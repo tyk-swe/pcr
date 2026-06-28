@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::rules::action::{RuleAction, RuleActionDocument};
 use crate::rules::condition::{RuleCondition, RuleConditionDocument};
 use crate::rules::error::RuleError;

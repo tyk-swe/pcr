@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::server_addr::resolve_dns_server_address;
 use super::transport::{decode_tcp_frame_length, encode_tcp_frame};
 use super::validation::{inspect_dns_response_header, validate_dns_response, DNS_HEADER_BYTES};

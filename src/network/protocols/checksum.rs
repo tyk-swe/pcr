@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use pnet::packet::icmpv6::{checksum as icmpv6_checksum, MutableIcmpv6Packet};

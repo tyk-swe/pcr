@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use pnet::packet::icmp::echo_request::EchoRequestPacket;
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
 use pnet::packet::icmpv6::Icmpv6Packet;

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! NDP (Neighbor Discovery Protocol) scanning utilities.
 //!
 //! The scanner mirrors the IPv4 ARP probe flow: parse the target specification,

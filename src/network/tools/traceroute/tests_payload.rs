@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 #[cfg(test)]
 mod tests {
     use super::super::utils::{classify_icmp_event_v4, IcmpEventKind};

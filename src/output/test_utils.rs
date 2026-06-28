@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 #[derive(Debug, Default, Clone)]
 pub struct CapturingOutputSink {
     stdout: Vec<String>,

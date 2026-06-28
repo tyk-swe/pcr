@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use packetcraftr::engine::spec::{
     DestinationSpec, Ipv6Spec, Layer2Spec, ListenerSpec, LoggingSpec, PacketSpec, PayloadSource,
     PayloadSpec, TransmissionSpec, TransportSpec,

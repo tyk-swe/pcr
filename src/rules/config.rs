@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 pub const RULE_EXECUTOR_WORKERS: usize = 4;
 pub const RULE_EXECUTOR_QUEUE_CAPACITY: usize = 64;
 pub const RULE_COMMAND_TIMEOUT_SECONDS: u64 = 5;

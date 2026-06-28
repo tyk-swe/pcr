@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::engine::request::TransmissionRequest;
 pub use crate::network::io::sender::{
     validate_transmission_policy, SendControlError, TransmissionPolicy,

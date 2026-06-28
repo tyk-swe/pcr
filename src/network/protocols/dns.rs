@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use anyhow::{Context, Result};
 use log::{debug, info};
 use std::str::FromStr;

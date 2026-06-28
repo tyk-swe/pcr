@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::engine::request::PacketRequest;
 use crate::rules::error::RuleError;
 use crate::util::sync::LockResultExt;

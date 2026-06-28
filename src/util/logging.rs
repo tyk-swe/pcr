@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
 use std::path::Path;

@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::builder::{Ipv4PacketBuilder, Ipv6PacketBuilder, PacketBuilder};
 use super::executor::{send_loop, send_via_transport};
 use super::interface::{desired_ipv6, resolve_ip_addresses};

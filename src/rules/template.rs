@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::rules::model::{PacketContext, RuleLogLevel};
 use log::{debug, error, info, trace, warn};
 use std::borrow::Cow;

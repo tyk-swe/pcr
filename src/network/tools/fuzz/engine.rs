@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use crate::engine::spec::{
     DestinationSpec, IcmpSpec, PacketSpec, PayloadSource, PayloadSpec, TargetAddress, TcpSpec,
     TransmissionSpec, TransportSpec, UdpSpec,

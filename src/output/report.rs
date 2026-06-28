@@ -1,3 +1,6 @@
+// Copyright (C) 2026 rkdxodud-tyk
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use serde::Serialize;
 
 use crate::engine::preflight::PreflightView;

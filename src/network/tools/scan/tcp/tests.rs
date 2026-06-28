@@ -68,21 +68,20 @@ fn send_tcp_with_retry_stops_after_max_attempts() {
 }
 
 struct SmartMockRx {
-    tx_capture: Arc<Mutex<Vec<(u16, IpAddr, u16)>>>, // (source_port, dest_ip, dest_port)
-    response_template: Option<(u8, PortState)>,      // If set, reply to all probes
+    tx_capture: Arc<Mutex<Vec<(u16, IpAddr, u16)>>>, // source port, destination IP, destination port
+    response_template: Option<(u8, PortState)>,
     generated: bool,
 }
 
 impl TcpScanRx for SmartMockRx {
     fn next_event(&mut self, _: Duration) -> Result<Option<ScanEvent>> {
-        // Check if any packet was sent
         let sent = self.tx_capture.lock().unwrap().clone();
         if sent.is_empty() {
             return Ok(None);
         }
 
         if self.generated {
-            return Ok(None); // Only generate once per test
+            return Ok(None);
         }
 
         if let Some((flags, _state)) = self.response_template {
@@ -90,8 +89,8 @@ impl TcpScanRx for SmartMockRx {
             self.generated = true;
 
             return Ok(Some(ScanEvent::PacketResponse {
-                source_port: dst_port, // Remote responds from its port
-                dest_port: src_port,   // To our local port
+                source_port: dst_port,
+                dest_port: src_port,
                 flags: Some(flags),
                 src_addr: dst_ip,
             }));
@@ -125,7 +124,7 @@ impl TcpScanStrategy for RateLimitScan {
 }
 
 struct CapturingTcpSender {
-    sent: Arc<Mutex<Vec<(u16, IpAddr, u16)>>>, // src_port, dst_ip, dst_port
+    sent: Arc<Mutex<Vec<(u16, IpAddr, u16)>>>,
 }
 
 impl TcpSender for CapturingTcpSender {
@@ -245,7 +244,7 @@ fn perform_tcp_scan_ipv4_requires_ipv4_override() {
         address: SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         ports: vec![80],
         timeout: Duration::from_millis(100),
-        source_override: Some(IpAddr::V6(Ipv6Addr::LOCALHOST)), // Mismatch
+        source_override: Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
         scan_strategy: GenericTcpScan::syn(),
     };
 
@@ -263,13 +262,13 @@ struct FlexibleMockRx {
     tx_capture: Arc<Mutex<Vec<(u16, IpAddr, u16)>>>,
     processed_count: usize,
     events: VecDeque<ScanEvent>,
-    responses: HashMap<u16, (u8, PortState)>, // Map target_port -> (flags, state)
+    responses: HashMap<u16, (u8, PortState)>,
     default_response: Option<(u8, PortState)>,
 }
 
 impl TcpScanRx for FlexibleMockRx {
     fn next_event(&mut self, _: Duration) -> Result<Option<ScanEvent>> {
-        // Process any newly sent packets
+        // Emit responses only for probes added since the previous poll.
         let new_packets_to_process = {
             let sent = self.tx_capture.lock().unwrap();
             let start_index = self.processed_count;
@@ -290,8 +289,8 @@ impl TcpScanRx for FlexibleMockRx {
 
             if let Some((flags, _)) = response {
                 self.events.push_back(ScanEvent::PacketResponse {
-                    source_port: dst_port, // Remote responds from its port
-                    dest_port: src_port,   // To our local port
+                    source_port: dst_port,
+                    dest_port: src_port,
                     flags: Some(flags),
                     src_addr: dst_ip,
                 });
@@ -376,7 +375,7 @@ fn test_tcp_syn_timeout_handling() {
         processed_count: 0,
         events: VecDeque::new(),
         responses: HashMap::new(),
-        default_response: None, // No response implies timeout
+        default_response: None,
     };
 
     let results = scan_ports_concurrent(
@@ -403,7 +402,6 @@ fn test_tcp_syn_multiple_ports() {
     let mut responses = HashMap::new();
     responses.insert(80, (TcpFlags::SYN | TcpFlags::ACK, PortState::Open));
     responses.insert(443, (TcpFlags::RST, PortState::Closed));
-    // 8080 will get no response (timeout/Filtered)
 
     let mut rx = FlexibleMockRx {
         tx_capture: sent_packets,
@@ -553,11 +551,9 @@ fn test_rate_limiting() {
 
     let mut rx = NoopTcpRx;
 
-    let ports: Vec<u16> = (0..1000).collect(); // 1000 ports
+    let ports: Vec<u16> = (0..1000).collect();
     let start = Instant::now();
 
-    // Use RateLimitScan strategy (or any strategy)
-    // Use a very short timeout so we can measure the sending duration primarily
     let _ = scan_ports_concurrent(
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
         &ports,
@@ -569,9 +565,6 @@ fn test_rate_limiting() {
     );
 
     let duration = start.elapsed();
-    // With 100us delay, 1000 ports should take >= 100ms.
-    // We check for >= 50ms.
-    // Without fix, it should be much faster (e.g. < 20ms) because we use a small timeout.
     assert!(
         duration >= Duration::from_millis(50),
         "Scan was too fast ({:?}), rate limiting likely missing",

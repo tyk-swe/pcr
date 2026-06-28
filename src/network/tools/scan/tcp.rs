@@ -43,7 +43,7 @@ const TCP_PACKET_BUFFER_SIZE: usize = 256;
 const SOURCE_DISCOVERY_PORT: u16 = 9;
 const SCAN_DELAY: Duration = Duration::from_micros(100);
 
-/// Encapsulates the specific behavior for different TCP scan types (SYN, FIN, NULL, etc.).
+/// Shared behavior for TCP scan variants such as SYN, FIN, NULL, XMAS, and ACK.
 pub trait TcpScanStrategy: Send + Sync + std::fmt::Debug {
     fn protocol_name(&self) -> &'static str;
     fn report_name(&self) -> &'static str;
@@ -323,19 +323,19 @@ where
     TX: TcpSender + ?Sized,
     RX: TcpScanRx + ?Sized,
 {
-    // Reused buffer for packet construction
+    // Reuse one packet buffer while sending this batch.
     let mut buffer = [0u8; TCP_PACKET_BUFFER_SIZE];
 
-    // Pre-calculate IP pair and flags to avoid repetition in hot loop
+    // Precompute values that are stable across all probes.
     let ip_pair = ip_version_pair(source_ip, destination.ip())?;
     let flags = scan_strategy.get_tcp_flags();
     let flags_value = tcp_flags_value(&flags);
 
     let mut spec = TcpSpec {
-        source_port: None,      // Set in loop
-        destination_port: None, // Set in loop
+        source_port: None,
+        destination_port: None,
         flags,
-        sequence: None, // Set in loop
+        sequence: None,
         acknowledgement: Some(0),
         window_size: Some(TCP_WINDOW_SIZE),
         options: None,
@@ -352,27 +352,13 @@ where
             initial_port_state: scan_strategy.timeout_state(),
         },
         ports,
-        // Sender closure
         |source_port, dest_port| {
-            // Enforce rate limiting to avoid flooding the network
+            // Bound probe rate across the whole batch.
             std::thread::sleep(SCAN_DELAY);
 
             spec.source_port = Some(source_port);
             spec.destination_port = Some(dest_port);
             spec.sequence = Some(random());
-
-            // Note: We use the mutable buffer captured from the outer scope.
-            // Since this closure is called sequentially in the sender thread, it's safe?
-            // Wait, buffer is on stack of `scan_ports_concurrent`.
-            // The closure captures `&mut buffer`.
-            // The closure is moved to the sender thread?
-            // `scan_ports_concurrent` (generic) takes `FSend`.
-            // `FSend` is moved to the thread.
-            // So `buffer` must be moved to the closure?
-            // Yes. But `scan_ports_concurrent` is called once.
-            // `spec` and `buffer` are moved into the closure.
-            // The closure is `FnMut`. It owns `spec` and `buffer`.
-            // This is correct.
 
             if let Ok(len) =
                 build_tcp_segment_optimized(&spec, flags_value, &[], &ip_pair, &mut buffer)
@@ -383,9 +369,7 @@ where
             }
             Ok(())
         },
-        // Receiver closure
         |timeout| rx.next_event(timeout),
-        // Classify closure
         |event, results, target_port| match event {
             ScanEvent::PacketResponse {
                 flags: Some(flags), ..
@@ -464,7 +448,7 @@ fn scan_tcp_v6<S: TcpScanStrategy>(
     let source_ip =
         super::common::source_ipv6_or_discover(dest_ip, SOURCE_DISCOVERY_PORT, source_override)?;
 
-    // Pnet sender loses IPv6 scope ID, so we only use it for receiving
+    // Pnet senders do not preserve IPv6 scope IDs.
     let (_, mut tcp_receiver) = open_transport_channel(
         TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Tcp)),
@@ -480,7 +464,7 @@ fn scan_tcp_v6<S: TcpScanStrategy>(
     let socket = Socket::new(Domain::IPV6, Type::RAW, Some(Protocol::TCP))
         .context("create raw IPv6 TCP socket")?;
 
-    // Bind ensures kernel uses correct source IP for checksum
+    // The bind fixes the checksum source address for raw IPv6 sends.
     let bind_addr = SockAddr::from(SocketAddr::new(IpAddr::V6(source_ip), 0));
     socket.bind(&bind_addr).context(operation_failed(
         "bind TCPv6 socket",

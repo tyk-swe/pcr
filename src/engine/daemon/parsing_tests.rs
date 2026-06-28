@@ -1,6 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use super::control::*;
 use super::*;
 use std::os::unix::fs::FileTypeExt;
 use tokio::sync::mpsc;
@@ -130,13 +131,11 @@ async fn reject_huge_line() {
     };
     let (tx, _rx) = mpsc::channel(8);
 
-    // Spawn handler
     tokio::spawn(async move {
         handle_control_stream(server, tx).await.ok();
     });
 
-    // Construct a huge line
-    let huge_line = vec![b'a'; super::MAX_CONTROL_LINE_BYTES + 10];
+    let huge_line = vec![b'a'; MAX_CONTROL_LINE_BYTES + 10];
     if let Err(err) = client.write_all(&huge_line).await {
         if err.kind() == std::io::ErrorKind::PermissionDenied {
             return;
@@ -150,7 +149,6 @@ async fn reject_huge_line() {
         panic!("failed to write newline: {err}");
     }
 
-    // Read response
     let mut buf = [0u8; 1024];
     let n = match client.read(&mut buf).await {
         Ok(n) => n,
@@ -255,8 +253,9 @@ async fn spawn_control_socket_cleans_up_stale_socket() {
     let (tx, _rx) = mpsc::channel(8);
     let result = spawn_control_socket(socket_path.to_str().unwrap(), tx);
     match result {
-        Ok(handle) => {
-            handle.abort();
+        Ok(active) => {
+            let mut control_socket = Some(active);
+            cleanup_control_socket(&mut control_socket).await;
         }
         Err(err) if is_permission_error(&err) => return,
         Err(err) => panic!("should replace stale socket: {err}"),
@@ -273,20 +272,17 @@ async fn spawn_control_socket_cleans_up_symlink() {
     let symlink_path = dir.path().join("socket_link");
     let target_path = dir.path().join("target_file");
 
-    // Create a symlink pointing to a non-existent file (broken link)
-    // or a real file. Either way, we should remove the symlink itself.
-    // Let's test broken link first as it's common for stale state.
+    // Broken symlinks are stale socket state and should be replaced.
     symlink(&target_path, &symlink_path).unwrap();
 
     let (tx, _rx) = mpsc::channel(8);
     let result = spawn_control_socket(symlink_path.to_str().unwrap(), tx);
 
-    let handle = match result {
-        Ok(handle) => handle,
+    let active = match result {
+        Ok(active) => active,
         Err(err) if is_permission_error(&err) => return,
         Err(err) => panic!("should replace symlink: {err}"),
     };
-    handle.abort();
 
     assert!(
         std::fs::symlink_metadata(&symlink_path)
@@ -295,6 +291,9 @@ async fn spawn_control_socket_cleans_up_symlink() {
             .is_socket(),
         "path should now be a socket"
     );
+
+    let mut control_socket = Some(active);
+    cleanup_control_socket(&mut control_socket).await;
 }
 
 #[tokio::test]
@@ -306,13 +305,13 @@ async fn cleanup_control_socket_removes_bound_socket() {
     let socket_path = dir.path().join("control.sock");
 
     let (tx, _rx) = mpsc::channel(8);
-    let handle = match spawn_control_socket(socket_path.to_str().unwrap(), tx) {
-        Ok(handle) => handle,
+    let active = match spawn_control_socket(socket_path.to_str().unwrap(), tx) {
+        Ok(active) => active,
         Err(err) if is_permission_error(&err) => return,
         Err(err) => panic!("should bind control socket: {err}"),
     };
 
-    let mut control_socket = Some((handle, socket_path.to_string_lossy().into_owned()));
+    let mut control_socket = Some(active);
     cleanup_control_socket(&mut control_socket).await;
 
     assert!(

@@ -4,6 +4,9 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use log::{debug, info, warn};
+use pnet::packet::ethernet::EthernetPacket;
+use pnet::packet::ipv4::Ipv4Packet;
+use pnet::packet::ipv6::Ipv6Packet;
 
 use crate::engine::spec::{DestinationSpec, PacketSpec, TargetAddress};
 
@@ -88,6 +91,7 @@ pub fn plan_transmission_with_interface_and_policy(
 
     let (frames, link_type, destination) =
         assemble_frames(spec, &context, layer2.as_ref(), &transport)?;
+    validate_built_frames(&frames, &link_type)?;
 
     let mut transmit = spec.transmit.clone();
 
@@ -238,6 +242,33 @@ fn convert_build_result(result: PacketBuildResult) -> (Vec<Vec<u8>>, LinkType, N
     (result.frames, result.link_type, result.target)
 }
 
+fn validate_built_frames(frames: &[Vec<u8>], link_type: &LinkType) -> Result<()> {
+    if frames.is_empty() {
+        return Err(PlannerError::EmptyFramePlan.into());
+    }
+
+    for frame in frames {
+        let valid = match link_type {
+            LinkType::Ipv4 => Ipv4Packet::new(frame)
+                .map(|packet| packet.get_version() == 4)
+                .unwrap_or(false),
+            LinkType::Ipv6 => Ipv6Packet::new(frame)
+                .map(|packet| packet.get_version() == 6)
+                .unwrap_or(false),
+            LinkType::Ethernet => EthernetPacket::new(frame).is_some(),
+        };
+
+        if !valid {
+            return Err(PlannerError::InvalidBuiltFrame {
+                link_type: link_type.as_str(),
+            }
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
 fn build_summary(
     context: &PlanningContext,
     frames: &[Vec<u8>],
@@ -263,6 +294,7 @@ fn format_target(target: &DestinationSpec) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::network::io::sender::SenderError;
     use std::net::Ipv4Addr;
 
     #[test]
@@ -430,6 +462,57 @@ mod tests {
         assert_eq!(frames[1], vec![4, 5, 6]);
         assert!(matches!(link_type, LinkType::Ethernet));
         assert!(matches!(target, NetworkTarget::Ipv4(_)));
+    }
+
+    #[test]
+    fn validate_built_frames_rejects_empty_plan() {
+        let frames = Vec::new();
+
+        let err = validate_built_frames(&frames, &LinkType::Ipv4).expect_err("empty plan");
+
+        assert!(matches!(
+            err,
+            SenderError::Planner(PlannerError::EmptyFramePlan)
+        ));
+    }
+
+    #[test]
+    fn validate_built_frames_rejects_invalid_ipv4_frame() {
+        let frames = vec![vec![0u8; 20]];
+
+        let err = validate_built_frames(&frames, &LinkType::Ipv4).expect_err("invalid ipv4");
+
+        assert!(matches!(
+            err,
+            SenderError::Planner(PlannerError::InvalidBuiltFrame { link_type: "ipv4" })
+        ));
+    }
+
+    #[test]
+    fn validate_built_frames_rejects_invalid_ipv6_frame() {
+        let frames = vec![vec![0u8; 40]];
+
+        let err = validate_built_frames(&frames, &LinkType::Ipv6).expect_err("invalid ipv6");
+
+        assert!(matches!(
+            err,
+            SenderError::Planner(PlannerError::InvalidBuiltFrame { link_type: "ipv6" })
+        ));
+    }
+
+    #[test]
+    fn validate_built_frames_rejects_invalid_ethernet_frame() {
+        let frames = vec![vec![0u8; 13]];
+
+        let err =
+            validate_built_frames(&frames, &LinkType::Ethernet).expect_err("invalid ethernet");
+
+        assert!(matches!(
+            err,
+            SenderError::Planner(PlannerError::InvalidBuiltFrame {
+                link_type: "ethernet"
+            })
+        ));
     }
 
     #[test]

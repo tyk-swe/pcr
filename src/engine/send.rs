@@ -14,7 +14,9 @@ use crate::engine::request::PacketRequest;
 use crate::engine::resolve::{resolve_packet_request, SystemTargetResolver};
 use crate::engine::spec::{PacketSpec, TransportSpec};
 use crate::engine::{EngineConfig, EngineError, EngineResult};
-use crate::network::io::sender::{validate_transmission_policy, NetworkTarget, TransmissionPlan};
+use crate::network::io::sender::{
+    emission_accounting, validate_transmission_policy, NetworkTarget, TransmissionPlan,
+};
 
 #[derive(Debug, Clone)]
 pub struct PacketSendService {
@@ -152,7 +154,7 @@ impl PacketSendService {
         spec: &PacketSpec,
         plan: &TransmissionPlan,
     ) -> EngineResult<TrafficPlan> {
-        let traffic_plan = self.traffic_plan_from_transmission(spec, plan);
+        let traffic_plan = self.traffic_plan_from_transmission(spec, plan)?;
         self.policy
             .authorize(&traffic_plan)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
@@ -164,7 +166,7 @@ impl PacketSendService {
         spec: &PacketSpec,
         mode: TrafficMode,
     ) -> EngineResult<TrafficPlan> {
-        let traffic_plan = self.traffic_plan_from_spec(spec, mode);
+        let traffic_plan = self.traffic_plan_from_spec(spec, mode)?;
         self.policy
             .authorize(&traffic_plan)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
@@ -213,15 +215,11 @@ impl PacketSendService {
         &self,
         spec: &PacketSpec,
         plan: &TransmissionPlan,
-    ) -> TrafficPlan {
-        let unbounded =
-            spec.transmit.loop_send || (spec.transmit.flood && spec.transmit.count.is_none());
-        let estimated_packets = if unbounded {
-            None
-        } else {
-            let count = spec.transmit.count.unwrap_or(1);
-            Some(count.saturating_mul(plan.frames.len() as u64))
-        };
+    ) -> EngineResult<TrafficPlan> {
+        let accounting = emission_accounting(&spec.transmit, self.policy, plan.frames.len() as u64)
+            .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
+        let unbounded = accounting.attempts.is_none();
+        let estimated_packets = accounting.total_emitted_units;
         let planned_target_scope = match &plan.destination {
             NetworkTarget::Ipv4(addr) => classify_ip((*addr).into()),
             NetworkTarget::Ipv6(addr) => classify_ip((*addr).into()),
@@ -239,17 +237,18 @@ impl PacketSendService {
         traffic_plan.rate_per_sec = Some(self.policy.budget.max_rate_per_sec);
         traffic_plan.required_privileges = packet_spec_privileges(spec);
 
-        traffic_plan
+        Ok(traffic_plan)
     }
 
-    fn traffic_plan_from_spec(&self, spec: &PacketSpec, mode: TrafficMode) -> TrafficPlan {
-        let unbounded =
-            spec.transmit.loop_send || (spec.transmit.flood && spec.transmit.count.is_none());
-        let estimated_packets = if unbounded {
-            None
-        } else {
-            Some(spec.transmit.count.unwrap_or(1))
-        };
+    fn traffic_plan_from_spec(
+        &self,
+        spec: &PacketSpec,
+        mode: TrafficMode,
+    ) -> EngineResult<TrafficPlan> {
+        let accounting = emission_accounting(&spec.transmit, self.policy, 1)
+            .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
+        let unbounded = accounting.attempts.is_none();
+        let estimated_packets = accounting.total_emitted_units;
 
         let mut traffic_plan = TrafficPlan::new(mode, packet_spec_target_scope(spec));
         traffic_plan.target_count = 1;
@@ -260,7 +259,7 @@ impl PacketSendService {
         traffic_plan.batch_size = 1;
         traffic_plan.rate_per_sec = Some(self.policy.budget.max_rate_per_sec);
         traffic_plan.required_privileges = packet_spec_privileges(spec);
-        traffic_plan
+        Ok(traffic_plan)
     }
 }
 
@@ -333,6 +332,48 @@ mod tests {
         assert!(
             message.contains(&PolicyRejectionCode::PublicTarget.to_string()),
             "unexpected error: {message}"
+        );
+    }
+
+    #[test]
+    fn authorization_rejects_emitted_unit_overflow() {
+        let spec = PacketSpec {
+            target: DestinationSpec {
+                address: Some(TargetAddress::Ip(IpAddr::V6(Ipv6Addr::LOCALHOST))),
+                interface: None,
+            },
+            transmit: TransmissionSpec {
+                count: Some(u64::MAX),
+                ..Default::default()
+            },
+            logging: LoggingSpec::default(),
+            ..Default::default()
+        };
+        let plan = TransmissionPlan {
+            frames: vec![vec![0; 64], vec![0; 64]],
+            link_type: LinkType::Ipv6,
+            transmit: spec.transmit.clone(),
+            destination: NetworkTarget::Ipv6(Ipv6Addr::LOCALHOST),
+            interface: test_interface(),
+            protocol: IpNextHeaderProtocols::Udp,
+            summary: TransmissionSummary {
+                payload_len: 0,
+                largest_frame_len: 64,
+                frame_count: 2,
+                transport: "udp",
+            },
+            logging: LoggingSpec::default(),
+            mode: PlanningMode::Live,
+            policy: TransmissionPolicy::default(),
+        };
+
+        let err = PacketSendService::new(TransmissionPolicy::default())
+            .authorize_transmission_plan(&spec, &plan)
+            .expect_err("overflow should be rejected");
+
+        assert!(
+            err.to_string().contains("emitted unit count overflows u64"),
+            "unexpected error: {err}"
         );
     }
 }

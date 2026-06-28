@@ -49,6 +49,7 @@ pub enum Ipv6ExtHeader {
 // header within the maximum IPv6 payload length. However, we allow up to 127
 // segments to support larger headers if needed.
 pub const MAX_ROUTING_SEGMENTS: usize = 127;
+const MAX_IPV6_OPTIONS_HEADER_LEN: usize = 2048;
 
 pub(crate) fn parse_ipv6_ext_header(raw: &str) -> SpecResult<Ipv6ExtHeader> {
     let raw = raw.trim();
@@ -268,17 +269,11 @@ pub(crate) fn validate_ipv6_ext_chain(headers: &[Ipv6ExtHeader]) -> SpecResult<(
 
     for (index, header) in headers.iter().enumerate() {
         let header_len = match header {
-            Ipv6ExtHeader::HopByHop { options } | Ipv6ExtHeader::DestinationOptions { options } => {
-                let mut total = options.len() + 2;
-                if total < 8 {
-                    total = 8;
-                }
-                let remainder = total % 8;
-                if remainder == 0 {
-                    total
-                } else {
-                    total + (8 - remainder)
-                }
+            Ipv6ExtHeader::HopByHop { options } => {
+                measure_ipv6_options_header("Hop-by-Hop", options)?
+            }
+            Ipv6ExtHeader::DestinationOptions { options } => {
+                measure_ipv6_options_header("Destination", options)?
             }
             Ipv6ExtHeader::Routing { segments, .. } => 8 + segments.len() * 16,
         };
@@ -316,6 +311,30 @@ pub(crate) fn validate_ipv6_ext_chain(headers: &[Ipv6ExtHeader]) -> SpecResult<(
     }
 
     Ok(())
+}
+
+fn measure_ipv6_options_header(header: &'static str, options: &[u8]) -> SpecResult<usize> {
+    let mut total = options
+        .len()
+        .checked_add(2)
+        .ok_or(SpecError::Ipv6ExtensionLengthOverflow)?;
+    if total < 8 {
+        total = 8;
+    }
+    let remainder = total % 8;
+    if remainder != 0 {
+        total = total
+            .checked_add(8 - remainder)
+            .ok_or(SpecError::Ipv6ExtensionLengthOverflow)?;
+    }
+    if total > MAX_IPV6_OPTIONS_HEADER_LEN {
+        return Err(SpecError::Ipv6OptionsHeaderTooLong {
+            header,
+            length: total,
+            max: MAX_IPV6_OPTIONS_HEADER_LEN,
+        });
+    }
+    Ok(total)
 }
 
 #[cfg(test)]
@@ -555,6 +574,35 @@ mod tests {
             }
             _ => panic!("Expected DestinationOptions header"),
         }
+    }
+
+    #[test]
+    fn validate_options_header_allows_2048_encoded_bytes() {
+        let headers = vec![Ipv6ExtHeader::HopByHop {
+            options: vec![0; 2046],
+        }];
+
+        let result = validate_ipv6_ext_chain(&headers);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_options_header_rejects_more_than_2048_encoded_bytes() {
+        let headers = vec![Ipv6ExtHeader::DestinationOptions {
+            options: vec![0; 2047],
+        }];
+
+        let result = validate_ipv6_ext_chain(&headers);
+
+        assert!(matches!(
+            result,
+            Err(SpecError::Ipv6OptionsHeaderTooLong {
+                header: "Destination",
+                length: 2056,
+                max: 2048,
+            })
+        ));
     }
 
     #[test]

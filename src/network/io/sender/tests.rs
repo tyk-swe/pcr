@@ -1550,6 +1550,9 @@ fn metrics_snapshot_writes_json() {
     assert_eq!(parsed["frames"]["bytes_per_iteration"], 48);
     assert_eq!(parsed["frames"]["largest"], 32);
     assert_eq!(parsed["mode"]["type"], "finite");
+    assert_eq!(parsed["mode"]["attempts"], 2);
+    assert_eq!(parsed["mode"]["units_per_attempt"], 2);
+    assert_eq!(parsed["mode"]["total_emitted_units"], 4);
     assert_eq!(parsed["target"]["interface"], "test0");
 }
 

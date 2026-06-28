@@ -5,7 +5,7 @@ use std::fs;
 
 use serde_json::json;
 
-use super::control::{determine_send_mode, SendMode};
+use super::control::emission_accounting;
 use super::error::{PlannerError, Result};
 use super::types::{NetworkTarget, TransmissionPlan};
 
@@ -28,14 +28,26 @@ pub(crate) fn emit_metrics_snapshot(plan: &TransmissionPlan) -> Result<()> {
     let bytes_per_iteration: usize = frame_sizes.iter().sum();
     let largest_frame = plan.summary.largest_frame_len;
 
-    let mode = match determine_send_mode(&plan.transmit, plan.policy)? {
-        SendMode::Finite(count) => json!({
+    let accounting = emission_accounting(
+        &plan.transmit,
+        plan.policy,
+        u64::try_from(frames_per_iteration).unwrap_or(u64::MAX),
+    )?;
+    let mode = if let Some(attempts) = accounting.attempts {
+        json!({
             "type": "finite",
-            "iterations": count,
-        }),
-        SendMode::Infinite => json!({
-            "type": "infinite"
-        }),
+            "iterations": attempts,
+            "attempts": attempts,
+            "units_per_attempt": accounting.units_per_attempt,
+            "total_emitted_units": accounting.total_emitted_units,
+        })
+    } else {
+        json!({
+            "type": "infinite",
+            "attempts": null,
+            "units_per_attempt": accounting.units_per_attempt,
+            "total_emitted_units": null,
+        })
     };
 
     let interval_ms = plan.transmit.interval.map(|duration| duration.as_millis());
@@ -147,6 +159,25 @@ mod tests {
         let result = emit_metrics_snapshot(&plan);
         assert!(result.is_ok());
         assert!(nested_path.exists());
+    }
+
+    #[test]
+    fn emit_metrics_writes_emission_accounting() {
+        let (_temp_dir, metrics_path) = temp_metrics_path("metrics_accounting.json");
+
+        let mut plan = create_minimal_plan();
+        plan.transmit.count = Some(3);
+        plan.logging.metrics_json = Some(metrics_path.clone());
+
+        emit_metrics_snapshot(&plan).expect("metrics snapshot");
+
+        let content = std::fs::read_to_string(&metrics_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+        assert_eq!(parsed["mode"]["type"], "finite");
+        assert_eq!(parsed["mode"]["attempts"], 3);
+        assert_eq!(parsed["mode"]["units_per_attempt"], 2);
+        assert_eq!(parsed["mode"]["total_emitted_units"], 6);
     }
 
     #[test]

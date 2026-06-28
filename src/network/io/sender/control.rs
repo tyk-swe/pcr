@@ -14,6 +14,13 @@ pub enum SendControlError {
     LoopRequiresAllowUnbounded,
     #[error("--count must be greater than zero")]
     CountMustBePositive,
+    #[error(
+        "emitted unit count overflows u64: attempts={attempts} units_per_attempt={units_per_attempt}"
+    )]
+    EmittedUnitsOverflow {
+        attempts: u64,
+        units_per_attempt: u64,
+    },
 }
 
 pub fn validate_transmission_policy(
@@ -56,6 +63,40 @@ pub(crate) fn determine_send_mode(
     } else {
         Ok(SendMode::Finite(1))
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmissionAccounting {
+    pub attempts: Option<u64>,
+    pub units_per_attempt: u64,
+    pub total_emitted_units: Option<u64>,
+}
+
+pub fn emission_accounting(
+    spec: &TransmissionSpec,
+    policy: TransmissionPolicy,
+    units_per_attempt: u64,
+) -> Result<EmissionAccounting, SendControlError> {
+    let attempts = match determine_send_mode(spec, policy)? {
+        SendMode::Finite(count) => Some(count),
+        SendMode::Infinite => None,
+    };
+    let total_emitted_units = attempts
+        .map(|count| {
+            count
+                .checked_mul(units_per_attempt)
+                .ok_or(SendControlError::EmittedUnitsOverflow {
+                    attempts: count,
+                    units_per_attempt,
+                })
+        })
+        .transpose()?;
+
+    Ok(EmissionAccounting {
+        attempts,
+        units_per_attempt,
+        total_emitted_units,
+    })
 }
 
 #[cfg(test)]
@@ -240,5 +281,62 @@ mod tests {
             SendMode::Finite(count) => assert_eq!(count, u64::MAX),
             _ => panic!("expected Finite mode with large count"),
         }
+    }
+
+    #[test]
+    fn emission_accounting_reports_finite_totals() {
+        let spec = TransmissionSpec {
+            count: Some(3),
+            ..Default::default()
+        };
+
+        let accounting = emission_accounting(&spec, strict_policy(), 2).expect("accounting");
+
+        assert_eq!(
+            accounting,
+            EmissionAccounting {
+                attempts: Some(3),
+                units_per_attempt: 2,
+                total_emitted_units: Some(6),
+            }
+        );
+    }
+
+    #[test]
+    fn emission_accounting_reports_unbounded_totals() {
+        let spec = TransmissionSpec {
+            flood: true,
+            ..Default::default()
+        };
+
+        let accounting =
+            emission_accounting(&spec, allow_unbounded_policy(), 4).expect("accounting");
+
+        assert_eq!(
+            accounting,
+            EmissionAccounting {
+                attempts: None,
+                units_per_attempt: 4,
+                total_emitted_units: None,
+            }
+        );
+    }
+
+    #[test]
+    fn emission_accounting_rejects_total_overflow() {
+        let spec = TransmissionSpec {
+            count: Some(u64::MAX),
+            ..Default::default()
+        };
+
+        let result = emission_accounting(&spec, strict_policy(), 2);
+
+        assert!(matches!(
+            result,
+            Err(SendControlError::EmittedUnitsOverflow {
+                attempts: u64::MAX,
+                units_per_attempt: 2,
+            })
+        ));
     }
 }

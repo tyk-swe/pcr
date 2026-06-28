@@ -110,6 +110,9 @@ fn json_dry_run_stdout_parses_without_log_prefixes() {
     assert_eq!(json["destination"], "127.0.0.1");
     assert_eq!(json["protocol"], "UDP");
     assert_eq!(json["count"], 1);
+    assert_eq!(json["attempts"], 1);
+    assert_eq!(json["units_per_attempt"], 1);
+    assert_eq!(json["total_emitted_units"], 1);
     assert_eq!(json["mode"], "L3");
     assert_eq!(json["policy"]["status"], "allowed");
     assert!(json["target"]["interface"].is_string());
@@ -307,6 +310,75 @@ fn high_volume_opt_in_and_matching_cap_allow_large_dry_run() {
         .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
     assert_eq!(json["policy"]["status"], "allowed");
     assert_eq!(json["count"], 4097);
+    assert_eq!(json["attempts"], 4097);
+    assert_eq!(json["units_per_attempt"], 1);
+    assert_eq!(json["total_emitted_units"], 4097);
+}
+
+#[test]
+fn json_dry_run_reports_fragmented_emission_accounting() {
+    let output = command_result(&[
+        "--output-format",
+        "json",
+        "dry-run",
+        "--dest",
+        "127.0.0.1",
+        "--count",
+        "3",
+        "--frag",
+        "36",
+        "--data",
+        "abcdefghijklmnopqrstuvwxyz0123456789",
+        "udp",
+        "--dport",
+        "9",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "fragmented json dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
+
+    assert_eq!(json["count"], 3);
+    assert_eq!(json["attempts"], 3);
+    assert_eq!(json["units_per_attempt"], 3);
+    assert_eq!(json["total_emitted_units"], 9);
+}
+
+#[test]
+fn json_dry_run_reports_unbounded_emission_accounting() {
+    let output = command_result(&[
+        "--output-format",
+        "json",
+        "dry-run",
+        "--dest",
+        "127.0.0.1",
+        "--allow-unbounded-sends",
+        "--flood",
+        "udp",
+        "--dport",
+        "9",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "unbounded json dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
+
+    assert!(json["count"].is_null());
+    assert!(json["attempts"].is_null());
+    assert_eq!(json["units_per_attempt"], 1);
+    assert!(json["total_emitted_units"].is_null());
 }
 
 #[cfg(feature = "scan")]

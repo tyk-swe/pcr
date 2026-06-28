@@ -6,7 +6,7 @@ use packetcraftr::engine::spec::{
     PayloadSpec, TransmissionSpec, TransportSpec, UdpSpec,
 };
 use packetcraftr::network::sender::{
-    plan_transmission_with_interface, LinkType, NetworkTarget, PlanningMode,
+    plan_transmission_with_interface, Ipv6Error, LinkType, NetworkTarget, PlanningMode, SenderError,
 };
 use pnet::datalink::MacAddr;
 use pnet::ipnetwork::{IpNetwork, Ipv4Network, Ipv6Network};
@@ -207,4 +207,42 @@ fn ipv6_end_to_end_plan_builds_routing_extension_chain() {
     let mut encoded_final = [0u8; 16];
     encoded_final.copy_from_slice(&body[routing_offset + 24..routing_offset + 40]);
     assert_eq!(Ipv6Addr::from(encoded_final), final_destination);
+}
+
+#[test]
+fn planner_propagates_ipv6_builder_errors() {
+    let mut spec = base_spec();
+    let src_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x10);
+    let dst_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x20);
+
+    spec.ip = Some(IpSpec {
+        source: Some(IpAddr::V6(src_ip)),
+        destination: Some(IpAddr::V6(dst_ip)),
+        prefer_ipv6: None,
+        ttl: Some(64),
+        tos: None,
+        identification: None,
+        fragmentation: FragmentSpec::default(),
+    });
+    spec.ipv6 = Ipv6Spec {
+        exthdrs: vec![Ipv6ExtHeader::DestinationOptions {
+            options: vec![0; 2047],
+        }],
+    };
+    spec.transport = TransportSpec::Udp(UdpSpec {
+        source_port: Some(1234),
+        destination_port: Some(4321),
+    });
+    spec.transmit.force_layer3 = true;
+
+    let interface = mock_interface(
+        "test3",
+        None,
+        vec![IpNetwork::V6(Ipv6Network::new(src_ip, 64).unwrap())],
+    );
+
+    let err = plan_transmission_with_interface(&spec, interface, PlanningMode::Live)
+        .expect_err("oversized IPv6 options should remain a builder backstop");
+
+    assert!(matches!(err, SenderError::Ipv6(Ipv6Error::OptionsTooLong)));
 }

@@ -12,6 +12,9 @@ use crate::engine::request::{
 
 use super::utils::parse_hex_bytes;
 
+const TCP_BASE_HEADER_LEN: usize = 20;
+const TCP_MAX_HEADER_LEN: usize = 60;
+
 #[derive(Debug, Clone, Default)]
 pub struct Icmpv6Spec {
     pub kind: Option<u8>,
@@ -330,7 +333,9 @@ impl IcmpSpec {
 pub(crate) fn build_tcp_options_from_flags(tcp: &TcpRequest) -> SpecResult<Option<Vec<u8>>> {
     // If hex is provided, use it directly
     if let Some(hex) = tcp.options_hex.as_ref() {
-        return parse_tcp_options_hex(hex).map(Some);
+        let options = parse_tcp_options_hex(hex)?;
+        validate_tcp_options(&options)?;
+        return Ok(Some(options));
     }
 
     // Build from individual flags
@@ -382,6 +387,7 @@ pub(crate) fn build_tcp_options_from_flags(tcp: &TcpRequest) -> SpecResult<Optio
     if bytes.is_empty() {
         Ok(None)
     } else {
+        validate_tcp_options(&bytes)?;
         Ok(Some(bytes))
     }
 }
@@ -389,6 +395,22 @@ pub(crate) fn build_tcp_options_from_flags(tcp: &TcpRequest) -> SpecResult<Optio
 /// Parse hex-only TCP options
 pub(crate) fn parse_tcp_options_hex(hex: &str) -> SpecResult<Vec<u8>> {
     parse_hex_bytes(hex)
+}
+
+fn validate_tcp_options(options: &[u8]) -> SpecResult<()> {
+    let header_len = TCP_BASE_HEADER_LEN + options.len();
+    if header_len > TCP_MAX_HEADER_LEN {
+        return Err(SpecError::TcpHeaderTooLong {
+            length: header_len,
+            max: TCP_MAX_HEADER_LEN,
+        });
+    }
+    if !options.len().is_multiple_of(4) {
+        return Err(SpecError::TcpOptionsNotAligned {
+            length: options.len(),
+        });
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -680,6 +702,39 @@ mod tests {
             opts[3], 0x00,
             "TCP option padding must be zero (EOL), not NOP"
         );
+    }
+
+    #[test]
+    fn tcp_raw_options_must_be_four_byte_aligned() {
+        let tcp_options = TcpRequest {
+            options_hex: Some("0102".to_string()),
+            ..Default::default()
+        };
+
+        let result = build_tcp_options_from_flags(&tcp_options);
+
+        assert!(matches!(
+            result,
+            Err(SpecError::TcpOptionsNotAligned { length: 2 })
+        ));
+    }
+
+    #[test]
+    fn tcp_raw_options_must_fit_max_header_length() {
+        let tcp_options = TcpRequest {
+            options_hex: Some("00".repeat(44)),
+            ..Default::default()
+        };
+
+        let result = build_tcp_options_from_flags(&tcp_options);
+
+        assert!(matches!(
+            result,
+            Err(SpecError::TcpHeaderTooLong {
+                length: 64,
+                max: 60
+            })
+        ));
     }
 
     #[test]

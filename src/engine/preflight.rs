@@ -4,7 +4,7 @@
 use crate::engine::spec::{PacketSpec, TransmissionSpec};
 use crate::engine::EngineConfig;
 use crate::network::io::sender::{
-    determine_send_mode, LinkType, NetworkTarget, SendMode, SenderResult, TransmissionPlan,
+    emission_accounting, LinkType, NetworkTarget, SenderResult, TransmissionPlan,
 };
 use crate::output::OutputController;
 
@@ -16,6 +16,9 @@ pub struct PreflightView {
     pub mode: &'static str,
     pub transport: &'static str,
     pub count: Option<u64>,
+    pub attempts: Option<u64>,
+    pub units_per_attempt: u64,
+    pub total_emitted_units: Option<u64>,
     pub send_mode: &'static str,
     pub frame_count: usize,
     pub largest_frame_len: usize,
@@ -24,9 +27,12 @@ pub struct PreflightView {
 
 impl PreflightView {
     pub(crate) fn try_from_plan(plan: &TransmissionPlan) -> SenderResult<Self> {
-        let (count, send_mode) = match determine_send_mode(&plan.transmit, plan.policy)? {
-            SendMode::Finite(count) => (Some(count), "finite"),
-            SendMode::Infinite => (None, "unbounded"),
+        let accounting =
+            emission_accounting(&plan.transmit, plan.policy, plan.summary.frame_count as u64)?;
+        let send_mode = if accounting.attempts.is_some() {
+            "finite"
+        } else {
+            "unbounded"
         };
 
         Ok(Self {
@@ -35,7 +41,10 @@ impl PreflightView {
             interface: plan.interface.name.clone(),
             mode: planned_mode(plan),
             transport: plan.summary.transport,
-            count,
+            count: accounting.attempts,
+            attempts: accounting.attempts,
+            units_per_attempt: accounting.units_per_attempt,
+            total_emitted_units: accounting.total_emitted_units,
             send_mode,
             frame_count: plan.summary.frame_count,
             largest_frame_len: plan.summary.largest_frame_len,
@@ -147,6 +156,9 @@ mod tests {
         assert_eq!(view.mode, "L3");
         assert_eq!(view.transport, "UDP");
         assert_eq!(view.count, Some(3));
+        assert_eq!(view.attempts, Some(3));
+        assert_eq!(view.units_per_attempt, 2);
+        assert_eq!(view.total_emitted_units, Some(6));
         assert_eq!(view.send_mode, "finite");
         assert_eq!(view.frame_count, 2);
         assert_eq!(view.largest_frame_len, 128);
@@ -168,6 +180,9 @@ mod tests {
         let view = PreflightView::try_from_plan(&plan).expect("preflight view");
 
         assert_eq!(view.count, None);
+        assert_eq!(view.attempts, None);
+        assert_eq!(view.units_per_attempt, 2);
+        assert_eq!(view.total_emitted_units, None);
         assert_eq!(view.send_mode, "unbounded");
     }
 

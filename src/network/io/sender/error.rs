@@ -153,6 +153,10 @@ pub enum PlannerError {
     },
     #[error("IPv6 extension headers cannot be used with layer-3 transmission fallback; specify a destination MAC or ensure neighbor discovery succeeds")]
     Ipv6ExtensionHeaderLayer3Mismatch,
+    #[error("transmission planner produced no frames")]
+    EmptyFramePlan,
+    #[error("transmission planner produced a frame that does not match link type {link_type}")]
+    InvalidBuiltFrame { link_type: &'static str },
 }
 
 #[derive(Debug, Error)]

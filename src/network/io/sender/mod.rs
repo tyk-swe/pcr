@@ -18,8 +18,10 @@ mod planner;
 mod transport;
 mod types;
 
-pub(crate) use control::{determine_send_mode, SendMode};
-pub use control::{validate_transmission_policy, SendControlError, TransmissionPolicy};
+pub use control::{
+    emission_accounting, validate_transmission_policy, EmissionAccounting, SendControlError,
+    TransmissionPolicy,
+};
 pub use error::{
     ExecutorError, FragmentError, HeaderError, InterfaceError, Ipv4Error, Ipv6Error, Layer2Error,
     PayloadError, PlannerError, Result as SenderResult, SenderError,

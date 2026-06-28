@@ -166,6 +166,24 @@ pub enum SpecError {
         #[source]
         source: ParseIntError,
     },
+    #[error("TCP total header length {length} exceeds maximum of {max} bytes")]
+    TcpHeaderTooLong { length: usize, max: usize },
+    #[error("TCP options length {length} must be 4-byte aligned")]
+    TcpOptionsNotAligned { length: usize },
+    #[error("IPv6 {header} options header length {length} exceeds maximum of {max} bytes")]
+    Ipv6OptionsHeaderTooLong {
+        header: &'static str,
+        length: usize,
+        max: usize,
+    },
+    #[error("HTTP method must be a non-empty token")]
+    InvalidHttpMethod,
+    #[error("HTTP path must start with '/' and contain no control characters")]
+    InvalidHttpPath,
+    #[error("HTTP host must not be empty or contain whitespace/control characters")]
+    InvalidHttpHost,
+    #[error("{field} must be a non-empty ASCII DNS hostname within DNS length limits")]
+    InvalidDnsHostname { field: &'static str },
     #[error("--filter requires Packetcraft to be built with the 'pcap' feature")]
     FilterRequiresPcap,
     #[error("--listen-reply requires Packetcraft to be built with the 'pcap' feature")]

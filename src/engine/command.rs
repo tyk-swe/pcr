@@ -108,57 +108,33 @@ pub struct DnsQueryResult {
 
 #[cfg(feature = "scan")]
 #[derive(Debug, Clone)]
+pub struct PortScanRequest {
+    pub target: String,
+    pub ports: String,
+    pub interface: Option<String>,
+}
+
+#[cfg(feature = "scan")]
+#[derive(Debug, Clone)]
+pub struct TimedScanRequest {
+    pub target: String,
+    pub interface: Option<String>,
+    pub timeout: u64,
+}
+
+#[cfg(feature = "scan")]
+#[derive(Debug, Clone)]
 pub enum ScanRequest {
-    TcpSyn {
-        target: String,
-        ports: String,
-        interface: Option<String>,
-    },
-    TcpFin {
-        target: String,
-        ports: String,
-        interface: Option<String>,
-    },
-    TcpNull {
-        target: String,
-        ports: String,
-        interface: Option<String>,
-    },
-    TcpXmas {
-        target: String,
-        ports: String,
-        interface: Option<String>,
-    },
-    TcpAck {
-        target: String,
-        ports: String,
-        interface: Option<String>,
-    },
-    SctpInit {
-        target: String,
-        ports: String,
-        interface: Option<String>,
-    },
-    Icmp {
-        target: String,
-        interface: Option<String>,
-        timeout: u64,
-    },
-    Udp {
-        target: String,
-        ports: String,
-        interface: Option<String>,
-    },
-    Arp {
-        target: String,
-        interface: Option<String>,
-        timeout: u64,
-    },
-    Ndp {
-        target: String,
-        interface: Option<String>,
-        timeout: u64,
-    },
+    TcpSyn(PortScanRequest),
+    TcpFin(PortScanRequest),
+    TcpNull(PortScanRequest),
+    TcpXmas(PortScanRequest),
+    TcpAck(PortScanRequest),
+    SctpInit(PortScanRequest),
+    Icmp(TimedScanRequest),
+    Udp(PortScanRequest),
+    Arp(TimedScanRequest),
+    Ndp(TimedScanRequest),
 }
 
 #[cfg(feature = "traceroute")]

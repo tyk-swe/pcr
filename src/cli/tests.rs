@@ -129,58 +129,175 @@ fn logging_options_accept_structured_mode() {
 }
 
 #[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_arp_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "arp",
-        "--target",
-        "192.0.2.0/30",
-        "--timeout",
-        "250",
-    ])
-    .expect("scan arp should parse");
+#[derive(Clone, Copy)]
+struct PortScanCase {
+    subcommand: &'static str,
+    target: &'static str,
+    ports: &'static str,
+    interface: Option<&'static str>,
+}
 
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::Arp {
-            target,
-            timeout,
-            interface,
-        }) => {
-            assert_eq!(target, "192.0.2.0/30");
-            assert_eq!(timeout, 250);
-            assert!(interface.is_none());
-        }
-        other => panic!("expected arp variant, got {other:?}"),
+#[cfg(feature = "scan")]
+#[derive(Clone, Copy)]
+struct TimedScanCase {
+    subcommand: &'static str,
+    target: &'static str,
+    timeout: u64,
+    interface: Option<&'static str>,
+}
+
+#[cfg(feature = "scan")]
+fn parse_scan_from(args: &[&str]) -> ScanCommand {
+    let mut full_args = vec!["packetcraftr", "scan"];
+    full_args.extend_from_slice(args);
+
+    match PacketcraftArgs::try_parse_from(full_args)
+        .expect("scan command should parse")
+        .command
+    {
+        PacketcraftCommand::Scan(command) => command,
+        other => panic!("expected scan command, got {other:?}"),
+    }
+}
+
+#[cfg(feature = "scan")]
+fn parse_port_scan(case: PortScanCase) -> ScanCommand {
+    let mut args = vec![
+        case.subcommand,
+        "--target",
+        case.target,
+        "--ports",
+        case.ports,
+    ];
+    if let Some(interface) = case.interface {
+        args.extend(["--interface", interface]);
+    }
+    parse_scan_from(&args)
+}
+
+#[cfg(feature = "scan")]
+fn parse_timed_scan(case: TimedScanCase) -> ScanCommand {
+    let timeout = case.timeout.to_string();
+    let mut args = vec![
+        case.subcommand,
+        "--target",
+        case.target,
+        "--timeout",
+        timeout.as_str(),
+    ];
+    if let Some(interface) = case.interface {
+        args.extend(["--interface", interface]);
+    }
+    parse_scan_from(&args)
+}
+
+#[cfg(feature = "scan")]
+fn assert_port_scan(command: ScanCommand, case: PortScanCase) {
+    let options = match (case.subcommand, command) {
+        ("tcp-syn", ScanCommand::TcpSyn(options)) => options,
+        ("tcp-fin", ScanCommand::TcpFin(options)) => options,
+        ("tcp-null", ScanCommand::TcpNull(options)) => options,
+        ("tcp-xmas", ScanCommand::TcpXmas(options)) => options,
+        ("tcp-ack", ScanCommand::TcpAck(options)) => options,
+        ("sctp-init", ScanCommand::SctpInit(options)) => options,
+        ("udp", ScanCommand::Udp(options)) => options,
+        (expected, other) => panic!("expected {expected} variant, got {other:?}"),
+    };
+
+    assert_eq!(options.target, case.target);
+    assert_eq!(options.ports, case.ports);
+    assert_eq!(options.interface.as_deref(), case.interface);
+}
+
+#[cfg(feature = "scan")]
+fn assert_timed_scan(command: ScanCommand, case: TimedScanCase) {
+    let options = match (case.subcommand, command) {
+        ("arp", ScanCommand::Arp(options)) => options,
+        ("ndp", ScanCommand::Ndp(options)) => options,
+        ("icmp", ScanCommand::Icmp(options)) => options,
+        (expected, other) => panic!("expected {expected} variant, got {other:?}"),
+    };
+
+    assert_eq!(options.target, case.target);
+    assert_eq!(options.timeout, case.timeout);
+    assert_eq!(options.interface.as_deref(), case.interface);
+}
+
+#[cfg(feature = "scan")]
+#[test]
+fn scan_command_parses_port_variants() {
+    for case in [
+        PortScanCase {
+            subcommand: "tcp-syn",
+            target: "192.0.2.1",
+            ports: "80,443",
+            interface: None,
+        },
+        PortScanCase {
+            subcommand: "tcp-fin",
+            target: "192.0.2.1",
+            ports: "80,443",
+            interface: None,
+        },
+        PortScanCase {
+            subcommand: "tcp-null",
+            target: "192.0.2.1",
+            ports: "80,443",
+            interface: None,
+        },
+        PortScanCase {
+            subcommand: "tcp-xmas",
+            target: "192.0.2.1",
+            ports: "80,443",
+            interface: None,
+        },
+        PortScanCase {
+            subcommand: "tcp-ack",
+            target: "192.0.2.1",
+            ports: "80,443",
+            interface: None,
+        },
+        PortScanCase {
+            subcommand: "sctp-init",
+            target: "192.0.2.1",
+            ports: "80,443",
+            interface: None,
+        },
+        PortScanCase {
+            subcommand: "udp",
+            target: "192.0.2.0/24",
+            ports: "53",
+            interface: Some("eth0"),
+        },
+    ] {
+        assert_port_scan(parse_port_scan(case), case);
     }
 }
 
 #[cfg(feature = "scan")]
 #[test]
-fn scan_command_parses_ndp_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "ndp",
-        "--target",
-        "2001:db8::/64",
-        "--timeout",
-        "500",
-    ])
-    .expect("scan ndp should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::Ndp {
-            target,
-            timeout,
-            interface,
-        }) => {
-            assert_eq!(target, "2001:db8::/64");
-            assert_eq!(timeout, 500);
-            assert!(interface.is_none());
-        }
-        other => panic!("expected ndp variant, got {other:?}"),
+fn scan_command_parses_timed_variants() {
+    for case in [
+        TimedScanCase {
+            subcommand: "arp",
+            target: "192.0.2.0/30",
+            timeout: 250,
+            interface: None,
+        },
+        TimedScanCase {
+            subcommand: "ndp",
+            target: "2001:db8::/64",
+            timeout: 500,
+            interface: None,
+        },
+        TimedScanCase {
+            subcommand: "icmp",
+            target: "192.168.1.0/24",
+            timeout: 500,
+            interface: Some("eth0"),
+        },
+    ] {
+        assert_timed_scan(parse_timed_scan(case), case);
     }
 }
 
@@ -255,176 +372,6 @@ fn tcp_options_are_parsed_correctly() {
             assert_eq!(opts.mss, Some(1460));
         }
         other => panic!("expected tcp subcommand, got {other:?}"),
-    }
-}
-
-#[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_tcp_syn_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "tcp-syn",
-        "--target",
-        "192.0.2.1",
-        "--ports",
-        "80,443",
-    ])
-    .expect("scan tcp-syn should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::TcpSyn {
-            target,
-            ports,
-            interface,
-        }) => {
-            assert_eq!(target, "192.0.2.1");
-            assert_eq!(ports, "80,443");
-            assert!(interface.is_none());
-        }
-        other => panic!("expected tcp-syn variant, got {other:?}"),
-    }
-}
-
-#[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_sctp_init_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "sctp-init",
-        "--target",
-        "192.0.2.1",
-        "--ports",
-        "80,443",
-    ])
-    .expect("scan sctp-init should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::SctpInit {
-            target,
-            ports,
-            interface,
-        }) => {
-            assert_eq!(target, "192.0.2.1");
-            assert_eq!(ports, "80,443");
-            assert!(interface.is_none());
-        }
-        other => panic!("expected sctp-init variant, got {other:?}"),
-    }
-}
-
-#[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_udp_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "udp",
-        "--target",
-        "192.0.2.0/24",
-        "--ports",
-        "53",
-        "--interface",
-        "eth0",
-    ])
-    .expect("scan udp should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::Udp {
-            target,
-            ports,
-            interface,
-        }) => {
-            assert_eq!(target, "192.0.2.0/24");
-            assert_eq!(ports, "53");
-            assert_eq!(interface.as_deref(), Some("eth0"));
-        }
-        other => panic!("expected udp variant, got {other:?}"),
-    }
-}
-
-#[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_tcp_null_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "tcp-null",
-        "--target",
-        "192.0.2.1",
-        "--ports",
-        "80,443",
-    ])
-    .expect("scan tcp-null should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::TcpNull {
-            target,
-            ports,
-            interface,
-        }) => {
-            assert_eq!(target, "192.0.2.1");
-            assert_eq!(ports, "80,443");
-            assert!(interface.is_none());
-        }
-        other => panic!("expected tcp-null variant, got {other:?}"),
-    }
-}
-
-#[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_tcp_xmas_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "tcp-xmas",
-        "--target",
-        "192.0.2.1",
-        "--ports",
-        "80,443",
-    ])
-    .expect("scan tcp-xmas should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::TcpXmas {
-            target,
-            ports,
-            interface,
-        }) => {
-            assert_eq!(target, "192.0.2.1");
-            assert_eq!(ports, "80,443");
-            assert!(interface.is_none());
-        }
-        other => panic!("expected tcp-xmas variant, got {other:?}"),
-    }
-}
-
-#[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_tcp_ack_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "tcp-ack",
-        "--target",
-        "192.0.2.1",
-        "--ports",
-        "80,443",
-    ])
-    .expect("scan tcp-ack should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::TcpAck {
-            target,
-            ports,
-            interface,
-        }) => {
-            assert_eq!(target, "192.0.2.1");
-            assert_eq!(ports, "80,443");
-            assert!(interface.is_none());
-        }
-        other => panic!("expected tcp-ack variant, got {other:?}"),
     }
 }
 
@@ -670,34 +617,6 @@ fn dns_query_rejects_out_of_range_retries() {
     ]);
 
     assert!(result.is_err());
-}
-
-#[cfg(feature = "scan")]
-#[test]
-fn scan_command_parses_icmp_variant() {
-    let args = PacketcraftArgs::try_parse_from([
-        "packetcraftr",
-        "scan",
-        "icmp",
-        "--target",
-        "192.168.1.0/24",
-        "--timeout",
-        "500",
-    ])
-    .expect("scan icmp should parse");
-
-    match args.command {
-        PacketcraftCommand::Scan(ScanCommand::Icmp {
-            target,
-            interface,
-            timeout,
-        }) => {
-            assert_eq!(target, "192.168.1.0/24");
-            assert!(interface.is_none());
-            assert_eq!(timeout, 500);
-        }
-        other => panic!("expected icmp variant, got {other:?}"),
-    }
 }
 
 #[test]

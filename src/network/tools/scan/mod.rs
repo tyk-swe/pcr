@@ -24,91 +24,75 @@ use crate::engine::EngineConfig;
 
 pub async fn run_command(command: &ScanRequest, config: &EngineConfig) -> Result<()> {
     match command {
-        ScanRequest::TcpSyn {
-            target,
-            ports,
-            interface,
-        } => {
-            info!("Starting TCP SYN scan against {target} ports {ports}");
-            run_tcp_syn(target, ports, interface, config).await
-        }
-        ScanRequest::TcpFin {
-            target,
-            ports,
-            interface,
-        } => {
-            info!("Starting TCP FIN scan against {target} ports {ports}");
-            run_tcp_fin(target, ports, interface, config).await
-        }
-        ScanRequest::TcpNull {
-            target,
-            ports,
-            interface,
-        } => {
-            info!("Starting TCP NULL scan against {target} ports {ports}");
-            run_tcp_null(target, ports, interface, config).await
-        }
-        ScanRequest::TcpXmas {
-            target,
-            ports,
-            interface,
-        } => {
-            info!("Starting TCP XMAS scan against {target} ports {ports}");
-            run_tcp_xmas(target, ports, interface, config).await
-        }
-        ScanRequest::TcpAck {
-            target,
-            ports,
-            interface,
-        } => {
-            info!("Starting TCP ACK scan against {target} ports {ports}");
-            run_tcp_ack(target, ports, interface, config).await
-        }
-        ScanRequest::SctpInit {
-            target,
-            ports,
-            interface,
-        } => {
-            info!("Starting SCTP INIT scan against {target} ports {ports}");
-            run_sctp_init(target, ports, interface, config).await
-        }
-        ScanRequest::Udp {
-            target,
-            ports,
-            interface,
-        } => {
-            info!("Starting UDP scan against {target} ports {ports}");
-            run_udp(target, ports, interface, config).await
-        }
-        ScanRequest::Arp {
-            target,
-            interface,
-            timeout,
-        } => {
+        ScanRequest::TcpSyn(request) => {
             info!(
-                "Starting ARP probe against {target} using interface {:?} timeout {}ms",
-                interface, timeout
+                "Starting TCP SYN scan against {} ports {}",
+                request.target, request.ports
             );
-            run_arp(target, interface, *timeout, config).await
+            run_tcp_syn(&request.target, &request.ports, &request.interface, config).await
         }
-        ScanRequest::Ndp {
-            target,
-            interface,
-            timeout,
-        } => {
+        ScanRequest::TcpFin(request) => {
             info!(
-                "Starting NDP probe against {target} using interface {:?} timeout {}ms",
-                interface, timeout
+                "Starting TCP FIN scan against {} ports {}",
+                request.target, request.ports
             );
-            run_ndp(target, interface, *timeout, config).await
+            run_tcp_fin(&request.target, &request.ports, &request.interface, config).await
         }
-        ScanRequest::Icmp {
-            target,
-            interface,
-            timeout,
-        } => {
-            info!("Starting ICMP scan against {target} timeout {}ms", timeout);
-            run_icmp(target, interface, *timeout, config).await
+        ScanRequest::TcpNull(request) => {
+            info!(
+                "Starting TCP NULL scan against {} ports {}",
+                request.target, request.ports
+            );
+            run_tcp_null(&request.target, &request.ports, &request.interface, config).await
+        }
+        ScanRequest::TcpXmas(request) => {
+            info!(
+                "Starting TCP XMAS scan against {} ports {}",
+                request.target, request.ports
+            );
+            run_tcp_xmas(&request.target, &request.ports, &request.interface, config).await
+        }
+        ScanRequest::TcpAck(request) => {
+            info!(
+                "Starting TCP ACK scan against {} ports {}",
+                request.target, request.ports
+            );
+            run_tcp_ack(&request.target, &request.ports, &request.interface, config).await
+        }
+        ScanRequest::SctpInit(request) => {
+            info!(
+                "Starting SCTP INIT scan against {} ports {}",
+                request.target, request.ports
+            );
+            run_sctp_init(&request.target, &request.ports, &request.interface, config).await
+        }
+        ScanRequest::Udp(request) => {
+            info!(
+                "Starting UDP scan against {} ports {}",
+                request.target, request.ports
+            );
+            run_udp(&request.target, &request.ports, &request.interface, config).await
+        }
+        ScanRequest::Arp(request) => {
+            info!(
+                "Starting ARP probe against {} using interface {:?} timeout {}ms",
+                request.target, request.interface, request.timeout
+            );
+            run_arp(&request.target, &request.interface, request.timeout, config).await
+        }
+        ScanRequest::Ndp(request) => {
+            info!(
+                "Starting NDP probe against {} using interface {:?} timeout {}ms",
+                request.target, request.interface, request.timeout
+            );
+            run_ndp(&request.target, &request.interface, request.timeout, config).await
+        }
+        ScanRequest::Icmp(request) => {
+            info!(
+                "Starting ICMP scan against {} timeout {}ms",
+                request.target, request.timeout
+            );
+            run_icmp(&request.target, &request.interface, request.timeout, config).await
         }
     }
 }

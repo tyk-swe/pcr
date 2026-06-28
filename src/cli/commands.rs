@@ -232,128 +232,62 @@ pub enum TracerouteProtocol {
 }
 
 #[cfg(feature = "scan")]
+#[derive(Debug, Args, Clone)]
+pub struct PortScanOptions {
+    /// Target IP or CIDR (e.g., 192.168.1.0/24).
+    #[arg(long = "target")]
+    pub target: String,
+    /// Ports to scan (e.g., "80,443", "1-100").
+    #[arg(long = "ports")]
+    pub ports: String,
+    /// Scanning interface.
+    #[arg(long = "interface")]
+    pub interface: Option<String>,
+}
+
+#[cfg(feature = "scan")]
+#[derive(Debug, Args, Clone)]
+pub struct TimedScanOptions {
+    /// Target IP or CIDR (e.g., 192.168.1.0/24).
+    #[arg(long = "target")]
+    pub target: String,
+    /// Scanning interface.
+    #[arg(long = "interface")]
+    pub interface: Option<String>,
+    /// Timeout (in ms).
+    #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 1_000)]
+    pub timeout: u64,
+}
+
+#[cfg(feature = "scan")]
 #[derive(Debug, Subcommand)]
 pub enum ScanCommand {
     /// Perform a TCP SYN scan (half-open).
-    TcpSyn {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Ports to scan (e.g., "80,443", "1-100").
-        #[arg(long = "ports")]
-        ports: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-    },
+    #[command(name = "tcp-syn")]
+    TcpSyn(PortScanOptions),
     /// Perform a TCP FIN scan (inverse mapping).
-    TcpFin {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Ports to scan (e.g., "80,443", "1-100").
-        #[arg(long = "ports")]
-        ports: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-    },
+    #[command(name = "tcp-fin")]
+    TcpFin(PortScanOptions),
     /// Perform a TCP NULL scan (no flags set).
-    TcpNull {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Ports to scan (e.g., "80,443", "1-100").
-        #[arg(long = "ports")]
-        ports: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-    },
+    #[command(name = "tcp-null")]
+    TcpNull(PortScanOptions),
     /// Perform a TCP XMAS scan (FIN+URG+PUSH).
-    TcpXmas {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Ports to scan (e.g., "80,443", "1-100").
-        #[arg(long = "ports")]
-        ports: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-    },
+    #[command(name = "tcp-xmas")]
+    TcpXmas(PortScanOptions),
     /// Perform a TCP ACK scan (firewall mapping).
-    TcpAck {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Ports to scan (e.g., "80,443", "1-100").
-        #[arg(long = "ports")]
-        ports: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-    },
+    #[command(name = "tcp-ack")]
+    TcpAck(PortScanOptions),
     /// Perform an SCTP INIT scan.
-    SctpInit {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Ports to scan (e.g., "80,443", "1-100").
-        #[arg(long = "ports")]
-        ports: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-    },
+    #[command(name = "sctp-init")]
+    SctpInit(PortScanOptions),
     /// Perform an ICMP echo scan (ping sweep).
-    Icmp {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-        /// Timeout (in ms).
-        #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 1_000)]
-        timeout: u64,
-    },
+    Icmp(TimedScanOptions),
     /// Perform a UDP scan.
-    Udp {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Ports to scan (e.g., "53", "1-100").
-        #[arg(long = "ports")]
-        ports: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-    },
+    Udp(PortScanOptions),
     /// Perform an ARP scan (local network discovery).
-    Arp {
-        /// Target IP or CIDR (e.g., 192.168.1.0/24).
-        #[arg(long = "target")]
-        target: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-        /// Timeout (in ms).
-        #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 1_000)]
-        timeout: u64,
-    },
+    Arp(TimedScanOptions),
     /// Perform an NDP scan (IPv6 local network discovery).
-    Ndp {
-        /// Target IP or CIDR (e.g., "fe80::/64").
-        #[arg(long = "target")]
-        target: String,
-        /// Scanning interface.
-        #[arg(long = "interface")]
-        interface: Option<String>,
-        /// Timeout (in ms).
-        #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 1_000)]
-        timeout: u64,
-    },
+    Ndp(TimedScanOptions),
 }
 
 impl DnsQueryOptions {
@@ -425,160 +359,38 @@ impl ScanCommand {
         use crate::engine::command::ScanRequest;
 
         match self {
-            Self::TcpSyn {
-                target,
-                ports,
-                interface,
-            } => {
-                let fields = PortScanRequestFields::from_cli(target, ports, interface);
-                ScanRequest::TcpSyn {
-                    target: fields.target,
-                    ports: fields.ports,
-                    interface: fields.interface,
-                }
-            }
-            Self::TcpFin {
-                target,
-                ports,
-                interface,
-            } => {
-                let fields = PortScanRequestFields::from_cli(target, ports, interface);
-                ScanRequest::TcpFin {
-                    target: fields.target,
-                    ports: fields.ports,
-                    interface: fields.interface,
-                }
-            }
-            Self::TcpNull {
-                target,
-                ports,
-                interface,
-            } => {
-                let fields = PortScanRequestFields::from_cli(target, ports, interface);
-                ScanRequest::TcpNull {
-                    target: fields.target,
-                    ports: fields.ports,
-                    interface: fields.interface,
-                }
-            }
-            Self::TcpXmas {
-                target,
-                ports,
-                interface,
-            } => {
-                let fields = PortScanRequestFields::from_cli(target, ports, interface);
-                ScanRequest::TcpXmas {
-                    target: fields.target,
-                    ports: fields.ports,
-                    interface: fields.interface,
-                }
-            }
-            Self::TcpAck {
-                target,
-                ports,
-                interface,
-            } => {
-                let fields = PortScanRequestFields::from_cli(target, ports, interface);
-                ScanRequest::TcpAck {
-                    target: fields.target,
-                    ports: fields.ports,
-                    interface: fields.interface,
-                }
-            }
-            Self::SctpInit {
-                target,
-                ports,
-                interface,
-            } => {
-                let fields = PortScanRequestFields::from_cli(target, ports, interface);
-                ScanRequest::SctpInit {
-                    target: fields.target,
-                    ports: fields.ports,
-                    interface: fields.interface,
-                }
-            }
-            Self::Icmp {
-                target,
-                interface,
-                timeout,
-            } => {
-                let fields = TargetScanRequestFields::from_cli(target, interface);
-                ScanRequest::Icmp {
-                    target: fields.target,
-                    interface: fields.interface,
-                    timeout: *timeout,
-                }
-            }
-            Self::Udp {
-                target,
-                ports,
-                interface,
-            } => {
-                let fields = PortScanRequestFields::from_cli(target, ports, interface);
-                ScanRequest::Udp {
-                    target: fields.target,
-                    ports: fields.ports,
-                    interface: fields.interface,
-                }
-            }
-            Self::Arp {
-                target,
-                interface,
-                timeout,
-            } => {
-                let fields = TargetScanRequestFields::from_cli(target, interface);
-                ScanRequest::Arp {
-                    target: fields.target,
-                    interface: fields.interface,
-                    timeout: *timeout,
-                }
-            }
-            Self::Ndp {
-                target,
-                interface,
-                timeout,
-            } => {
-                let fields = TargetScanRequestFields::from_cli(target, interface);
-                ScanRequest::Ndp {
-                    target: fields.target,
-                    interface: fields.interface,
-                    timeout: *timeout,
-                }
-            }
+            Self::TcpSyn(options) => ScanRequest::TcpSyn(options.to_request()),
+            Self::TcpFin(options) => ScanRequest::TcpFin(options.to_request()),
+            Self::TcpNull(options) => ScanRequest::TcpNull(options.to_request()),
+            Self::TcpXmas(options) => ScanRequest::TcpXmas(options.to_request()),
+            Self::TcpAck(options) => ScanRequest::TcpAck(options.to_request()),
+            Self::SctpInit(options) => ScanRequest::SctpInit(options.to_request()),
+            Self::Icmp(options) => ScanRequest::Icmp(options.to_request()),
+            Self::Udp(options) => ScanRequest::Udp(options.to_request()),
+            Self::Arp(options) => ScanRequest::Arp(options.to_request()),
+            Self::Ndp(options) => ScanRequest::Ndp(options.to_request()),
         }
     }
 }
 
 #[cfg(feature = "scan")]
-struct PortScanRequestFields {
-    target: String,
-    ports: String,
-    interface: Option<String>,
-}
-
-#[cfg(feature = "scan")]
-impl PortScanRequestFields {
-    fn from_cli(target: &str, ports: &str, interface: &Option<String>) -> Self {
-        Self {
-            target: target.to_owned(),
-            ports: ports.to_owned(),
-            interface: interface.clone(),
+impl PortScanOptions {
+    fn to_request(&self) -> crate::engine::command::PortScanRequest {
+        crate::engine::command::PortScanRequest {
+            target: self.target.clone(),
+            ports: self.ports.clone(),
+            interface: self.interface.clone(),
         }
     }
 }
 
 #[cfg(feature = "scan")]
-struct TargetScanRequestFields {
-    target: String,
-    interface: Option<String>,
-}
-
-#[cfg(feature = "scan")]
-impl TargetScanRequestFields {
-    fn from_cli(target: &str, interface: &Option<String>) -> Self {
-        Self {
-            target: target.to_owned(),
-            interface: interface.clone(),
+impl TimedScanOptions {
+    fn to_request(&self) -> crate::engine::command::TimedScanRequest {
+        crate::engine::command::TimedScanRequest {
+            target: self.target.clone(),
+            interface: self.interface.clone(),
+            timeout: self.timeout,
         }
     }
 }

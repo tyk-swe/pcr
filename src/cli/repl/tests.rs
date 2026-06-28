@@ -254,9 +254,9 @@ fn parse_helpers_accept_expected_arguments() {
     ])
     .expect("parse scan")
     {
-        ScanCommand::TcpSyn { target, ports, .. } => {
-            assert_eq!(target, "example.com");
-            assert_eq!(ports, "80");
+        ScanCommand::TcpSyn(options) => {
+            assert_eq!(options.target, "example.com");
+            assert_eq!(options.ports, "80");
         }
         other => panic!("unexpected scan command: {other:?}"),
     }
@@ -598,16 +598,16 @@ impl ReplEngine for TestEngine {
         request: ScanRequest,
     ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
         let label = match request {
-            ScanRequest::TcpSyn { .. } => "TcpSyn",
-            ScanRequest::TcpFin { .. } => "TcpFin",
-            ScanRequest::TcpNull { .. } => "TcpNull",
-            ScanRequest::TcpXmas { .. } => "TcpXmas",
-            ScanRequest::TcpAck { .. } => "TcpAck",
-            ScanRequest::SctpInit { .. } => "SctpInit",
-            ScanRequest::Udp { .. } => "Udp",
-            ScanRequest::Arp { .. } => "Arp",
-            ScanRequest::Ndp { .. } => "Ndp",
-            ScanRequest::Icmp { .. } => "Icmp",
+            ScanRequest::TcpSyn(_) => "TcpSyn",
+            ScanRequest::TcpFin(_) => "TcpFin",
+            ScanRequest::TcpNull(_) => "TcpNull",
+            ScanRequest::TcpXmas(_) => "TcpXmas",
+            ScanRequest::TcpAck(_) => "TcpAck",
+            ScanRequest::SctpInit(_) => "SctpInit",
+            ScanRequest::Udp(_) => "Udp",
+            ScanRequest::Arp(_) => "Arp",
+            ScanRequest::Ndp(_) => "Ndp",
+            ScanRequest::Icmp(_) => "Icmp",
         };
         self.scan_invocations.push(label.to_string());
         Box::pin(async { Ok(()) })

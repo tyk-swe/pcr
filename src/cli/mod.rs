@@ -20,9 +20,9 @@ pub use commands::FuzzOptions;
 pub use commands::InteractiveOptions;
 #[cfg(feature = "pcap")]
 pub use commands::ListenCommandOptions;
-#[cfg(feature = "scan")]
-pub use commands::ScanCommand;
 pub use commands::{DnsQueryOptions, PacketcraftCommand};
+#[cfg(feature = "scan")]
+pub use commands::{PortScanOptions, ScanCommand, TimedScanOptions};
 #[cfg(feature = "traceroute")]
 pub use commands::{TracerouteOptions, TracerouteProtocol};
 pub use enums::{FragmentProfile, Icmpv6ErrorCode, Icmpv6ErrorKind, LogLevel, OutputFormat};

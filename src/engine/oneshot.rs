@@ -58,10 +58,34 @@ impl<'engine> OneShotFlow<'engine> {
             .context("rule loading task failed")??;
 
             self.engine.rules.replace_rules(rules);
-            if self.engine.rules.has_startup_triggers() && !self.engine.config.dry_run {
-                self.engine.rules.run_startup_actions();
-            }
         }
+        Ok(self)
+    }
+
+    pub fn with_startup_rules(self) -> Self {
+        if self.engine.rules.has_startup_triggers() && !self.engine.config.dry_run {
+            self.engine.rules.run_startup_actions();
+        }
+        self
+    }
+
+    pub async fn with_authorized_preflight_traffic(mut self) -> Result<Self> {
+        let spec = Arc::clone(
+            self.spec
+                .as_ref()
+                .context("packet spec missing; ensure with_spec() is called first")?,
+        );
+        let service = PacketSendService::from_config(&self.engine.config);
+
+        if !self.engine.config.dry_run {
+            service
+                .authorize_spec_traffic(spec.as_ref(), crate::engine::policy::TrafficMode::Send)?;
+            return Ok(self);
+        }
+
+        let plan = service.plan_dry_run(Arc::clone(&spec)).await?;
+        service.authorize_transmission_plan(spec.as_ref(), &plan)?;
+        self.plan = Some(plan);
         Ok(self)
     }
 
@@ -83,14 +107,18 @@ impl<'engine> OneShotFlow<'engine> {
     }
 
     pub async fn with_plan(mut self) -> Result<Self> {
+        if self.engine.config.dry_run {
+            return Ok(self);
+        }
+
         let spec = Arc::clone(
             self.spec
                 .as_ref()
                 .context("packet spec missing; ensure with_spec() is called first")?,
         );
-        let plan = PacketSendService::from_config(&self.engine.config)
-            .plan(spec)
-            .await?;
+        let service = PacketSendService::from_config(&self.engine.config);
+        let plan = service.plan_live(Arc::clone(&spec)).await?;
+        service.authorize_transmission_plan(spec.as_ref(), &plan)?;
         self.plan = Some(plan);
         Ok(self)
     }
@@ -190,10 +218,28 @@ impl<'engine> OneShotFlow<'engine> {
 mod tests {
     use super::*;
     use crate::engine::config::EngineConfig;
+    use crate::engine::policy::{TrafficBudget, TrafficPolicy};
     use crate::engine::spec::{
         DestinationSpec, Ipv6Spec, Layer2Spec, ListenerSpec, LoggingSpec, PayloadSource,
         PayloadSpec, TargetAddress, TransmissionSpec, TransportSpec,
     };
+    use std::io::Write;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+    use tempfile::NamedTempFile;
+
+    fn test_config() -> EngineConfig {
+        EngineConfig {
+            output_format: None,
+            prometheus_bind: None,
+            rule_workers: None,
+            rule_queue: None,
+            send_workers: None,
+            send_queue: None,
+            traffic_policy: TrafficPolicy::default(),
+            dry_run: false,
+        }
+    }
 
     #[test]
     fn ensure_privileges_checks_layer3_transmit_modes() {
@@ -219,17 +265,7 @@ mod tests {
         };
 
         // We need a dummy Engine.
-        let config = EngineConfig {
-            output_format: None,
-            prometheus_bind: None,
-            rule_workers: None,
-            rule_queue: None,
-            send_workers: None,
-            send_queue: None,
-            allow_unbounded_sends: false,
-            dry_run: false,
-        };
-        let mut engine = Engine::new(config).expect("engine initialisation");
+        let mut engine = Engine::new(test_config()).expect("engine initialisation");
         let _flow = OneShotFlow::new(&mut engine, PacketRequest::default());
 
         let has_raw_capability = crate::util::privileges::assert_raw_socket_capability().is_ok();
@@ -243,5 +279,80 @@ mod tests {
                 "missing CAP_NET_RAW should surface as an error in layer3-only mode"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn expanded_plan_policy_rejection_skips_startup_rules() {
+        use crate::rules::test_support;
+
+        let _executor_guard = test_support::executor_lock();
+        let mut rules_file = NamedTempFile::new().expect("create temporary rule file");
+        writeln!(
+            rules_file,
+            r#"
+- name: "startup"
+  trigger: on_startup
+  actions:
+    - type: send
+"#
+        )
+        .expect("write rules");
+
+        let (tx, rx) = mpsc::channel();
+        let tx = Arc::new(Mutex::new(tx));
+        let _hook_guard = test_support::send_hook_guard(Some(Arc::new(move |rule_name, _| {
+            tx.lock()
+                .expect("startup hook mutex")
+                .send(rule_name)
+                .expect("startup hook receiver");
+            Ok(())
+        })));
+
+        let mut config = test_config();
+        config.traffic_policy = TrafficPolicy {
+            budget: TrafficBudget {
+                max_estimated_packets: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let mut request = PacketRequest::default();
+        request.destination.destination = Some("127.0.0.1".to_string());
+        request.destination.interface = Some("lo".to_string());
+        request.ip.fragment.mtu = Some(68);
+        request.payload.random_payload_size = Some(512);
+        request.transmit.force_layer3 = Some(true);
+        request.rules_file = Some(rules_file.path().to_string_lossy().into_owned());
+
+        let mut engine = Engine::new(config).expect("engine initialisation");
+        let result = OneShotFlow::new(&mut engine, request)
+            .with_policy_validation()
+            .expect("request policy")
+            .with_spec()
+            .await
+            .expect("spec")
+            .with_authorized_preflight_traffic()
+            .await
+            .expect("spec traffic authorization")
+            .with_rules()
+            .await
+            .expect("rules")
+            .with_plan()
+            .await;
+
+        let error = match result {
+            Ok(_) => panic!("expanded plan should exceed packet cap"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("packet_cap_exceeded"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(engine.rule_count(), 1, "rules should be loaded");
+        assert!(
+            rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "startup send action should not run after plan authorization fails"
+        );
     }
 }

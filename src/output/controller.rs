@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use anyhow::Result;
 use pnet::datalink::MacAddr;
 
+use crate::engine::policy::{PolicyOutcome, TrafficPlan};
 use crate::engine::preflight::PreflightView;
 use crate::engine::spec::{PacketSpec, PayloadSource};
 
@@ -50,8 +51,44 @@ impl OutputController {
         }
     }
 
+    pub fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> Result<()> {
+        match self.default_format.unwrap_or(OutputFormat::Summary) {
+            OutputFormat::Json => {
+                let report = serde_json::json!({
+                    "mode": "dry_run",
+                    "plan": plan,
+                    "policy": PolicyOutcome::allowed(),
+                });
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+            OutputFormat::Detailed => {
+                self.print_traffic_plan_summary(plan);
+                println!("Target scope: {}", plan.target_scope);
+                println!("Batch size: {}", plan.batch_size);
+                println!("Rate limit: {:?}", plan.rate_per_sec);
+                println!("Required privileges: {:?}", plan.required_privileges);
+                println!("Policy: allowed");
+            }
+            OutputFormat::Summary | OutputFormat::Hex => {
+                self.print_traffic_plan_summary(plan);
+            }
+        }
+        Ok(())
+    }
+
     fn print_summary(&self, report: &PreflightReport) {
         println!("{}", report.summary_line());
+    }
+
+    fn print_traffic_plan_summary(&self, plan: &TrafficPlan) {
+        let estimated = plan
+            .estimated_packets
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "unbounded".to_string());
+        println!(
+            "Plan: mode={} targets={} ports={} estimated_packets={} scope={} policy=allowed",
+            plan.mode, plan.target_count, plan.port_count, estimated, plan.target_scope
+        );
     }
 
     fn print_detailed(&self, spec: &PacketSpec, view: &PreflightView) {

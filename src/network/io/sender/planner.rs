@@ -13,7 +13,6 @@ use super::error::{PlannerError, Result};
 use super::interface::{resolve_ip_addresses, select_interface};
 use super::ipv6;
 use super::layer2::{resolve_layer2_ipv4, resolve_layer2_ipv6, Layer2Resolved};
-use super::metrics::emit_metrics_snapshot;
 use super::payload::prepare_payload;
 use super::transport::{build_transport_segment, TransportBuild};
 use super::types::{LinkType, NetworkTarget, PlanningMode, TransmissionPlan, TransmissionSummary};
@@ -123,10 +122,6 @@ pub fn plan_transmission_with_interface_and_policy(
         mode,
         policy,
     };
-
-    if mode == PlanningMode::Live {
-        emit_metrics_snapshot(&plan)?;
-    }
 
     debug!(
         "Prepared frame(s): transport={} payload={} bytes frames={} largest_frame={} bytes link_type={:?} mode={:?}",

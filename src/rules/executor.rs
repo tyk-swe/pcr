@@ -9,7 +9,7 @@ use tokio::runtime::Handle;
 use tokio::sync::{Semaphore, TryAcquireError};
 use tokio::task::JoinError;
 
-use crate::engine::policy::{validate_transmission_policy, TransmissionPolicy};
+use crate::engine::policy::{TrafficMode, TrafficPlan, TrafficPolicy};
 use crate::engine::request::{PacketRequest, TransportProtocolRequest};
 use crate::engine::send::PacketSendService;
 use crate::engine::spec::TransmissionSpec;
@@ -259,26 +259,27 @@ fn render_vec(fields: &mut [String], packet: Option<&PacketContext>) {
 #[derive(Debug, Clone)]
 pub struct RuleSendExecutor {
     executor: Arc<BoundedExecutor>,
-    allow_unbounded_sends: bool,
+    traffic_policy: TrafficPolicy,
     dry_run: bool,
 }
 
 fn validate_rule_send_mode(
     rule_name: &str,
     request: &PacketRequest,
-    policy: TransmissionPolicy,
+    policy: TrafficPolicy,
 ) -> Result<()> {
-    let spec = TransmissionSpec::from_request(&request.transmit).map_err(|source| {
+    TransmissionSpec::from_request(&request.transmit).map_err(|source| {
         warn!("rule '{}' send action rejected: {}", rule_name, source);
-        telemetry::record_rule_executor_drop("send", "policy_invalid");
+        telemetry::record_rule_executor_drop("send", "invalid_send_mode");
         RuleActionError::InvalidSendMode {
             rule: rule_name.to_string(),
         }
     })?;
 
-    validate_transmission_policy(&spec, policy).map_err(|source| {
+    let plan = TrafficPlan::from_packet_request(request, TrafficMode::RuleSend, &policy);
+    policy.authorize(&plan).map_err(|source| {
         warn!("rule '{}' send action rejected: {}", rule_name, source);
-        telemetry::record_rule_executor_drop("send", "policy_unbounded");
+        telemetry::record_rule_executor_drop("send", "policy_rejected");
         RuleActionError::InvalidSendMode {
             rule: rule_name.to_string(),
         }
@@ -292,7 +293,7 @@ impl RuleSendExecutor {
         Self::new_configured(RuleExecutorConfig {
             workers: RULE_SEND_EXECUTOR_WORKERS,
             queue_capacity: RULE_SEND_EXECUTOR_QUEUE_CAPACITY,
-            allow_unbounded_sends: false,
+            traffic_policy: TrafficPolicy::default(),
             dry_run: false,
         })
     }
@@ -306,7 +307,7 @@ impl RuleSendExecutor {
             RuleExecutorConfig {
                 workers: RULE_SEND_EXECUTOR_WORKERS,
                 queue_capacity: RULE_SEND_EXECUTOR_QUEUE_CAPACITY,
-                allow_unbounded_sends: false,
+                traffic_policy: TrafficPolicy::default(),
                 dry_run: false,
             },
             handle,
@@ -330,7 +331,7 @@ impl RuleSendExecutor {
                 config.workers,
                 config.workers + config.queue_capacity,
             )),
-            allow_unbounded_sends: config.allow_unbounded_sends,
+            traffic_policy: config.traffic_policy,
             dry_run: config.dry_run,
         })
     }
@@ -410,15 +411,11 @@ impl RuleSendExecutor {
         }
     }
 
-    fn transmission_policy(&self) -> TransmissionPolicy {
-        TransmissionPolicy::new(self.allow_unbounded_sends, self.dry_run)
+    fn transmission_policy(&self) -> TrafficPolicy {
+        self.traffic_policy.with_dry_run(self.dry_run)
     }
 
-    async fn send(
-        rule_name: String,
-        request: PacketRequest,
-        policy: TransmissionPolicy,
-    ) -> Result<()> {
+    async fn send(rule_name: String, request: PacketRequest, policy: TrafficPolicy) -> Result<()> {
         #[cfg(any(test, feature = "test_utils"))]
         if let Some(handler) = test_support::send_hook() {
             return handler(rule_name, request);

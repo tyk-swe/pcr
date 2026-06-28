@@ -3,6 +3,7 @@
 
 use crate::engine::command::FuzzRequest;
 pub use crate::engine::command::{FuzzProtocol, FuzzStrategy};
+use crate::engine::policy::TrafficPolicy;
 
 #[derive(Debug, Clone)]
 pub struct FuzzConfig {
@@ -12,6 +13,15 @@ pub struct FuzzConfig {
     pub strategy: FuzzStrategy,
     pub count: u64,
     pub delay_ms: u64,
+    pub batch_size: usize,
+    pub rate_per_sec: u64,
+}
+
+impl FuzzConfig {
+    pub fn apply_traffic_policy(&mut self, policy: &TrafficPolicy) {
+        self.batch_size = policy.budget.max_batch_size;
+        self.rate_per_sec = policy.budget.max_rate_per_sec;
+    }
 }
 
 impl TryFrom<&FuzzRequest> for FuzzConfig {
@@ -33,6 +43,8 @@ impl TryFrom<&FuzzRequest> for FuzzConfig {
             strategy: opts.strategy,
             count: opts.count,
             delay_ms: opts.delay,
+            batch_size: crate::engine::policy::DEFAULT_MAX_BATCH_SIZE,
+            rate_per_sec: crate::engine::policy::DEFAULT_MAX_RATE_PER_SEC,
         })
     }
 }

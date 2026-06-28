@@ -111,6 +111,7 @@ fn json_dry_run_stdout_parses_without_log_prefixes() {
     assert_eq!(json["protocol"], "UDP");
     assert_eq!(json["count"], 1);
     assert_eq!(json["mode"], "L3");
+    assert_eq!(json["policy"]["status"], "allowed");
     assert!(json["target"]["interface"].is_string());
     assert_eq!(json["transmit"]["auto_layer3"], true);
     assert_eq!(json["transmit"]["layer3_active"], true);
@@ -165,7 +166,7 @@ fn json_dry_run_rejects_unbounded_flood_before_hostname_resolution() {
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("--flood without --count requires explicit unbounded-send opt-in"),
+        stderr.contains("unbounded_send"),
         "stderr should explain flood policy failure\nstderr:\n{stderr}"
     );
     assert!(
@@ -183,6 +184,8 @@ fn json_dns_query_dry_run_stdout_parses() {
         "--dry-run",
         "--domain",
         "example.com",
+        "--server",
+        "127.0.0.1",
     ]);
 
     assert!(
@@ -196,8 +199,28 @@ fn json_dns_query_dry_run_stdout_parses() {
     assert_eq!(json["mode"], "dry_run");
     assert_eq!(json["query"]["domain"], "example.com");
     assert_eq!(json["query"]["record_type"], "A");
-    assert_eq!(json["query"]["server"], "8.8.8.8");
+    assert_eq!(json["query"]["server"], "127.0.0.1");
     assert_eq!(json["query"]["timeout_ms"], 1000);
+}
+
+#[test]
+fn dns_query_rejects_default_public_server_without_opt_in() {
+    let output = command_result(&["dns-query", "--domain", "example.com"]);
+
+    assert!(
+        !output.status.success(),
+        "default public DNS server should require opt-in"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "policy failure should not emit success-like stdout\nstdout:\n{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("public_target"),
+        "stderr should explain DNS traffic policy failure\nstderr:\n{stderr}"
+    );
 }
 
 #[test]
@@ -226,4 +249,173 @@ fn verbose_logging_does_not_corrupt_json_stdout() {
         .unwrap_or_else(|err| panic!("{err}\nstdout:\n{stdout}"));
     assert!(!stdout.contains("INFO"), "stdout contains logs\n{stdout}");
     assert!(!stdout.contains("DEBUG"), "stdout contains logs\n{stdout}");
+}
+
+#[test]
+fn cap_override_above_default_requires_high_volume_opt_in() {
+    let output = command_result(&[
+        "dry-run",
+        "--traffic-max-packets",
+        "4097",
+        "--dest",
+        "127.0.0.1",
+        "udp",
+        "--dport",
+        "9",
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "expected raised cap without opt-in to fail"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "policy failure should not emit success-like stdout"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("high_volume_requires_opt_in"),
+        "stderr should include policy code\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
+fn high_volume_opt_in_and_matching_cap_allow_large_dry_run() {
+    let output = command_result(&[
+        "--output-format",
+        "json",
+        "dry-run",
+        "--allow-high-volume",
+        "--traffic-max-packets",
+        "4097",
+        "--count",
+        "4097",
+        "--dest",
+        "127.0.0.1",
+        "udp",
+        "--dport",
+        "9",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "high-volume dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
+    assert_eq!(json["policy"]["status"], "allowed");
+    assert_eq!(json["count"], 4097);
+}
+
+#[cfg(feature = "scan")]
+#[test]
+fn scan_dry_run_outputs_typed_json_plan() {
+    let output = command_result(&[
+        "--output-format",
+        "json",
+        "--dry-run",
+        "scan",
+        "tcp-syn",
+        "--target",
+        "127.0.0.1",
+        "--ports",
+        "80,443",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "scan dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
+    assert_eq!(json["mode"], "dry_run");
+    assert_eq!(json["plan"]["mode"], "scan");
+    assert_eq!(json["plan"]["port_count"], 2);
+    assert_eq!(json["policy"]["status"], "allowed");
+}
+
+#[cfg(feature = "traceroute")]
+#[test]
+fn traceroute_dry_run_outputs_typed_json_plan() {
+    let output = command_result(&[
+        "--output-format",
+        "json",
+        "--dry-run",
+        "traceroute",
+        "--dest",
+        "127.0.0.1",
+        "--max-ttl",
+        "4",
+        "--probes",
+        "2",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "traceroute dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
+    assert_eq!(json["plan"]["mode"], "traceroute");
+    assert_eq!(json["plan"]["estimated_packets"], 8);
+    assert_eq!(json["policy"]["status"], "allowed");
+}
+
+#[cfg(feature = "fuzz")]
+#[test]
+fn fuzz_requires_malformed_opt_in_and_outputs_typed_json_plan() {
+    let rejected = command_result(&[
+        "--dry-run",
+        "fuzz",
+        "--target",
+        "127.0.0.1",
+        "--protocol",
+        "icmp",
+        "--count",
+        "1",
+    ]);
+    assert!(
+        !rejected.status.success(),
+        "fuzz dry-run should require malformed opt-in"
+    );
+    assert!(
+        rejected.stdout.is_empty(),
+        "rejected dry-run should not emit stdout"
+    );
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("malformed_requires_opt_in"),
+        "stderr should include malformed policy code\nstderr:\n{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+
+    let allowed = command_result(&[
+        "--output-format",
+        "json",
+        "--dry-run",
+        "--allow-malformed",
+        "fuzz",
+        "--target",
+        "127.0.0.1",
+        "--protocol",
+        "icmp",
+        "--count",
+        "1",
+    ]);
+    assert!(
+        allowed.status.success(),
+        "fuzz dry-run failed: {}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    let stdout = String::from_utf8(allowed.stdout).expect("stdout should be UTF-8");
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
+    assert_eq!(json["plan"]["mode"], "fuzz");
+    assert_eq!(json["plan"]["malformed"], true);
+    assert_eq!(json["policy"]["status"], "allowed");
 }

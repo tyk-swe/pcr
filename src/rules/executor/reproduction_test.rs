@@ -27,7 +27,10 @@ fn send_action_rejects_infinite_send_by_default() {
 fn send_action_allows_infinite_send_when_configured() {
     let _executor_guard = test_support::executor_lock();
     let config = RuleExecutorConfig {
-        allow_unbounded_sends: true,
+        traffic_policy: crate::engine::policy::TrafficPolicy {
+            allow_unbounded_sends: true,
+            ..Default::default()
+        },
         dry_run: true,
         ..Default::default()
     };
@@ -103,6 +106,61 @@ fn send_action_rejects_zero_count() {
     });
 
     let result = executor.dispatch("zero-count-rule", &template, None);
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(RuleActionError::InvalidSendMode { .. }))
+    ));
+}
+
+#[test]
+fn dry_run_send_action_rejects_flood_with_interval() {
+    let _executor_guard = test_support::executor_lock();
+    let config = RuleExecutorConfig {
+        dry_run: true,
+        ..Default::default()
+    };
+    let executor = RuleSendExecutor::new_configured(config).expect("create executor");
+
+    let template = RuleSendTemplate::new(PacketRequest {
+        transmit: crate::engine::request::TransmissionRequest {
+            flood: Some(true),
+            count: Some(1),
+            interval: Some("10ms".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let result = executor.dispatch("flood-interval-rule", &template, None);
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(RuleActionError::InvalidSendMode { .. }))
+    ));
+}
+
+#[test]
+fn dry_run_send_action_rejects_loop_with_count_when_unbounded_allowed() {
+    let _executor_guard = test_support::executor_lock();
+    let config = RuleExecutorConfig {
+        traffic_policy: crate::engine::policy::TrafficPolicy {
+            allow_unbounded_sends: true,
+            ..Default::default()
+        },
+        dry_run: true,
+        ..Default::default()
+    };
+    let executor = RuleSendExecutor::new_configured(config).expect("create executor");
+
+    let template = RuleSendTemplate::new(PacketRequest {
+        transmit: crate::engine::request::TransmissionRequest {
+            loop_forever: Some(true),
+            count: Some(2),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let result = executor.dispatch("loop-count-rule", &template, None);
     assert!(matches!(
         result,
         Err(RuleError::Action(RuleActionError::InvalidSendMode { .. }))

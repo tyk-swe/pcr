@@ -245,6 +245,8 @@ fn perform_tcp_scan_ipv4_requires_ipv4_override() {
         ports: vec![80],
         timeout: Duration::from_millis(100),
         source_override: Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+        batch_size: CONCURRENT_SCAN_BATCH_SIZE,
+        send_delay: None,
         scan_strategy: GenericTcpScan::syn(),
     };
 

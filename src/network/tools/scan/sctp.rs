@@ -48,7 +48,7 @@ pub async fn run_sctp_init(
     target: &str,
     ports: &str,
     interface: &Option<String>,
-    _config: &EngineConfig,
+    config: &EngineConfig,
 ) -> Result<()> {
     let address = resolve_target(target)?;
     let source_override = resolve_interface_override(interface, address.ip())?;
@@ -65,6 +65,8 @@ pub async fn run_sctp_init(
         ports: port_list,
         timeout: DEFAULT_TIMEOUT,
         source_override,
+        batch_size: config.traffic_policy.budget.max_batch_size,
+        send_delay: config.traffic_policy.rate_delay(),
     };
 
     let results = task::spawn_blocking(move || perform_sctp_scan(scan_config))
@@ -83,17 +85,33 @@ struct SctpScanConfig {
     ports: Vec<u16>,
     timeout: Duration,
     source_override: Option<IpAddr>,
+    batch_size: usize,
+    send_delay: Option<Duration>,
 }
 
 fn perform_sctp_scan(config: SctpScanConfig) -> Result<BTreeMap<u16, PortState>> {
     match config.address {
         SocketAddr::V4(dest) => {
             let override_v4 = source_override_ipv4(config.source_override)?;
-            scan_sctp_v4(*dest.ip(), &config.ports, config.timeout, override_v4)
+            scan_sctp_v4(
+                *dest.ip(),
+                &config.ports,
+                config.timeout,
+                override_v4,
+                config.batch_size,
+                config.send_delay,
+            )
         }
         SocketAddr::V6(_dest) => {
             let override_v6 = source_override_ipv6(config.source_override)?;
-            scan_sctp_v6(config.address, &config.ports, config.timeout, override_v6)
+            scan_sctp_v6(
+                config.address,
+                &config.ports,
+                config.timeout,
+                override_v6,
+                config.batch_size,
+                config.send_delay,
+            )
         }
     }
 }
@@ -103,6 +121,8 @@ fn scan_sctp_v4(
     ports: &[u16],
     timeout: Duration,
     source_override: Option<Ipv4Addr>,
+    batch_size: usize,
+    send_delay: Option<Duration>,
 ) -> Result<BTreeMap<u16, PortState>> {
     let source_ip = super::common::source_ipv4_or_discover(destination, 9, source_override)?;
 
@@ -130,11 +150,18 @@ fn scan_sctp_v4(
         icmp_iter: icmp_packet_iter(&mut icmp_receiver),
     };
 
-    scan_ports_concurrent(
-        SocketAddr::new(IpAddr::V4(destination), 0),
+    scan_ports_concurrent_with_config(
+        ConcurrentScanConfig {
+            destination: SocketAddr::new(IpAddr::V4(destination), 0),
+            source_ip: IpAddr::V4(source_ip),
+            timeout,
+            batch_size,
+            send_delay,
+            base_port_offset: BASE_PORT_OFFSET,
+            base_port_override: None,
+            initial_port_state: PortState::Filtered,
+        },
         ports,
-        IpAddr::V4(source_ip),
-        timeout,
         &mut tx,
         &mut rx,
     )
@@ -145,6 +172,8 @@ fn scan_sctp_v6(
     ports: &[u16],
     timeout: Duration,
     source_override: Option<Ipv6Addr>,
+    batch_size: usize,
+    send_delay: Option<Duration>,
 ) -> Result<BTreeMap<u16, PortState>> {
     let dest_ip = match destination.ip() {
         IpAddr::V6(v6) => v6,
@@ -209,16 +238,24 @@ fn scan_sctp_v6(
         icmp_iter: icmpv6_packet_iter(&mut icmp_receiver),
     };
 
-    scan_ports_concurrent(
-        destination,
+    scan_ports_concurrent_with_config(
+        ConcurrentScanConfig {
+            destination,
+            source_ip: IpAddr::V6(source_ip),
+            timeout,
+            batch_size,
+            send_delay,
+            base_port_offset: BASE_PORT_OFFSET,
+            base_port_override: None,
+            initial_port_state: PortState::Filtered,
+        },
         ports,
-        IpAddr::V6(source_ip),
-        timeout,
         &mut tx,
         &mut rx,
     )
 }
 
+#[cfg(test)]
 fn scan_ports_concurrent(
     destination: SocketAddr,
     ports: &[u16],
@@ -227,14 +264,24 @@ fn scan_ports_concurrent(
     tx: &mut dyn SctpScanTx,
     rx: &mut dyn SctpScanRx,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let mut base_port: u16 = random();
-    if base_port < BASE_PORT_OFFSET {
-        base_port = base_port.wrapping_add(BASE_PORT_OFFSET);
-    }
-
-    scan_ports_concurrent_with_base_port(destination, ports, source_ip, timeout, tx, rx, base_port)
+    scan_ports_concurrent_with_config(
+        ConcurrentScanConfig {
+            destination,
+            source_ip,
+            timeout,
+            batch_size: CONCURRENT_SCAN_BATCH_SIZE,
+            send_delay: None,
+            base_port_offset: BASE_PORT_OFFSET,
+            base_port_override: None,
+            initial_port_state: PortState::Filtered,
+        },
+        ports,
+        tx,
+        rx,
+    )
 }
 
+#[cfg(test)]
 fn scan_ports_concurrent_with_base_port(
     destination: SocketAddr,
     ports: &[u16],
@@ -244,16 +291,37 @@ fn scan_ports_concurrent_with_base_port(
     rx: &mut dyn SctpScanRx,
     base_port: u16,
 ) -> Result<BTreeMap<u16, PortState>> {
-    super::common::scan_ports_concurrent(
+    scan_ports_concurrent_with_config(
         ConcurrentScanConfig {
             destination,
             source_ip,
             timeout,
             batch_size: CONCURRENT_SCAN_BATCH_SIZE,
+            send_delay: None,
             base_port_offset: BASE_PORT_OFFSET,
             base_port_override: Some(base_port),
             initial_port_state: PortState::Filtered,
         },
+        ports,
+        tx,
+        rx,
+    )
+}
+
+fn scan_ports_concurrent_with_config(
+    config: ConcurrentScanConfig,
+    ports: &[u16],
+    tx: &mut dyn SctpScanTx,
+    rx: &mut dyn SctpScanRx,
+) -> Result<BTreeMap<u16, PortState>> {
+    let config = ConcurrentScanConfig {
+        batch_size: config.batch_size.clamp(1, CONCURRENT_SCAN_BATCH_SIZE),
+        ..config
+    };
+    let destination = config.destination;
+
+    super::common::scan_ports_concurrent(
+        config,
         ports,
         |source_port, dest_port| {
             let packet_bytes = build_sctp_init_packet(source_port, dest_port, 0, random::<u32>());

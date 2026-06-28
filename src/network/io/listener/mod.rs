@@ -281,7 +281,7 @@ mod tests {
             rule_queue: None,
             send_workers: None,
             send_queue: None,
-            allow_unbounded_sends: false,
+            traffic_policy: crate::engine::policy::TrafficPolicy::default(),
             dry_run: false,
         }
     }

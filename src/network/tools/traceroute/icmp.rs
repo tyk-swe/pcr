@@ -17,7 +17,8 @@ use crate::util::error::operation_failed;
 
 use super::common::{
     open_ipv4_channel, open_ipv6_channel, request_timeout, resolve_source_ipv6,
-    run_traceroute_loop, PacketReceiver, ProbeResult, TracerouteExecutor, TransportSender,
+    run_traceroute_loop_with_delay, PacketReceiver, ProbeResult, TracerouteExecutor,
+    TransportSender,
 };
 use super::utils::{
     await_icmp_echo_v4, await_icmpv6_echo, build_echo_request, IcmpReceiverAdapter,
@@ -65,13 +66,23 @@ where
     }
 }
 
-pub fn run_icmp_traceroute_v4(destination: Ipv4Addr, opts: &TracerouteRequest) -> Result<()> {
+pub fn run_icmp_traceroute_v4(
+    destination: Ipv4Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+) -> Result<()> {
     let (mut sender, mut receiver) =
         open_ipv4_channel(IpNextHeaderProtocols::Icmp, "open ICMP channel")?;
     let mut iter = icmp_packet_iter(&mut receiver);
     let mut adapter = IcmpReceiverAdapter(&mut iter);
 
-    run_icmp_traceroute_v4_loop(destination, opts, &mut sender, &mut adapter)?;
+    run_icmp_traceroute_v4_loop_with_delay(
+        destination,
+        opts,
+        send_delay,
+        &mut sender,
+        &mut adapter,
+    )?;
 
     // Explicitly drop channels to ensure cleanup
     drop(sender);
@@ -89,6 +100,20 @@ where
     S: TransportSender,
     R: PacketReceiver + ?Sized,
 {
+    run_icmp_traceroute_v4_loop_with_delay(destination, opts, None, sender, receiver)
+}
+
+fn run_icmp_traceroute_v4_loop_with_delay<S, R>(
+    destination: Ipv4Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+    sender: &mut S,
+    receiver: &mut R,
+) -> Result<()>
+where
+    S: TransportSender,
+    R: PacketReceiver + ?Sized,
+{
     let identifier = random::<u16>();
 
     let mut executor = IcmpV4Executor {
@@ -99,7 +124,7 @@ where
         identifier,
     };
 
-    run_traceroute_loop(opts, &mut executor)
+    run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }
 
 struct IcmpV6Executor<'a, S, R: ?Sized> {
@@ -153,7 +178,11 @@ where
     }
 }
 
-pub fn run_icmp_traceroute_v6(destination: Ipv6Addr, opts: &TracerouteRequest) -> Result<()> {
+pub fn run_icmp_traceroute_v6(
+    destination: Ipv6Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+) -> Result<()> {
     let source_ip = resolve_source_ipv6(destination)?;
     let (mut sender, mut receiver) = open_ipv6_channel(
         IpNextHeaderProtocols::Icmpv6,
@@ -162,7 +191,14 @@ pub fn run_icmp_traceroute_v6(destination: Ipv6Addr, opts: &TracerouteRequest) -
     let mut iter = icmpv6_packet_iter(&mut receiver);
     let mut adapter = Icmpv6ReceiverAdapter(&mut iter);
 
-    run_icmp_traceroute_v6_loop(destination, source_ip, opts, &mut sender, &mut adapter)?;
+    run_icmp_traceroute_v6_loop_with_delay(
+        destination,
+        source_ip,
+        opts,
+        send_delay,
+        &mut sender,
+        &mut adapter,
+    )?;
 
     // Explicitly drop channels to ensure cleanup
     drop(sender);
@@ -181,6 +217,21 @@ where
     S: TransportSender,
     R: PacketReceiver + ?Sized,
 {
+    run_icmp_traceroute_v6_loop_with_delay(destination, source_ip, opts, None, sender, receiver)
+}
+
+fn run_icmp_traceroute_v6_loop_with_delay<S, R>(
+    destination: Ipv6Addr,
+    source_ip: Ipv6Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+    sender: &mut S,
+    receiver: &mut R,
+) -> Result<()>
+where
+    S: TransportSender,
+    R: PacketReceiver + ?Sized,
+{
     let identifier = random::<u16>();
 
     let mut executor = IcmpV6Executor {
@@ -192,7 +243,7 @@ where
         identifier,
     };
 
-    run_traceroute_loop(opts, &mut executor)
+    run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }
 
 #[cfg(test)]

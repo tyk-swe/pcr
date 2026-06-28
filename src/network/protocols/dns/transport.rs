@@ -8,6 +8,7 @@ use anyhow::{anyhow, Context, Result};
 use log::debug;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
+use tokio::time::{sleep, Instant};
 use trust_dns_proto::op::Message;
 use trust_dns_proto::rr::RecordType;
 
@@ -35,6 +36,35 @@ pub(super) struct DnsQueryPlan<'a> {
     pub(super) timeout: Duration,
 }
 
+pub(super) struct DnsRateLimiter {
+    delay: Option<Duration>,
+    last_send: Option<Instant>,
+}
+
+impl DnsRateLimiter {
+    pub(super) fn new(delay: Option<Duration>) -> Self {
+        Self {
+            delay,
+            last_send: None,
+        }
+    }
+
+    async fn wait(&mut self) {
+        let Some(delay) = self.delay else {
+            return;
+        };
+
+        if let Some(last_send) = self.last_send {
+            let elapsed = last_send.elapsed();
+            if elapsed < delay {
+                sleep(delay - elapsed).await;
+            }
+        }
+
+        self.last_send = Some(Instant::now());
+    }
+}
+
 enum DnsAttemptError {
     Retryable(anyhow::Error),
     Fatal(anyhow::Error),
@@ -52,16 +82,21 @@ pub(super) async fn query_udp_with_retries(
     plan: &DnsQueryPlan<'_>,
     retries: u8,
     attempts: &mut u32,
+    rate_limiter: &mut DnsRateLimiter,
 ) -> Result<DnsTransportResponse> {
-    query_with_retries(retries, attempts, || async { query_udp_once(plan).await }).await
+    query_with_retries(retries, attempts, rate_limiter, || async {
+        query_udp_once(plan).await
+    })
+    .await
 }
 
 pub(super) async fn query_udp_for_auto_with_retries(
     plan: &DnsQueryPlan<'_>,
     retries: u8,
     attempts: &mut u32,
+    rate_limiter: &mut DnsRateLimiter,
 ) -> Result<AutoUdpResponse> {
-    query_with_retries(retries, attempts, || async {
+    query_with_retries(retries, attempts, rate_limiter, || async {
         query_udp_for_auto_once(plan).await
     })
     .await
@@ -71,16 +106,26 @@ pub(super) async fn query_tcp_with_retries(
     plan: &DnsQueryPlan<'_>,
     retries: u8,
     attempts: &mut u32,
+    rate_limiter: &mut DnsRateLimiter,
 ) -> Result<DnsTransportResponse> {
-    query_with_retries(retries, attempts, || async { query_tcp_once(plan).await }).await
+    query_with_retries(retries, attempts, rate_limiter, || async {
+        query_tcp_once(plan).await
+    })
+    .await
 }
 
-async fn query_with_retries<F, Fut, T>(retries: u8, attempts: &mut u32, mut attempt: F) -> Result<T>
+async fn query_with_retries<F, Fut, T>(
+    retries: u8,
+    attempts: &mut u32,
+    rate_limiter: &mut DnsRateLimiter,
+    mut attempt: F,
+) -> Result<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = std::result::Result<T, DnsAttemptError>>,
 {
     for attempt_index in 0..=retries {
+        rate_limiter.wait().await;
         *attempts += 1;
         match attempt().await {
             Ok(response) => return Ok(response),

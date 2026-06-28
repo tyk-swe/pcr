@@ -60,7 +60,7 @@ impl Engine {
         let send_config = crate::rules::RuleExecutorConfig::from_options(
             config.send_workers,
             config.send_queue,
-            Some(config.allow_unbounded_sends),
+            Some(config.traffic_policy),
             Some(config.dry_run),
         );
 
@@ -93,12 +93,15 @@ impl Engine {
             .with_policy_validation()?
             .with_spec()
             .await?
+            .with_authorized_preflight_traffic()
+            .await?
             .with_rules()
             .await?
             .with_preflight()
             .await?
             .with_plan()
             .await?
+            .with_startup_rules()
             .with_preflight_output()?
             .execute()
             .await
@@ -164,21 +167,32 @@ impl Engine {
 
     #[cfg(feature = "traceroute")]
     pub async fn run_traceroute(&mut self, opts: &TracerouteRequest) -> Result<()> {
+        let prepared = crate::network::tools::traceroute::prepare(opts, &self.config)?;
+        self.config
+            .traffic_policy
+            .with_dry_run(self.config.dry_run)
+            .authorize(&prepared.traffic_plan)
+            .map_err(|e| EngineError::Traceroute(e.into()))?;
+
         if self.config.dry_run {
-            info!(
-                "Dry-run: traceroute to {} max_ttl={} probes={} protocol={:?}",
-                opts.destination, opts.max_ttl, opts.probes, opts.protocol
-            );
+            self.output
+                .emit_traffic_plan_summary(&prepared.traffic_plan)?;
             return Ok(());
         }
         info!(
             "Running traceroute to {} max_ttl={} probes={}",
             opts.destination, opts.max_ttl, opts.probes
         );
-        crate::network::tools::traceroute::run(opts, &self.config).await
+        crate::network::tools::traceroute::run_prepared(opts, &self.config, prepared).await
     }
 
     pub async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<String> {
+        let prepared = crate::network::protocols::dns::prepare(options, &self.config).await?;
+        self.config
+            .traffic_policy
+            .with_dry_run(self.config.dry_run)
+            .authorize(&prepared.traffic_plan)?;
+
         if self.config.dry_run {
             info!(
                 "Dry-run: DNS query for {} {} via {}",
@@ -189,7 +203,7 @@ impl Engine {
                 _ => Ok(crate::output::format_dns_dry_run(options)),
             };
         }
-        let result = crate::network::protocols::dns::resolve(options, &self.config).await?;
+        let result = crate::network::protocols::dns::resolve_prepared(options, prepared).await?;
         match self.config.output_format {
             Some(OutputFormat::Json) => crate::output::format_dns_message_json(&result),
             _ => Ok(crate::output::format_dns_message(&result)),
@@ -198,26 +212,36 @@ impl Engine {
 
     #[cfg(feature = "scan")]
     pub async fn run_scan(&mut self, command: &ScanRequest) -> Result<()> {
+        let prepared = crate::network::tools::scan::prepare(command, &self.config)?;
+        self.config
+            .traffic_policy
+            .with_dry_run(self.config.dry_run)
+            .authorize(&prepared.traffic_plan)
+            .map_err(|e| EngineError::Scan(e.into()))?;
+
         if self.config.dry_run {
-            info!(
-                "Dry-run: scan would execute command={:?}",
-                std::mem::discriminant(command)
-            );
+            self.output
+                .emit_traffic_plan_summary(&prepared.traffic_plan)?;
             return Ok(());
         }
-        crate::network::tools::scan::run_command(command, &self.config).await
+        crate::network::tools::scan::run_command(prepared.command(), &self.config).await
     }
 
     #[cfg(feature = "fuzz")]
     pub async fn run_fuzz(&mut self, options: &FuzzRequest) -> Result<()> {
+        let mut config = crate::network::tools::fuzz::FuzzConfig::try_from(options)?;
+        config.apply_traffic_policy(&self.config.traffic_policy);
+        let plan = crate::network::tools::fuzz::traffic_plan(&config)?;
+        self.config
+            .traffic_policy
+            .with_dry_run(self.config.dry_run)
+            .authorize(&plan)
+            .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
+
         if self.config.dry_run {
-            info!(
-                "Dry-run: fuzz would target {} protocol={:?} strategy={:?} count={}",
-                options.target, options.protocol, options.strategy, options.count
-            );
+            self.output.emit_traffic_plan_summary(&plan)?;
             return Ok(());
         }
-        let config = crate::network::tools::fuzz::FuzzConfig::try_from(options)?;
         crate::network::tools::fuzz::run_fuzz(config).await?;
         Ok(())
     }
@@ -267,7 +291,7 @@ mod tests {
             rule_queue: None,
             send_workers: None,
             send_queue: None,
-            allow_unbounded_sends: false,
+            traffic_policy: crate::engine::policy::TrafficPolicy::default(),
             dry_run: false,
         }
     }

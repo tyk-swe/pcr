@@ -192,6 +192,21 @@ where
     unreachable!("send_with_enobufs_retry loop should always return")
 }
 
+pub(super) fn wait_for_send_delay(send_delay: Option<Duration>, last_send: &mut Option<Instant>) {
+    let Some(delay) = send_delay else {
+        return;
+    };
+
+    if let Some(last) = *last_send {
+        let elapsed = last.elapsed();
+        if elapsed < delay {
+            thread::sleep(delay - elapsed);
+        }
+    }
+
+    *last_send = Some(Instant::now());
+}
+
 pub(super) fn report_results(protocol: &str, address: &IpAddr, results: &BTreeMap<u16, PortState>) {
     let mut open = Vec::new();
     let mut closed = Vec::new();
@@ -263,6 +278,7 @@ pub(super) struct ConcurrentScanConfig {
     pub(super) source_ip: IpAddr,
     pub(super) timeout: Duration,
     pub(super) batch_size: usize,
+    pub(super) send_delay: Option<Duration>,
     pub(super) base_port_offset: u16,
     pub(super) base_port_override: Option<u16>,
     pub(super) initial_port_state: PortState,
@@ -306,6 +322,9 @@ where
         thread::scope(|s| {
             s.spawn(move || {
                 for (idx, port) in chunk_owned.iter().enumerate() {
+                    if let Some(delay) = config.send_delay {
+                        thread::sleep(delay);
+                    }
                     let source_port = calculate_source_port(base_port, start_idx + idx);
                     if let Err(e) = send_fn_ref(source_port, *port) {
                         log::warn!(

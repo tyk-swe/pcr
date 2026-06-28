@@ -4,14 +4,17 @@
 use super::server_addr::resolve_dns_server_address;
 use super::transport::{decode_tcp_frame_length, encode_tcp_frame};
 use super::validation::{inspect_dns_response_header, validate_dns_response, DNS_HEADER_BYTES};
-use super::{build_dns_query, resolve};
+use super::{build_dns_query, prepare, resolve, traffic_plan_for_target};
 use crate::engine::command::{DnsRequest, DnsTransport, DnsTransportMode};
+use crate::engine::policy::TargetScope;
 use crate::engine::EngineConfig;
+use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, UdpSocket};
 use trust_dns_proto::op::{Message, MessageType, OpCode, Query};
@@ -121,7 +124,7 @@ fn config() -> EngineConfig {
         rule_queue: None,
         send_workers: None,
         send_queue: None,
-        allow_unbounded_sends: false,
+        traffic_policy: crate::engine::policy::TrafficPolicy::default(),
         dry_run: false,
     }
 }
@@ -145,6 +148,49 @@ fn dns_request_for_type(
         transport,
         retries,
     }
+}
+
+#[tokio::test]
+async fn prepare_classifies_literal_server_and_estimates_auto_fallback_attempts() {
+    let mut config = config();
+    config.traffic_policy.budget.max_rate_per_sec = 42;
+    let request = dns_request("8.8.8.8".to_string(), DnsTransportMode::Auto, 2);
+
+    let prepared = prepare(&request, &config)
+        .await
+        .expect("prepared DNS query");
+    let plan = prepared.traffic_plan;
+
+    assert_eq!(plan.target_scope, TargetScope::Public);
+    assert_eq!(plan.target_count, 1);
+    assert_eq!(plan.port_count, 1);
+    assert_eq!(plan.estimated_packets, Some(6));
+    assert_eq!(plan.batch_size, 1);
+    assert_eq!(plan.rate_per_sec, Some(42));
+    assert!(plan.required_privileges.is_empty());
+}
+
+#[test]
+fn traffic_plan_classifies_hostname_server_by_resolved_target() {
+    let config = config();
+    let request = dns_request("dns.google".to_string(), DnsTransportMode::Udp, 0);
+    let target: SocketAddr = "8.8.8.8:53".parse().expect("public DNS target");
+
+    let plan = traffic_plan_for_target(&request, &config, target);
+
+    assert_eq!(plan.target_scope, TargetScope::Public);
+    assert_eq!(plan.estimated_packets, Some(1));
+}
+
+#[tokio::test]
+async fn prepare_resolves_hostname_before_classifying_target() {
+    let request = dns_request("localhost".to_string(), DnsTransportMode::Udp, 0);
+
+    let prepared = prepare(&request, &config())
+        .await
+        .expect("prepared local DNS query");
+
+    assert_eq!(prepared.traffic_plan.target_scope, TargetScope::Local);
 }
 
 fn response_message_for_query(query_bytes: &[u8], truncated: bool, answer: bool) -> Message {
@@ -356,6 +402,39 @@ async fn auto_mode_falls_back_to_tcp_on_udp_truncation() {
     assert_eq!(result.message.answer_count(), 1);
     assert_eq!(udp_count.load(Ordering::SeqCst), 1);
     assert_eq!(tcp_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn auto_mode_rate_limits_tcp_fallback() {
+    let tcp_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server_addr = tcp_listener.local_addr().unwrap();
+    let udp_socket = UdpSocket::bind(server_addr).await.unwrap();
+
+    tokio::spawn(async move {
+        let mut buf = [0u8; 512];
+        let (len, peer) = udp_socket.recv_from(&mut buf).await.unwrap();
+        let response = response_for_query(&buf[..len], true, false);
+        udp_socket.send_to(&response, peer).await.unwrap();
+    });
+
+    tokio::spawn(tcp_server_once(tcp_listener, false, true));
+
+    let mut config = config();
+    config.traffic_policy.budget.max_rate_per_sec = 20;
+    let started = Instant::now();
+    let result = resolve(
+        &dns_request(server_addr.to_string(), DnsTransportMode::Auto, 0),
+        &config,
+    )
+    .await
+    .expect("rate-limited auto DNS result");
+
+    assert_eq!(result.transport_used, DnsTransport::Tcp);
+    assert_eq!(result.attempts, 2);
+    assert!(
+        started.elapsed() >= Duration::from_millis(40),
+        "TCP fallback should wait for the authorized DNS rate"
+    );
 }
 
 #[tokio::test]

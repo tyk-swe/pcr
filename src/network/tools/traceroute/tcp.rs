@@ -19,7 +19,7 @@ use crate::util::error::operation_failed;
 
 use super::common::{
     open_ipv4_channel, open_ipv6_channel, remaining_probe_time, request_timeout,
-    resolve_source_ipv4, resolve_source_ipv6, run_traceroute_loop, tcp_base_source_port,
+    resolve_source_ipv4, resolve_source_ipv6, run_traceroute_loop_with_delay, tcp_base_source_port,
     PacketReceiver, ProbeResult, TracerouteExecutor, DEFAULT_PORT,
 };
 use super::utils::{
@@ -95,7 +95,11 @@ where
     }
 }
 
-pub fn run_tcp_traceroute_v4(destination: Ipv4Addr, opts: &TracerouteRequest) -> Result<()> {
+pub fn run_tcp_traceroute_v4(
+    destination: Ipv4Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<Duration>,
+) -> Result<()> {
     let source_ip = resolve_source_ipv4(destination)?;
     let (mut tcp_sender, mut tcp_receiver) =
         open_ipv4_channel(IpNextHeaderProtocols::Tcp, "open TCP transport channel")?;
@@ -121,7 +125,7 @@ pub fn run_tcp_traceroute_v4(destination: Ipv4Addr, opts: &TracerouteRequest) ->
         base_source_port,
     };
 
-    run_traceroute_loop(opts, &mut executor)?;
+    run_traceroute_loop_with_delay(opts, &mut executor, send_delay)?;
 
     // Explicitly drop channels to ensure cleanup
     drop(tcp_sender);
@@ -196,7 +200,11 @@ where
     }
 }
 
-pub fn run_tcp_traceroute_v6(destination: Ipv6Addr, opts: &TracerouteRequest) -> Result<()> {
+pub fn run_tcp_traceroute_v6(
+    destination: Ipv6Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<Duration>,
+) -> Result<()> {
     let source_ip = resolve_source_ipv6(destination)?;
     let (mut tcp_sender, mut tcp_receiver) =
         open_ipv6_channel(IpNextHeaderProtocols::Tcp, "open TCPv6 transport channel")?;
@@ -222,7 +230,7 @@ pub fn run_tcp_traceroute_v6(destination: Ipv6Addr, opts: &TracerouteRequest) ->
         base_source_port,
     };
 
-    run_traceroute_loop(opts, &mut executor)?;
+    run_traceroute_loop_with_delay(opts, &mut executor, send_delay)?;
 
     // Explicitly drop channels to ensure cleanup
     drop(tcp_sender);

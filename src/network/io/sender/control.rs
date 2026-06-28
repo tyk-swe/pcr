@@ -4,27 +4,7 @@
 use thiserror::Error;
 
 use crate::engine::spec::TransmissionSpec;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TransmissionPolicy {
-    pub allow_unbounded_sends: bool,
-    pub dry_run: bool,
-}
-
-impl TransmissionPolicy {
-    pub fn new(allow_unbounded_sends: bool, dry_run: bool) -> Self {
-        Self {
-            allow_unbounded_sends,
-            dry_run,
-        }
-    }
-}
-
-impl Default for TransmissionPolicy {
-    fn default() -> Self {
-        Self::new(false, false)
-    }
-}
+pub type TransmissionPolicy = crate::engine::policy::TransmissionPolicy;
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum SendControlError {

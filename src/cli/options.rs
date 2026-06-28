@@ -454,6 +454,34 @@ pub struct RuleOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
+pub struct SafetyOptions {
+    /// Allow packet-producing commands to target public IP addresses.
+    #[arg(long = "allow-public-targets", global = true)]
+    pub allow_public_targets: bool,
+    /// Allow malformed packet shapes such as overlap or teardrop fragments.
+    #[arg(long = "allow-malformed", global = true)]
+    pub allow_malformed: bool,
+    /// Allow plans that exceed recommended traffic defaults when explicit caps are raised.
+    #[arg(long = "allow-high-volume", global = true)]
+    pub allow_high_volume: bool,
+    /// Maximum expanded target count.
+    #[arg(long = "traffic-max-targets", global = true, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    pub traffic_max_targets: Option<usize>,
+    /// Maximum expanded port count.
+    #[arg(long = "traffic-max-ports", global = true, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    pub traffic_max_ports: Option<usize>,
+    /// Maximum estimated packet count.
+    #[arg(long = "traffic-max-packets", global = true, value_parser = value_parser!(u64).range(1..))]
+    pub traffic_max_packets: Option<u64>,
+    /// Maximum send batch size.
+    #[arg(long = "traffic-batch-size", global = true, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
+    pub traffic_batch_size: Option<usize>,
+    /// Maximum send rate in packets per second.
+    #[arg(long = "traffic-rate", global = true, value_parser = value_parser!(u64).range(1..))]
+    pub traffic_rate: Option<u64>,
+}
+
+#[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
 pub struct LoggingOptions {
     /// Log output to a file.
     #[arg(long = "log-file")]

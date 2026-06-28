@@ -28,6 +28,8 @@ fn test_perform_tcp_scan_ipv6_mismatch() {
         ports: vec![80],
         timeout: Duration::from_millis(100),
         source_override: Some(IpAddr::V4(Ipv4Addr::LOCALHOST)), // Mismatch
+        batch_size: CONCURRENT_SCAN_BATCH_SIZE,
+        send_delay: None,
         scan_strategy: GenericTcpScan::syn(),
     };
 

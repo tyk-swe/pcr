@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 use crate::network::sender::error::Result;
 use crate::util::telemetry;
@@ -34,9 +35,12 @@ where
     let mut iterations: u64 = 0;
     let mut transmitted: u64 = 0;
     let interval = plan.transmit.interval;
+    let rate_delay = plan.policy.rate_delay();
+    let mut last_send: Option<Instant> = None;
 
     loop {
         for frame in &plan.frames {
+            wait_for_rate_slot(rate_delay, &mut last_send);
             send_frame(frame)?;
             record_packet(frame)?;
             frames_counter.inc();
@@ -61,4 +65,19 @@ where
         }
     }
     Ok(())
+}
+
+fn wait_for_rate_slot(rate_delay: Option<Duration>, last_send: &mut Option<Instant>) {
+    let Some(delay) = rate_delay else {
+        return;
+    };
+
+    if let Some(last) = *last_send {
+        let elapsed = last.elapsed();
+        if elapsed < delay {
+            sleep(delay - elapsed);
+        }
+    }
+
+    *last_send = Some(Instant::now());
 }

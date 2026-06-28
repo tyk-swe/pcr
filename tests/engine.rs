@@ -6,7 +6,7 @@ use packetcraftr::cli::{
     RuleOptions, TransmitOptions, TransportOptions,
 };
 use packetcraftr::engine::request::PacketRequest;
-use packetcraftr::engine::{Engine, EngineConfig};
+use packetcraftr::engine::{DnsRequest, DnsTransportMode, Engine, EngineConfig};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -18,7 +18,7 @@ fn default_config() -> EngineConfig {
         rule_queue: None,
         send_workers: None,
         send_queue: None,
-        allow_unbounded_sends: false,
+        traffic_policy: packetcraftr::engine::policy::TrafficPolicy::default(),
         dry_run: false,
     }
 }
@@ -103,7 +103,7 @@ async fn unbounded_flood_policy_rejects_before_rules_load() {
     );
     let error = result.expect_err("unbounded flood should fail").to_string();
     assert!(
-        error.contains("--flood without --count requires explicit unbounded-send opt-in"),
+        error.contains("unbounded_send"),
         "unexpected error: {error}"
     );
     assert_eq!(
@@ -125,13 +125,35 @@ async fn zero_count_policy_rejects_before_hostname_resolution() {
     assert!(result.is_err(), "zero count should be rejected");
     let error = result.expect_err("zero count should fail").to_string();
     assert!(
-        error.contains("--count must be greater than zero"),
+        error.contains("count_must_be_positive"),
         "unexpected error: {error}"
     );
     assert!(
         !error.contains("resolve hostname failed"),
         "count validation should happen before hostname resolution: {error}"
     );
+}
+
+#[tokio::test]
+async fn dns_query_rejects_public_server_without_opt_in() {
+    let mut engine = Engine::new(default_config()).expect("engine initialisation");
+    let request = DnsRequest {
+        domain: "example.com".to_string(),
+        record_type: "A".to_string(),
+        server: "8.8.8.8".to_string(),
+        timeout: 1,
+        transaction_id: Some(0x1234),
+        transport: DnsTransportMode::Udp,
+        retries: 0,
+    };
+
+    let result = engine.run_dns_query(&request).await;
+
+    assert!(result.is_err(), "public DNS server should be rejected");
+    let error = result
+        .expect_err("public DNS server should fail")
+        .to_string();
+    assert!(error.contains("public_target"), "unexpected error: {error}");
 }
 
 #[cfg(feature = "metrics")]

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
@@ -20,7 +20,7 @@ pub async fn run_arp(
     target: &str,
     interface: &Option<String>,
     timeout_ms: u64,
-    _config: &EngineConfig,
+    config: &EngineConfig,
 ) -> Result<()> {
     let iface = interface::find_interface(interface.as_deref()).with_context(|| {
         operation_failed(
@@ -57,6 +57,7 @@ pub async fn run_arp(
         source_ip,
         targets,
         timeout: Duration::from_millis(timeout_ms.max(1)),
+        send_delay: config.traffic_policy.rate_delay(),
     };
 
     let results = tokio::task::spawn_blocking(move || perform_arp_scan(config))
@@ -83,6 +84,7 @@ struct ArpScanConfig {
     source_ip: Ipv4Addr,
     targets: Vec<Ipv4Addr>,
     timeout: Duration,
+    send_delay: Option<Duration>,
 }
 
 struct ArpHit {
@@ -113,14 +115,17 @@ fn perform_arp_scan_with_scanner<S: ArpResolver + ?Sized>(
         source_ip,
         targets,
         timeout,
+        send_delay,
         ..
     } = config;
 
     let mut discovered = Vec::new();
+    let mut last_send: Option<Instant> = None;
     for target in targets {
         if target == source_ip {
             continue;
         }
+        super::common::wait_for_send_delay(send_delay, &mut last_send);
         match scanner.resolve(target, timeout) {
             Ok(mac) => {
                 debug!("ARP {} -> {}", target, mac);
@@ -135,7 +140,7 @@ fn perform_arp_scan_with_scanner<S: ArpResolver + ?Sized>(
     Ok(discovered)
 }
 
-fn parse_arp_targets(spec: &str) -> Result<Vec<Ipv4Addr>> {
+pub(super) fn parse_arp_targets(spec: &str) -> Result<Vec<Ipv4Addr>> {
     if let Ok(network) = spec.parse::<IpNetwork>() {
         match network {
             IpNetwork::V4(v4) => {
@@ -324,6 +329,7 @@ mod tests {
             source_ip,
             targets: vec![source_ip, other_ip],
             timeout: Duration::from_millis(1),
+            send_delay: None,
         };
 
         let hits = perform_arp_scan_with_scanner(config, &mut resolver).expect("scan succeeds");
@@ -356,10 +362,52 @@ mod tests {
             source_ip,
             targets: vec![other_ip],
             timeout: Duration::from_millis(1),
+            send_delay: None,
         };
 
         let hits = perform_arp_scan_with_scanner(config, &mut resolver).expect("scan succeeds");
 
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn perform_arp_scan_respects_send_delay() {
+        let source_ip = Ipv4Addr::new(192, 168, 1, 100);
+        let first = Ipv4Addr::new(192, 168, 1, 101);
+        let second = Ipv4Addr::new(192, 168, 1, 102);
+
+        let iface = NetworkInterface {
+            name: "test".to_string(),
+            description: "".to_string(),
+            index: 1,
+            mac: None,
+            ips: vec![],
+            flags: 0,
+        };
+
+        let mut resolver = MockResolver {
+            f: |_target: Ipv4Addr, _d: Duration| -> Result<MacAddr> {
+                Ok(MacAddr::new(0, 1, 2, 3, 4, 5))
+            },
+        };
+
+        let config = ArpScanConfig {
+            interface: iface,
+            source_ip,
+            targets: vec![first, second],
+            timeout: Duration::from_millis(1),
+            send_delay: Some(Duration::from_millis(40)),
+        };
+
+        let start = Instant::now();
+        let hits = perform_arp_scan_with_scanner(config, &mut resolver).expect("scan succeeds");
+        let duration = start.elapsed();
+
+        assert_eq!(hits.len(), 2);
+        assert!(
+            duration >= Duration::from_millis(40),
+            "ARP scan did not apply send delay: {:?}",
+            duration
+        );
     }
 }

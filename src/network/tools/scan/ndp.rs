@@ -8,7 +8,7 @@
 //! source IP for the interface. IPv6 networks can span enormous host counts, so
 //! the scanner bounds CIDR expansion before probing.
 use std::net::Ipv6Addr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
@@ -29,7 +29,7 @@ pub async fn run_ndp(
     target: &str,
     interface: &Option<String>,
     timeout_ms: u64,
-    _config: &EngineConfig,
+    config: &EngineConfig,
 ) -> Result<()> {
     let iface = interface::find_interface(interface.as_deref()).with_context(|| {
         operation_failed(
@@ -62,6 +62,7 @@ pub async fn run_ndp(
         default_source_ip,
         targets,
         timeout: Duration::from_millis(timeout_ms.max(1)),
+        send_delay: config.traffic_policy.rate_delay(),
     };
 
     let results = tokio::task::spawn_blocking(move || perform_ndp_scan(config))
@@ -89,6 +90,7 @@ struct NdpScanConfig {
     default_source_ip: Ipv6Addr,
     targets: Vec<Ipv6Addr>,
     timeout: Duration,
+    send_delay: Option<Duration>,
 }
 
 /// A successful NDP discovery response.
@@ -111,9 +113,11 @@ where
         default_source_ip,
         targets,
         timeout,
+        send_delay,
     } = config;
 
     let mut discovered = Vec::new();
+    let mut last_send: Option<Instant> = None;
     for target in targets {
         // Dynamically select the best source IP for this target
         let effective_source_ip =
@@ -123,6 +127,7 @@ where
             continue;
         }
 
+        super::common::wait_for_send_delay(send_delay, &mut last_send);
         match resolver(&interface, effective_source_ip, target, timeout) {
             Ok(mac) => {
                 debug!("NDP {} -> {}", target, mac);
@@ -151,7 +156,7 @@ fn choose_best_source_ip(interface: &NetworkInterface, target: Ipv6Addr) -> Opti
     select_interface_ipv6_source_for_destination(interface, target)
 }
 
-fn parse_ndp_targets(spec: &str) -> Result<Vec<Ipv6Addr>> {
+pub(super) fn parse_ndp_targets(spec: &str) -> Result<Vec<Ipv6Addr>> {
     if let Ok(network) = spec.parse::<IpNetwork>() {
         match network {
             IpNetwork::V6(v6) => {
@@ -171,7 +176,7 @@ fn parse_ndp_targets(spec: &str) -> Result<Vec<Ipv6Addr>> {
     }
 }
 
-fn normalize_targets(mut targets: Vec<Ipv6Addr>) -> Result<Vec<Ipv6Addr>> {
+pub(super) fn normalize_targets(mut targets: Vec<Ipv6Addr>) -> Result<Vec<Ipv6Addr>> {
     targets.sort();
     targets.dedup();
 
@@ -334,6 +339,7 @@ mod tests {
             default_source_ip: source_ip,
             targets: vec![source_ip, other_ip],
             timeout: Duration::from_millis(1),
+            send_delay: None,
         };
 
         let hits = perform_ndp_scan_with_resolver(config, resolver).expect("scan succeeds");
@@ -341,5 +347,48 @@ mod tests {
         assert_eq!(calls.into_inner(), vec![other_ip]);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].ip, other_ip);
+    }
+
+    #[test]
+    fn perform_ndp_scan_respects_send_delay() {
+        let source_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let first = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
+        let second = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 3);
+
+        let iface = NetworkInterface {
+            name: "test".to_string(),
+            description: "".to_string(),
+            index: 1,
+            mac: None,
+            ips: vec![],
+            flags: 0,
+        };
+
+        let resolver = |_: &NetworkInterface,
+                        _src: Ipv6Addr,
+                        _target: Ipv6Addr,
+                        _d: Duration|
+         -> std::result::Result<MacAddr, anyhow::Error> {
+            Ok(MacAddr::new(0, 1, 2, 3, 4, 5))
+        };
+
+        let config = NdpScanConfig {
+            interface: iface,
+            default_source_ip: source_ip,
+            targets: vec![first, second],
+            timeout: Duration::from_millis(1),
+            send_delay: Some(Duration::from_millis(40)),
+        };
+
+        let start = Instant::now();
+        let hits = perform_ndp_scan_with_resolver(config, resolver).expect("scan succeeds");
+        let duration = start.elapsed();
+
+        assert_eq!(hits.len(), 2);
+        assert!(
+            duration >= Duration::from_millis(40),
+            "NDP scan did not apply send delay: {:?}",
+            duration
+        );
     }
 }

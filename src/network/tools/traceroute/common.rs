@@ -6,6 +6,7 @@ use pnet::packet::icmpv6::Icmpv6Packet;
 use pnet::packet::ip::IpNextHeaderProtocol;
 use pnet::transport::{TransportChannelType, TransportProtocol};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -115,9 +116,19 @@ pub fn run_traceroute_loop<E: TracerouteExecutor + ?Sized>(
     opts: &TracerouteRequest,
     executor: &mut E,
 ) -> Result<()> {
+    run_traceroute_loop_with_delay(opts, executor, None)
+}
+
+pub fn run_traceroute_loop_with_delay<E: TracerouteExecutor + ?Sized>(
+    opts: &TracerouteRequest,
+    executor: &mut E,
+    send_delay: Option<Duration>,
+) -> Result<()> {
+    let mut last_probe: Option<Instant> = None;
     for ttl in 1..=opts.max_ttl {
         info!("ttl {:>2}:", ttl);
         for probe in 0..opts.probes {
+            wait_for_probe_delay(send_delay, &mut last_probe);
             let result = executor.execute_probe(ttl, probe)?;
             if handle_probe_result(result, opts)? {
                 return Ok(());
@@ -127,6 +138,21 @@ pub fn run_traceroute_loop<E: TracerouteExecutor + ?Sized>(
 
     warn!("Maximum TTL reached without destination response");
     Ok(())
+}
+
+fn wait_for_probe_delay(send_delay: Option<Duration>, last_probe: &mut Option<Instant>) {
+    let Some(delay) = send_delay else {
+        return;
+    };
+
+    if let Some(last) = *last_probe {
+        let elapsed = last.elapsed();
+        if elapsed < delay {
+            thread::sleep(delay - elapsed);
+        }
+    }
+
+    *last_probe = Some(Instant::now());
 }
 
 pub fn request_timeout(opts: &TracerouteRequest) -> Duration {
@@ -214,4 +240,43 @@ pub fn resolve_source_ipv4(destination: Ipv4Addr) -> Result<Ipv4Addr> {
 
 pub fn resolve_source_ipv6(destination: Ipv6Addr) -> Result<Ipv6Addr> {
     discover_source_ipv6(destination, DEFAULT_PORT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::command::TracerouteProtocol;
+
+    struct TimingExecutor {
+        probes: Vec<Instant>,
+    }
+
+    impl TracerouteExecutor for TimingExecutor {
+        fn execute_probe(&mut self, _ttl: u8, _probe: u8) -> Result<ProbeResult> {
+            self.probes.push(Instant::now());
+            Ok(ProbeResult::Timeout)
+        }
+    }
+
+    #[test]
+    fn run_traceroute_loop_respects_send_delay() {
+        let opts = TracerouteRequest {
+            destination: "127.0.0.1".to_string(),
+            max_ttl: 1,
+            probes: 2,
+            protocol: TracerouteProtocol::Udp,
+            no_dns: None,
+            timeout: 1,
+        };
+        let mut executor = TimingExecutor { probes: Vec::new() };
+
+        run_traceroute_loop_with_delay(&opts, &mut executor, Some(Duration::from_millis(40)))
+            .expect("traceroute loop");
+
+        assert_eq!(executor.probes.len(), 2);
+        assert!(
+            executor.probes[1].duration_since(executor.probes[0]) >= Duration::from_millis(40),
+            "traceroute probe delay was not applied"
+        );
+    }
 }

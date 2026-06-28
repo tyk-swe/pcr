@@ -3,6 +3,7 @@
 
 use serde::Serialize;
 
+use crate::engine::policy::PolicyOutcome;
 use crate::engine::preflight::PreflightView;
 use crate::engine::spec::{PacketSpec, PayloadSource, TransportSpec};
 
@@ -25,6 +26,7 @@ pub struct PreflightReport {
     pub listener: serde_json::Value,
     pub rules_file: Option<String>,
     pub logging: serde_json::Value,
+    pub policy: PolicyOutcome,
 }
 
 impl PreflightReport {
@@ -115,6 +117,7 @@ pub(crate) fn preflight_report(spec: &PacketSpec, view: &PreflightView) -> Prefl
                 .as_ref()
                 .map(|p| p.display().to_string())
         }),
+        policy: PolicyOutcome::allowed(),
     }
 }
 

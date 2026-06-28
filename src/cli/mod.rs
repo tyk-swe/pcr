@@ -28,8 +28,8 @@ pub use commands::{TracerouteOptions, TracerouteProtocol};
 pub use enums::{FragmentProfile, Icmpv6ErrorCode, Icmpv6ErrorKind, LogLevel, OutputFormat};
 pub use options::{
     IcmpOptions, Icmpv6Options, IpOptions, Layer2Options, ListenOptions, LoggingOptions,
-    OneShotOptions, PayloadOptions, RuleOptions, SendOptions, TcpOptions, TransmitOptions,
-    TransportCommand, TransportOptions, UdpOptions, VlanOptions,
+    OneShotOptions, PayloadOptions, RuleOptions, SafetyOptions, SendOptions, TcpOptions,
+    TransmitOptions, TransportCommand, TransportOptions, UdpOptions, VlanOptions,
 };
 
 use clap::Parser;
@@ -71,6 +71,8 @@ pub struct PacketcraftArgs {
         help = "Preview what would be sent without transmitting any packets"
     )]
     pub dry_run: bool,
+    #[command(flatten, next_help_heading = "Safety")]
+    pub safety: SafetyOptions,
     /// Select an operation mode.
     #[command(subcommand)]
     pub command: PacketcraftCommand,
@@ -98,6 +100,34 @@ impl PacketcraftArgs {
         };
         let logging_options = self.one_shot_options().map(|options| &options.logging);
 
+        let mut budget = crate::engine::policy::TrafficBudget::default();
+        if let Some(value) = self.safety.traffic_max_targets {
+            budget.max_targets = value;
+        }
+        if let Some(value) = self.safety.traffic_max_ports {
+            budget.max_ports = value;
+        }
+        if let Some(value) = self.safety.traffic_max_packets {
+            budget.max_estimated_packets = value;
+        }
+        if let Some(value) = self.safety.traffic_batch_size {
+            budget.max_batch_size = value;
+        }
+        if let Some(value) = self.safety.traffic_rate {
+            budget.max_rate_per_sec = value;
+        }
+
+        let traffic_policy = crate::engine::policy::TrafficPolicy {
+            allow_public_targets: self.safety.allow_public_targets,
+            allow_malformed: self.safety.allow_malformed,
+            allow_high_volume: self.safety.allow_high_volume,
+            allow_unbounded_sends: rule_options
+                .map(|options| options.allow_unbounded_sends)
+                .unwrap_or(false),
+            dry_run: self.effective_dry_run(),
+            budget,
+        };
+
         crate::engine::EngineConfig {
             output_format: self.output_format.map(crate::output::OutputFormat::from),
             prometheus_bind: logging_options.and_then(|options| options.prometheus_bind.clone()),
@@ -105,9 +135,7 @@ impl PacketcraftArgs {
             rule_queue: rule_options.and_then(|options| options.rule_queue),
             send_workers: rule_options.and_then(|options| options.send_workers),
             send_queue: rule_options.and_then(|options| options.send_queue),
-            allow_unbounded_sends: rule_options
-                .map(|options| options.allow_unbounded_sends)
-                .unwrap_or(false),
+            traffic_policy,
             dry_run: self.effective_dry_run(),
         }
     }

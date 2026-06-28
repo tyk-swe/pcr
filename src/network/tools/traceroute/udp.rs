@@ -11,8 +11,8 @@ use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::transport::{icmp_packet_iter, icmpv6_packet_iter};
 
 use super::common::{
-    open_ipv4_channel, open_ipv6_channel, request_timeout, run_traceroute_loop, PacketReceiver,
-    ProbeResult, TracerouteExecutor, UdpSocketV4, UdpSocketV6, DEFAULT_PORT,
+    open_ipv4_channel, open_ipv6_channel, request_timeout, run_traceroute_loop_with_delay,
+    PacketReceiver, ProbeResult, TracerouteExecutor, UdpSocketV4, UdpSocketV6, DEFAULT_PORT,
 };
 use super::utils::{
     await_icmp_response_v4, await_icmp_response_v6, IcmpReceiverAdapter, Icmpv6ReceiverAdapter,
@@ -31,7 +31,11 @@ fn probe_destination_port(ttl: u8, probe: u8) -> Result<u16> {
         .ok_or_else(|| anyhow!("traceroute port exceeded u16 range: ttl={ttl} probe={probe}"))
 }
 
-pub fn run_udp_traceroute_v4(destination: Ipv4Addr, opts: &TracerouteRequest) -> Result<()> {
+pub fn run_udp_traceroute_v4(
+    destination: Ipv4Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+) -> Result<()> {
     let bind_addr = (Ipv4Addr::UNSPECIFIED, 0);
     let socket = std::net::UdpSocket::bind(bind_addr)
         .with_context(|| operation_failed("bind UDP socket", format!("addr={bind_addr:?}")))?;
@@ -45,7 +49,7 @@ pub fn run_udp_traceroute_v4(destination: Ipv4Addr, opts: &TracerouteRequest) ->
     let mut iter = icmp_packet_iter(&mut receiver);
     let mut adapter = IcmpReceiverAdapter(&mut iter);
 
-    run_udp_traceroute_v4_loop(destination, opts, &socket, &mut adapter)?;
+    run_udp_traceroute_v4_loop_with_delay(destination, opts, send_delay, &socket, &mut adapter)?;
 
     // Explicitly drop channels to ensure cleanup
     drop(socket);
@@ -101,13 +105,27 @@ where
     S: UdpSocketV4,
     R: super::common::PacketReceiver + ?Sized,
 {
+    run_udp_traceroute_v4_loop_with_delay(destination, opts, None, socket, receiver)
+}
+
+fn run_udp_traceroute_v4_loop_with_delay<S, R>(
+    destination: Ipv4Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+    socket: &S,
+    receiver: &mut R,
+) -> Result<()>
+where
+    S: UdpSocketV4,
+    R: super::common::PacketReceiver + ?Sized,
+{
     let mut executor = UdpV4Executor {
         destination,
         timeout: request_timeout(opts),
         socket,
         receiver,
     };
-    run_traceroute_loop(opts, &mut executor)
+    run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }
 
 struct UdpV6Executor<'a, S, R: ?Sized> {
@@ -155,16 +173,34 @@ where
     S: UdpSocketV6,
     R: PacketReceiver + ?Sized,
 {
+    run_udp_traceroute_v6_loop_with_delay(destination, opts, None, socket, receiver)
+}
+
+fn run_udp_traceroute_v6_loop_with_delay<S, R>(
+    destination: Ipv6Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+    socket: &S,
+    receiver: &mut R,
+) -> Result<()>
+where
+    S: UdpSocketV6,
+    R: PacketReceiver + ?Sized,
+{
     let mut executor = UdpV6Executor {
         destination,
         timeout: request_timeout(opts),
         socket,
         receiver,
     };
-    run_traceroute_loop(opts, &mut executor)
+    run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }
 
-pub fn run_udp_traceroute_v6(destination: Ipv6Addr, opts: &TracerouteRequest) -> Result<()> {
+pub fn run_udp_traceroute_v6(
+    destination: Ipv6Addr,
+    opts: &TracerouteRequest,
+    send_delay: Option<std::time::Duration>,
+) -> Result<()> {
     let bind_addr = (Ipv6Addr::UNSPECIFIED, 0);
     let socket = std::net::UdpSocket::bind(bind_addr)
         .with_context(|| operation_failed("bind IPv6 UDP socket", format!("addr={bind_addr:?}")))?;
@@ -178,7 +214,7 @@ pub fn run_udp_traceroute_v6(destination: Ipv6Addr, opts: &TracerouteRequest) ->
     let mut iter = icmpv6_packet_iter(&mut receiver);
     let mut adapter = Icmpv6ReceiverAdapter(&mut iter);
 
-    run_udp_traceroute_v6_loop(destination, opts, &socket, &mut adapter)?;
+    run_udp_traceroute_v6_loop_with_delay(destination, opts, send_delay, &socket, &mut adapter)?;
 
     // Explicitly drop channels to ensure cleanup
     drop(socket);

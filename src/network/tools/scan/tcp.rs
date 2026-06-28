@@ -231,7 +231,7 @@ async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
     target: &str,
     ports: &str,
     interface: &Option<String>,
-    _config: &EngineConfig,
+    config: &EngineConfig,
     scan_strategy: S,
 ) -> Result<()> {
     let address = resolve_target(target)?;
@@ -260,6 +260,8 @@ async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
         ports: port_list,
         timeout: DEFAULT_TIMEOUT,
         source_override,
+        batch_size: config.traffic_policy.budget.max_batch_size,
+        send_delay: config.traffic_policy.rate_delay(),
         scan_strategy,
     };
 
@@ -279,6 +281,8 @@ struct TcpScanConfig<S> {
     ports: Vec<u16>,
     timeout: Duration,
     source_override: Option<IpAddr>,
+    batch_size: usize,
+    send_delay: Option<Duration>,
     scan_strategy: S,
 }
 
@@ -288,27 +292,32 @@ fn perform_tcp_scan<S: TcpScanStrategy>(
     match config.address {
         SocketAddr::V4(dest) => {
             let override_v4 = source_override_ipv4(config.source_override)?;
-            scan_tcp_v4(
+            scan_tcp_v4_with_controls(
                 *dest.ip(),
                 &config.ports,
                 config.timeout,
                 override_v4,
+                config.batch_size,
+                config.send_delay,
                 &config.scan_strategy,
             )
         }
         SocketAddr::V6(_dest) => {
             let override_v6 = source_override_ipv6(config.source_override)?;
-            scan_tcp_v6(
+            scan_tcp_v6_with_controls(
                 config.address,
                 &config.ports,
                 config.timeout,
                 override_v6,
+                config.batch_size,
+                config.send_delay,
                 &config.scan_strategy,
             )
         }
     }
 }
 
+#[cfg(test)]
 fn scan_ports_concurrent<S, TX, RX>(
     destination: SocketAddr,
     ports: &[u16],
@@ -323,6 +332,44 @@ where
     TX: TcpSender + ?Sized,
     RX: TcpScanRx + ?Sized,
 {
+    scan_ports_concurrent_with_config(
+        ConcurrentScanConfig {
+            destination,
+            source_ip,
+            timeout,
+            batch_size: CONCURRENT_SCAN_BATCH_SIZE,
+            send_delay: None,
+            base_port_offset: BASE_PORT_OFFSET,
+            base_port_override: None,
+            initial_port_state: scan_strategy.timeout_state(),
+        },
+        ports,
+        scan_strategy,
+        tx,
+        rx,
+    )
+}
+
+fn scan_ports_concurrent_with_config<S, TX, RX>(
+    config: ConcurrentScanConfig,
+    ports: &[u16],
+    scan_strategy: &S,
+    tx: &mut TX,
+    rx: &mut RX,
+) -> Result<BTreeMap<u16, PortState>>
+where
+    S: TcpScanStrategy,
+    TX: TcpSender + ?Sized,
+    RX: TcpScanRx + ?Sized,
+{
+    let config = ConcurrentScanConfig {
+        batch_size: config.batch_size.clamp(1, CONCURRENT_SCAN_BATCH_SIZE),
+        ..config
+    };
+    let destination = config.destination;
+    let source_ip = config.source_ip;
+    let send_delay = config.send_delay;
+
     // Reuse one packet buffer while sending this batch.
     let mut buffer = [0u8; TCP_PACKET_BUFFER_SIZE];
 
@@ -342,19 +389,12 @@ where
     };
 
     super::common::scan_ports_concurrent(
-        ConcurrentScanConfig {
-            destination,
-            source_ip,
-            timeout,
-            batch_size: CONCURRENT_SCAN_BATCH_SIZE,
-            base_port_offset: BASE_PORT_OFFSET,
-            base_port_override: None,
-            initial_port_state: scan_strategy.timeout_state(),
-        },
+        config,
         ports,
         |source_port, dest_port| {
-            // Bound probe rate across the whole batch.
-            std::thread::sleep(SCAN_DELAY);
+            if send_delay.is_none() {
+                std::thread::sleep(SCAN_DELAY);
+            }
 
             spec.source_port = Some(source_port);
             spec.destination_port = Some(dest_port);
@@ -386,11 +426,13 @@ where
     )
 }
 
-fn scan_tcp_v4<S: TcpScanStrategy>(
+fn scan_tcp_v4_with_controls<S: TcpScanStrategy>(
     destination: Ipv4Addr,
     ports: &[u16],
     timeout: Duration,
     source_override: Option<Ipv4Addr>,
+    batch_size: usize,
+    send_delay: Option<Duration>,
     scan_strategy: &S,
 ) -> Result<BTreeMap<u16, PortState>> {
     let source_ip = super::common::source_ipv4_or_discover(
@@ -420,11 +462,18 @@ fn scan_tcp_v4<S: TcpScanStrategy>(
         icmp_iter,
     };
 
-    let results = scan_ports_concurrent(
-        SocketAddr::new(IpAddr::V4(destination), 0),
+    let results = scan_ports_concurrent_with_config(
+        ConcurrentScanConfig {
+            destination: SocketAddr::new(IpAddr::V4(destination), 0),
+            source_ip: IpAddr::V4(source_ip),
+            timeout,
+            batch_size,
+            send_delay,
+            base_port_offset: BASE_PORT_OFFSET,
+            base_port_override: None,
+            initial_port_state: scan_strategy.timeout_state(),
+        },
         ports,
-        IpAddr::V4(source_ip),
-        timeout,
         scan_strategy,
         &mut tx,
         &mut rx,
@@ -433,11 +482,32 @@ fn scan_tcp_v4<S: TcpScanStrategy>(
     Ok(results)
 }
 
+#[cfg(test)]
 fn scan_tcp_v6<S: TcpScanStrategy>(
     destination: SocketAddr,
     ports: &[u16],
     timeout: Duration,
     source_override: Option<Ipv6Addr>,
+    scan_strategy: &S,
+) -> Result<BTreeMap<u16, PortState>> {
+    scan_tcp_v6_with_controls(
+        destination,
+        ports,
+        timeout,
+        source_override,
+        CONCURRENT_SCAN_BATCH_SIZE,
+        None,
+        scan_strategy,
+    )
+}
+
+fn scan_tcp_v6_with_controls<S: TcpScanStrategy>(
+    destination: SocketAddr,
+    ports: &[u16],
+    timeout: Duration,
+    source_override: Option<Ipv6Addr>,
+    batch_size: usize,
+    send_delay: Option<Duration>,
     scan_strategy: &S,
 ) -> Result<BTreeMap<u16, PortState>> {
     let dest_ip = match destination.ip() {
@@ -480,11 +550,18 @@ fn scan_tcp_v6<S: TcpScanStrategy>(
         icmp_iter,
     };
 
-    let results = scan_ports_concurrent(
-        destination,
+    let results = scan_ports_concurrent_with_config(
+        ConcurrentScanConfig {
+            destination,
+            source_ip: IpAddr::V6(source_ip),
+            timeout,
+            batch_size,
+            send_delay,
+            base_port_offset: BASE_PORT_OFFSET,
+            base_port_override: None,
+            initial_port_state: scan_strategy.timeout_state(),
+        },
         ports,
-        IpAddr::V6(source_ip),
-        timeout,
         scan_strategy,
         &mut tx,
         &mut rx,

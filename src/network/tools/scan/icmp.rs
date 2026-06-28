@@ -38,7 +38,7 @@ pub async fn run_icmp(
     target: &str,
     interface: &Option<String>,
     timeout_ms: u64,
-    _config: &EngineConfig,
+    config: &EngineConfig,
 ) -> Result<()> {
     // Parse targets
     let targets = parse_icmp_targets(target)?;
@@ -72,14 +72,16 @@ pub async fn run_icmp(
 
     // Resolve single source override (mixed targets already rejected)
     let source_override = resolve_interface_override(interface, targets[0].ip())?;
+    let send_delay = config.traffic_policy.rate_delay();
 
-    let results =
-        task::spawn_blocking(move || perform_icmp_scan(targets, timeout, source_override))
-            .await
-            .context(operation_failed(
-                "join ICMP scan task",
-                "spawn_blocking failed",
-            ))??;
+    let results = task::spawn_blocking(move || {
+        perform_icmp_scan(targets, timeout, source_override, send_delay)
+    })
+    .await
+    .context(operation_failed(
+        "join ICMP scan task",
+        "spawn_blocking failed",
+    ))??;
 
     // Report
     if results.is_empty() {
@@ -94,7 +96,7 @@ pub async fn run_icmp(
     Ok(())
 }
 
-fn parse_icmp_targets(spec: &str) -> Result<Vec<SocketAddr>> {
+pub(super) fn parse_icmp_targets(spec: &str) -> Result<Vec<SocketAddr>> {
     // Support IPv4 CIDR or single IP
     if let Ok(network) = spec.parse::<IpNetwork>() {
         match network {
@@ -125,6 +127,7 @@ fn perform_icmp_scan(
     targets: Vec<SocketAddr>,
     timeout: Duration,
     source_override: Option<IpAddr>,
+    send_delay: Option<Duration>,
 ) -> Result<Vec<IpAddr>> {
     let has_v4 = targets.iter().any(|t| t.is_ipv4());
     let has_v6 = targets.iter().any(|t| t.is_ipv6());
@@ -204,13 +207,25 @@ fn perform_icmp_scan(
     };
 
     let id = random::<u16>();
-    scan_hosts_concurrent(targets, id, timeout, &mut dual_tx, &mut dual_rx)
+    scan_hosts_concurrent_with_delay(targets, id, timeout, send_delay, &mut dual_tx, &mut dual_rx)
 }
 
+#[cfg(test)]
 fn scan_hosts_concurrent(
     targets: Vec<SocketAddr>,
     id: u16,
     timeout: Duration,
+    tx: &mut dyn IcmpScanTx,
+    rx: &mut dyn IcmpScanRx,
+) -> Result<Vec<IpAddr>> {
+    scan_hosts_concurrent_with_delay(targets, id, timeout, None, tx, rx)
+}
+
+fn scan_hosts_concurrent_with_delay(
+    targets: Vec<SocketAddr>,
+    id: u16,
+    timeout: Duration,
+    send_delay: Option<Duration>,
     tx: &mut dyn IcmpScanTx,
     rx: &mut dyn IcmpScanRx,
 ) -> Result<Vec<IpAddr>> {
@@ -228,7 +243,9 @@ fn scan_hosts_concurrent(
 
     thread::scope(|s| {
         s.spawn(|| {
+            let mut last_send = None;
             for (seq, target) in targets_owned.iter().enumerate() {
+                super::common::wait_for_send_delay(send_delay, &mut last_send);
                 if let Err(err) = tx.send_echo_request(*target, id, seq as u16) {
                     *send_error_ref.lock().ignore_poison() = Some(err);
                     break;
@@ -609,5 +626,36 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], target.ip());
+    }
+
+    #[test]
+    fn scan_hosts_concurrent_respects_send_delay() {
+        let targets = vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 0),
+        ];
+        let mut tx = MockTx { sent: vec![] };
+        let mut rx = MockRx {
+            replies: VecDeque::new(),
+        };
+
+        let start = Instant::now();
+        scan_hosts_concurrent_with_delay(
+            targets,
+            1234,
+            Duration::from_millis(1),
+            Some(Duration::from_millis(40)),
+            &mut tx,
+            &mut rx,
+        )
+        .expect("scan success");
+        let duration = start.elapsed();
+
+        assert_eq!(tx.sent.len(), 2);
+        assert!(
+            duration >= Duration::from_millis(40),
+            "ICMP scan did not apply send delay: {:?}",
+            duration
+        );
     }
 }

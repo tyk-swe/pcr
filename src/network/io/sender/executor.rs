@@ -247,6 +247,48 @@ mod tests {
     }
 
     #[test]
+    fn send_loop_respects_policy_rate() {
+        let frames = vec![vec![0x01]];
+        let mut plan = create_test_plan(frames, Some(2), None);
+        plan.policy.budget.max_rate_per_sec = 20;
+        let mut sender = MockSender::new();
+
+        let start = Instant::now();
+        send_loop(&mut sender, &plan, &plan.interface, &mut |_| Ok(())).expect("send_loop failed");
+        let duration = start.elapsed();
+
+        assert!(
+            duration >= Duration::from_millis(50),
+            "Duration {:?} should include policy rate delay",
+            duration
+        );
+    }
+
+    #[test]
+    fn send_loop_respects_policy_rate_in_flood_mode() {
+        let frames = vec![vec![0x01]];
+        let mut plan = create_test_plan(frames, Some(2), Some(Duration::from_secs(1)));
+        plan.transmit.flood = true;
+        plan.policy.budget.max_rate_per_sec = 20;
+        let mut sender = MockSender::new();
+
+        let start = Instant::now();
+        send_loop(&mut sender, &plan, &plan.interface, &mut |_| Ok(())).expect("send_loop failed");
+        let duration = start.elapsed();
+
+        assert!(
+            duration >= Duration::from_millis(50),
+            "Duration {:?} should include policy rate delay in flood mode",
+            duration
+        );
+        assert!(
+            duration < Duration::from_millis(500),
+            "Flood mode should ignore --interval and rely on policy rate, got {:?}",
+            duration
+        );
+    }
+
+    #[test]
     fn send_loop_handles_send_error() {
         let frames = vec![vec![0x01]];
         let plan = create_test_plan(frames, Some(1), None);

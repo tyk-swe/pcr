@@ -26,6 +26,39 @@ fn send_options(args: &PacketcraftArgs) -> &OneShotOptions {
 }
 
 #[test]
+fn safety_options_are_parsed_and_mapped_to_engine_config() {
+    let args = parse_send_from(&[
+        "--allow-public-targets",
+        "--allow-malformed",
+        "--allow-high-volume",
+        "--traffic-max-targets",
+        "300",
+        "--traffic-max-ports",
+        "1200",
+        "--traffic-max-packets",
+        "5000",
+        "--traffic-batch-size",
+        "300",
+        "--traffic-rate",
+        "200",
+    ]);
+
+    assert!(args.safety.allow_public_targets);
+    assert!(args.safety.allow_malformed);
+    assert!(args.safety.allow_high_volume);
+
+    let config = args.engine_config();
+    assert!(config.traffic_policy.allow_public_targets);
+    assert!(config.traffic_policy.allow_malformed);
+    assert!(config.traffic_policy.allow_high_volume);
+    assert_eq!(config.traffic_policy.budget.max_targets, 300);
+    assert_eq!(config.traffic_policy.budget.max_ports, 1200);
+    assert_eq!(config.traffic_policy.budget.max_estimated_packets, 5000);
+    assert_eq!(config.traffic_policy.budget.max_batch_size, 300);
+    assert_eq!(config.traffic_policy.budget.max_rate_per_sec, 200);
+}
+
+#[test]
 fn conflicting_transport_layers_are_rejected() {
     let result = try_parse_send_from(&["tcp", "udp"]);
     assert!(result.is_err());

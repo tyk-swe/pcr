@@ -27,6 +27,7 @@ pub use error::{
 pub use executor::execute_transmission;
 #[cfg(any(test, feature = "test_utils"))]
 pub use executor::test_utils;
+pub(crate) use metrics::emit_metrics_snapshot;
 pub use planner::{
     plan_transmission, plan_transmission_dry_run, plan_transmission_dry_run_with_policy,
     plan_transmission_with_interface, plan_transmission_with_interface_and_policy,

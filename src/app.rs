@@ -34,6 +34,10 @@ impl PacketcraftApp {
         Self::init_logging(&args)?;
 
         let config = args.engine_config();
+        config
+            .traffic_policy
+            .validate_configuration()
+            .map_err(anyhow::Error::from)?;
         let command = args.engine_command();
 
         #[cfg(feature = "daemon")]
@@ -246,6 +250,7 @@ mod tests {
             verbose: 0,
             output_format: None,
             dry_run: false,
+            safety: crate::cli::SafetyOptions::default(),
             command: PacketcraftCommand::Send(SendOptions::default()),
         }
     }

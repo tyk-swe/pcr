@@ -16,6 +16,7 @@ use anyhow::Result;
 use log::info;
 
 use crate::engine::command::{TracerouteProtocol, TracerouteRequest};
+use crate::engine::policy::{classify_ip, TrafficMode, TrafficPlan, TrafficPrivilege};
 use crate::engine::EngineConfig;
 
 use self::common::resolve_destination;
@@ -23,17 +24,56 @@ use self::icmp::{run_icmp_traceroute_v4, run_icmp_traceroute_v6};
 use self::tcp::{run_tcp_traceroute_v4, run_tcp_traceroute_v6};
 use self::udp::{run_udp_traceroute_v4, run_udp_traceroute_v6};
 
-pub async fn run(opts: &TracerouteRequest, _config: &EngineConfig) -> Result<()> {
+#[derive(Debug, Clone)]
+pub struct PreparedTraceroute {
+    pub traffic_plan: TrafficPlan,
+    pub destination: IpAddr,
+    send_delay: Option<std::time::Duration>,
+}
+
+pub fn prepare(opts: &TracerouteRequest, config: &EngineConfig) -> Result<PreparedTraceroute> {
+    let destination = resolve_destination(&opts.destination)?;
+    let mut plan = TrafficPlan::new(TrafficMode::Traceroute, classify_ip(destination));
+    plan.target_count = 1;
+    plan.port_count = 1;
+    plan.estimated_packets = Some(u64::from(opts.max_ttl) * u64::from(opts.probes));
+    plan.batch_size = 1;
+    plan.rate_per_sec = Some(config.traffic_policy.budget.max_rate_per_sec);
+    plan.required_privileges = vec![TrafficPrivilege::RawSocket];
+    Ok(PreparedTraceroute {
+        traffic_plan: plan,
+        destination,
+        send_delay: config.traffic_policy.rate_delay(),
+    })
+}
+
+pub fn traffic_plan(opts: &TracerouteRequest, config: &EngineConfig) -> Result<TrafficPlan> {
+    Ok(prepare(opts, config)?.traffic_plan)
+}
+
+pub async fn run(opts: &TracerouteRequest, config: &EngineConfig) -> Result<()> {
+    let prepared = prepare(opts, config)?;
+    run_prepared(opts, config, prepared).await
+}
+
+pub async fn run_prepared(
+    opts: &TracerouteRequest,
+    _config: &EngineConfig,
+    prepared: PreparedTraceroute,
+) -> Result<()> {
     tokio::task::spawn_blocking({
         let opts = opts.clone();
-        move || traceroute_blocking(&opts)
+        move || traceroute_blocking(&opts, prepared.destination, prepared.send_delay)
     })
     .await??;
     Ok(())
 }
 
-fn traceroute_blocking(opts: &TracerouteRequest) -> Result<()> {
-    let destination = resolve_destination(&opts.destination)?;
+fn traceroute_blocking(
+    opts: &TracerouteRequest,
+    destination: IpAddr,
+    send_delay: Option<std::time::Duration>,
+) -> Result<()> {
     info!(
         "Traceroute destination {} using {:?}",
         destination, opts.protocol
@@ -41,14 +81,14 @@ fn traceroute_blocking(opts: &TracerouteRequest) -> Result<()> {
 
     match destination {
         IpAddr::V4(dest_v4) => match opts.protocol {
-            TracerouteProtocol::Udp => run_udp_traceroute_v4(dest_v4, opts),
-            TracerouteProtocol::Icmp => run_icmp_traceroute_v4(dest_v4, opts),
-            TracerouteProtocol::Tcp => run_tcp_traceroute_v4(dest_v4, opts),
+            TracerouteProtocol::Udp => run_udp_traceroute_v4(dest_v4, opts, send_delay),
+            TracerouteProtocol::Icmp => run_icmp_traceroute_v4(dest_v4, opts, send_delay),
+            TracerouteProtocol::Tcp => run_tcp_traceroute_v4(dest_v4, opts, send_delay),
         },
         IpAddr::V6(dest_v6) => match opts.protocol {
-            TracerouteProtocol::Udp => run_udp_traceroute_v6(dest_v6, opts),
-            TracerouteProtocol::Icmp => run_icmp_traceroute_v6(dest_v6, opts),
-            TracerouteProtocol::Tcp => run_tcp_traceroute_v6(dest_v6, opts),
+            TracerouteProtocol::Udp => run_udp_traceroute_v6(dest_v6, opts, send_delay),
+            TracerouteProtocol::Icmp => run_icmp_traceroute_v6(dest_v6, opts, send_delay),
+            TracerouteProtocol::Tcp => run_tcp_traceroute_v6(dest_v6, opts, send_delay),
         },
     }
 }
@@ -75,6 +115,19 @@ mod tests {
 
     const ROUTER_SOLICITATION: pnet::packet::icmpv6::Icmpv6Type = Icmpv6Types::RouterSolicit;
     const TEST_TIMEOUT: Duration = Duration::from_secs(3);
+
+    fn engine_config() -> crate::engine::EngineConfig {
+        crate::engine::EngineConfig {
+            output_format: None,
+            prometheus_bind: None,
+            rule_workers: None,
+            rule_queue: None,
+            send_workers: None,
+            send_queue: None,
+            traffic_policy: crate::engine::policy::TrafficPolicy::default(),
+            dry_run: false,
+        }
+    }
 
     fn is_permission_error(err: &anyhow::Error) -> bool {
         err.chain().any(|cause| {
@@ -121,6 +174,26 @@ mod tests {
     fn resolve_destination_accepts_ipv4_literal() {
         let addr = resolve_destination("127.0.0.1").expect("resolved destination");
         assert_eq!(addr, IpAddr::V4(Ipv4Addr::LOCALHOST));
+    }
+
+    #[test]
+    fn prepare_uses_resolved_destination_for_execution() {
+        let opts = crate::engine::command::TracerouteRequest {
+            destination: "localhost".to_string(),
+            max_ttl: 1,
+            probes: 1,
+            protocol: crate::engine::command::TracerouteProtocol::Udp,
+            no_dns: None,
+            timeout: 1,
+        };
+
+        let prepared = super::prepare(&opts, &engine_config()).expect("prepare traceroute");
+
+        assert!(prepared.destination.is_loopback());
+        assert_eq!(
+            prepared.traffic_plan.target_scope,
+            crate::engine::policy::TargetScope::Local
+        );
     }
 
     #[test]

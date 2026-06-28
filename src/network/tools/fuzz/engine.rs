@@ -35,10 +35,18 @@ where
 
     let target_ip: IpAddr = config.target_ip.parse()?;
     let mut failures = 0;
+    let rate_delay = rate_delay(config.rate_per_sec);
+    let configured_delay = Duration::from_millis(config.delay_ms);
+    let effective_delay = configured_delay.max(rate_delay);
+    let batch_size = config.batch_size.max(1);
 
     for i in 0..config.count {
-        if i > 0 && config.delay_ms > 0 {
-            sleep(Duration::from_millis(config.delay_ms)).await;
+        if i > 0 && !effective_delay.is_zero() {
+            sleep(effective_delay).await;
+        }
+
+        if i > 0 && (i as usize).is_multiple_of(batch_size) {
+            tokio::task::yield_now().await;
         }
 
         let payload_bytes = generate_payload(&config.strategy);
@@ -98,6 +106,14 @@ where
     }
 
     Ok(())
+}
+
+fn rate_delay(rate_per_sec: u64) -> Duration {
+    if rate_per_sec == 0 {
+        return Duration::ZERO;
+    }
+
+    Duration::from_nanos((1_000_000_000u64 / rate_per_sec).max(1))
 }
 
 fn generate_payload(strategy: &FuzzStrategy) -> Vec<u8> {
@@ -209,6 +225,8 @@ mod tests {
             strategy: FuzzStrategy::RandomPayload,
             count: 3,
             delay_ms: 0,
+            batch_size: 256,
+            rate_per_sec: 100,
         };
 
         let result =
@@ -232,6 +250,8 @@ mod tests {
             strategy: FuzzStrategy::RandomPayload,
             count: 5,
             delay_ms: 0,
+            batch_size: 256,
+            rate_per_sec: 100,
         };
 
         let attempt = Arc::new(AtomicUsize::new(0));
@@ -264,6 +284,8 @@ mod tests {
             strategy: FuzzStrategy::Boundary,
             count: 1,
             delay_ms: 0,
+            batch_size: 256,
+            rate_per_sec: 100,
         };
 
         let transports = Arc::new(Mutex::new(Vec::new()));

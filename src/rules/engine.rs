@@ -47,7 +47,7 @@ impl RuleEngine {
         Self::new_configured(RuleExecutorConfig {
             workers: RULE_EXECUTOR_WORKERS,
             queue_capacity: RULE_EXECUTOR_QUEUE_CAPACITY,
-            allow_unbounded_sends: false,
+            traffic_policy: crate::engine::policy::TrafficPolicy::default(),
             dry_run: false,
         })
     }
@@ -61,7 +61,7 @@ impl RuleEngine {
             RuleExecutorConfig {
                 workers: RULE_EXECUTOR_WORKERS,
                 queue_capacity: RULE_EXECUTOR_QUEUE_CAPACITY,
-                allow_unbounded_sends: false,
+                traffic_policy: crate::engine::policy::TrafficPolicy::default(),
                 dry_run: false,
             },
             handle,

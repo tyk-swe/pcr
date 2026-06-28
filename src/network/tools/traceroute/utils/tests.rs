@@ -9,6 +9,7 @@ use pnet::packet::icmpv6::{Icmpv6Code, Icmpv6Packet, Icmpv6Types, MutableIcmpv6P
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv4::{Ipv4Packet, MutableIpv4Packet};
 use pnet::packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
+use pnet::packet::tcp::{MutableTcpPacket, TcpPacket};
 use pnet::packet::udp::{MutableUdpPacket, UdpPacket};
 use pnet::packet::MutablePacket;
 use std::collections::VecDeque;
@@ -101,6 +102,33 @@ fn build_custom_icmpv4_packet(
         let mut icmp = MutableIcmpPacket::new(&mut icmp_bytes).expect("icmp packet");
         icmp.set_icmp_type(icmp_type);
         icmp.set_icmp_code(icmp_code);
+        icmp.set_payload(&ipv4_bytes);
+    }
+    icmp_bytes
+}
+
+fn build_icmpv4_tcp_reply(source_port: u16, dest_port: u16) -> Vec<u8> {
+    let tcp_len = TcpPacket::minimum_packet_size();
+    let mut ipv4_bytes = vec![0u8; Ipv4Packet::minimum_packet_size() + tcp_len];
+    let ipv4_len = ipv4_bytes.len() as u16;
+    {
+        let mut ipv4 = MutableIpv4Packet::new(&mut ipv4_bytes).expect("ipv4 packet");
+        ipv4.set_version(4);
+        ipv4.set_header_length(5);
+        ipv4.set_total_length(ipv4_len);
+        ipv4.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
+
+        let mut tcp = MutableTcpPacket::new(ipv4.payload_mut()).expect("tcp packet");
+        tcp.set_source(source_port);
+        tcp.set_destination(dest_port);
+        tcp.set_data_offset(5);
+    }
+
+    let mut icmp_bytes = vec![0u8; MutableIcmpPacket::minimum_packet_size() + ipv4_bytes.len()];
+    {
+        let mut icmp = MutableIcmpPacket::new(&mut icmp_bytes).expect("icmp packet");
+        icmp.set_icmp_type(IcmpTypes::TimeExceeded);
+        icmp.set_icmp_code(pnet::packet::icmp::IcmpCode::new(0));
         icmp.set_payload(&ipv4_bytes);
     }
     icmp_bytes
@@ -200,6 +228,34 @@ fn classify_icmp_event_v4_returns_none_when_port_mismatch() {
         classify_icmp_event_v4(&packet, IpNextHeaderProtocols::Udp, dest_port, Some((1, 1)));
 
     assert!(result.is_none());
+}
+
+#[test]
+fn classify_icmp_event_v4_with_source_returns_none_when_source_port_mismatch() {
+    let source_port = 40_000;
+    let dest_port = 80;
+    let packet_bytes = build_icmpv4_tcp_reply(source_port, dest_port);
+    let packet = IcmpPacket::new(&packet_bytes).expect("icmp packet");
+
+    let result = classify_icmp_event_v4_with_source(
+        &packet,
+        IpNextHeaderProtocols::Tcp,
+        Some(source_port + 1),
+        dest_port,
+        None,
+    );
+
+    assert!(result.is_none());
+    assert!(matches!(
+        classify_icmp_event_v4_with_source(
+            &packet,
+            IpNextHeaderProtocols::Tcp,
+            Some(source_port),
+            dest_port,
+            None
+        ),
+        Some(IcmpEventKind::Hop)
+    ));
 }
 
 #[test]
@@ -322,6 +378,31 @@ fn build_custom_icmpv6_packet(
     icmp_bytes
 }
 
+fn build_icmpv6_tcp_reply(source_port: u16, dest_port: u16) -> Vec<u8> {
+    let tcp_len = TcpPacket::minimum_packet_size();
+    let mut ipv6_bytes = vec![0u8; Ipv6Packet::minimum_packet_size() + tcp_len];
+    {
+        let mut ipv6 = MutableIpv6Packet::new(&mut ipv6_bytes).expect("ipv6 packet");
+        ipv6.set_version(6);
+        ipv6.set_payload_length(tcp_len as u16);
+        ipv6.set_next_header(IpNextHeaderProtocols::Tcp);
+
+        let mut tcp = MutableTcpPacket::new(ipv6.payload_mut()).expect("tcp packet");
+        tcp.set_source(source_port);
+        tcp.set_destination(dest_port);
+        tcp.set_data_offset(5);
+    }
+
+    let mut icmp_bytes = vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + ipv6_bytes.len()];
+    {
+        let mut icmp = MutableIcmpv6Packet::new(&mut icmp_bytes).expect("icmpv6 packet");
+        icmp.set_icmpv6_type(Icmpv6Types::TimeExceeded);
+        icmp.set_icmpv6_code(Icmpv6Code(0));
+        icmp.set_payload(&ipv6_bytes);
+    }
+    icmp_bytes
+}
+
 #[test]
 fn classify_icmp_event_v6_returns_destination_when_port_unreachable() {
     let dest_port = 33434;
@@ -415,6 +496,34 @@ fn classify_icmp_event_v6_returns_none_when_port_mismatch() {
         classify_icmp_event_v6(&packet, IpNextHeaderProtocols::Udp, dest_port, Some((1, 1)));
 
     assert!(result.is_none());
+}
+
+#[test]
+fn classify_icmp_event_v6_with_source_returns_none_when_source_port_mismatch() {
+    let source_port = 40_000;
+    let dest_port = 80;
+    let packet_bytes = build_icmpv6_tcp_reply(source_port, dest_port);
+    let packet = Icmpv6Packet::new(&packet_bytes).expect("icmpv6 packet");
+
+    let result = classify_icmp_event_v6_with_source(
+        &packet,
+        IpNextHeaderProtocols::Tcp,
+        Some(source_port + 1),
+        dest_port,
+        None,
+    );
+
+    assert!(result.is_none());
+    assert!(matches!(
+        classify_icmp_event_v6_with_source(
+            &packet,
+            IpNextHeaderProtocols::Tcp,
+            Some(source_port),
+            dest_port,
+            None
+        ),
+        Some(IcmpEventKind::Hop)
+    ));
 }
 
 #[test]

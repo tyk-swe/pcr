@@ -65,6 +65,11 @@ impl RuleLoadReport {
         self.diagnostics.iter().any(RuleDiagnostic::is_error)
     }
 
+    #[cfg(feature = "daemon")]
+    pub(crate) fn has_receive_triggers(&self) -> bool {
+        self.rules.iter().any(Rule::triggers_on_receive)
+    }
+
     pub(crate) fn into_rules(self) -> Vec<Rule> {
         self.rules
     }

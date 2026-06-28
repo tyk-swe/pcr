@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use log::{debug, trace};
 use pnet::datalink::{self, Channel, Config, MacAddr, NetworkInterface};
+#[cfg(test)]
 use pnet::ipnetwork::IpNetwork;
 use pnet::packet::ethernet::{EtherTypes, EthernetPacket, MutableEthernetPacket};
 use pnet::packet::icmpv6::ndp::{
@@ -16,6 +17,8 @@ use pnet::packet::icmpv6::{checksum as icmpv6_checksum, Icmpv6Code, Icmpv6Packet
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::ipv6::{Ipv6Packet, MutableIpv6Packet};
 use pnet::packet::{MutablePacket, Packet};
+
+use crate::util::source_ip::select_interface_ipv6_source_for_destination;
 
 use thiserror::Error;
 
@@ -81,7 +84,7 @@ pub fn resolve_mac(
             interface: interface.name.clone(),
         })?;
     let effective_source_ip = if source_ip.is_unspecified() {
-        first_interface_ipv6(interface).ok_or_else(|| {
+        select_interface_ipv6_source_for_destination(interface, target_ip).ok_or_else(|| {
             NeighborDiscoveryError::MissingInterfaceIpv6 {
                 interface: interface.name.clone(),
             }
@@ -285,6 +288,7 @@ fn parse_neighbor_advert(packet: &[u8], expected_target: Ipv6Addr) -> Option<Mac
     Some(ethernet.get_source())
 }
 
+#[cfg(test)]
 fn first_interface_ipv6(interface: &NetworkInterface) -> Option<Ipv6Addr> {
     interface.ips.iter().find_map(|ip| match ip {
         IpNetwork::V6(v6) => Some(v6.ip()),
@@ -602,6 +606,31 @@ mod tests {
         };
         let result = first_interface_ipv6(&iface);
         assert_eq!(result, Some(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0x1)));
+    }
+
+    #[test]
+    fn interface_ipv6_source_for_destination_prefers_same_scope() {
+        let iface = NetworkInterface {
+            name: "test0".to_string(),
+            description: "test interface".to_string(),
+            index: 1,
+            mac: Some(MacAddr::new(0x00, 0x11, 0x22, 0x33, 0x44, 0x55)),
+            ips: vec![
+                IpNetwork::V6("::/128".parse().unwrap()),
+                IpNetwork::V6("fe80::1/64".parse().unwrap()),
+                IpNetwork::V6("2001:db8::1/64".parse().unwrap()),
+            ],
+            flags: 0,
+        };
+
+        assert_eq!(
+            select_interface_ipv6_source_for_destination(&iface, "fe80::10".parse().unwrap()),
+            Some(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 0x1))
+        );
+        assert_eq!(
+            select_interface_ipv6_source_for_destination(&iface, "2001:db8:1::10".parse().unwrap()),
+            Some(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x1))
+        );
     }
 
     #[test]

@@ -11,6 +11,7 @@ use pnet::packet::tcp::MutableTcpPacket;
 use pnet::packet::udp::MutableUdpPacket;
 use pnet::packet::MutablePacket;
 use proptest::prelude::*;
+use std::net::Ipv4Addr;
 
 fn build_ipv4_payload(
     source: u16,
@@ -84,6 +85,30 @@ fn build_ipv6_payload(
         }
     }
     (ipv6_bytes, proto)
+}
+
+fn build_ipv6_hop_by_hop_udp_payload(source: u16, destination: u16) -> Vec<u8> {
+    let transport_len = UdpPacket::minimum_packet_size();
+    let extension_len = 8;
+    let mut ipv6_bytes =
+        vec![0u8; Ipv6Packet::minimum_packet_size() + extension_len + transport_len];
+    {
+        let mut ipv6 = MutableIpv6Packet::new(&mut ipv6_bytes).expect("ipv6 packet");
+        ipv6.set_version(6);
+        ipv6.set_payload_length((extension_len + transport_len) as u16);
+        ipv6.set_next_header(IpNextHeaderProtocols::Hopopt);
+        ipv6.set_source("2001:db8::1".parse().unwrap());
+        ipv6.set_destination("2001:db8::2".parse().unwrap());
+
+        let payload = ipv6.payload_mut();
+        payload[0] = IpNextHeaderProtocols::Udp.0;
+        payload[1] = 0;
+        let mut udp = MutableUdpPacket::new(&mut payload[extension_len..]).expect("udp packet");
+        udp.set_source(source);
+        udp.set_destination(destination);
+        udp.set_length(transport_len as u16);
+    }
+    ipv6_bytes
 }
 
 #[test]
@@ -235,6 +260,32 @@ fn extract_original_transport_v6_parses_udp_payload() {
 }
 
 #[test]
+fn extract_original_transport_v6_walks_extension_headers() {
+    let ipv6_bytes = build_ipv6_hop_by_hop_udp_payload(43210, 33434);
+    let mut icmp_bytes = vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + ipv6_bytes.len()];
+    {
+        let mut icmp = MutableIcmpv6Packet::new(&mut icmp_bytes).expect("icmpv6 packet");
+        icmp.set_icmpv6_type(Icmpv6Types::TimeExceeded);
+        icmp.set_payload(&ipv6_bytes);
+    }
+
+    let packet = Icmpv6Packet::new(&icmp_bytes).expect("icmpv6 view");
+    let transport = extract_original_transport_v6(&packet).expect("extracted udp transport");
+
+    assert_eq!(transport.protocol, IpNextHeaderProtocols::Udp);
+    assert_eq!(transport.source, 43210);
+    assert_eq!(transport.destination, 33434);
+    assert_eq!(
+        transport.source_ip,
+        "2001:db8::1".parse::<IpAddr>().unwrap()
+    );
+    assert_eq!(
+        transport.destination_ip,
+        "2001:db8::2".parse::<IpAddr>().unwrap()
+    );
+}
+
+#[test]
 fn extract_original_transport_v6_handles_parameter_problem() {
     let mut ipv6_bytes =
         vec![0u8; Ipv6Packet::minimum_packet_size() + UdpPacket::minimum_packet_size()];
@@ -353,6 +404,42 @@ fn extract_inner_echo_v6_returns_identifier_and_sequence() {
     let (identifier, sequence) = extract_inner_echo_v6(&packet).expect("echo tuple");
     assert_eq!(identifier, 0xaaaa);
     assert_eq!(sequence, 0x5555);
+}
+
+#[test]
+fn extract_inner_echo_v6_walks_extension_headers() {
+    let mut echo_bytes = vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + 4];
+    {
+        let mut echo = MutableIcmpv6Packet::new(&mut echo_bytes).expect("echo packet");
+        echo.set_icmpv6_type(Icmpv6Types::EchoRequest);
+        echo.set_payload(&[0x12, 0x34, 0xab, 0xcd]);
+    }
+
+    let extension_len = 8;
+    let mut ipv6_bytes =
+        vec![0u8; Ipv6Packet::minimum_packet_size() + extension_len + echo_bytes.len()];
+    {
+        let mut ipv6 = MutableIpv6Packet::new(&mut ipv6_bytes).expect("ipv6 packet");
+        ipv6.set_version(6);
+        ipv6.set_payload_length((extension_len + echo_bytes.len()) as u16);
+        ipv6.set_next_header(IpNextHeaderProtocols::Hopopt);
+        let payload = ipv6.payload_mut();
+        payload[0] = IpNextHeaderProtocols::Icmpv6.0;
+        payload[1] = 0;
+        payload[extension_len..].copy_from_slice(&echo_bytes);
+    }
+
+    let mut icmp_bytes = vec![0u8; MutableIcmpv6Packet::minimum_packet_size() + ipv6_bytes.len()];
+    {
+        let mut icmp = MutableIcmpv6Packet::new(&mut icmp_bytes).expect("icmpv6 packet");
+        icmp.set_icmpv6_type(Icmpv6Types::TimeExceeded);
+        icmp.set_payload(&ipv6_bytes);
+    }
+
+    let packet = Icmpv6Packet::new(&icmp_bytes).expect("icmpv6 view");
+    let (identifier, sequence) = extract_inner_echo_v6(&packet).expect("echo tuple");
+    assert_eq!(identifier, 0x1234);
+    assert_eq!(sequence, 0xabcd);
 }
 
 #[test]
@@ -589,40 +676,43 @@ fn parse_icmpv6_echo_returns_none_for_short_payload() {
     assert_eq!(result, None);
 }
 
-#[test]
-fn original_transport_matches_expected_destination_returns_true() {
-    let transport = OriginalTransport {
+fn sample_original_transport() -> OriginalTransport {
+    OriginalTransport {
         protocol: IpNextHeaderProtocols::Tcp,
+        source_ip: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+        destination_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20)),
         source: 1234,
         destination: 80,
         payload: vec![],
-    };
-
-    assert!(transport.matches_expected_destination(IpNextHeaderProtocols::Tcp, 80));
+    }
 }
 
 #[test]
-fn original_transport_matches_expected_destination_returns_false_for_wrong_protocol() {
+fn original_transport_matches_expected_allows_any_source_port() {
     let transport = OriginalTransport {
         protocol: IpNextHeaderProtocols::Tcp,
+        source_ip: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+        destination_ip: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 20)),
         source: 1234,
         destination: 80,
         payload: vec![],
     };
 
-    assert!(!transport.matches_expected_destination(IpNextHeaderProtocols::Udp, 80));
+    assert!(transport.matches_expected(IpNextHeaderProtocols::Tcp, None, 80));
 }
 
 #[test]
-fn original_transport_matches_expected_destination_returns_false_for_wrong_port() {
-    let transport = OriginalTransport {
-        protocol: IpNextHeaderProtocols::Tcp,
-        source: 1234,
-        destination: 80,
-        payload: vec![],
-    };
+fn original_transport_matches_expected_returns_false_for_wrong_protocol() {
+    let transport = sample_original_transport();
 
-    assert!(!transport.matches_expected_destination(IpNextHeaderProtocols::Tcp, 443));
+    assert!(!transport.matches_expected(IpNextHeaderProtocols::Udp, None, 80));
+}
+
+#[test]
+fn original_transport_matches_expected_returns_false_for_wrong_destination() {
+    let transport = sample_original_transport();
+
+    assert!(!transport.matches_expected(IpNextHeaderProtocols::Tcp, None, 443));
 }
 
 #[test]
@@ -687,7 +777,7 @@ proptest! {
             prop_assert_eq!(transport.protocol, proto);
             prop_assert_eq!(transport.source, source);
             prop_assert_eq!(transport.destination, destination);
-            prop_assert!(transport.matches_expected_destination(proto, destination));
+            prop_assert!(transport.matches_expected(proto, None, destination));
         } else {
             prop_assert!(extracted.is_none());
         }
@@ -739,7 +829,7 @@ proptest! {
             prop_assert_eq!(transport.protocol, proto);
             prop_assert_eq!(transport.source, source);
             prop_assert_eq!(transport.destination, destination);
-            prop_assert!(transport.matches_expected_destination(proto, destination));
+            prop_assert!(transport.matches_expected(proto, None, destination));
         } else {
             prop_assert!(extracted.is_none());
         }

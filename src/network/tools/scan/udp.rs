@@ -369,11 +369,11 @@ impl<'a> UdpScanRx for RealUdpRxV4<'a> {
                 // Poll ICMP
                 if let Some(transport) = extract_original_transport_v4(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Udp {
-                        return Ok(Some(ScanEvent::IcmpResponse {
-                            dest_port: transport.destination,
-                            icmp_type: packet.get_icmp_type().0,
-                            icmp_code: packet.get_icmp_code().0,
-                        }));
+                        return Ok(Some(ScanEvent::icmp_response(
+                            transport,
+                            packet.get_icmp_type().0,
+                            packet.get_icmp_code().0,
+                        )));
                     }
                 }
                 return Ok(Some(ScanEvent::Other));
@@ -408,11 +408,11 @@ impl<'a> UdpScanRx for RealUdpRxV6<'a> {
             if let Some((packet, _)) = self.icmp_iter.next_with_timeout(poll_timeout)? {
                 if let Some(transport) = extract_original_transport_v6(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Udp {
-                        return Ok(Some(ScanEvent::IcmpResponse {
-                            dest_port: transport.destination,
-                            icmp_type: packet.get_icmpv6_type().0,
-                            icmp_code: packet.get_icmpv6_code().0,
-                        }));
+                        return Ok(Some(ScanEvent::icmp_response(
+                            transport,
+                            packet.get_icmpv6_type().0,
+                            packet.get_icmpv6_code().0,
+                        )));
                     }
                 }
                 return Ok(Some(ScanEvent::Other));
@@ -571,6 +571,24 @@ mod tests {
         }
     }
 
+    fn icmp_response(
+        source_port: u16,
+        dest_port: u16,
+        src_addr: IpAddr,
+        dst_addr: IpAddr,
+        icmp_type: u8,
+        icmp_code: u8,
+    ) -> ScanEvent {
+        ScanEvent::IcmpResponse {
+            source_port,
+            dest_port,
+            src_addr,
+            dst_addr,
+            icmp_type,
+            icmp_code,
+        }
+    }
+
     #[test]
     fn scan_ports_concurrent_detects_open_port() {
         let mut tx = MockTx { sent: vec![] };
@@ -635,21 +653,29 @@ mod tests {
     #[test]
     fn scan_ports_concurrent_detects_closed_port_via_icmp() {
         let mut tx = MockTx { sent: vec![] };
+        let dummy_base_port = 10_000;
+        let source_port = calculate_source_port(dummy_base_port, 0);
+        let source_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let mut rx = MockRx {
-            events: VecDeque::from(vec![ScanEvent::IcmpResponse {
-                dest_port: 80,
-                icmp_type: 3,
-                icmp_code: 3, // Port Unreachable
-            }]),
+            events: VecDeque::from(vec![icmp_response(
+                source_port,
+                80,
+                source_ip,
+                destination.ip(),
+                3,
+                3, // Port Unreachable
+            )]),
         };
 
-        let results = scan_ports_concurrent(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        let results = scan_ports_concurrent_with_base_port(
+            destination,
             &[80],
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            source_ip,
             Duration::from_millis(100),
             &mut tx,
             &mut rx,
+            dummy_base_port,
         )
         .expect("scan failed");
 
@@ -659,21 +685,29 @@ mod tests {
     #[test]
     fn scan_ports_concurrent_filters_non_port_unreachable_icmp_v4() {
         let mut tx = MockTx { sent: vec![] };
+        let dummy_base_port = 10_000;
+        let source_port = calculate_source_port(dummy_base_port, 0);
+        let source_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
         let mut rx = MockRx {
-            events: VecDeque::from(vec![ScanEvent::IcmpResponse {
-                dest_port: 80,
-                icmp_type: IcmpTypes::DestinationUnreachable.0,
-                icmp_code: 1,
-            }]),
+            events: VecDeque::from(vec![icmp_response(
+                source_port,
+                80,
+                source_ip,
+                destination.ip(),
+                IcmpTypes::DestinationUnreachable.0,
+                1,
+            )]),
         };
 
-        let results = scan_ports_concurrent(
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0),
+        let results = scan_ports_concurrent_with_base_port(
+            destination,
             &[80],
-            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            source_ip,
             Duration::from_millis(100),
             &mut tx,
             &mut rx,
+            dummy_base_port,
         )
         .expect("scan failed");
 
@@ -683,25 +717,97 @@ mod tests {
     #[test]
     fn scan_ports_concurrent_detects_closed_port_via_icmp_v6() {
         let mut tx = MockTx { sent: vec![] };
+        let dummy_base_port = 10_000;
+        let source_port = calculate_source_port(dummy_base_port, 0);
+        let source_ip = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let destination = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0);
         let mut rx = MockRx {
-            events: VecDeque::from(vec![ScanEvent::IcmpResponse {
-                dest_port: 80,
-                icmp_type: Icmpv6Types::DestinationUnreachable.0,
-                icmp_code: ICMPV6_CODE_PORT_UNREACHABLE,
-            }]),
+            events: VecDeque::from(vec![icmp_response(
+                source_port,
+                80,
+                source_ip,
+                destination.ip(),
+                Icmpv6Types::DestinationUnreachable.0,
+                ICMPV6_CODE_PORT_UNREACHABLE,
+            )]),
         };
 
-        let results = scan_ports_concurrent(
-            SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0),
+        let results = scan_ports_concurrent_with_base_port(
+            destination,
             &[80],
-            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            source_ip,
             Duration::from_millis(100),
             &mut tx,
             &mut rx,
+            dummy_base_port,
         )
         .expect("scan failed");
 
         assert_eq!(results.get(&80), Some(&PortState::Closed));
+    }
+
+    #[test]
+    fn scan_ports_concurrent_ignores_icmp_quotes_with_wrong_source_port() {
+        let mut tx = MockTx { sent: vec![] };
+        let dummy_base_port = 10_000;
+        let source_port = calculate_source_port(dummy_base_port, 0).wrapping_add(1);
+        let source_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let mut rx = MockRx {
+            events: VecDeque::from(vec![icmp_response(
+                source_port,
+                80,
+                source_ip,
+                destination.ip(),
+                IcmpTypes::DestinationUnreachable.0,
+                icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable.0,
+            )]),
+        };
+
+        let results = scan_ports_concurrent_with_base_port(
+            destination,
+            &[80],
+            source_ip,
+            Duration::from_millis(100),
+            &mut tx,
+            &mut rx,
+            dummy_base_port,
+        )
+        .expect("scan failed");
+
+        assert_eq!(results.get(&80), Some(&PortState::OpenOrFiltered));
+    }
+
+    #[test]
+    fn scan_ports_concurrent_ignores_icmp_quotes_with_wrong_inner_ips() {
+        let mut tx = MockTx { sent: vec![] };
+        let dummy_base_port = 10_000;
+        let source_port = calculate_source_port(dummy_base_port, 0);
+        let source_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+        let mut rx = MockRx {
+            events: VecDeque::from(vec![icmp_response(
+                source_port,
+                80,
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+                destination.ip(),
+                IcmpTypes::DestinationUnreachable.0,
+                icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable.0,
+            )]),
+        };
+
+        let results = scan_ports_concurrent_with_base_port(
+            destination,
+            &[80],
+            source_ip,
+            Duration::from_millis(100),
+            &mut tx,
+            &mut rx,
+            dummy_base_port,
+        )
+        .expect("scan failed");
+
+        assert_eq!(results.get(&80), Some(&PortState::OpenOrFiltered));
     }
 
     struct FailingUdpSender;

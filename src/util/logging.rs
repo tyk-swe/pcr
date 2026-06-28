@@ -37,11 +37,7 @@ pub fn init(
     log_file: Option<&Path>,
 ) -> Result<()> {
     let mut builder = Builder::new();
-    let base_level = level_override.unwrap_or(match verbose {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
-    });
+    let base_level = level_override.unwrap_or_else(|| level_from_verbosity(verbose));
     builder.filter_level(base_level);
 
     if let Some(path) = log_file {
@@ -87,6 +83,14 @@ pub fn init(
     Ok(())
 }
 
+fn level_from_verbosity(verbose: u8) -> LevelFilter {
+    match verbose {
+        0 | 1 => LevelFilter::Info,
+        2 => LevelFilter::Debug,
+        _ => LevelFilter::Trace,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -106,5 +110,14 @@ mod tests {
             }
             _ => panic!("Expected OpenLogFile error, got {:?}", result),
         }
+    }
+
+    #[test]
+    fn verbosity_maps_to_expected_levels() {
+        assert_eq!(level_from_verbosity(0), LevelFilter::Info);
+        assert_eq!(level_from_verbosity(1), LevelFilter::Info);
+        assert_eq!(level_from_verbosity(2), LevelFilter::Debug);
+        assert_eq!(level_from_verbosity(3), LevelFilter::Trace);
+        assert_eq!(level_from_verbosity(u8::MAX), LevelFilter::Trace);
     }
 }

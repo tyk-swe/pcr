@@ -19,7 +19,7 @@ use crate::engine::request::ListenerRequest;
 use crate::engine::EngineConfig;
 use crate::network::listener;
 use crate::output::OutputController;
-use crate::rules::RuleEngine;
+use crate::rules::{RuleEngine, RuleLoadOptions, RuleLoadReport};
 use crate::util::error::operation_failed;
 
 const TIMER_TICK: Duration = Duration::from_secs(5);
@@ -27,8 +27,59 @@ const LISTENER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_CONTROL_LINE_BYTES: usize = 64 * 1024;
 const CONTROL_COMMAND_QUEUE_CAPACITY: usize = 512;
 const COMMAND_QUEUE_SEND_TIMEOUT: Duration = Duration::from_secs(2);
+const LISTENER_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 type CommandResponse = anyhow::Result<String>;
+
+#[derive(Debug)]
+pub(crate) struct DaemonStartupPreflight {
+    rules: Option<RuleLoadReport>,
+}
+
+impl DaemonStartupPreflight {
+    pub(crate) fn rules_were_loaded(&self) -> bool {
+        self.rules.is_some()
+    }
+
+    pub(crate) fn into_rules(self) -> Option<RuleLoadReport> {
+        self.rules
+    }
+}
+
+pub(crate) fn preflight(opts: &DaemonRequest) -> Result<DaemonStartupPreflight> {
+    if opts.rules_file.is_none() && opts.control_socket.is_none() {
+        return Err(anyhow!(
+            "daemon startup requires --rules or --control-socket so it can be configured after launch"
+        ));
+    }
+
+    let rules = if let Some(rules_file) = opts.rules_file.as_ref() {
+        let report =
+            RuleEngine::load_rules_from_path_with_options(rules_file, RuleLoadOptions::default())
+                .with_context(|| format!("load rule file failed: path={rules_file}"))?;
+        if report.has_receive_triggers() {
+            ensure_listener_feature_available()?;
+        }
+        Some(report)
+    } else {
+        None
+    };
+
+    #[cfg(unix)]
+    if let Some(path) = opts.control_socket.as_ref() {
+        preflight_control_socket(path)
+            .with_context(|| format!("control socket preflight failed for {}", path))?;
+    }
+
+    #[cfg(not(unix))]
+    if let Some(path) = opts.control_socket.as_ref() {
+        return Err(anyhow!(
+            "--control-socket ({path}) is only available on Unix platforms"
+        ));
+    }
+
+    Ok(DaemonStartupPreflight { rules })
+}
 
 pub async fn run(
     opts: &DaemonRequest,
@@ -86,14 +137,19 @@ pub async fn run(
 
     if rules.has_receive_triggers() {
         debug!("Auto-starting listener because receive rules are active");
-        start_listener(
+        if let Err(err) = start_listener(
             &mut state,
             default_listener_options(),
             config,
             rules,
             output,
         )
-        .await?;
+        .await
+        {
+            #[cfg(unix)]
+            cleanup_control_socket(&mut control_socket).await;
+            return Err(err);
+        }
     }
 
     #[cfg(unix)]
@@ -149,28 +205,7 @@ pub async fn run(
     stop_listener(&mut state).await?;
 
     #[cfg(unix)]
-    if let Some((handle, path)) = control_socket.take() {
-        handle.abort();
-        let _ = handle.await;
-        match std::fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_socket() => {
-                if let Err(err) = std::fs::remove_file(&path) {
-                    warn!("failed to remove control socket '{}': {err}", path);
-                }
-            }
-            Ok(_) => {
-                warn!(
-                    "control socket cleanup skipped for '{}': path is not a socket",
-                    path
-                );
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-            Err(err) => warn!(
-                "failed to inspect control socket path '{}' during cleanup: {}",
-                path, err
-            ),
-        }
-    }
+    cleanup_control_socket(&mut control_socket).await;
 
     info!("Daemon shutdown complete");
     Ok(())
@@ -192,6 +227,57 @@ impl DaemonState {
             listener: None,
             listener_options: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod preflight_tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn preflight_rejects_daemon_without_rules_or_control_socket() {
+        let opts = DaemonRequest {
+            rules_file: None,
+            foreground: Some(true),
+            control_socket: None,
+        };
+
+        let err = preflight(&opts).expect_err("daemon must be configurable");
+
+        assert!(err
+            .to_string()
+            .contains("requires --rules or --control-socket"));
+    }
+
+    #[test]
+    fn preflight_loads_rules_without_engine_runtime() {
+        let mut rules = NamedTempFile::new().expect("create temporary rules file");
+        writeln!(
+            rules,
+            "{}",
+            r#"
+- name: "startup"
+  trigger: on_startup
+  actions:
+    - type: log
+      message: "boot"
+"#
+            .trim()
+        )
+        .expect("write rules");
+
+        let opts = DaemonRequest {
+            rules_file: Some(rules.path().to_string_lossy().into_owned()),
+            foreground: Some(true),
+            control_socket: None,
+        };
+
+        let preflight = preflight(&opts).expect("daemon preflight should load rules");
+
+        assert!(preflight.rules_were_loaded());
+        assert_eq!(preflight.into_rules().unwrap().rule_count(), 1);
     }
 }
 
@@ -372,23 +458,51 @@ async fn handle_command(
 
 async fn start_listener(
     state: &mut DaemonState,
+    options: ListenerRequest,
+    config: &EngineConfig,
+    rules: &RuleEngine,
+    output: &OutputController,
+) -> Result<()> {
+    start_listener_with_interface_hint(state, options, config, rules, output, None).await
+}
+
+async fn start_listener_with_interface_hint(
+    state: &mut DaemonState,
     mut options: ListenerRequest,
     config: &EngineConfig,
     rules: &RuleEngine,
     output: &OutputController,
+    interface_hint: Option<&str>,
 ) -> Result<()> {
     ensure_listener_feature_available()?;
     listener::validate_options(&options).map_err(anyhow::Error::from)?;
     stop_listener(state).await?;
     let shutdown = Arc::new(AtomicBool::new(true));
+    let (startup_tx, startup_rx) = oneshot::channel();
     let handle = listener::spawn_background(
         &options,
-        None,
+        interface_hint,
         config,
         listener_event_handler(rules, output),
         shutdown.clone(),
+        Some(startup_tx),
     )
     .map_err(anyhow::Error::from)?;
+    match time::timeout(LISTENER_STARTUP_TIMEOUT, startup_rx).await {
+        Ok(Ok(Ok(()))) => {}
+        Ok(Ok(Err(message))) => {
+            shutdown.store(false, Ordering::SeqCst);
+            let _ = stop_joined_listener(handle).await;
+            return Err(anyhow!(message));
+        }
+        Ok(Err(_)) => {
+            shutdown.store(false, Ordering::SeqCst);
+            return stop_unacknowledged_listener(handle).await;
+        }
+        Err(_) => {
+            debug!("listener startup acknowledgement timed out; treating listener as active");
+        }
+    }
     state.listener = Some(ActiveListener { shutdown, handle });
     options.listen = Some(true);
     state.listener_options = Some(options);
@@ -414,7 +528,7 @@ fn listener_event_handler(
     })
 }
 
-fn ensure_listener_feature_available() -> Result<()> {
+pub(crate) fn ensure_listener_feature_available() -> Result<()> {
     #[cfg(not(feature = "pcap"))]
     {
         Err(anyhow::Error::new(
@@ -474,6 +588,66 @@ async fn stop_listener(state: &mut DaemonState) -> Result<()> {
     Ok(())
 }
 
+async fn stop_joined_listener(
+    handle: tokio::task::JoinHandle<crate::network::listener::ListenerResult<()>>,
+) -> Result<()> {
+    match handle.await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(anyhow::Error::from(err)),
+        Err(join_err) => Err(anyhow::Error::from(join_err)),
+    }
+}
+
+async fn stop_unacknowledged_listener(
+    mut handle: tokio::task::JoinHandle<crate::network::listener::ListenerResult<()>>,
+) -> Result<()> {
+    let missing_ack =
+        || anyhow!("listener startup ended before the capture worker reported readiness");
+
+    tokio::select! {
+        result = &mut handle => {
+            match result {
+                Ok(Ok(())) => Err(missing_ack()),
+                Ok(Err(err)) => Err(anyhow::Error::from(err)),
+                Err(join_err) => Err(anyhow::Error::from(join_err)),
+            }
+        }
+        _ = time::sleep(LISTENER_SHUTDOWN_TIMEOUT) => {
+            handle.abort();
+            let _ = handle.await;
+            Err(missing_ack())
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn cleanup_control_socket(
+    control_socket: &mut Option<(tokio::task::JoinHandle<()>, String)>,
+) {
+    if let Some((handle, path)) = control_socket.take() {
+        handle.abort();
+        let _ = handle.await;
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.file_type().is_socket() => {
+                if let Err(err) = std::fs::remove_file(&path) {
+                    warn!("failed to remove control socket '{}': {err}", path);
+                }
+            }
+            Ok(_) => {
+                warn!(
+                    "control socket cleanup skipped for '{}': path is not a socket",
+                    path
+                );
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(err) => warn!(
+                "failed to inspect control socket path '{}' during cleanup: {}",
+                path, err
+            ),
+        }
+    }
+}
+
 fn send_response(tx: oneshot::Sender<CommandResponse>, result: CommandResponse) {
     if let Err(result) = tx.send(result) {
         match result {
@@ -500,18 +674,25 @@ fn default_listener_options() -> ListenerRequest {
 }
 
 #[cfg(unix)]
-fn spawn_control_socket(
-    path: &str,
-    tx: mpsc::Sender<DaemonCommand>,
-) -> Result<tokio::task::JoinHandle<()>> {
-    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
-    use tokio::net::UnixListener;
+fn preflight_control_socket(path: &str) -> Result<()> {
+    use std::os::unix::net::UnixListener;
 
+    prepare_control_socket_path(path)?;
+    let socket_path = std::path::Path::new(path);
+    let listener = UnixListener::bind(socket_path)
+        .with_context(|| operation_failed("bind control socket", format!("path={path}")))?;
+    drop(listener);
+    cleanup_control_socket_path(path);
+    Ok(())
+}
+
+#[cfg(unix)]
+fn prepare_control_socket_path(path: &str) -> Result<()> {
     let socket_path = std::path::Path::new(path);
 
     // Use symlink_metadata to inspect the file itself, not what it points to.
-    // This allows safe cleanup of symlinks (which remove_file handles) and
-    // detection of broken symlinks, while refusing to delete actual files.
+    // This allows safe cleanup of symlinks and detection of broken symlinks,
+    // while refusing to delete actual files.
     match std::fs::symlink_metadata(socket_path) {
         Ok(metadata) => {
             let file_type = metadata.file_type();
@@ -538,9 +719,7 @@ fn spawn_control_socket(
                 ));
             }
         }
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            // Path does not exist; safe to bind
-        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
         Err(err) => {
             return Err(err).context(operation_failed(
                 "inspect existing socket path",
@@ -548,6 +727,30 @@ fn spawn_control_socket(
             ));
         }
     }
+
+    Ok(())
+}
+
+#[cfg(unix)]
+fn cleanup_control_socket_path(path: &str) {
+    match std::fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_socket() => {
+            let _ = std::fs::remove_file(path);
+        }
+        _ => {}
+    }
+}
+
+#[cfg(unix)]
+fn spawn_control_socket(
+    path: &str,
+    tx: mpsc::Sender<DaemonCommand>,
+) -> Result<tokio::task::JoinHandle<()>> {
+    use std::os::unix::fs::PermissionsExt;
+    use tokio::net::UnixListener;
+
+    let socket_path = std::path::Path::new(path);
+    prepare_control_socket_path(path)?;
 
     let listener = UnixListener::bind(socket_path)
         .with_context(|| operation_failed("bind control socket", format!("path={path}")))?;

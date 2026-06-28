@@ -87,13 +87,32 @@ pub fn poll_icmp_event_v4<R: PacketReceiver + ?Sized>(
     verification_params: Option<(u8, u8)>, // ttl, probe
     timeout: Duration,
 ) -> Result<Option<(IcmpEventKind, IpAddr)>> {
+    poll_icmp_event_v4_with_source(
+        iter,
+        expected_protocol,
+        None,
+        expected_port,
+        verification_params,
+        timeout,
+    )
+}
+
+pub fn poll_icmp_event_v4_with_source<R: PacketReceiver + ?Sized>(
+    iter: &mut R,
+    expected_protocol: IpNextHeaderProtocol,
+    expected_source_port: Option<u16>,
+    expected_port: u16,
+    verification_params: Option<(u8, u8)>, // ttl, probe
+    timeout: Duration,
+) -> Result<Option<(IcmpEventKind, IpAddr)>> {
     match iter.next_packet(timeout)? {
         Some((packet_bytes, addr)) => {
             let packet =
                 IcmpPacket::new(&packet_bytes).ok_or_else(|| anyhow!("invalid ICMP packet"))?;
-            Ok(classify_icmp_event_v4(
+            Ok(classify_icmp_event_v4_with_source(
                 &packet,
                 expected_protocol,
+                expected_source_port,
                 expected_port,
                 verification_params,
             )
@@ -110,13 +129,32 @@ pub fn poll_icmp_event_v6<R: PacketReceiver + ?Sized>(
     verification_params: Option<(u8, u8)>, // ttl, probe
     timeout: Duration,
 ) -> Result<Option<(IcmpEventKind, IpAddr)>> {
+    poll_icmp_event_v6_with_source(
+        iter,
+        expected_protocol,
+        None,
+        expected_port,
+        verification_params,
+        timeout,
+    )
+}
+
+pub fn poll_icmp_event_v6_with_source<R: PacketReceiver + ?Sized>(
+    iter: &mut R,
+    expected_protocol: IpNextHeaderProtocol,
+    expected_source_port: Option<u16>,
+    expected_port: u16,
+    verification_params: Option<(u8, u8)>, // ttl, probe
+    timeout: Duration,
+) -> Result<Option<(IcmpEventKind, IpAddr)>> {
     match iter.next_packet(timeout)? {
         Some((packet_bytes, addr)) => {
             let packet =
                 Icmpv6Packet::new(&packet_bytes).ok_or_else(|| anyhow!("invalid ICMPv6 packet"))?;
-            Ok(classify_icmp_event_v6(
+            Ok(classify_icmp_event_v6_with_source(
                 &packet,
                 expected_protocol,
+                expected_source_port,
                 expected_port,
                 verification_params,
             )
@@ -132,8 +170,24 @@ pub fn classify_icmp_event_v4(
     expected_port: u16,
     verification_params: Option<(u8, u8)>, // (ttl, probe)
 ) -> Option<IcmpEventKind> {
+    classify_icmp_event_v4_with_source(
+        packet,
+        expected_protocol,
+        None,
+        expected_port,
+        verification_params,
+    )
+}
+
+pub fn classify_icmp_event_v4_with_source(
+    packet: &IcmpPacket,
+    expected_protocol: IpNextHeaderProtocol,
+    expected_source_port: Option<u16>,
+    expected_port: u16,
+    verification_params: Option<(u8, u8)>, // (ttl, probe)
+) -> Option<IcmpEventKind> {
     let original = extract_original_transport_v4(packet)?;
-    if !original.matches_expected_destination(expected_protocol, expected_port) {
+    if !original.matches_expected(expected_protocol, expected_source_port, expected_port) {
         return None;
     }
 
@@ -168,8 +222,24 @@ pub fn classify_icmp_event_v6(
     expected_port: u16,
     verification_params: Option<(u8, u8)>, // ttl, probe
 ) -> Option<IcmpEventKind> {
+    classify_icmp_event_v6_with_source(
+        packet,
+        expected_protocol,
+        None,
+        expected_port,
+        verification_params,
+    )
+}
+
+pub fn classify_icmp_event_v6_with_source(
+    packet: &Icmpv6Packet,
+    expected_protocol: IpNextHeaderProtocol,
+    expected_source_port: Option<u16>,
+    expected_port: u16,
+    verification_params: Option<(u8, u8)>, // ttl, probe
+) -> Option<IcmpEventKind> {
     let original = extract_original_transport_v6(packet)?;
-    if !original.matches_expected_destination(expected_protocol, expected_port) {
+    if !original.matches_expected(expected_protocol, expected_source_port, expected_port) {
         return None;
     }
 

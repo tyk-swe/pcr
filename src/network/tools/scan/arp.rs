@@ -14,6 +14,8 @@ use crate::network::arp;
 use crate::network::interface;
 use crate::util::error::operation_failed;
 
+use super::common::push_scan_target;
+
 pub async fn run_arp(
     target: &str,
     interface: &Option<String>,
@@ -148,7 +150,7 @@ fn parse_arp_targets(spec: &str) -> Result<Vec<Ipv4Addr>> {
                     if skip_boundaries && ip == broadcast {
                         continue;
                     }
-                    hosts.push(ip);
+                    push_scan_target(&mut hosts, ip)?;
                 }
                 Ok(hosts)
             }
@@ -238,6 +240,14 @@ mod tests {
         assert_eq!(ips[13], Ipv4Addr::new(192, 0, 2, 14));
         assert!(!ips.contains(&Ipv4Addr::new(192, 0, 2, 0)));
         assert!(!ips.contains(&Ipv4Addr::new(192, 0, 2, 15)));
+    }
+
+    #[test]
+    fn parse_arp_targets_rejects_cidr_over_limit() {
+        let err = parse_arp_targets("10.0.0.0/19").expect_err("large cidr should fail");
+        assert!(err
+            .to_string()
+            .contains("scan target expansion exceeds limit of 4096"));
     }
 
     #[test]

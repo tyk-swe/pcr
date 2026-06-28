@@ -10,6 +10,7 @@ use super::error::InterfaceError;
 use crate::engine::spec::{PacketSpec, TargetAddress, TransportSpec};
 use crate::network::interface;
 use crate::util::net::resolve_target_ip;
+use crate::util::source_ip::select_interface_ipv6_source_for_destination;
 
 type Result<T> = std::result::Result<T, InterfaceError>;
 
@@ -147,10 +148,12 @@ pub(crate) fn resolve_ip_addresses(
                 .filter(|addr| !addr.is_unspecified())
                 .map(IpAddr::V4)
                 .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-            IpAddr::V6(_) => interface_ipv6(interface)
-                .filter(|addr| !addr.is_unspecified())
-                .map(IpAddr::V6)
-                .unwrap_or_else(|| IpAddr::V6(Ipv6Addr::UNSPECIFIED)),
+            IpAddr::V6(destination) => {
+                select_interface_ipv6_source_for_destination(interface, destination)
+                    .filter(|addr| !addr.is_unspecified())
+                    .map(IpAddr::V6)
+                    .unwrap_or_else(|| IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+            }
         },
     };
 
@@ -167,7 +170,7 @@ mod tests {
     use libc::IFF_UP;
     use pnet::datalink::MacAddr;
     use pnet::ipnetwork::IpNetwork;
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     fn base_spec() -> PacketSpec {
         PacketSpec {
@@ -193,6 +196,21 @@ mod tests {
             index: 0,
             mac,
             ips: vec![IpNetwork::new(IpAddr::V4(addr), 24).expect("ipv4 network")],
+            flags: IFF_UP as u32,
+        }
+    }
+
+    fn interface_with_ipv6(addrs: &[Ipv6Addr]) -> NetworkInterface {
+        NetworkInterface {
+            name: "v6".to_string(),
+            description: String::new(),
+            index: 0,
+            mac: Some(MacAddr::new(0, 0, 0, 0, 0, 1)),
+            ips: addrs
+                .iter()
+                .copied()
+                .map(|addr| IpNetwork::new(IpAddr::V6(addr), 64).expect("ipv6 network"))
+                .collect(),
             flags: IFF_UP as u32,
         }
     }
@@ -266,6 +284,38 @@ mod tests {
 
         // Should return Some(true) for IPv6 source
         assert_eq!(desired_ipv6(&spec_v6), Some(true));
+    }
+
+    #[test]
+    fn resolve_ip_addresses_prefers_link_local_source_for_link_local_destination() {
+        let global = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let destination = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 10);
+        let iface = interface_with_ipv6(&[global, link_local]);
+        let mut spec = base_spec();
+        spec.target.address = Some(TargetAddress::Ip(IpAddr::V6(destination)));
+
+        let (source, destination_out) =
+            resolve_ip_addresses(&spec, &iface).expect("resolve addresses");
+
+        assert_eq!(source, IpAddr::V6(link_local));
+        assert_eq!(destination_out, IpAddr::V6(destination));
+    }
+
+    #[test]
+    fn resolve_ip_addresses_prefers_non_link_local_source_for_global_destination() {
+        let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let global = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 10);
+        let iface = interface_with_ipv6(&[Ipv6Addr::UNSPECIFIED, link_local, global]);
+        let mut spec = base_spec();
+        spec.target.address = Some(TargetAddress::Ip(IpAddr::V6(destination)));
+
+        let (source, destination_out) =
+            resolve_ip_addresses(&spec, &iface).expect("resolve addresses");
+
+        assert_eq!(source, IpAddr::V6(global));
+        assert_eq!(destination_out, IpAddr::V6(destination));
     }
 
     #[test]

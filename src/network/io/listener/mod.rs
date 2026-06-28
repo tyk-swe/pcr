@@ -11,6 +11,8 @@ use std::sync::Arc;
 use log::{info, warn};
 #[cfg(feature = "pcap")]
 use tokio::sync::mpsc;
+#[cfg(any(feature = "daemon", feature = "pcap"))]
+use tokio::sync::oneshot;
 #[cfg(feature = "daemon")]
 use tokio::task::JoinHandle;
 
@@ -40,6 +42,8 @@ use process::process_packet;
 
 pub type ListenerResult<T> = std::result::Result<T, ListenerError>;
 pub type ListenerEventHandler = Arc<dyn Fn(ListenerEvent) + Send + Sync>;
+#[cfg(any(feature = "daemon", feature = "pcap"))]
+pub(crate) type ListenerStartupSignal = oneshot::Sender<std::result::Result<(), String>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg(any(test, feature = "pcap"))]
@@ -67,6 +71,7 @@ pub async fn run_command(
                 config.clone(),
                 handler.clone(),
                 None,
+                None,
             )
             .await?;
             if !should_rearm_listener(&runtime, outcome) {
@@ -76,7 +81,7 @@ pub async fn run_command(
         }
         Ok(())
     } else {
-        run_internal(runtime, interface_hint, config.clone(), handler, None)
+        run_internal(runtime, interface_hint, config.clone(), handler, None, None)
             .await
             .map(|_| ())
     }
@@ -102,7 +107,7 @@ pub async fn run_from_spec(
     #[cfg(feature = "pcap")]
     {
         let runtime = ListenerRuntimeConfig::from_spec(spec)?;
-        run_internal(runtime, interface_hint, config.clone(), handler, None)
+        run_internal(runtime, interface_hint, config.clone(), handler, None, None)
             .await
             .map(|_| ())
     }
@@ -115,10 +120,11 @@ pub(crate) fn spawn_background(
     config: &EngineConfig,
     handler: ListenerEventHandler,
     shutdown: Arc<AtomicBool>,
+    startup: Option<ListenerStartupSignal>,
 ) -> ListenerResult<JoinHandle<ListenerResult<()>>> {
     #[cfg(not(feature = "pcap"))]
     {
-        let _ = (options, interface_hint, config, handler, shutdown);
+        let _ = (options, interface_hint, config, handler, shutdown, startup);
         Err(ListenerError::ListenerRequiresPcap)
     }
 
@@ -135,6 +141,7 @@ pub(crate) fn spawn_background(
                 config,
                 handler,
                 Some(shutdown),
+                startup,
             )
             .await
             .map(|_| ())
@@ -154,13 +161,21 @@ async fn run_internal(
     _config: EngineConfig,
     handler: ListenerEventHandler,
     shutdown: Option<Arc<AtomicBool>>,
+    startup: Option<ListenerStartupSignal>,
 ) -> ListenerResult<ListenerRunOutcome> {
-    let interface = interface::find_interface(interface_hint).map_err(|source| {
-        ListenerError::InterfaceLookup {
-            hint: interface_hint.map(|s| s.to_string()),
-            source,
+    let interface = match interface::find_interface(interface_hint) {
+        Ok(interface) => interface,
+        Err(source) => {
+            let err = ListenerError::InterfaceLookup {
+                hint: interface_hint.map(|s| s.to_string()),
+                source,
+            };
+            if let Some(startup) = startup {
+                let _ = startup.send(Err(err.to_string()));
+            }
+            return Err(err);
         }
-    })?;
+    };
 
     info!(
         "Listener active on {} filter={:?} promisc={} timeout={:?} capture={:?} queue_capacity={}",
@@ -190,6 +205,7 @@ async fn run_internal(
         interface.clone(),
         packet_tx,
         running.clone(),
+        startup,
     );
 
     let mut captured = 0usize;
@@ -290,6 +306,38 @@ mod tests {
 
         assert!(matches!(
             result,
+            Err(ListenerError::InterfaceLookup { hint: Some(ref hint), .. })
+                if hint == "__packetcraftr_missing_listener_interface__"
+        ));
+    }
+
+    #[cfg(all(feature = "daemon", feature = "pcap"))]
+    #[tokio::test]
+    async fn spawn_background_reports_startup_failure() {
+        let options = ListenerRequest::default();
+        let config = empty_engine_config();
+        let handler: ListenerEventHandler = Arc::new(|_| {});
+        let shutdown = Arc::new(AtomicBool::new(true));
+        let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
+
+        let handle = spawn_background(
+            &options,
+            Some("__packetcraftr_missing_listener_interface__"),
+            &config,
+            handler,
+            shutdown,
+            Some(startup_tx),
+        )
+        .expect("spawn listener task");
+
+        let startup = startup_rx.await.expect("startup acknowledgement");
+        assert!(startup
+            .expect_err("startup should fail")
+            .contains("__packetcraftr_missing_listener_interface__"));
+
+        let joined = handle.await.expect("listener task joined");
+        assert!(matches!(
+            joined,
             Err(ListenerError::InterfaceLookup { hint: Some(ref hint), .. })
                 if hint == "__packetcraftr_missing_listener_interface__"
         ));

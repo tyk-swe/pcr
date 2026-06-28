@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::engine::spec::{
-    DestinationSpec, IcmpSpec, PacketSpec, PayloadSource, PayloadSpec, TargetAddress, TcpSpec,
-    TransmissionSpec, TransportSpec, UdpSpec,
+    DestinationSpec, IcmpSpec, Icmpv6Spec, PacketSpec, PayloadSource, PayloadSpec, TargetAddress,
+    TcpSpec, TransmissionSpec, TransportSpec, UdpSpec,
 };
 use crate::network::fuzz::config::{FuzzConfig, FuzzProtocol, FuzzStrategy};
 use crate::network::sender::execute_transmission;
@@ -33,7 +33,7 @@ where
         config.target_ip, config.strategy
     );
 
-    let _target_ip: IpAddr = config.target_ip.parse()?;
+    let target_ip: IpAddr = config.target_ip.parse()?;
     let mut failures = 0;
 
     for i in 0..config.count {
@@ -46,7 +46,7 @@ where
         let mut spec = PacketSpec {
             // Construct a PacketSpec based on the config and generated payload
             target: DestinationSpec {
-                address: Some(TargetAddress::Ip(config.target_ip.parse()?)),
+                address: Some(TargetAddress::Ip(target_ip)),
                 interface: None,
             },
             payload: PayloadSpec {
@@ -71,8 +71,10 @@ where
                 spec.transport = TransportSpec::Udp(udp);
             }
             FuzzProtocol::Icmp => {
-                let icmp = IcmpSpec::default();
-                spec.transport = TransportSpec::Icmp(icmp);
+                spec.transport = match target_ip {
+                    IpAddr::V4(_) => TransportSpec::Icmp(IcmpSpec::default()),
+                    IpAddr::V6(_) => TransportSpec::Icmpv6(Icmpv6Spec::default()),
+                };
             }
         }
 
@@ -249,6 +251,36 @@ mod tests {
         .await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_run_fuzz_uses_icmpv6_for_ipv6_target() {
+        use std::sync::{Arc, Mutex};
+
+        let config = FuzzConfig {
+            target_ip: "2001:db8::1".to_string(),
+            protocol: FuzzProtocol::Icmp,
+            target_port: None,
+            strategy: FuzzStrategy::Boundary,
+            count: 1,
+            delay_ms: 0,
+        };
+
+        let transports = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&transports);
+
+        run_fuzz_internal(config, move |spec| {
+            let captured = Arc::clone(&captured);
+            async move {
+                captured.lock().unwrap().push(spec.transport);
+                Ok(())
+            }
+        })
+        .await
+        .expect("fuzz run should succeed");
+
+        let transports = transports.lock().unwrap();
+        assert!(matches!(transports.as_slice(), [TransportSpec::Icmpv6(_)]));
     }
 
     use proptest::prelude::*;

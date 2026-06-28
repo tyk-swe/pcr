@@ -183,6 +183,9 @@ fn plan_overlap_fragments(
         if mtu <= header_len + first_fragment_extra {
             return Err(FragmentError::MtuLeavesNoPayload { mtu: mtu_value });
         }
+        if mtu - header_len - first_fragment_extra < 8 {
+            return Err(FragmentError::MtuLeavesNoPayload { mtu: mtu_value });
+        }
     }
 
     let base_size = frag // Base first fragment on aligned MTU or balanced split
@@ -543,6 +546,20 @@ mod tests {
         let available = 40 - 20;
         let aligned = align_down(available, 8);
         assert!(result[0].len <= aligned.max(8));
+    }
+
+    #[test]
+    fn plan_overlap_fragments_rejects_mtu_with_less_than_eight_payload_bytes() {
+        let mut spec = create_default_spec();
+        spec.overlap = true;
+        spec.mtu = Some(27);
+
+        let result = plan_fragments(&spec, 50, 20, 0);
+
+        assert!(matches!(
+            result,
+            Err(FragmentError::MtuLeavesNoPayload { mtu: 27 })
+        ));
     }
 
     #[test]

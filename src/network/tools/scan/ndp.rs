@@ -6,8 +6,7 @@
 //! The scanner mirrors the IPv4 ARP probe flow: parse the target specification,
 //! normalize hosts, and probe each address while selecting an appropriate
 //! source IP for the interface. IPv6 networks can span enormous host counts, so
-//! the scanner restricts probing to small prefixes (/120 or longer) to avoid
-//! generating excessive traffic.
+//! the scanner bounds CIDR expansion before probing.
 use std::net::Ipv6Addr;
 use std::time::Duration;
 
@@ -20,6 +19,11 @@ use crate::engine::EngineConfig;
 use crate::network::interface;
 use crate::network::ndp;
 use crate::util::error::operation_failed;
+use crate::util::source_ip::select_interface_ipv6_source_for_destination;
+
+use super::common::push_scan_target;
+#[cfg(test)]
+use super::common::MAX_SCAN_TARGETS;
 
 pub async fn run_ndp(
     target: &str,
@@ -138,49 +142,22 @@ fn choose_best_source_ip(interface: &NetworkInterface, target: Ipv6Addr) -> Opti
     // Try to find a matching prefix first.
     for ip_net in &interface.ips {
         if let IpNetwork::V6(v6) = ip_net {
-            if v6.contains(target) {
+            if !v6.ip().is_unspecified() && v6.contains(target) {
                 return Some(v6.ip());
             }
         }
     }
 
-    // If target is link-local, try to find a link-local source.
-    if target.is_unicast_link_local() {
-        for ip_net in &interface.ips {
-            if let IpNetwork::V6(v6) = ip_net {
-                if v6.ip().is_unicast_link_local() {
-                    return Some(v6.ip());
-                }
-            }
-        }
-    }
-
-    // Fallback: use the first IPv6 address found to avoid stalling the scan
-    // if no better match is available.
-    for ip_net in &interface.ips {
-        if let IpNetwork::V6(v6) = ip_net {
-            return Some(v6.ip());
-        }
-    }
-
-    None
+    select_interface_ipv6_source_for_destination(interface, target)
 }
 
 fn parse_ndp_targets(spec: &str) -> Result<Vec<Ipv6Addr>> {
     if let Ok(network) = spec.parse::<IpNetwork>() {
         match network {
             IpNetwork::V6(v6) => {
-                if v6.prefix() < 120 {
-                    // Restrict to small networks to avoid generating excessive NDP
-                    // probes across large IPv6 address spaces.
-                    return Err(anyhow!(
-                        "NDP probing supports small IPv6 networks only (prefix >= 120)"
-                    ));
-                }
-
                 let mut hosts = Vec::new();
                 for ip in v6.iter() {
-                    hosts.push(ip);
+                    push_scan_target(&mut hosts, ip)?;
                 }
                 Ok(hosts)
             }
@@ -224,10 +201,19 @@ mod tests {
     }
 
     #[test]
+    fn parse_ndp_targets_allows_max_sized_network() {
+        let ips = parse_ndp_targets("2001:db8::/116").expect("max network should parse");
+        assert_eq!(ips.len(), MAX_SCAN_TARGETS);
+    }
+
+    #[test]
     fn parse_ndp_targets_rejects_large_network() {
         let result = parse_ndp_targets("2001:db8::/64");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("prefix >= 120"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("scan target expansion exceeds limit of 4096"));
     }
 
     #[test]
@@ -278,6 +264,30 @@ mod tests {
         };
 
         assert_eq!(choose_best_source_ip(&iface, target), Some(link_local_src));
+    }
+
+    #[test]
+    fn choose_best_source_ip_prefers_non_link_local_for_global_target() {
+        let target = Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 10);
+        let link_local_src = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let global_src = Ipv6Addr::new(0x2001, 0xdb8, 0, 2, 0, 0, 0, 1);
+
+        let iface = NetworkInterface {
+            name: "test".to_string(),
+            description: "".to_string(),
+            index: 1,
+            mac: None,
+            ips: vec![
+                IpNetwork::V6(
+                    pnet::ipnetwork::Ipv6Network::new(Ipv6Addr::UNSPECIFIED, 128).unwrap(),
+                ),
+                IpNetwork::V6(pnet::ipnetwork::Ipv6Network::new(link_local_src, 64).unwrap()),
+                IpNetwork::V6(pnet::ipnetwork::Ipv6Network::new(global_src, 64).unwrap()),
+            ],
+            flags: 0,
+        };
+
+        assert_eq!(choose_best_source_ip(&iface, target), Some(global_src));
     }
 
     #[test]

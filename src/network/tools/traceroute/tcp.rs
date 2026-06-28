@@ -23,8 +23,8 @@ use super::common::{
     PacketReceiver, ProbeResult, TracerouteExecutor, DEFAULT_PORT,
 };
 use super::utils::{
-    poll_icmp_event_v4, poll_icmp_event_v6, IcmpEventKind, IcmpReceiverAdapter,
-    Icmpv6ReceiverAdapter,
+    poll_icmp_event_v4_with_source, poll_icmp_event_v6_with_source, IcmpEventKind,
+    IcmpReceiverAdapter, Icmpv6ReceiverAdapter,
 };
 
 struct TcpV4Executor<'a, R: ?Sized> {
@@ -242,9 +242,10 @@ fn await_tcp_probe_v4<R: PacketReceiver + ?Sized>(
     while let Some(remaining) = remaining_probe_time(start, timeout) {
         let slice = remaining.min(Duration::from_millis(100));
 
-        if let Some((event, addr)) = poll_icmp_event_v4(
+        if let Some((event, addr)) = poll_icmp_event_v4_with_source(
             icmp_iter,
             IpNextHeaderProtocols::Tcp,
+            Some(expected_source_port),
             expected_dest_port,
             None,
             slice,
@@ -281,9 +282,10 @@ fn await_tcp_probe_v6<R: PacketReceiver + ?Sized>(
     while let Some(remaining) = remaining_probe_time(start, timeout) {
         let slice = remaining.min(Duration::from_millis(100));
 
-        if let Some((event, addr)) = poll_icmp_event_v6(
+        if let Some((event, addr)) = poll_icmp_event_v6_with_source(
             icmp_iter,
             IpNextHeaderProtocols::Tcp,
+            Some(expected_source_port),
             expected_dest_port,
             None,
             slice,

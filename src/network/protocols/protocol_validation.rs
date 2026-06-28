@@ -1,6 +1,8 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::IpAddr;
+
 use pnet::packet::icmp::echo_request::EchoRequestPacket;
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
 use pnet::packet::icmpv6::Icmpv6Packet;
@@ -15,19 +17,84 @@ use pnet::packet::Packet;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OriginalTransport {
     pub(crate) protocol: IpNextHeaderProtocol,
+    pub(crate) source_ip: IpAddr,
+    pub(crate) destination_ip: IpAddr,
     pub(crate) source: u16,
     pub(crate) destination: u16,
     pub(crate) payload: Vec<u8>,
 }
 
 impl OriginalTransport {
-    pub(crate) fn matches_expected_destination(
+    #[allow(dead_code)]
+    pub(crate) fn matches_expected(
         &self,
         expected_protocol: IpNextHeaderProtocol,
+        expected_source: Option<u16>,
         expected_destination: u16,
     ) -> bool {
-        self.protocol == expected_protocol && self.destination == expected_destination
+        self.protocol == expected_protocol
+            && expected_source.is_none_or(|source| self.source == source)
+            && self.destination == expected_destination
     }
+}
+
+pub(crate) struct Ipv6TransportPayload<'a> {
+    pub(crate) protocol: IpNextHeaderProtocol,
+    pub(crate) payload: &'a [u8],
+}
+
+pub(crate) fn ipv6_transport_payload<'a>(
+    packet: &'a Ipv6Packet<'a>,
+) -> Option<Ipv6TransportPayload<'a>> {
+    let mut protocol = packet.get_next_header();
+    let mut payload = packet.payload();
+
+    for _ in 0..8 {
+        match protocol {
+            IpNextHeaderProtocols::Hopopt
+            | IpNextHeaderProtocols::Ipv6Route
+            | IpNextHeaderProtocols::Ipv6Opts => {
+                if payload.len() < 2 {
+                    return None;
+                }
+                let next = IpNextHeaderProtocol::new(payload[0]);
+                let header_len = (usize::from(payload[1]) + 1) * 8;
+                if payload.len() < header_len {
+                    return None;
+                }
+                protocol = next;
+                payload = &payload[header_len..];
+            }
+            IpNextHeaderProtocols::Ipv6Frag => {
+                if payload.len() < 8 {
+                    return None;
+                }
+                let fragment_field = u16::from_be_bytes([payload[2], payload[3]]);
+                let fragment_offset = (fragment_field & 0xfff8) >> 3;
+                if fragment_offset != 0 {
+                    return None;
+                }
+                protocol = IpNextHeaderProtocol::new(payload[0]);
+                payload = &payload[8..];
+            }
+            IpNextHeaderProtocols::Ah => {
+                if payload.len() < 2 {
+                    return None;
+                }
+                let next = IpNextHeaderProtocol::new(payload[0]);
+                let header_len = (usize::from(payload[1]) + 2) * 4;
+                if payload.len() < header_len {
+                    return None;
+                }
+                protocol = next;
+                payload = &payload[header_len..];
+            }
+            IpNextHeaderProtocols::Ipv6NoNxt => return None,
+            _ => return Some(Ipv6TransportPayload { protocol, payload }),
+        }
+    }
+
+    None
 }
 
 pub(crate) fn extract_original_transport_v4(packet: &IcmpPacket) -> Option<OriginalTransport> {
@@ -53,7 +120,12 @@ pub(crate) fn extract_original_transport_v4(packet: &IcmpPacket) -> Option<Origi
     if inner_payload.len() < 4 {
         return None;
     }
-    original_transport_from_payload(proto, inner_payload)
+    original_transport_from_payload(
+        proto,
+        inner_payload,
+        IpAddr::V4(inner.get_source()),
+        IpAddr::V4(inner.get_destination()),
+    )
 }
 
 pub(crate) fn extract_original_transport_v6(packet: &Icmpv6Packet) -> Option<OriginalTransport> {
@@ -72,23 +144,31 @@ pub(crate) fn extract_original_transport_v6(packet: &Icmpv6Packet) -> Option<Ori
         return None;
     }
     let inner = Ipv6Packet::new(payload)?;
-    let proto = inner.get_next_header();
-    let inner_payload = inner.payload();
-    if inner_payload.len() < 4 {
+    let transport = ipv6_transport_payload(&inner)?;
+    if transport.payload.len() < 4 {
         return None;
     }
-    original_transport_from_payload(proto, inner_payload)
+    original_transport_from_payload(
+        transport.protocol,
+        transport.payload,
+        IpAddr::V6(inner.get_source()),
+        IpAddr::V6(inner.get_destination()),
+    )
 }
 
 fn original_transport_from_payload(
     proto: IpNextHeaderProtocol,
     inner_payload: &[u8],
+    source_ip: IpAddr,
+    destination_ip: IpAddr,
 ) -> Option<OriginalTransport> {
     match proto {
         IpNextHeaderProtocols::Udp => {
             let udp = UdpPacket::new(inner_payload)?;
             Some(OriginalTransport {
                 protocol: proto,
+                source_ip,
+                destination_ip,
                 source: udp.get_source(),
                 destination: udp.get_destination(),
                 payload: udp.payload().to_vec(),
@@ -98,6 +178,8 @@ fn original_transport_from_payload(
             let tcp = TcpPacket::new(inner_payload)?;
             Some(OriginalTransport {
                 protocol: proto,
+                source_ip,
+                destination_ip,
                 source: tcp.get_source(),
                 destination: tcp.get_destination(),
                 payload: tcp.payload().to_vec(),
@@ -111,6 +193,8 @@ fn original_transport_from_payload(
             };
             Some(OriginalTransport {
                 protocol: proto,
+                source_ip,
+                destination_ip,
                 source: u16::from_be_bytes([inner_payload[0], inner_payload[1]]),
                 destination: u16::from_be_bytes([inner_payload[2], inner_payload[3]]),
                 payload,
@@ -153,14 +237,14 @@ pub(crate) fn extract_inner_echo_v6(packet: &Icmpv6Packet) -> Option<(u16, u16)>
         return None;
     }
     let inner = Ipv6Packet::new(payload)?;
-    if inner.get_next_header() != IpNextHeaderProtocols::Icmpv6 {
+    let transport = ipv6_transport_payload(&inner)?;
+    if transport.protocol != IpNextHeaderProtocols::Icmpv6 {
         return None;
     }
-    let inner_payload = inner.payload();
-    if inner_payload.len() < 4 {
+    if transport.payload.len() < 4 {
         return None;
     }
-    let inner_packet = Icmpv6Packet::new(inner_payload)?;
+    let inner_packet = Icmpv6Packet::new(transport.payload)?;
     parse_icmpv6_echo(&inner_packet)
 }
 

@@ -220,39 +220,34 @@ async fn stop_listener_aborts_hanging_task_after_timeout() {
 
 #[cfg(feature = "pcap")]
 #[tokio::test]
-async fn handle_command_listen_starts_listener() {
+async fn start_listener_does_not_record_listener_when_capture_startup_fails() {
     let mut state = DaemonState::new();
-    let mut rules = rule_engine();
+    let rules = rule_engine();
     let config = empty_engine_config();
     let output = OutputController::new(None);
-
-    // Avoid using filter/pcap features to ensure test portability
     let options = ListenerRequest {
         timeout: Some(5),
         ..Default::default()
     };
 
-    let (tx, rx) = oneshot::channel();
-    let exit = handle_command(
-        DaemonCommand::Listen {
-            options,
-            respond_to: tx,
-        },
+    let result = start_listener_with_interface_hint(
         &mut state,
-        &mut rules,
+        options,
         &config,
+        &rules,
         &output,
+        Some("__packetcraftr_missing_daemon_listener_interface__"),
     )
-    .await
-    .unwrap();
+    .await;
 
-    assert!(!exit);
-    let response = rx.await.unwrap().unwrap();
-    assert!(response.contains("listener active"));
-    assert!(state.listener.is_some());
-
-    let saved_opts = state.listener_options.as_ref().unwrap();
-    assert_eq!(saved_opts.timeout, Some(5));
+    let err = result.expect_err("startup should fail before listener is recorded");
+    assert!(
+        err.to_string()
+            .contains("__packetcraftr_missing_daemon_listener_interface__"),
+        "error should include missing interface hint: {err}"
+    );
+    assert!(state.listener.is_none());
+    assert!(state.listener_options.is_none());
 }
 
 #[cfg(not(feature = "pcap"))]

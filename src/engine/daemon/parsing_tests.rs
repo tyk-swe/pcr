@@ -179,6 +179,62 @@ async fn spawn_control_socket_refuses_regular_file() {
     assert!(file_path.exists(), "should not delete regular file");
 }
 
+#[test]
+fn preflight_control_socket_refuses_regular_file() {
+    use std::fs::File;
+    use tempfile::tempdir;
+
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("test_file");
+    File::create(&file_path).unwrap();
+
+    let opts = DaemonRequest {
+        rules_file: None,
+        foreground: Some(true),
+        control_socket: Some(file_path.to_string_lossy().into_owned()),
+    };
+
+    let result = preflight(&opts);
+
+    assert!(result.is_err(), "should refuse to overwrite regular file");
+    assert!(file_path.exists(), "should not delete regular file");
+}
+
+#[test]
+fn preflight_keeps_existing_control_socket_when_rules_fail() {
+    use std::os::unix::net::UnixListener;
+    use tempfile::tempdir;
+
+    let dir = tempdir().unwrap();
+    let socket_path = dir.path().join("control.sock");
+    let _listener = match UnixListener::bind(&socket_path) {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return,
+        Err(err) => panic!("failed to bind existing control socket: {err}"),
+    };
+    let rules_path = dir.path().join("bad-rules.yml");
+    std::fs::write(&rules_path, "not: a rule list\n").expect("write invalid rules");
+
+    let opts = DaemonRequest {
+        rules_file: Some(rules_path.to_string_lossy().into_owned()),
+        foreground: Some(true),
+        control_socket: Some(socket_path.to_string_lossy().into_owned()),
+    };
+
+    let err = preflight(&opts).expect_err("invalid rules should fail preflight");
+
+    assert!(
+        err.to_string().contains("load rule file failed"),
+        "rules should fail before control socket preflight: {err:#}"
+    );
+    let metadata = std::fs::symlink_metadata(&socket_path)
+        .expect("existing control socket path should remain");
+    assert!(
+        metadata.file_type().is_socket(),
+        "existing control socket should not be replaced or removed"
+    );
+}
+
 #[tokio::test]
 async fn spawn_control_socket_cleans_up_stale_socket() {
     use std::os::unix::net::UnixListener;
@@ -239,4 +295,33 @@ async fn spawn_control_socket_cleans_up_symlink() {
             .is_socket(),
         "path should now be a socket"
     );
+}
+
+#[tokio::test]
+async fn cleanup_control_socket_removes_bound_socket() {
+    use tempfile::tempdir;
+    use tokio::sync::mpsc;
+
+    let dir = tempdir().unwrap();
+    let socket_path = dir.path().join("control.sock");
+
+    let (tx, _rx) = mpsc::channel(8);
+    let handle = match spawn_control_socket(socket_path.to_str().unwrap(), tx) {
+        Ok(handle) => handle,
+        Err(err) if is_permission_error(&err) => return,
+        Err(err) => panic!("should bind control socket: {err}"),
+    };
+
+    let mut control_socket = Some((handle, socket_path.to_string_lossy().into_owned()));
+    cleanup_control_socket(&mut control_socket).await;
+
+    assert!(
+        control_socket.is_none(),
+        "cleanup should consume the active control socket handle"
+    );
+    match std::fs::symlink_metadata(&socket_path) {
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(_) => panic!("control socket path should be removed"),
+        Err(err) => panic!("failed to inspect control socket path: {err}"),
+    }
 }

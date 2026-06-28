@@ -18,9 +18,11 @@ use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 use pnet::packet::tcp::TcpPacket;
 use pnet::packet::udp::UdpPacket;
+use pnet::packet::vlan::VlanPacket;
 use pnet::packet::Packet;
 
 use crate::engine::{ListenerEvent, ProtocolLabel};
+use crate::network::protocol_validation::ipv6_transport_payload;
 use crate::util::telemetry;
 
 const PREVIEW_BYTES: usize = 48;
@@ -82,6 +84,11 @@ pub(crate) fn build_event(data: &[u8], show_reply: bool) -> ListenerEvent {
                     populate_ipv6(&mut event, &ipv6);
                 }
             }
+            EtherTypes::Vlan => {
+                if let Some(vlan) = VlanPacket::new(eth.payload()) {
+                    populate_vlan(&mut event, &vlan);
+                }
+            }
             _ => {
                 debug!(
                     "listener observed unsupported EtherType 0x{:04x}",
@@ -109,9 +116,39 @@ fn populate_ipv4(event: &mut ListenerEvent, packet: &Ipv4Packet) {
 fn populate_ipv6(event: &mut ListenerEvent, packet: &Ipv6Packet) {
     event.network_source = Some(IpAddr::V6(packet.get_source()));
     event.network_destination = Some(IpAddr::V6(packet.get_destination()));
-    event.network_protocol = Some(format!("IPv6 {:?}", packet.get_next_header()));
+    if let Some(transport) = ipv6_transport_payload(packet) {
+        event.network_protocol = Some(format!("IPv6 {:?}", transport.protocol));
+        populate_transport_details(event, transport.protocol, transport.payload);
+    } else {
+        event.network_protocol = Some(format!("IPv6 {:?}", packet.get_next_header()));
+    }
+}
 
-    populate_transport_details(event, packet.get_next_header(), packet.payload());
+fn populate_vlan(event: &mut ListenerEvent, packet: &VlanPacket) {
+    event.detail = Some(format!(
+        "vlan id={} ether type 0x{:04x}",
+        packet.get_vlan_identifier(),
+        packet.get_ethertype().0
+    ));
+
+    match packet.get_ethertype() {
+        EtherTypes::Ipv4 => {
+            if let Some(ipv4) = Ipv4Packet::new(packet.payload()) {
+                populate_ipv4(event, &ipv4);
+            }
+        }
+        EtherTypes::Ipv6 => {
+            if let Some(ipv6) = Ipv6Packet::new(packet.payload()) {
+                populate_ipv6(event, &ipv6);
+            }
+        }
+        _ => {
+            debug!(
+                "listener observed unsupported VLAN EtherType 0x{:04x}",
+                packet.get_ethertype().0
+            );
+        }
+    }
 }
 
 fn populate_transport_details(
@@ -239,6 +276,7 @@ mod tests {
     use pnet::packet::ipv6::MutableIpv6Packet;
     use pnet::packet::tcp::MutableTcpPacket;
     use pnet::packet::udp::MutableUdpPacket;
+    use pnet::packet::vlan::MutableVlanPacket;
     use pnet::packet::MutablePacket;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -375,6 +413,76 @@ mod tests {
             "Transport string missing flags"
         );
         assert_eq!(listener_protocol_label(&event), "tcp");
+    }
+
+    #[test]
+    fn build_event_unwraps_vlan_ipv4_tcp() {
+        let mut buffer = vec![0u8; 128];
+        let mut eth = MutableEthernetPacket::new(&mut buffer).unwrap();
+        eth.set_ethertype(EtherTypes::Vlan);
+        eth.set_source(MacAddr::new(0, 0, 0, 0, 0, 1));
+        eth.set_destination(MacAddr::new(0, 0, 0, 0, 0, 2));
+
+        let mut vlan = MutableVlanPacket::new(eth.payload_mut()).unwrap();
+        vlan.set_vlan_identifier(123);
+        vlan.set_ethertype(EtherTypes::Ipv4);
+
+        let mut ip = MutableIpv4Packet::new(vlan.payload_mut()).unwrap();
+        ip.set_version(4);
+        ip.set_header_length(5);
+        ip.set_total_length(40);
+        ip.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
+        ip.set_source(Ipv4Addr::new(192, 168, 1, 1));
+        ip.set_destination(Ipv4Addr::new(192, 168, 1, 2));
+
+        let mut tcp = MutableTcpPacket::new(ip.payload_mut()).unwrap();
+        tcp.set_source(12345);
+        tcp.set_destination(443);
+        tcp.set_flags(pnet::packet::tcp::TcpFlags::SYN);
+
+        let event = build_event(&buffer, false);
+
+        assert_eq!(
+            event.detail.as_deref(),
+            Some("vlan id=123 ether type 0x0800")
+        );
+        assert_eq!(
+            event.network_source,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)))
+        );
+        assert_eq!(
+            event.network_destination,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)))
+        );
+        assert_eq!(event.protocol_label, ProtocolLabel::Tcp);
+        assert!(event.transport.as_deref().unwrap().contains("12345 -> 443"));
+    }
+
+    #[test]
+    fn build_event_walks_ipv6_extension_headers() {
+        let mut buffer = vec![0u8; 14 + 40 + 8 + 8];
+        let mut eth = MutableEthernetPacket::new(&mut buffer).unwrap();
+        eth.set_ethertype(EtherTypes::Ipv6);
+        eth.set_source(MacAddr::new(0, 0, 0, 0, 0, 1));
+        eth.set_destination(MacAddr::new(0, 0, 0, 0, 0, 2));
+
+        let mut ip = MutableIpv6Packet::new(eth.payload_mut()).unwrap();
+        ip.set_version(6);
+        ip.set_payload_length(16);
+        ip.set_next_header(IpNextHeaderProtocols::Hopopt);
+        ip.set_source(Ipv6Addr::LOCALHOST);
+        ip.set_destination(Ipv6Addr::LOCALHOST);
+
+        let payload = ip.payload_mut();
+        payload[0] = IpNextHeaderProtocols::Icmpv6.0;
+        payload[1] = 0;
+        let mut icmp = MutableIcmpv6Packet::new(&mut payload[8..]).unwrap();
+        icmp.set_icmpv6_type(Icmpv6Types::EchoRequest);
+
+        let event = build_event(&buffer, false);
+
+        assert_eq!(event.protocol_label, ProtocolLabel::Icmp);
+        assert!(event.transport.as_deref().unwrap().contains("ICMPv6"));
     }
 
     #[test]

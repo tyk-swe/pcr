@@ -99,11 +99,11 @@ impl<'a> TcpScanRx for RealTcpRxV4<'a> {
             if let Some((packet, _)) = self.icmp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 if let Some(transport) = extract_original_transport_v4(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Tcp {
-                        return Ok(Some(ScanEvent::IcmpResponse {
-                            dest_port: transport.destination,
-                            icmp_type: packet.get_icmp_type().0,
-                            icmp_code: packet.get_icmp_code().0,
-                        }));
+                        return Ok(Some(ScanEvent::icmp_response(
+                            transport,
+                            packet.get_icmp_type().0,
+                            packet.get_icmp_code().0,
+                        )));
                     }
                 }
             }
@@ -136,11 +136,11 @@ impl<'a> TcpScanRx for RealTcpRxV6<'a> {
             if let Some((packet, _)) = self.icmp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 if let Some(transport) = extract_original_transport_v6(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Tcp {
-                        return Ok(Some(ScanEvent::IcmpResponse {
-                            dest_port: transport.destination,
-                            icmp_type: packet.get_icmpv6_type().0,
-                            icmp_code: packet.get_icmpv6_code().0,
-                        }));
+                        return Ok(Some(ScanEvent::icmp_response(
+                            transport,
+                            packet.get_icmpv6_type().0,
+                            packet.get_icmpv6_code().0,
+                        )));
                     }
                 }
             }

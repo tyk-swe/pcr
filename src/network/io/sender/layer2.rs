@@ -14,6 +14,7 @@ use pnet::packet::MutablePacket;
 use crate::engine::spec::{PacketSpec, VlanTag};
 use crate::network::sender::error::{Layer2Error, Result};
 use crate::network::{arp, ndp};
+use crate::util::source_ip::select_interface_ipv6_source_for_destination;
 
 use super::types::LinkType;
 
@@ -110,7 +111,7 @@ pub(crate) fn resolve_layer2_ipv6(
             None
         } else {
             let effective_source = if source_ip.is_unspecified() {
-                super::interface::interface_ipv6(interface)
+                select_interface_ipv6_source_for_destination(interface, destination_ip)
             } else {
                 Some(source_ip)
             };

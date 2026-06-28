@@ -89,6 +89,33 @@ fn rule_engine_load_from_path_allows_unknown_fields() {
 }
 
 #[test]
+fn rule_engine_strict_mode_rejects_nested_send_unknown_fields() {
+    let yaml = r#"
+- name: "nested-send-typos"
+  trigger: on_receive
+  actions:
+    - type: send
+      payload:
+        datax: "typo"
+      transport:
+        command:
+          tcp:
+            flagsx: "syn"
+"#;
+
+    let result = RuleEngine::validate_rules_from_str_with_options(yaml, RuleLoadOptions::strict());
+    let err = result.expect_err("strict mode should reject nested send typos");
+    let diagnostics = err.diagnostics().expect("validation diagnostics");
+
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.path == "rules[0].actions[0].payload.datax"));
+    assert!(diagnostics.iter().any(|diagnostic| {
+        diagnostic.path == "rules[0].actions[0].transport.command.tcp.flagsx"
+    }));
+}
+
+#[test]
 fn rule_engine_load_from_path_rejects_legacy_send_options_wrapper() {
     let mut engine = RuleEngine::new().expect("rule engine initialisation");
     let mut file = tempfile::NamedTempFile::new().expect("create temp file");

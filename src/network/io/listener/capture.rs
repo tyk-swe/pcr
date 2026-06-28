@@ -23,6 +23,7 @@ use tokio::task::JoinHandle;
 
 use super::config::ListenerRuntimeConfig;
 use super::error::ListenerError;
+use super::ListenerStartupSignal;
 use crate::util::telemetry;
 
 pub type ListenerResult<T> = std::result::Result<T, ListenerError>;
@@ -36,20 +37,24 @@ pub(crate) fn spawn_capture_thread(
     interface: datalink::NetworkInterface,
     packet_tx: mpsc::Sender<Vec<u8>>,
     running: Arc<AtomicBool>,
+    startup: Option<ListenerStartupSignal>,
 ) -> Option<JoinHandle<ListenerResult<()>>> {
     let recovery_running = running;
     Some(tokio::spawn(async move {
         let capture_running = Arc::clone(&recovery_running);
         let result = tokio::task::spawn_blocking(move || {
+            let mut startup = startup;
             if runtime.filter.is_some() {
                 #[cfg(feature = "pcap")]
                 {
-                    return capture_loop_with_pcap(
+                    let result = capture_loop_with_pcap(
                         runtime,
                         interface,
                         packet_tx,
                         Arc::clone(&capture_running),
+                        &mut startup,
                     );
+                    return notify_startup_failure_on_error(&mut startup, result);
                 }
 
                 #[cfg(not(feature = "pcap"))]
@@ -60,16 +65,19 @@ pub(crate) fn spawn_capture_thread(
                             filter, interface.name
                         );
                     }
-                    return capture_loop(
+                    let result = capture_loop(
                         runtime,
                         interface,
                         packet_tx,
                         Arc::clone(&capture_running),
+                        &mut startup,
                     );
+                    return notify_startup_failure_on_error(&mut startup, result);
                 }
             }
 
-            capture_loop(runtime, interface, packet_tx, capture_running)
+            let result = capture_loop(runtime, interface, packet_tx, capture_running, &mut startup);
+            notify_startup_failure_on_error(&mut startup, result)
         })
         .await;
 
@@ -90,6 +98,24 @@ pub(crate) fn spawn_capture_thread(
             }
         }
     }))
+}
+
+fn notify_startup_ready(startup: &mut Option<ListenerStartupSignal>) {
+    if let Some(startup) = startup.take() {
+        let _ = startup.send(Ok(()));
+    }
+}
+
+fn notify_startup_failure_on_error(
+    startup: &mut Option<ListenerStartupSignal>,
+    result: ListenerResult<()>,
+) -> ListenerResult<()> {
+    if let Err(err) = result.as_ref() {
+        if let Some(startup) = startup.take() {
+            let _ = startup.send(Err(err.to_string()));
+        }
+    }
+    result
 }
 
 #[cfg(feature = "pcap")]
@@ -177,6 +203,7 @@ fn capture_loop(
     interface: datalink::NetworkInterface,
     packet_tx: mpsc::Sender<Vec<u8>>,
     running: Arc<AtomicBool>,
+    startup: &mut Option<ListenerStartupSignal>,
 ) -> ListenerResult<()> {
     if interface.name.is_empty() {
         return Err(ListenerError::CaptureChannel {
@@ -223,6 +250,8 @@ fn capture_loop(
 
     #[cfg(feature = "pcap")]
     let mut recorder = create_capture_writer(runtime.capture_file.as_deref(), Linktype::ETHERNET)?;
+
+    notify_startup_ready(startup);
 
     let start = Instant::now();
     let timeout = runtime.timeout;
@@ -326,6 +355,7 @@ fn capture_loop_with_pcap(
     interface: datalink::NetworkInterface,
     packet_tx: mpsc::Sender<Vec<u8>>,
     running: Arc<AtomicBool>,
+    startup: &mut Option<ListenerStartupSignal>,
 ) -> ListenerResult<()> {
     let device = match resolve_pcap_device(&interface.name) {
         Ok(device) => device,
@@ -334,7 +364,7 @@ fn capture_loop_with_pcap(
                 "failed to resolve pcap device for {}: {err}; falling back to datalink capture",
                 interface.name
             );
-            return capture_loop(runtime, interface, packet_tx, running);
+            return capture_loop(runtime, interface, packet_tx, running, startup);
         }
     };
 
@@ -352,7 +382,7 @@ fn capture_loop_with_pcap(
                 "failed to open pcap capture on {}: {err}; falling back to datalink capture",
                 interface.name
             );
-            return capture_loop(runtime, interface, packet_tx, running);
+            return capture_loop(runtime, interface, packet_tx, running, startup);
         }
     };
 
@@ -366,7 +396,14 @@ fn capture_loop_with_pcap(
             })?;
     }
 
-    capture_loop_from_pcap(&mut capture, runtime, interface, packet_tx, running)
+    capture_loop_from_pcap(
+        &mut capture,
+        runtime,
+        interface,
+        packet_tx,
+        running,
+        startup,
+    )
 }
 
 #[cfg(feature = "pcap")]
@@ -376,6 +413,7 @@ fn capture_loop_from_pcap(
     interface: datalink::NetworkInterface,
     packet_tx: mpsc::Sender<Vec<u8>>,
     running: Arc<AtomicBool>,
+    startup: &mut Option<ListenerStartupSignal>,
 ) -> ListenerResult<()> {
     let capture_label = runtime
         .capture_file
@@ -383,6 +421,8 @@ fn capture_loop_from_pcap(
         .map(|path| path.display().to_string());
     let mut recorder =
         create_capture_writer(runtime.capture_file.as_deref(), capture.get_datalink())?;
+
+    notify_startup_ready(startup);
 
     let start = Instant::now();
     let timeout = runtime.timeout;
@@ -474,10 +514,20 @@ fn resolve_pcap_device(name: &str) -> ListenerResult<Device> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[cfg(feature = "net_integration")]
     use crate::network::listener::config::DEFAULT_QUEUE_CAPACITY;
     #[cfg(feature = "pcap")]
     use tempfile::TempDir;
+
+    fn empty_interface() -> datalink::NetworkInterface {
+        datalink::NetworkInterface {
+            name: String::new(),
+            description: String::new(),
+            index: 0,
+            mac: None,
+            ips: vec![],
+            flags: 0,
+        }
+    }
 
     #[cfg(feature = "net_integration")]
     #[ignore = "opens a pnet datalink capture channel with an invalid interface"]
@@ -491,18 +541,12 @@ mod tests {
             capture_file: None,
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
         };
-        let interface = datalink::NetworkInterface {
-            name: String::new(),
-            description: String::new(),
-            index: 0,
-            mac: None,
-            ips: vec![],
-            flags: 0,
-        };
+        let interface = empty_interface();
         let (tx, _rx) = mpsc::channel(1);
         let running = Arc::new(AtomicBool::new(true));
+        let mut startup = None;
 
-        let result = capture_loop(runtime, interface, tx, running);
+        let result = capture_loop(runtime, interface, tx, running, &mut startup);
 
         assert!(matches!(
             result,
@@ -527,6 +571,36 @@ mod tests {
             matches!(result, Err(ListenerError::CaptureOpen { .. })),
             "directory paths should fail to open as pcap files"
         );
+    }
+
+    #[tokio::test]
+    async fn spawn_capture_thread_reports_startup_failure_before_readiness() {
+        let runtime = ListenerRuntimeConfig {
+            filter: None,
+            promiscuous: false,
+            timeout: None,
+            show_reply: false,
+            capture_file: None,
+            queue_capacity: DEFAULT_QUEUE_CAPACITY,
+        };
+        let (tx, _rx) = mpsc::channel(1);
+        let running = Arc::new(AtomicBool::new(true));
+        let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
+
+        let handle =
+            spawn_capture_thread(runtime, empty_interface(), tx, running, Some(startup_tx))
+                .expect("capture task should spawn");
+
+        let startup = startup_rx.await.expect("startup acknowledgement");
+        assert!(startup
+            .expect_err("startup should fail")
+            .contains("failed to open datalink channel on <unspecified>"));
+
+        let result = handle.await.expect("capture task joined");
+        assert!(matches!(
+            result,
+            Err(ListenerError::CaptureChannel { interface, .. }) if interface == "<unspecified>"
+        ));
     }
 
     #[test]
@@ -575,18 +649,12 @@ mod tests {
             capture_file: None,
             queue_capacity: DEFAULT_QUEUE_CAPACITY,
         };
-        let interface = datalink::NetworkInterface {
-            name: String::new(),
-            description: String::new(),
-            index: 0,
-            mac: None,
-            ips: vec![],
-            flags: 0,
-        };
+        let interface = empty_interface();
         let (tx, _rx) = mpsc::channel(1);
         let running = Arc::new(AtomicBool::new(true));
+        let mut startup = None;
 
-        let result = capture_loop(runtime, interface, tx, running);
+        let result = capture_loop(runtime, interface, tx, running, &mut startup);
 
         match result {
             Err(ListenerError::CaptureChannel {

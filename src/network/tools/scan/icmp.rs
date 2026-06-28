@@ -30,7 +30,9 @@ use crate::network::pnet_utils::open_transport_channel;
 use crate::util::error::operation_failed;
 use crate::util::sync::LockResultExt;
 
-use super::common::{resolve_interface_override, resolve_target};
+#[cfg(test)]
+use super::common::MAX_SCAN_TARGETS;
+use super::common::{push_scan_target, resolve_interface_override, resolve_target};
 
 pub async fn run_icmp(
     target: &str,
@@ -100,14 +102,14 @@ fn parse_icmp_targets(spec: &str) -> Result<Vec<SocketAddr>> {
                 let mut hosts = Vec::new();
                 for ip in v4.iter() {
                     // For CIDR, port is 0, scope_id is 0
-                    hosts.push(SocketAddr::new(IpAddr::V4(ip), 0));
+                    push_scan_target(&mut hosts, SocketAddr::new(IpAddr::V4(ip), 0))?;
                 }
                 Ok(hosts)
             }
             IpNetwork::V6(v6) => {
                 let mut hosts = Vec::new();
                 for ip in v6.iter() {
-                    hosts.push(SocketAddr::new(IpAddr::V6(ip), 0));
+                    push_scan_target(&mut hosts, SocketAddr::new(IpAddr::V6(ip), 0))?;
                 }
                 Ok(hosts)
             }
@@ -531,6 +533,28 @@ mod tests {
         let targets = parse_icmp_targets("192.168.1.0/30").expect("parse cidr");
         // .0, .1, .2, .3 = 4 hosts
         assert_eq!(targets.len(), 4);
+    }
+
+    #[test]
+    fn parse_icmp_targets_allows_max_sized_cidr() {
+        let targets = parse_icmp_targets("192.0.0.0/20").expect("max cidr should parse");
+        assert_eq!(targets.len(), MAX_SCAN_TARGETS);
+    }
+
+    #[test]
+    fn parse_icmp_targets_rejects_cidr_over_limit() {
+        let err = parse_icmp_targets("192.0.0.0/19").expect_err("large cidr should fail");
+        assert!(err
+            .to_string()
+            .contains("scan target expansion exceeds limit of 4096"));
+    }
+
+    #[test]
+    fn parse_icmp_targets_rejects_ipv6_cidr_over_limit() {
+        let err = parse_icmp_targets("2001:db8::/115").expect_err("large cidr should fail");
+        assert!(err
+            .to_string()
+            .contains("scan target expansion exceeds limit of 4096"));
     }
 
     #[test]

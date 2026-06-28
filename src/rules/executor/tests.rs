@@ -51,6 +51,84 @@ fn send_template_applies_context_placeholders() {
 }
 
 #[test]
+fn send_template_applies_context_placeholders_to_nested_string_fields() {
+    use crate::engine::request::{
+        Ipv6Request, LoggingRequest, PayloadRequest, TcpRequest, TransportProtocolRequest,
+        TransportRequest,
+    };
+    use std::time::SystemTime;
+
+    let template = RuleSendTemplate::new(PacketRequest {
+        ipv6: Ipv6Request {
+            extensions: vec!["routing:{destination}".to_string()],
+        },
+        transport: TransportRequest {
+            command: Some(TransportProtocolRequest::Tcp(TcpRequest {
+                flags: Some("syn,{description}".to_string()),
+                timestamps: Some("{length}:0".to_string()),
+                options_hex: Some("{source}".to_string()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        },
+        payload: PayloadRequest {
+            dns_query: Some("{source}.example".to_string()),
+            dns_type: Some("{description}".to_string()),
+            http_method: Some("{description}".to_string()),
+            http_path: Some("/{length}".to_string()),
+            http_host: Some("{destination}".to_string()),
+            tls_client_hello: Some("{source}".to_string()),
+            ..Default::default()
+        },
+        logging: LoggingRequest {
+            metrics_json: Some("/tmp/{length}.json".to_string()),
+            prometheus_bind: Some("{destination}:9000".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let ctx = PacketContext {
+        description: "ack".to_string(),
+        source: Some("192.0.2.10".to_string()),
+        destination: Some("198.51.100.20".to_string()),
+        length: 128,
+        timestamp: SystemTime::now(),
+    };
+
+    let rendered = template.render(Some(&ctx));
+    assert_eq!(rendered.ipv6.extensions, vec!["routing:198.51.100.20"]);
+    match rendered.transport.command {
+        Some(TransportProtocolRequest::Tcp(tcp)) => {
+            assert_eq!(tcp.flags.as_deref(), Some("syn,ack"));
+            assert_eq!(tcp.timestamps.as_deref(), Some("128:0"));
+            assert_eq!(tcp.options_hex.as_deref(), Some("192.0.2.10"));
+        }
+        other => panic!("expected tcp transport, got {other:?}"),
+    }
+    assert_eq!(
+        rendered.payload.dns_query.as_deref(),
+        Some("192.0.2.10.example")
+    );
+    assert_eq!(rendered.payload.dns_type.as_deref(), Some("ack"));
+    assert_eq!(rendered.payload.http_method.as_deref(), Some("ack"));
+    assert_eq!(rendered.payload.http_path.as_deref(), Some("/128"));
+    assert_eq!(rendered.payload.http_host.as_deref(), Some("198.51.100.20"));
+    assert_eq!(
+        rendered.payload.tls_client_hello.as_deref(),
+        Some("192.0.2.10")
+    );
+    assert_eq!(
+        rendered.logging.metrics_json.as_deref(),
+        Some("/tmp/128.json")
+    );
+    assert_eq!(
+        rendered.logging.prometheus_bind.as_deref(),
+        Some("198.51.100.20:9000")
+    );
+}
+
+#[test]
 fn bounded_executor_enforces_queue_capacity_under_load() {
     let _executor_guard = test_support::executor_lock();
 

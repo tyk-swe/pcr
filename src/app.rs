@@ -32,18 +32,33 @@ impl PacketcraftApp {
     /// Build the application with its runtime, engine, and telemetry wiring in place.
     pub fn bootstrap(args: PacketcraftArgs) -> Result<Self> {
         Self::init_logging(&args)?;
-        Self::maybe_daemonize(&args)?;
 
         let config = args.engine_config();
         let command = args.engine_command();
+
+        #[cfg(feature = "daemon")]
+        let daemon_preflight = Self::preflight_daemon_if_needed(&args, &command)?;
+
+        Self::maybe_daemonize(&args)?;
+
         let runtime = Self::build_runtime()?;
+        let engine = engine::Engine::new_with_runtime_handle(config, runtime.handle().clone())?;
+
+        #[cfg(feature = "daemon")]
+        let mut engine = engine;
+
+        #[cfg(feature = "daemon")]
+        if let Some(preflight) = daemon_preflight {
+            engine.apply_daemon_preflight(preflight);
+        }
 
         #[cfg(feature = "metrics")]
-        let prometheus_handle = Self::maybe_start_prometheus_exporter(&args, &config, &runtime)?;
+        let prometheus_handle =
+            Self::maybe_start_prometheus_exporter(&args, engine.config(), &runtime)?;
 
         #[cfg(not(feature = "metrics"))]
         if let Some(oneshot) = args.one_shot_options() {
-            if config.prometheus_bind.is_some()
+            if engine.config().prometheus_bind.is_some()
                 || oneshot.logging.metrics_json.is_some()
                 || oneshot.logging.allow_public_metrics.unwrap_or(false)
             {
@@ -52,8 +67,6 @@ impl PacketcraftApp {
                 ));
             }
         }
-
-        let engine = engine::Engine::new_with_runtime_handle(config, runtime.handle().clone())?;
 
         Ok(Self {
             args,
@@ -121,6 +134,22 @@ impl PacketcraftApp {
         })?;
 
         Ok(())
+    }
+
+    #[cfg(feature = "daemon")]
+    fn preflight_daemon_if_needed(
+        args: &PacketcraftArgs,
+        command: &EngineCommand,
+    ) -> Result<Option<crate::engine::daemon::DaemonStartupPreflight>> {
+        if args.effective_dry_run() {
+            return Ok(None);
+        }
+
+        if let EngineCommand::Daemon(opts) = command {
+            return crate::engine::daemon::preflight(opts).map(Some);
+        }
+
+        Ok(None)
     }
 
     /// Access the derived engine configuration for testing or telemetry wiring.

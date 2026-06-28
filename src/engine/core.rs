@@ -34,6 +34,8 @@ pub struct Engine {
     pub(crate) config: EngineConfig,
     pub(crate) output: OutputController,
     pub(crate) rules: RuleEngine,
+    #[cfg(feature = "daemon")]
+    daemon_rules_preloaded: bool,
 }
 
 impl Engine {
@@ -81,6 +83,8 @@ impl Engine {
             output: OutputController::new(config.output_format),
             rules,
             config,
+            #[cfg(feature = "daemon")]
+            daemon_rules_preloaded: false,
         })
     }
 
@@ -110,8 +114,25 @@ impl Engine {
             return Ok(());
         }
         info!("Launching daemon mode");
-        self.init_daemon_rules(opts.rules_file.as_ref())?;
+        if !self.daemon_rules_preloaded {
+            self.init_daemon_rules(opts.rules_file.as_ref())?;
+            if self.rules.has_receive_triggers() {
+                crate::engine::daemon::ensure_listener_feature_available()?;
+            }
+        }
+        self.daemon_rules_preloaded = false;
         crate::engine::daemon::run(opts, &self.config, &mut self.rules, &self.output).await
+    }
+
+    #[cfg(feature = "daemon")]
+    pub(crate) fn apply_daemon_preflight(
+        &mut self,
+        preflight: crate::engine::daemon::DaemonStartupPreflight,
+    ) {
+        self.daemon_rules_preloaded = preflight.rules_were_loaded();
+        if let Some(report) = preflight.into_rules() {
+            self.rules.replace_rules(report.into_rules());
+        }
     }
 
     #[cfg(feature = "daemon")]
@@ -344,5 +365,32 @@ mod tests {
         assert_eq!(engine.rule_count(), 1);
         // The rule is loaded, but triggers are NOT run here.
         assert!(engine.rules.has_startup_triggers());
+    }
+
+    #[cfg(feature = "daemon")]
+    #[test]
+    fn daemon_preflight_installation_marks_rules_prepared() {
+        let mut engine = Engine::new(config_with_overrides()).expect("engine initialisation");
+
+        let rules = r#"
+- name: "startup"
+  trigger: on_startup
+  actions:
+    - type: log
+      message: "boot"
+"#;
+        let file = write_rules(rules);
+        let opts = DaemonRequest {
+            rules_file: Some(file.path().to_string_lossy().into_owned()),
+            foreground: Some(true),
+            control_socket: None,
+        };
+        let preflight =
+            crate::engine::daemon::preflight(&opts).expect("daemon preflight should load rules");
+
+        engine.apply_daemon_preflight(preflight);
+
+        assert_eq!(engine.rule_count(), 1);
+        assert!(engine.daemon_rules_preloaded);
     }
 }

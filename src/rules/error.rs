@@ -173,6 +173,8 @@ pub enum MatcherError {
         "complex matcher must not define more than one of: contains, equals, starts_with, ends_with, regex"
     )]
     ConflictingDefinitions,
+    #[error("complex matcher with 'not' must not define sibling matcher fields")]
+    NotWithSiblingDefinitions,
     #[error("invalid regex '{pattern}': {source}")]
     Regex {
         pattern: String,

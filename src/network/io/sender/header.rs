@@ -39,6 +39,7 @@ pub(crate) fn initialize_ipv4_header<'a>(
     packet.set_total_length(params.total_length);
     packet.set_ttl(context.ttl());
     packet.set_dscp(context.dscp());
+    packet.set_ecn(context.ecn());
     packet.set_identification(params.identification);
     let mut flags = 0u8;
     if params.dont_fragment {
@@ -101,7 +102,11 @@ impl IpHeaderContext {
     }
 
     pub(crate) fn dscp(&self) -> u8 {
-        self.traffic_class
+        self.traffic_class >> 2
+    }
+
+    pub(crate) fn ecn(&self) -> u8 {
+        self.traffic_class & 0b11
     }
 
     pub(crate) fn traffic_class(&self) -> u8 {
@@ -185,7 +190,8 @@ mod tests {
         let mut ctx = IpHeaderContext::from_spec(&spec);
         assert_eq!(ctx.ttl(), 42);
         assert_eq!(ctx.hop_limit(), 42);
-        assert_eq!(ctx.dscp(), 0x1c);
+        assert_eq!(ctx.dscp(), 0x07);
+        assert_eq!(ctx.ecn(), 0);
         assert!(ctx.fragment().more_fragments);
         assert!(ctx.fragment().dont_fragment);
         assert_eq!(ctx.fragment_offset(), 24);
@@ -228,7 +234,8 @@ mod tests {
         assert_eq!(view.get_version(), 4);
         assert_eq!(view.get_total_length(), 60);
         assert_eq!(view.get_ttl(), 60);
-        assert_eq!(view.get_dscp(), 0x2e);
+        assert_eq!(view.get_dscp(), 0x0b);
+        assert_eq!(view.get_ecn(), 0x02);
         assert_eq!(view.get_fragment_offset(), 32);
         assert_eq!(view.get_identification(), 0x1234);
         assert_eq!(view.get_next_level_protocol(), IpNextHeaderProtocols::Tcp);

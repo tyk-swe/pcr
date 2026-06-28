@@ -55,7 +55,7 @@ pub(crate) fn parse_vlan_tag(request: &VlanRequest) -> SpecResult<Option<VlanTag
         }
     };
 
-    if matches!(id, 0 | 4095) {
+    if !(1..=4094).contains(&id) {
         return Err(SpecError::VlanIdInvalid { value: id });
     }
 
@@ -209,7 +209,7 @@ mod tests {
             Err(SpecError::VlanDeiRequiresId)
         ));
 
-        for id in [0, 4095] {
+        for id in [0, 4095, 4096, u16::MAX] {
             assert!(matches!(
                 parse_vlan_tag(&VlanRequest {
                     id: Some(id),

@@ -4,7 +4,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use anyhow::{anyhow, Context, Result};
-use pnet::datalink;
+use pnet::datalink::{self, NetworkInterface};
 use pnet::ipnetwork::IpNetwork;
 
 use crate::util::error::operation_failed;
@@ -68,10 +68,9 @@ pub fn resolve_interface_or_ip_override(
             IpNetwork::V4(v4) => Some(IpAddr::V4(v4.ip())),
             _ => None,
         }),
-        IpAddr::V6(_) => iface.ips.iter().find_map(|network| match network {
-            IpNetwork::V6(v6) => Some(IpAddr::V6(v6.ip())),
-            _ => None,
-        }),
+        IpAddr::V6(destination) => {
+            select_interface_ipv6_source_for_destination(&iface, destination).map(IpAddr::V6)
+        }
     };
 
     candidate
@@ -103,6 +102,50 @@ pub fn source_override_ipv6(source_override: Option<IpAddr>) -> Result<Option<Ip
 
 fn is_matching_ip_family(candidate: IpAddr, target: IpAddr) -> bool {
     (candidate.is_ipv4() && target.is_ipv4()) || (candidate.is_ipv6() && target.is_ipv6())
+}
+
+pub(crate) fn select_ipv6_source_for_destination<I>(
+    addresses: I,
+    destination: Ipv6Addr,
+) -> Option<Ipv6Addr>
+where
+    I: IntoIterator<Item = Ipv6Addr>,
+{
+    let wants_link_local = destination.is_unicast_link_local();
+    let mut fallback = None;
+
+    for address in addresses {
+        if address.is_unspecified() {
+            continue;
+        }
+        if fallback.is_none() {
+            fallback = Some(address);
+        }
+
+        let same_scope = if wants_link_local {
+            address.is_unicast_link_local()
+        } else {
+            !address.is_unicast_link_local()
+        };
+        if same_scope {
+            return Some(address);
+        }
+    }
+
+    fallback
+}
+
+pub(crate) fn select_interface_ipv6_source_for_destination(
+    interface: &NetworkInterface,
+    destination: Ipv6Addr,
+) -> Option<Ipv6Addr> {
+    select_ipv6_source_for_destination(
+        interface.ips.iter().filter_map(|network| match network {
+            IpNetwork::V6(v6) => Some(v6.ip()),
+            _ => None,
+        }),
+        destination,
+    )
 }
 
 fn discover_impl(destination: IpAddr, port: u16) -> Result<IpAddr> {
@@ -206,6 +249,42 @@ mod tests {
                 .contains("does not match target address family"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn select_ipv6_source_prefers_link_local_for_link_local_destination() {
+        let global = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let destination = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 10);
+
+        let selected = select_ipv6_source_for_destination([global, link_local], destination);
+
+        assert_eq!(selected, Some(link_local));
+    }
+
+    #[test]
+    fn select_ipv6_source_prefers_non_link_local_for_global_destination() {
+        let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let global = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 10);
+
+        let selected = select_ipv6_source_for_destination(
+            [Ipv6Addr::UNSPECIFIED, link_local, global],
+            destination,
+        );
+
+        assert_eq!(selected, Some(global));
+    }
+
+    #[test]
+    fn select_ipv6_source_falls_back_to_first_non_unspecified_address() {
+        let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 1, 0, 0, 0, 10);
+
+        let selected =
+            select_ipv6_source_for_destination([Ipv6Addr::UNSPECIFIED, link_local], destination);
+
+        assert_eq!(selected, Some(link_local));
     }
 
     #[test]

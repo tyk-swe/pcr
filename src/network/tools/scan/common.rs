@@ -12,6 +12,7 @@ use anyhow::{anyhow, Context, Result};
 use log::info;
 use rand::random;
 
+use crate::network::protocol_validation::OriginalTransport;
 use crate::network::tools::probe::remaining_probe_time;
 use crate::util::error::operation_failed;
 use crate::util::net::resolve_target_socket_addr;
@@ -21,12 +22,25 @@ use crate::util::source_ip::{
 use crate::util::sync::LockResultExt;
 
 pub(super) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
+pub(super) const MAX_SCAN_TARGETS: usize = 4096;
 const RECEIVER_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_SEND_RETRIES: usize = 3;
 const SEND_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(1);
 
 // ICMPv6 Code 4: Port Unreachable (RFC 4443)
 pub(super) const ICMPV6_CODE_PORT_UNREACHABLE: u8 = 4;
+
+pub(super) fn push_scan_target<T>(targets: &mut Vec<T>, target: T) -> Result<()> {
+    if targets.len() >= MAX_SCAN_TARGETS {
+        return Err(anyhow!(
+            "scan target expansion exceeds limit of {} addresses",
+            MAX_SCAN_TARGETS
+        ));
+    }
+
+    targets.push(target);
+    Ok(())
+}
 
 #[derive(Debug)]
 pub(super) enum ScanEvent {
@@ -37,11 +51,31 @@ pub(super) enum ScanEvent {
         flags: Option<u8>,
     },
     IcmpResponse {
+        source_port: u16,
         dest_port: u16,
+        src_addr: IpAddr,
+        dst_addr: IpAddr,
         icmp_type: u8,
         icmp_code: u8,
     },
     Other,
+}
+
+impl ScanEvent {
+    pub(super) fn icmp_response(
+        transport: OriginalTransport,
+        icmp_type: u8,
+        icmp_code: u8,
+    ) -> Self {
+        Self::IcmpResponse {
+            source_port: transport.source,
+            dest_port: transport.destination,
+            src_addr: transport.source_ip,
+            dst_addr: transport.destination_ip,
+            icmp_type,
+            icmp_code,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -408,9 +442,19 @@ where
                 }
             }
         }
-        ScanEvent::IcmpResponse { dest_port, .. } if results.contains_key(&dest_port) => {
-            classify_fn(event, results, dest_port);
-            return true;
+        ScanEvent::IcmpResponse {
+            source_port,
+            dest_port,
+            src_addr,
+            dst_addr,
+            ..
+        } if src_addr == config.source_ip && dst_addr == config.destination.ip() => {
+            if let Some(target_ports) = port_map.get(&source_port) {
+                if target_ports.contains(&dest_port) {
+                    classify_fn(event, results, dest_port);
+                    return true;
+                }
+            }
         }
         _ => {}
     }

@@ -150,7 +150,15 @@ impl TryFrom<MatcherDef> for Matcher {
                 case_insensitive,
                 not,
             } => {
+                let has_sibling_matcher = contains.is_some()
+                    || equals.is_some()
+                    || starts_with.is_some()
+                    || ends_with.is_some()
+                    || regex.is_some();
                 if let Some(def) = not {
+                    if has_sibling_matcher {
+                        return Err(MatcherError::NotWithSiblingDefinitions);
+                    }
                     return Ok(Matcher::Not(Box::new(Matcher::try_from(*def)?)));
                 }
 
@@ -300,6 +308,13 @@ mod matcher_tests {
         assert!(matches!(
             Matcher::try_from(def),
             Err(MatcherError::ConflictingDefinitions)
+        ));
+
+        let def: MatcherDef =
+            crate::rules::yaml::from_str("{ not: { equals: bad }, contains: good }").unwrap();
+        assert!(matches!(
+            Matcher::try_from(def),
+            Err(MatcherError::NotWithSiblingDefinitions)
         ));
 
         let def: MatcherDef = crate::rules::yaml::from_str("regex: '[invalid'").unwrap();

@@ -6,7 +6,7 @@ pub mod protocols;
 pub mod tools;
 
 pub use io::{interface, listener, pnet_utils, sender};
-#[cfg(any(test, feature = "scan", feature = "traceroute"))]
+#[cfg(any(test, feature = "pcap", feature = "scan", feature = "traceroute"))]
 pub use protocols::protocol_validation;
 pub use protocols::{arp, checksum, dns, ndp};
 #[cfg(feature = "daemon")]

@@ -1,0 +1,43 @@
+use std::str::FromStr;
+
+use anyhow::{anyhow, Context, Result};
+use trust_dns_proto::op::{Message, MessageType, OpCode, Query};
+use trust_dns_proto::rr::{DNSClass, Name, RecordType};
+
+pub fn build_dns_query(
+    domain: &str,
+    record_type: &str,
+    transaction_id: Option<u16>,
+) -> Result<(Vec<u8>, u16)> {
+    let domain = domain.trim();
+    if domain.is_empty() {
+        return Err(anyhow!("domain name must not be empty"));
+    }
+    let mut name = Name::from_str(domain).context("Invalid domain name")?;
+    // Ensure fully qualified domain name
+    if !domain.ends_with('.') {
+        name = Name::from_str(&format!("{}.", domain)).context("Invalid domain name")?;
+    }
+
+    let record_type_enum = RecordType::from_str(&record_type.to_uppercase())
+        .map_err(|_| anyhow::anyhow!("Unsupported DNS type: {}", record_type))?;
+
+    let mut message = Message::new();
+    // trust-dns-proto Message::new() initializes with a random ID if we don't set it,
+    // but explicit setting is fine too.
+    let id = transaction_id.unwrap_or_else(rand::random);
+    message.set_id(id);
+    message.set_message_type(MessageType::Query);
+    message.set_op_code(OpCode::Query);
+    message.set_recursion_desired(true);
+
+    let mut query = Query::new();
+    query.set_name(name);
+    query.set_query_type(record_type_enum);
+    query.set_query_class(DNSClass::IN);
+
+    message.add_query(query);
+
+    let bytes = message.to_vec()?;
+    Ok((bytes, id))
+}

@@ -4,8 +4,9 @@
 use crate::rules::action::{RuleAction, RuleActionDocument};
 use crate::rules::condition::{RuleCondition, RuleConditionDocument};
 use crate::rules::error::RuleError;
-use crate::rules::executor::{BoundedExecutor, RuleSendExecutor};
+use crate::rules::executor::BoundedExecutor;
 use crate::rules::model::PacketContext;
+use crate::rules::send::RuleSendDispatcher;
 use log::warn;
 use serde::Deserialize;
 
@@ -118,7 +119,7 @@ impl Rule {
     pub fn execute(
         &self,
         packet: Option<&PacketContext>,
-        sender: Option<&RuleSendExecutor>,
+        sender: Option<&dyn RuleSendDispatcher>,
         task_executor: &BoundedExecutor,
     ) {
         let rule_name = self.name.as_deref().unwrap_or("<unnamed rule>").to_string();

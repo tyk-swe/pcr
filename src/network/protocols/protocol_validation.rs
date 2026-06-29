@@ -1,19 +1,28 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use std::net::IpAddr;
 
+#[cfg(feature = "traceroute")]
 use pnet::packet::icmp::echo_request::EchoRequestPacket;
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use pnet::packet::icmp::{IcmpPacket, IcmpTypes};
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use pnet::packet::icmpv6::Icmpv6Packet;
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use pnet::packet::icmpv6::Icmpv6Types;
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use pnet::packet::tcp::TcpPacket;
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use pnet::packet::udp::UdpPacket;
 use pnet::packet::Packet;
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OriginalTransport {
     pub(crate) protocol: IpNextHeaderProtocol,
@@ -24,6 +33,7 @@ pub(crate) struct OriginalTransport {
     pub(crate) payload: Vec<u8>,
 }
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 impl OriginalTransport {
     #[allow(dead_code)]
     pub(crate) fn matches_expected(
@@ -97,6 +107,7 @@ pub(crate) fn ipv6_transport_payload<'a>(
     None
 }
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 pub(crate) fn extract_original_transport_v4(packet: &IcmpPacket) -> Option<OriginalTransport> {
     if !matches!(
         packet.get_icmp_type(),
@@ -128,6 +139,7 @@ pub(crate) fn extract_original_transport_v4(packet: &IcmpPacket) -> Option<Origi
     )
 }
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 pub(crate) fn extract_original_transport_v6(packet: &Icmpv6Packet) -> Option<OriginalTransport> {
     if !matches!(
         packet.get_icmpv6_type(),
@@ -156,6 +168,7 @@ pub(crate) fn extract_original_transport_v6(packet: &Icmpv6Packet) -> Option<Ori
     )
 }
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 fn original_transport_from_payload(
     proto: IpNextHeaderProtocol,
     inner_payload: &[u8],
@@ -204,6 +217,7 @@ fn original_transport_from_payload(
     }
 }
 
+#[cfg(feature = "traceroute")]
 pub(crate) fn extract_inner_echo_v4(packet: &IcmpPacket) -> Option<(u16, u16)> {
     if !matches!(
         packet.get_icmp_type(),
@@ -225,6 +239,7 @@ pub(crate) fn extract_inner_echo_v4(packet: &IcmpPacket) -> Option<(u16, u16)> {
     Some((echo.get_identifier(), echo.get_sequence_number()))
 }
 
+#[cfg(feature = "traceroute")]
 pub(crate) fn extract_inner_echo_v6(packet: &Icmpv6Packet) -> Option<(u16, u16)> {
     if !matches!(
         packet.get_icmpv6_type(),
@@ -248,6 +263,7 @@ pub(crate) fn extract_inner_echo_v6(packet: &Icmpv6Packet) -> Option<(u16, u16)>
     parse_icmpv6_echo(&inner_packet)
 }
 
+#[cfg(feature = "traceroute")]
 pub(crate) fn parse_icmpv6_echo(packet: &Icmpv6Packet) -> Option<(u16, u16)> {
     let payload = packet.payload();
     if payload.len() < 4 {

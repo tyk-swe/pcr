@@ -4,11 +4,13 @@
 pub mod app;
 #[doc(hidden)]
 pub mod cli;
+pub mod domain;
 pub mod engine;
 #[doc(hidden)]
 pub mod network;
 pub mod output;
 pub mod rules;
+pub mod tools;
 #[doc(hidden)]
 pub mod util;
 

@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use crate::engine::request::PacketRequest;
+use crate::domain::request::PacketRequest;
 
 pub type ResolveResult<T> = std::result::Result<T, ResolveError>;
 

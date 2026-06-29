@@ -18,7 +18,9 @@ use super::options::ListenOptions;
 use super::options::RuleOptions;
 use super::options::SendOptions;
 use super::validators::dns_record_type_validator;
-use crate::engine::command::DnsTransportMode;
+use crate::domain::command::{self as domain_command, DnsTransportMode};
+#[cfg(feature = "pcap")]
+use crate::domain::request::ListenerRequest;
 
 /// Global operation modes.
 #[derive(Debug, Subcommand)]
@@ -297,8 +299,8 @@ pub enum ScanCommand {
 }
 
 impl DnsQueryOptions {
-    pub(crate) fn to_request(&self) -> crate::engine::command::DnsRequest {
-        crate::engine::command::DnsRequest {
+    pub(crate) fn to_request(&self) -> domain_command::DnsRequest {
+        domain_command::DnsRequest {
             domain: self.domain.clone(),
             record_type: self.record_type.clone(),
             server: self.server.clone(),
@@ -312,8 +314,8 @@ impl DnsQueryOptions {
 
 #[cfg(feature = "repl")]
 impl InteractiveOptions {
-    pub(crate) fn to_request(&self) -> crate::engine::command::InteractiveRequest {
-        crate::engine::command::InteractiveRequest {
+    pub(crate) fn to_request(&self) -> domain_command::InteractiveRequest {
+        domain_command::InteractiveRequest {
             script: self.script.clone(),
             auto_listen: self.auto_listen,
         }
@@ -322,8 +324,8 @@ impl InteractiveOptions {
 
 #[cfg(feature = "daemon")]
 impl DaemonOptions {
-    pub(crate) fn to_request(&self) -> crate::engine::command::DaemonRequest {
-        crate::engine::command::DaemonRequest {
+    pub(crate) fn to_request(&self) -> domain_command::DaemonRequest {
+        domain_command::DaemonRequest {
             rules_file: self.rule_options.rules_file.clone(),
             foreground: self.foreground,
             control_socket: self.control_socket.clone(),
@@ -333,9 +335,9 @@ impl DaemonOptions {
 
 #[cfg(feature = "pcap")]
 impl ListenCommandOptions {
-    pub(crate) fn to_request(&self) -> crate::engine::command::ListenRequest {
-        crate::engine::command::ListenRequest {
-            listen: crate::engine::request::ListenerRequest::from(&self.listen),
+    pub(crate) fn to_request(&self) -> domain_command::ListenRequest {
+        domain_command::ListenRequest {
+            listen: ListenerRequest::from(&self.listen),
             persistent: self.persistent,
         }
     }
@@ -343,15 +345,15 @@ impl ListenCommandOptions {
 
 #[cfg(feature = "traceroute")]
 impl TracerouteOptions {
-    pub(crate) fn to_request(&self) -> crate::engine::command::TracerouteRequest {
-        crate::engine::command::TracerouteRequest {
+    pub(crate) fn to_request(&self) -> domain_command::TracerouteRequest {
+        domain_command::TracerouteRequest {
             destination: self.destination.clone(),
             max_ttl: self.max_ttl,
             probes: self.probes,
             protocol: match self.protocol {
-                TracerouteProtocol::Udp => crate::engine::command::TracerouteProtocol::Udp,
-                TracerouteProtocol::Tcp => crate::engine::command::TracerouteProtocol::Tcp,
-                TracerouteProtocol::Icmp => crate::engine::command::TracerouteProtocol::Icmp,
+                TracerouteProtocol::Udp => domain_command::TracerouteProtocol::Udp,
+                TracerouteProtocol::Tcp => domain_command::TracerouteProtocol::Tcp,
+                TracerouteProtocol::Icmp => domain_command::TracerouteProtocol::Icmp,
             },
             no_dns: self.no_dns,
             timeout: self.timeout,
@@ -361,8 +363,8 @@ impl TracerouteOptions {
 
 #[cfg(feature = "scan")]
 impl ScanCommand {
-    pub(crate) fn to_request(&self) -> crate::engine::command::ScanRequest {
-        use crate::engine::command::ScanRequest;
+    pub(crate) fn to_request(&self) -> domain_command::ScanRequest {
+        use domain_command::ScanRequest;
 
         match self {
             Self::TcpSyn(options) => ScanRequest::TcpSyn(options.to_request()),
@@ -381,8 +383,8 @@ impl ScanCommand {
 
 #[cfg(feature = "scan")]
 impl PortScanOptions {
-    fn to_request(&self) -> crate::engine::command::PortScanRequest {
-        crate::engine::command::PortScanRequest {
+    fn to_request(&self) -> domain_command::PortScanRequest {
+        domain_command::PortScanRequest {
             target: self.target.clone(),
             ports: self.ports.clone(),
             interface: self.interface.clone(),
@@ -393,8 +395,8 @@ impl PortScanOptions {
 
 #[cfg(feature = "scan")]
 impl TimedScanOptions {
-    fn to_request(&self) -> crate::engine::command::TimedScanRequest {
-        crate::engine::command::TimedScanRequest {
+    fn to_request(&self) -> domain_command::TimedScanRequest {
+        domain_command::TimedScanRequest {
             target: self.target.clone(),
             interface: self.interface.clone(),
             source_ip: self.source_ip.clone(),
@@ -405,20 +407,20 @@ impl TimedScanOptions {
 
 #[cfg(feature = "fuzz")]
 impl FuzzOptions {
-    pub(crate) fn to_request(&self) -> crate::engine::command::FuzzRequest {
-        crate::engine::command::FuzzRequest {
+    pub(crate) fn to_request(&self) -> domain_command::FuzzRequest {
+        domain_command::FuzzRequest {
             target: self.target.clone(),
             port: self.port,
             protocol: match self.protocol {
-                FuzzProtocol::Tcp => crate::engine::command::FuzzProtocol::Tcp,
-                FuzzProtocol::Udp => crate::engine::command::FuzzProtocol::Udp,
-                FuzzProtocol::Icmp => crate::engine::command::FuzzProtocol::Icmp,
+                FuzzProtocol::Tcp => domain_command::FuzzProtocol::Tcp,
+                FuzzProtocol::Udp => domain_command::FuzzProtocol::Udp,
+                FuzzProtocol::Icmp => domain_command::FuzzProtocol::Icmp,
             },
             strategy: match self.strategy {
-                FuzzStrategy::BitFlip => crate::engine::command::FuzzStrategy::BitFlip,
-                FuzzStrategy::ByteSwap => crate::engine::command::FuzzStrategy::ByteSwap,
-                FuzzStrategy::RandomPayload => crate::engine::command::FuzzStrategy::RandomPayload,
-                FuzzStrategy::Boundary => crate::engine::command::FuzzStrategy::Boundary,
+                FuzzStrategy::BitFlip => domain_command::FuzzStrategy::BitFlip,
+                FuzzStrategy::ByteSwap => domain_command::FuzzStrategy::ByteSwap,
+                FuzzStrategy::RandomPayload => domain_command::FuzzStrategy::RandomPayload,
+                FuzzStrategy::Boundary => domain_command::FuzzStrategy::Boundary,
             },
             count: self.count,
             delay: self.delay,

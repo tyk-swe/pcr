@@ -8,7 +8,7 @@ use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 
-use crate::engine::spec::{DestinationSpec, PacketSpec, TargetAddress};
+use crate::domain::spec::{DestinationSpec, PacketSpec, TargetAddress};
 
 use super::builder::{Ipv4PacketBuilder, Ipv6PacketBuilder, PacketBuildResult, PacketBuilder};
 use super::control::{validate_transmission_policy, TransmissionPolicy};

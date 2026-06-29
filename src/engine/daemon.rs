@@ -16,9 +16,9 @@ mod control;
 #[cfg(unix)]
 use control::{cleanup_control_socket, preflight_control_socket, spawn_control_socket};
 
-use crate::engine::command::DaemonRequest;
-use crate::engine::request::ListenerRequest;
-use crate::engine::EngineConfig;
+use crate::domain::command::DaemonRequest;
+use crate::domain::request::ListenerRequest;
+use crate::engine::config::EngineConfig;
 use crate::network::listener;
 use crate::output::OutputController;
 use crate::rules::{RuleEngine, RuleLoadOptions, RuleLoadReport};
@@ -82,7 +82,7 @@ pub(crate) fn preflight(opts: &DaemonRequest) -> Result<DaemonStartupPreflight> 
 
 pub async fn run(
     opts: &DaemonRequest,
-    config: &EngineConfig,
+    _config: &EngineConfig,
     rules: &mut RuleEngine,
     output: &OutputController,
 ) -> Result<()> {
@@ -136,14 +136,8 @@ pub async fn run(
 
     if rules.has_receive_triggers() {
         debug!("Auto-starting listener because receive rules are active");
-        if let Err(err) = start_listener(
-            &mut state,
-            default_listener_options(),
-            config,
-            rules,
-            output,
-        )
-        .await
+        if let Err(err) =
+            start_listener(&mut state, default_listener_options(), rules, output).await
         {
             #[cfg(unix)]
             cleanup_control_socket(&mut control_socket).await;
@@ -168,7 +162,7 @@ pub async fn run(
                     break;
                 }
                 Some(command) = cmd_rx.recv() => {
-                    if handle_command(command, &mut state, rules, config, output).await? {
+                    if handle_command(command, &mut state, rules, output).await? {
                         info!("Daemon received shutdown command via control socket");
                         break;
                     }
@@ -189,7 +183,7 @@ pub async fn run(
                 break;
             }
             Some(command) = cmd_rx.recv() => {
-                if handle_command(command, &mut state, rules, config, output).await? {
+                if handle_command(command, &mut state, rules, output).await? {
                     info!("Daemon received shutdown command via control socket");
                     break;
                 }
@@ -254,12 +248,11 @@ async fn handle_command(
     command: DaemonCommand,
     state: &mut DaemonState,
     rules: &mut RuleEngine,
-    config: &EngineConfig,
     output: &OutputController,
 ) -> Result<bool> {
     match command {
         DaemonCommand::LoadRules { path, respond_to } => {
-            let result = load_rules_from_command(&path, state, rules, config, output).await;
+            let result = load_rules_from_command(&path, state, rules, output).await;
             send_response(respond_to, result);
             Ok(false)
         }
@@ -269,7 +262,7 @@ async fn handle_command(
         } => {
             let mut opts = options;
             opts.listen = Some(true);
-            let outcome = start_listener(state, opts.clone(), config, rules, output)
+            let outcome = start_listener(state, opts.clone(), rules, output)
                 .await
                 .map(|_| {
                     format!(
@@ -316,12 +309,11 @@ async fn load_rules_from_command(
     path: &str,
     state: &mut DaemonState,
     rules: &mut RuleEngine,
-    config: &EngineConfig,
     output: &OutputController,
 ) -> CommandResponse {
     let candidate = build_rule_reload_candidate(path, rules)?;
 
-    prepare_listener_for_rule_reload(state, &candidate.rules, config, output).await?;
+    prepare_listener_for_rule_reload(state, &candidate.rules, output).await?;
     replace_rules_after_reload(rules, candidate.rules);
 
     Ok(format!("loaded {} rule(s)", candidate.loaded_count))
@@ -346,7 +338,6 @@ fn build_rule_reload_candidate(path: &str, rules: &RuleEngine) -> Result<RuleRel
 async fn prepare_listener_for_rule_reload(
     state: &mut DaemonState,
     candidate_rules: &RuleEngine,
-    config: &EngineConfig,
     output: &OutputController,
 ) -> Result<()> {
     if candidate_rules.has_receive_triggers() {
@@ -354,7 +345,7 @@ async fn prepare_listener_for_rule_reload(
             .listener_options
             .clone()
             .unwrap_or_else(default_listener_options);
-        return start_listener(state, options, config, candidate_rules, output)
+        return start_listener(state, options, candidate_rules, output)
             .await
             .map_err(|err| {
                 warn!("failed to restart listener after rule reload: {err}");
@@ -379,17 +370,15 @@ fn replace_rules_after_reload(rules: &mut RuleEngine, candidate_rules: RuleEngin
 async fn start_listener(
     state: &mut DaemonState,
     options: ListenerRequest,
-    config: &EngineConfig,
     rules: &RuleEngine,
     output: &OutputController,
 ) -> Result<()> {
-    start_listener_with_interface_hint(state, options, config, rules, output, None).await
+    start_listener_with_interface_hint(state, options, rules, output, None).await
 }
 
 async fn start_listener_with_interface_hint(
     state: &mut DaemonState,
     mut options: ListenerRequest,
-    config: &EngineConfig,
     rules: &RuleEngine,
     output: &OutputController,
     interface_hint: Option<&str>,
@@ -402,7 +391,6 @@ async fn start_listener_with_interface_hint(
     let handle = listener::spawn_background(
         &options,
         interface_hint,
-        config,
         listener_event_handler(rules, output),
         shutdown.clone(),
         Some(startup_tx),
@@ -443,7 +431,7 @@ fn listener_event_handler(
             return;
         }
 
-        let context = crate::engine::event::listener_event_rule_context(&event);
+        let context = crate::rules::PacketContext::from_listener_event(&event);
         rules.notify_receive(&context);
     })
 }

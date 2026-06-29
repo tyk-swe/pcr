@@ -6,7 +6,7 @@ use std::net::Ipv6Addr;
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 use rand::random;
 
-use crate::engine::spec::{FragmentSpec, Ipv6ExtHeader, PacketSpec};
+use crate::domain::spec::{FragmentSpec, Ipv6ExtHeader, PacketSpec};
 use crate::network::sender::error::{Ipv6Error, Result};
 
 use super::fragment::{

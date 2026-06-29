@@ -12,23 +12,24 @@ use log::warn;
 use tokio::runtime::Handle;
 
 #[cfg(feature = "daemon")]
-use crate::engine::command::DaemonRequest;
-use crate::engine::command::DnsRequest;
+use crate::domain::command::DaemonRequest;
+use crate::domain::command::DnsRequest;
 #[cfg(feature = "fuzz")]
-use crate::engine::command::FuzzRequest;
+use crate::domain::command::FuzzRequest;
 #[cfg(feature = "pcap")]
-use crate::engine::command::ListenRequest;
+use crate::domain::command::ListenRequest;
 #[cfg(feature = "scan")]
-use crate::engine::command::ScanRequest;
+use crate::domain::command::ScanRequest;
 #[cfg(feature = "traceroute")]
-use crate::engine::command::TracerouteRequest;
+use crate::domain::command::TracerouteRequest;
+use crate::domain::request::PacketRequest;
 use crate::engine::config::EngineConfig;
+use crate::engine::error::{EngineError, EngineResult};
 use crate::engine::oneshot::OneShotFlow;
-use crate::engine::request::PacketRequest;
-use crate::engine::{EngineError, EngineResult};
+use crate::engine::rule_send::{RuleSendConfig, RuleSendExecutor};
 use crate::output::OutputController;
 use crate::output::OutputFormat;
-use crate::rules::{RuleEngine, RuleSendExecutor};
+use crate::rules::RuleEngine;
 
 pub struct Engine {
     pub(crate) config: EngineConfig,
@@ -51,17 +52,13 @@ impl Engine {
         config: EngineConfig,
         handle: Option<Handle>,
     ) -> EngineResult<Self> {
-        let rule_config = crate::rules::RuleExecutorConfig::from_options(
-            config.rule_workers,
-            config.rule_queue,
-            None,
-            Some(config.dry_run),
-        );
-        let send_config = crate::rules::RuleExecutorConfig::from_options(
+        let rule_config =
+            crate::rules::RuleExecutorConfig::from_options(config.rule_workers, config.rule_queue);
+        let send_config = RuleSendConfig::from_options(
             config.send_workers,
             config.send_queue,
-            Some(config.traffic_policy),
-            Some(config.dry_run),
+            config.traffic_policy,
+            config.dry_run,
         );
 
         let mut rules = match handle.as_ref() {
@@ -160,14 +157,15 @@ impl Engine {
             return Ok(());
         }
         info!("Running listener mode");
-        crate::network::io::listener::run_command(opts, None, &self.config, self.listener_handler())
+        crate::network::io::listener::run_command(opts, None, self.listener_handler())
             .await
             .map_err(anyhow::Error::from)
     }
 
     #[cfg(feature = "traceroute")]
     pub async fn run_traceroute(&mut self, opts: &TracerouteRequest) -> Result<()> {
-        let prepared = crate::network::tools::traceroute::prepare(opts, &self.config)?;
+        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
+        let prepared = crate::tools::traceroute::prepare(opts, policy)?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
@@ -183,11 +181,12 @@ impl Engine {
             "Running traceroute to {} max_ttl={} probes={}",
             opts.destination, opts.max_ttl, opts.probes
         );
-        crate::network::tools::traceroute::run_prepared(opts, &self.config, prepared).await
+        crate::tools::traceroute::run_prepared(opts, prepared).await
     }
 
     pub async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<String> {
-        let prepared = crate::network::protocols::dns::prepare(options, &self.config).await?;
+        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
+        let prepared = crate::tools::dns::prepare(options, policy).await?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
@@ -203,7 +202,7 @@ impl Engine {
                 _ => Ok(crate::output::format_dns_dry_run(options)),
             };
         }
-        let result = crate::network::protocols::dns::resolve_prepared(options, prepared).await?;
+        let result = crate::tools::dns::resolve_prepared(options, prepared).await?;
         match self.config.output_format {
             Some(OutputFormat::Json) => crate::output::format_dns_message_json(&result),
             _ => Ok(crate::output::format_dns_message(&result)),
@@ -212,7 +211,8 @@ impl Engine {
 
     #[cfg(feature = "scan")]
     pub async fn run_scan(&mut self, command: &ScanRequest) -> Result<()> {
-        let prepared = crate::network::tools::scan::prepare(command, &self.config)?;
+        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
+        let prepared = crate::tools::scan::prepare(command, policy)?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
@@ -224,14 +224,15 @@ impl Engine {
                 .emit_traffic_plan_summary(&prepared.traffic_plan)?;
             return Ok(());
         }
-        crate::network::tools::scan::run_command(prepared.command(), &self.config).await
+        let runtime = crate::tools::TrafficRuntimeConfig::from_policy(&policy);
+        crate::tools::scan::run_command(prepared.command(), runtime).await
     }
 
     #[cfg(feature = "fuzz")]
     pub async fn run_fuzz(&mut self, options: &FuzzRequest) -> Result<()> {
-        let mut config = crate::network::tools::fuzz::FuzzConfig::try_from(options)?;
+        let mut config = crate::tools::fuzz::FuzzConfig::try_from(options)?;
         config.apply_traffic_policy(&self.config.traffic_policy);
-        let plan = crate::network::tools::fuzz::traffic_plan(&config)?;
+        let plan = crate::tools::fuzz::traffic_plan(&config)?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
@@ -242,7 +243,7 @@ impl Engine {
             self.output.emit_traffic_plan_summary(&plan)?;
             return Ok(());
         }
-        crate::network::tools::fuzz::run_fuzz(config).await?;
+        crate::tools::fuzz::run_fuzz(config).await?;
         Ok(())
     }
 
@@ -269,7 +270,7 @@ impl Engine {
                 return;
             }
 
-            let context = crate::engine::event::listener_event_rule_context(&event);
+            let context = crate::rules::PacketContext::from_listener_event(&event);
             rules.notify_receive(&context);
         })
     }

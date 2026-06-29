@@ -21,7 +21,7 @@ use pnet::packet::udp::UdpPacket;
 use pnet::packet::vlan::VlanPacket;
 use pnet::packet::Packet;
 
-use crate::engine::{ListenerEvent, ProtocolLabel};
+use crate::domain::event::{ListenerEvent, ProtocolLabel};
 use crate::network::protocol_validation::ipv6_transport_payload;
 use crate::util::telemetry;
 

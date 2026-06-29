@@ -7,7 +7,7 @@ use pnet::packet::ip::IpNextHeaderProtocol;
 use pnet::packet::ipv4::checksum as ipv4_checksum;
 use rand::random;
 
-use crate::engine::spec::{FragmentSpec, PacketSpec};
+use crate::domain::spec::{FragmentSpec, PacketSpec};
 use crate::network::sender::error::{Ipv4Error, Result};
 
 use super::fragment::{

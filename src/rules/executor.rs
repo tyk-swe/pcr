@@ -4,21 +4,15 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use log::{error, info, warn};
+use log::{error, warn};
 use tokio::runtime::Handle;
 use tokio::sync::{Semaphore, TryAcquireError};
 use tokio::task::JoinError;
 
-use crate::engine::policy::{TrafficMode, TrafficPlan, TrafficPolicy};
-use crate::engine::request::{PacketRequest, TransportProtocolRequest};
-use crate::engine::send::PacketSendService;
-use crate::engine::spec::TransmissionSpec;
-use crate::rules::config::{
-    RuleExecutorConfig, RULE_SEND_EXECUTOR_QUEUE_CAPACITY, RULE_SEND_EXECUTOR_WORKERS,
-};
+use crate::domain::policy::{TrafficMode, TrafficPlan, TrafficPolicy};
+use crate::domain::request::PacketRequest;
+use crate::domain::spec::TransmissionSpec;
 use crate::rules::error::{RuleActionError, RuleError};
-use crate::rules::model::PacketContext;
-use crate::rules::template::{apply_template, render_option};
 use crate::util::telemetry;
 
 type Result<T> = std::result::Result<T, RuleError>;
@@ -149,69 +143,7 @@ fn current_runtime_handle() -> std::result::Result<Handle, ExecutorError> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RuleSendTemplate {
-    request: PacketRequest,
-}
-
-impl RuleSendTemplate {
-    pub fn new(request: PacketRequest) -> Self {
-        Self { request }
-    }
-
-    pub fn render(&self, packet: Option<&PacketContext>) -> PacketRequest {
-        let mut request = self.request.clone();
-        render_option(&mut request.destination.destination, packet);
-        render_option(&mut request.destination.destination_ip, packet);
-        render_option(&mut request.destination.interface, packet);
-        render_option(&mut request.layer2.source_mac, packet);
-        render_option(&mut request.layer2.destination_mac, packet);
-        render_option(&mut request.layer2.ethertype, packet);
-        render_option(&mut request.ip.source_ip, packet);
-        render_option(&mut request.ip.destination_ip, packet);
-        render_vec(&mut request.ipv6.extensions, packet);
-        render_option(&mut request.payload.data, packet);
-        render_option(&mut request.payload.data_hex, packet);
-        render_option(&mut request.payload.data_file, packet);
-        render_option(&mut request.payload.dns_query, packet);
-        render_option(&mut request.payload.dns_type, packet);
-        render_option(&mut request.payload.http_method, packet);
-        render_option(&mut request.payload.http_path, packet);
-        render_option(&mut request.payload.http_host, packet);
-        render_option(&mut request.payload.tls_client_hello, packet);
-        render_option(&mut request.transmit.interval, packet);
-        render_option(&mut request.listener.filter, packet);
-        render_option(&mut request.listener.capture_file, packet);
-        render_option(&mut request.rules_file, packet);
-        render_option(&mut request.logging.log_file, packet);
-        render_option(&mut request.logging.pcap_write, packet);
-        render_option(&mut request.logging.metrics_json, packet);
-        render_option(&mut request.logging.prometheus_bind, packet);
-
-        if let Some(TransportProtocolRequest::Tcp(tcp)) = request.transport.command.as_mut() {
-            render_option(&mut tcp.flags, packet);
-            render_option(&mut tcp.timestamps, packet);
-            render_option(&mut tcp.options_hex, packet);
-        }
-
-        request
-    }
-}
-
-fn render_vec(fields: &mut [String], packet: Option<&PacketContext>) {
-    for field in fields {
-        *field = apply_template(field, packet);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct RuleSendExecutor {
-    executor: Arc<BoundedExecutor>,
-    traffic_policy: TrafficPolicy,
-    dry_run: bool,
-}
-
-fn validate_rule_send_mode(
+pub(crate) fn validate_rule_send_request(
     rule_name: &str,
     request: &PacketRequest,
     policy: TrafficPolicy,
@@ -234,152 +166,4 @@ fn validate_rule_send_mode(
     })?;
 
     Ok(())
-}
-
-impl RuleSendExecutor {
-    pub fn new() -> std::result::Result<Self, RuleError> {
-        Self::new_configured(RuleExecutorConfig {
-            workers: RULE_SEND_EXECUTOR_WORKERS,
-            queue_capacity: RULE_SEND_EXECUTOR_QUEUE_CAPACITY,
-            traffic_policy: TrafficPolicy::default(),
-            dry_run: false,
-        })
-    }
-
-    pub fn new_configured(config: RuleExecutorConfig) -> std::result::Result<Self, RuleError> {
-        Self::new_configured_with_runtime_source(config, RuntimeHandleSource::current_or_deferred())
-    }
-
-    pub fn new_with_runtime_handle(handle: Handle) -> std::result::Result<Self, RuleError> {
-        Self::new_configured_with_runtime_handle(
-            RuleExecutorConfig {
-                workers: RULE_SEND_EXECUTOR_WORKERS,
-                queue_capacity: RULE_SEND_EXECUTOR_QUEUE_CAPACITY,
-                traffic_policy: TrafficPolicy::default(),
-                dry_run: false,
-            },
-            handle,
-        )
-    }
-
-    pub fn new_configured_with_runtime_handle(
-        config: RuleExecutorConfig,
-        handle: Handle,
-    ) -> std::result::Result<Self, RuleError> {
-        Self::new_configured_with_runtime_source(config, RuntimeHandleSource::Explicit(handle))
-    }
-
-    fn new_configured_with_runtime_source(
-        config: RuleExecutorConfig,
-        runtime: RuntimeHandleSource,
-    ) -> std::result::Result<Self, RuleError> {
-        Ok(Self {
-            executor: Arc::new(BoundedExecutor::from_runtime_source(
-                runtime,
-                config.workers,
-                config.workers + config.queue_capacity,
-            )),
-            traffic_policy: config.traffic_policy,
-            dry_run: config.dry_run,
-        })
-    }
-
-    pub fn dispatch(
-        &self,
-        rule_name: &str,
-        template: &RuleSendTemplate,
-        packet: Option<&PacketContext>,
-    ) -> Result<()> {
-        let rendered = template.render(packet);
-        let policy = self.transmission_policy();
-        validate_rule_send_mode(rule_name, &rendered, policy)?;
-
-        if self.dry_run {
-            info!(
-                "rule '{}' send action validated (dry-run); would dispatch templated packet",
-                rule_name
-            );
-            telemetry::record_rule_action("send", "dry_run_validated");
-            return Ok(());
-        }
-
-        let rule_name_owned = rule_name.to_string();
-        let spawn_result = self.executor.spawn_async(move || async move {
-            telemetry::record_rule_action("send", "started");
-            match Self::send(rule_name_owned.clone(), rendered, policy).await {
-                Ok(_) => {
-                    telemetry::record_rule_action("send", "succeeded");
-                    info!("rule '{}' dispatched templated packet", rule_name_owned)
-                }
-                Err(err) => {
-                    telemetry::record_rule_action("send", "failed");
-                    error!("rule '{}' send action failed: {err}", rule_name_owned)
-                }
-            }
-        });
-
-        match spawn_result {
-            Ok(()) => {
-                telemetry::record_rule_action("send", "queued");
-                Ok(())
-            }
-            Err(ExecutorError::QueueFull) => {
-                warn!(
-                    "rule '{}' send action dropped: executor queue is full",
-                    rule_name
-                );
-                telemetry::record_rule_executor_drop("send", "queue_full");
-                Err(RuleActionError::SendQueueFull {
-                    rule: rule_name.to_string(),
-                }
-                .into())
-            }
-            Err(ExecutorError::Closed) => {
-                error!(
-                    "rule '{}' send action failed: executor unavailable",
-                    rule_name
-                );
-                telemetry::record_rule_executor_drop("send", "executor_closed");
-                Err(RuleActionError::SendExecutorUnavailable {
-                    rule: rule_name.to_string(),
-                }
-                .into())
-            }
-            Err(ExecutorError::RuntimeUnavailable(details)) => {
-                error!(
-                    "rule '{}' send action failed: executor runtime unavailable: {}",
-                    rule_name, details
-                );
-                telemetry::record_rule_executor_drop("send", "runtime_unavailable");
-                Err(RuleActionError::SendExecutorUnavailable {
-                    rule: rule_name.to_string(),
-                }
-                .into())
-            }
-        }
-    }
-
-    fn transmission_policy(&self) -> TrafficPolicy {
-        self.traffic_policy.with_dry_run(self.dry_run)
-    }
-
-    async fn send(rule_name: String, request: PacketRequest, policy: TrafficPolicy) -> Result<()> {
-        let service = PacketSendService::new(policy);
-        let prepared = service.prepare(request, true).await.map_err(|source| {
-            RuleActionError::SendExecution {
-                rule: rule_name.clone(),
-                stage: "preparing packet send",
-                source,
-            }
-        })?;
-        service
-            .execute_plan(prepared.plan)
-            .await
-            .map_err(|source| RuleActionError::SendExecution {
-                rule: rule_name,
-                stage: "executing transmission",
-                source,
-            })?;
-        Ok(())
-    }
 }

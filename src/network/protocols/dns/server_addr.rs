@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, Result};
 
-pub(super) fn resolve_dns_server_address(server: &str) -> Result<String> {
+pub(crate) fn resolve_dns_server_address(server: &str) -> Result<String> {
     let server = server.trim();
 
     if server.is_empty() {

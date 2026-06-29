@@ -14,7 +14,7 @@ use pnet::packet::MutablePacket;
 use rand::random;
 use thiserror::Error;
 
-use crate::engine::spec::{IcmpSpec, Icmpv6Spec, TcpFlagSet, TcpSpec, TransportSpec, UdpSpec};
+use crate::domain::spec::{IcmpSpec, Icmpv6Spec, TcpFlagSet, TcpSpec, TransportSpec, UdpSpec};
 use crate::network::checksum::{
     compute_icmpv6_checksum, compute_tcp_checksum, compute_udp_checksum, ip_version_pair,
     IpVersionPair,

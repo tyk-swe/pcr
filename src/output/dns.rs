@@ -6,7 +6,7 @@ use std::fmt::Write;
 use anyhow::{Context, Result};
 use trust_dns_proto::op::Message;
 
-use crate::engine::command::{DnsQueryResult, DnsRequest};
+use crate::domain::command::{DnsQueryResult, DnsRequest};
 
 pub fn format_dns_dry_run(options: &DnsRequest) -> String {
     format!(

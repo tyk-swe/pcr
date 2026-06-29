@@ -4,10 +4,11 @@
 use serde::de::IgnoredAny;
 use serde::Deserialize;
 
-use crate::engine::request::PacketRequest;
+use crate::domain::request::PacketRequest;
 use crate::rules::error::{RuleActionError, RuleError};
-use crate::rules::executor::{BoundedExecutor, RuleSendExecutor, RuleSendTemplate};
+use crate::rules::executor::BoundedExecutor;
 use crate::rules::model::{PacketContext, RuleLogLevel};
+use crate::rules::send::{RuleSendDispatcher, RuleSendTemplate};
 
 type Result<T> = std::result::Result<T, RuleError>;
 
@@ -104,7 +105,7 @@ impl RuleAction {
         &self,
         rule_name: &str,
         packet: Option<&PacketContext>,
-        sender: Option<&RuleSendExecutor>,
+        sender: Option<&dyn RuleSendDispatcher>,
         task_executor: &BoundedExecutor,
     ) -> Result<()> {
         match self {

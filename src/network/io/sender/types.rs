@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use pnet::datalink::NetworkInterface;
 use pnet::packet::ip::IpNextHeaderProtocol;
 
-use crate::engine::spec::{LoggingSpec, TransmissionSpec};
+use crate::domain::spec::{LoggingSpec, TransmissionSpec};
 
 use super::control::TransmissionPolicy;
 

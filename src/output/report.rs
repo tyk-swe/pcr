@@ -3,9 +3,9 @@
 
 use serde::Serialize;
 
-use crate::engine::policy::PolicyOutcome;
-use crate::engine::preflight::PreflightView;
-use crate::engine::spec::{PacketSpec, PayloadSource, TransportSpec};
+use crate::domain::policy::PolicyOutcome;
+use crate::domain::report::PreflightView;
+use crate::domain::spec::{PacketSpec, PayloadSource, TransportSpec};
 
 use super::format::format_preview;
 

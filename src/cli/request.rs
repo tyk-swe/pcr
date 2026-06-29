@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::cli;
-use crate::engine::request as req;
+use crate::domain::request as req;
 
 impl From<&cli::OneShotOptions> for req::PacketRequest {
     fn from(options: &cli::OneShotOptions) -> Self {

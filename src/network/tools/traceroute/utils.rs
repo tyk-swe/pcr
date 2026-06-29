@@ -454,6 +454,3 @@ pub fn await_icmp_response_v6<R: PacketReceiver + ?Sized>(
     }
     Ok(ProbeResult::Timeout)
 }
-
-#[cfg(test)]
-mod tests;

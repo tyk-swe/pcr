@@ -5,5 +5,5 @@ pub mod arp;
 pub mod checksum;
 pub mod dns;
 pub mod ndp;
-#[cfg(any(test, feature = "pcap", feature = "scan", feature = "traceroute"))]
+#[cfg(any(feature = "pcap", feature = "scan", feature = "traceroute"))]
 pub mod protocol_validation;

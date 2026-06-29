@@ -20,7 +20,6 @@ pub use diagnostic::{
 };
 pub use engine::RuleEngine;
 pub use error::{MatcherError, RuleActionError, RuleError};
-#[cfg(any(test, feature = "test_utils"))]
-pub use executor::test_support;
+
 pub use executor::RuleSendExecutor;
 pub use model::PacketContext;

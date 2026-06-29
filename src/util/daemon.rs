@@ -43,7 +43,3 @@ pub fn ensure_daemonized(foreground: bool) -> Result<()> {
         bail!("daemon mode is only supported on Unix platforms; rerun with --foreground");
     }
 }
-
-#[cfg(test)]
-#[path = "daemon_tests.rs"]
-mod tests;

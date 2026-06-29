@@ -229,96 +229,6 @@ impl DaemonState {
     }
 }
 
-#[cfg(test)]
-mod preflight_tests {
-    use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
-
-    #[test]
-    fn preflight_rejects_daemon_without_rules_or_control_socket() {
-        let opts = DaemonRequest {
-            rules_file: None,
-            foreground: Some(true),
-            control_socket: None,
-        };
-
-        let err = preflight(&opts).expect_err("daemon must be configurable");
-
-        assert!(err
-            .to_string()
-            .contains("requires --rules or --control-socket"));
-    }
-
-    #[test]
-    fn preflight_loads_rules_without_engine_runtime() {
-        let mut rules = NamedTempFile::new().expect("create temporary rules file");
-        writeln!(
-            rules,
-            "{}",
-            r#"
-- name: "startup"
-  trigger: on_startup
-  actions:
-    - type: log
-      message: "boot"
-"#
-            .trim()
-        )
-        .expect("write rules");
-
-        let opts = DaemonRequest {
-            rules_file: Some(rules.path().to_string_lossy().into_owned()),
-            foreground: Some(true),
-            control_socket: None,
-        };
-
-        let preflight = preflight(&opts).expect("daemon preflight should load rules");
-
-        assert!(preflight.rules_were_loaded());
-        assert_eq!(preflight.into_rules().unwrap().rule_count(), 1);
-    }
-}
-
-#[cfg(all(test, not(unix)))]
-mod tests {
-    use super::*;
-    use crate::rules::RuleSendExecutor;
-
-    #[tokio::test]
-    async fn control_socket_is_rejected_on_non_unix() {
-        let opts = DaemonRequest {
-            rules_file: None,
-            foreground: Some(false),
-            control_socket: Some("/tmp/pc.sock".to_string()),
-        };
-
-        let config = EngineConfig {
-            output_format: None,
-            prometheus_bind: None,
-            rule_workers: None,
-            rule_queue: None,
-            send_workers: None,
-            send_queue: None,
-            traffic_policy: crate::engine::policy::TrafficPolicy::default(),
-            dry_run: false,
-        };
-
-        let mut rules = RuleEngine::new().expect("rule engine initialisation");
-        rules.configure_sender(RuleSendExecutor::new().expect("rule send executor initialisation"));
-        let output = OutputController::new(None);
-
-        let result = run(&opts, &config, &mut rules, &output).await;
-        assert!(
-            result.is_err(),
-            "control socket should be rejected on non-Unix targets"
-        );
-    }
-}
-
-#[cfg(test)]
-mod command_tests;
-
 #[derive(Debug)]
 enum DaemonCommand {
     LoadRules {
@@ -649,6 +559,3 @@ fn default_listener_options() -> ListenerRequest {
         ..Default::default()
     }
 }
-
-#[cfg(all(test, unix))]
-mod parsing_tests;

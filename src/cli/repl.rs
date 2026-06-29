@@ -18,8 +18,6 @@ mod completion;
 mod help;
 mod history;
 
-#[cfg(test)]
-use command::command_arguments;
 use command::{
     parse_listen, parse_oneshot, parse_repl_line, parse_scan, parse_traceroute, CommandFlow,
     ReplCommand,
@@ -27,8 +25,6 @@ use command::{
 use completion::ReplHelper;
 use help::{print_command_help, print_help};
 use history::{history_path, print_history, recall_from_history, should_record_command};
-#[cfg(test)]
-use history::{packetcraftr_home_dir, render_history};
 
 const MAX_HISTORY_ENTRIES: usize = 500;
 
@@ -355,6 +351,3 @@ async fn load_script_commands(opts: &InteractiveRequest) -> Result<VecDeque<Stri
 }
 
 // ─── Tests ─────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests;

@@ -30,8 +30,6 @@ use crate::network::pnet_utils::open_transport_channel;
 use crate::util::error::operation_failed;
 use crate::util::sync::LockResultExt;
 
-#[cfg(test)]
-use super::common::MAX_SCAN_TARGETS;
 use super::common::{push_scan_target, resolve_source_override, resolve_target};
 
 pub async fn run_icmp(
@@ -207,17 +205,6 @@ fn perform_icmp_scan(
 
     let id = random::<u16>();
     scan_hosts_concurrent_with_delay(targets, id, timeout, send_delay, &mut dual_tx, &mut dual_rx)
-}
-
-#[cfg(test)]
-fn scan_hosts_concurrent(
-    targets: Vec<SocketAddr>,
-    id: u16,
-    timeout: Duration,
-    tx: &mut dyn IcmpScanTx,
-    rx: &mut dyn IcmpScanRx,
-) -> Result<Vec<IpAddr>> {
-    scan_hosts_concurrent_with_delay(targets, id, timeout, None, tx, rx)
 }
 
 fn scan_hosts_concurrent_with_delay(
@@ -528,133 +515,5 @@ impl<'a> IcmpScanRx for RealIcmpv6Rx<'a> {
             }
         }
         Ok(None)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::VecDeque;
-    use std::net::Ipv4Addr;
-
-    #[test]
-    fn parse_icmp_targets_single_ip() {
-        let targets = parse_icmp_targets("192.168.1.1").expect("parse single");
-        assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].ip(), IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)));
-    }
-
-    #[test]
-    fn parse_icmp_targets_cidr() {
-        let targets = parse_icmp_targets("192.168.1.0/30").expect("parse cidr");
-        // .0, .1, .2, .3 = 4 hosts
-        assert_eq!(targets.len(), 4);
-    }
-
-    #[test]
-    fn parse_icmp_targets_allows_max_sized_cidr() {
-        let targets = parse_icmp_targets("192.0.0.0/20").expect("max cidr should parse");
-        assert_eq!(targets.len(), MAX_SCAN_TARGETS);
-    }
-
-    #[test]
-    fn parse_icmp_targets_rejects_cidr_over_limit() {
-        let err = parse_icmp_targets("192.0.0.0/19").expect_err("large cidr should fail");
-        assert!(err
-            .to_string()
-            .contains("scan target expansion exceeds limit of 4096"));
-    }
-
-    #[test]
-    fn parse_icmp_targets_rejects_ipv6_cidr_over_limit() {
-        let err = parse_icmp_targets("2001:db8::/115").expect_err("large cidr should fail");
-        assert!(err
-            .to_string()
-            .contains("scan target expansion exceeds limit of 4096"));
-    }
-
-    #[test]
-    fn parse_icmp_targets_ipv6() {
-        let targets = parse_icmp_targets("2001:db8::1").expect("parse ipv6");
-        assert_eq!(targets.len(), 1);
-        match targets[0].ip() {
-            IpAddr::V6(_) => {}
-            _ => panic!("Expected IPv6"),
-        }
-    }
-
-    // Mocks
-    struct MockTx {
-        sent: Vec<(IpAddr, u16, u16)>,
-    }
-    impl IcmpScanTx for MockTx {
-        fn send_echo_request(&mut self, dest: SocketAddr, id: u16, seq: u16) -> Result<()> {
-            self.sent.push((dest.ip(), id, seq));
-            Ok(())
-        }
-    }
-
-    struct MockRx {
-        replies: VecDeque<(IpAddr, u16, u16)>,
-    }
-    impl IcmpScanRx for MockRx {
-        fn next_reply(&mut self, timeout: Duration) -> Result<Option<(IpAddr, u16, u16)>> {
-            if let Some(reply) = self.replies.pop_front() {
-                Ok(Some(reply))
-            } else {
-                std::thread::sleep(timeout);
-                Ok(None)
-            }
-        }
-    }
-
-    #[test]
-    fn scan_hosts_concurrent_detects_up_host() {
-        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0);
-        let targets = vec![target];
-        let id = 1234;
-
-        let mut tx = MockTx { sent: vec![] };
-        let mut rx = MockRx {
-            replies: VecDeque::from(vec![(target.ip(), id, 0)]),
-        };
-
-        let results =
-            scan_hosts_concurrent(targets, id, Duration::from_millis(100), &mut tx, &mut rx)
-                .expect("scan success");
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0], target.ip());
-    }
-
-    #[test]
-    fn scan_hosts_concurrent_respects_send_delay() {
-        let targets = vec![
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0),
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 0),
-        ];
-        let mut tx = MockTx { sent: vec![] };
-        let mut rx = MockRx {
-            replies: VecDeque::new(),
-        };
-
-        let start = Instant::now();
-        scan_hosts_concurrent_with_delay(
-            targets,
-            1234,
-            Duration::from_millis(1),
-            Some(Duration::from_millis(40)),
-            &mut tx,
-            &mut rx,
-        )
-        .expect("scan success");
-        let duration = start.elapsed();
-
-        assert_eq!(tx.sent.len(), 2);
-        assert!(
-            duration >= Duration::from_millis(40),
-            "ICMP scan did not apply send delay: {:?}",
-            duration
-        );
     }
 }

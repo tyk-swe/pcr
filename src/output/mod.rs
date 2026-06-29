@@ -5,9 +5,6 @@ mod controller;
 mod dns;
 mod format;
 mod report;
-#[cfg(any(test, feature = "test_utils"))]
-pub mod test_utils;
-
 pub use crate::engine::{ListenerEvent, ProtocolLabel};
 pub use controller::OutputController;
 pub use dns::{

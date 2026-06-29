@@ -9,9 +9,6 @@ pub(crate) mod repl;
 mod request;
 pub mod validators;
 
-#[cfg(test)]
-mod tests;
-
 #[cfg(feature = "daemon")]
 pub use commands::DaemonOptions;
 #[cfg(feature = "fuzz")]

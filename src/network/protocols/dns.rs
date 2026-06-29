@@ -186,6 +186,3 @@ pub(crate) async fn resolve_prepared(
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

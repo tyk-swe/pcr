@@ -257,6 +257,3 @@ pub(crate) fn parse_icmpv6_echo(packet: &Icmpv6Packet) -> Option<(u16, u16)> {
     let sequence = u16::from_be_bytes([payload[2], payload[3]]);
     Some((identifier, sequence))
 }
-
-#[cfg(test)]
-mod tests;

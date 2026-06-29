@@ -14,14 +14,8 @@
 # Binary / artifacts
 packetcraftr
 .packetcraftr/
-# Coverage reports
-coverage_output.txt
-target/llvm-cov-target/
-*.profraw
-*.profdata
 
 # Misc
 *.tmp
 .DS_Store
-
 

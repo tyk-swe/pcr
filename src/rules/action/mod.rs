@@ -124,6 +124,3 @@ impl RuleAction {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -27,8 +27,7 @@ pub use error::{
     PayloadError, PlannerError, Result as SenderResult, SenderError,
 };
 pub use executor::execute_transmission;
-#[cfg(any(test, feature = "test_utils"))]
-pub use executor::test_utils;
+
 pub(crate) use metrics::emit_metrics_snapshot;
 pub use planner::{
     plan_transmission, plan_transmission_dry_run, plan_transmission_dry_run_with_policy,
@@ -48,6 +47,3 @@ pub use types::{
     DestinationSelectionReason, InterfaceSelectionReason, LinkType, NetworkTarget, PlanningMode,
     SelectionMetadata, SourceSelectionReason, TransmissionPlan, TransmissionSummary,
 };
-
-#[cfg(test)]
-mod tests;

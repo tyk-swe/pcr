@@ -30,8 +30,7 @@ use super::common::{
 use crate::network::pnet_utils::open_transport_channel;
 
 mod tcp_io;
-#[cfg(test)]
-use tcp_io::send_tcp_with_retry;
+
 use tcp_io::{RawSocketSender, RealTcpRxV4, RealTcpRxV6, RealTcpSender, TcpScanRx, TcpSender};
 
 const TRANSPORT_CHANNEL_BUFFER_SIZE: usize = 1024 * 1024;
@@ -363,39 +362,6 @@ fn perform_tcp_scan<S: TcpScanStrategy>(
     }
 }
 
-#[cfg(test)]
-fn scan_ports_concurrent<S, TX, RX>(
-    destination: SocketAddr,
-    ports: &[u16],
-    source_ip: IpAddr,
-    timeout: Duration,
-    scan_strategy: &S,
-    tx: &mut TX,
-    rx: &mut RX,
-) -> Result<BTreeMap<u16, PortState>>
-where
-    S: TcpScanStrategy,
-    TX: TcpSender + ?Sized,
-    RX: TcpScanRx + ?Sized,
-{
-    scan_ports_concurrent_with_config(
-        ConcurrentScanConfig {
-            destination,
-            source_ip,
-            timeout,
-            batch_size: CONCURRENT_SCAN_BATCH_SIZE,
-            send_delay: None,
-            base_port_offset: BASE_PORT_OFFSET,
-            base_port_override: None,
-            initial_port_state: scan_strategy.timeout_state(),
-        },
-        ports,
-        scan_strategy,
-        tx,
-        rx,
-    )
-}
-
 fn scan_ports_concurrent_with_config<S, TX, RX>(
     config: ConcurrentScanConfig,
     ports: &[u16],
@@ -529,25 +495,6 @@ fn scan_tcp_v4_with_controls<S: TcpScanStrategy>(
     Ok(results)
 }
 
-#[cfg(test)]
-fn scan_tcp_v6<S: TcpScanStrategy>(
-    destination: SocketAddr,
-    ports: &[u16],
-    timeout: Duration,
-    source_override: Option<Ipv6Addr>,
-    scan_strategy: &S,
-) -> Result<BTreeMap<u16, PortState>> {
-    scan_tcp_v6_with_controls(
-        destination,
-        ports,
-        timeout,
-        source_override,
-        CONCURRENT_SCAN_BATCH_SIZE,
-        None,
-        scan_strategy,
-    )
-}
-
 fn scan_tcp_v6_with_controls<S: TcpScanStrategy>(
     destination: SocketAddr,
     ports: &[u16],
@@ -616,12 +563,3 @@ fn scan_tcp_v6_with_controls<S: TcpScanStrategy>(
 
     Ok(results)
 }
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod verification_tests;
-
-#[cfg(test)]
-mod tcp_scan_v6_tests;

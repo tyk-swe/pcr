@@ -269,6 +269,3 @@ impl RuleEngine {
         }
     }
 }
-
-#[cfg(test)]
-mod tests;

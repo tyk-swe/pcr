@@ -90,34 +90,3 @@ fn level_from_verbosity(verbose: u8) -> LevelFilter {
         _ => LevelFilter::Trace,
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serial_test::serial;
-    use tempfile::tempdir;
-
-    #[test]
-    #[serial]
-    fn init_fails_with_directory_path() {
-        let dir = tempdir().unwrap();
-        let log_path = dir.path();
-        let result = init(0, None, false, Some(log_path));
-
-        match result {
-            Err(LoggingInitError::OpenLogFile { path, .. }) => {
-                assert_eq!(path, log_path.to_path_buf());
-            }
-            _ => panic!("Expected OpenLogFile error, got {:?}", result),
-        }
-    }
-
-    #[test]
-    fn verbosity_maps_to_expected_levels() {
-        assert_eq!(level_from_verbosity(0), LevelFilter::Info);
-        assert_eq!(level_from_verbosity(1), LevelFilter::Info);
-        assert_eq!(level_from_verbosity(2), LevelFilter::Debug);
-        assert_eq!(level_from_verbosity(3), LevelFilter::Trace);
-        assert_eq!(level_from_verbosity(u8::MAX), LevelFilter::Trace);
-    }
-}

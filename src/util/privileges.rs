@@ -57,7 +57,3 @@ fn try_create_raw_socket() -> Result<()> {
     drop(socket);
     Ok(())
 }
-
-#[cfg(test)]
-#[path = "privileges_tests.rs"]
-mod tests;

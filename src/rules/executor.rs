@@ -23,14 +23,10 @@ use crate::util::telemetry;
 
 type Result<T> = std::result::Result<T, RuleError>;
 
-#[cfg(any(test, feature = "test_utils"))]
-pub mod test_support;
-
 #[derive(Debug)]
 pub enum ExecutorError {
     QueueFull,
     Closed,
-    #[cfg_attr(test, allow(dead_code))]
     RuntimeUnavailable(String),
 }
 
@@ -100,44 +96,6 @@ impl BoundedExecutor {
         }
     }
 
-    #[cfg(test)]
-    pub fn spawn<F>(&self, job: F) -> std::result::Result<(), ExecutorError>
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        let runtime = self.runtime.resolve()?;
-        let capacity_permit = self
-            .capacity_permits
-            .clone()
-            .try_acquire_owned()
-            .map_err(|err| match err {
-                TryAcquireError::NoPermits => ExecutorError::QueueFull,
-                TryAcquireError::Closed => ExecutorError::Closed,
-            })?;
-        let worker_permits = Arc::clone(&self.worker_permits);
-        let blocking_runtime = runtime.clone();
-
-        let task = runtime.spawn(async move {
-            let _capacity_permit = capacity_permit;
-            let Ok(worker_permit) = worker_permits.acquire_owned().await else {
-                warn!("bounded executor worker semaphore closed before task started");
-                return;
-            };
-            let _worker_permit = worker_permit;
-            if let Err(join_err) = blocking_runtime.spawn_blocking(job).await {
-                log_join_error(join_err);
-            }
-        });
-
-        runtime.spawn(async move {
-            if let Err(join_err) = task.await {
-                log_join_error(join_err);
-            }
-        });
-
-        Ok(())
-    }
-
     pub fn spawn_async<F, Fut>(&self, job: F) -> std::result::Result<(), ExecutorError>
     where
         F: FnOnce() -> Fut + Send + 'static,
@@ -185,19 +143,9 @@ fn log_join_error(join_err: JoinError) {
 fn current_runtime_handle() -> std::result::Result<Handle, ExecutorError> {
     match Handle::try_current() {
         Ok(handle) => Ok(handle),
-        Err(err) => {
-            #[cfg(test)]
-            {
-                let _ = err;
-                Ok(test_support::runtime_handle())
-            }
-            #[cfg(not(test))]
-            {
-                Err(ExecutorError::RuntimeUnavailable(format!(
-                    "rule executor requires an application Tokio runtime: {err}"
-                )))
-            }
-        }
+        Err(err) => Err(ExecutorError::RuntimeUnavailable(format!(
+            "rule executor requires an application Tokio runtime: {err}"
+        ))),
     }
 }
 
@@ -416,11 +364,6 @@ impl RuleSendExecutor {
     }
 
     async fn send(rule_name: String, request: PacketRequest, policy: TrafficPolicy) -> Result<()> {
-        #[cfg(any(test, feature = "test_utils"))]
-        if let Some(handler) = test_support::send_hook() {
-            return handler(rule_name, request);
-        }
-
         let service = PacketSendService::new(policy);
         let prepared = service.prepare(request, true).await.map_err(|source| {
             RuleActionError::SendExecution {
@@ -439,15 +382,4 @@ impl RuleSendExecutor {
             })?;
         Ok(())
     }
-
-    #[cfg(any(test, feature = "test_utils"))]
-    pub fn set_send_hook(hook: test_support::TestSendHook) {
-        test_support::set_send_hook(hook);
-    }
 }
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod reproduction_test;

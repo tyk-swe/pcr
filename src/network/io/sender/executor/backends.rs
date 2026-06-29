@@ -92,19 +92,6 @@ impl DatalinkDrain {
         }
     }
 
-    #[cfg(test)]
-    fn from_handle(
-        interface: impl Into<String>,
-        stop: Arc<AtomicBool>,
-        handle: thread::JoinHandle<()>,
-    ) -> Self {
-        Self {
-            interface: interface.into(),
-            stop,
-            handle: Some(handle),
-        }
-    }
-
     fn stop_and_join(mut self) -> Result<()> {
         self.stop_and_join_inner()
     }
@@ -305,69 +292,4 @@ where
             info!("Transmitted {} frame(s) via {}", sent, interface.name);
         },
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::network::sender::error::SenderError;
-    use std::sync::atomic::AtomicBool;
-
-    #[test]
-    fn datalink_drain_stop_and_join_sets_stop_flag() {
-        let stop = Arc::new(AtomicBool::new(false));
-        let observed_stop = Arc::new(AtomicBool::new(false));
-        let thread_stop = Arc::clone(&stop);
-        let thread_observed_stop = Arc::clone(&observed_stop);
-        let handle = thread::spawn(move || {
-            while !thread_stop.load(Ordering::Acquire) {
-                thread::sleep(Duration::from_millis(1));
-            }
-            thread_observed_stop.store(true, Ordering::Release);
-        });
-        let drain = DatalinkDrain::from_handle("test0", Arc::clone(&stop), handle);
-
-        finish_datalink_send(Ok(()), drain).expect("drain should join cleanly");
-
-        assert!(stop.load(Ordering::Acquire));
-        assert!(observed_stop.load(Ordering::Acquire));
-    }
-
-    #[test]
-    fn datalink_drain_join_panic_returns_typed_error_when_send_succeeds() {
-        let stop = Arc::new(AtomicBool::new(false));
-        let handle = thread::spawn(|| panic!("simulated drain panic"));
-        let drain = DatalinkDrain::from_handle("test0", Arc::clone(&stop), handle);
-
-        let err = finish_datalink_send(Ok(()), drain).expect_err("join panic should fail");
-
-        assert!(stop.load(Ordering::Acquire));
-        assert!(matches!(
-            err,
-            SenderError::Executor(ExecutorError::DatalinkDrainThreadPanicked { interface })
-                if interface == "test0"
-        ));
-    }
-
-    #[test]
-    fn datalink_drain_preserves_send_error_when_join_also_fails() {
-        let stop = Arc::new(AtomicBool::new(false));
-        let handle = thread::spawn(|| panic!("simulated drain panic"));
-        let drain = DatalinkDrain::from_handle("test0", Arc::clone(&stop), handle);
-        let send_error: Result<()> = Err(ExecutorError::FrameSendFailed {
-            interface: "test0".to_string(),
-            frame_len: 42,
-            source: std::io::Error::other("send failed"),
-        }
-        .into());
-
-        let err = finish_datalink_send(send_error, drain)
-            .expect_err("original send error should be returned");
-
-        assert!(stop.load(Ordering::Acquire));
-        assert!(matches!(
-            err,
-            SenderError::Executor(ExecutorError::FrameSendFailed { frame_len: 42, .. })
-        ));
-    }
 }

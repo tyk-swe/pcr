@@ -183,6 +183,8 @@ pub enum ExecutorError {
         #[source]
         source: std::io::Error,
     },
+    #[error("datalink receiver drain thread panicked on interface {interface}")]
+    DatalinkDrainThreadPanicked { interface: String },
     #[error("failed to open raw transport channel for protocol {protocol:?}: {source}")]
     OpenTransportChannel {
         protocol: IpNextHeaderProtocol,

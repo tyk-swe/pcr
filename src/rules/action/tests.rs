@@ -40,11 +40,31 @@ fn log_action(message: &str) -> RuleAction {
 }
 
 fn command_action(program: &str, args: &[&str], timeout_seconds: u64) -> RuleAction {
-    RuleAction::Command {
-        program: program.to_string(),
-        args: args.iter().map(|arg| arg.to_string()).collect(),
-        timeout_seconds,
-    }
+    RuleAction::Command(
+        command::CommandAction::from_document(
+            program.to_string(),
+            args.iter().map(|arg| arg.to_string()).collect(),
+            Some(timeout_seconds),
+            false,
+            Vec::new(),
+            Some("/".to_string()),
+        )
+        .expect("valid command action"),
+    )
+}
+
+fn enabled_command_action(program: &str, args: &[&str], timeout_seconds: u64) -> RuleAction {
+    RuleAction::Command(
+        command::CommandAction::from_document(
+            program.to_string(),
+            args.iter().map(|arg| arg.to_string()).collect(),
+            Some(timeout_seconds),
+            true,
+            vec![program.to_string()],
+            Some("/".to_string()),
+        )
+        .expect("valid command action"),
+    )
 }
 
 fn log_document(message: &str, level: Option<RuleLogLevel>) -> RuleActionDocument {
@@ -63,6 +83,9 @@ fn command_document(
         program: program.to_string(),
         args: args.iter().map(|arg| arg.to_string()).collect(),
         timeout_seconds,
+        enabled: false,
+        allowed_programs: Vec::new(),
+        working_dir: None,
     }
 }
 
@@ -81,16 +104,18 @@ fn assert_command_action(
     expected_program: &str,
     expected_args: &[&str],
     expected_timeout: u64,
+    expected_enabled: bool,
+    expected_allowed_programs: &[&str],
+    expected_working_dir: &str,
 ) {
     match action {
-        RuleAction::Command {
-            program,
-            args,
-            timeout_seconds,
-        } => {
-            assert_eq!(program, expected_program);
-            assert_eq!(args, expected_args);
-            assert_eq!(timeout_seconds, expected_timeout);
+        RuleAction::Command(command_action) => {
+            assert_eq!(command_action.program, expected_program);
+            assert_eq!(command_action.args, expected_args);
+            assert_eq!(command_action.timeout_seconds, expected_timeout);
+            assert_eq!(command_action.enabled, expected_enabled);
+            assert_eq!(command_action.allowed_programs, expected_allowed_programs);
+            assert_eq!(command_action.working_dir, expected_working_dir);
         }
         other => panic!("wrong action type: {other:?}"),
     }
@@ -133,10 +158,73 @@ fn log_action_handles_missing_context() {
 #[test]
 fn command_action_queues_successfully() {
     let _executor_guard = test_support::executor_lock();
-    let action = command_action("true", &[], 5);
+    let action = enabled_command_action("/bin/true", &[], 5);
     let executor = new_task_executor();
     let result = action.execute("rule", None, None, executor.as_ref());
     assert!(result.is_ok());
+}
+
+#[test]
+fn command_action_is_disabled_by_default() {
+    let action = command_action("/bin/true", &[], 5);
+    let executor = new_task_executor();
+    let result = action.execute("rule", None, None, executor.as_ref());
+
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(RuleActionError::CommandDisabled { .. }))
+    ));
+}
+
+#[test]
+fn command_action_denies_program_not_in_allowlist() {
+    let action = RuleAction::Command(
+        command::CommandAction::from_document(
+            "/bin/true".to_string(),
+            Vec::new(),
+            Some(5),
+            true,
+            vec!["/bin/false".to_string()],
+            Some("/".to_string()),
+        )
+        .expect("valid command action"),
+    );
+    let executor = new_task_executor();
+    let result = action.execute("rule", None, None, executor.as_ref());
+
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(
+            RuleActionError::CommandProgramDenied { .. }
+        ))
+    ));
+}
+
+#[test]
+fn command_action_denies_rendered_program_not_in_allowlist() {
+    let mut ctx = packet_context();
+    ctx.source = Some("/bin/true".to_string());
+    let action = RuleAction::Command(
+        command::CommandAction::from_document(
+            "{source}".to_string(),
+            Vec::new(),
+            Some(5),
+            true,
+            vec!["/bin/false".to_string()],
+            Some("/".to_string()),
+        )
+        .expect("valid command action"),
+    );
+    let executor = new_task_executor();
+    let result = action.execute("rule", Some(&ctx), None, executor.as_ref());
+
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(RuleActionError::CommandProgramDenied {
+            program,
+            ..
+        })) if program == "/bin/true"
+    ));
 }
 
 #[test]
@@ -176,7 +264,7 @@ fn command_action_reports_queue_full_error() {
     }
     drop(drain_tx);
 
-    let action = command_action("true", &[], 5);
+    let action = enabled_command_action("/bin/true", &[], 5);
     let result = action.execute("queue-full-rule", None, None, task_executor.as_ref());
     assert!(
         result.is_err(),
@@ -236,7 +324,7 @@ fn long_running_send_actions_do_not_starve_command_queue() {
         "send tasks failed to start"
     );
 
-    let command_action = command_action("true", &[], 5);
+    let command_action = enabled_command_action("/bin/true", &[], 5);
 
     let task_executor = new_task_executor();
     let result = command_action.execute("command", None, Some(&executor), task_executor.as_ref());
@@ -287,8 +375,113 @@ fn try_from_rule_action_document_command_variants() {
         let action = command_document(program, args, timeout)
             .try_into()
             .expect("valid command action");
-        assert_command_action(action, program, args, expected_timeout);
+        assert_command_action(action, program, args, expected_timeout, false, &[], "/");
     }
+}
+
+#[test]
+fn try_from_rule_action_document_command_accepts_explicit_policy_fields() {
+    let doc: RuleActionDocument = crate::rules::yaml::from_str(
+        r#"
+type: command
+program: "/bin/true"
+enabled: true
+allowed_programs:
+  - "/bin/true"
+working_dir: "/tmp"
+"#,
+    )
+    .expect("command action should deserialize");
+
+    let action = doc.try_into().expect("valid command action");
+
+    assert_command_action(action, "/bin/true", &[], 5, true, &["/bin/true"], "/tmp");
+}
+
+#[test]
+fn try_from_rule_action_document_rejects_enabled_command_without_allowlist() {
+    let doc: RuleActionDocument = crate::rules::yaml::from_str(
+        r#"
+type: command
+program: "/bin/true"
+enabled: true
+"#,
+    )
+    .expect("command action should deserialize");
+
+    let result: Result<RuleAction> = doc.try_into();
+
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(RuleActionError::MissingCommandAllowlist))
+    ));
+}
+
+#[test]
+fn try_from_rule_action_document_rejects_enabled_relative_literal_program() {
+    let doc: RuleActionDocument = crate::rules::yaml::from_str(
+        r#"
+type: command
+program: "true"
+enabled: true
+allowed_programs:
+  - "/bin/true"
+"#,
+    )
+    .expect("command action should deserialize");
+
+    let result: Result<RuleAction> = doc.try_into();
+
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(
+            RuleActionError::InvalidCommandProgram { .. }
+        ))
+    ));
+}
+
+#[test]
+fn try_from_rule_action_document_rejects_relative_allowed_program() {
+    let doc: RuleActionDocument = crate::rules::yaml::from_str(
+        r#"
+type: command
+program: "true"
+enabled: true
+allowed_programs:
+  - "true"
+"#,
+    )
+    .expect("command action should deserialize");
+
+    let result: Result<RuleAction> = doc.try_into();
+
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(
+            RuleActionError::InvalidCommandAllowlistEntry { .. }
+        ))
+    ));
+}
+
+#[test]
+fn try_from_rule_action_document_rejects_relative_working_dir() {
+    let doc: RuleActionDocument = crate::rules::yaml::from_str(
+        r#"
+type: command
+program: "/bin/true"
+working_dir: "relative"
+"#,
+    )
+    .expect("command action should deserialize");
+
+    let result: Result<RuleAction> = doc.try_into();
+
+    assert!(matches!(
+        result,
+        Err(RuleError::Action(
+            RuleActionError::InvalidCommandWorkingDir { .. }
+        ))
+    ));
 }
 
 #[test]

@@ -43,6 +43,39 @@ fn dry_run_ipv4_plan_skips_arp_resolution() {
     assert!(matches!(plan.destination, NetworkTarget::Ipv4(addr) if addr == dst_ip));
     assert!(!plan.frames.is_empty(), "frames should be constructed");
     assert_eq!(plan.mode, PlanningMode::DryRun);
+    assert_eq!(plan.selection.selected_interface, "test0");
+    assert_eq!(
+        plan.selection.interface_reason.as_str(),
+        "explicit_interface"
+    );
+    assert_eq!(plan.selection.source_ip, IpAddr::V4(src_ip));
+    assert_eq!(plan.selection.source_reason.as_str(), "explicit_source_ip");
+    assert_eq!(plan.selection.destination_ip, IpAddr::V4(dst_ip));
+    assert_eq!(plan.selection.destination_reason.as_str(), "target_literal");
+}
+
+#[test]
+fn ipv4_plan_records_interface_source_selection() {
+    let mut spec = base_spec();
+    let src_ip = Ipv4Addr::new(192, 0, 2, 1);
+    let dst_ip = Ipv4Addr::new(198, 51, 100, 10);
+
+    spec.target.address = Some(packetcraftr::engine::spec::TargetAddress::Ip(IpAddr::V4(
+        dst_ip,
+    )));
+    spec.transmit.force_layer3 = true;
+
+    let interface = mock_interface(
+        "test0",
+        None,
+        vec![IpNetwork::V4(Ipv4Network::new(src_ip, 24).unwrap())],
+    );
+
+    let plan = plan_transmission_with_interface(&spec, interface, PlanningMode::DryRun)
+        .expect("dry-run plan should succeed");
+
+    assert_eq!(plan.selection.source_ip, IpAddr::V4(src_ip));
+    assert_eq!(plan.selection.source_reason.as_str(), "interface_address");
 }
 
 #[test]
@@ -134,6 +167,37 @@ fn ipv6_plan_without_layer2_prefers_layer3() {
     assert!(plan.summary.frame_count > 0);
     assert!(plan.transmit.is_layer3());
     assert!(plan.transmit.auto_layer3);
+    assert_eq!(plan.selection.source_ip, IpAddr::V6(src_ip));
+    assert_eq!(plan.selection.source_reason.as_str(), "explicit_source_ip");
+}
+
+#[test]
+fn ipv6_plan_records_scope_matched_source_selection() {
+    let mut spec = base_spec();
+    let global = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+    let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+    let dst_ip = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 2);
+
+    spec.target.address = Some(packetcraftr::engine::spec::TargetAddress::Ip(IpAddr::V6(
+        dst_ip,
+    )));
+    spec.transport = TransportSpec::Icmpv6(Icmpv6Spec::default());
+    spec.transmit.force_layer3 = true;
+
+    let interface = mock_interface(
+        "test1",
+        None,
+        vec![
+            IpNetwork::V6(Ipv6Network::new(global, 64).unwrap()),
+            IpNetwork::V6(Ipv6Network::new(link_local, 64).unwrap()),
+        ],
+    );
+
+    let plan = plan_transmission_with_interface(&spec, interface, PlanningMode::DryRun)
+        .expect("dry-run plan should succeed");
+
+    assert_eq!(plan.selection.source_ip, IpAddr::V6(link_local));
+    assert_eq!(plan.selection.source_reason.as_str(), "ipv6_scope_match");
 }
 
 #[test]
@@ -185,6 +249,7 @@ fn ipv6_end_to_end_plan_builds_routing_extension_chain() {
 
     assert!(matches!(plan.link_type, LinkType::Ipv6));
     assert!(matches!(plan.destination, NetworkTarget::Ipv6(addr) if addr == first_hop));
+    assert_eq!(plan.selection.destination_ip, IpAddr::V6(final_destination));
     assert_eq!(plan.summary.transport, "UDP");
     assert!(!plan.frames.is_empty(), "frames should be constructed");
 

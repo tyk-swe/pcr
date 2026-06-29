@@ -9,7 +9,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use log::info;
+use log::{info, warn};
+use pnet::datalink;
 use rand::random;
 
 use crate::network::protocol_validation::OriginalTransport;
@@ -130,22 +131,179 @@ pub(super) fn resolve_target(target: &str) -> Result<SocketAddr> {
         .with_context(|| operation_failed("resolve scan target", format!("target={target}")))
 }
 
-pub(super) fn resolve_interface_override(
+pub(super) fn validate_source_override(
     interface: &Option<String>,
+    source_ip: &Option<String>,
+    target: IpAddr,
+) -> Result<()> {
+    reject_source_conflict(interface, source_ip)?;
+
+    if let Some(parsed) = parse_source_ip(source_ip)? {
+        ensure_source_ip_matches_target(parsed, target)?;
+    }
+
+    Ok(())
+}
+
+pub(super) fn resolve_explicit_source_override(
+    interface: &Option<String>,
+    source_ip: &Option<String>,
     target: IpAddr,
 ) -> Result<Option<IpAddr>> {
+    reject_source_conflict(interface, source_ip)?;
+
+    if let Some(parsed) = parse_source_ip(source_ip)? {
+        ensure_source_ip_matches_target(parsed, target)?;
+        return Ok(Some(parsed));
+    }
+
+    if let Some(interface) = interface
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if let Ok(parsed) = interface.parse::<IpAddr>() {
+            warn!(
+                "Using an IP literal with --interface is deprecated; use --source-ip {} instead",
+                parsed
+            );
+            ensure_interface_literal_matches_target(parsed, target)?;
+            return Ok(Some(parsed));
+        }
+    }
+
+    Ok(None)
+}
+
+pub(super) fn resolve_source_override(
+    interface: &Option<String>,
+    source_ip: &Option<String>,
+    target: IpAddr,
+) -> Result<Option<IpAddr>> {
+    if let Some(override_ip) = resolve_explicit_source_override(interface, source_ip, target)? {
+        if source_ip
+            .as_deref()
+            .map(str::trim)
+            .is_some_and(|value| !value.is_empty())
+        {
+            ensure_named_interface_exists(interface.as_deref())?;
+        }
+        return Ok(Some(override_ip));
+    }
+
     resolve_interface_or_ip_override(interface.as_deref(), target)
 }
 
-pub(super) fn source_ipv4_or_discover(
+fn ensure_named_interface_exists(interface: Option<&str>) -> Result<()> {
+    let Some(spec) = interface.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+
+    if spec.parse::<IpAddr>().is_ok() {
+        return Ok(());
+    }
+
+    if datalink::interfaces()
+        .into_iter()
+        .any(|iface| iface.name == spec)
+    {
+        return Ok(());
+    }
+
+    Err(anyhow!("interface {spec} not found"))
+}
+
+fn reject_source_conflict(interface: &Option<String>, source_ip: &Option<String>) -> Result<()> {
+    let has_source_ip = source_ip
+        .as_ref()
+        .is_some_and(|value| !value.trim().is_empty());
+    let interface_is_ip_literal = interface
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .is_some_and(|value| value.parse::<IpAddr>().is_ok());
+
+    if has_source_ip && interface_is_ip_literal {
+        return Err(anyhow!(
+            "IP literal --interface and --source-ip cannot be used together for scans"
+        ));
+    }
+    Ok(())
+}
+
+fn parse_source_ip(source_ip: &Option<String>) -> Result<Option<IpAddr>> {
+    if let Some(source_ip) = source_ip
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let parsed = source_ip
+            .parse::<IpAddr>()
+            .with_context(|| operation_failed("parse scan source IP", source_ip.to_string()))?;
+        return Ok(Some(parsed));
+    }
+
+    Ok(None)
+}
+
+fn ensure_source_ip_matches_target(source_ip: IpAddr, target: IpAddr) -> Result<()> {
+    if source_ip.is_ipv4() == target.is_ipv4() {
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "source IP {} does not match target address family",
+        source_ip
+    ))
+}
+
+fn ensure_interface_literal_matches_target(interface_ip: IpAddr, target: IpAddr) -> Result<()> {
+    if interface_ip.is_ipv4() == target.is_ipv4() {
+        return Ok(());
+    }
+
+    Err(anyhow!(
+        "interface override {} does not match target address family",
+        interface_ip
+    ))
+}
+
+pub(super) fn source_ipv4_for_layer4_send(
     destination: Ipv4Addr,
     discovery_port: u16,
     source_override: Option<Ipv4Addr>,
+    scan_name: &str,
 ) -> Result<Ipv4Addr> {
-    match source_override {
-        Some(ip) => Ok(ip),
-        None => discover_source_ipv4(destination, discovery_port),
+    source_ipv4_for_layer4_send_with_discovery(
+        destination,
+        discovery_port,
+        source_override,
+        scan_name,
+        discover_source_ipv4,
+    )
+}
+
+fn source_ipv4_for_layer4_send_with_discovery<F>(
+    destination: Ipv4Addr,
+    discovery_port: u16,
+    source_override: Option<Ipv4Addr>,
+    scan_name: &str,
+    discover: F,
+) -> Result<Ipv4Addr>
+where
+    F: FnOnce(Ipv4Addr, u16) -> Result<Ipv4Addr>,
+{
+    let route_source = discover(destination, discovery_port)?;
+
+    if let Some(source_ip) = source_override {
+        if source_ip != route_source {
+            return Err(anyhow!(
+                "IPv4 {scan_name} scan cannot use source IP override {source_ip}; Layer4 sends use route-selected source {route_source}"
+            ));
+        }
     }
+
+    Ok(route_source)
 }
 
 pub(super) fn source_ipv6_or_discover(
@@ -632,33 +790,168 @@ mod tests {
     }
 
     #[test]
-    fn resolve_interface_override_handles_absent_and_literal_overrides() {
+    fn resolve_source_override_handles_absent_and_deprecated_interface_literals() {
         let target_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
         assert_eq!(
-            resolve_interface_override(&None, target_v4).expect("none should succeed"),
+            resolve_source_override(&None, &None, target_v4).expect("none should succeed"),
             None
         );
 
         let override_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 200));
         assert_eq!(
-            resolve_interface_override(&Some(override_v4.to_string()), target_v4)
+            resolve_source_override(&Some(override_v4.to_string()), &None, target_v4)
                 .expect("matching IPv4 override should succeed"),
             Some(override_v4)
         );
 
         let override_v6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
         assert_eq!(
-            resolve_interface_override(&Some(override_v6.to_string()), override_v6)
+            resolve_source_override(&Some(override_v6.to_string()), &None, override_v6)
                 .expect("matching IPv6 override should succeed"),
             Some(override_v6)
         );
     }
 
     #[test]
-    fn resolve_interface_override_rejects_mismatched_family() {
+    fn resolve_source_override_accepts_explicit_source_ip() {
+        let target_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let source_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 200));
+
+        assert_eq!(
+            resolve_source_override(&None, &Some(source_v4.to_string()), target_v4)
+                .expect("matching source IP should succeed"),
+            Some(source_v4)
+        );
+    }
+
+    #[test]
+    fn resolve_source_override_accepts_deprecated_interface_ip_literal() {
+        let target_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+        let source_v4 = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 200));
+
+        assert_eq!(
+            resolve_source_override(&Some(source_v4.to_string()), &None, target_v4)
+                .expect("legacy IP literal should still succeed"),
+            Some(source_v4)
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_source_override_ignores_plain_interface_names() {
+        let target_v6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
+
+        assert_eq!(
+            resolve_explicit_source_override(&Some("eth0".to_string()), &None, target_v6)
+                .expect("plain interface should not become a fixed source"),
+            None
+        );
+    }
+
+    #[test]
+    fn resolve_explicit_source_override_accepts_ipv6_source_inputs() {
+        let target_v6 = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let source_v6 = IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2));
+
+        assert_eq!(
+            resolve_explicit_source_override(&None, &Some(source_v6.to_string()), target_v6)
+                .expect("explicit source IP should be fixed"),
+            Some(source_v6)
+        );
+        assert_eq!(
+            resolve_explicit_source_override(&Some(source_v6.to_string()), &None, target_v6)
+                .expect("legacy IP literal should be fixed"),
+            Some(source_v6)
+        );
+    }
+
+    #[test]
+    fn resolve_source_override_accepts_named_interface_and_source_ip_together() {
+        let source_ip = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        assert_eq!(
+            resolve_source_override(
+                &Some("lo".to_string()),
+                &Some(source_ip.to_string()),
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+            )
+            .expect("named interface and explicit source IP should be accepted"),
+            Some(source_ip)
+        );
+    }
+
+    #[test]
+    fn resolve_source_override_rejects_missing_named_interface_with_source_ip() {
+        let err = resolve_source_override(
+            &Some("pcr_missing_interface_for_source_ip".to_string()),
+            &Some(Ipv4Addr::LOCALHOST.to_string()),
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+        )
+        .expect_err("missing named interface should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("interface pcr_missing_interface_for_source_ip not found"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn source_ipv4_for_layer4_send_accepts_route_selected_source() {
+        let route_source = Ipv4Addr::new(192, 0, 2, 10);
+        let selected = source_ipv4_for_layer4_send_with_discovery(
+            Ipv4Addr::new(192, 0, 2, 20),
+            9,
+            Some(route_source),
+            "TCP",
+            |_, _| Ok(route_source),
+        )
+        .expect("route-selected source should be usable");
+
+        assert_eq!(selected, route_source);
+    }
+
+    #[test]
+    fn source_ipv4_for_layer4_send_rejects_mismatched_override() {
+        let route_source = Ipv4Addr::new(192, 0, 2, 10);
+        let override_source = Ipv4Addr::new(192, 0, 2, 11);
+        let err = source_ipv4_for_layer4_send_with_discovery(
+            Ipv4Addr::new(192, 0, 2, 20),
+            9,
+            Some(override_source),
+            "UDP",
+            |_, _| Ok(route_source),
+        )
+        .expect_err("Layer4 sender cannot honor a different IPv4 source override");
+
+        assert!(
+            err.to_string()
+                .contains("Layer4 sends use route-selected source 192.0.2.10"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_source_override_rejects_legacy_interface_literal_and_source_ip_together() {
+        let err = resolve_source_override(
+            &Some("192.0.2.201".to_string()),
+            &Some("192.0.2.200".to_string()),
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+        )
+        .expect_err("legacy interface IP literal and source IP should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("IP literal --interface and --source-ip cannot be used together"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_source_override_rejects_deprecated_interface_literal_mismatched_family() {
         let override_ip = IpAddr::V6(Ipv6Addr::LOCALHOST);
-        let err = resolve_interface_override(
+        let err = resolve_source_override(
             &Some(override_ip.to_string()),
+            &None,
             IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         )
         .expect_err("mismatched address family should error");

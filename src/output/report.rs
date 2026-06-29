@@ -20,6 +20,7 @@ pub struct PreflightReport {
     pub send_mode: &'static str,
     pub mode: &'static str,
     pub destination_family: &'static str,
+    pub selection: serde_json::Value,
     pub target: serde_json::Value,
     pub layer2: serde_json::Value,
     pub ip: Option<serde_json::Value>,
@@ -56,9 +57,24 @@ pub(crate) fn preflight_report(spec: &PacketSpec, view: &PreflightView) -> Prefl
         send_mode: view.send_mode,
         mode: view.mode,
         destination_family: view.destination_family,
+        selection: serde_json::json!({
+            "interface": {
+                "name": view.interface,
+                "reason": view.interface_reason
+            },
+            "source": {
+                "ip": view.source_ip,
+                "reason": view.source_reason
+            },
+            "destination": {
+                "ip": view.selected_destination_ip,
+                "reason": view.destination_reason
+            }
+        }),
         target: serde_json::json!({
             "address": view.destination,
-            "interface": view.interface
+            "interface": view.interface,
+            "interface_reason": view.interface_reason
         }),
         layer2: serde_json::json!({
             "smac": spec.layer2.source.as_ref().map(|mac| mac.to_string()),
@@ -207,5 +223,44 @@ fn transport_json(plan: &PacketSpec) -> serde_json::Value {
             "id": spec.identifier,
             "seq": spec.sequence
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::engine::spec::TransmissionSpec;
+
+    #[test]
+    fn preflight_report_selection_destination_uses_selected_destination() {
+        let view = PreflightView {
+            destination: "2001:db8::20".to_string(),
+            selected_destination_ip: "2001:db8::99".to_string(),
+            destination_reason: "target_literal",
+            destination_family: "IPv6",
+            interface: "test0".to_string(),
+            interface_reason: "explicit_interface",
+            source_ip: "2001:db8::10".to_string(),
+            source_reason: "explicit_source_ip",
+            mode: "L3",
+            transport: "UDP",
+            count: Some(1),
+            attempts: Some(1),
+            units_per_attempt: 1,
+            total_emitted_units: Some(1),
+            send_mode: "finite",
+            frame_count: 1,
+            largest_frame_len: 64,
+            transmit: TransmissionSpec::default(),
+        };
+
+        let report = preflight_report(&PacketSpec::default(), &view);
+
+        assert_eq!(report.destination, "2001:db8::20");
+        assert_eq!(
+            report.selection["destination"]["ip"].as_str(),
+            Some("2001:db8::99")
+        );
     }
 }

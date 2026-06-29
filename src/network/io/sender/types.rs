@@ -1,7 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use pnet::datalink::NetworkInterface;
 use pnet::packet::ip::IpNextHeaderProtocol;
@@ -40,6 +40,7 @@ pub struct TransmissionPlan {
     pub transmit: TransmissionSpec,
     pub destination: NetworkTarget,
     pub interface: NetworkInterface,
+    pub selection: SelectionMetadata,
     pub protocol: IpNextHeaderProtocol,
     pub summary: TransmissionSummary,
     pub logging: LoggingSpec,
@@ -59,4 +60,63 @@ pub struct TransmissionSummary {
 pub enum NetworkTarget {
     Ipv4(Ipv4Addr),
     Ipv6(Ipv6Addr),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectionMetadata {
+    pub selected_interface: String,
+    pub interface_reason: InterfaceSelectionReason,
+    pub source_ip: IpAddr,
+    pub source_reason: SourceSelectionReason,
+    pub destination_ip: IpAddr,
+    pub destination_reason: DestinationSelectionReason,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterfaceSelectionReason {
+    ExplicitInterface,
+    RouteTable,
+    Heuristic,
+}
+
+impl InterfaceSelectionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitInterface => "explicit_interface",
+            Self::RouteTable => "route_table",
+            Self::Heuristic => "heuristic",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceSelectionReason {
+    ExplicitSourceIp,
+    InterfaceAddress,
+    Ipv6ScopeMatch,
+}
+
+impl SourceSelectionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ExplicitSourceIp => "explicit_source_ip",
+            Self::InterfaceAddress => "interface_address",
+            Self::Ipv6ScopeMatch => "ipv6_scope_match",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinationSelectionReason {
+    HostnameResolution,
+    TargetLiteral,
+}
+
+impl DestinationSelectionReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::HostnameResolution => "hostname_resolution",
+            Self::TargetLiteral => "target_literal",
+        }
+    }
 }

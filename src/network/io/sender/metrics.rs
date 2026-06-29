@@ -97,7 +97,10 @@ pub(crate) fn emit_metrics_snapshot(plan: &TransmissionPlan) -> Result<()> {
 mod tests {
     use super::*;
     use crate::engine::spec::{LoggingSpec, TransmissionSpec};
-    use crate::network::sender::types::{LinkType, PlanningMode, TransmissionSummary};
+    use crate::network::sender::types::{
+        DestinationSelectionReason, InterfaceSelectionReason, LinkType, PlanningMode,
+        SelectionMetadata, SourceSelectionReason, TransmissionSummary,
+    };
     use pnet::datalink::NetworkInterface;
     use pnet::packet::ip::IpNextHeaderProtocols;
     use std::net::Ipv4Addr;
@@ -122,6 +125,14 @@ mod tests {
             transmit: TransmissionSpec::default(),
             destination: NetworkTarget::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
             interface: create_test_interface(),
+            selection: SelectionMetadata {
+                selected_interface: "test0".to_string(),
+                interface_reason: InterfaceSelectionReason::ExplicitInterface,
+                source_ip: std::net::IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
+                source_reason: SourceSelectionReason::InterfaceAddress,
+                destination_ip: std::net::IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                destination_reason: DestinationSelectionReason::TargetLiteral,
+            },
             protocol: IpNextHeaderProtocols::Tcp,
             summary: TransmissionSummary {
                 payload_len: 100,

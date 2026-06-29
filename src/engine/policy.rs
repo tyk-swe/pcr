@@ -199,6 +199,8 @@ pub struct TrafficPlan {
     pub batch_size: usize,
     pub rate_per_sec: Option<u64>,
     pub required_privileges: Vec<TrafficPrivilege>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selection: Option<TrafficSelection>,
 }
 
 impl TrafficPlan {
@@ -214,6 +216,7 @@ impl TrafficPlan {
             batch_size: 1,
             rate_per_sec: None,
             required_privileges: Vec::new(),
+            selection: None,
         }
     }
 
@@ -241,6 +244,7 @@ impl TrafficPlan {
             batch_size: 1,
             rate_per_sec: Some(policy.budget.max_rate_per_sec),
             required_privileges: request_privileges(request),
+            selection: None,
         }
     }
 
@@ -257,6 +261,19 @@ impl TrafficPlan {
                 .map(|rate| rate > DEFAULT_MAX_RATE_PER_SEC)
                 .unwrap_or(false)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrafficSelection {
+    pub interface: Option<TrafficSelectionValue>,
+    pub source: Option<TrafficSelectionValue>,
+    pub destination: Option<TrafficSelectionValue>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrafficSelectionValue {
+    pub value: Option<String>,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -418,9 +435,13 @@ pub fn packet_spec_target_scope(spec: &PacketSpec) -> TargetScope {
     if let Some(ip) = spec.ip.as_ref().and_then(|ip| ip.destination) {
         scopes.push(classify_ip(ip));
     } else {
-        match spec.target.address.as_ref() {
-            Some(TargetAddress::Ip(addr)) => scopes.push(classify_ip(*addr)),
-            Some(TargetAddress::Host(_)) | None => {}
+        if let Some(addr) = spec
+            .target
+            .address
+            .as_ref()
+            .and_then(TargetAddress::resolved_ip)
+        {
+            scopes.push(classify_ip(addr));
         }
     }
 

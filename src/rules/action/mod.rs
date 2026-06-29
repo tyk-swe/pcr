@@ -11,7 +11,7 @@ use crate::rules::model::{PacketContext, RuleLogLevel};
 
 type Result<T> = std::result::Result<T, RuleError>;
 
-mod command;
+pub(crate) mod command;
 mod logging;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -28,6 +28,12 @@ pub enum RuleActionDocument {
         args: Vec<String>,
         #[serde(default)]
         timeout_seconds: Option<u64>,
+        #[serde(default)]
+        enabled: bool,
+        #[serde(default)]
+        allowed_programs: Vec<String>,
+        #[serde(default)]
+        working_dir: Option<String>,
     },
     Send {
         #[serde(default)]
@@ -45,11 +51,7 @@ pub enum RuleAction {
         level: RuleLogLevel,
         message: String,
     },
-    Command {
-        program: String,
-        args: Vec<String>,
-        timeout_seconds: u64,
-    },
+    Command(command::CommandAction),
     Send(Box<RuleSendTemplate>),
 }
 
@@ -69,14 +71,20 @@ impl TryFrom<RuleActionDocument> for RuleAction {
                 program,
                 args,
                 timeout_seconds,
+                enabled,
+                allowed_programs,
+                working_dir,
             } => {
-                let timeout = command::validate_definition(&program, &args, timeout_seconds)?;
-
-                Ok(RuleAction::Command {
+                let command_action = command::CommandAction::from_document(
                     program,
                     args,
-                    timeout_seconds: timeout,
-                })
+                    timeout_seconds,
+                    enabled,
+                    allowed_programs,
+                    working_dir,
+                )?;
+
+                Ok(RuleAction::Command(command_action))
             }
             RuleActionDocument::Send {
                 legacy_options,
@@ -104,18 +112,9 @@ impl RuleAction {
                 logging::execute(rule_name, packet, *level, message);
                 Ok(())
             }
-            RuleAction::Command {
-                program,
-                args,
-                timeout_seconds,
-            } => command::execute(
-                rule_name,
-                packet,
-                program,
-                args,
-                *timeout_seconds,
-                task_executor,
-            ),
+            RuleAction::Command(command_action) => {
+                command_action.execute(rule_name, packet, task_executor)
+            }
             RuleAction::Send(template) => {
                 let sender = sender.ok_or_else(|| RuleActionError::MissingSendExecutor {
                     rule: rule_name.to_string(),

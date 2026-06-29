@@ -15,7 +15,10 @@ use super::transport::{
     build_icmpv6_segment, build_tcp_segment, build_transport_segment, build_udp_segment,
     TransportBuild, TCP_HEADER_LEN, UDP_HEADER_LEN,
 };
-use super::types::{LinkType, NetworkTarget, PlanningMode, TransmissionPlan, TransmissionSummary};
+use super::types::{
+    DestinationSelectionReason, InterfaceSelectionReason, LinkType, NetworkTarget, PlanningMode,
+    SelectionMetadata, SourceSelectionReason, TransmissionPlan, TransmissionSummary,
+};
 use super::{SendControlError, TransmissionPolicy};
 use crate::engine::spec::{
     DestinationSpec, FragmentSpec, IcmpSpec, IpSpec, Ipv6ExtHeader, Ipv6Spec, Layer2Spec,
@@ -45,6 +48,17 @@ fn make_interface(name: &str, ips: Vec<IpNetwork>) -> NetworkInterface {
         mac: None,
         ips,
         flags: 0,
+    }
+}
+
+fn selection_metadata(interface: &NetworkInterface, destination: IpAddr) -> SelectionMetadata {
+    SelectionMetadata {
+        selected_interface: interface.name.clone(),
+        interface_reason: InterfaceSelectionReason::ExplicitInterface,
+        source_ip: destination,
+        source_reason: SourceSelectionReason::InterfaceAddress,
+        destination_ip: destination,
+        destination_reason: DestinationSelectionReason::TargetLiteral,
     }
 }
 
@@ -1385,6 +1399,7 @@ async fn send_loop_rejects_zero_iterations() {
         },
         destination: NetworkTarget::Ipv4(Ipv4Addr::LOCALHOST),
         interface: interface.clone(),
+        selection: selection_metadata(&interface, IpAddr::V4(Ipv4Addr::LOCALHOST)),
         protocol: IpNextHeaderProtocols::Tcp,
         summary: TransmissionSummary {
             payload_len: 32,
@@ -1417,6 +1432,7 @@ async fn send_loop_rejects_zero_iterations() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn layer3_send_rejects_zero_iterations() {
     let interface = make_interface("eth0", vec![]);
+    let selection = selection_metadata(&interface, IpAddr::V4(Ipv4Addr::LOCALHOST));
     let plan = TransmissionPlan {
         frames: vec![vec![0u8; IPV4_HEADER_LEN]],
         link_type: LinkType::Ipv4,
@@ -1426,6 +1442,7 @@ async fn layer3_send_rejects_zero_iterations() {
         },
         destination: NetworkTarget::Ipv4(Ipv4Addr::LOCALHOST),
         interface,
+        selection,
         protocol: IpNextHeaderProtocols::Tcp,
         summary: TransmissionSummary {
             payload_len: 0,
@@ -1505,6 +1522,14 @@ fn ipv4_fragmentation_respects_mtu() {
 fn metrics_snapshot_writes_json() {
     let temp = tempdir().expect("tempdir");
     let metrics_path = temp.path().join("metrics.json");
+    let interface = NetworkInterface {
+        name: "test0".to_string(),
+        description: String::new(),
+        index: 0,
+        mac: None,
+        ips: Vec::new(),
+        flags: 0,
+    };
 
     let plan = TransmissionPlan {
         frames: vec![vec![0u8; 32], vec![0u8; 16]],
@@ -1514,14 +1539,8 @@ fn metrics_snapshot_writes_json() {
             ..TransmissionSpec::default()
         },
         destination: NetworkTarget::Ipv4(Ipv4Addr::LOCALHOST),
-        interface: NetworkInterface {
-            name: "test0".to_string(),
-            description: String::new(),
-            index: 0,
-            mac: None,
-            ips: Vec::new(),
-            flags: 0,
-        },
+        interface: interface.clone(),
+        selection: selection_metadata(&interface, IpAddr::V4(Ipv4Addr::LOCALHOST)),
         protocol: IpNextHeaderProtocols::Tcp,
         summary: TransmissionSummary {
             payload_len: 0,

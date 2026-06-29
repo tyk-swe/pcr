@@ -116,6 +116,28 @@ fn rule_engine_strict_mode_rejects_nested_send_unknown_fields() {
 }
 
 #[test]
+fn rule_engine_strict_mode_accepts_command_policy_fields() {
+    let yaml = r#"
+- name: "command-policy"
+  trigger: on_startup
+  actions:
+    - type: command
+      program: "/bin/true"
+      args: []
+      timeout_seconds: 1
+      enabled: true
+      allowed_programs:
+        - "/bin/true"
+      working_dir: "/"
+"#;
+
+    let report = RuleEngine::validate_rules_from_str_with_options(yaml, RuleLoadOptions::strict())
+        .expect("strict mode should accept command policy fields");
+
+    assert!(report.diagnostics().is_empty());
+}
+
+#[test]
 fn rule_engine_load_from_path_rejects_legacy_send_options_wrapper() {
     let mut engine = RuleEngine::new().expect("rule engine initialisation");
     let mut file = tempfile::NamedTempFile::new().expect("create temp file");

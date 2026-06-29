@@ -7,6 +7,7 @@ use pnet::datalink::{self, NetworkInterface};
 use pnet::ipnetwork::IpNetwork;
 
 use super::error::InterfaceError;
+use super::types::{DestinationSelectionReason, InterfaceSelectionReason, SourceSelectionReason};
 use crate::engine::spec::{PacketSpec, TargetAddress, TransportSpec};
 use crate::network::interface;
 use crate::util::net::resolve_target_ip;
@@ -14,16 +15,25 @@ use crate::util::source_ip::select_interface_ipv6_source_for_destination;
 
 type Result<T> = std::result::Result<T, InterfaceError>;
 
-pub(crate) fn select_interface(spec: &PacketSpec) -> Result<NetworkInterface> {
+pub(crate) struct SelectedInterface {
+    pub(crate) interface: NetworkInterface,
+    pub(crate) reason: InterfaceSelectionReason,
+}
+
+pub(crate) fn select_interface_with_reason(spec: &PacketSpec) -> Result<SelectedInterface> {
     if let Some(name) = spec.target.interface.as_ref() {
-        return interface::resolve_interface_by_name(name)
-            .map_err(|source| InterfaceError::InterfaceLookup { source });
+        let selection = interface::find_interface_selection(Some(name))
+            .map_err(|source| InterfaceError::InterfaceLookup { source })?;
+        return Ok(SelectedInterface {
+            interface: selection.interface,
+            reason: map_interface_selection_reason(selection.reason),
+        });
     }
 
     // Determine destination IP for routing query
     let destination_ip = spec.ip.as_ref().and_then(|ip| ip.destination).or_else(|| {
         spec.target.address.as_ref().and_then(|addr| match addr {
-            TargetAddress::Ip(ip) => Some(*ip),
+            TargetAddress::Ip(ip) | TargetAddress::ResolvedHost { ip, .. } => Some(*ip),
             TargetAddress::Host(host) => {
                 // Resolve hostname to IP
                 let prefer_ipv6 = desired_ipv6(spec);
@@ -34,13 +44,32 @@ pub(crate) fn select_interface(spec: &PacketSpec) -> Result<NetworkInterface> {
 
     // Use routing table if destination IP is known
     if let Some(dest) = destination_ip {
-        return interface::find_interface_for_destination(dest)
-            .map_err(|source| InterfaceError::InterfaceLookup { source });
+        let selection = interface::find_interface_for_destination_selection(dest)
+            .map_err(|source| InterfaceError::InterfaceLookup { source })?;
+        return Ok(SelectedInterface {
+            interface: selection.interface,
+            reason: map_interface_selection_reason(selection.reason),
+        });
     }
 
     // Fallback to heuristic selection
     let interfaces = datalink::interfaces();
-    select_interface_from_list(spec, interfaces)
+    Ok(SelectedInterface {
+        interface: select_interface_from_list(spec, interfaces)?,
+        reason: InterfaceSelectionReason::Heuristic,
+    })
+}
+
+fn map_interface_selection_reason(
+    reason: interface::InterfaceSelectionReason,
+) -> InterfaceSelectionReason {
+    match reason {
+        interface::InterfaceSelectionReason::ExplicitInterface => {
+            InterfaceSelectionReason::ExplicitInterface
+        }
+        interface::InterfaceSelectionReason::RouteTable => InterfaceSelectionReason::RouteTable,
+        interface::InterfaceSelectionReason::Heuristic => InterfaceSelectionReason::Heuristic,
+    }
 }
 
 fn select_interface_from_list(
@@ -89,7 +118,12 @@ pub(crate) fn desired_ipv6(spec: &PacketSpec) -> Option<bool> {
     if let Some(ip) = spec.ip.as_ref().and_then(|ip| ip.destination) {
         return Some(matches!(ip, IpAddr::V6(_)));
     }
-    if let Some(TargetAddress::Ip(addr)) = spec.target.address.as_ref() {
+    if let Some(addr) = spec
+        .target
+        .address
+        .as_ref()
+        .and_then(TargetAddress::resolved_ip)
+    {
         return Some(matches!(addr, IpAddr::V6(_)));
     }
     spec.ip.as_ref().and_then(|ip| ip.prefer_ipv6).or_else(|| {
@@ -100,10 +134,26 @@ pub(crate) fn desired_ipv6(spec: &PacketSpec) -> Option<bool> {
     })
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_ip_addresses(
     spec: &PacketSpec,
     interface: &NetworkInterface,
 ) -> Result<(IpAddr, IpAddr)> {
+    let selection = resolve_ip_addresses_with_selection(spec, interface)?;
+    Ok((selection.source_ip, selection.destination_ip))
+}
+
+pub(crate) struct IpAddressSelection {
+    pub(crate) source_ip: IpAddr,
+    pub(crate) source_reason: SourceSelectionReason,
+    pub(crate) destination_ip: IpAddr,
+    pub(crate) destination_reason: DestinationSelectionReason,
+}
+
+pub(crate) fn resolve_ip_addresses_with_selection(
+    spec: &PacketSpec,
+    interface: &NetworkInterface,
+) -> Result<IpAddressSelection> {
     let ip_spec = spec.ip.as_ref();
     let prefer_ipv6 = ip_spec
         .and_then(|ip| ip.prefer_ipv6)
@@ -123,46 +173,61 @@ pub(crate) fn resolve_ip_addresses(
             _ => None,
         });
 
-    let destination_ip = if let Some(ip) = ip_spec.and_then(|ip| ip.destination) {
-        ip
-    } else if let Some(address) = spec.target.address.as_ref() {
-        match address {
-            TargetAddress::Ip(ip) => *ip,
-            TargetAddress::Host(host) => {
-                resolve_target_ip(host, prefer_ipv6).map_err(|source| {
-                    InterfaceError::HostnameResolution {
-                        host: host.clone(),
-                        source,
-                    }
-                })?
+    let (destination_ip, destination_reason) =
+        if let Some(ip) = ip_spec.and_then(|ip| ip.destination) {
+            (ip, DestinationSelectionReason::TargetLiteral)
+        } else if let Some(address) = spec.target.address.as_ref() {
+            match address {
+                TargetAddress::Ip(ip) => (*ip, DestinationSelectionReason::TargetLiteral),
+                TargetAddress::ResolvedHost { ip, .. } => {
+                    (*ip, DestinationSelectionReason::HostnameResolution)
+                }
+                TargetAddress::Host(host) => {
+                    let ip = resolve_target_ip(host, prefer_ipv6).map_err(|source| {
+                        InterfaceError::HostnameResolution {
+                            host: host.clone(),
+                            source,
+                        }
+                    })?;
+                    (ip, DestinationSelectionReason::HostnameResolution)
+                }
             }
-        }
-    } else {
-        return Err(InterfaceError::DestinationRequired);
-    };
+        } else {
+            return Err(InterfaceError::DestinationRequired);
+        };
 
-    let source_ip = match ip_spec.and_then(|ip| ip.source) {
-        Some(addr) => addr,
+    let (source_ip, source_reason) = match ip_spec.and_then(|ip| ip.source) {
+        Some(addr) => (addr, SourceSelectionReason::ExplicitSourceIp),
         None => match destination_ip {
-            IpAddr::V4(_) => interface_ipv4(interface)
-                .filter(|addr| !addr.is_unspecified())
-                .map(IpAddr::V4)
-                .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+            IpAddr::V4(_) => (
+                interface_ipv4(interface)
+                    .filter(|addr| !addr.is_unspecified())
+                    .map(IpAddr::V4)
+                    .unwrap_or_else(|| IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+                SourceSelectionReason::InterfaceAddress,
+            ),
             IpAddr::V6(destination) => {
-                select_interface_ipv6_source_for_destination(interface, destination)
+                let selected = select_interface_ipv6_source_for_destination(interface, destination)
                     .filter(|addr| !addr.is_unspecified())
                     .map(IpAddr::V6)
-                    .unwrap_or_else(|| IpAddr::V6(Ipv6Addr::UNSPECIFIED))
+                    .unwrap_or_else(|| IpAddr::V6(Ipv6Addr::UNSPECIFIED));
+                (selected, SourceSelectionReason::Ipv6ScopeMatch)
             }
         },
     };
 
-    Ok((source_ip, destination_ip))
+    Ok(IpAddressSelection {
+        source_ip,
+        source_reason,
+        destination_ip,
+        destination_reason,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::request::DestinationRequest;
     use crate::engine::spec::{
         DestinationSpec, Ipv6Spec, Layer2Spec, ListenerSpec, LoggingSpec, PayloadSource,
         PayloadSpec, TransmissionSpec,
@@ -300,6 +365,113 @@ mod tests {
 
         assert_eq!(source, IpAddr::V6(link_local));
         assert_eq!(destination_out, IpAddr::V6(destination));
+    }
+
+    #[test]
+    fn resolve_ip_addresses_reports_explicit_source_reason() {
+        let source = Ipv4Addr::new(192, 0, 2, 10);
+        let destination = Ipv4Addr::new(198, 51, 100, 10);
+        let iface = interface_with("v4", None, source);
+        let mut spec = base_spec();
+        spec.target.address = Some(TargetAddress::Ip(IpAddr::V4(destination)));
+        spec.ip = Some(crate::engine::spec::IpSpec {
+            source: Some(IpAddr::V4(source)),
+            ..Default::default()
+        });
+
+        let selection =
+            resolve_ip_addresses_with_selection(&spec, &iface).expect("resolve addresses");
+
+        assert_eq!(selection.source_ip, IpAddr::V4(source));
+        assert_eq!(
+            selection.source_reason,
+            SourceSelectionReason::ExplicitSourceIp
+        );
+        assert_eq!(selection.destination_ip, IpAddr::V4(destination));
+        assert_eq!(
+            selection.destination_reason,
+            DestinationSelectionReason::TargetLiteral
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_reports_interface_source_reason() {
+        let source = Ipv4Addr::new(192, 0, 2, 10);
+        let destination = Ipv4Addr::new(198, 51, 100, 10);
+        let iface = interface_with("v4", None, source);
+        let mut spec = base_spec();
+        spec.target.address = Some(TargetAddress::Ip(IpAddr::V4(destination)));
+
+        let selection =
+            resolve_ip_addresses_with_selection(&spec, &iface).expect("resolve addresses");
+
+        assert_eq!(selection.source_ip, IpAddr::V4(source));
+        assert_eq!(
+            selection.source_reason,
+            SourceSelectionReason::InterfaceAddress
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_reports_hostname_destination_reason() {
+        let source = Ipv4Addr::new(127, 0, 0, 1);
+        let iface = interface_with("lo", None, source);
+        let mut spec = base_spec();
+        spec.target.address = Some(TargetAddress::Host("localhost".to_string()));
+        spec.ip = Some(crate::engine::spec::IpSpec {
+            prefer_ipv6: Some(false),
+            ..Default::default()
+        });
+
+        let selection =
+            resolve_ip_addresses_with_selection(&spec, &iface).expect("resolve localhost");
+
+        assert_eq!(
+            selection.destination_reason,
+            DestinationSelectionReason::HostnameResolution
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_reports_resolved_hostname_destination_reason() {
+        let source = Ipv4Addr::new(192, 0, 2, 10);
+        let destination = Ipv4Addr::new(198, 51, 100, 10);
+        let iface = interface_with("v4", None, source);
+        let mut spec = base_spec();
+        spec.target = DestinationSpec::from_request(&DestinationRequest {
+            destination: Some("example.test".to_string()),
+            resolved_destination: Some(IpAddr::V4(destination)),
+            ..Default::default()
+        })
+        .expect("destination spec");
+
+        let selection =
+            resolve_ip_addresses_with_selection(&spec, &iface).expect("resolve addresses");
+
+        assert_eq!(selection.destination_ip, IpAddr::V4(destination));
+        assert_eq!(
+            selection.destination_reason,
+            DestinationSelectionReason::HostnameResolution
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_reports_ipv6_scope_match_reason() {
+        let global = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let link_local = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1);
+        let destination = Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 10);
+        let iface = interface_with_ipv6(&[global, link_local]);
+        let mut spec = base_spec();
+        spec.target.address = Some(TargetAddress::Ip(IpAddr::V6(destination)));
+
+        let selection =
+            resolve_ip_addresses_with_selection(&spec, &iface).expect("resolve addresses");
+
+        assert_eq!(selection.source_ip, IpAddr::V6(link_local));
+        assert_eq!(
+            selection.source_reason,
+            SourceSelectionReason::Ipv6ScopeMatch
+        );
     }
 
     #[test]

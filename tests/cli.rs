@@ -410,6 +410,69 @@ fn scan_dry_run_outputs_typed_json_plan() {
     assert_eq!(json["policy"]["status"], "allowed");
 }
 
+#[cfg(feature = "scan")]
+#[test]
+fn scan_dry_run_accepts_valid_source_ip() {
+    let output = command_result(&[
+        "--output-format",
+        "json",
+        "--dry-run",
+        "scan",
+        "tcp-syn",
+        "--target",
+        "127.0.0.1",
+        "--ports",
+        "80",
+        "--source-ip",
+        "127.0.0.1",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "scan dry-run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be UTF-8");
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
+    assert_eq!(json["plan"]["mode"], "scan");
+    assert_eq!(json["plan"]["port_count"], 1);
+    assert_eq!(json["policy"]["status"], "allowed");
+}
+
+#[cfg(feature = "scan")]
+#[test]
+fn scan_dry_run_rejects_invalid_source_ip_before_plan() {
+    let output = command_result(&[
+        "--output-format",
+        "json",
+        "--dry-run",
+        "scan",
+        "tcp-syn",
+        "--target",
+        "127.0.0.1",
+        "--ports",
+        "80",
+        "--source-ip",
+        "not_an_ip",
+    ]);
+
+    assert!(
+        !output.status.success(),
+        "invalid source IP dry-run should fail"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "rejected dry-run should not emit stdout: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("parse scan source IP"),
+        "unexpected stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 #[cfg(feature = "traceroute")]
 #[test]
 fn traceroute_dry_run_outputs_typed_json_plan() {
@@ -436,6 +499,19 @@ fn traceroute_dry_run_outputs_typed_json_plan() {
         .unwrap_or_else(|err| panic!("stdout should be JSON: {err}\n{stdout}"));
     assert_eq!(json["plan"]["mode"], "traceroute");
     assert_eq!(json["plan"]["estimated_packets"], 8);
+    assert_eq!(
+        json["plan"]["selection"]["destination"]["value"],
+        "127.0.0.1"
+    );
+    assert_eq!(
+        json["plan"]["selection"]["destination"]["reason"],
+        "target_literal"
+    );
+    assert!(json["plan"]["selection"]["source"]["value"].is_null());
+    assert_eq!(
+        json["plan"]["selection"]["source"]["reason"],
+        "os_socket_selected"
+    );
     assert_eq!(json["policy"]["status"], "allowed");
 }
 

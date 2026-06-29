@@ -94,7 +94,11 @@ impl OutputController {
     fn print_detailed(&self, spec: &PacketSpec, view: &PreflightView) {
         println!("Target: {:?}", spec.target);
         println!("Planned destination: {}", view.destination);
+        println!("Planned destination reason: {}", view.destination_reason);
         println!("Planned interface: {}", view.interface);
+        println!("Planned interface reason: {}", view.interface_reason);
+        println!("Planned source IP: {}", view.source_ip);
+        println!("Planned source reason: {}", view.source_reason);
         println!("Planned mode: {}", view.mode);
         println!("Layer2: {:?}", spec.layer2);
         println!("IP: {:?}", spec.ip);

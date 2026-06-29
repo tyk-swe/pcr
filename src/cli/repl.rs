@@ -8,9 +8,9 @@ use log::{info, warn};
 use rustyline::error::ReadlineError;
 use rustyline::{Config, Editor};
 
-use crate::engine::command::{InteractiveRequest, ListenRequest, ScanRequest, TracerouteRequest};
-use crate::engine::request::PacketRequest;
-use crate::engine::Engine;
+use crate::domain::command::{InteractiveRequest, ListenRequest, ScanRequest, TracerouteRequest};
+use crate::domain::request::PacketRequest;
+use crate::engine::core::Engine;
 use crate::util::error::operation_failed;
 
 mod command;

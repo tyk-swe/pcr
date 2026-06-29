@@ -10,6 +10,7 @@ mod error;
 mod executor;
 pub mod model;
 mod rule;
+pub mod send;
 pub mod template;
 mod yaml;
 
@@ -21,5 +22,5 @@ pub use diagnostic::{
 pub use engine::RuleEngine;
 pub use error::{MatcherError, RuleActionError, RuleError};
 
-pub use executor::RuleSendExecutor;
+pub(crate) use executor::{validate_rule_send_request, BoundedExecutor, ExecutorError};
 pub use model::PacketContext;

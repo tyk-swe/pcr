@@ -8,7 +8,7 @@ use pnet::ipnetwork::IpNetwork;
 
 use super::error::InterfaceError;
 use super::types::{DestinationSelectionReason, InterfaceSelectionReason, SourceSelectionReason};
-use crate::engine::spec::{PacketSpec, TargetAddress, TransportSpec};
+use crate::domain::spec::{PacketSpec, TargetAddress, TransportSpec};
 use crate::network::interface;
 use crate::util::net::resolve_target_ip;
 use crate::util::source_ip::select_interface_ipv6_source_for_destination;

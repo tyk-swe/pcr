@@ -17,11 +17,11 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 
 #[cfg(feature = "pcap")]
-use crate::engine::command::ListenRequest;
+use crate::domain::command::ListenRequest;
+use crate::domain::event::ListenerEvent;
 #[cfg(feature = "daemon")]
-use crate::engine::request::ListenerRequest;
-use crate::engine::ListenerEvent;
-use crate::engine::{spec::ListenerSpec, EngineConfig};
+use crate::domain::request::ListenerRequest;
+use crate::domain::spec::ListenerSpec;
 #[cfg(feature = "pcap")]
 use crate::network::interface;
 
@@ -57,7 +57,6 @@ enum ListenerRunOutcome {
 pub async fn run_command(
     opts: &ListenRequest,
     interface_hint: Option<&str>,
-    config: &EngineConfig,
     handler: ListenerEventHandler,
 ) -> ListenerResult<()> {
     let mut listen = opts.listen.clone();
@@ -65,15 +64,8 @@ pub async fn run_command(
     let runtime = ListenerRuntimeConfig::from_request(&listen)?;
     if opts.persistent.unwrap_or(false) {
         loop {
-            let outcome = run_internal(
-                runtime.clone(),
-                interface_hint,
-                config.clone(),
-                handler.clone(),
-                None,
-                None,
-            )
-            .await?;
+            let outcome =
+                run_internal(runtime.clone(), interface_hint, handler.clone(), None, None).await?;
             if !should_rearm_listener(&runtime, outcome) {
                 break;
             }
@@ -81,7 +73,7 @@ pub async fn run_command(
         }
         Ok(())
     } else {
-        run_internal(runtime, interface_hint, config.clone(), handler, None, None)
+        run_internal(runtime, interface_hint, handler, None, None)
             .await
             .map(|_| ())
     }
@@ -91,7 +83,6 @@ pub async fn run_command(
 pub async fn run_from_spec(
     spec: &ListenerSpec,
     interface_hint: Option<&str>,
-    config: &EngineConfig,
     handler: ListenerEventHandler,
 ) -> ListenerResult<()> {
     if !spec.enabled {
@@ -100,14 +91,14 @@ pub async fn run_from_spec(
 
     #[cfg(not(feature = "pcap"))]
     {
-        let _ = (interface_hint, config, handler);
+        let _ = (interface_hint, handler);
         Err(ListenerError::ListenerRequiresPcap)
     }
 
     #[cfg(feature = "pcap")]
     {
         let runtime = ListenerRuntimeConfig::from_spec(spec)?;
-        run_internal(runtime, interface_hint, config.clone(), handler, None, None)
+        run_internal(runtime, interface_hint, handler, None, None)
             .await
             .map(|_| ())
     }
@@ -117,14 +108,13 @@ pub async fn run_from_spec(
 pub(crate) fn spawn_background(
     options: &ListenerRequest,
     interface_hint: Option<&str>,
-    config: &EngineConfig,
     handler: ListenerEventHandler,
     shutdown: Arc<AtomicBool>,
     startup: Option<ListenerStartupSignal>,
 ) -> ListenerResult<JoinHandle<ListenerResult<()>>> {
     #[cfg(not(feature = "pcap"))]
     {
-        let _ = (options, interface_hint, config, handler, shutdown, startup);
+        let _ = (options, interface_hint, handler, shutdown, startup);
         Err(ListenerError::ListenerRequiresPcap)
     }
 
@@ -132,13 +122,11 @@ pub(crate) fn spawn_background(
     {
         let runtime = ListenerRuntimeConfig::from_request(options)?;
         let interface_hint = interface_hint.map(|s| s.to_string());
-        let config = config.clone();
 
         Ok(tokio::spawn(async move {
             run_internal(
                 runtime,
                 interface_hint.as_deref(),
-                config,
                 handler,
                 Some(shutdown),
                 startup,
@@ -158,7 +146,6 @@ pub(crate) fn validate_options(options: &ListenerRequest) -> ListenerResult<()> 
 async fn run_internal(
     runtime: ListenerRuntimeConfig,
     interface_hint: Option<&str>,
-    _config: EngineConfig,
     handler: ListenerEventHandler,
     shutdown: Option<Arc<AtomicBool>>,
     startup: Option<ListenerStartupSignal>,

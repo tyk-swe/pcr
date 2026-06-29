@@ -6,7 +6,7 @@ use std::io::Read;
 
 use rand::Rng;
 
-use crate::engine::spec::PayloadSource;
+use crate::domain::spec::PayloadSource;
 use crate::network::sender::error::{PayloadError, Result};
 
 const MAX_PAYLOAD_SIZE: u64 = 10 * 1024 * 1024; // 10MB

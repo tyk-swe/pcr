@@ -17,32 +17,32 @@ use super::validation::{inspect_dns_response_header, validate_dns_response};
 const UDP_RESPONSE_BUFFER_BYTES: usize = 4096;
 const MAX_DNS_TCP_FRAME_BYTES: usize = u16::MAX as usize;
 
-pub(super) struct DnsTransportResponse {
-    pub(super) message: Message,
-    pub(super) response_bytes: usize,
+pub(crate) struct DnsTransportResponse {
+    pub(crate) message: Message,
+    pub(crate) response_bytes: usize,
 }
 
-pub(super) enum AutoUdpResponse {
+pub(crate) enum AutoUdpResponse {
     Complete(DnsTransportResponse),
     Truncated { response_bytes: usize },
 }
 
-pub(super) struct DnsQueryPlan<'a> {
-    pub(super) target: SocketAddr,
-    pub(super) query: &'a [u8],
-    pub(super) query_id: u16,
-    pub(super) domain: &'a str,
-    pub(super) record_type: RecordType,
-    pub(super) timeout: Duration,
+pub(crate) struct DnsQueryPlan<'a> {
+    pub(crate) target: SocketAddr,
+    pub(crate) query: &'a [u8],
+    pub(crate) query_id: u16,
+    pub(crate) domain: &'a str,
+    pub(crate) record_type: RecordType,
+    pub(crate) timeout: Duration,
 }
 
-pub(super) struct DnsRateLimiter {
+pub(crate) struct DnsRateLimiter {
     delay: Option<Duration>,
     last_send: Option<Instant>,
 }
 
 impl DnsRateLimiter {
-    pub(super) fn new(delay: Option<Duration>) -> Self {
+    pub(crate) fn new(delay: Option<Duration>) -> Self {
         Self {
             delay,
             last_send: None,
@@ -78,7 +78,7 @@ impl DnsAttemptError {
     }
 }
 
-pub(super) async fn query_udp_with_retries(
+pub(crate) async fn query_udp_with_retries(
     plan: &DnsQueryPlan<'_>,
     retries: u8,
     attempts: &mut u32,
@@ -90,7 +90,7 @@ pub(super) async fn query_udp_with_retries(
     .await
 }
 
-pub(super) async fn query_udp_for_auto_with_retries(
+pub(crate) async fn query_udp_for_auto_with_retries(
     plan: &DnsQueryPlan<'_>,
     retries: u8,
     attempts: &mut u32,
@@ -102,7 +102,7 @@ pub(super) async fn query_udp_for_auto_with_retries(
     .await
 }
 
-pub(super) async fn query_tcp_with_retries(
+pub(crate) async fn query_tcp_with_retries(
     plan: &DnsQueryPlan<'_>,
     retries: u8,
     attempts: &mut u32,

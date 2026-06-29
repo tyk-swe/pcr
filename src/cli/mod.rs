@@ -29,6 +29,10 @@ pub use options::{
     TransmitOptions, TransportCommand, TransportOptions, UdpOptions, VlanOptions,
 };
 
+use crate::domain::command::EngineCommand;
+use crate::domain::policy::{TrafficBudget, TrafficPolicy};
+use crate::domain::request::PacketRequest;
+use crate::engine::config::EngineConfig;
 use clap::Parser;
 
 /// Top-level CLI arguments for PacketcraftR.
@@ -89,7 +93,7 @@ impl PacketcraftArgs {
         self.dry_run || matches!(&self.command, PacketcraftCommand::DryRun(_))
     }
 
-    pub(crate) fn engine_config(&self) -> crate::engine::EngineConfig {
+    pub(crate) fn engine_config(&self) -> EngineConfig {
         let rule_options = match &self.command {
             #[cfg(feature = "daemon")]
             PacketcraftCommand::Daemon(opts) => Some(&opts.rule_options),
@@ -97,7 +101,7 @@ impl PacketcraftArgs {
         };
         let logging_options = self.one_shot_options().map(|options| &options.logging);
 
-        let mut budget = crate::engine::policy::TrafficBudget::default();
+        let mut budget = TrafficBudget::default();
         if let Some(value) = self.safety.traffic_max_targets {
             budget.max_targets = value;
         }
@@ -114,7 +118,7 @@ impl PacketcraftArgs {
             budget.max_rate_per_sec = value;
         }
 
-        let traffic_policy = crate::engine::policy::TrafficPolicy {
+        let traffic_policy = TrafficPolicy {
             allow_public_targets: self.safety.allow_public_targets,
             allow_malformed: self.safety.allow_malformed,
             allow_high_volume: self.safety.allow_high_volume,
@@ -125,7 +129,7 @@ impl PacketcraftArgs {
             budget,
         };
 
-        crate::engine::EngineConfig {
+        EngineConfig {
             output_format: self.output_format.map(crate::output::OutputFormat::from),
             prometheus_bind: logging_options.and_then(|options| options.prometheus_bind.clone()),
             rule_workers: rule_options.and_then(|options| options.rule_workers),
@@ -137,41 +141,31 @@ impl PacketcraftArgs {
         }
     }
 
-    pub(crate) fn engine_command(&self) -> crate::engine::EngineCommand {
+    pub(crate) fn engine_command(&self) -> EngineCommand {
         match &self.command {
-            PacketcraftCommand::Send(options) => crate::engine::EngineCommand::Send(
-                crate::engine::request::PacketRequest::from(&options.oneshot),
-            ),
-            PacketcraftCommand::DryRun(options) => crate::engine::EngineCommand::DryRun(
-                crate::engine::request::PacketRequest::from(&options.oneshot),
-            ),
+            PacketcraftCommand::Send(options) => {
+                EngineCommand::Send(PacketRequest::from(&options.oneshot))
+            }
+            PacketcraftCommand::DryRun(options) => {
+                EngineCommand::DryRun(PacketRequest::from(&options.oneshot))
+            }
             #[cfg(feature = "repl")]
             PacketcraftCommand::Interactive(options) => {
-                crate::engine::EngineCommand::Interactive(options.to_request())
+                EngineCommand::Interactive(options.to_request())
             }
             #[cfg(feature = "daemon")]
-            PacketcraftCommand::Daemon(options) => {
-                crate::engine::EngineCommand::Daemon(options.to_request())
-            }
+            PacketcraftCommand::Daemon(options) => EngineCommand::Daemon(options.to_request()),
             #[cfg(feature = "pcap")]
-            PacketcraftCommand::Listen(options) => {
-                crate::engine::EngineCommand::Listen(options.to_request())
-            }
+            PacketcraftCommand::Listen(options) => EngineCommand::Listen(options.to_request()),
             #[cfg(feature = "traceroute")]
             PacketcraftCommand::Traceroute(options) => {
-                crate::engine::EngineCommand::Traceroute(options.to_request())
+                EngineCommand::Traceroute(options.to_request())
             }
             #[cfg(feature = "scan")]
-            PacketcraftCommand::Scan(command) => {
-                crate::engine::EngineCommand::Scan(command.to_request())
-            }
-            PacketcraftCommand::DnsQuery(options) => {
-                crate::engine::EngineCommand::DnsQuery(options.to_request())
-            }
+            PacketcraftCommand::Scan(command) => EngineCommand::Scan(command.to_request()),
+            PacketcraftCommand::DnsQuery(options) => EngineCommand::DnsQuery(options.to_request()),
             #[cfg(feature = "fuzz")]
-            PacketcraftCommand::Fuzz(options) => {
-                crate::engine::EngineCommand::Fuzz(options.to_request())
-            }
+            PacketcraftCommand::Fuzz(options) => EngineCommand::Fuzz(options.to_request()),
         }
     }
 }

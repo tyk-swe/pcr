@@ -3,7 +3,7 @@
 
 use std::net::{Ipv4Addr, Ipv6Addr};
 
-use crate::engine::spec::PacketSpec;
+use crate::domain::spec::PacketSpec;
 use crate::network::sender::error::Result;
 
 use super::ipv4;

@@ -5,7 +5,7 @@ use std::net::Ipv6Addr;
 
 use pnet::packet::ip::{IpNextHeaderProtocol, IpNextHeaderProtocols};
 
-use crate::engine::spec::{Ipv6ExtHeader, MAX_ROUTING_SEGMENTS};
+use crate::domain::spec::{Ipv6ExtHeader, MAX_ROUTING_SEGMENTS};
 use crate::network::sender::error::Ipv6Error;
 
 type Ipv6Result<T> = std::result::Result<T, Ipv6Error>;

@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio::sync::{mpsc, oneshot};
 use tokio::time;
 
-use crate::engine::request::ListenerRequest;
+use crate::domain::request::ListenerRequest;
 use crate::util::error::operation_failed;
 
 use super::{CommandResponse, DaemonCommand};

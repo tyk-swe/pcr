@@ -10,6 +10,6 @@ pub struct EngineConfig {
     pub rule_queue: Option<usize>,
     pub send_workers: Option<usize>,
     pub send_queue: Option<usize>,
-    pub traffic_policy: crate::engine::policy::TrafficPolicy,
+    pub traffic_policy: crate::domain::policy::TrafficPolicy,
     pub dry_run: bool,
 }

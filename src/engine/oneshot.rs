@@ -5,11 +5,12 @@ use anyhow::{Context, Result};
 use log::{debug, info};
 use std::sync::Arc;
 
+use crate::domain::policy::TrafficMode;
+use crate::domain::request::PacketRequest;
+use crate::domain::spec::PacketSpec;
 use crate::engine::core::Engine;
-use crate::engine::request::PacketRequest;
+use crate::engine::error::{EngineError, EngineResult};
 use crate::engine::send::PacketSendService;
-use crate::engine::spec::PacketSpec;
-use crate::engine::{EngineError, EngineResult};
 use crate::network::io::sender::TransmissionPlan;
 
 pub struct OneShotFlow<'engine> {
@@ -78,8 +79,7 @@ impl<'engine> OneShotFlow<'engine> {
         let service = PacketSendService::from_config(&self.engine.config);
 
         if !self.engine.config.dry_run {
-            service
-                .authorize_spec_traffic(spec.as_ref(), crate::engine::policy::TrafficMode::Send)?;
+            service.authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
             return Ok(self);
         }
 
@@ -191,7 +191,7 @@ impl<'engine> OneShotFlow<'engine> {
     ) -> EngineResult<()> {
         self.engine
             .output
-            .emit_preflight_summary(spec, plan, &self.engine.config)
+            .emit_preflight_summary(spec, plan)
             .map_err(EngineError::PreflightSummary)
     }
 
@@ -200,7 +200,6 @@ impl<'engine> OneShotFlow<'engine> {
             crate::network::io::listener::run_from_spec(
                 &plan.listener,
                 plan.target.interface.as_deref(),
-                &self.engine.config,
                 self.engine.listener_handler(),
             )
             .await

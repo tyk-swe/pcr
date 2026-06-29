@@ -4,15 +4,15 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::engine::listener_config::{
+use crate::domain::listener_config::{
     normalize_queue_capacity, NormalizedListenerRequest, QueueCapacityError,
 };
-use crate::engine::request::ListenerRequest;
-use crate::engine::spec::ListenerSpec;
+use crate::domain::request::ListenerRequest;
+use crate::domain::spec::ListenerSpec;
 
 use super::error::ListenerError;
 
-pub use crate::engine::listener_config::{DEFAULT_QUEUE_CAPACITY, MAX_QUEUE_CAPACITY};
+pub use crate::domain::listener_config::{DEFAULT_QUEUE_CAPACITY, MAX_QUEUE_CAPACITY};
 
 #[derive(Clone, Debug)]
 pub struct ListenerRuntimeConfig {
@@ -28,17 +28,17 @@ impl ListenerRuntimeConfig {
     pub fn from_request(options: &ListenerRequest) -> Result<Self, ListenerError> {
         #[cfg(not(feature = "pcap"))]
         if let Some(requirement) =
-            crate::engine::listener_config::runtime_request_pcap_requirement(options)
+            crate::domain::listener_config::runtime_request_pcap_requirement(options)
         {
             return Err(match requirement {
-                crate::engine::listener_config::ListenerPcapRequirement::Filter => {
+                crate::domain::listener_config::ListenerPcapRequirement::Filter => {
                     ListenerError::FilterRequiresPcap
                 }
-                crate::engine::listener_config::ListenerPcapRequirement::Capture => {
+                crate::domain::listener_config::ListenerPcapRequirement::Capture => {
                     ListenerError::CaptureRequiresPcap
                 }
-                crate::engine::listener_config::ListenerPcapRequirement::Listen
-                | crate::engine::listener_config::ListenerPcapRequirement::ShowReply => {
+                crate::domain::listener_config::ListenerPcapRequirement::Listen
+                | crate::domain::listener_config::ListenerPcapRequirement::ShowReply => {
                     ListenerError::ListenerRequiresPcap
                 }
             });

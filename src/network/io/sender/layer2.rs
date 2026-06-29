@@ -11,7 +11,7 @@ use pnet::packet::ethernet::{EtherType, EtherTypes, MutableEthernetPacket};
 use pnet::packet::vlan::{ClassOfService, MutableVlanPacket};
 use pnet::packet::MutablePacket;
 
-use crate::engine::spec::{PacketSpec, VlanTag};
+use crate::domain::spec::{PacketSpec, VlanTag};
 use crate::network::sender::error::{Layer2Error, Result};
 use crate::network::{arp, ndp};
 use crate::util::source_ip::select_interface_ipv6_source_for_destination;

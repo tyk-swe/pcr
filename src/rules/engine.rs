@@ -14,9 +14,10 @@ use crate::rules::diagnostic::{
     RuleDiagnostic, RuleDiagnosticSeverity, RuleLoadOptions, RuleLoadReport,
 };
 use crate::rules::error::RuleError;
-use crate::rules::executor::{BoundedExecutor, RuleSendExecutor};
+use crate::rules::executor::BoundedExecutor;
 use crate::rules::model::PacketContext;
 use crate::rules::rule::{Rule, RuleDocument, RuleTrigger};
+use crate::rules::send::RuleSendDispatcher;
 use crate::rules::yaml;
 use crate::util::error::UtilError;
 
@@ -38,7 +39,7 @@ fn log_rule_diagnostics(diagnostics: &[RuleDiagnostic]) {
 #[derive(Debug, Clone)]
 pub struct RuleEngine {
     rules: Vec<Rule>,
-    sender: Option<Arc<RuleSendExecutor>>,
+    sender: Option<Arc<dyn RuleSendDispatcher>>,
     task_executor: Arc<BoundedExecutor>,
 }
 
@@ -47,8 +48,6 @@ impl RuleEngine {
         Self::new_configured(RuleExecutorConfig {
             workers: RULE_EXECUTOR_WORKERS,
             queue_capacity: RULE_EXECUTOR_QUEUE_CAPACITY,
-            traffic_policy: crate::engine::policy::TrafficPolicy::default(),
-            dry_run: false,
         })
     }
 
@@ -61,8 +60,6 @@ impl RuleEngine {
             RuleExecutorConfig {
                 workers: RULE_EXECUTOR_WORKERS,
                 queue_capacity: RULE_EXECUTOR_QUEUE_CAPACITY,
-                traffic_policy: crate::engine::policy::TrafficPolicy::default(),
-                dry_run: false,
             },
             handle,
         )
@@ -103,11 +100,14 @@ impl RuleEngine {
         &self.task_executor
     }
 
-    pub fn configure_sender(&mut self, sender: RuleSendExecutor) {
+    pub fn configure_sender<D>(&mut self, sender: D)
+    where
+        D: RuleSendDispatcher + 'static,
+    {
         self.sender = Some(Arc::new(sender));
     }
 
-    fn sender(&self) -> Option<&RuleSendExecutor> {
+    fn sender(&self) -> Option<&dyn RuleSendDispatcher> {
         self.sender.as_deref()
     }
 

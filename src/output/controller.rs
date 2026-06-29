@@ -8,9 +8,9 @@ use std::time::SystemTime;
 use anyhow::Result;
 use pnet::datalink::MacAddr;
 
-use crate::engine::policy::{PolicyOutcome, TrafficPlan};
-use crate::engine::preflight::PreflightView;
-use crate::engine::spec::{PacketSpec, PayloadSource};
+use crate::domain::policy::{PolicyOutcome, TrafficPlan};
+use crate::domain::report::PreflightView;
+use crate::domain::spec::{PacketSpec, PayloadSource};
 
 use super::format::{format_preview, render_listener_hex};
 use super::report::{preflight_report, PreflightReport};

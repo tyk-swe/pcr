@@ -7,7 +7,7 @@ use pnet::packet::ip::IpNextHeaderProtocol;
 use pnet::packet::ipv4::MutableIpv4Packet;
 use pnet::packet::ipv6::MutableIpv6Packet;
 
-use crate::engine::spec::{FragmentSpec, PacketSpec};
+use crate::domain::spec::{FragmentSpec, PacketSpec};
 use crate::network::sender::error::{HeaderError, Result};
 
 #[derive(Clone)]

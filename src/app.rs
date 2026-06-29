@@ -9,7 +9,7 @@ use log::warn;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::cli::PacketcraftArgs;
-use crate::engine::EngineCommand;
+use crate::domain::command::EngineCommand;
 use crate::{engine, util};
 
 pub fn run_cli() -> Result<()> {
@@ -23,7 +23,7 @@ pub struct PacketcraftApp {
     args: PacketcraftArgs,
     command: EngineCommand,
     runtime: Runtime,
-    engine: engine::Engine,
+    engine: engine::core::Engine,
     #[cfg(feature = "metrics")]
     prometheus_handle: Option<util::telemetry::PrometheusExporterHandle>,
 }
@@ -46,7 +46,8 @@ impl PacketcraftApp {
         Self::maybe_daemonize(&args)?;
 
         let runtime = Self::build_runtime()?;
-        let engine = engine::Engine::new_with_runtime_handle(config, runtime.handle().clone())?;
+        let engine =
+            engine::core::Engine::new_with_runtime_handle(config, runtime.handle().clone())?;
 
         #[cfg(feature = "daemon")]
         let mut engine = engine;
@@ -157,7 +158,7 @@ impl PacketcraftApp {
     }
 
     /// Access the derived engine configuration for testing or telemetry wiring.
-    pub fn config(&self) -> &engine::EngineConfig {
+    pub fn config(&self) -> &engine::config::EngineConfig {
         self.engine.config()
     }
 
@@ -204,7 +205,7 @@ impl PacketcraftApp {
     #[cfg(feature = "metrics")]
     fn maybe_start_prometheus_exporter(
         args: &PacketcraftArgs,
-        config: &engine::EngineConfig,
+        config: &engine::config::EngineConfig,
         runtime: &Runtime,
     ) -> Result<Option<util::telemetry::PrometheusExporterHandle>> {
         if let Some(bind) = config.prometheus_bind.as_deref() {

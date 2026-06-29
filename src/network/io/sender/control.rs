@@ -3,8 +3,8 @@
 
 use thiserror::Error;
 
-use crate::engine::spec::TransmissionSpec;
-pub type TransmissionPolicy = crate::engine::policy::TransmissionPolicy;
+use crate::domain::spec::TransmissionSpec;
+pub type TransmissionPolicy = crate::domain::policy::TransmissionPolicy;
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 pub enum SendControlError {

@@ -6,14 +6,15 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use log::debug;
 
-use crate::engine::policy::{
+use crate::domain::policy::{
     classify_ip, combine_target_scopes, packet_spec_privileges, packet_spec_target_scope,
     packet_spec_uses_malformed_options, TrafficMode, TrafficPlan, TransmissionPolicy,
 };
-use crate::engine::request::PacketRequest;
+use crate::domain::request::PacketRequest;
+use crate::domain::spec::{PacketSpec, TransportSpec};
+use crate::engine::config::EngineConfig;
+use crate::engine::error::{EngineError, EngineResult};
 use crate::engine::resolve::{resolve_packet_request, SystemTargetResolver};
-use crate::engine::spec::{PacketSpec, TransportSpec};
-use crate::engine::{EngineConfig, EngineError, EngineResult};
 use crate::network::io::sender::{
     emission_accounting, validate_transmission_policy, NetworkTarget, TransmissionPlan,
 };

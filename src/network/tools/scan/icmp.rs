@@ -32,11 +32,12 @@ use crate::util::sync::LockResultExt;
 
 #[cfg(test)]
 use super::common::MAX_SCAN_TARGETS;
-use super::common::{push_scan_target, resolve_interface_override, resolve_target};
+use super::common::{push_scan_target, resolve_source_override, resolve_target};
 
 pub async fn run_icmp(
     target: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     timeout_ms: u64,
     config: &EngineConfig,
 ) -> Result<()> {
@@ -46,10 +47,8 @@ pub async fn run_icmp(
         return Err(anyhow!("no targets found"));
     }
 
-    // Validate interface override compatibility
-    // resolve_interface_override takes IpAddr for target address family check.
-    // We can pass the IP part of SocketAddr.
-    if let Some(src) = resolve_interface_override(interface, targets[0].ip())? {
+    // Validate source override compatibility against the target address family.
+    if let Some(src) = resolve_source_override(interface, source_ip, targets[0].ip())? {
         if src.is_ipv4() && targets.iter().any(|t| t.is_ipv6()) {
             return Err(anyhow!(
                 "IPv4 interface override cannot be used for IPv6 targets"
@@ -71,7 +70,7 @@ pub async fn run_icmp(
     );
 
     // Resolve single source override (mixed targets already rejected)
-    let source_override = resolve_interface_override(interface, targets[0].ip())?;
+    let source_override = resolve_source_override(interface, source_ip, targets[0].ip())?;
     let send_delay = config.traffic_policy.rate_delay();
 
     let results = task::spawn_blocking(move || {

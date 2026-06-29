@@ -42,15 +42,12 @@ impl PacketSpec {
         let ipv6 = Ipv6Spec::from_request(&request.ipv6)?;
         let prefer_ipv6_hint = infer_prefer_ipv6_hint(request);
 
-        let destination_hint = if let Some(ip) = ip.as_ref().and_then(|ip| ip.destination) {
-            Some(ip)
-        } else {
-            match target.address.as_ref() {
-                Some(TargetAddress::Ip(ip)) => Some(*ip),
-                Some(TargetAddress::Host(_)) => request.destination.resolved_destination,
-                None => None,
-            }
-        };
+        let destination_hint = ip.as_ref().and_then(|ip| ip.destination).or_else(|| {
+            target.address.as_ref().and_then(|addr| {
+                addr.resolved_ip()
+                    .or(request.destination.resolved_destination)
+            })
+        });
 
         let transport = TransportSpec::from_request(
             &request.transport,
@@ -119,9 +116,11 @@ impl PacketSpec {
 
             if let Some(prefer_v6) = ip.prefer_ipv6 {
                 if prefer_v6 != ipv6_target {
-                    let conflicting_ip = ip.destination.or(match self.target.address.as_ref() {
-                        Some(TargetAddress::Ip(addr)) => Some(*addr),
-                        _ => None,
+                    let conflicting_ip = ip.destination.or_else(|| {
+                        self.target
+                            .address
+                            .as_ref()
+                            .and_then(TargetAddress::resolved_ip)
                     });
 
                     if let Some(target) = conflicting_ip {

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
@@ -13,12 +13,14 @@ use crate::engine::EngineConfig;
 use crate::network::arp;
 use crate::network::interface;
 use crate::util::error::operation_failed;
+use crate::util::source_ip::source_override_ipv4;
 
-use super::common::push_scan_target;
+use super::common::{push_scan_target, resolve_explicit_source_override};
 
 pub async fn run_arp(
     target: &str,
     interface: &Option<String>,
+    source_ip_override: &Option<String>,
     timeout_ms: u64,
     config: &EngineConfig,
 ) -> Result<()> {
@@ -29,21 +31,14 @@ pub async fn run_arp(
         )
     })?;
 
-    let source_ip = iface
-        .ips
-        .iter()
-        .find_map(|network| match network {
-            IpNetwork::V4(v4) => Some(v4.ip()),
-            _ => None,
-        })
-        .ok_or_else(|| anyhow!("interface {} does not have an IPv4 address", iface.name))?;
-
     let mut targets = parse_arp_targets(target)?;
     targets.sort();
     targets.dedup();
     if targets.is_empty() {
         return Err(anyhow!("no IPv4 hosts available for ARP probing"));
     }
+    let effective_source_ip =
+        resolve_arp_source_ip(&iface, interface, source_ip_override, targets[0])?;
 
     info!(
         "Starting ARP probe against {} ({} host(s)) via {}",
@@ -54,7 +49,7 @@ pub async fn run_arp(
 
     let config = ArpScanConfig {
         interface: iface,
-        source_ip,
+        source_ip: effective_source_ip,
         targets,
         timeout: Duration::from_millis(timeout_ms.max(1)),
         send_delay: config.traffic_policy.rate_delay(),
@@ -138,6 +133,32 @@ fn perform_arp_scan_with_scanner<S: ArpResolver + ?Sized>(
     }
 
     Ok(discovered)
+}
+
+fn resolve_arp_source_ip(
+    iface: &NetworkInterface,
+    interface: &Option<String>,
+    source_ip_override: &Option<String>,
+    target: Ipv4Addr,
+) -> Result<Ipv4Addr> {
+    let source_override = source_override_ipv4(resolve_explicit_source_override(
+        interface,
+        source_ip_override,
+        IpAddr::V4(target),
+    )?)?;
+
+    if let Some(source_ip) = source_override {
+        return Ok(source_ip);
+    }
+
+    iface
+        .ips
+        .iter()
+        .find_map(|network| match network {
+            IpNetwork::V4(v4) => Some(v4.ip()),
+            _ => None,
+        })
+        .ok_or_else(|| anyhow!("interface {} does not have an IPv4 address", iface.name))
 }
 
 pub(super) fn parse_arp_targets(spec: &str) -> Result<Vec<Ipv4Addr>> {
@@ -285,6 +306,29 @@ mod tests {
         assert_eq!(ips.len(), 2);
         assert_eq!(ips[0], Ipv4Addr::new(172, 16, 0, 1));
         assert_eq!(ips[1], Ipv4Addr::new(172, 16, 0, 2));
+    }
+
+    #[test]
+    fn resolve_arp_source_ip_uses_override_without_interface_ipv4() {
+        let override_ip = Ipv4Addr::new(192, 0, 2, 10);
+        let iface = NetworkInterface {
+            name: "test".to_string(),
+            description: "".to_string(),
+            index: 1,
+            mac: Some(MacAddr::new(0, 1, 2, 3, 4, 5)),
+            ips: vec![],
+            flags: 0,
+        };
+
+        let source_ip = resolve_arp_source_ip(
+            &iface,
+            &Some("eth0".to_string()),
+            &Some(override_ip.to_string()),
+            Ipv4Addr::new(192, 0, 2, 20),
+        )
+        .expect("explicit source IP should not require an interface IPv4 address");
+
+        assert_eq!(source_ip, override_ip);
     }
 
     struct MockResolver<F> {

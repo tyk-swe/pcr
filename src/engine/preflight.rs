@@ -11,8 +11,13 @@ use crate::output::OutputController;
 #[derive(Debug, Clone)]
 pub struct PreflightView {
     pub destination: String,
+    pub selected_destination_ip: String,
+    pub destination_reason: &'static str,
     pub destination_family: &'static str,
     pub interface: String,
+    pub interface_reason: &'static str,
+    pub source_ip: String,
+    pub source_reason: &'static str,
     pub mode: &'static str,
     pub transport: &'static str,
     pub count: Option<u64>,
@@ -37,8 +42,13 @@ impl PreflightView {
 
         Ok(Self {
             destination: planned_destination(plan),
+            selected_destination_ip: plan.selection.destination_ip.to_string(),
+            destination_reason: plan.selection.destination_reason.as_str(),
             destination_family: planned_destination_family(plan),
             interface: plan.interface.name.clone(),
+            interface_reason: plan.selection.interface_reason.as_str(),
+            source_ip: plan.selection.source_ip.to_string(),
+            source_reason: plan.selection.source_reason.as_str(),
             mode: planned_mode(plan),
             transport: plan.summary.transport,
             count: accounting.attempts,
@@ -90,13 +100,16 @@ fn planned_mode(plan: &TransmissionPlan) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     use pnet::datalink::NetworkInterface;
     use pnet::packet::ip::IpNextHeaderProtocols;
 
     use crate::engine::spec::LoggingSpec;
-    use crate::network::io::sender::{PlanningMode, TransmissionPolicy, TransmissionSummary};
+    use crate::network::io::sender::{
+        DestinationSelectionReason, InterfaceSelectionReason, PlanningMode, SelectionMetadata,
+        SourceSelectionReason, TransmissionPolicy, TransmissionSummary,
+    };
 
     fn test_interface() -> NetworkInterface {
         NetworkInterface {
@@ -119,8 +132,22 @@ mod tests {
             frames: vec![vec![0; 64], vec![0; 128]],
             link_type,
             transmit,
-            destination,
+            destination: destination.clone(),
             interface: test_interface(),
+            selection: SelectionMetadata {
+                selected_interface: "test0".to_string(),
+                interface_reason: InterfaceSelectionReason::ExplicitInterface,
+                source_ip: match destination {
+                    NetworkTarget::Ipv4(addr) => std::net::IpAddr::V4(addr),
+                    NetworkTarget::Ipv6(addr) => std::net::IpAddr::V6(addr),
+                },
+                source_reason: SourceSelectionReason::InterfaceAddress,
+                destination_ip: match destination {
+                    NetworkTarget::Ipv4(addr) => std::net::IpAddr::V4(addr),
+                    NetworkTarget::Ipv6(addr) => std::net::IpAddr::V6(addr),
+                },
+                destination_reason: DestinationSelectionReason::TargetLiteral,
+            },
             protocol: IpNextHeaderProtocols::Udp,
             summary: TransmissionSummary {
                 payload_len: 8,
@@ -151,8 +178,13 @@ mod tests {
         let view = PreflightView::try_from_plan(&plan).expect("preflight view");
 
         assert_eq!(view.destination, "192.0.2.10");
+        assert_eq!(view.selected_destination_ip, "192.0.2.10");
+        assert_eq!(view.destination_reason, "target_literal");
         assert_eq!(view.destination_family, "IPv4");
         assert_eq!(view.interface, "test0");
+        assert_eq!(view.interface_reason, "explicit_interface");
+        assert_eq!(view.source_ip, "192.0.2.10");
+        assert_eq!(view.source_reason, "interface_address");
         assert_eq!(view.mode, "L3");
         assert_eq!(view.transport, "UDP");
         assert_eq!(view.count, Some(3));
@@ -214,5 +246,23 @@ mod tests {
         assert_eq!(view.destination, "2001:db8::1");
         assert_eq!(view.destination_family, "IPv6");
         assert_eq!(view.mode, "L3");
+    }
+
+    #[test]
+    fn preflight_view_separates_transmit_and_selected_destination() {
+        let first_hop = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x20);
+        let final_destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 0x99);
+        let mut plan = test_plan(
+            NetworkTarget::Ipv6(first_hop),
+            LinkType::Ipv6,
+            TransmissionSpec::default(),
+            TransmissionPolicy::default(),
+        );
+        plan.selection.destination_ip = IpAddr::V6(final_destination);
+
+        let view = PreflightView::try_from_plan(&plan).expect("preflight view");
+
+        assert_eq!(view.destination, first_hop.to_string());
+        assert_eq!(view.selected_destination_ip, final_destination.to_string());
     }
 }

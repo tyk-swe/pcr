@@ -44,7 +44,10 @@ pub(crate) use transport::{build_tcp_segment_optimized, finalize_udp_checksum, t
 #[doc(hidden)]
 pub use transport::{build_transport_segment, TransportBuildError};
 
-pub use types::{LinkType, NetworkTarget, PlanningMode, TransmissionPlan, TransmissionSummary};
+pub use types::{
+    DestinationSelectionReason, InterfaceSelectionReason, LinkType, NetworkTarget, PlanningMode,
+    SelectionMetadata, SourceSelectionReason, TransmissionPlan, TransmissionSummary,
+};
 
 #[cfg(test)]
 mod tests;

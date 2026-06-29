@@ -16,10 +16,13 @@ use anyhow::Result;
 use log::info;
 
 use crate::engine::command::{TracerouteProtocol, TracerouteRequest};
-use crate::engine::policy::{classify_ip, TrafficMode, TrafficPlan, TrafficPrivilege};
+use crate::engine::policy::{
+    classify_ip, TrafficMode, TrafficPlan, TrafficPrivilege, TrafficSelection,
+    TrafficSelectionValue,
+};
 use crate::engine::EngineConfig;
 
-use self::common::resolve_destination;
+use self::common::resolve_destination_with_reason;
 use self::icmp::{run_icmp_traceroute_v4, run_icmp_traceroute_v6};
 use self::tcp::{run_tcp_traceroute_v4, run_tcp_traceroute_v6};
 use self::udp::{run_udp_traceroute_v4, run_udp_traceroute_v6};
@@ -32,7 +35,8 @@ pub struct PreparedTraceroute {
 }
 
 pub fn prepare(opts: &TracerouteRequest, config: &EngineConfig) -> Result<PreparedTraceroute> {
-    let destination = resolve_destination(&opts.destination)?;
+    let resolved_destination = resolve_destination_with_reason(&opts.destination)?;
+    let destination = resolved_destination.address;
     let mut plan = TrafficPlan::new(TrafficMode::Traceroute, classify_ip(destination));
     plan.target_count = 1;
     plan.port_count = 1;
@@ -40,11 +44,50 @@ pub fn prepare(opts: &TracerouteRequest, config: &EngineConfig) -> Result<Prepar
     plan.batch_size = 1;
     plan.rate_per_sec = Some(config.traffic_policy.budget.max_rate_per_sec);
     plan.required_privileges = vec![TrafficPrivilege::RawSocket];
+    plan.selection = Some(traceroute_selection(
+        destination,
+        resolved_destination.reason,
+        opts.protocol,
+    ));
     Ok(PreparedTraceroute {
         traffic_plan: plan,
         destination,
         send_delay: config.traffic_policy.rate_delay(),
     })
+}
+
+fn traceroute_selection(
+    destination: IpAddr,
+    destination_reason: &'static str,
+    protocol: TracerouteProtocol,
+) -> TrafficSelection {
+    let (source_value, source_reason) = match (destination, protocol) {
+        (IpAddr::V4(destination), TracerouteProtocol::Tcp) => (
+            common::resolve_source_ipv4(destination)
+                .ok()
+                .map(|ip| ip.to_string()),
+            "route_table",
+        ),
+        (IpAddr::V6(destination), TracerouteProtocol::Tcp | TracerouteProtocol::Icmp) => (
+            common::resolve_source_ipv6(destination)
+                .ok()
+                .map(|ip| ip.to_string()),
+            "route_table",
+        ),
+        _ => (None, "os_socket_selected"),
+    };
+
+    TrafficSelection {
+        interface: None,
+        source: Some(TrafficSelectionValue {
+            value: source_value,
+            reason: source_reason.to_string(),
+        }),
+        destination: Some(TrafficSelectionValue {
+            value: Some(destination.to_string()),
+            reason: destination_reason.to_string(),
+        }),
+    }
 }
 
 pub fn traffic_plan(opts: &TracerouteRequest, config: &EngineConfig) -> Result<TrafficPlan> {
@@ -194,6 +237,45 @@ mod tests {
             prepared.traffic_plan.target_scope,
             crate::engine::policy::TargetScope::Local
         );
+        let selection = prepared
+            .traffic_plan
+            .selection
+            .as_ref()
+            .expect("traceroute selection metadata");
+        assert_eq!(
+            selection
+                .destination
+                .as_ref()
+                .map(|value| value.reason.as_str()),
+            Some("hostname_resolution")
+        );
+        assert_eq!(
+            selection.source.as_ref().map(|value| value.reason.as_str()),
+            Some("os_socket_selected")
+        );
+    }
+
+    #[test]
+    fn prepare_reports_tcp_source_selection_when_discovery_succeeds() {
+        let opts = crate::engine::command::TracerouteRequest {
+            destination: "127.0.0.1".to_string(),
+            max_ttl: 1,
+            probes: 1,
+            protocol: crate::engine::command::TracerouteProtocol::Tcp,
+            no_dns: None,
+            timeout: 1,
+        };
+
+        let prepared = super::prepare(&opts, &engine_config()).expect("prepare traceroute");
+        let source = prepared
+            .traffic_plan
+            .selection
+            .as_ref()
+            .and_then(|selection| selection.source.as_ref())
+            .expect("source selection");
+
+        assert_eq!(source.reason, "route_table");
+        assert_eq!(source.value.as_deref(), Some("127.0.0.1"));
     }
 
     #[test]

@@ -153,7 +153,8 @@ mod tests {
     use crate::engine::spec::{LoggingSpec, TransmissionSpec};
     use crate::network::sender::error::ExecutorError;
     use crate::network::sender::types::{
-        LinkType, NetworkTarget, TransmissionPlan, TransmissionSummary,
+        DestinationSelectionReason, InterfaceSelectionReason, LinkType, NetworkTarget,
+        SelectionMetadata, SourceSelectionReason, TransmissionPlan, TransmissionSummary,
     };
     use crate::network::sender::{SendControlError, TransmissionPolicy};
     use pnet::packet::ip::IpNextHeaderProtocols;
@@ -179,6 +180,14 @@ mod tests {
             },
             destination: NetworkTarget::Ipv4(std::net::Ipv4Addr::LOCALHOST),
             interface: test_utils::dummy_interface(),
+            selection: SelectionMetadata {
+                selected_interface: "test_iface".to_string(),
+                interface_reason: InterfaceSelectionReason::ExplicitInterface,
+                source_ip: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                source_reason: SourceSelectionReason::InterfaceAddress,
+                destination_ip: std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+                destination_reason: DestinationSelectionReason::TargetLiteral,
+            },
             protocol: IpNextHeaderProtocols::Tcp,
             summary: TransmissionSummary {
                 payload_len: 0,

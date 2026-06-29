@@ -19,6 +19,19 @@ pub trait InterfaceProvider {
     fn interfaces(&self) -> Vec<NetworkInterface>;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterfaceSelectionReason {
+    ExplicitInterface,
+    RouteTable,
+    Heuristic,
+}
+
+#[derive(Debug, Clone)]
+pub struct InterfaceSelection {
+    pub interface: NetworkInterface,
+    pub reason: InterfaceSelectionReason,
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemInterfaceProvider;
 
@@ -75,57 +88,84 @@ pub enum InterfaceError {
 }
 
 pub fn find_interface(name: Option<&str>) -> Result<NetworkInterface> {
-    find_interface_with_provider_impl(name, &SystemInterfaceProvider)
+    Ok(find_interface_selection_with_provider_impl(name, &SystemInterfaceProvider)?.interface)
 }
 
-fn find_interface_with_provider_impl<P>(
+pub fn find_interface_selection(name: Option<&str>) -> Result<InterfaceSelection> {
+    find_interface_selection_with_provider_impl(name, &SystemInterfaceProvider)
+}
+
+fn find_interface_selection_with_provider_impl<P>(
     name: Option<&str>,
     provider: &P,
-) -> Result<NetworkInterface>
+) -> Result<InterfaceSelection>
 where
     P: InterfaceProvider + ?Sized,
 {
     if let Some(name) = name {
-        return resolve_interface_by_name_with_provider(name, provider);
+        return Ok(InterfaceSelection {
+            interface: resolve_interface_by_name_with_provider(name, provider)?,
+            reason: InterfaceSelectionReason::ExplicitInterface,
+        });
     }
-    heuristic_default_interface_with_provider(provider)
+    Ok(InterfaceSelection {
+        interface: heuristic_default_interface_with_provider(provider)?,
+        reason: InterfaceSelectionReason::Heuristic,
+    })
 }
 
 /// Find the interface for a specific destination using the routing table
 pub fn find_interface_for_destination(destination: IpAddr) -> Result<NetworkInterface> {
-    find_interface_for_destination_with_provider_impl(
+    Ok(find_interface_for_destination_selection_with_provider_impl(
+        destination,
+        &SystemInterfaceProvider,
+        query_routing_table,
+    )?
+    .interface)
+}
+
+pub fn find_interface_for_destination_selection(destination: IpAddr) -> Result<InterfaceSelection> {
+    find_interface_for_destination_selection_with_provider_impl(
         destination,
         &SystemInterfaceProvider,
         query_routing_table,
     )
 }
 
-fn find_interface_for_destination_with_provider_impl<P, Q>(
+fn find_interface_for_destination_selection_with_provider_impl<P, Q>(
     destination: IpAddr,
     provider: &P,
     route_query: Q,
-) -> Result<NetworkInterface>
+) -> Result<InterfaceSelection>
 where
     P: InterfaceProvider + ?Sized,
     Q: FnOnce(IpAddr) -> Result<String>,
 {
     match route_query(destination) {
-        Ok(iface_name) => resolve_interface_by_name_with_provider(&iface_name, provider).map_err(
-            |err| match err {
-                InterfaceError::NotFound { .. } => InterfaceError::RouteInterfaceMissing {
-                    destination,
-                    interface: iface_name,
-                },
-                other => other,
-            },
-        ),
+        Ok(iface_name) => {
+            let interface = resolve_interface_by_name_with_provider(&iface_name, provider)
+                .map_err(|err| match err {
+                    InterfaceError::NotFound { .. } => InterfaceError::RouteInterfaceMissing {
+                        destination,
+                        interface: iface_name,
+                    },
+                    other => other,
+                })?;
+            Ok(InterfaceSelection {
+                interface,
+                reason: InterfaceSelectionReason::RouteTable,
+            })
+        }
         Err(err) if should_fallback_to_heuristic(&err) => {
             warn!(
                 "Failed to query routing table for {}: {}; falling back to heuristic selection. \
                 Consider using --interface to specify the interface explicitly.",
                 destination, err
             );
-            heuristic_default_interface_with_provider(provider)
+            Ok(InterfaceSelection {
+                interface: heuristic_default_interface_with_provider(provider)?,
+                reason: InterfaceSelectionReason::Heuristic,
+            })
         }
         Err(err) => Err(err),
     }
@@ -362,7 +402,7 @@ pub fn find_interface_with_provider<P>(name: Option<&str>, provider: &P) -> Resu
 where
     P: InterfaceProvider + ?Sized,
 {
-    find_interface_with_provider_impl(name, provider)
+    Ok(find_interface_selection_with_provider_impl(name, provider)?.interface)
 }
 
 #[cfg(any(test, feature = "test_utils"))]
@@ -375,7 +415,36 @@ where
     P: InterfaceProvider + ?Sized,
     Q: FnOnce(IpAddr) -> Result<String>,
 {
-    find_interface_for_destination_with_provider_impl(destination, provider, route_query)
+    Ok(find_interface_for_destination_selection_with_provider_impl(
+        destination,
+        provider,
+        route_query,
+    )?
+    .interface)
+}
+
+#[cfg(any(test, feature = "test_utils"))]
+pub fn find_interface_selection_with_provider<P>(
+    name: Option<&str>,
+    provider: &P,
+) -> Result<InterfaceSelection>
+where
+    P: InterfaceProvider + ?Sized,
+{
+    find_interface_selection_with_provider_impl(name, provider)
+}
+
+#[cfg(any(test, feature = "test_utils"))]
+pub fn find_interface_for_destination_selection_with_provider<P, Q>(
+    destination: IpAddr,
+    provider: &P,
+    route_query: Q,
+) -> Result<InterfaceSelection>
+where
+    P: InterfaceProvider + ?Sized,
+    Q: FnOnce(IpAddr) -> Result<String>,
+{
+    find_interface_for_destination_selection_with_provider_impl(destination, provider, route_query)
 }
 
 #[cfg(any(test, feature = "test_utils"))]
@@ -638,6 +707,47 @@ mod tests {
         .expect("fake routed interface");
 
         assert_eq!(iface.name, "eth-test");
+    }
+
+    #[test]
+    fn interface_selection_reports_explicit_reason() {
+        let provider = fake_provider();
+        let selection = find_interface_selection_with_provider(Some("eth-test"), &provider)
+            .expect("named fake interface");
+
+        assert_eq!(selection.interface.name, "eth-test");
+        assert_eq!(
+            selection.reason,
+            InterfaceSelectionReason::ExplicitInterface
+        );
+    }
+
+    #[test]
+    fn interface_selection_reports_route_table_reason() {
+        let provider = fake_provider();
+        let destination: IpAddr = "198.51.100.7".parse().unwrap();
+        let selection =
+            find_interface_for_destination_selection_with_provider(destination, &provider, |_| {
+                Ok("eth-test".to_string())
+            })
+            .expect("fake routed interface");
+
+        assert_eq!(selection.interface.name, "eth-test");
+        assert_eq!(selection.reason, InterfaceSelectionReason::RouteTable);
+    }
+
+    #[test]
+    fn interface_selection_reports_heuristic_fallback_reason() {
+        let provider = fake_provider();
+        let destination: IpAddr = "198.51.100.7".parse().unwrap();
+        let selection =
+            find_interface_for_destination_selection_with_provider(destination, &provider, |_| {
+                Err(InterfaceError::IpCommandNotFound)
+            })
+            .expect("fake heuristic fallback");
+
+        assert_eq!(selection.interface.name, "eth-test");
+        assert_eq!(selection.reason, InterfaceSelectionReason::Heuristic);
     }
 
     #[test]

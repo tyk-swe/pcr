@@ -134,12 +134,22 @@ pub enum RuleActionError {
     InvalidCommandProgram { details: String },
     #[error("command action has invalid argument at index {index}: {details}")]
     InvalidCommandArgument { index: usize, details: String },
+    #[error("command action has invalid allowlist entry at index {index}: {details}")]
+    InvalidCommandAllowlistEntry { index: usize, details: String },
+    #[error("enabled command action requires at least one allowed program")]
+    MissingCommandAllowlist,
+    #[error("command action has invalid working directory: {details}")]
+    InvalidCommandWorkingDir { details: String },
     #[error("command action exceeds limits: {details}")]
     CommandShapeLimitExceeded { details: String },
     #[error(
         "rule '{rule}' command argument injection detected: template '{arg}' looks like a flag"
     )]
     ArgumentInjection { rule: String, arg: String },
+    #[error("rule '{rule}' command action is disabled")]
+    CommandDisabled { rule: String },
+    #[error("rule '{rule}' command program '{program}' is not allowed")]
+    CommandProgramDenied { rule: String, program: String },
     #[error("rule '{rule}' command action dropped: executor queue is full ({details})")]
     CommandQueueFull { rule: String, details: String },
     #[error("rule '{rule}' command action failed: executor unavailable ({details})")]

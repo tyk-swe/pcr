@@ -16,7 +16,15 @@ const RULE_MATCHER_FIELDS: &[&str] = &[
     "not",
 ];
 const RULE_LOG_ACTION_FIELDS: &[&str] = &["type", "message", "level"];
-const RULE_COMMAND_ACTION_FIELDS: &[&str] = &["type", "program", "args", "timeout_seconds"];
+const RULE_COMMAND_ACTION_FIELDS: &[&str] = &[
+    "type",
+    "program",
+    "args",
+    "timeout_seconds",
+    "enabled",
+    "allowed_programs",
+    "working_dir",
+];
 const RULE_SEND_ACTION_FIELDS: &[&str] = &[
     "type",
     "destination",

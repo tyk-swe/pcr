@@ -24,7 +24,7 @@ use crate::util::error::operation_failed;
 use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 
 use super::common::{
-    parse_ports, report_results, resolve_interface_override, resolve_target, ConcurrentScanConfig,
+    parse_ports, report_results, resolve_source_override, resolve_target, ConcurrentScanConfig,
     PortState, ScanEvent, DEFAULT_TIMEOUT,
 };
 use crate::network::pnet_utils::open_transport_channel;
@@ -186,56 +186,102 @@ pub async fn run_tcp_syn(
     target: &str,
     ports: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     config: &EngineConfig,
 ) -> Result<()> {
-    run_tcp_scan(target, ports, interface, config, GenericTcpScan::syn()).await
+    run_tcp_scan(
+        target,
+        ports,
+        interface,
+        source_ip,
+        config,
+        GenericTcpScan::syn(),
+    )
+    .await
 }
 
 pub async fn run_tcp_fin(
     target: &str,
     ports: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     config: &EngineConfig,
 ) -> Result<()> {
-    run_tcp_scan(target, ports, interface, config, GenericTcpScan::fin()).await
+    run_tcp_scan(
+        target,
+        ports,
+        interface,
+        source_ip,
+        config,
+        GenericTcpScan::fin(),
+    )
+    .await
 }
 
 pub async fn run_tcp_null(
     target: &str,
     ports: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     config: &EngineConfig,
 ) -> Result<()> {
-    run_tcp_scan(target, ports, interface, config, GenericTcpScan::null()).await
+    run_tcp_scan(
+        target,
+        ports,
+        interface,
+        source_ip,
+        config,
+        GenericTcpScan::null(),
+    )
+    .await
 }
 
 pub async fn run_tcp_xmas(
     target: &str,
     ports: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     config: &EngineConfig,
 ) -> Result<()> {
-    run_tcp_scan(target, ports, interface, config, GenericTcpScan::xmas()).await
+    run_tcp_scan(
+        target,
+        ports,
+        interface,
+        source_ip,
+        config,
+        GenericTcpScan::xmas(),
+    )
+    .await
 }
 
 pub async fn run_tcp_ack(
     target: &str,
     ports: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     config: &EngineConfig,
 ) -> Result<()> {
-    run_tcp_scan(target, ports, interface, config, GenericTcpScan::ack()).await
+    run_tcp_scan(
+        target,
+        ports,
+        interface,
+        source_ip,
+        config,
+        GenericTcpScan::ack(),
+    )
+    .await
 }
 
 async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
     target: &str,
     ports: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     config: &EngineConfig,
     scan_strategy: S,
 ) -> Result<()> {
     let address = resolve_target(target)?;
-    let source_override = resolve_interface_override(interface, address.ip())?;
+    let source_override = resolve_source_override(interface, source_ip, address.ip())?;
     let port_list = parse_ports(ports)?;
 
     if port_list.len() > PORT_REUSE_WARNING_THRESHOLD {
@@ -435,10 +481,11 @@ fn scan_tcp_v4_with_controls<S: TcpScanStrategy>(
     send_delay: Option<Duration>,
     scan_strategy: &S,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let source_ip = super::common::source_ipv4_or_discover(
+    let source_ip = super::common::source_ipv4_for_layer4_send(
         destination,
         SOURCE_DISCOVERY_PORT,
         source_override,
+        "TCP",
     )?;
 
     let (mut tcp_sender, mut tcp_receiver) = open_transport_channel(

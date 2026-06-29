@@ -231,7 +231,26 @@ pub fn resolve_hostname(addr: IpAddr, no_dns: bool) -> String {
 }
 
 pub fn resolve_destination(target: &str) -> Result<IpAddr> {
-    resolve_target_ip(target, None).map_err(anyhow::Error::from)
+    Ok(resolve_destination_with_reason(target)?.address)
+}
+
+pub struct ResolvedDestination {
+    pub address: IpAddr,
+    pub reason: &'static str,
+}
+
+pub fn resolve_destination_with_reason(target: &str) -> Result<ResolvedDestination> {
+    if let Ok(address) = target.parse::<IpAddr>() {
+        return Ok(ResolvedDestination {
+            address,
+            reason: "target_literal",
+        });
+    }
+
+    Ok(ResolvedDestination {
+        address: resolve_target_ip(target, None).map_err(anyhow::Error::from)?,
+        reason: "hostname_resolution",
+    })
 }
 
 pub fn resolve_source_ipv4(destination: Ipv4Addr) -> Result<Ipv4Addr> {

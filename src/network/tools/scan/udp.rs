@@ -31,7 +31,7 @@ use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 #[cfg(test)]
 use super::common::calculate_source_port;
 use super::common::{
-    parse_ports, report_results, resolve_interface_override, resolve_target, ConcurrentScanConfig,
+    parse_ports, report_results, resolve_source_override, resolve_target, ConcurrentScanConfig,
     PortState, ScanEvent, DEFAULT_TIMEOUT, ICMPV6_CODE_PORT_UNREACHABLE,
 };
 use crate::network::pnet_utils::open_transport_channel;
@@ -40,10 +40,11 @@ pub async fn run_udp(
     target: &str,
     ports: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     config: &EngineConfig,
 ) -> Result<()> {
     let address = resolve_target(target)?;
-    let source_override = resolve_interface_override(interface, address.ip())?;
+    let source_override = resolve_source_override(interface, source_ip, address.ip())?;
     let port_list = parse_ports(ports)?;
 
     log::info!(
@@ -116,7 +117,8 @@ fn scan_udp_v4(
     batch_size: usize,
     send_delay: Option<Duration>,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let source_ip = super::common::source_ipv4_or_discover(destination, 9, source_override)?;
+    let source_ip =
+        super::common::source_ipv4_for_layer4_send(destination, 9, source_override, "UDP")?;
 
     let (mut udp_sender, mut udp_receiver) = open_transport_channel(
         1024 * 1024,

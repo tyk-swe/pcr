@@ -270,7 +270,10 @@ mod tests {
     use crate::engine::spec::{
         DestinationSpec, Ipv6ExtHeader, Ipv6Spec, LoggingSpec, TargetAddress, TransmissionSpec,
     };
-    use crate::network::io::sender::{LinkType, PlanningMode, TransmissionSummary};
+    use crate::network::io::sender::{
+        DestinationSelectionReason, InterfaceSelectionReason, LinkType, PlanningMode,
+        SelectionMetadata, SourceSelectionReason, TransmissionSummary,
+    };
     use pnet::datalink::NetworkInterface;
     use pnet::packet::ip::IpNextHeaderProtocols;
     use std::net::{IpAddr, Ipv6Addr};
@@ -283,6 +286,17 @@ mod tests {
             mac: None,
             ips: Vec::new(),
             flags: 0,
+        }
+    }
+
+    fn test_selection(destination: IpAddr) -> SelectionMetadata {
+        SelectionMetadata {
+            selected_interface: "test0".to_string(),
+            interface_reason: InterfaceSelectionReason::ExplicitInterface,
+            source_ip: destination,
+            source_reason: SourceSelectionReason::InterfaceAddress,
+            destination_ip: destination,
+            destination_reason: DestinationSelectionReason::TargetLiteral,
         }
     }
 
@@ -312,6 +326,7 @@ mod tests {
             transmit: TransmissionSpec::default(),
             destination: NetworkTarget::Ipv6(first_hop),
             interface: test_interface(),
+            selection: test_selection(IpAddr::V6(first_hop)),
             protocol: IpNextHeaderProtocols::Ipv6Route,
             summary: TransmissionSummary {
                 payload_len: 0,
@@ -355,6 +370,7 @@ mod tests {
             transmit: spec.transmit.clone(),
             destination: NetworkTarget::Ipv6(Ipv6Addr::LOCALHOST),
             interface: test_interface(),
+            selection: test_selection(IpAddr::V6(Ipv6Addr::LOCALHOST)),
             protocol: IpNextHeaderProtocols::Udp,
             summary: TransmissionSummary {
                 payload_len: 0,

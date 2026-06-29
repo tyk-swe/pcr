@@ -112,6 +112,7 @@ pub struct PortScanRequest {
     pub target: String,
     pub ports: String,
     pub interface: Option<String>,
+    pub source_ip: Option<String>,
 }
 
 #[cfg(feature = "scan")]
@@ -119,6 +120,7 @@ pub struct PortScanRequest {
 pub struct TimedScanRequest {
     pub target: String,
     pub interface: Option<String>,
+    pub source_ip: Option<String>,
     pub timeout: u64,
 }
 

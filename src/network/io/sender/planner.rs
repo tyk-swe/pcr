@@ -13,12 +13,15 @@ use crate::engine::spec::{DestinationSpec, PacketSpec, TargetAddress};
 use super::builder::{Ipv4PacketBuilder, Ipv6PacketBuilder, PacketBuildResult, PacketBuilder};
 use super::control::{validate_transmission_policy, TransmissionPolicy};
 use super::error::{PlannerError, Result};
-use super::interface::{resolve_ip_addresses, select_interface};
+use super::interface::{resolve_ip_addresses_with_selection, select_interface_with_reason};
 use super::ipv6;
 use super::layer2::{resolve_layer2_ipv4, resolve_layer2_ipv6, Layer2Resolved};
 use super::payload::prepare_payload;
 use super::transport::{build_transport_segment, TransportBuild};
-use super::types::{LinkType, NetworkTarget, PlanningMode, TransmissionPlan, TransmissionSummary};
+use super::types::{
+    InterfaceSelectionReason, LinkType, NetworkTarget, PlanningMode, SelectionMetadata,
+    TransmissionPlan, TransmissionSummary,
+};
 
 pub fn plan_transmission(spec: &PacketSpec) -> Result<TransmissionPlan> {
     plan_transmission_with_policy(spec, TransmissionPolicy::default())
@@ -49,8 +52,14 @@ fn plan_transmission_with_mode(
 ) -> Result<TransmissionPlan> {
     info!("Preparing packet for {}", format_target(&spec.target));
 
-    let interface = select_interface(spec)?;
-    plan_transmission_with_interface_and_policy(spec, interface, mode, policy)
+    let selected = select_interface_with_reason(spec)?;
+    plan_transmission_with_interface_and_reason(
+        spec,
+        selected.interface,
+        selected.reason,
+        mode,
+        policy,
+    )
 }
 
 /// Plan transmission with selected interface.
@@ -66,6 +75,22 @@ pub fn plan_transmission_with_interface(
 pub fn plan_transmission_with_interface_and_policy(
     spec: &PacketSpec,
     interface: pnet::datalink::NetworkInterface,
+    mode: PlanningMode,
+    policy: TransmissionPolicy,
+) -> Result<TransmissionPlan> {
+    plan_transmission_with_interface_and_reason(
+        spec,
+        interface,
+        InterfaceSelectionReason::ExplicitInterface,
+        mode,
+        policy,
+    )
+}
+
+fn plan_transmission_with_interface_and_reason(
+    spec: &PacketSpec,
+    interface: pnet::datalink::NetworkInterface,
+    interface_reason: InterfaceSelectionReason,
     mode: PlanningMode,
     policy: TransmissionPolicy,
 ) -> Result<TransmissionPlan> {
@@ -119,6 +144,14 @@ pub fn plan_transmission_with_interface_and_policy(
         link_type,
         transmit,
         destination,
+        selection: SelectionMetadata {
+            selected_interface: interface.name.clone(),
+            interface_reason,
+            source_ip: context.source_ip,
+            source_reason: context.source_reason,
+            destination_ip: context.destination_ip,
+            destination_reason: context.destination_reason,
+        },
         interface,
         protocol,
         summary,
@@ -168,7 +201,9 @@ fn log_layer3_selection(spec: &PacketSpec) {
 struct PlanningContext {
     payload: Vec<u8>,
     source_ip: IpAddr,
+    source_reason: super::types::SourceSelectionReason,
     destination_ip: IpAddr,
+    destination_reason: super::types::DestinationSelectionReason,
     ipv6_first_hop: Option<Ipv6Addr>,
 }
 
@@ -177,7 +212,9 @@ fn build_planning_context(
     interface: &pnet::datalink::NetworkInterface,
 ) -> Result<PlanningContext> {
     let payload = prepare_payload(&spec.payload.source)?;
-    let (source_ip, destination_ip) = resolve_ip_addresses(spec, interface)?;
+    let ip_selection = resolve_ip_addresses_with_selection(spec, interface)?;
+    let source_ip = ip_selection.source_ip;
+    let destination_ip = ip_selection.destination_ip;
     let ipv6_first_hop = match destination_ip {
         IpAddr::V6(dst) => Some(ipv6::routing_initial_destination(&spec.ipv6.exthdrs, dst)),
         _ => None,
@@ -186,7 +223,9 @@ fn build_planning_context(
     Ok(PlanningContext {
         payload,
         source_ip,
+        source_reason: ip_selection.source_reason,
         destination_ip,
+        destination_reason: ip_selection.destination_reason,
         ipv6_first_hop,
     })
 }
@@ -349,7 +388,9 @@ mod tests {
         let context = PlanningContext {
             payload: vec![1, 2, 3, 4],
             source_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            source_reason: super::super::types::SourceSelectionReason::InterfaceAddress,
             destination_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
+            destination_reason: super::super::types::DestinationSelectionReason::TargetLiteral,
             ipv6_first_hop: None,
         };
         let frames = vec![vec![0; 64]];
@@ -368,7 +409,9 @@ mod tests {
         let context = PlanningContext {
             payload: vec![1, 2, 3, 4, 5, 6, 7, 8],
             source_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+            source_reason: super::super::types::SourceSelectionReason::InterfaceAddress,
             destination_ip: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+            destination_reason: super::super::types::DestinationSelectionReason::TargetLiteral,
             ipv6_first_hop: None,
         };
         let frames = vec![vec![0; 100], vec![0; 150], vec![0; 80]];
@@ -387,7 +430,9 @@ mod tests {
         let context = PlanningContext {
             payload: vec![],
             source_ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            source_reason: super::super::types::SourceSelectionReason::InterfaceAddress,
             destination_ip: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            destination_reason: super::super::types::DestinationSelectionReason::TargetLiteral,
             ipv6_first_hop: None,
         };
         let frames = vec![vec![0; 40]];
@@ -406,7 +451,9 @@ mod tests {
         let context = PlanningContext {
             payload: vec![1, 2, 3],
             source_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1)),
+            source_reason: super::super::types::SourceSelectionReason::InterfaceAddress,
             destination_ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2)),
+            destination_reason: super::super::types::DestinationSelectionReason::TargetLiteral,
             ipv6_first_hop: None,
         };
         let frames: Vec<Vec<u8>> = vec![];
@@ -425,7 +472,9 @@ mod tests {
         let context = PlanningContext {
             payload: vec![0xFF; 1000],
             source_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+            source_reason: super::super::types::SourceSelectionReason::Ipv6ScopeMatch,
             destination_ip: IpAddr::V6(Ipv6Addr::LOCALHOST),
+            destination_reason: super::super::types::DestinationSelectionReason::TargetLiteral,
             ipv6_first_hop: Some(Ipv6Addr::LOCALHOST),
         };
         let frames = vec![

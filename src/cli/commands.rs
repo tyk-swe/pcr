@@ -243,6 +243,9 @@ pub struct PortScanOptions {
     /// Scanning interface.
     #[arg(long = "interface")]
     pub interface: Option<String>,
+    /// Source IP address to use for crafted scan probes.
+    #[arg(long = "source-ip")]
+    pub source_ip: Option<String>,
 }
 
 #[cfg(feature = "scan")]
@@ -254,6 +257,9 @@ pub struct TimedScanOptions {
     /// Scanning interface.
     #[arg(long = "interface")]
     pub interface: Option<String>,
+    /// Source IP address to use for crafted scan probes.
+    #[arg(long = "source-ip")]
+    pub source_ip: Option<String>,
     /// Timeout (in ms).
     #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 1_000)]
     pub timeout: u64,
@@ -380,6 +386,7 @@ impl PortScanOptions {
             target: self.target.clone(),
             ports: self.ports.clone(),
             interface: self.interface.clone(),
+            source_ip: self.source_ip.clone(),
         }
     }
 }
@@ -390,6 +397,7 @@ impl TimedScanOptions {
         crate::engine::command::TimedScanRequest {
             target: self.target.clone(),
             interface: self.interface.clone(),
+            source_ip: self.source_ip.clone(),
             timeout: self.timeout,
         }
     }

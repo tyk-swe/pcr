@@ -24,7 +24,9 @@ impl DestinationSpec {
         } else if let Some(dest) = request.destination.as_ref() {
             address = Some(
                 match (parse_target_address(dest)?, request.resolved_destination) {
-                    (TargetAddress::Host(_), Some(ip)) => TargetAddress::Ip(ip),
+                    (TargetAddress::Host(host), Some(ip)) => {
+                        TargetAddress::ResolvedHost { host, ip }
+                    }
                     (target, _) => target,
                 },
             );
@@ -41,6 +43,16 @@ impl DestinationSpec {
 pub enum TargetAddress {
     Ip(IpAddr),
     Host(String),
+    ResolvedHost { host: String, ip: IpAddr },
+}
+
+impl TargetAddress {
+    pub(crate) fn resolved_ip(&self) -> Option<IpAddr> {
+        match self {
+            Self::Ip(ip) | Self::ResolvedHost { ip, .. } => Some(*ip),
+            Self::Host(_) => None,
+        }
+    }
 }
 
 impl fmt::Display for TargetAddress {
@@ -48,6 +60,7 @@ impl fmt::Display for TargetAddress {
         match self {
             TargetAddress::Ip(addr) => write!(f, "{addr}"),
             TargetAddress::Host(host) => write!(f, "{host}"),
+            TargetAddress::ResolvedHost { ip, .. } => write!(f, "{ip}"),
         }
     }
 }
@@ -105,7 +118,10 @@ mod tests {
 
         assert_eq!(
             spec.address,
-            Some(TargetAddress::Ip("192.0.2.7".parse().unwrap()))
+            Some(TargetAddress::ResolvedHost {
+                host: "example.test".to_string(),
+                ip: "192.0.2.7".parse().unwrap()
+            })
         );
     }
 

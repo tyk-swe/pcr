@@ -71,6 +71,13 @@ pub fn prepare(command: &ScanRequest, config: &EngineConfig) -> Result<PreparedS
             }
             ScanRequest::Icmp(request) => {
                 let targets = icmp::parse_icmp_targets(&request.target)?;
+                for target in &targets {
+                    common::validate_source_override(
+                        &request.interface,
+                        &request.source_ip,
+                        target.ip(),
+                    )?;
+                }
                 let scope =
                     combine_target_scopes(targets.iter().map(|target| classify_ip(target.ip())));
                 let mut prepared = request.clone();
@@ -87,6 +94,13 @@ pub fn prepare(command: &ScanRequest, config: &EngineConfig) -> Result<PreparedS
             }
             ScanRequest::Arp(request) => {
                 let targets = arp::parse_arp_targets(&request.target)?;
+                for target in &targets {
+                    common::validate_source_override(
+                        &request.interface,
+                        &request.source_ip,
+                        std::net::IpAddr::V4(*target),
+                    )?;
+                }
                 let scope = combine_target_scopes(
                     targets
                         .iter()
@@ -106,6 +120,13 @@ pub fn prepare(command: &ScanRequest, config: &EngineConfig) -> Result<PreparedS
             }
             ScanRequest::Ndp(request) => {
                 let targets = ndp::normalize_targets(ndp::parse_ndp_targets(&request.target)?)?;
+                for target in &targets {
+                    common::validate_source_override(
+                        &request.interface,
+                        &request.source_ip,
+                        std::net::IpAddr::V6(*target),
+                    )?;
+                }
                 let scope = combine_target_scopes(
                     targets
                         .iter()
@@ -152,6 +173,7 @@ fn prepare_port_scan(
     Option<u64>,
 )> {
     let address = common::resolve_target(&request.target)?;
+    common::validate_source_override(&request.interface, &request.source_ip, address.ip())?;
     let ports = common::parse_ports(&request.ports)?;
     let mut prepared = request.clone();
     prepared.target = address.ip().to_string();
@@ -170,70 +192,140 @@ pub async fn run_command(command: &ScanRequest, config: &EngineConfig) -> Result
                 "Starting TCP SYN scan against {} ports {}",
                 request.target, request.ports
             );
-            run_tcp_syn(&request.target, &request.ports, &request.interface, config).await
+            run_tcp_syn(
+                &request.target,
+                &request.ports,
+                &request.interface,
+                &request.source_ip,
+                config,
+            )
+            .await
         }
         ScanRequest::TcpFin(request) => {
             info!(
                 "Starting TCP FIN scan against {} ports {}",
                 request.target, request.ports
             );
-            run_tcp_fin(&request.target, &request.ports, &request.interface, config).await
+            run_tcp_fin(
+                &request.target,
+                &request.ports,
+                &request.interface,
+                &request.source_ip,
+                config,
+            )
+            .await
         }
         ScanRequest::TcpNull(request) => {
             info!(
                 "Starting TCP NULL scan against {} ports {}",
                 request.target, request.ports
             );
-            run_tcp_null(&request.target, &request.ports, &request.interface, config).await
+            run_tcp_null(
+                &request.target,
+                &request.ports,
+                &request.interface,
+                &request.source_ip,
+                config,
+            )
+            .await
         }
         ScanRequest::TcpXmas(request) => {
             info!(
                 "Starting TCP XMAS scan against {} ports {}",
                 request.target, request.ports
             );
-            run_tcp_xmas(&request.target, &request.ports, &request.interface, config).await
+            run_tcp_xmas(
+                &request.target,
+                &request.ports,
+                &request.interface,
+                &request.source_ip,
+                config,
+            )
+            .await
         }
         ScanRequest::TcpAck(request) => {
             info!(
                 "Starting TCP ACK scan against {} ports {}",
                 request.target, request.ports
             );
-            run_tcp_ack(&request.target, &request.ports, &request.interface, config).await
+            run_tcp_ack(
+                &request.target,
+                &request.ports,
+                &request.interface,
+                &request.source_ip,
+                config,
+            )
+            .await
         }
         ScanRequest::SctpInit(request) => {
             info!(
                 "Starting SCTP INIT scan against {} ports {}",
                 request.target, request.ports
             );
-            run_sctp_init(&request.target, &request.ports, &request.interface, config).await
+            run_sctp_init(
+                &request.target,
+                &request.ports,
+                &request.interface,
+                &request.source_ip,
+                config,
+            )
+            .await
         }
         ScanRequest::Udp(request) => {
             info!(
                 "Starting UDP scan against {} ports {}",
                 request.target, request.ports
             );
-            run_udp(&request.target, &request.ports, &request.interface, config).await
+            run_udp(
+                &request.target,
+                &request.ports,
+                &request.interface,
+                &request.source_ip,
+                config,
+            )
+            .await
         }
         ScanRequest::Arp(request) => {
             info!(
                 "Starting ARP probe against {} using interface {:?} timeout {}ms",
                 request.target, request.interface, request.timeout
             );
-            run_arp(&request.target, &request.interface, request.timeout, config).await
+            run_arp(
+                &request.target,
+                &request.interface,
+                &request.source_ip,
+                request.timeout,
+                config,
+            )
+            .await
         }
         ScanRequest::Ndp(request) => {
             info!(
                 "Starting NDP probe against {} using interface {:?} timeout {}ms",
                 request.target, request.interface, request.timeout
             );
-            run_ndp(&request.target, &request.interface, request.timeout, config).await
+            run_ndp(
+                &request.target,
+                &request.interface,
+                &request.source_ip,
+                request.timeout,
+                config,
+            )
+            .await
         }
         ScanRequest::Icmp(request) => {
             info!(
                 "Starting ICMP scan against {} timeout {}ms",
                 request.target, request.timeout
             );
-            run_icmp(&request.target, &request.interface, request.timeout, config).await
+            run_icmp(
+                &request.target,
+                &request.interface,
+                &request.source_ip,
+                request.timeout,
+                config,
+            )
+            .await
         }
     }
 }
@@ -263,6 +355,7 @@ mod tests {
             target: "localhost".to_string(),
             ports: "80".to_string(),
             interface: None,
+            source_ip: None,
         });
 
         let prepared = prepare(&command, &config()).expect("prepare scan");
@@ -275,5 +368,79 @@ mod tests {
             _ => panic!("unexpected prepared command"),
         }
         assert_eq!(prepared.traffic_plan.target_scope, TargetScope::Local);
+    }
+
+    #[test]
+    fn prepare_accepts_named_interface_and_source_ip_together() {
+        let command = ScanRequest::TcpSyn(PortScanRequest {
+            target: "127.0.0.1".to_string(),
+            ports: "80".to_string(),
+            interface: Some("lo".to_string()),
+            source_ip: Some("127.0.0.1".to_string()),
+        });
+
+        let prepared = prepare(&command, &config()).expect("named interface and source IP");
+
+        match prepared.command() {
+            ScanRequest::TcpSyn(request) => {
+                assert_eq!(request.interface.as_deref(), Some("lo"));
+                assert_eq!(request.source_ip.as_deref(), Some("127.0.0.1"));
+            }
+            _ => panic!("unexpected prepared command"),
+        }
+    }
+
+    #[test]
+    fn prepare_rejects_legacy_interface_literal_and_source_ip_together() {
+        let command = ScanRequest::TcpSyn(PortScanRequest {
+            target: "127.0.0.1".to_string(),
+            ports: "80".to_string(),
+            interface: Some("127.0.0.2".to_string()),
+            source_ip: Some("127.0.0.1".to_string()),
+        });
+
+        let err =
+            prepare(&command, &config()).expect_err("legacy interface IP literal should conflict");
+
+        assert!(
+            err.to_string()
+                .contains("IP literal --interface and --source-ip cannot be used together"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn prepare_rejects_invalid_source_ip() {
+        let command = ScanRequest::TcpSyn(PortScanRequest {
+            target: "127.0.0.1".to_string(),
+            ports: "80".to_string(),
+            interface: None,
+            source_ip: Some("not_an_ip".to_string()),
+        });
+
+        let err = prepare(&command, &config()).expect_err("invalid source IP should be rejected");
+
+        assert!(
+            err.to_string().contains("parse scan source IP"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn prepare_rejects_source_ip_with_wrong_address_family() {
+        let command = ScanRequest::TcpSyn(PortScanRequest {
+            target: "127.0.0.1".to_string(),
+            ports: "80".to_string(),
+            interface: None,
+            source_ip: Some("2001:db8::1".to_string()),
+        });
+
+        let err = prepare(&command, &config()).expect_err("family mismatch should be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("does not match target address family"),
+            "unexpected error: {err}"
+        );
     }
 }

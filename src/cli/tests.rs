@@ -168,6 +168,7 @@ struct PortScanCase {
     target: &'static str,
     ports: &'static str,
     interface: Option<&'static str>,
+    source_ip: Option<&'static str>,
 }
 
 #[cfg(feature = "scan")]
@@ -177,6 +178,7 @@ struct TimedScanCase {
     target: &'static str,
     timeout: u64,
     interface: Option<&'static str>,
+    source_ip: Option<&'static str>,
 }
 
 #[cfg(feature = "scan")]
@@ -205,6 +207,9 @@ fn parse_port_scan(case: PortScanCase) -> ScanCommand {
     if let Some(interface) = case.interface {
         args.extend(["--interface", interface]);
     }
+    if let Some(source_ip) = case.source_ip {
+        args.extend(["--source-ip", source_ip]);
+    }
     parse_scan_from(&args)
 }
 
@@ -220,6 +225,9 @@ fn parse_timed_scan(case: TimedScanCase) -> ScanCommand {
     ];
     if let Some(interface) = case.interface {
         args.extend(["--interface", interface]);
+    }
+    if let Some(source_ip) = case.source_ip {
+        args.extend(["--source-ip", source_ip]);
     }
     parse_scan_from(&args)
 }
@@ -240,6 +248,7 @@ fn assert_port_scan(command: ScanCommand, case: PortScanCase) {
     assert_eq!(options.target, case.target);
     assert_eq!(options.ports, case.ports);
     assert_eq!(options.interface.as_deref(), case.interface);
+    assert_eq!(options.source_ip.as_deref(), case.source_ip);
 }
 
 #[cfg(feature = "scan")]
@@ -254,6 +263,7 @@ fn assert_timed_scan(command: ScanCommand, case: TimedScanCase) {
     assert_eq!(options.target, case.target);
     assert_eq!(options.timeout, case.timeout);
     assert_eq!(options.interface.as_deref(), case.interface);
+    assert_eq!(options.source_ip.as_deref(), case.source_ip);
 }
 
 #[cfg(feature = "scan")]
@@ -265,42 +275,49 @@ fn scan_command_parses_port_variants() {
             target: "192.0.2.1",
             ports: "80,443",
             interface: None,
+            source_ip: None,
         },
         PortScanCase {
             subcommand: "tcp-fin",
             target: "192.0.2.1",
             ports: "80,443",
             interface: None,
+            source_ip: None,
         },
         PortScanCase {
             subcommand: "tcp-null",
             target: "192.0.2.1",
             ports: "80,443",
             interface: None,
+            source_ip: None,
         },
         PortScanCase {
             subcommand: "tcp-xmas",
             target: "192.0.2.1",
             ports: "80,443",
             interface: None,
+            source_ip: None,
         },
         PortScanCase {
             subcommand: "tcp-ack",
             target: "192.0.2.1",
             ports: "80,443",
             interface: None,
+            source_ip: None,
         },
         PortScanCase {
             subcommand: "sctp-init",
             target: "192.0.2.1",
             ports: "80,443",
             interface: None,
+            source_ip: None,
         },
         PortScanCase {
             subcommand: "udp",
             target: "192.0.2.0/24",
             ports: "53",
-            interface: Some("eth0"),
+            interface: None,
+            source_ip: Some("192.0.2.10"),
         },
     ] {
         assert_port_scan(parse_port_scan(case), case);
@@ -316,18 +333,21 @@ fn scan_command_parses_timed_variants() {
             target: "192.0.2.0/30",
             timeout: 250,
             interface: None,
+            source_ip: None,
         },
         TimedScanCase {
             subcommand: "ndp",
             target: "2001:db8::/64",
             timeout: 500,
             interface: None,
+            source_ip: None,
         },
         TimedScanCase {
             subcommand: "icmp",
             target: "192.168.1.0/24",
             timeout: 500,
             interface: Some("eth0"),
+            source_ip: None,
         },
     ] {
         assert_timed_scan(parse_timed_scan(case), case);

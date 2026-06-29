@@ -7,7 +7,7 @@
 //! normalize hosts, and probe each address while selecting an appropriate
 //! source IP for the interface. IPv6 networks can span enormous host counts, so
 //! the scanner bounds CIDR expansion before probing.
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
@@ -19,15 +19,16 @@ use crate::engine::EngineConfig;
 use crate::network::interface;
 use crate::network::ndp;
 use crate::util::error::operation_failed;
-use crate::util::source_ip::select_interface_ipv6_source_for_destination;
+use crate::util::source_ip::{select_interface_ipv6_source_for_destination, source_override_ipv6};
 
-use super::common::push_scan_target;
 #[cfg(test)]
 use super::common::MAX_SCAN_TARGETS;
+use super::common::{push_scan_target, resolve_explicit_source_override};
 
 pub async fn run_ndp(
     target: &str,
     interface: &Option<String>,
+    source_ip: &Option<String>,
     timeout_ms: u64,
     config: &EngineConfig,
 ) -> Result<()> {
@@ -38,17 +39,9 @@ pub async fn run_ndp(
         )
     })?;
 
-    // Ensure we have at least one IPv6 address to start with
-    let default_source_ip = iface
-        .ips
-        .iter()
-        .find_map(|network| match network {
-            IpNetwork::V6(v6) => Some(v6.ip()),
-            _ => None,
-        })
-        .ok_or_else(|| anyhow!("interface {} does not have an IPv6 address", iface.name))?;
-
     let targets = normalize_targets(parse_ndp_targets(target)?)?;
+    let (default_source_ip, source_override) =
+        resolve_ndp_source_ips(&iface, interface, source_ip, targets[0])?;
 
     info!(
         "Starting NDP probe against {} ({} host(s)) via {}",
@@ -60,6 +53,7 @@ pub async fn run_ndp(
     let config = NdpScanConfig {
         interface: iface,
         default_source_ip,
+        source_override,
         targets,
         timeout: Duration::from_millis(timeout_ms.max(1)),
         send_delay: config.traffic_policy.rate_delay(),
@@ -88,6 +82,7 @@ pub async fn run_ndp(
 struct NdpScanConfig {
     interface: NetworkInterface,
     default_source_ip: Ipv6Addr,
+    source_override: Option<Ipv6Addr>,
     targets: Vec<Ipv6Addr>,
     timeout: Duration,
     send_delay: Option<Duration>,
@@ -111,6 +106,7 @@ where
     let NdpScanConfig {
         interface,
         default_source_ip,
+        source_override,
         targets,
         timeout,
         send_delay,
@@ -120,8 +116,9 @@ where
     let mut last_send: Option<Instant> = None;
     for target in targets {
         // Dynamically select the best source IP for this target
-        let effective_source_ip =
-            choose_best_source_ip(&interface, target).unwrap_or(default_source_ip);
+        let effective_source_ip = source_override
+            .or_else(|| choose_best_source_ip(&interface, target))
+            .unwrap_or(default_source_ip);
 
         if target == effective_source_ip {
             continue;
@@ -154,6 +151,33 @@ fn choose_best_source_ip(interface: &NetworkInterface, target: Ipv6Addr) -> Opti
     }
 
     select_interface_ipv6_source_for_destination(interface, target)
+}
+
+fn resolve_ndp_source_ips(
+    iface: &NetworkInterface,
+    interface: &Option<String>,
+    source_ip: &Option<String>,
+    target: Ipv6Addr,
+) -> Result<(Ipv6Addr, Option<Ipv6Addr>)> {
+    let source_override = source_override_ipv6(resolve_explicit_source_override(
+        interface,
+        source_ip,
+        IpAddr::V6(target),
+    )?)?;
+
+    let default_source_ip = match source_override {
+        Some(source_ip) => source_ip,
+        None => iface
+            .ips
+            .iter()
+            .find_map(|network| match network {
+                IpNetwork::V6(v6) => Some(v6.ip()),
+                _ => None,
+            })
+            .ok_or_else(|| anyhow!("interface {} does not have an IPv6 address", iface.name))?,
+    };
+
+    Ok((default_source_ip, source_override))
 }
 
 pub(super) fn parse_ndp_targets(spec: &str) -> Result<Vec<Ipv6Addr>> {
@@ -309,6 +333,30 @@ mod tests {
     }
 
     #[test]
+    fn resolve_ndp_source_ips_uses_override_without_interface_ipv6() {
+        let override_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
+        let iface = NetworkInterface {
+            name: "test".to_string(),
+            description: "".to_string(),
+            index: 1,
+            mac: Some(MacAddr::new(0, 1, 2, 3, 4, 5)),
+            ips: vec![],
+            flags: 0,
+        };
+
+        let (default_source_ip, source_override) = resolve_ndp_source_ips(
+            &iface,
+            &Some("eth0".to_string()),
+            &Some(override_ip.to_string()),
+            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 20),
+        )
+        .expect("explicit source IP should not require an interface IPv6 address");
+
+        assert_eq!(default_source_ip, override_ip);
+        assert_eq!(source_override, Some(override_ip));
+    }
+
+    #[test]
     fn perform_ndp_scan_skips_self_targets() {
         let source_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
         let other_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 2);
@@ -337,6 +385,7 @@ mod tests {
         let config = NdpScanConfig {
             interface: iface,
             default_source_ip: source_ip,
+            source_override: None,
             targets: vec![source_ip, other_ip],
             timeout: Duration::from_millis(1),
             send_delay: None,
@@ -347,6 +396,57 @@ mod tests {
         assert_eq!(calls.into_inner(), vec![other_ip]);
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].ip, other_ip);
+    }
+
+    #[test]
+    fn perform_ndp_scan_selects_source_per_target_without_override() {
+        let source_a = Ipv6Addr::new(0x2001, 0xdb8, 1, 0, 0, 0, 0, 1);
+        let source_b = Ipv6Addr::new(0x2001, 0xdb8, 2, 0, 0, 0, 0, 1);
+        let target_a = Ipv6Addr::new(0x2001, 0xdb8, 1, 0, 0, 0, 0, 0x10);
+        let target_b = Ipv6Addr::new(0x2001, 0xdb8, 2, 0, 0, 0, 0, 0x10);
+
+        let iface = NetworkInterface {
+            name: "test".to_string(),
+            description: "".to_string(),
+            index: 1,
+            mac: None,
+            ips: vec![
+                IpNetwork::V6(
+                    pnet::ipnetwork::Ipv6Network::new(source_a, 64).expect("valid network"),
+                ),
+                IpNetwork::V6(
+                    pnet::ipnetwork::Ipv6Network::new(source_b, 64).expect("valid network"),
+                ),
+            ],
+            flags: 0,
+        };
+
+        let calls: RefCell<Vec<(Ipv6Addr, Ipv6Addr)>> = RefCell::new(Vec::new());
+        let resolver = |_: &NetworkInterface,
+                        src: Ipv6Addr,
+                        target: Ipv6Addr,
+                        _d: Duration|
+         -> std::result::Result<MacAddr, anyhow::Error> {
+            calls.borrow_mut().push((src, target));
+            Ok(MacAddr::new(0, 1, 2, 3, 4, 5))
+        };
+
+        let config = NdpScanConfig {
+            interface: iface,
+            default_source_ip: source_a,
+            source_override: None,
+            targets: vec![target_a, target_b],
+            timeout: Duration::from_millis(1),
+            send_delay: None,
+        };
+
+        let hits = perform_ndp_scan_with_resolver(config, resolver).expect("scan succeeds");
+
+        assert_eq!(
+            calls.into_inner(),
+            vec![(source_a, target_a), (source_b, target_b)]
+        );
+        assert_eq!(hits.len(), 2);
     }
 
     #[test]
@@ -375,6 +475,7 @@ mod tests {
         let config = NdpScanConfig {
             interface: iface,
             default_source_ip: source_ip,
+            source_override: None,
             targets: vec![first, second],
             timeout: Duration::from_millis(1),
             send_delay: Some(Duration::from_millis(40)),

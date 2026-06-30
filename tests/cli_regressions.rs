@@ -75,11 +75,61 @@ fn scan_port_variants_support_dry_run() {
 
         assert_success(&output);
         let stdout = String::from_utf8_lossy(&output.stdout);
+        for expected in ["mode=scan", "ports=1", "estimated_packets=1"] {
+            assert!(
+                stdout.contains(expected),
+                "expected {variant} dry-run output to include {expected}, got:\n{stdout}"
+            );
+        }
+    }
+}
+
+#[cfg(feature = "scan")]
+#[test]
+fn scan_port_dry_run_deduplicates_port_ranges() {
+    let output = packetcraftr([
+        "--dry-run",
+        "scan",
+        "tcp-syn",
+        "--target",
+        "127.0.0.1",
+        "--ports",
+        "80,80,81-82",
+    ]);
+
+    assert_success(&output);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for expected in ["mode=scan", "ports=3", "estimated_packets=3"] {
         assert!(
-            stdout.contains("mode=scan"),
-            "expected {variant} dry-run output to include a scan plan, got:\n{stdout}"
+            stdout.contains(expected),
+            "expected deduplicated scan dry-run output to include {expected}, got:\n{stdout}"
         );
     }
+}
+
+#[cfg(feature = "scan")]
+#[test]
+fn scan_rejects_interface_ip_literal_with_source_ip() {
+    let output = packetcraftr([
+        "--dry-run",
+        "scan",
+        "tcp-syn",
+        "--target",
+        "127.0.0.1",
+        "--ports",
+        "80",
+        "--interface",
+        "127.0.0.1",
+        "--source-ip",
+        "127.0.0.1",
+    ]);
+
+    assert_failure(&output);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("IP literal --interface and --source-ip cannot be used together for scans"),
+        "expected scan source override validation error, got:\n{stderr}"
+    );
 }
 
 #[cfg(feature = "traceroute")]
@@ -116,6 +166,15 @@ fn assert_success(output: &Output) {
         output.status.success(),
         "command failed with status {:?}\nstdout:\n{}\nstderr:\n{}",
         output.status.code(),
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn assert_failure(output: &Output) {
+    assert!(
+        !output.status.success(),
+        "command unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

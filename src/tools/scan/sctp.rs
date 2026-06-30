@@ -6,7 +6,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use crc::{Crc, CRC_32_ISCSI};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::Packet;
@@ -29,8 +29,9 @@ use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 
 use super::common::{
     clamp_batch_size, classify_icmp_port_unreachable, join_blocking_scan, report_results,
-    resolve_port_scan, ConcurrentScanConfig, PortState, ScanEvent, DEFAULT_TIMEOUT,
-    PACKET_POLL_INTERVAL, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
+    require_ipv6_destination, resolve_port_scan_run, ConcurrentScanConfig, PortScanRunConfig,
+    PortState, ScanEvent, CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT, PACKET_POLL_INTERVAL,
+    SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
 
@@ -38,7 +39,6 @@ const SCTP_PROTOCOL_ID: u8 = 132;
 const SCTP_INIT_CHUNK_TYPE: u8 = 1;
 const SCTP_INIT_ACK_CHUNK_TYPE: u8 = 2;
 const SCTP_ABORT_CHUNK_TYPE: u8 = 6;
-const CONCURRENT_SCAN_BATCH_SIZE: usize = 30_000;
 
 pub async fn run_sctp_init(
     target: &str,
@@ -47,25 +47,21 @@ pub async fn run_sctp_init(
     source_ip: &Option<String>,
     runtime: TrafficRuntimeConfig,
 ) -> Result<()> {
-    let resolved = resolve_port_scan(target, ports, interface, source_ip)?;
-    let address = resolved.address;
-    let source_override = resolved.source_override;
-    let port_list = resolved.ports;
+    let scan_config = resolve_port_scan_run(
+        target,
+        ports,
+        interface,
+        source_ip,
+        runtime,
+        DEFAULT_TIMEOUT,
+    )?;
+    let address = scan_config.address;
 
     log::info!(
         "Starting SCTP INIT scan against {} ports {:?}",
         address.ip(),
-        port_list
+        scan_config.ports
     );
-
-    let scan_config = SctpScanConfig {
-        address,
-        ports: port_list,
-        timeout: DEFAULT_TIMEOUT,
-        source_override,
-        batch_size: runtime.batch_size,
-        send_delay: runtime.send_delay,
-    };
 
     let results = join_blocking_scan(
         task::spawn_blocking(move || perform_sctp_scan(scan_config)),
@@ -77,16 +73,7 @@ pub async fn run_sctp_init(
     Ok(())
 }
 
-struct SctpScanConfig {
-    address: SocketAddr,
-    ports: Vec<u16>,
-    timeout: Duration,
-    source_override: Option<IpAddr>,
-    batch_size: usize,
-    send_delay: Option<Duration>,
-}
-
-fn perform_sctp_scan(config: SctpScanConfig) -> Result<BTreeMap<u16, PortState>> {
+fn perform_sctp_scan(config: PortScanRunConfig) -> Result<BTreeMap<u16, PortState>> {
     match config.address {
         SocketAddr::V4(dest) => {
             let override_v4 = source_override_ipv4(config.source_override)?;
@@ -177,10 +164,7 @@ fn scan_sctp_v6(
     batch_size: usize,
     send_delay: Option<Duration>,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let dest_ip = match destination.ip() {
-        IpAddr::V6(v6) => v6,
-        _ => return Err(anyhow!("scan_sctp_v6 called with IPv4 address")),
-    };
+    let dest_ip = require_ipv6_destination(destination, "scan_sctp_v6")?;
 
     let source_ip =
         super::common::source_ipv6_or_discover(dest_ip, SOURCE_DISCOVERY_PORT, source_override)?;
@@ -265,7 +249,7 @@ fn scan_ports_concurrent_with_config(
     rx: &mut dyn SctpScanRx,
 ) -> Result<BTreeMap<u16, PortState>> {
     let config = ConcurrentScanConfig {
-        batch_size: clamp_batch_size(config.batch_size, CONCURRENT_SCAN_BATCH_SIZE),
+        batch_size: clamp_batch_size(config.batch_size, CONCURRENT_PORT_SCAN_BATCH_LIMIT),
         ..config
     };
     let destination = config.destination;

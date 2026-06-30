@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::tcp::{TcpFlags, TcpPacket};
 use pnet::transport::{
@@ -24,8 +24,9 @@ use crate::util::error::operation_failed;
 use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 
 use super::common::{
-    clamp_batch_size, join_blocking_scan, report_results, resolve_port_scan, ConcurrentScanConfig,
-    PortState, ScanEvent, DEFAULT_TIMEOUT, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET,
+    clamp_batch_size, join_blocking_scan, report_results, require_ipv6_destination,
+    resolve_port_scan_run, ConcurrentScanConfig, PortScanRunConfig, PortState, ScanEvent,
+    CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET,
     TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
@@ -35,7 +36,6 @@ mod tcp_io;
 use tcp_io::{RawSocketSender, RealTcpRxV4, RealTcpRxV6, RealTcpSender, TcpScanRx, TcpSender};
 
 const PORT_REUSE_WARNING_THRESHOLD: usize = 32_767;
-const CONCURRENT_SCAN_BATCH_SIZE: usize = 30_000;
 const TCP_WINDOW_SIZE: u16 = 65_535;
 const TCP_PACKET_BUFFER_SIZE: usize = 256;
 const SCAN_DELAY: Duration = Duration::from_micros(100);
@@ -277,15 +277,20 @@ async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
     runtime: TrafficRuntimeConfig,
     scan_strategy: S,
 ) -> Result<()> {
-    let resolved = resolve_port_scan(target, ports, interface, source_ip)?;
-    let address = resolved.address;
-    let source_override = resolved.source_override;
-    let port_list = resolved.ports;
+    let run_config = resolve_port_scan_run(
+        target,
+        ports,
+        interface,
+        source_ip,
+        runtime,
+        DEFAULT_TIMEOUT,
+    )?;
+    let address = run_config.address;
 
-    if port_list.len() > PORT_REUSE_WARNING_THRESHOLD {
+    if run_config.ports.len() > PORT_REUSE_WARNING_THRESHOLD {
         log::warn!(
             "TCP scan will reuse source ports after 32,768 probes ({} targets); consider narrowing the range to avoid collisions",
-            port_list.len()
+            run_config.ports.len()
         );
     }
 
@@ -296,16 +301,11 @@ async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
         "Starting {} scan against {} ports {:?}",
         protocol_name,
         address.ip(),
-        port_list
+        run_config.ports
     );
 
     let scan_config = TcpScanConfig {
-        address,
-        ports: port_list,
-        timeout: DEFAULT_TIMEOUT,
-        source_override,
-        batch_size: runtime.batch_size,
-        send_delay: runtime.send_delay,
+        run: run_config,
         scan_strategy,
     };
 
@@ -320,40 +320,35 @@ async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
 }
 
 struct TcpScanConfig<S> {
-    address: SocketAddr,
-    ports: Vec<u16>,
-    timeout: Duration,
-    source_override: Option<IpAddr>,
-    batch_size: usize,
-    send_delay: Option<Duration>,
+    run: PortScanRunConfig,
     scan_strategy: S,
 }
 
 fn perform_tcp_scan<S: TcpScanStrategy>(
     config: TcpScanConfig<S>,
 ) -> Result<BTreeMap<u16, PortState>> {
-    match config.address {
+    match config.run.address {
         SocketAddr::V4(dest) => {
-            let override_v4 = source_override_ipv4(config.source_override)?;
+            let override_v4 = source_override_ipv4(config.run.source_override)?;
             scan_tcp_v4_with_controls(
                 *dest.ip(),
-                &config.ports,
-                config.timeout,
+                &config.run.ports,
+                config.run.timeout,
                 override_v4,
-                config.batch_size,
-                config.send_delay,
+                config.run.batch_size,
+                config.run.send_delay,
                 &config.scan_strategy,
             )
         }
         SocketAddr::V6(_dest) => {
-            let override_v6 = source_override_ipv6(config.source_override)?;
+            let override_v6 = source_override_ipv6(config.run.source_override)?;
             scan_tcp_v6_with_controls(
-                config.address,
-                &config.ports,
-                config.timeout,
+                config.run.address,
+                &config.run.ports,
+                config.run.timeout,
                 override_v6,
-                config.batch_size,
-                config.send_delay,
+                config.run.batch_size,
+                config.run.send_delay,
                 &config.scan_strategy,
             )
         }
@@ -373,7 +368,7 @@ where
     RX: TcpScanRx + ?Sized,
 {
     let config = ConcurrentScanConfig {
-        batch_size: clamp_batch_size(config.batch_size, CONCURRENT_SCAN_BATCH_SIZE),
+        batch_size: clamp_batch_size(config.batch_size, CONCURRENT_PORT_SCAN_BATCH_LIMIT),
         ..config
     };
     let destination = config.destination;
@@ -502,10 +497,7 @@ fn scan_tcp_v6_with_controls<S: TcpScanStrategy>(
     send_delay: Option<Duration>,
     scan_strategy: &S,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let dest_ip = match destination.ip() {
-        IpAddr::V6(v6) => v6,
-        _ => return Err(anyhow!("scan_tcp_v6 called with IPv4 address")),
-    };
+    let dest_ip = require_ipv6_destination(destination, "scan_tcp_v6")?;
 
     let source_ip =
         super::common::source_ipv6_or_discover(dest_ip, SOURCE_DISCOVERY_PORT, source_override)?;

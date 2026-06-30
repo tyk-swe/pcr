@@ -17,6 +17,7 @@ use rand::random;
 
 use crate::network::protocol_validation::OriginalTransport;
 use crate::tools::probe::remaining_probe_time;
+use crate::tools::TrafficRuntimeConfig;
 use crate::util::error::operation_failed;
 use crate::util::net::resolve_target_socket_addr;
 use crate::util::source_ip::{
@@ -30,6 +31,7 @@ pub(super) const TRANSPORT_CHANNEL_BUFFER_SIZE: usize = 1024 * 1024;
 pub(super) const SOURCE_DISCOVERY_PORT: u16 = 9;
 pub(super) const SOURCE_PORT_OFFSET: u16 = 10_000;
 pub(super) const PACKET_POLL_INTERVAL: Duration = Duration::from_millis(1);
+pub(super) const CONCURRENT_PORT_SCAN_BATCH_LIMIT: usize = 30_000;
 const RECEIVER_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_SEND_RETRIES: usize = 3;
 const SEND_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(1);
@@ -143,6 +145,15 @@ pub(super) struct ResolvedPortScan {
     pub(super) ports: Vec<u16>,
 }
 
+pub(super) struct PortScanRunConfig {
+    pub(super) address: SocketAddr,
+    pub(super) ports: Vec<u16>,
+    pub(super) timeout: Duration,
+    pub(super) source_override: Option<IpAddr>,
+    pub(super) batch_size: usize,
+    pub(super) send_delay: Option<Duration>,
+}
+
 pub(super) fn resolve_port_scan(
     target: &str,
     ports: &str,
@@ -158,6 +169,33 @@ pub(super) fn resolve_port_scan(
         source_override,
         ports,
     })
+}
+
+pub(super) fn resolve_port_scan_run(
+    target: &str,
+    ports: &str,
+    interface: &Option<String>,
+    source_ip: &Option<String>,
+    runtime: TrafficRuntimeConfig,
+    timeout: Duration,
+) -> Result<PortScanRunConfig> {
+    let resolved = resolve_port_scan(target, ports, interface, source_ip)?;
+
+    Ok(PortScanRunConfig {
+        address: resolved.address,
+        ports: resolved.ports,
+        timeout,
+        source_override: resolved.source_override,
+        batch_size: runtime.batch_size,
+        send_delay: runtime.send_delay,
+    })
+}
+
+pub(super) fn require_ipv6_destination(destination: SocketAddr, caller: &str) -> Result<Ipv6Addr> {
+    match destination.ip() {
+        IpAddr::V6(v6) => Ok(v6),
+        IpAddr::V4(_) => Err(anyhow!("{caller} called with IPv4 address")),
+    }
 }
 
 pub(super) fn validate_source_override(

@@ -47,8 +47,10 @@ pub async fn run_icmp(
         return Err(anyhow!("no targets found"));
     }
 
+    let source_override = resolve_source_override(interface, source_ip, targets[0].ip())?;
+
     // Validate source override compatibility against the target address family.
-    if let Some(src) = resolve_source_override(interface, source_ip, targets[0].ip())? {
+    if let Some(src) = source_override {
         if src.is_ipv4() && targets.iter().any(|t| t.is_ipv6()) {
             return Err(anyhow!(
                 "IPv4 interface override cannot be used for IPv6 targets"
@@ -69,8 +71,6 @@ pub async fn run_icmp(
         targets.len()
     );
 
-    // Resolve single source override (mixed targets already rejected)
-    let source_override = resolve_source_override(interface, source_ip, targets[0].ip())?;
     let send_delay = runtime.send_delay;
 
     let results = task::spawn_blocking(move || {

@@ -11,10 +11,10 @@ use backends::send_via_datalink;
 use log::error;
 use recorder::PacketRecorder;
 
-use super::types::{LinkType, TransmissionPlan};
+use super::types::{LinkType, NetworkTransmissionPlan};
 pub(crate) use backends::send_via_transport;
 
-pub async fn execute_transmission(plan: TransmissionPlan) -> Result<()> {
+pub(crate) async fn execute_transmission(plan: NetworkTransmissionPlan) -> Result<()> {
     if plan.mode == crate::network::sender::types::PlanningMode::DryRun {
         return Err(ExecutorError::DryRunBlocked.into());
     }
@@ -34,7 +34,7 @@ pub async fn execute_transmission(plan: TransmissionPlan) -> Result<()> {
     }
 }
 
-fn run_transmission_task(plan: TransmissionPlan) -> Result<()> {
+fn run_transmission_task(plan: NetworkTransmissionPlan) -> Result<()> {
     let mut recorder = PacketRecorder::for_plan(&plan)?;
 
     let link_type = plan.link_type.clone();

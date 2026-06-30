@@ -23,7 +23,7 @@ use crate::util::source_ip::{select_interface_ipv6_source_for_destination, sourc
 
 use super::common::{push_scan_target, resolve_explicit_source_override};
 
-pub async fn run_ndp(
+pub(crate) async fn run_ndp(
     target: &str,
     interface: &Option<String>,
     source_ip: &Option<String>,

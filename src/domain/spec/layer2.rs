@@ -10,7 +10,7 @@ use crate::domain::net::{EtherType, MacAddress};
 use crate::domain::request::{Layer2Request, VlanRequest};
 
 #[derive(Debug, Clone, Default)]
-pub struct Layer2Spec {
+pub(crate) struct Layer2Spec {
     pub source: Option<MacAddress>,
     pub destination: Option<MacAddress>,
     pub ethertype: Option<u16>,
@@ -31,7 +31,7 @@ impl Layer2Spec {
 
 /// IEEE 802.1Q VLAN tag parameters extracted from user input.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct VlanTag {
+pub(crate) struct VlanTag {
     /// VLAN identifier (VID). Values 0 and 4095 are reserved per 802.1Q.
     pub identifier: u16,
     /// Priority Code Point (PCP) used for quality-of-service classification.

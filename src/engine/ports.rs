@@ -29,76 +29,76 @@ use crate::domain::request::PacketRequest;
 use crate::domain::spec::{ListenerSpec, PacketSpec};
 use crate::domain::transmission::{PlanningMode, TransmissionPlan};
 
-pub type PortResult<T> = Result<T, Error>;
-pub type PortFuture<T> = Pin<Box<dyn Future<Output = PortResult<T>> + Send + 'static>>;
+pub(crate) type PortResult<T> = Result<T, Error>;
+pub(crate) type PortFuture<T> = Pin<Box<dyn Future<Output = PortResult<T>> + Send + 'static>>;
 type PreparedDnsResolver = Box<dyn FnOnce() -> PortFuture<DnsQueryResult> + Send + 'static>;
 #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 type PreparedTrafficExecutor = Box<dyn FnOnce() -> PortFuture<()> + Send + 'static>;
 
-pub struct PreparedDnsQuery {
+pub(crate) struct PreparedDnsQuery {
     traffic_plan: TrafficPlan,
     resolver: PreparedDnsResolver,
 }
 
 impl PreparedDnsQuery {
-    pub fn new(traffic_plan: TrafficPlan, resolver: PreparedDnsResolver) -> Self {
+    pub(crate) fn new(traffic_plan: TrafficPlan, resolver: PreparedDnsResolver) -> Self {
         Self {
             traffic_plan,
             resolver,
         }
     }
 
-    pub fn traffic_plan(&self) -> &TrafficPlan {
+    pub(crate) fn traffic_plan(&self) -> &TrafficPlan {
         &self.traffic_plan
     }
 
-    pub fn resolve(self) -> PortFuture<DnsQueryResult> {
+    pub(crate) fn resolve(self) -> PortFuture<DnsQueryResult> {
         (self.resolver)()
     }
 }
 
 #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
-pub struct PreparedTrafficRun {
+pub(crate) struct PreparedTrafficRun {
     traffic_plan: TrafficPlan,
     executor: PreparedTrafficExecutor,
 }
 
 #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 impl PreparedTrafficRun {
-    pub fn new(traffic_plan: TrafficPlan, executor: PreparedTrafficExecutor) -> Self {
+    pub(crate) fn new(traffic_plan: TrafficPlan, executor: PreparedTrafficExecutor) -> Self {
         Self {
             traffic_plan,
             executor,
         }
     }
 
-    pub fn traffic_plan(&self) -> &TrafficPlan {
+    pub(crate) fn traffic_plan(&self) -> &TrafficPlan {
         &self.traffic_plan
     }
 
-    pub fn run(self) -> PortFuture<()> {
+    pub(crate) fn run(self) -> PortFuture<()> {
         (self.executor)()
     }
 }
 
 #[cfg(feature = "traceroute")]
-pub type PreparedTracerouteRun = PreparedTrafficRun;
+pub(crate) type PreparedTracerouteRun = PreparedTrafficRun;
 
 #[cfg(feature = "scan")]
-pub type PreparedScanRun = PreparedTrafficRun;
+pub(crate) type PreparedScanRun = PreparedTrafficRun;
 
 #[cfg(feature = "fuzz")]
-pub type PreparedFuzzRun = PreparedTrafficRun;
+pub(crate) type PreparedFuzzRun = PreparedTrafficRun;
 
-pub trait TargetResolver: Send + Sync {
+pub(crate) trait TargetResolver: Send + Sync {
     fn resolve_target_ip(&self, target: String, prefer_ipv6: Option<bool>) -> PortFuture<IpAddr>;
 }
 
-pub trait PrivilegeChecker: Send + Sync {
+pub(crate) trait PrivilegeChecker: Send + Sync {
     fn check_packet_send(&self, spec: Arc<PacketSpec>) -> PortFuture<()>;
 }
 
-pub trait PacketPlanner: Send + Sync {
+pub(crate) trait PacketPlanner: Send + Sync {
     fn plan_packet(
         &self,
         spec: Arc<PacketSpec>,
@@ -107,11 +107,11 @@ pub trait PacketPlanner: Send + Sync {
     ) -> PortFuture<TransmissionPlan>;
 }
 
-pub trait PacketTransmitter: Send + Sync {
+pub(crate) trait PacketTransmitter: Send + Sync {
     fn transmit(&self, plan: TransmissionPlan) -> PortFuture<()>;
 }
 
-pub trait ListenerRunner: Send + Sync {
+pub(crate) trait ListenerRunner: Send + Sync {
     fn run_for_packet(
         &self,
         spec: ListenerSpec,
@@ -123,13 +123,13 @@ pub trait ListenerRunner: Send + Sync {
     fn run_command(&self, request: ListenRequest, handler: ListenerEventHandler) -> PortFuture<()>;
 }
 
-pub type ListenerEventHandler = Arc<dyn Fn(ListenerEvent) + Send + Sync>;
+pub(crate) type ListenerEventHandler = Arc<dyn Fn(ListenerEvent) + Send + Sync>;
 
 #[cfg(feature = "daemon")]
-pub type ListenerStartupSignal = tokio::sync::oneshot::Sender<Result<(), String>>;
+pub(crate) type ListenerStartupSignal = tokio::sync::oneshot::Sender<Result<(), String>>;
 
 #[cfg(feature = "daemon")]
-pub trait DaemonListenerRuntime: Send + Sync {
+pub(crate) trait DaemonListenerRuntime: Send + Sync {
     fn validate_options(&self, options: &ListenerRequest) -> PortResult<()>;
     fn spawn_background(
         &self,
@@ -141,12 +141,12 @@ pub trait DaemonListenerRuntime: Send + Sync {
     ) -> PortResult<tokio::task::JoinHandle<PortResult<()>>>;
 }
 
-pub trait DnsClient: Send + Sync {
+pub(crate) trait DnsClient: Send + Sync {
     fn prepare(&self, request: DnsRequest, policy: TrafficPolicy) -> PortFuture<PreparedDnsQuery>;
 }
 
 #[cfg(feature = "traceroute")]
-pub trait TracerouteRunner: Send + Sync {
+pub(crate) trait TracerouteRunner: Send + Sync {
     fn prepare(
         &self,
         request: TracerouteRequest,
@@ -155,16 +155,16 @@ pub trait TracerouteRunner: Send + Sync {
 }
 
 #[cfg(feature = "scan")]
-pub trait ScanRunner: Send + Sync {
+pub(crate) trait ScanRunner: Send + Sync {
     fn prepare(&self, request: ScanRequest, policy: TrafficPolicy) -> PortFuture<PreparedScanRun>;
 }
 
 #[cfg(feature = "fuzz")]
-pub trait FuzzRunner: Send + Sync {
+pub(crate) trait FuzzRunner: Send + Sync {
     fn prepare(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<PreparedFuzzRun>;
 }
 
-pub trait EngineOutput: Send + Sync {
+pub(crate) trait EngineOutput: Send + Sync {
     fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> PortResult<()>;
     #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
     fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> PortResult<()>;
@@ -173,13 +173,13 @@ pub trait EngineOutput: Send + Sync {
     fn format_dns_response(&self, result: &DnsQueryResult) -> PortResult<String>;
 }
 
-pub trait RuleActionTelemetry: Send + Sync {
+pub(crate) trait RuleActionTelemetry: Send + Sync {
     fn record_rule_action(&self, action: &'static str, status: &'static str);
     fn record_rule_executor_drop(&self, action: &'static str, reason: &'static str);
 }
 
 #[derive(Clone)]
-pub struct EngineDependencies {
+pub(crate) struct EngineDependencies {
     pub target_resolver: Arc<dyn TargetResolver>,
     pub privilege_checker: Arc<dyn PrivilegeChecker>,
     pub packet_planner: Arc<dyn PacketPlanner>,
@@ -204,7 +204,7 @@ impl std::fmt::Debug for EngineDependencies {
     }
 }
 
-pub fn resolve_packet_request(
+pub(crate) fn resolve_packet_request(
     mut request: PacketRequest,
     resolver: Arc<dyn TargetResolver>,
 ) -> PortFuture<PacketRequest> {

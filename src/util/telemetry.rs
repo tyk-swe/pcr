@@ -98,7 +98,10 @@ fn normalise_label(value: &str) -> &str {
 }
 
 #[cfg(feature = "metrics")]
-pub fn get_frame_sent_counters(link_type: &str, transport: &str) -> (IntCounter, IntCounter) {
+pub(crate) fn get_frame_sent_counters(
+    link_type: &str,
+    transport: &str,
+) -> (IntCounter, IntCounter) {
     let link = normalise_label(link_type);
     let transport = normalise_label(transport);
     (
@@ -108,44 +111,47 @@ pub fn get_frame_sent_counters(link_type: &str, transport: &str) -> (IntCounter,
 }
 
 #[cfg(all(feature = "metrics", feature = "pcap"))]
-pub fn record_listener_packet(protocol: &str) {
+pub(crate) fn record_listener_packet(protocol: &str) {
     let proto = normalise_label(protocol);
     LISTENER_PACKETS.with_label_values(&[proto]).inc();
 }
 
 #[cfg(feature = "metrics")]
-pub fn record_rule_action(action: &str, outcome: &str) {
+pub(crate) fn record_rule_action(action: &str, outcome: &str) {
     let action = normalise_label(action);
     let outcome = normalise_label(outcome);
     RULE_ACTIONS.with_label_values(&[action, outcome]).inc();
 }
 
 #[cfg(feature = "metrics")]
-pub fn record_rule_executor_drop(action: &str, reason: &str) {
+pub(crate) fn record_rule_executor_drop(action: &str, reason: &str) {
     let action = normalise_label(action);
     let reason = normalise_label(reason);
     RULE_ACTION_DROPS.with_label_values(&[action, reason]).inc();
 }
 
 #[cfg(all(feature = "metrics", feature = "pcap"))]
-pub fn record_listener_dropped_packet(reason: &str) {
+pub(crate) fn record_listener_dropped_packet(reason: &str) {
     let reason = normalise_label(reason);
     LISTENER_DROPPED_PACKETS.with_label_values(&[reason]).inc();
 }
 
 #[cfg(not(feature = "metrics"))]
 #[derive(Clone, Copy, Debug, Default)]
-pub struct NoopCounter;
+pub(crate) struct NoopCounter;
 
 #[cfg(not(feature = "metrics"))]
 impl NoopCounter {
-    pub fn inc(&self) {}
+    pub(crate) fn inc(&self) {}
 
-    pub fn inc_by(&self, _amount: u64) {}
+    pub(crate) fn inc_by(&self, _amount: u64) {}
 }
 
 #[cfg(not(feature = "metrics"))]
-pub fn get_frame_sent_counters(_link_type: &str, _transport: &str) -> (NoopCounter, NoopCounter) {
+pub(crate) fn get_frame_sent_counters(
+    _link_type: &str,
+    _transport: &str,
+) -> (NoopCounter, NoopCounter) {
     (NoopCounter, NoopCounter)
 }
 
@@ -153,17 +159,17 @@ pub fn get_frame_sent_counters(_link_type: &str, _transport: &str) -> (NoopCount
 pub fn record_listener_packet(_protocol: &str) {}
 
 #[cfg(not(feature = "metrics"))]
-pub fn record_rule_action(_action: &str, _outcome: &str) {}
+pub(crate) fn record_rule_action(_action: &str, _outcome: &str) {}
 
 #[cfg(not(feature = "metrics"))]
-pub fn record_rule_executor_drop(_action: &str, _reason: &str) {}
+pub(crate) fn record_rule_executor_drop(_action: &str, _reason: &str) {}
 
 #[cfg(all(not(feature = "metrics"), feature = "pcap"))]
 pub fn record_listener_dropped_packet(_reason: &str) {}
 
 #[cfg(feature = "metrics")]
 #[derive(Debug)]
-pub struct PrometheusExporterHandle {
+pub(crate) struct PrometheusExporterHandle {
     pub addr: SocketAddr,
     pub shutdown_tx: oneshot::Sender<()>,
     pub join_handle: tokio::task::JoinHandle<()>,
@@ -176,7 +182,10 @@ struct MetricsCache {
 }
 
 #[cfg(feature = "metrics")]
-pub fn spawn_prometheus_exporter(handle: &Handle, addr: &str) -> Result<PrometheusExporterHandle> {
+pub(crate) fn spawn_prometheus_exporter(
+    handle: &Handle,
+    addr: &str,
+) -> Result<PrometheusExporterHandle> {
     let socket: SocketAddr = addr
         .parse()
         .map_err(|source| TelemetryError::ParseAddress {
@@ -297,7 +306,7 @@ pub fn spawn_prometheus_exporter(handle: &Handle, addr: &str) -> Result<Promethe
 
 #[cfg(feature = "metrics")]
 #[derive(Debug, Error)]
-pub enum TelemetryError {
+pub(crate) enum TelemetryError {
     #[error("parse prometheus bind address failed: addr='{addr}'")]
     ParseAddress {
         addr: String,
@@ -313,4 +322,4 @@ pub enum TelemetryError {
 }
 
 #[cfg(feature = "metrics")]
-pub type Result<T> = std::result::Result<T, TelemetryError>;
+pub(crate) type Result<T> = std::result::Result<T, TelemetryError>;

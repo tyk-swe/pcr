@@ -31,7 +31,7 @@ fn probe_destination_port(ttl: u8, probe: u8) -> Result<u16> {
         .ok_or_else(|| anyhow!("traceroute port exceeded u16 range: ttl={ttl} probe={probe}"))
 }
 
-pub fn run_udp_traceroute_v4(
+pub(super) fn run_udp_traceroute_v4(
     destination: Ipv4Addr,
     opts: &TracerouteRequest,
     send_delay: Option<std::time::Duration>,
@@ -170,7 +170,7 @@ where
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }
 
-pub fn run_udp_traceroute_v6(
+pub(super) fn run_udp_traceroute_v6(
     destination: Ipv6Addr,
     opts: &TracerouteRequest,
     send_delay: Option<std::time::Duration>,

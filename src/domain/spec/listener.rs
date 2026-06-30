@@ -14,7 +14,7 @@ use crate::domain::listener_config::NormalizedListenerRequest;
 use crate::domain::request::ListenerRequest;
 
 #[derive(Debug, Clone, Default)]
-pub struct ListenerSpec {
+pub(crate) struct ListenerSpec {
     pub enabled: bool,
     pub filter: Option<String>,
     pub promiscuous: bool,

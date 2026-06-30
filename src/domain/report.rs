@@ -8,7 +8,7 @@ use crate::domain::transmission::{
 };
 
 #[derive(Debug, Clone)]
-pub struct PreflightView {
+pub(crate) struct PreflightView {
     pub destination: String,
     pub selected_destination_ip: String,
     pub destination_reason: &'static str,
@@ -30,7 +30,9 @@ pub struct PreflightView {
 }
 
 impl PreflightView {
-    pub fn from_transmission_plan(plan: &TransmissionPlan) -> Result<Self, SendControlError> {
+    pub(crate) fn from_transmission_plan(
+        plan: &TransmissionPlan,
+    ) -> Result<Self, SendControlError> {
         let accounting =
             emission_accounting(&plan.transmit, plan.policy, plan.summary.frame_count as u64)?;
         let send_mode = if accounting.attempts.is_some() {

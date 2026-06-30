@@ -19,7 +19,7 @@ const ARP_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Attempt to resolve the MAC address for a target IPv4 address by issuing an ARP request
 /// on the supplied interface.
-pub fn resolve_mac(
+pub(crate) fn resolve_mac(
     interface: &NetworkInterface,
     source_ip: std::net::Ipv4Addr,
     target_ip: std::net::Ipv4Addr,
@@ -30,7 +30,7 @@ pub fn resolve_mac(
 }
 
 /// A reusable ARP scanner that maintains an open datalink channel.
-pub struct ArpScanner {
+pub(crate) struct ArpScanner {
     channel: DatalinkArpChannel,
     interface_name: String,
     source_mac: MacAddr,
@@ -39,7 +39,7 @@ pub struct ArpScanner {
 
 impl ArpScanner {
     /// Create a new ARP scanner on the specified interface.
-    pub fn new(
+    pub(crate) fn new(
         interface: &NetworkInterface,
         source_ip: std::net::Ipv4Addr,
         timeout: Duration,
@@ -59,7 +59,11 @@ impl ArpScanner {
     }
 
     /// Resolve the MAC address for a target IPv4 address.
-    pub fn resolve(&mut self, target_ip: std::net::Ipv4Addr, timeout: Duration) -> Result<MacAddr> {
+    pub(crate) fn resolve(
+        &mut self,
+        target_ip: std::net::Ipv4Addr,
+        timeout: Duration,
+    ) -> Result<MacAddr> {
         resolve_with_channel(
             &mut self.channel,
             &self.interface_name,

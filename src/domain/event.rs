@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use crate::domain::net::MacAddress;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProtocolLabel {
+pub(crate) enum ProtocolLabel {
     Tcp,
     Udp,
     Icmp,
@@ -17,7 +17,7 @@ pub enum ProtocolLabel {
 }
 
 impl ProtocolLabel {
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             Self::Tcp => "tcp",
             Self::Udp => "udp",
@@ -30,7 +30,7 @@ impl ProtocolLabel {
 }
 
 #[derive(Debug, Clone)]
-pub struct ListenerEvent {
+pub(crate) struct ListenerEvent {
     pub timestamp: SystemTime,
     pub length: usize,
     pub layer2_source: Option<MacAddress>,

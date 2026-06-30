@@ -82,7 +82,7 @@ where
     }
 }
 
-pub fn run_tcp_traceroute_v4(
+pub(super) fn run_tcp_traceroute_v4(
     destination: Ipv4Addr,
     opts: &TracerouteRequest,
     send_delay: Option<Duration>,
@@ -215,7 +215,7 @@ fn tcp_probe_spec(ttl: u8, probe: u8, base_source_port: u16) -> TcpProbeSpec {
     }
 }
 
-pub fn run_tcp_traceroute_v6(
+pub(super) fn run_tcp_traceroute_v6(
     destination: Ipv6Addr,
     opts: &TracerouteRequest,
     send_delay: Option<Duration>,

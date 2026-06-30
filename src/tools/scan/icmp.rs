@@ -34,7 +34,7 @@ use super::common::{
     push_scan_target, resolve_source_override, resolve_target, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 
-pub async fn run_icmp(
+pub(crate) async fn run_icmp(
     target: &str,
     interface: &Option<String>,
     source_ip: &Option<String>,

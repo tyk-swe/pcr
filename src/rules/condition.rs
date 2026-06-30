@@ -7,7 +7,7 @@ use crate::util::error::UtilError;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, Clone, Default)]
-pub struct RuleConditionDocument {
+pub(crate) struct RuleConditionDocument {
     #[serde(default)]
     pub source: Option<MatcherDef>,
     #[serde(default)]
@@ -17,7 +17,7 @@ pub struct RuleConditionDocument {
 }
 
 #[derive(Debug, Clone)]
-pub struct RuleCondition {
+pub(crate) struct RuleCondition {
     pub source: Option<Matcher>,
     pub destination: Option<Matcher>,
     pub description: Option<Matcher>,
@@ -36,7 +36,7 @@ impl TryFrom<RuleConditionDocument> for RuleCondition {
 }
 
 impl RuleCondition {
-    pub fn matches(&self, packet: &PacketContext) -> bool {
+    pub(crate) fn matches(&self, packet: &PacketContext) -> bool {
         if let Some(source) = &self.source {
             if !source.matches(packet.source.as_deref()) {
                 return false;
@@ -57,7 +57,7 @@ impl RuleCondition {
 }
 
 #[derive(Debug, Clone)]
-pub enum Matcher {
+pub(crate) enum Matcher {
     Contains(String, bool),
     Equals(String, bool),
     StartsWith(String, bool),
@@ -67,7 +67,7 @@ pub enum Matcher {
 }
 
 impl Matcher {
-    pub fn matches(&self, haystack: Option<&str>) -> bool {
+    pub(crate) fn matches(&self, haystack: Option<&str>) -> bool {
         let Some(haystack) = haystack else {
             return false;
         };
@@ -115,7 +115,7 @@ impl Default for Matcher {
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(untagged)]
-pub enum MatcherDef {
+pub(crate) enum MatcherDef {
     Simple(String),
     Complex {
         #[serde(default)]

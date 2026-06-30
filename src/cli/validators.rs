@@ -6,13 +6,13 @@ use std::str::FromStr;
 use crate::domain::net::MacAddress;
 use trust_dns_proto::rr::RecordType;
 
-pub fn mac_address_validator(s: &str) -> Result<String, String> {
+pub(crate) fn mac_address_validator(s: &str) -> Result<String, String> {
     MacAddress::from_str(s)
         .map(|_| s.to_string())
         .map_err(|_| format!("invalid MAC address: {s} (expected format xx:xx:xx:xx:xx:xx)"))
 }
 
-pub fn socket_addr_validator(s: &str) -> Result<String, String> {
+pub(crate) fn socket_addr_validator(s: &str) -> Result<String, String> {
     std::net::SocketAddr::from_str(s)
         .map(|_| s.to_string())
         .map_err(|_| {
@@ -20,7 +20,7 @@ pub fn socket_addr_validator(s: &str) -> Result<String, String> {
         })
 }
 
-pub fn dns_record_type_validator(s: &str) -> Result<String, String> {
+pub(crate) fn dns_record_type_validator(s: &str) -> Result<String, String> {
     RecordType::from_str(&s.to_uppercase())
         .map(|_| s.to_string())
         .map_err(|_| {

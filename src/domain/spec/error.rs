@@ -9,10 +9,10 @@ use thiserror::Error;
 use crate::domain::net::MacAddressParseError;
 use crate::domain::request::Icmpv6ErrorCode;
 
-pub type SpecResult<T> = std::result::Result<T, SpecError>;
+pub(crate) type SpecResult<T> = std::result::Result<T, SpecError>;
 
 #[derive(Debug, Error)]
-pub enum SpecError {
+pub(crate) enum SpecError {
     #[error("parse IP address failed: value='{value}'")]
     IpAddressParse {
         value: String,

@@ -20,19 +20,19 @@ use crate::engine::error::{EngineError, EngineResult};
 use crate::engine::ports::{resolve_packet_request, EngineDependencies};
 
 #[derive(Debug, Clone)]
-pub struct SendUseCase {
+pub(crate) struct SendUseCase {
     policy: TransmissionPolicy,
     dry_run: bool,
     dependencies: EngineDependencies,
 }
 
 #[derive(Debug, Clone)]
-pub struct PreparedPacketSend {
+pub(crate) struct PreparedPacketSend {
     pub plan: TransmissionPlan,
 }
 
 impl SendUseCase {
-    pub fn new(policy: TransmissionPolicy, dependencies: EngineDependencies) -> Self {
+    pub(crate) fn new(policy: TransmissionPolicy, dependencies: EngineDependencies) -> Self {
         Self {
             dry_run: policy.dry_run,
             policy,
@@ -40,7 +40,7 @@ impl SendUseCase {
         }
     }
 
-    pub fn validate_request_policy(&self, request: &PacketRequest) -> EngineResult<()> {
+    pub(crate) fn validate_request_policy(&self, request: &PacketRequest) -> EngineResult<()> {
         let plan = TrafficPlan::from_packet_request(request, TrafficMode::Send, &self.policy);
         self.policy
             .authorize(&plan)
@@ -48,19 +48,19 @@ impl SendUseCase {
             .map_err(|e| EngineError::TransmissionPlan(e.into()))
     }
 
-    pub fn validate_spec_policy(&self, spec: &PacketSpec) -> EngineResult<()> {
+    pub(crate) fn validate_spec_policy(&self, spec: &PacketSpec) -> EngineResult<()> {
         validate_transmission_policy(&spec.transmit, self.policy)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))
     }
 
-    pub async fn check_privileges(&self, spec: Arc<PacketSpec>) -> Result<()> {
+    pub(crate) async fn check_privileges(&self, spec: Arc<PacketSpec>) -> Result<()> {
         self.dependencies
             .privilege_checker
             .check_packet_send(spec)
             .await
     }
 
-    pub async fn prepare(
+    pub(crate) async fn prepare(
         &self,
         request: PacketRequest,
         check_privileges: bool,
@@ -85,7 +85,7 @@ impl SendUseCase {
         Ok(PreparedPacketSend { plan })
     }
 
-    pub async fn resolve_spec(&self, request: PacketRequest) -> Result<Arc<PacketSpec>> {
+    pub(crate) async fn resolve_spec(&self, request: PacketRequest) -> Result<Arc<PacketSpec>> {
         self.validate_request_policy(&request)?;
         let request = self.resolve_request(request).await?;
         self.build_spec(request).await
@@ -110,11 +110,11 @@ impl SendUseCase {
             .map_err(|source| EngineError::PacketSpecBuild(source).into())
     }
 
-    pub async fn plan_dry_run(&self, spec: Arc<PacketSpec>) -> Result<TransmissionPlan> {
+    pub(crate) async fn plan_dry_run(&self, spec: Arc<PacketSpec>) -> Result<TransmissionPlan> {
         self.plan_with_mode(spec, true).await
     }
 
-    pub async fn plan_live(&self, spec: Arc<PacketSpec>) -> Result<TransmissionPlan> {
+    pub(crate) async fn plan_live(&self, spec: Arc<PacketSpec>) -> Result<TransmissionPlan> {
         self.plan_with_mode(spec, false).await
     }
 
@@ -144,7 +144,7 @@ impl SendUseCase {
         Ok(tx_plan)
     }
 
-    pub fn authorize_transmission_plan(
+    pub(crate) fn authorize_transmission_plan(
         &self,
         spec: &PacketSpec,
         plan: &TransmissionPlan,
@@ -156,7 +156,7 @@ impl SendUseCase {
         Ok(traffic_plan)
     }
 
-    pub fn authorize_spec_traffic(
+    pub(crate) fn authorize_spec_traffic(
         &self,
         spec: &PacketSpec,
         mode: TrafficMode,
@@ -168,7 +168,7 @@ impl SendUseCase {
         Ok(traffic_plan)
     }
 
-    pub async fn execute_plan(&self, plan: TransmissionPlan) -> Result<()> {
+    pub(crate) async fn execute_plan(&self, plan: TransmissionPlan) -> Result<()> {
         if self.dry_run {
             log::info!(
                 "Dry-run mode: would send {} frame(s) via {} ({} bytes largest)",

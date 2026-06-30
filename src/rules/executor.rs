@@ -18,7 +18,7 @@ use crate::util::telemetry;
 type Result<T> = std::result::Result<T, RuleError>;
 
 #[derive(Debug)]
-pub enum ExecutorError {
+pub(crate) enum ExecutorError {
     QueueFull,
     Closed,
     RuntimeUnavailable(String),
@@ -47,14 +47,14 @@ impl RuntimeHandleSource {
 }
 
 #[derive(Debug, Clone)]
-pub struct BoundedExecutor {
+pub(crate) struct BoundedExecutor {
     runtime: RuntimeHandleSource,
     capacity_permits: Arc<Semaphore>,
     worker_permits: Arc<Semaphore>,
 }
 
 impl BoundedExecutor {
-    pub fn new(
+    pub(crate) fn new(
         name_prefix: &str,
         workers: usize,
         capacity: usize,
@@ -67,7 +67,7 @@ impl BoundedExecutor {
         ))
     }
 
-    pub fn new_with_handle(
+    pub(crate) fn new_with_handle(
         handle: Handle,
         workers: usize,
         capacity: usize,
@@ -90,7 +90,7 @@ impl BoundedExecutor {
         }
     }
 
-    pub fn spawn_async<F, Fut>(&self, job: F) -> std::result::Result<(), ExecutorError>
+    pub(crate) fn spawn_async<F, Fut>(&self, job: F) -> std::result::Result<(), ExecutorError>
     where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,

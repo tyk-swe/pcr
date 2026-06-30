@@ -11,7 +11,7 @@ use super::fragment::FragmentSpec;
 use super::utils::parse_ip_address;
 
 #[derive(Debug, Clone, Default)]
-pub struct IpSpec {
+pub(crate) struct IpSpec {
     pub source: Option<IpAddr>,
     pub destination: Option<IpAddr>,
     pub prefer_ipv6: Option<bool>,

@@ -1,8 +1,8 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub mod interface;
-pub mod listener;
+pub(crate) mod interface;
+pub(crate) mod listener;
 #[cfg(any(feature = "scan", feature = "traceroute"))]
-pub mod pnet_utils;
-pub mod sender;
+pub(crate) mod pnet_utils;
+pub(crate) mod sender;

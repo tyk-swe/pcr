@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 
 use crate::domain::command::{DnsQueryResult, DnsRequest};
 
-pub fn format_dns_dry_run(options: &DnsRequest) -> String {
+pub(crate) fn format_dns_dry_run(options: &DnsRequest) -> String {
     format!(
         "Dry-run DNS query: domain={} type={} server={} timeout={}ms transaction_id={} transport={} retries={}",
         options.domain,
@@ -23,7 +23,7 @@ pub fn format_dns_dry_run(options: &DnsRequest) -> String {
     )
 }
 
-pub fn format_dns_dry_run_json(options: &DnsRequest) -> Result<String> {
+pub(crate) fn format_dns_dry_run_json(options: &DnsRequest) -> Result<String> {
     let value = serde_json::json!({
         "mode": "dry_run",
         "query": {
@@ -40,7 +40,7 @@ pub fn format_dns_dry_run_json(options: &DnsRequest) -> Result<String> {
     serde_json::to_string_pretty(&value).context("failed to serialize DNS dry-run JSON")
 }
 
-pub fn format_dns_message(result: &DnsQueryResult) -> String {
+pub(crate) fn format_dns_message(result: &DnsQueryResult) -> String {
     let mut output = String::new();
 
     let _ = writeln!(
@@ -92,7 +92,7 @@ pub fn format_dns_message(result: &DnsQueryResult) -> String {
     output.trim_end().to_string()
 }
 
-pub fn format_dns_message_json(result: &DnsQueryResult) -> Result<String> {
+pub(crate) fn format_dns_message_json(result: &DnsQueryResult) -> Result<String> {
     let queries = result
         .questions
         .iter()

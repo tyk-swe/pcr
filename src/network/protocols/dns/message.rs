@@ -7,7 +7,7 @@ use anyhow::{anyhow, Context, Result};
 use trust_dns_proto::op::{Message, MessageType, OpCode, Query};
 use trust_dns_proto::rr::{DNSClass, Name, RecordType};
 
-pub fn build_dns_query(
+pub(crate) fn build_dns_query(
     domain: &str,
     record_type: &str,
     transaction_id: Option<u16>,

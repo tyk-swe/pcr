@@ -24,7 +24,7 @@ use super::common::{
     ICMP_RESPONSE_POLL_INTERVAL,
 };
 
-pub struct IcmpReceiverAdapter<'a, 'b>(pub &'a mut IcmpTransportChannelIterator<'b>);
+pub(super) struct IcmpReceiverAdapter<'a, 'b>(pub &'a mut IcmpTransportChannelIterator<'b>);
 
 impl<'a, 'b> PacketReceiver for IcmpReceiverAdapter<'a, 'b> {
     fn next_packet(&mut self, timeout: Duration) -> Result<Option<(Vec<u8>, IpAddr)>> {
@@ -36,7 +36,7 @@ impl<'a, 'b> PacketReceiver for IcmpReceiverAdapter<'a, 'b> {
     }
 }
 
-pub struct Icmpv6ReceiverAdapter<'a, 'b>(pub &'a mut Icmpv6TransportChannelIterator<'b>);
+pub(super) struct Icmpv6ReceiverAdapter<'a, 'b>(pub &'a mut Icmpv6TransportChannelIterator<'b>);
 
 impl<'a, 'b> PacketReceiver for Icmpv6ReceiverAdapter<'a, 'b> {
     fn next_packet(&mut self, timeout: Duration) -> Result<Option<(Vec<u8>, IpAddr)>> {
@@ -49,17 +49,17 @@ impl<'a, 'b> PacketReceiver for Icmpv6ReceiverAdapter<'a, 'b> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum IcmpEventKind {
+pub(super) enum IcmpEventKind {
     Hop,
     Destination,
 }
 
-pub enum ProbeEvent {
+pub(super) enum ProbeEvent {
     Hop(IpAddr),
     Destination(IpAddr),
 }
 
-pub fn build_echo_request(buffer: &mut [u8], identifier: u16, sequence: u16) -> Result<()> {
+pub(super) fn build_echo_request(buffer: &mut [u8], identifier: u16, sequence: u16) -> Result<()> {
     let buffer_len = buffer.len();
     let mut packet = MutableEchoRequestPacket::new(buffer).context(operation_failed(
         "build ICMP echo request",
@@ -81,7 +81,7 @@ pub fn build_echo_request(buffer: &mut [u8], identifier: u16, sequence: u16) -> 
     Ok(())
 }
 
-pub fn poll_icmp_event_v4<R: PacketReceiver + ?Sized>(
+pub(super) fn poll_icmp_event_v4<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     expected_protocol: IpNextHeaderProtocol,
     expected_port: u16,
@@ -98,7 +98,7 @@ pub fn poll_icmp_event_v4<R: PacketReceiver + ?Sized>(
     )
 }
 
-pub fn poll_icmp_event_v4_with_source<R: PacketReceiver + ?Sized>(
+pub(super) fn poll_icmp_event_v4_with_source<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     expected_protocol: IpNextHeaderProtocol,
     expected_source_port: Option<u16>,
@@ -123,7 +123,7 @@ pub fn poll_icmp_event_v4_with_source<R: PacketReceiver + ?Sized>(
     }
 }
 
-pub fn poll_icmp_event_v6<R: PacketReceiver + ?Sized>(
+pub(super) fn poll_icmp_event_v6<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     expected_protocol: IpNextHeaderProtocol,
     expected_port: u16,
@@ -140,7 +140,7 @@ pub fn poll_icmp_event_v6<R: PacketReceiver + ?Sized>(
     )
 }
 
-pub fn poll_icmp_event_v6_with_source<R: PacketReceiver + ?Sized>(
+pub(super) fn poll_icmp_event_v6_with_source<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     expected_protocol: IpNextHeaderProtocol,
     expected_source_port: Option<u16>,
@@ -165,7 +165,7 @@ pub fn poll_icmp_event_v6_with_source<R: PacketReceiver + ?Sized>(
     }
 }
 
-pub fn classify_icmp_event_v4_with_source(
+pub(super) fn classify_icmp_event_v4_with_source(
     packet: &IcmpPacket,
     expected_protocol: IpNextHeaderProtocol,
     expected_source_port: Option<u16>,
@@ -202,7 +202,7 @@ pub fn classify_icmp_event_v4_with_source(
     })
 }
 
-pub fn classify_icmp_event_v6_with_source(
+pub(super) fn classify_icmp_event_v6_with_source(
     packet: &Icmpv6Packet,
     expected_protocol: IpNextHeaderProtocol,
     expected_source_port: Option<u16>,
@@ -238,7 +238,7 @@ pub fn classify_icmp_event_v6_with_source(
     })
 }
 
-pub fn poll_icmp_echo_event_v4<R: PacketReceiver + ?Sized>(
+pub(super) fn poll_icmp_echo_event_v4<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     identifier: u16,
     sequence: u16,
@@ -254,7 +254,7 @@ pub fn poll_icmp_echo_event_v4<R: PacketReceiver + ?Sized>(
     }
 }
 
-pub fn await_icmp_echo_v4<R: PacketReceiver + ?Sized>(
+pub(super) fn await_icmp_echo_v4<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     identifier: u16,
     sequence: u16,
@@ -265,7 +265,7 @@ pub fn await_icmp_echo_v4<R: PacketReceiver + ?Sized>(
     })
 }
 
-pub fn await_icmpv6_echo<R: PacketReceiver + ?Sized>(
+pub(super) fn await_icmpv6_echo<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     identifier: u16,
     sequence: u16,
@@ -276,7 +276,7 @@ pub fn await_icmpv6_echo<R: PacketReceiver + ?Sized>(
     })
 }
 
-pub fn classify_icmp_echo_v4(
+pub(super) fn classify_icmp_echo_v4(
     packet: &IcmpPacket,
     addr: IpAddr,
     identifier: u16,
@@ -299,7 +299,7 @@ pub fn classify_icmp_echo_v4(
     }
 }
 
-pub fn poll_icmpv6_echo_event<R: PacketReceiver + ?Sized>(
+pub(super) fn poll_icmpv6_echo_event<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     identifier: u16,
     sequence: u16,
@@ -317,7 +317,7 @@ pub fn poll_icmpv6_echo_event<R: PacketReceiver + ?Sized>(
     }
 }
 
-pub fn classify_icmpv6_echo_event(
+pub(super) fn classify_icmpv6_echo_event(
     packet: &Icmpv6Packet,
     addr: IpAddr,
     identifier: u16,
@@ -338,7 +338,7 @@ pub fn classify_icmpv6_echo_event(
     }
 }
 
-pub fn parse_icmpv6_echo(packet: &Icmpv6Packet) -> Option<(u16, u16)> {
+pub(super) fn parse_icmpv6_echo(packet: &Icmpv6Packet) -> Option<(u16, u16)> {
     parse_icmpv6_echo_impl(packet)
 }
 
@@ -350,7 +350,7 @@ fn inner_icmpv6_echo_matches(packet: &Icmpv6Packet, identifier: u16, sequence: u
         .unwrap_or(false)
 }
 
-pub fn run_probe_loop<Poll>(timeout: Duration, mut poll: Poll) -> Result<ProbeResult>
+pub(super) fn run_probe_loop<Poll>(timeout: Duration, mut poll: Poll) -> Result<ProbeResult>
 where
     Poll: FnMut(Duration) -> Result<Option<ProbeEvent>>,
 {
@@ -372,7 +372,7 @@ where
     Ok(ProbeResult::Timeout)
 }
 
-pub fn await_icmp_response_v4<R: PacketReceiver + ?Sized>(
+pub(super) fn await_icmp_response_v4<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     expected_protocol: IpNextHeaderProtocol,
     expected_port: u16,
@@ -399,7 +399,7 @@ pub fn await_icmp_response_v4<R: PacketReceiver + ?Sized>(
     Ok(ProbeResult::Timeout)
 }
 
-pub fn await_icmp_response_v6<R: PacketReceiver + ?Sized>(
+pub(super) fn await_icmp_response_v6<R: PacketReceiver + ?Sized>(
     iter: &mut R,
     expected_protocol: IpNextHeaderProtocol,
     expected_port: u16,

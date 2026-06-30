@@ -3,7 +3,7 @@
 
 /// Global configuration derived from CLI arguments.
 #[derive(Debug, Clone)]
-pub struct EngineConfig {
+pub(crate) struct EngineConfig {
     pub prometheus_bind: Option<String>,
     pub rule_workers: Option<usize>,
     pub rule_queue: Option<usize>,

@@ -7,14 +7,14 @@ use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MacAddress([u8; 6]);
+pub(crate) struct MacAddress([u8; 6]);
 
 impl MacAddress {
-    pub fn new(octets: [u8; 6]) -> Self {
+    pub(crate) fn new(octets: [u8; 6]) -> Self {
         Self(octets)
     }
 
-    pub fn octets(self) -> [u8; 6] {
+    pub(crate) fn octets(self) -> [u8; 6] {
         self.0
     }
 }
@@ -52,19 +52,19 @@ impl FromStr for MacAddress {
 
 #[derive(Debug, Error, Clone, Copy, PartialEq, Eq)]
 #[error("invalid MAC address")]
-pub struct MacAddressParseError;
+pub(crate) struct MacAddressParseError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EtherType(pub u16);
+pub(crate) struct EtherType(pub u16);
 
 impl EtherType {
-    pub const IPV4: Self = Self(0x0800);
-    pub const IPV6: Self = Self(0x86dd);
-    pub const ARP: Self = Self(0x0806);
-    pub const VLAN: Self = Self(0x8100);
-    pub const PPPOE_DISCOVERY: Self = Self(0x8863);
-    pub const PPPOE_SESSION: Self = Self(0x8864);
+    pub(crate) const IPV4: Self = Self(0x0800);
+    pub(crate) const IPV6: Self = Self(0x86dd);
+    pub(crate) const ARP: Self = Self(0x0806);
+    pub(crate) const VLAN: Self = Self(0x8100);
+    pub(crate) const PPPOE_DISCOVERY: Self = Self(0x8863);
+    pub(crate) const PPPOE_SESSION: Self = Self(0x8864);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct IpProtocol(pub u8);
+pub(crate) struct IpProtocol(pub u8);

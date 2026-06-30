@@ -14,7 +14,7 @@ type Result<T> = std::result::Result<T, RuleError>;
 
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-pub enum RuleTrigger {
+pub(crate) enum RuleTrigger {
     #[default]
     #[serde(alias = "on_receive")]
     Receive,
@@ -25,7 +25,7 @@ pub enum RuleTrigger {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RuleDocument {
+pub(crate) struct RuleDocument {
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -37,7 +37,7 @@ pub struct RuleDocument {
 }
 
 #[derive(Debug, Clone)]
-pub struct Rule {
+pub(crate) struct Rule {
     pub name: Option<String>,
     pub trigger: RuleTrigger,
     pub actions: Vec<RuleAction>,
@@ -101,22 +101,22 @@ impl Rule {
         })
     }
 
-    pub fn triggers_on_receive(&self) -> bool {
+    pub(crate) fn triggers_on_receive(&self) -> bool {
         matches!(&self.trigger, RuleTrigger::Receive)
     }
 
-    pub fn triggers_on_timer(&self) -> bool {
+    pub(crate) fn triggers_on_timer(&self) -> bool {
         matches!(&self.trigger, RuleTrigger::Timer)
     }
 
-    pub fn matches(&self, packet: &PacketContext) -> bool {
+    pub(crate) fn matches(&self, packet: &PacketContext) -> bool {
         match &self.condition {
             Some(condition) => condition.matches(packet),
             None => true,
         }
     }
 
-    pub fn execute(
+    pub(crate) fn execute(
         &self,
         packet: Option<&PacketContext>,
         sender: Option<&dyn RuleSendDispatcher>,

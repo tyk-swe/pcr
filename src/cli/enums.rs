@@ -8,7 +8,7 @@ use std::fmt;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum OutputFormat {
+pub(crate) enum OutputFormat {
     /// Concise summary.
     Summary,
     /// Field-by-field breakdown.
@@ -22,7 +22,7 @@ pub enum OutputFormat {
 /// Predefined fragmentation behaviours for rapid testing/attacks.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum FragmentProfile {
+pub(crate) enum FragmentProfile {
     /// Minimal overlapping pair.
     Overlap,
     /// Classic teardrop.
@@ -45,7 +45,7 @@ impl fmt::Display for FragmentProfile {
 /// Supported logging levels for explicit override.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LogLevel {
+pub(crate) enum LogLevel {
     /// Very low priority, verbose.
     Trace,
     /// Lower priority.
@@ -59,7 +59,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    pub fn to_level_filter(self) -> LevelFilter {
+    pub(crate) fn to_level_filter(self) -> LevelFilter {
         match self {
             LogLevel::Trace => LevelFilter::Trace,
             LogLevel::Debug => LevelFilter::Debug,
@@ -74,7 +74,7 @@ impl LogLevel {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[clap(rename_all = "kebab-case")]
 #[serde(rename_all = "kebab-case")]
-pub enum Icmpv6ErrorKind {
+pub(crate) enum Icmpv6ErrorKind {
     DestinationUnreachable,
     PacketTooBig,
     TimeExceeded,
@@ -85,7 +85,7 @@ pub enum Icmpv6ErrorKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[clap(rename_all = "kebab-case")]
 #[serde(rename_all = "kebab-case")]
-pub enum Icmpv6ErrorCode {
+pub(crate) enum Icmpv6ErrorCode {
     /// No route to destination.
     DestinationUnreachableNoRoute,
     /// Communication with destination administratively prohibited.

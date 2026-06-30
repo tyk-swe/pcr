@@ -79,7 +79,7 @@ pub(crate) fn preflight(opts: &DaemonRequest) -> Result<DaemonStartupPreflight> 
     Ok(DaemonStartupPreflight { rules })
 }
 
-pub async fn run(
+pub(crate) async fn run(
     opts: &DaemonRequest,
     _config: &EngineConfig,
     rules: &mut RuleEngine,

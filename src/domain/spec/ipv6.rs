@@ -11,7 +11,7 @@ use crate::domain::request::Ipv6Request;
 use super::utils::parse_hex_bytes;
 
 #[derive(Debug, Clone, Default)]
-pub struct Ipv6Spec {
+pub(crate) struct Ipv6Spec {
     pub exthdrs: Vec<Ipv6ExtHeader>,
 }
 
@@ -31,7 +31,7 @@ impl Ipv6Spec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Ipv6ExtHeader {
+pub(crate) enum Ipv6ExtHeader {
     HopByHop {
         options: Vec<u8>,
     },
@@ -48,7 +48,7 @@ pub enum Ipv6ExtHeader {
 // RFC 8200 section 4.4 limits routing headers to at most 23 segments to keep the
 // header within the maximum IPv6 payload length. However, we allow up to 127
 // segments to support larger headers if needed.
-pub const MAX_ROUTING_SEGMENTS: usize = 127;
+pub(crate) const MAX_ROUTING_SEGMENTS: usize = 127;
 const MAX_IPV6_OPTIONS_HEADER_LEN: usize = 2048;
 
 pub(crate) fn parse_ipv6_ext_header(raw: &str) -> SpecResult<Ipv6ExtHeader> {

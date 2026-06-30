@@ -16,7 +16,7 @@ const TCP_BASE_HEADER_LEN: usize = 20;
 const TCP_MAX_HEADER_LEN: usize = 60;
 
 #[derive(Debug, Clone, Default)]
-pub struct Icmpv6Spec {
+pub(crate) struct Icmpv6Spec {
     pub kind: Option<u8>,
     pub code: Option<u8>,
     pub identifier: Option<u16>,
@@ -130,7 +130,7 @@ fn icmpv6_error_code_to_type_and_value(code: Icmpv6ErrorCode) -> (u8, u8) {
 }
 
 #[derive(Debug, Clone, Default)]
-pub enum TransportSpec {
+pub(crate) enum TransportSpec {
     #[default]
     Auto,
     Tcp(TcpSpec),
@@ -170,7 +170,7 @@ impl TransportSpec {
         Self::infer_default(request, destination, prefer_ipv6)
     }
 
-    pub fn label(&self) -> &'static str {
+    pub(crate) fn label(&self) -> &'static str {
         match self {
             TransportSpec::Auto => "AUTO",
             TransportSpec::Tcp(_) => "TCP",
@@ -207,7 +207,7 @@ impl TransportSpec {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TcpSpec {
+pub(crate) struct TcpSpec {
     pub source_port: Option<u16>,
     pub destination_port: Option<u16>,
     pub flags: TcpFlagSet,
@@ -234,7 +234,7 @@ impl TcpSpec {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct TcpFlagSet {
+pub(crate) struct TcpFlagSet {
     pub syn: bool,
     pub ack: bool,
     pub fin: bool,
@@ -285,7 +285,7 @@ impl TcpFlagSet {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct UdpSpec {
+pub(crate) struct UdpSpec {
     pub source_port: Option<u16>,
     pub destination_port: Option<u16>,
 }
@@ -300,7 +300,7 @@ impl UdpSpec {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct IcmpSpec {
+pub(crate) struct IcmpSpec {
     pub kind: Option<u8>,
     pub code: Option<u8>,
     pub identifier: Option<u16>,

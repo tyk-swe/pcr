@@ -14,7 +14,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::sleep;
 
-pub async fn run_fuzz(config: FuzzConfig) -> anyhow::Result<()> {
+pub(crate) async fn run_fuzz(config: FuzzConfig) -> anyhow::Result<()> {
     run_fuzz_internal(config, |spec| async move {
         let plan = plan_transmission(&spec)?;
         execute_transmission(plan).await?;

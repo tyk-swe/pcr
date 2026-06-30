@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use crate::domain::command::FuzzRequest;
-pub use crate::domain::command::{FuzzProtocol, FuzzStrategy};
+pub(crate) use crate::domain::command::{FuzzProtocol, FuzzStrategy};
 use crate::domain::policy::TrafficPolicy;
 
 #[derive(Debug, Clone)]
-pub struct FuzzConfig {
+pub(crate) struct FuzzConfig {
     pub target_ip: String,
     pub target_port: Option<u16>,
     pub protocol: FuzzProtocol,
@@ -18,7 +18,7 @@ pub struct FuzzConfig {
 }
 
 impl FuzzConfig {
-    pub fn apply_traffic_policy(&mut self, policy: &TrafficPolicy) {
+    pub(crate) fn apply_traffic_policy(&mut self, policy: &TrafficPolicy) {
         self.batch_size = policy.budget.max_batch_size;
         self.rate_per_sec = policy.budget.max_rate_per_sec;
     }

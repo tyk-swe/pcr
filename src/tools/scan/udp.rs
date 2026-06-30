@@ -34,7 +34,7 @@ use super::common::{
 };
 use crate::network::pnet_utils::open_transport_channel;
 
-pub async fn run_udp(
+pub(crate) async fn run_udp(
     target: &str,
     ports: &str,
     interface: &Option<String>,

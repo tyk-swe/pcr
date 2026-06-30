@@ -12,7 +12,7 @@ use crate::domain::transmission::TransmissionPlan;
 use crate::engine::core::Engine;
 use crate::engine::error::{EngineError, EngineResult};
 
-pub struct OneShotFlow<'engine> {
+pub(crate) struct OneShotFlow<'engine> {
     engine: &'engine mut Engine,
     request: PacketRequest,
     spec: Option<std::sync::Arc<PacketSpec>>,
@@ -20,7 +20,7 @@ pub struct OneShotFlow<'engine> {
 }
 
 impl<'engine> OneShotFlow<'engine> {
-    pub fn new(engine: &'engine mut Engine, request: PacketRequest) -> Self {
+    pub(crate) fn new(engine: &'engine mut Engine, request: PacketRequest) -> Self {
         Self {
             engine,
             request,
@@ -29,7 +29,7 @@ impl<'engine> OneShotFlow<'engine> {
         }
     }
 
-    pub async fn with_spec(mut self) -> Result<Self> {
+    pub(crate) async fn with_spec(mut self) -> Result<Self> {
         self.log_one_shot_entry();
         let request = self.request.clone();
         let spec = self.engine.send.resolve_spec(request).await?;
@@ -38,12 +38,12 @@ impl<'engine> OneShotFlow<'engine> {
         Ok(self)
     }
 
-    pub fn with_policy_validation(self) -> Result<Self> {
+    pub(crate) fn with_policy_validation(self) -> Result<Self> {
         self.engine.send.validate_request_policy(&self.request)?;
         Ok(self)
     }
 
-    pub async fn with_rules(self) -> Result<Self> {
+    pub(crate) async fn with_rules(self) -> Result<Self> {
         if let Some(rules_file) = self.spec()?.rules_file.clone() {
             let path = rules_file.clone();
             let rules = tokio::task::spawn_blocking(move || {
@@ -59,14 +59,14 @@ impl<'engine> OneShotFlow<'engine> {
         Ok(self)
     }
 
-    pub fn with_startup_rules(self) -> Self {
+    pub(crate) fn with_startup_rules(self) -> Self {
         if self.engine.rules.has_startup_triggers() && !self.engine.config.dry_run {
             self.engine.rules.run_startup_actions();
         }
         self
     }
 
-    pub async fn with_authorized_preflight_traffic(mut self) -> Result<Self> {
+    pub(crate) async fn with_authorized_preflight_traffic(mut self) -> Result<Self> {
         let spec = Arc::clone(
             self.spec
                 .as_ref()
@@ -87,7 +87,7 @@ impl<'engine> OneShotFlow<'engine> {
         Ok(self)
     }
 
-    pub async fn with_preflight(self) -> Result<Self> {
+    pub(crate) async fn with_preflight(self) -> Result<Self> {
         let spec = Arc::clone(
             self.spec
                 .as_ref()
@@ -102,7 +102,7 @@ impl<'engine> OneShotFlow<'engine> {
         Ok(self)
     }
 
-    pub async fn with_plan(mut self) -> Result<Self> {
+    pub(crate) async fn with_plan(mut self) -> Result<Self> {
         if self.engine.config.dry_run {
             return Ok(self);
         }
@@ -120,14 +120,14 @@ impl<'engine> OneShotFlow<'engine> {
         Ok(self)
     }
 
-    pub fn with_preflight_output(self) -> Result<Self> {
+    pub(crate) fn with_preflight_output(self) -> Result<Self> {
         let spec = self.spec()?;
         let plan = self.plan()?;
         self.emit_preflight_summary(spec, plan)?;
         Ok(self)
     }
 
-    pub async fn execute(mut self) -> Result<()> {
+    pub(crate) async fn execute(mut self) -> Result<()> {
         let spec = self.take_spec()?;
         let plan = self.take_plan()?;
         self.engine.send.execute_plan(plan).await?;

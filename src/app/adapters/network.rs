@@ -58,7 +58,7 @@ impl PacketPlanner for NetworkPacketPlanner {
             .await
             .map_err(|source| anyhow::anyhow!("transmission planning task failed: {source}"))??;
 
-            Ok(into_domain_plan(plan))
+            Ok(network_plan_to_domain_plan(plan))
         })
     }
 }
@@ -161,7 +161,7 @@ pub(crate) struct NetworkPacketTransmitter;
 impl PacketTransmitter for NetworkPacketTransmitter {
     fn transmit(&self, plan: TransmissionPlan) -> PortFuture<()> {
         Box::pin(async move {
-            let plan = into_network_plan(plan)?;
+            let plan = domain_plan_to_network_plan(plan)?;
             crate::network::io::sender::emit_metrics_snapshot(&plan)
                 .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
             crate::network::io::sender::execute_transmission(plan)
@@ -172,7 +172,9 @@ impl PacketTransmitter for NetworkPacketTransmitter {
     }
 }
 
-fn into_domain_plan(plan: crate::network::io::sender::TransmissionPlan) -> TransmissionPlan {
+fn network_plan_to_domain_plan(
+    plan: crate::network::io::sender::NetworkTransmissionPlan,
+) -> TransmissionPlan {
     TransmissionPlan {
         frames: plan.frames,
         link_type: plan.link_type,
@@ -188,9 +190,9 @@ fn into_domain_plan(plan: crate::network::io::sender::TransmissionPlan) -> Trans
     }
 }
 
-fn into_network_plan(
+fn domain_plan_to_network_plan(
     plan: TransmissionPlan,
-) -> Result<crate::network::io::sender::TransmissionPlan, EngineError> {
+) -> Result<crate::network::io::sender::NetworkTransmissionPlan, EngineError> {
     let interface = pnet::datalink::interfaces()
         .into_iter()
         .find(|interface| interface.name == plan.interface_name)
@@ -201,7 +203,7 @@ fn into_network_plan(
             ))
         })?;
 
-    Ok(crate::network::io::sender::TransmissionPlan {
+    Ok(crate::network::io::sender::NetworkTransmissionPlan {
         frames: plan.frames,
         link_type: plan.link_type,
         transmit: plan.transmit,

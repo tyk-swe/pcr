@@ -5,10 +5,10 @@ use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, ResolveHostnameError>;
+pub(crate) type Result<T> = std::result::Result<T, ResolveHostnameError>;
 
 #[derive(Debug, Error)]
-pub enum ResolveHostnameError {
+pub(crate) enum ResolveHostnameError {
     #[error("resolve hostname failed for '{host}'")]
     LookupFailed {
         host: String,
@@ -19,11 +19,11 @@ pub enum ResolveHostnameError {
     NoAddresses { host: String },
 }
 
-pub fn resolve_target_ip(target: &str, prefer_ipv6: Option<bool>) -> Result<IpAddr> {
+pub(crate) fn resolve_target_ip(target: &str, prefer_ipv6: Option<bool>) -> Result<IpAddr> {
     Ok(resolve_target_socket_addr(target, 0, prefer_ipv6)?.ip())
 }
 
-pub fn resolve_target_socket_addr(
+pub(crate) fn resolve_target_socket_addr(
     target: &str,
     port: u16,
     prefer_ipv6: Option<bool>,

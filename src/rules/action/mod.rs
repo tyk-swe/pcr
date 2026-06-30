@@ -17,7 +17,7 @@ mod logging;
 
 #[derive(Debug, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum RuleActionDocument {
+pub(crate) enum RuleActionDocument {
     Log {
         message: String,
         #[serde(default)]
@@ -47,7 +47,7 @@ pub enum RuleActionDocument {
 }
 
 #[derive(Debug, Clone)]
-pub enum RuleAction {
+pub(crate) enum RuleAction {
     Log {
         level: RuleLogLevel,
         message: String,
@@ -101,7 +101,7 @@ impl TryFrom<RuleActionDocument> for RuleAction {
 }
 
 impl RuleAction {
-    pub fn execute(
+    pub(crate) fn execute(
         &self,
         rule_name: &str,
         packet: Option<&PacketContext>,

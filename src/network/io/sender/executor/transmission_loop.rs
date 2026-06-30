@@ -8,10 +8,10 @@ use crate::network::sender::error::Result;
 use crate::util::telemetry;
 
 use super::super::control::{determine_send_mode, SendMode};
-use super::super::types::TransmissionPlan;
+use super::super::types::NetworkTransmissionPlan;
 
 pub(crate) fn run_transmission_loop<S, R, I, C>(
-    plan: &TransmissionPlan,
+    plan: &NetworkTransmissionPlan,
     mut send_frame: S,
     mut record_packet: R,
     on_infinite_start: I,

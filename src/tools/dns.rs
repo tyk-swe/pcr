@@ -21,14 +21,17 @@ use crate::network::protocols::dns::{
 use trust_dns_proto::op::Message;
 
 #[derive(Debug, Clone)]
-pub struct PreparedDnsQuery {
+pub(crate) struct PreparedDnsQuery {
     pub traffic_plan: TrafficPlan,
     server_addr: String,
     target: SocketAddr,
     send_delay: Option<Duration>,
 }
 
-pub async fn prepare(options: &DnsRequest, policy: TrafficPolicy) -> Result<PreparedDnsQuery> {
+pub(crate) async fn prepare(
+    options: &DnsRequest,
+    policy: TrafficPolicy,
+) -> Result<PreparedDnsQuery> {
     let server_addr = resolve_dns_server_address(&options.server)?;
     let target = resolve_dns_target(&server_addr).await?;
     let traffic_plan = traffic_plan_for_target(options, policy, target);
@@ -69,7 +72,7 @@ fn traffic_plan_for_target(
     plan
 }
 
-pub async fn resolve_prepared(
+pub(crate) async fn resolve_prepared(
     options: &DnsRequest,
     prepared: PreparedDnsQuery,
 ) -> Result<DnsQueryResult> {

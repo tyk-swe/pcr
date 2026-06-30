@@ -24,13 +24,16 @@ use self::tcp::{run_tcp_traceroute_v4, run_tcp_traceroute_v6};
 use self::udp::{run_udp_traceroute_v4, run_udp_traceroute_v6};
 
 #[derive(Debug, Clone)]
-pub struct PreparedTraceroute {
+pub(crate) struct PreparedTraceroute {
     pub traffic_plan: TrafficPlan,
     pub destination: IpAddr,
     send_delay: Option<std::time::Duration>,
 }
 
-pub fn prepare(opts: &TracerouteRequest, policy: TrafficPolicy) -> Result<PreparedTraceroute> {
+pub(crate) fn prepare(
+    opts: &TracerouteRequest,
+    policy: TrafficPolicy,
+) -> Result<PreparedTraceroute> {
     let resolved_destination = resolve_destination_with_reason(&opts.destination)?;
     let destination = resolved_destination.address;
     let mut plan = TrafficPlan::new(TrafficMode::Traceroute, classify_ip(destination));
@@ -86,7 +89,10 @@ fn traceroute_selection(
     }
 }
 
-pub async fn run_prepared(opts: &TracerouteRequest, prepared: PreparedTraceroute) -> Result<()> {
+pub(crate) async fn run_prepared(
+    opts: &TracerouteRequest,
+    prepared: PreparedTraceroute,
+) -> Result<()> {
     tokio::task::spawn_blocking({
         let opts = opts.clone();
         move || traceroute_blocking(&opts, prepared.destination, prepared.send_delay)

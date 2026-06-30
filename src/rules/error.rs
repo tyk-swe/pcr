@@ -7,7 +7,7 @@ use crate::rules::diagnostic::RuleDiagnostic;
 use crate::util::error::UtilError;
 
 #[derive(Debug, Error)]
-pub enum RuleError {
+pub(crate) enum RuleError {
     #[error("loaded rules file must contain at least one rule")]
     EmptyRulesFile,
     #[error("{context}: rule is missing at least one action")]
@@ -103,7 +103,7 @@ impl RuleError {
         }
     }
 
-    pub fn diagnostics(&self) -> Option<&[RuleDiagnostic]> {
+    pub(crate) fn diagnostics(&self) -> Option<&[RuleDiagnostic]> {
         match self {
             RuleError::Validation { diagnostics, .. } => Some(diagnostics),
             _ => None,
@@ -119,7 +119,7 @@ fn rule_context(rule_index: usize, rule_name: Option<&str>) -> String {
 }
 
 #[derive(Debug, Error)]
-pub enum RuleActionError {
+pub(crate) enum RuleActionError {
     #[error("log action requires a non-empty message")]
     EmptyLogMessage,
     #[error("command action requires a program to execute")]
@@ -176,7 +176,7 @@ pub enum RuleActionError {
 }
 
 #[derive(Debug, Error)]
-pub enum MatcherError {
+pub(crate) enum MatcherError {
     #[error("complex matcher must define at least one of: contains, equals, starts_with, ends_with, regex")]
     MissingDefinition,
     #[error(

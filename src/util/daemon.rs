@@ -11,7 +11,7 @@ use log::info;
 /// When `foreground` is `false`, the process detaches using the `daemonize` crate
 /// (Unix platforms only). On unsupported platforms the caller receives an error
 /// instructing them to use foreground mode instead.
-pub fn ensure_daemonized(foreground: bool) -> Result<()> {
+pub(crate) fn ensure_daemonized(foreground: bool) -> Result<()> {
     if foreground {
         info!("Running daemon in foreground mode");
         return Ok(());

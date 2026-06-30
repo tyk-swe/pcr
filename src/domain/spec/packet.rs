@@ -20,7 +20,7 @@ use super::transmission::TransmissionSpec;
 use super::transport::TransportSpec;
 
 #[derive(Debug, Clone, Default)]
-pub struct PacketSpec {
+pub(crate) struct PacketSpec {
     pub target: DestinationSpec,
     pub layer2: Layer2Spec,
     pub ip: Option<IpSpec>,
@@ -34,7 +34,7 @@ pub struct PacketSpec {
 }
 
 impl PacketSpec {
-    pub fn from_request(request: &PacketRequest) -> SpecResult<Self> {
+    pub(crate) fn from_request(request: &PacketRequest) -> SpecResult<Self> {
         let target = DestinationSpec::from_request(&request.destination)?;
         let layer2 = Layer2Spec::from_request(&request.layer2)?;
         let ip = IpSpec::from_request(&request.ip)?;
@@ -164,5 +164,190 @@ impl PacketSpec {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{
+        FragmentRequest, Layer2Request, PacketRequest, PayloadRequest, TcpRequest,
+        TransportProtocolRequest, TransportRequest, VlanRequest,
+    };
+
+    fn request_with_destination_ip(destination_ip: &str) -> PacketRequest {
+        PacketRequest {
+            ip: crate::domain::request::IpRequest {
+                destination_ip: Some(destination_ip.to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn spec_from(request: PacketRequest) -> Result<PacketSpec, SpecError> {
+        PacketSpec::from_request(&request)
+    }
+
+    #[test]
+    fn applies_ipv6_layer3_default_without_layer2_hints() {
+        let spec = spec_from(request_with_destination_ip("2001:db8::1")).unwrap();
+
+        assert!(spec.transmit.auto_layer3);
+        assert!(spec.transmit.is_layer3());
+    }
+
+    #[test]
+    fn rejects_target_version_mismatches() {
+        let mut request = request_with_destination_ip("2001:db8::1");
+        request.layer2.ethertype = Some("ipv4".to_string());
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::EtherTypeIpVersionMismatch {
+                target_version: 6,
+                ..
+            })
+        ));
+
+        let mut request = request_with_destination_ip("2001:db8::1");
+        request.ip.source_ip = Some("192.0.2.10".to_string());
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::SourceIpVersionMismatch {
+                target_version: 6,
+                ..
+            })
+        ));
+
+        let mut request = request_with_destination_ip("192.0.2.10");
+        request.ip.prefer_ipv6 = Some(true);
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::TargetIpVersionPreferenceMismatch {
+                prefer_version: 6,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_ipv4_and_ipv6_option_mismatches() {
+        let mut request = request_with_destination_ip("2001:db8::1");
+        request.ip.identification = Some(10);
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::IpV4OptionWithIpV6Target { option: "--id" })
+        ));
+
+        let mut request = request_with_destination_ip("192.0.2.10");
+        request.ipv6.extensions = vec!["hop-by-hop".to_string()];
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::IpV6OptionWithIpV4Target {
+                option: "--ipv6-ext"
+            })
+        ));
+    }
+
+    #[test]
+    fn rejects_vlan_options_without_vlan_id() {
+        let request = PacketRequest {
+            layer2: Layer2Request {
+                vlan: VlanRequest {
+                    priority: Some(1),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::VlanPriorityRequiresId)
+        ));
+    }
+
+    #[test]
+    fn rejects_multiple_payload_sources() {
+        let request = PacketRequest {
+            payload: PayloadRequest {
+                data: Some("hello".to_string()),
+                data_hex: Some("6869".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::MultiplePayloadSources)
+        ));
+    }
+
+    #[test]
+    fn infers_transport_from_ports_and_ip_version() {
+        let spec = spec_from(request_with_destination_ip("192.0.2.10")).unwrap();
+        assert!(matches!(spec.transport, TransportSpec::Icmp(_)));
+
+        let spec = spec_from(request_with_destination_ip("2001:db8::1")).unwrap();
+        assert!(matches!(spec.transport, TransportSpec::Icmpv6(_)));
+
+        let mut request = request_with_destination_ip("192.0.2.10");
+        request.transport.destination_port = Some(53);
+        let spec = spec_from(request).unwrap();
+        assert!(matches!(spec.transport, TransportSpec::Udp(_)));
+    }
+
+    #[test]
+    fn validates_tcp_flags() {
+        let mut request = request_with_destination_ip("192.0.2.10");
+        request.transport = TransportRequest {
+            command: Some(TransportProtocolRequest::Tcp(TcpRequest {
+                flags: Some("SS".to_string()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::DuplicateTcpFlag { flag: 'S' })
+        ));
+
+        let mut request = request_with_destination_ip("192.0.2.10");
+        request.transport = TransportRequest {
+            command: Some(TransportProtocolRequest::Tcp(TcpRequest {
+                flags: Some("Z".to_string()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::UnsupportedTcpFlag { flag: 'Z' })
+        ));
+    }
+
+    #[test]
+    fn ipv6_fragment_id_prefers_ipv6_but_rejects_ipv4_target() {
+        let mut request = PacketRequest {
+            ip: crate::domain::request::IpRequest {
+                fragment: FragmentRequest {
+                    fragment_id: Some(42),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(request.prefer_ipv6_hint(), Some(true));
+
+        request.ip.destination_ip = Some("192.0.2.10".to_string());
+        assert!(matches!(
+            spec_from(request),
+            Err(SpecError::IpV6OptionWithIpV4Target {
+                option: "--frag-id"
+            })
+        ));
     }
 }

@@ -22,7 +22,7 @@ pub(crate) enum IpVersionPair {
 pub(crate) type Result<T> = std::result::Result<T, ChecksumError>;
 
 #[derive(Debug, Error)]
-pub enum ChecksumError {
+pub(crate) enum ChecksumError {
     #[error("source and destination IP versions must match for checksum calculation")]
     IpVersionMismatch,
     #[error("source and destination must both be IPv6 for ICMPv6 checksum calculation")]

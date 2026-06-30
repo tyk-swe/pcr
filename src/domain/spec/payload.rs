@@ -11,7 +11,7 @@ const DNS_MAX_NAME_LEN: usize = 253;
 const DNS_MAX_LABEL_LEN: usize = 63;
 
 #[derive(Debug, Clone, Default)]
-pub struct PayloadSpec {
+pub(crate) struct PayloadSpec {
     pub source: PayloadSource,
 }
 
@@ -162,7 +162,7 @@ fn validate_dns_hostname(field: &'static str, value: &str, allow_root: bool) -> 
 }
 
 #[derive(Debug, Clone, Default)]
-pub enum PayloadSource {
+pub(crate) enum PayloadSource {
     #[default]
     Empty,
     Inline(String),

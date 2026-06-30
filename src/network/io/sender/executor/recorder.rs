@@ -11,7 +11,7 @@ use crate::network::sender::error::{ExecutorError, Result};
 
 #[cfg(feature = "pcap")]
 use super::super::types::LinkType;
-use super::super::types::TransmissionPlan;
+use super::super::types::NetworkTransmissionPlan;
 
 pub(super) struct PacketRecorder {
     #[cfg(feature = "pcap")]
@@ -19,7 +19,7 @@ pub(super) struct PacketRecorder {
 }
 
 impl PacketRecorder {
-    pub(super) fn for_plan(plan: &TransmissionPlan) -> Result<Self> {
+    pub(super) fn for_plan(plan: &NetworkTransmissionPlan) -> Result<Self> {
         #[cfg(feature = "pcap")]
         {
             let capture = if let Some(path) = plan.logging.pcap_write.as_ref() {

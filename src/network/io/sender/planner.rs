@@ -20,26 +20,26 @@ use super::layer2::{resolve_layer2_ipv4, resolve_layer2_ipv6, Layer2Resolved};
 use super::payload::prepare_payload;
 use super::transport::{build_transport_segment, TransportBuild};
 use super::types::{
-    InterfaceSelectionReason, LinkType, NetworkTarget, PlanningMode, SelectionMetadata,
-    TransmissionPlan, TransmissionSummary,
+    InterfaceSelectionReason, LinkType, NetworkTarget, NetworkTransmissionPlan, PlanningMode,
+    SelectionMetadata, TransmissionSummary,
 };
 
 #[cfg(feature = "fuzz")]
-pub fn plan_transmission(spec: &PacketSpec) -> Result<TransmissionPlan> {
+pub(crate) fn plan_transmission(spec: &PacketSpec) -> Result<NetworkTransmissionPlan> {
     plan_transmission_with_policy(spec, TransmissionPolicy::default())
 }
 
-pub fn plan_transmission_with_policy(
+pub(crate) fn plan_transmission_with_policy(
     spec: &PacketSpec,
     policy: TransmissionPolicy,
-) -> Result<TransmissionPlan> {
+) -> Result<NetworkTransmissionPlan> {
     plan_transmission_with_mode(spec, PlanningMode::Live, policy)
 }
 
-pub fn plan_transmission_dry_run_with_policy(
+pub(crate) fn plan_transmission_dry_run_with_policy(
     spec: &PacketSpec,
     policy: TransmissionPolicy,
-) -> Result<TransmissionPlan> {
+) -> Result<NetworkTransmissionPlan> {
     plan_transmission_with_mode(spec, PlanningMode::DryRun, policy)
 }
 
@@ -47,7 +47,7 @@ fn plan_transmission_with_mode(
     spec: &PacketSpec,
     mode: PlanningMode,
     policy: TransmissionPolicy,
-) -> Result<TransmissionPlan> {
+) -> Result<NetworkTransmissionPlan> {
     info!("Preparing packet for {}", format_target(&spec.target));
 
     let selected = select_interface_with_reason(spec)?;
@@ -66,7 +66,7 @@ fn plan_transmission_with_interface_and_reason(
     interface_reason: InterfaceSelectionReason,
     mode: PlanningMode,
     policy: TransmissionPolicy,
-) -> Result<TransmissionPlan> {
+) -> Result<NetworkTransmissionPlan> {
     info!("Using interface {}", interface.name);
 
     enforce_feature_constraints(spec)?;
@@ -112,7 +112,7 @@ fn plan_transmission_with_interface_and_reason(
     } = transport;
     let summary = build_summary(&context, &frames, label);
 
-    let plan = TransmissionPlan {
+    let plan = NetworkTransmissionPlan {
         frames,
         link_type,
         transmit,

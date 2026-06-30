@@ -11,7 +11,7 @@ use crate::domain::request::DestinationRequest;
 use super::utils::parse_ip_address;
 
 #[derive(Debug, Clone, Default)]
-pub struct DestinationSpec {
+pub(crate) struct DestinationSpec {
     pub address: Option<TargetAddress>,
     pub interface: Option<String>,
 }
@@ -40,7 +40,7 @@ impl DestinationSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TargetAddress {
+pub(crate) enum TargetAddress {
     Ip(IpAddr),
     Host(String),
     ResolvedHost { host: String, ip: IpAddr },

@@ -10,7 +10,7 @@ use crate::domain::spec::{PacketSpec, PayloadSource, TransportSpec};
 use super::format::format_preview;
 
 #[derive(Debug, Clone, Serialize)]
-pub struct PreflightReport {
+pub(super) struct PreflightReport {
     pub destination: String,
     pub protocol: &'static str,
     pub count: Option<u64>,

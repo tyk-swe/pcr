@@ -1,8 +1,6 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#[cfg(feature = "pcap")]
-use pcap;
 use thiserror::Error;
 #[cfg(feature = "pcap")]
 use tokio::task::JoinError;
@@ -11,7 +9,7 @@ use tokio::task::JoinError;
 use crate::network::interface::InterfaceError;
 
 #[derive(Debug, Error)]
-pub enum ListenerError {
+pub(crate) enum ListenerError {
     #[cfg(not(feature = "pcap"))]
     #[error("listener capture requires PacketcraftR to be built with the 'pcap' feature")]
     ListenerRequiresPcap,

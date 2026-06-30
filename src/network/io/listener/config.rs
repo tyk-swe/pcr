@@ -14,7 +14,7 @@ use crate::domain::spec::ListenerSpec;
 use super::error::ListenerError;
 
 #[derive(Clone, Debug)]
-pub struct ListenerRuntimeConfig {
+pub(crate) struct ListenerRuntimeConfig {
     pub filter: Option<String>,
     pub promiscuous: bool,
     pub timeout: Option<Duration>,
@@ -24,7 +24,7 @@ pub struct ListenerRuntimeConfig {
 }
 
 impl ListenerRuntimeConfig {
-    pub fn from_request(options: &ListenerRequest) -> Result<Self, ListenerError> {
+    pub(crate) fn from_request(options: &ListenerRequest) -> Result<Self, ListenerError> {
         #[cfg(not(feature = "pcap"))]
         if let Some(requirement) =
             crate::domain::listener_config::runtime_request_pcap_requirement(options)
@@ -58,7 +58,7 @@ impl ListenerRuntimeConfig {
     }
 
     #[cfg(feature = "pcap")]
-    pub fn from_spec(spec: &ListenerSpec) -> Result<Self, ListenerError> {
+    pub(crate) fn from_spec(spec: &ListenerSpec) -> Result<Self, ListenerError> {
         let queue_capacity =
             normalize_queue_capacity(spec.queue_capacity).map_err(queue_capacity_spec_error)?;
 

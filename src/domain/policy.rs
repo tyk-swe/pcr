@@ -10,14 +10,14 @@ use thiserror::Error;
 use crate::domain::request::{PacketRequest, TransmissionRequest};
 use crate::domain::spec::{Ipv6ExtHeader, PacketSpec, TargetAddress, TransportSpec};
 
-pub const DEFAULT_MAX_TARGETS: usize = 256;
-pub const DEFAULT_MAX_PORTS: usize = 1024;
-pub const DEFAULT_MAX_ESTIMATED_PACKETS: u64 = 4096;
-pub const DEFAULT_MAX_BATCH_SIZE: usize = 256;
-pub const DEFAULT_MAX_RATE_PER_SEC: u64 = 100;
+pub(crate) const DEFAULT_MAX_TARGETS: usize = 256;
+pub(crate) const DEFAULT_MAX_PORTS: usize = 1024;
+pub(crate) const DEFAULT_MAX_ESTIMATED_PACKETS: u64 = 4096;
+pub(crate) const DEFAULT_MAX_BATCH_SIZE: usize = 256;
+pub(crate) const DEFAULT_MAX_RATE_PER_SEC: u64 = 100;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrafficBudget {
+pub(crate) struct TrafficBudget {
     pub max_targets: usize,
     pub max_ports: usize,
     pub max_estimated_packets: u64,
@@ -38,7 +38,7 @@ impl Default for TrafficBudget {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub struct TrafficPolicy {
+pub(crate) struct TrafficPolicy {
     pub allow_public_targets: bool,
     pub allow_malformed: bool,
     pub allow_high_volume: bool,
@@ -48,7 +48,7 @@ pub struct TrafficPolicy {
 }
 
 impl TrafficPolicy {
-    pub fn new(allow_unbounded_sends: bool, dry_run: bool) -> Self {
+    pub(crate) fn new(allow_unbounded_sends: bool, dry_run: bool) -> Self {
         Self {
             allow_unbounded_sends,
             dry_run,
@@ -56,12 +56,12 @@ impl TrafficPolicy {
         }
     }
 
-    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+    pub(crate) fn with_dry_run(mut self, dry_run: bool) -> Self {
         self.dry_run = dry_run;
         self
     }
 
-    pub fn authorize(&self, plan: &TrafficPlan) -> Result<PolicyOutcome, PolicyRejection> {
+    pub(crate) fn authorize(&self, plan: &TrafficPlan) -> Result<PolicyOutcome, PolicyRejection> {
         if plan.target_count == 0
             || plan.port_count == 0
             || matches!(plan.estimated_packets, Some(0))
@@ -157,7 +157,7 @@ impl TrafficPolicy {
         Ok(PolicyOutcome::allowed())
     }
 
-    pub fn validate_configuration(&self) -> Result<(), PolicyRejection> {
+    pub(crate) fn validate_configuration(&self) -> Result<(), PolicyRejection> {
         let default = TrafficBudget::default();
         let raises_default = self.budget.max_targets > default.max_targets
             || self.budget.max_ports > default.max_ports
@@ -175,7 +175,7 @@ impl TrafficPolicy {
         Ok(())
     }
 
-    pub fn rate_delay(&self) -> Option<std::time::Duration> {
+    pub(crate) fn rate_delay(&self) -> Option<std::time::Duration> {
         if self.budget.max_rate_per_sec == 0 {
             return None;
         }
@@ -185,10 +185,10 @@ impl TrafficPolicy {
     }
 }
 
-pub type TransmissionPolicy = TrafficPolicy;
+pub(crate) type TransmissionPolicy = TrafficPolicy;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrafficPlan {
+pub(crate) struct TrafficPlan {
     pub mode: TrafficMode,
     pub target_scope: TargetScope,
     pub target_count: usize,
@@ -204,7 +204,7 @@ pub struct TrafficPlan {
 }
 
 impl TrafficPlan {
-    pub fn new(mode: TrafficMode, target_scope: TargetScope) -> Self {
+    pub(crate) fn new(mode: TrafficMode, target_scope: TargetScope) -> Self {
         Self {
             mode,
             target_scope,
@@ -220,7 +220,7 @@ impl TrafficPlan {
         }
     }
 
-    pub fn from_packet_request(
+    pub(crate) fn from_packet_request(
         request: &PacketRequest,
         mode: TrafficMode,
         policy: &TrafficPolicy,
@@ -248,7 +248,7 @@ impl TrafficPlan {
         }
     }
 
-    pub fn exceeds_recommended_defaults(&self) -> bool {
+    pub(crate) fn exceeds_recommended_defaults(&self) -> bool {
         self.target_count > DEFAULT_MAX_TARGETS
             || self.port_count > DEFAULT_MAX_PORTS
             || self
@@ -264,21 +264,21 @@ impl TrafficPlan {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrafficSelection {
+pub(crate) struct TrafficSelection {
     pub interface: Option<TrafficSelectionValue>,
     pub source: Option<TrafficSelectionValue>,
     pub destination: Option<TrafficSelectionValue>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TrafficSelectionValue {
+pub(crate) struct TrafficSelectionValue {
     pub value: Option<String>,
     pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TrafficMode {
+pub(crate) enum TrafficMode {
     Send,
     RuleSend,
     Scan,
@@ -301,7 +301,7 @@ impl fmt::Display for TrafficMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TargetScope {
+pub(crate) enum TargetScope {
     Local,
     Private,
     Documentation,
@@ -324,31 +324,31 @@ impl fmt::Display for TargetScope {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TrafficPrivilege {
+pub(crate) enum TrafficPrivilege {
     RawSocket,
     Datalink,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct PolicyOutcome {
+pub(crate) struct PolicyOutcome {
     pub status: &'static str,
 }
 
 impl PolicyOutcome {
-    pub fn allowed() -> Self {
+    pub(crate) fn allowed() -> Self {
         Self { status: "allowed" }
     }
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[error("{code}: {message}")]
-pub struct PolicyRejection {
+pub(crate) struct PolicyRejection {
     pub code: PolicyRejectionCode,
     pub message: String,
 }
 
 impl PolicyRejection {
-    pub fn new(message_code: PolicyRejectionCode, message: impl Into<String>) -> Self {
+    pub(crate) fn new(message_code: PolicyRejectionCode, message: impl Into<String>) -> Self {
         Self {
             code: message_code,
             message: message.into(),
@@ -358,7 +358,7 @@ impl PolicyRejection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PolicyRejectionCode {
+pub(crate) enum PolicyRejectionCode {
     PublicTarget,
     MalformedRequiresOptIn,
     HighVolumeRequiresOptIn,
@@ -389,7 +389,7 @@ impl fmt::Display for PolicyRejectionCode {
     }
 }
 
-pub fn validate_unbounded_request_policy(
+pub(crate) fn validate_unbounded_request_policy(
     request: &TransmissionRequest,
     policy: TransmissionPolicy,
 ) -> Result<(), PolicyRejection> {
@@ -406,14 +406,14 @@ pub fn validate_unbounded_request_policy(
         .map(|_| ())
 }
 
-pub fn classify_ip(addr: IpAddr) -> TargetScope {
+pub(crate) fn classify_ip(addr: IpAddr) -> TargetScope {
     match addr {
         IpAddr::V4(addr) => classify_ipv4(addr),
         IpAddr::V6(addr) => classify_ipv6(addr),
     }
 }
 
-pub fn combine_target_scopes(scopes: impl IntoIterator<Item = TargetScope>) -> TargetScope {
+pub(crate) fn combine_target_scopes(scopes: impl IntoIterator<Item = TargetScope>) -> TargetScope {
     let mut combined = TargetScope::Unspecified;
     for scope in scopes {
         combined = match (combined, scope) {
@@ -429,7 +429,7 @@ pub fn combine_target_scopes(scopes: impl IntoIterator<Item = TargetScope>) -> T
     combined
 }
 
-pub fn packet_spec_target_scope(spec: &PacketSpec) -> TargetScope {
+pub(crate) fn packet_spec_target_scope(spec: &PacketSpec) -> TargetScope {
     let mut scopes = Vec::new();
 
     if let Some(ip) = spec.ip.as_ref().and_then(|ip| ip.destination) {
@@ -454,7 +454,7 @@ pub fn packet_spec_target_scope(spec: &PacketSpec) -> TargetScope {
     combine_target_scopes(scopes)
 }
 
-pub fn packet_spec_uses_malformed_options(spec: &PacketSpec) -> bool {
+pub(crate) fn packet_spec_uses_malformed_options(spec: &PacketSpec) -> bool {
     spec.ip
         .as_ref()
         .map(|ip| {
@@ -465,7 +465,7 @@ pub fn packet_spec_uses_malformed_options(spec: &PacketSpec) -> bool {
         .unwrap_or(false)
 }
 
-pub fn packet_spec_privileges(spec: &PacketSpec) -> Vec<TrafficPrivilege> {
+pub(crate) fn packet_spec_privileges(spec: &PacketSpec) -> Vec<TrafficPrivilege> {
     let requires_raw = spec.layer2.source.is_some()
         || spec.layer2.destination.is_some()
         || matches!(
@@ -577,4 +577,66 @@ fn classify_ipv6(addr: Ipv6Addr) -> TargetScope {
     }
 
     TargetScope::Public
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_public_targets_without_opt_in() {
+        let plan = TrafficPlan::new(TrafficMode::Send, TargetScope::Public);
+
+        let rejection = TrafficPolicy::default().authorize(&plan).unwrap_err();
+        assert_eq!(rejection.code, PolicyRejectionCode::PublicTarget);
+    }
+
+    #[test]
+    fn rejects_malformed_traffic_without_opt_in() {
+        let mut plan = TrafficPlan::new(TrafficMode::Send, TargetScope::Documentation);
+        plan.malformed = true;
+
+        let rejection = TrafficPolicy::default().authorize(&plan).unwrap_err();
+        assert_eq!(rejection.code, PolicyRejectionCode::MalformedRequiresOptIn);
+    }
+
+    #[test]
+    fn rejects_high_volume_plans_and_cap_overrides_without_opt_in() {
+        let mut plan = TrafficPlan::new(TrafficMode::Send, TargetScope::Documentation);
+        plan.estimated_packets = Some(DEFAULT_MAX_ESTIMATED_PACKETS + 1);
+
+        let rejection = TrafficPolicy::default().authorize(&plan).unwrap_err();
+        assert_eq!(rejection.code, PolicyRejectionCode::HighVolumeRequiresOptIn);
+
+        let policy = TrafficPolicy {
+            budget: TrafficBudget {
+                max_estimated_packets: DEFAULT_MAX_ESTIMATED_PACKETS + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let rejection = policy.validate_configuration().unwrap_err();
+        assert_eq!(rejection.code, PolicyRejectionCode::HighVolumeRequiresOptIn);
+    }
+
+    #[test]
+    fn accepts_policy_opt_ins() {
+        let mut plan = TrafficPlan::new(TrafficMode::Send, TargetScope::Public);
+        plan.malformed = true;
+        plan.estimated_packets = Some(DEFAULT_MAX_ESTIMATED_PACKETS + 1);
+
+        let policy = TrafficPolicy {
+            allow_public_targets: true,
+            allow_malformed: true,
+            allow_high_volume: true,
+            budget: TrafficBudget {
+                max_estimated_packets: DEFAULT_MAX_ESTIMATED_PACKETS + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert!(policy.authorize(&plan).is_ok());
+        assert!(policy.validate_configuration().is_ok());
+    }
 }

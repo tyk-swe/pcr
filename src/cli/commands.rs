@@ -22,7 +22,7 @@ use crate::domain::command::DnsTransportMode;
 
 /// Global operation modes.
 #[derive(Debug, Subcommand)]
-pub enum PacketcraftCommand {
+pub(crate) enum PacketcraftCommand {
     /// Send a finite packet request.
     Send(SendOptions),
     /// Preview a packet request without transmitting.
@@ -52,7 +52,7 @@ pub enum PacketcraftCommand {
 
 #[cfg(feature = "fuzz")]
 #[derive(Debug, Args, Clone)]
-pub struct FuzzOptions {
+pub(crate) struct FuzzOptions {
     /// Target IP address (IPv4/IPv6).
     #[arg(long = "target")]
     pub target: String,
@@ -84,7 +84,7 @@ pub struct FuzzOptions {
 
 #[cfg(feature = "fuzz")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum FuzzProtocol {
+pub(crate) enum FuzzProtocol {
     /// Fuzz TCP protocol fields.
     Tcp,
     /// Fuzz UDP payload and headers.
@@ -95,7 +95,7 @@ pub enum FuzzProtocol {
 
 #[cfg(feature = "fuzz")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum FuzzStrategy {
+pub(crate) enum FuzzStrategy {
     /// Randomly flip bits in the payload.
     BitFlip,
     /// Randomly swap bytes in the payload.
@@ -109,7 +109,7 @@ pub enum FuzzStrategy {
 }
 
 #[derive(Debug, Args, Clone, Default)]
-pub struct DnsQueryOptions {
+pub(crate) struct DnsQueryOptions {
     /// Domain to query.
     #[arg(long = "domain")]
     pub domain: String,
@@ -135,7 +135,7 @@ pub struct DnsQueryOptions {
 
 #[cfg(feature = "repl")]
 #[derive(Debug, Args)]
-pub struct InteractiveOptions {
+pub(crate) struct InteractiveOptions {
     /// Preload a script file.
     #[arg(long = "script")]
     pub script: Option<String>,
@@ -153,7 +153,7 @@ pub struct InteractiveOptions {
 
 #[cfg(feature = "daemon")]
 #[derive(Debug, Args)]
-pub struct DaemonOptions {
+pub(crate) struct DaemonOptions {
     #[command(flatten)]
     pub rule_options: RuleOptions,
     /// Run in the foreground.
@@ -174,7 +174,7 @@ pub struct DaemonOptions {
 
 #[cfg(feature = "pcap")]
 #[derive(Debug, Args)]
-pub struct ListenCommandOptions {
+pub(crate) struct ListenCommandOptions {
     #[command(flatten, next_help_heading = "Listener configuration")]
     pub listen: ListenOptions,
     /// Continue listening after timeout.
@@ -191,7 +191,7 @@ pub struct ListenCommandOptions {
 
 #[cfg(feature = "traceroute")]
 #[derive(Debug, Args, Clone, Default)]
-pub struct TracerouteOptions {
+pub(crate) struct TracerouteOptions {
     /// Target destination.
     #[arg(long = "dest")]
     pub destination: String,
@@ -221,7 +221,7 @@ pub struct TracerouteOptions {
 
 #[cfg(feature = "traceroute")]
 #[derive(Debug, Copy, Clone, ValueEnum, Default)]
-pub enum TracerouteProtocol {
+pub(crate) enum TracerouteProtocol {
     /// Use UDP probes.
     #[default]
     Udp,
@@ -233,7 +233,7 @@ pub enum TracerouteProtocol {
 
 #[cfg(feature = "scan")]
 #[derive(Debug, Args, Clone)]
-pub struct PortScanOptions {
+pub(crate) struct PortScanOptions {
     /// Target IP or CIDR (e.g., 192.168.1.0/24).
     #[arg(long = "target")]
     pub target: String,
@@ -250,7 +250,7 @@ pub struct PortScanOptions {
 
 #[cfg(feature = "scan")]
 #[derive(Debug, Args, Clone)]
-pub struct TimedScanOptions {
+pub(crate) struct TimedScanOptions {
     /// Target IP or CIDR (e.g., 192.168.1.0/24).
     #[arg(long = "target")]
     pub target: String,
@@ -267,7 +267,7 @@ pub struct TimedScanOptions {
 
 #[cfg(feature = "scan")]
 #[derive(Debug, Subcommand)]
-pub enum ScanCommand {
+pub(crate) enum ScanCommand {
     /// Perform a TCP SYN scan (half-open).
     #[command(name = "tcp-syn")]
     TcpSyn(PortScanOptions),

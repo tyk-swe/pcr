@@ -5,16 +5,16 @@ use std::fmt;
 
 use crate::rules::rule::Rule;
 
-pub const RULE_PARSE_UNKNOWN_FIELD: &str = "RULE_PARSE_UNKNOWN_FIELD";
+pub(crate) const RULE_PARSE_UNKNOWN_FIELD: &str = "RULE_PARSE_UNKNOWN_FIELD";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuleDiagnosticSeverity {
+pub(crate) enum RuleDiagnosticSeverity {
     Warning,
     Error,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RuleDiagnostic {
+pub(crate) struct RuleDiagnostic {
     pub code: &'static str,
     pub severity: RuleDiagnosticSeverity,
     pub path: String,
@@ -31,7 +31,7 @@ impl RuleDiagnostic {
         }
     }
 
-    pub fn is_error(&self) -> bool {
+    pub(crate) fn is_error(&self) -> bool {
         matches!(self.severity, RuleDiagnosticSeverity::Error)
     }
 }
@@ -43,7 +43,7 @@ impl fmt::Display for RuleDiagnostic {
 }
 
 #[derive(Debug, Clone)]
-pub struct RuleLoadReport {
+pub(crate) struct RuleLoadReport {
     pub diagnostics: Vec<RuleDiagnostic>,
     rules: Vec<Rule>,
 }
@@ -53,15 +53,15 @@ impl RuleLoadReport {
         Self { diagnostics, rules }
     }
 
-    pub fn diagnostics(&self) -> &[RuleDiagnostic] {
+    pub(crate) fn diagnostics(&self) -> &[RuleDiagnostic] {
         &self.diagnostics
     }
 
-    pub fn rule_count(&self) -> usize {
+    pub(crate) fn rule_count(&self) -> usize {
         self.rules.len()
     }
 
-    pub fn has_errors(&self) -> bool {
+    pub(crate) fn has_errors(&self) -> bool {
         self.diagnostics.iter().any(RuleDiagnostic::is_error)
     }
 
@@ -76,7 +76,7 @@ impl RuleLoadReport {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RuleLoadOptions {
+pub(crate) struct RuleLoadOptions {
     pub strict: bool,
     pub log_diagnostics: bool,
 }
@@ -91,19 +91,19 @@ impl Default for RuleLoadOptions {
 }
 
 impl RuleLoadOptions {
-    pub fn strict() -> Self {
+    pub(crate) fn strict() -> Self {
         Self {
             strict: true,
             ..Self::default()
         }
     }
 
-    pub fn with_strict(mut self, strict: bool) -> Self {
+    pub(crate) fn with_strict(mut self, strict: bool) -> Self {
         self.strict = strict;
         self
     }
 
-    pub fn with_diagnostic_logging(mut self, log_diagnostics: bool) -> Self {
+    pub(crate) fn with_diagnostic_logging(mut self, log_diagnostics: bool) -> Self {
         self.log_diagnostics = log_diagnostics;
         self
     }

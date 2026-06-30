@@ -8,12 +8,12 @@ use thiserror::Error;
 ///
 /// Keeping this helper centralises the wording and makes it harder to regress on the
 /// agreed format when we add new error contexts across the codebase.
-pub fn operation_failed(operation: &str, details: impl fmt::Display) -> String {
+pub(crate) fn operation_failed(operation: &str, details: impl fmt::Display) -> String {
     format!("{operation} failed: {details}")
 }
 
 #[derive(Debug, Error)]
-pub enum UtilError {
+pub(crate) enum UtilError {
     #[error("filesystem error for '{path}'")]
     Filesystem {
         path: String,

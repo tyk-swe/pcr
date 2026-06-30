@@ -5,11 +5,11 @@ use anyhow::Error as AnyhowError;
 use thiserror::Error;
 
 /// Result type for engine operations
-pub type EngineResult<T> = std::result::Result<T, EngineError>;
+pub(crate) type EngineResult<T> = std::result::Result<T, EngineError>;
 
 /// Errors that can occur during engine operations
 #[derive(Error, Debug)]
-pub enum EngineError {
+pub(crate) enum EngineError {
     #[error("failed to initialize rule engine: {0}")]
     RuleEngineInit(#[source] AnyhowError),
 
@@ -48,14 +48,14 @@ pub enum EngineError {
 }
 
 impl EngineError {
-    pub fn rule_load<S: Into<String>>(path: S, source: anyhow::Error) -> Self {
+    pub(crate) fn rule_load<S: Into<String>>(path: S, source: anyhow::Error) -> Self {
         Self::RuleLoad {
             path: path.into(),
             source,
         }
     }
 
-    pub fn transmission_plan<S: Into<String>>(msg: S) -> Self {
+    pub(crate) fn transmission_plan<S: Into<String>>(msg: S) -> Self {
         Self::TransmissionPlan(AnyhowError::msg(msg.into()))
     }
 }

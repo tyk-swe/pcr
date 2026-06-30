@@ -63,7 +63,7 @@ where
     }
 }
 
-pub fn run_icmp_traceroute_v4(
+pub(super) fn run_icmp_traceroute_v4(
     destination: Ipv4Addr,
     opts: &TracerouteRequest,
     send_delay: Option<std::time::Duration>,
@@ -162,7 +162,7 @@ where
     }
 }
 
-pub fn run_icmp_traceroute_v6(
+pub(super) fn run_icmp_traceroute_v6(
     destination: Ipv6Addr,
     opts: &TracerouteRequest,
     send_delay: Option<std::time::Duration>,

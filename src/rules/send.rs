@@ -7,16 +7,16 @@ use crate::rules::model::PacketContext;
 use crate::rules::template::{apply_template, render_option};
 
 #[derive(Debug, Clone)]
-pub struct RuleSendTemplate {
+pub(crate) struct RuleSendTemplate {
     request: PacketRequest,
 }
 
 impl RuleSendTemplate {
-    pub fn new(request: PacketRequest) -> Self {
+    pub(crate) fn new(request: PacketRequest) -> Self {
         Self { request }
     }
 
-    pub fn render(&self, packet: Option<&PacketContext>) -> PacketRequest {
+    pub(crate) fn render(&self, packet: Option<&PacketContext>) -> PacketRequest {
         let mut request = self.request.clone();
         render_option(&mut request.destination.destination, packet);
         render_option(&mut request.destination.destination_ip, packet);
@@ -61,7 +61,7 @@ fn render_vec(fields: &mut [String], packet: Option<&PacketContext>) {
     }
 }
 
-pub trait RuleSendDispatcher: std::fmt::Debug + Send + Sync {
+pub(crate) trait RuleSendDispatcher: std::fmt::Debug + Send + Sync {
     fn dispatch(
         &self,
         rule_name: &str,

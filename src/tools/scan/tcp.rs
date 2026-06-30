@@ -41,7 +41,7 @@ const TCP_PACKET_BUFFER_SIZE: usize = 256;
 const SCAN_DELAY: Duration = Duration::from_micros(100);
 
 /// Shared behavior for TCP scan variants such as SYN, FIN, NULL, XMAS, and ACK.
-pub trait TcpScanStrategy: Send + Sync + std::fmt::Debug {
+pub(super) trait TcpScanStrategy: Send + Sync + std::fmt::Debug {
     fn protocol_name(&self) -> &'static str;
     fn report_name(&self) -> &'static str;
     fn get_tcp_flags(&self) -> TcpFlagSet;
@@ -179,7 +179,7 @@ impl TcpScanStrategy for GenericTcpScan {
     }
 }
 
-pub async fn run_tcp_syn(
+pub(crate) async fn run_tcp_syn(
     target: &str,
     ports: &str,
     interface: &Option<String>,
@@ -197,7 +197,7 @@ pub async fn run_tcp_syn(
     .await
 }
 
-pub async fn run_tcp_fin(
+pub(crate) async fn run_tcp_fin(
     target: &str,
     ports: &str,
     interface: &Option<String>,
@@ -215,7 +215,7 @@ pub async fn run_tcp_fin(
     .await
 }
 
-pub async fn run_tcp_null(
+pub(crate) async fn run_tcp_null(
     target: &str,
     ports: &str,
     interface: &Option<String>,
@@ -233,7 +233,7 @@ pub async fn run_tcp_null(
     .await
 }
 
-pub async fn run_tcp_xmas(
+pub(crate) async fn run_tcp_xmas(
     target: &str,
     ports: &str,
     interface: &Option<String>,
@@ -251,7 +251,7 @@ pub async fn run_tcp_xmas(
     .await
 }
 
-pub async fn run_tcp_ack(
+pub(crate) async fn run_tcp_ack(
     target: &str,
     ports: &str,
     interface: &Option<String>,

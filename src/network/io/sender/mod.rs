@@ -18,15 +18,15 @@ mod planner;
 mod transport;
 mod types;
 
-pub use executor::execute_transmission;
+pub(crate) use executor::execute_transmission;
 
 pub(crate) use metrics::emit_metrics_snapshot;
 #[cfg(feature = "fuzz")]
-pub use planner::plan_transmission;
-pub use planner::{plan_transmission_dry_run_with_policy, plan_transmission_with_policy};
+pub(crate) use planner::plan_transmission;
+pub(crate) use planner::{plan_transmission_dry_run_with_policy, plan_transmission_with_policy};
 #[cfg(feature = "traceroute")]
 pub(crate) use transport::{build_icmpv6_segment, build_tcp_segment};
 #[cfg(feature = "scan")]
 pub(crate) use transport::{build_tcp_segment_optimized, finalize_udp_checksum, tcp_flags_value};
 
-pub use types::TransmissionPlan;
+pub(crate) use types::NetworkTransmissionPlan;

@@ -7,9 +7,9 @@ use serde_json::json;
 
 use super::control::emission_accounting;
 use super::error::{PlannerError, Result};
-use super::types::{NetworkTarget, TransmissionPlan};
+use super::types::{NetworkTarget, NetworkTransmissionPlan};
 
-pub(crate) fn emit_metrics_snapshot(plan: &TransmissionPlan) -> Result<()> {
+pub(crate) fn emit_metrics_snapshot(plan: &NetworkTransmissionPlan) -> Result<()> {
     let Some(path) = plan.logging.metrics_json.as_ref() else {
         return Ok(());
     };

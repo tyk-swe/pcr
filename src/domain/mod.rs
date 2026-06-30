@@ -1,12 +1,14 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub mod command;
-pub mod event;
+#![allow(dead_code)]
+
+pub(crate) mod command;
+pub(crate) mod event;
 pub(crate) mod listener_config;
-pub mod net;
-pub mod policy;
-pub mod report;
-pub mod request;
-pub mod spec;
-pub mod transmission;
+pub(crate) mod net;
+pub(crate) mod policy;
+pub(crate) mod report;
+pub(crate) mod request;
+pub(crate) mod spec;
+pub(crate) mod transmission;

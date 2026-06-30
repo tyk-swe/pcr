@@ -7,14 +7,14 @@ use pnet::packet::ip::IpNextHeaderProtocol;
 use crate::domain::policy::TransmissionPolicy;
 use crate::domain::spec::{LoggingSpec, TransmissionSpec};
 
-pub use crate::domain::transmission::{
+pub(super) use crate::domain::transmission::{
     DestinationSelectionReason, InterfaceSelectionReason, PlanningMode, SourceSelectionReason,
     TransmissionLinkType as LinkType, TransmissionSelection as SelectionMetadata,
     TransmissionSummary, TransmissionTarget as NetworkTarget,
 };
 
 #[derive(Debug, Clone)]
-pub struct TransmissionPlan {
+pub(crate) struct NetworkTransmissionPlan {
     pub frames: Vec<Vec<u8>>,
     pub link_type: LinkType,
     pub transmit: TransmissionSpec,

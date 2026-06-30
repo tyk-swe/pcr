@@ -40,7 +40,7 @@ const SCTP_INIT_CHUNK_TYPE: u8 = 1;
 const SCTP_INIT_ACK_CHUNK_TYPE: u8 = 2;
 const SCTP_ABORT_CHUNK_TYPE: u8 = 6;
 
-pub async fn run_sctp_init(
+pub(crate) async fn run_sctp_init(
     target: &str,
     ports: &str,
     interface: &Option<String>,

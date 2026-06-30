@@ -20,10 +20,10 @@ use crate::util::net::ResolveHostnameError;
 use super::control::SendControlError;
 use super::transport::TransportBuildError;
 
-pub type Result<T> = std::result::Result<T, SenderError>;
+pub(super) type Result<T> = std::result::Result<T, SenderError>;
 
 #[derive(Debug, Error)]
-pub enum SenderError {
+pub(crate) enum SenderError {
     #[error(transparent)]
     Fragment(#[from] FragmentError),
     #[error(transparent)]
@@ -51,7 +51,7 @@ pub enum SenderError {
 }
 
 #[derive(Debug, Error)]
-pub enum FragmentError {
+pub(crate) enum FragmentError {
     #[error("fragment offset {offset} is not aligned to 8-byte boundary")]
     Misaligned { offset: usize },
     #[error("MTU {mtu} too small to carry {context}")]
@@ -67,7 +67,7 @@ pub enum FragmentError {
 }
 
 #[derive(Debug, Error)]
-pub enum Ipv4Error {
+pub(crate) enum Ipv4Error {
     #[error("failed to generate any IPv4 fragments")]
     NoFragments,
     #[error("IPv4 fragment length {length} exceeds protocol maximum of {max} bytes; enable fragmentation or reduce the payload")]
@@ -79,7 +79,7 @@ pub enum Ipv4Error {
 }
 
 #[derive(Debug, Error)]
-pub enum Ipv6Error {
+pub(crate) enum Ipv6Error {
     #[error("IPv6 'dont_fragment' option cannot be combined with fragmentation directives")]
     DontFragmentConflict,
     #[error("failed to generate any IPv6 fragments")]
@@ -111,7 +111,7 @@ pub enum Ipv6Error {
 }
 
 #[derive(Debug, Error)]
-pub enum Layer2Error {
+pub(crate) enum Layer2Error {
     #[error("interface {interface} has no MAC address; specify --smac explicitly")]
     MissingInterfaceMac { interface: String },
     #[error("failed to allocate Ethernet frame")]
@@ -121,7 +121,7 @@ pub enum Layer2Error {
 }
 
 #[derive(Debug, Error)]
-pub enum HeaderError {
+pub(crate) enum HeaderError {
     #[error("failed to allocate IPv4 packet")]
     Ipv4AllocationFailed,
     #[error("failed to allocate IPv6 packet")]
@@ -129,7 +129,7 @@ pub enum HeaderError {
 }
 
 #[derive(Debug, Error)]
-pub enum PlannerError {
+pub(crate) enum PlannerError {
     #[cfg(not(feature = "pcap"))]
     #[error("--pcap-write requires Packetcraft to be built with the 'pcap' feature")]
     PcapFeatureRequired,
@@ -158,7 +158,7 @@ pub enum PlannerError {
 }
 
 #[derive(Debug, Error)]
-pub enum ExecutorError {
+pub(crate) enum ExecutorError {
     #[cfg(not(feature = "pcap"))]
     #[error(
         "packet capture output ({path}) requires Packetcraft to be built with the 'pcap' feature"
@@ -235,7 +235,7 @@ pub enum ExecutorError {
 }
 
 #[derive(Debug, Error)]
-pub enum PayloadError {
+pub(crate) enum PayloadError {
     #[error("hex payload must contain an even number of hexadecimal characters")]
     HexLength,
     #[error("invalid hex byte '{byte:02x}'")]
@@ -252,7 +252,7 @@ pub enum PayloadError {
 }
 
 #[derive(Debug, Error)]
-pub enum InterfaceError {
+pub(crate) enum InterfaceError {
     #[error("no suitable interface found using heuristics; specify --interface explicitly or provide a destination address")]
     InterfaceSelection,
     #[error("destination address is required for transmission planning")]

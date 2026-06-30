@@ -23,7 +23,7 @@ use crate::network::checksum::{
 type Result<T> = std::result::Result<T, TransportBuildError>;
 
 #[derive(Debug, Error)]
-pub enum TransportBuildError {
+pub(crate) enum TransportBuildError {
     #[error("source and destination IP versions must match for {context}")]
     IpVersionMismatch { context: &'static str },
     #[error("TCP options exceed maximum supported header length of 60 bytes (got {length} bytes)")]
@@ -46,13 +46,13 @@ pub(crate) const TCP_HEADER_LEN: usize = 20;
 pub(crate) const UDP_HEADER_LEN: usize = 8;
 
 #[derive(Debug)]
-pub struct TransportBuild {
+pub(super) struct TransportBuild {
     pub bytes: Vec<u8>,
     pub protocol: IpNextHeaderProtocol,
     pub label: &'static str,
 }
 
-pub fn build_transport_segment(
+pub(super) fn build_transport_segment(
     transport: &TransportSpec,
     payload: &[u8],
     source_ip: IpAddr,
@@ -410,4 +410,118 @@ pub(crate) fn tcp_flags_value(flags: &TcpFlagSet) -> u8 {
         value |= 0x80;
     }
     value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::packet::icmp::{echo_request::EchoRequestPacket, IcmpPacket, IcmpTypes};
+    use pnet::packet::icmpv6::{
+        echo_request::EchoRequestPacket as Icmpv6EchoRequestPacket, Icmpv6Packet, Icmpv6Types,
+    };
+    use pnet::packet::tcp::TcpPacket;
+    use pnet::packet::udp::UdpPacket;
+    use pnet::packet::Packet;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn builds_deterministic_tcp_segment() {
+        let spec = TcpSpec {
+            source_port: Some(12345),
+            destination_port: Some(443),
+            flags: TcpFlagSet {
+                syn: true,
+                ack: true,
+                ..Default::default()
+            },
+            sequence: Some(7),
+            acknowledgement: Some(9),
+            window_size: Some(4096),
+            options: None,
+        };
+
+        let bytes = build_tcp_segment(
+            &spec,
+            b"abc",
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+        )
+        .unwrap();
+        let packet = TcpPacket::new(&bytes).unwrap();
+
+        assert_eq!(packet.get_source(), 12345);
+        assert_eq!(packet.get_destination(), 443);
+        assert_eq!(packet.get_sequence(), 7);
+        assert_eq!(packet.get_acknowledgement(), 9);
+        assert_eq!(packet.get_flags(), 0x12);
+        assert_eq!(packet.get_window(), 4096);
+        assert_eq!(packet.payload(), b"abc");
+    }
+
+    #[test]
+    fn builds_udp_segment_with_payload_and_length() {
+        let spec = UdpSpec {
+            source_port: Some(5353),
+            destination_port: Some(53),
+        };
+
+        let bytes = build_udp_segment(
+            &spec,
+            b"dns",
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+        )
+        .unwrap();
+        let packet = UdpPacket::new(&bytes).unwrap();
+
+        assert_eq!(packet.get_source(), 5353);
+        assert_eq!(packet.get_destination(), 53);
+        assert_eq!(packet.get_length(), UDP_HEADER_LEN as u16 + 3);
+        assert_eq!(packet.payload(), b"dns");
+    }
+
+    #[test]
+    fn builds_icmp_echo_segment() {
+        let spec = IcmpSpec {
+            kind: Some(8),
+            code: Some(0),
+            identifier: Some(0x1234),
+            sequence: Some(2),
+        };
+
+        let bytes = build_icmp_segment(&spec, b"ping").unwrap();
+        let packet = IcmpPacket::new(&bytes).unwrap();
+        let echo = EchoRequestPacket::new(&bytes).unwrap();
+
+        assert_eq!(packet.get_icmp_type(), IcmpTypes::EchoRequest);
+        assert_eq!(echo.get_identifier(), 0x1234);
+        assert_eq!(echo.get_sequence_number(), 2);
+        assert_eq!(echo.payload(), b"ping");
+    }
+
+    #[test]
+    fn builds_icmpv6_echo_segment() {
+        let spec = Icmpv6Spec {
+            kind: Some(128),
+            code: Some(0),
+            identifier: Some(0x4321),
+            sequence: Some(4),
+            parameter: None,
+        };
+
+        let bytes = build_icmpv6_segment(
+            &spec,
+            b"ping6",
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+        )
+        .unwrap();
+        let packet = Icmpv6Packet::new(&bytes).unwrap();
+        let echo = Icmpv6EchoRequestPacket::new(&bytes).unwrap();
+
+        assert_eq!(packet.get_icmpv6_type(), Icmpv6Types::EchoRequest);
+        assert_eq!(echo.get_identifier(), 0x4321);
+        assert_eq!(echo.get_sequence_number(), 4);
+        assert_eq!(echo.payload(), b"ping6");
+    }
 }

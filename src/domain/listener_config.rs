@@ -7,9 +7,9 @@ use std::time::Duration;
 use crate::domain::request::ListenerRequest;
 
 #[cfg(any(feature = "daemon", feature = "pcap"))]
-pub const DEFAULT_QUEUE_CAPACITY: usize = 256;
+pub(crate) const DEFAULT_QUEUE_CAPACITY: usize = 256;
 #[cfg(any(feature = "daemon", feature = "pcap"))]
-pub const MAX_QUEUE_CAPACITY: usize = 4096;
+pub(crate) const MAX_QUEUE_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub(crate) struct NormalizedListenerRequest {

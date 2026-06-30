@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PacketRequest {
+pub(crate) struct PacketRequest {
     pub destination: DestinationRequest,
     pub layer2: Layer2Request,
     pub ip: IpRequest,
@@ -22,7 +22,7 @@ pub struct PacketRequest {
 }
 
 impl PacketRequest {
-    pub fn prefer_ipv6_hint(&self) -> Option<bool> {
+    pub(crate) fn prefer_ipv6_hint(&self) -> Option<bool> {
         infer_prefer_ipv6_hint(self)
     }
 }
@@ -53,7 +53,7 @@ fn parse_ip_hint(raw: Option<&str>) -> Option<IpAddr> {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct DestinationRequest {
+pub(crate) struct DestinationRequest {
     pub destination: Option<String>,
     pub destination_ip: Option<String>,
     pub interface: Option<String>,
@@ -63,7 +63,7 @@ pub struct DestinationRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Layer2Request {
+pub(crate) struct Layer2Request {
     pub source_mac: Option<String>,
     pub destination_mac: Option<String>,
     pub ethertype: Option<String>,
@@ -72,7 +72,7 @@ pub struct Layer2Request {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct VlanRequest {
+pub(crate) struct VlanRequest {
     pub id: Option<u16>,
     pub priority: Option<u8>,
     pub drop_eligible_indicator: Option<bool>,
@@ -80,7 +80,7 @@ pub struct VlanRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct IpRequest {
+pub(crate) struct IpRequest {
     pub source_ip: Option<String>,
     pub destination_ip: Option<String>,
     pub prefer_ipv6: Option<bool>,
@@ -92,7 +92,7 @@ pub struct IpRequest {
 }
 
 impl IpRequest {
-    pub fn prefer_ipv6_setting(&self) -> Option<bool> {
+    pub(crate) fn prefer_ipv6_setting(&self) -> Option<bool> {
         if let Some(value) = self.prefer_ipv6 {
             Some(value)
         } else if let Some(value) = self.prefer_ipv4 {
@@ -109,7 +109,7 @@ impl IpRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct FragmentRequest {
+pub(crate) struct FragmentRequest {
     pub mtu: Option<u16>,
     pub offset: Option<u16>,
     pub more_fragments: Option<bool>,
@@ -122,13 +122,13 @@ pub struct FragmentRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Ipv6Request {
+pub(crate) struct Ipv6Request {
     pub extensions: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct TransportRequest {
+pub(crate) struct TransportRequest {
     pub command: Option<TransportProtocolRequest>,
     pub source_port: Option<u16>,
     pub destination_port: Option<u16>,
@@ -136,7 +136,7 @@ pub struct TransportRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TransportProtocolRequest {
+pub(crate) enum TransportProtocolRequest {
     Tcp(TcpRequest),
     Udp,
     Icmp(IcmpRequest),
@@ -145,7 +145,7 @@ pub enum TransportProtocolRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct TcpRequest {
+pub(crate) struct TcpRequest {
     pub flags: Option<String>,
     pub sequence: Option<u32>,
     pub acknowledgement: Option<u32>,
@@ -159,7 +159,7 @@ pub struct TcpRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct IcmpRequest {
+pub(crate) struct IcmpRequest {
     pub kind: Option<u8>,
     pub code: Option<u8>,
     pub identifier: Option<u16>,
@@ -168,7 +168,7 @@ pub struct IcmpRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct Icmpv6Request {
+pub(crate) struct Icmpv6Request {
     pub kind: Option<u8>,
     pub code: Option<u8>,
     pub identifier: Option<u16>,
@@ -181,7 +181,7 @@ pub struct Icmpv6Request {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct PayloadRequest {
+pub(crate) struct PayloadRequest {
     pub data: Option<String>,
     pub data_hex: Option<String>,
     pub data_file: Option<String>,
@@ -196,7 +196,7 @@ pub struct PayloadRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct TransmissionRequest {
+pub(crate) struct TransmissionRequest {
     pub count: Option<u64>,
     pub interval: Option<String>,
     pub flood: Option<bool>,
@@ -207,7 +207,7 @@ pub struct TransmissionRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct ListenerRequest {
+pub(crate) struct ListenerRequest {
     pub listen: Option<bool>,
     pub filter: Option<String>,
     pub promiscuous: Option<bool>,
@@ -219,7 +219,7 @@ pub struct ListenerRequest {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct LoggingRequest {
+pub(crate) struct LoggingRequest {
     pub log_file: Option<String>,
     pub pcap_write: Option<String>,
     pub metrics_json: Option<String>,
@@ -231,7 +231,7 @@ pub struct LoggingRequest {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum FragmentProfile {
+pub(crate) enum FragmentProfile {
     Overlap,
     Teardrop,
     TinyOverlap,
@@ -250,7 +250,7 @@ impl fmt::Display for FragmentProfile {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LogLevel {
+pub(crate) enum LogLevel {
     Trace,
     Debug,
     Info,
@@ -260,7 +260,7 @@ pub enum LogLevel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Icmpv6ErrorKind {
+pub(crate) enum Icmpv6ErrorKind {
     DestinationUnreachable,
     PacketTooBig,
     TimeExceeded,
@@ -269,7 +269,7 @@ pub enum Icmpv6ErrorKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Icmpv6ErrorCode {
+pub(crate) enum Icmpv6ErrorCode {
     DestinationUnreachableNoRoute,
     DestinationUnreachableAdminProhibited,
     DestinationUnreachableBeyondScope,
@@ -283,4 +283,39 @@ pub enum Icmpv6ErrorCode {
     ParameterProblemErroneousHeader,
     ParameterProblemUnrecognizedNextHeader,
     ParameterProblemUnrecognizedOption,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn infers_ipv6_preference_from_explicit_flags_and_addresses() {
+        let mut request = PacketRequest::default();
+        request.ip.prefer_ipv4 = Some(true);
+        request.ip.destination_ip = Some("2001:db8::1".to_string());
+        assert_eq!(request.prefer_ipv6_hint(), Some(false));
+
+        request.ip.prefer_ipv4 = None;
+        assert_eq!(request.prefer_ipv6_hint(), Some(true));
+
+        request.ip.destination_ip = None;
+        request.ip.source_ip = Some("192.0.2.10".to_string());
+        assert_eq!(request.prefer_ipv6_hint(), Some(false));
+    }
+
+    #[test]
+    fn infers_ipv6_preference_from_ipv6_options_and_transport() {
+        let mut request = PacketRequest::default();
+        request.ipv6.extensions.push("hop-by-hop".to_string());
+        assert_eq!(request.prefer_ipv6_hint(), Some(true));
+
+        request.ipv6.extensions.clear();
+        request.transport.command = Some(TransportProtocolRequest::Icmp(IcmpRequest::default()));
+        assert_eq!(request.prefer_ipv6_hint(), Some(false));
+
+        request.transport.command =
+            Some(TransportProtocolRequest::Icmpv6(Icmpv6Request::default()));
+        assert_eq!(request.prefer_ipv6_hint(), Some(true));
+    }
 }

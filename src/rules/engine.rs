@@ -37,25 +37,27 @@ fn log_rule_diagnostics(diagnostics: &[RuleDiagnostic]) {
 }
 
 #[derive(Debug, Clone)]
-pub struct RuleEngine {
+pub(crate) struct RuleEngine {
     rules: Vec<Rule>,
     sender: Option<Arc<dyn RuleSendDispatcher>>,
     task_executor: Arc<BoundedExecutor>,
 }
 
 impl RuleEngine {
-    pub fn new() -> std::result::Result<Self, RuleError> {
+    pub(crate) fn new() -> std::result::Result<Self, RuleError> {
         Self::new_configured(RuleExecutorConfig {
             workers: RULE_EXECUTOR_WORKERS,
             queue_capacity: RULE_EXECUTOR_QUEUE_CAPACITY,
         })
     }
 
-    pub fn new_configured(config: RuleExecutorConfig) -> std::result::Result<Self, RuleError> {
+    pub(crate) fn new_configured(
+        config: RuleExecutorConfig,
+    ) -> std::result::Result<Self, RuleError> {
         Self::new_configured_with_runtime_source(config, None)
     }
 
-    pub fn new_with_runtime_handle(handle: Handle) -> std::result::Result<Self, RuleError> {
+    pub(crate) fn new_with_runtime_handle(handle: Handle) -> std::result::Result<Self, RuleError> {
         Self::new_configured_with_runtime_handle(
             RuleExecutorConfig {
                 workers: RULE_EXECUTOR_WORKERS,
@@ -65,7 +67,7 @@ impl RuleEngine {
         )
     }
 
-    pub fn new_configured_with_runtime_handle(
+    pub(crate) fn new_configured_with_runtime_handle(
         config: RuleExecutorConfig,
         handle: Handle,
     ) -> std::result::Result<Self, RuleError> {
@@ -100,7 +102,7 @@ impl RuleEngine {
         &self.task_executor
     }
 
-    pub fn configure_sender<D>(&mut self, sender: D)
+    pub(crate) fn configure_sender<D>(&mut self, sender: D)
     where
         D: RuleSendDispatcher + 'static,
     {
@@ -111,29 +113,31 @@ impl RuleEngine {
         self.sender.as_deref()
     }
 
-    pub fn validate_rules_from_path<P: AsRef<std::path::Path>>(path: P) -> Result<RuleLoadReport> {
+    pub(crate) fn validate_rules_from_path<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<RuleLoadReport> {
         Self::load_rules_from_path_with_options(path, RuleLoadOptions::validation())
     }
 
-    pub fn validate_rules_from_path_with_options<P: AsRef<std::path::Path>>(
+    pub(crate) fn validate_rules_from_path_with_options<P: AsRef<std::path::Path>>(
         path: P,
         options: RuleLoadOptions,
     ) -> Result<RuleLoadReport> {
         Self::load_rules_from_path_with_options(path, options.with_diagnostic_logging(false))
     }
 
-    pub fn validate_rules_from_str(input: &str) -> Result<RuleLoadReport> {
+    pub(crate) fn validate_rules_from_str(input: &str) -> Result<RuleLoadReport> {
         Self::load_rules_from_str_with_options(input, RuleLoadOptions::validation())
     }
 
-    pub fn validate_rules_from_str_with_options(
+    pub(crate) fn validate_rules_from_str_with_options(
         input: &str,
         options: RuleLoadOptions,
     ) -> Result<RuleLoadReport> {
         Self::load_rules_from_str_with_options(input, options.with_diagnostic_logging(false))
     }
 
-    pub fn load_rules_from_path_with_options<P: AsRef<std::path::Path>>(
+    pub(crate) fn load_rules_from_path_with_options<P: AsRef<std::path::Path>>(
         path: P,
         options: RuleLoadOptions,
     ) -> Result<RuleLoadReport> {
@@ -146,7 +150,7 @@ impl RuleEngine {
         Self::load_rules_from_str_with_source(&data, source_name, options)
     }
 
-    pub fn load_rules_from_str_with_options(
+    pub(crate) fn load_rules_from_str_with_options(
         input: &str,
         options: RuleLoadOptions,
     ) -> Result<RuleLoadReport> {
@@ -195,12 +199,12 @@ impl RuleEngine {
         Ok(RuleLoadReport::new(parsed, diagnostics))
     }
 
-    pub fn load_from_path<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
+    pub(crate) fn load_from_path<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
         self.rules = Self::load_rules_from_path(path)?;
         Ok(())
     }
 
-    pub fn load_from_path_with_options<P: AsRef<std::path::Path>>(
+    pub(crate) fn load_from_path_with_options<P: AsRef<std::path::Path>>(
         &mut self,
         path: P,
         options: RuleLoadOptions,
@@ -210,11 +214,11 @@ impl RuleEngine {
         Ok(report)
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.rules.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.rules.is_empty()
     }
 
@@ -222,7 +226,7 @@ impl RuleEngine {
         self.rules = rules;
     }
 
-    pub fn notify_receive(&self, packet: &PacketContext) {
+    pub(crate) fn notify_receive(&self, packet: &PacketContext) {
         for rule in &self.rules {
             if rule.triggers_on_receive() && rule.matches(packet) {
                 let name = rule.name.as_deref().unwrap_or("<unnamed receive rule>");
@@ -235,21 +239,21 @@ impl RuleEngine {
         }
     }
 
-    pub fn has_receive_triggers(&self) -> bool {
+    pub(crate) fn has_receive_triggers(&self) -> bool {
         self.rules.iter().any(|rule| rule.triggers_on_receive())
     }
 
-    pub fn has_timer_triggers(&self) -> bool {
+    pub(crate) fn has_timer_triggers(&self) -> bool {
         self.rules.iter().any(|rule| rule.triggers_on_timer())
     }
 
-    pub fn has_startup_triggers(&self) -> bool {
+    pub(crate) fn has_startup_triggers(&self) -> bool {
         self.rules
             .iter()
             .any(|rule| matches!(&rule.trigger, RuleTrigger::Startup))
     }
 
-    pub fn run_timer_actions(&self) {
+    pub(crate) fn run_timer_actions(&self) {
         for rule in &self.rules {
             if rule.triggers_on_timer() {
                 let name = rule.name.as_deref().unwrap_or("<unnamed timer rule>");
@@ -259,7 +263,7 @@ impl RuleEngine {
         }
     }
 
-    pub fn run_startup_actions(&self) {
+    pub(crate) fn run_startup_actions(&self) {
         for rule in &self.rules {
             if matches!(&rule.trigger, RuleTrigger::Startup) {
                 let name = rule.name.as_deref().unwrap_or("<unnamed startup rule>");

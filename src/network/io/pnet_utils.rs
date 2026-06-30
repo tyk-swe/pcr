@@ -8,7 +8,7 @@ use pnet::transport::{
 use std::io;
 
 /// Open a transport channel with a user-friendly error message for permission issues.
-pub fn open_transport_channel(
+pub(crate) fn open_transport_channel(
     buffer_size: usize,
     channel_type: TransportChannelType,
 ) -> Result<(TransportSender, TransportReceiver)> {

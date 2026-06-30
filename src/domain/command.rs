@@ -6,7 +6,7 @@ use crate::domain::request::ListenerRequest;
 use crate::domain::request::PacketRequest;
 
 #[derive(Debug, Clone)]
-pub enum EngineCommand {
+pub(crate) enum EngineCommand {
     Send(PacketRequest),
     DryRun(PacketRequest),
     #[cfg(feature = "repl")]
@@ -25,7 +25,7 @@ pub enum EngineCommand {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct DnsRequest {
+pub(crate) struct DnsRequest {
     pub domain: String,
     pub record_type: String,
     pub server: String,
@@ -36,7 +36,7 @@ pub struct DnsRequest {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum DnsTransportMode {
+pub(crate) enum DnsTransportMode {
     #[default]
     Auto,
     Udp,
@@ -44,7 +44,7 @@ pub enum DnsTransportMode {
 }
 
 impl DnsTransportMode {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Auto => "auto",
             Self::Udp => "udp",
@@ -75,13 +75,13 @@ impl std::str::FromStr for DnsTransportMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DnsTransport {
+pub(crate) enum DnsTransport {
     Udp,
     Tcp,
 }
 
 impl DnsTransport {
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Udp => "udp",
             Self::Tcp => "tcp",
@@ -96,7 +96,7 @@ impl std::fmt::Display for DnsTransport {
 }
 
 #[derive(Debug, Clone)]
-pub struct DnsQueryResult {
+pub(crate) struct DnsQueryResult {
     pub id: u16,
     pub opcode: String,
     pub response_code: String,
@@ -114,7 +114,7 @@ pub struct DnsQueryResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct DnsQuestion {
+pub(crate) struct DnsQuestion {
     pub name: String,
     pub record_type: String,
     pub class: String,
@@ -122,7 +122,7 @@ pub struct DnsQuestion {
 
 #[cfg(feature = "scan")]
 #[derive(Debug, Clone)]
-pub struct PortScanRequest {
+pub(crate) struct PortScanRequest {
     pub target: String,
     pub ports: String,
     pub interface: Option<String>,
@@ -131,7 +131,7 @@ pub struct PortScanRequest {
 
 #[cfg(feature = "scan")]
 #[derive(Debug, Clone)]
-pub struct TimedScanRequest {
+pub(crate) struct TimedScanRequest {
     pub target: String,
     pub interface: Option<String>,
     pub source_ip: Option<String>,
@@ -140,7 +140,7 @@ pub struct TimedScanRequest {
 
 #[cfg(feature = "scan")]
 #[derive(Debug, Clone)]
-pub enum ScanRequest {
+pub(crate) enum ScanRequest {
     TcpSyn(PortScanRequest),
     TcpFin(PortScanRequest),
     TcpNull(PortScanRequest),
@@ -155,7 +155,7 @@ pub enum ScanRequest {
 
 #[cfg(feature = "traceroute")]
 #[derive(Debug, Clone, Default)]
-pub struct TracerouteRequest {
+pub(crate) struct TracerouteRequest {
     pub destination: String,
     pub max_ttl: u8,
     pub probes: u8,
@@ -166,7 +166,7 @@ pub struct TracerouteRequest {
 
 #[cfg(feature = "traceroute")]
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
-pub enum TracerouteProtocol {
+pub(crate) enum TracerouteProtocol {
     #[default]
     Udp,
     Tcp,
@@ -175,7 +175,7 @@ pub enum TracerouteProtocol {
 
 #[cfg(feature = "fuzz")]
 #[derive(Debug, Clone)]
-pub struct FuzzRequest {
+pub(crate) struct FuzzRequest {
     pub target: String,
     pub port: Option<u16>,
     pub protocol: FuzzProtocol,
@@ -186,7 +186,7 @@ pub struct FuzzRequest {
 
 #[cfg(feature = "fuzz")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FuzzProtocol {
+pub(crate) enum FuzzProtocol {
     Tcp,
     Udp,
     Icmp,
@@ -194,7 +194,7 @@ pub enum FuzzProtocol {
 
 #[cfg(feature = "fuzz")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FuzzStrategy {
+pub(crate) enum FuzzStrategy {
     BitFlip,
     ByteSwap,
     RandomPayload,
@@ -203,7 +203,7 @@ pub enum FuzzStrategy {
 
 #[cfg(feature = "daemon")]
 #[derive(Debug, Clone, Default)]
-pub struct DaemonRequest {
+pub(crate) struct DaemonRequest {
     pub rules_file: Option<String>,
     pub foreground: Option<bool>,
     pub control_socket: Option<String>,
@@ -211,14 +211,14 @@ pub struct DaemonRequest {
 
 #[cfg(feature = "repl")]
 #[derive(Debug, Clone, Default)]
-pub struct InteractiveRequest {
+pub(crate) struct InteractiveRequest {
     pub script: Option<String>,
     pub auto_listen: Option<bool>,
 }
 
 #[cfg(feature = "pcap")]
 #[derive(Debug, Clone, Default)]
-pub struct ListenRequest {
+pub(crate) struct ListenRequest {
     pub listen: ListenerRequest,
     pub persistent: Option<bool>,
 }

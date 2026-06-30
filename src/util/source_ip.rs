@@ -20,7 +20,7 @@ use crate::util::error::operation_failed;
 /// This is done by creating a UDP socket and connecting it to the destination. No packets are sent.
 /// The `port` argument is used for the connection but does not need to be open on the remote host.
 #[cfg(any(feature = "scan", feature = "traceroute"))]
-pub fn discover_source_ipv4(destination: Ipv4Addr, port: u16) -> Result<Ipv4Addr> {
+pub(crate) fn discover_source_ipv4(destination: Ipv4Addr, port: u16) -> Result<Ipv4Addr> {
     match discover_impl(IpAddr::V4(destination), port)? {
         IpAddr::V4(addr) => Ok(addr),
         other => Err(anyhow!(
@@ -32,7 +32,7 @@ pub fn discover_source_ipv4(destination: Ipv4Addr, port: u16) -> Result<Ipv4Addr
 }
 
 #[cfg(any(feature = "scan", feature = "traceroute"))]
-pub fn discover_source_ipv6(destination: Ipv6Addr, port: u16) -> Result<Ipv6Addr> {
+pub(crate) fn discover_source_ipv6(destination: Ipv6Addr, port: u16) -> Result<Ipv6Addr> {
     match discover_impl(IpAddr::V6(destination), port)? {
         IpAddr::V6(addr) => Ok(addr),
         other => Err(anyhow!(
@@ -44,7 +44,7 @@ pub fn discover_source_ipv6(destination: Ipv6Addr, port: u16) -> Result<Ipv6Addr
 }
 
 #[cfg(feature = "scan")]
-pub fn resolve_interface_or_ip_override(
+pub(crate) fn resolve_interface_or_ip_override(
     interface: Option<&str>,
     target: IpAddr,
 ) -> Result<Option<IpAddr>> {
@@ -84,7 +84,7 @@ pub fn resolve_interface_or_ip_override(
 }
 
 #[cfg(feature = "scan")]
-pub fn source_override_ipv4(source_override: Option<IpAddr>) -> Result<Option<Ipv4Addr>> {
+pub(crate) fn source_override_ipv4(source_override: Option<IpAddr>) -> Result<Option<Ipv4Addr>> {
     source_override
         .map(|ip| match ip {
             IpAddr::V4(v4) => Ok(v4),
@@ -96,7 +96,7 @@ pub fn source_override_ipv4(source_override: Option<IpAddr>) -> Result<Option<Ip
 }
 
 #[cfg(feature = "scan")]
-pub fn source_override_ipv6(source_override: Option<IpAddr>) -> Result<Option<Ipv6Addr>> {
+pub(crate) fn source_override_ipv6(source_override: Option<IpAddr>) -> Result<Option<Ipv6Addr>> {
     source_override
         .map(|ip| match ip {
             IpAddr::V6(v6) => Ok(v6),

@@ -18,9 +18,12 @@ use super::transmission_loop::run_transmission_loop;
 use crate::network::sender::error::{ExecutorError, Result};
 
 use super::super::control::determine_send_mode;
-use super::super::types::{NetworkTarget, TransmissionPlan};
+use super::super::types::{NetworkTarget, NetworkTransmissionPlan};
 
-pub(super) fn send_via_datalink<F>(plan: TransmissionPlan, record_packet: &mut F) -> Result<()>
+pub(super) fn send_via_datalink<F>(
+    plan: NetworkTransmissionPlan,
+    record_packet: &mut F,
+) -> Result<()>
 where
     F: FnMut(&[u8]) -> Result<()>,
 {
@@ -141,7 +144,10 @@ fn finish_datalink_send(send_result: Result<()>, drain: DatalinkDrain) -> Result
     }
 }
 
-pub(crate) fn send_via_transport<F>(plan: TransmissionPlan, record_packet: &mut F) -> Result<()>
+pub(crate) fn send_via_transport<F>(
+    plan: NetworkTransmissionPlan,
+    record_packet: &mut F,
+) -> Result<()>
 where
     F: FnMut(&[u8]) -> Result<()>,
 {
@@ -211,7 +217,7 @@ where
 }
 
 fn send_via_transport_pnet<F>(
-    plan: TransmissionPlan,
+    plan: NetworkTransmissionPlan,
     dest_ip: IpAddr,
     record_packet: &mut F,
 ) -> Result<()>
@@ -259,7 +265,7 @@ where
 
 pub(crate) fn send_loop<F>(
     tx: &mut dyn DataLinkSender,
-    plan: &TransmissionPlan,
+    plan: &NetworkTransmissionPlan,
     interface: &NetworkInterface,
     record_packet: &mut F,
 ) -> Result<()>

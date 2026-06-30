@@ -30,7 +30,7 @@ fn operation_failed(operation: &str, details: impl std::fmt::Display) -> String 
     format!("{operation} failed: {details}")
 }
 
-pub trait ReplEngine {
+pub(crate) trait ReplEngine {
     fn rule_count(&self) -> usize;
     fn has_receive_rules(&self) -> bool;
     fn run_one_shot<'a>(
@@ -145,7 +145,10 @@ async fn handle_traceroute(args: &[String], engine: &mut impl ReplEngine) -> Res
 
 // ─── Entry Point ───────────────────────────────────────────────
 
-pub async fn start_session(opts: &InteractiveRequest, engine: &mut impl ReplEngine) -> Result<()> {
+pub(crate) async fn start_session(
+    opts: &InteractiveRequest,
+    engine: &mut impl ReplEngine,
+) -> Result<()> {
     info!("Interactive session bootstrapping");
 
     let mut pending = load_script_commands(opts).await?;

@@ -5,7 +5,7 @@ use crate::rules::model::{PacketContext, RuleLogLevel};
 use log::{debug, error, info, trace, warn};
 use std::borrow::Cow;
 
-pub fn log_message(level: RuleLogLevel, rule_name: &str, message: &str) {
+pub(crate) fn log_message(level: RuleLogLevel, rule_name: &str, message: &str) {
     match level {
         RuleLogLevel::Trace => trace!("rule '{}': {}", rule_name, message),
         RuleLogLevel::Debug => debug!("rule '{}': {}", rule_name, message),
@@ -15,7 +15,7 @@ pub fn log_message(level: RuleLogLevel, rule_name: &str, message: &str) {
     }
 }
 
-pub fn apply_template(template: &str, packet: Option<&PacketContext>) -> String {
+pub(crate) fn apply_template(template: &str, packet: Option<&PacketContext>) -> String {
     let mut result = String::with_capacity(template.len() + 128);
     let mut cursor = 0;
 
@@ -81,7 +81,7 @@ fn sanitize_input(input: &str) -> Cow<'_, str> {
     }
 }
 
-pub fn render_option(field: &mut Option<String>, packet: Option<&PacketContext>) {
+pub(crate) fn render_option(field: &mut Option<String>, packet: Option<&PacketContext>) {
     if let Some(value) = field.as_mut() {
         let rendered = apply_template(value, packet);
         *value = rendered;

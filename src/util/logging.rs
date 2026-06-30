@@ -11,7 +11,7 @@ use serde_json::json;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
-pub enum LoggingInitError {
+pub(crate) enum LoggingInitError {
     #[error("create log directory failed: path={}", path.display())]
     CreateLogDirectory {
         path: std::path::PathBuf,
@@ -28,9 +28,9 @@ pub enum LoggingInitError {
     LoggerInit(#[from] log::SetLoggerError),
 }
 
-pub type Result<T> = std::result::Result<T, LoggingInitError>;
+pub(crate) type Result<T> = std::result::Result<T, LoggingInitError>;
 
-pub fn init(
+pub(crate) fn init(
     verbose: u8,
     level_override: Option<LevelFilter>,
     structured: bool,

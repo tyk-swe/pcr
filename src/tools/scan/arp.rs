@@ -17,7 +17,7 @@ use crate::util::source_ip::source_override_ipv4;
 
 use super::common::{push_scan_target, resolve_explicit_source_override};
 
-pub async fn run_arp(
+pub(crate) async fn run_arp(
     target: &str,
     interface: &Option<String>,
     source_ip_override: &Option<String>,

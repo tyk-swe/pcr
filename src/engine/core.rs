@@ -32,7 +32,7 @@ use crate::engine::rule_send::{RuleSendConfig, RuleSendExecutor};
 use crate::engine::send::SendUseCase;
 use crate::rules::RuleEngine;
 
-pub struct Engine {
+pub(crate) struct Engine {
     pub(crate) config: EngineConfig,
     pub(crate) send: Arc<SendUseCase>,
     pub(crate) dependencies: EngineDependencies,
@@ -100,7 +100,7 @@ impl Engine {
         })
     }
 
-    pub async fn run_one_shot(&mut self, request: PacketRequest) -> Result<()> {
+    pub(crate) async fn run_one_shot(&mut self, request: PacketRequest) -> Result<()> {
         OneShotFlow::new(self, request)
             .with_policy_validation()?
             .with_spec()
@@ -120,7 +120,7 @@ impl Engine {
     }
 
     #[cfg(feature = "daemon")]
-    pub async fn run_daemon(&mut self, opts: &DaemonRequest) -> Result<()> {
+    pub(crate) async fn run_daemon(&mut self, opts: &DaemonRequest) -> Result<()> {
         if self.config.dry_run {
             info!(
                 "Dry-run: daemon mode would start with rules={:?}",
@@ -170,7 +170,7 @@ impl Engine {
     }
 
     #[cfg(feature = "pcap")]
-    pub async fn run_listener(&mut self, opts: &ListenRequest) -> Result<()> {
+    pub(crate) async fn run_listener(&mut self, opts: &ListenRequest) -> Result<()> {
         if self.config.dry_run {
             info!(
                 "Dry-run: listener would run with filter={:?} timeout={:?}",
@@ -186,7 +186,7 @@ impl Engine {
     }
 
     #[cfg(feature = "traceroute")]
-    pub async fn run_traceroute(&mut self, opts: &TracerouteRequest) -> Result<()> {
+    pub(crate) async fn run_traceroute(&mut self, opts: &TracerouteRequest) -> Result<()> {
         let policy = self.effective_policy();
         let prepared = self
             .dependencies
@@ -210,7 +210,7 @@ impl Engine {
         prepared.run().await
     }
 
-    pub async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<String> {
+    pub(crate) async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<String> {
         let policy = self.effective_policy();
         let prepared = self
             .dependencies
@@ -231,7 +231,7 @@ impl Engine {
     }
 
     #[cfg(feature = "scan")]
-    pub async fn run_scan(&mut self, command: &ScanRequest) -> Result<()> {
+    pub(crate) async fn run_scan(&mut self, command: &ScanRequest) -> Result<()> {
         let policy = self.effective_policy();
         let prepared = self
             .dependencies
@@ -252,7 +252,7 @@ impl Engine {
     }
 
     #[cfg(feature = "fuzz")]
-    pub async fn run_fuzz(&mut self, options: &FuzzRequest) -> Result<()> {
+    pub(crate) async fn run_fuzz(&mut self, options: &FuzzRequest) -> Result<()> {
         let policy = self.effective_policy();
         let prepared = self
             .dependencies
@@ -272,17 +272,17 @@ impl Engine {
         prepared.run().await
     }
 
-    pub fn config(&self) -> &EngineConfig {
+    pub(crate) fn config(&self) -> &EngineConfig {
         &self.config
     }
 
     #[cfg(feature = "repl")]
-    pub fn rule_count(&self) -> usize {
+    pub(crate) fn rule_count(&self) -> usize {
         self.rules.len()
     }
 
     #[cfg(feature = "repl")]
-    pub fn has_receive_rules(&self) -> bool {
+    pub(crate) fn has_receive_rules(&self) -> bool {
         self.rules.has_receive_triggers()
     }
 

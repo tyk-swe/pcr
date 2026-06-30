@@ -4,7 +4,7 @@
 use std::sync::{LockResult, PoisonError};
 
 /// Extension trait for LockResult to easily handle poisoned locks by ignoring the poison.
-pub trait LockResultExt<Guard> {
+pub(crate) trait LockResultExt<Guard> {
     /// Returns the guard, ignoring whether the lock is poisoned or not.
     ///
     /// This is equivalent to `unwrap_or_else(PoisonError::into_inner)`.

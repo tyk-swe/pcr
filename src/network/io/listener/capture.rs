@@ -9,8 +9,6 @@ use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
 #[cfg(feature = "pcap")]
-use libc;
-#[cfg(feature = "pcap")]
 use log::info;
 use log::{error, warn};
 #[cfg(feature = "pcap")]
@@ -26,7 +24,7 @@ use super::error::ListenerError;
 use super::ListenerStartupSignal;
 use crate::util::telemetry;
 
-pub type ListenerResult<T> = std::result::Result<T, ListenerError>;
+pub(crate) type ListenerResult<T> = std::result::Result<T, ListenerError>;
 
 const CHANNEL_TIMEOUT: Duration = Duration::from_millis(500);
 const CAPTURE_BUFFER_SIZE: usize = 65_535;

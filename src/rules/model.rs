@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use crate::domain::event::ListenerEvent;
 
 #[derive(Debug, Clone)]
-pub struct PacketContext {
+pub(crate) struct PacketContext {
     pub description: String,
     pub source: Option<String>,
     pub destination: Option<String>,
@@ -39,7 +39,7 @@ impl PacketContext {
 
 #[derive(Debug, Deserialize, Clone, Copy, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum RuleLogLevel {
+pub(crate) enum RuleLogLevel {
     Trace,
     Debug,
     #[default]

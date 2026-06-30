@@ -7,7 +7,7 @@ use crate::domain::event::ListenerEvent;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum OutputFormat {
+pub(crate) enum OutputFormat {
     /// Concise summary.
     Summary,
     /// Field-by-field breakdown.

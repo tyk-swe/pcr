@@ -26,14 +26,14 @@ use crate::domain::spec::ListenerSpec;
 use crate::network::interface;
 
 #[cfg(feature = "pcap")]
-pub mod capture;
+pub(crate) mod capture;
 #[cfg(any(feature = "daemon", feature = "pcap"))]
 mod config;
-pub mod error;
+pub(crate) mod error;
 #[cfg(feature = "pcap")]
-pub mod process;
+pub(crate) mod process;
 
-pub use error::ListenerError;
+pub(crate) use error::ListenerError;
 
 #[cfg(feature = "pcap")]
 use capture::spawn_capture_thread;
@@ -42,8 +42,8 @@ use config::ListenerRuntimeConfig;
 #[cfg(feature = "pcap")]
 use process::process_packet;
 
-pub type ListenerResult<T> = std::result::Result<T, ListenerError>;
-pub type ListenerEventHandler = Arc<dyn Fn(ListenerEvent) + Send + Sync>;
+pub(crate) type ListenerResult<T> = std::result::Result<T, ListenerError>;
+pub(crate) type ListenerEventHandler = Arc<dyn Fn(ListenerEvent) + Send + Sync>;
 #[cfg(any(feature = "daemon", feature = "pcap"))]
 pub(crate) type ListenerStartupSignal = oneshot::Sender<std::result::Result<(), String>>;
 
@@ -56,7 +56,7 @@ enum ListenerRunOutcome {
 
 /// Run the listener using the CLI `listen` subcommand configuration.
 #[cfg(feature = "pcap")]
-pub async fn run_command(
+pub(crate) async fn run_command(
     opts: &ListenRequest,
     interface_hint: Option<&str>,
     handler: ListenerEventHandler,
@@ -82,7 +82,7 @@ pub async fn run_command(
 }
 
 /// Run the listener when requested from a one-shot transmission plan.
-pub async fn run_from_spec(
+pub(crate) async fn run_from_spec(
     spec: &ListenerSpec,
     interface_hint: Option<&str>,
     handler: ListenerEventHandler,

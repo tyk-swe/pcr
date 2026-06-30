@@ -6,7 +6,6 @@ rust-version = "1.96"
 license = "AGPL-3.0-only"
 authors = ["rkdxodud-tyk"]
 description = "Modular packet crafting, transmission, and automation toolkit"
-readme = "README.md"
 keywords = ["packet", "network", "cli", "testing"]
 categories = ["command-line-utilities", "network-programming"]
 

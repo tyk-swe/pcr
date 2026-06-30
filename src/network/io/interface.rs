@@ -15,25 +15,25 @@ use thiserror::Error;
 
 type Result<T> = std::result::Result<T, InterfaceError>;
 
-pub trait InterfaceProvider {
+pub(crate) trait InterfaceProvider {
     fn interfaces(&self) -> Vec<NetworkInterface>;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InterfaceSelectionReason {
+pub(crate) enum InterfaceSelectionReason {
     ExplicitInterface,
     RouteTable,
     Heuristic,
 }
 
 #[derive(Debug, Clone)]
-pub struct InterfaceSelection {
+pub(crate) struct InterfaceSelection {
     pub interface: NetworkInterface,
     pub reason: InterfaceSelectionReason,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SystemInterfaceProvider;
+pub(crate) struct SystemInterfaceProvider;
 
 impl InterfaceProvider for SystemInterfaceProvider {
     fn interfaces(&self) -> Vec<NetworkInterface> {
@@ -42,7 +42,7 @@ impl InterfaceProvider for SystemInterfaceProvider {
 }
 
 #[derive(Debug, Error)]
-pub enum InterfaceError {
+pub(crate) enum InterfaceError {
     #[error("interface '{name}' not found")]
     NotFound { name: String },
     #[error(
@@ -88,11 +88,11 @@ pub enum InterfaceError {
 }
 
 #[cfg(any(feature = "pcap", feature = "scan"))]
-pub fn find_interface(name: Option<&str>) -> Result<NetworkInterface> {
+pub(crate) fn find_interface(name: Option<&str>) -> Result<NetworkInterface> {
     Ok(find_interface_selection_with_provider_impl(name, &SystemInterfaceProvider)?.interface)
 }
 
-pub fn find_interface_selection(name: Option<&str>) -> Result<InterfaceSelection> {
+pub(crate) fn find_interface_selection(name: Option<&str>) -> Result<InterfaceSelection> {
     find_interface_selection_with_provider_impl(name, &SystemInterfaceProvider)
 }
 
@@ -115,7 +115,9 @@ where
     })
 }
 
-pub fn find_interface_for_destination_selection(destination: IpAddr) -> Result<InterfaceSelection> {
+pub(crate) fn find_interface_for_destination_selection(
+    destination: IpAddr,
+) -> Result<InterfaceSelection> {
     find_interface_for_destination_selection_with_provider_impl(
         destination,
         &SystemInterfaceProvider,

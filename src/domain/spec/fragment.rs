@@ -4,7 +4,7 @@
 use crate::domain::request::{FragmentProfile, FragmentRequest};
 
 #[derive(Debug, Clone, Default)]
-pub struct FragmentSpec {
+pub(crate) struct FragmentSpec {
     pub mtu: Option<u16>,
     pub offset: Option<u16>,
     pub more_fragments: bool,
@@ -35,7 +35,7 @@ impl FragmentSpec {
         spec
     }
 
-    pub fn is_default(&self) -> bool {
+    pub(crate) fn is_default(&self) -> bool {
         self.mtu.is_none()
             && self.offset.is_none()
             && !self.more_fragments
@@ -46,7 +46,7 @@ impl FragmentSpec {
             && self.fragment_id.is_none()
     }
 
-    pub fn apply_profile(&mut self, profile: FragmentProfile) {
+    pub(crate) fn apply_profile(&mut self, profile: FragmentProfile) {
         self.dont_fragment = false;
         match profile {
             FragmentProfile::Overlap => {

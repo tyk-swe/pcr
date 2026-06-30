@@ -5,10 +5,10 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-pub type Result<T> = std::result::Result<T, PrivilegeError>;
+pub(crate) type Result<T> = std::result::Result<T, PrivilegeError>;
 
 #[derive(Debug, Error)]
-pub enum PrivilegeError {
+pub(crate) enum PrivilegeError {
     #[error("failed to create raw socket: CAP_NET_RAW capability not available")]
     RawSocketUnavailable {
         #[source]
@@ -25,7 +25,7 @@ pub enum PrivilegeError {
     },
 }
 
-pub fn assert_raw_socket_capability() -> Result<()> {
+pub(crate) fn assert_raw_socket_capability() -> Result<()> {
     #[cfg(unix)]
     if nix::unistd::geteuid().is_root() {
         // Fast path: root has all capabilities

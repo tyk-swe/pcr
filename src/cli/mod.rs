@@ -1,13 +1,13 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub mod commands;
-pub mod enums;
-pub mod options;
+pub(crate) mod commands;
+pub(crate) mod enums;
+pub(crate) mod options;
 #[cfg(feature = "repl")]
 pub(crate) mod repl;
 mod request;
-pub mod validators;
+pub(crate) mod validators;
 
 use clap::Parser;
 
@@ -34,7 +34,7 @@ Advanced operational tools are experimental and appear only when their Cargo fea
   4. Preview a raw payload from hex:
      packetcraftr dry-run -d 127.0.0.1 --data-hex \"aa bb cc\" udp --dport 9"
 )]
-pub struct PacketcraftArgs {
+pub(crate) struct PacketcraftArgs {
     /// Set the verbosity level (-v: info, -vv: debug, -vvv: trace).
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
@@ -56,7 +56,7 @@ pub struct PacketcraftArgs {
 }
 
 impl PacketcraftArgs {
-    pub fn one_shot_options(&self) -> Option<&options::OneShotOptions> {
+    pub(crate) fn one_shot_options(&self) -> Option<&options::OneShotOptions> {
         match &self.command {
             commands::PacketcraftCommand::Send(options)
             | commands::PacketcraftCommand::DryRun(options) => Some(&options.oneshot),
@@ -64,7 +64,7 @@ impl PacketcraftArgs {
         }
     }
 
-    pub fn effective_dry_run(&self) -> bool {
+    pub(crate) fn effective_dry_run(&self) -> bool {
         self.dry_run || matches!(&self.command, commands::PacketcraftCommand::DryRun(_))
     }
 }

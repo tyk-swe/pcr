@@ -10,7 +10,7 @@ use super::error::SpecResult;
 use crate::domain::request::{LogLevel, LoggingRequest};
 
 #[derive(Debug, Clone, Default)]
-pub struct LoggingSpec {
+pub(crate) struct LoggingSpec {
     pub log_file: Option<PathBuf>,
     pub pcap_write: Option<PathBuf>,
     pub metrics_json: Option<PathBuf>,

@@ -30,7 +30,7 @@ const NDP_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 type NeighborDiscoveryResult<T> = std::result::Result<T, NeighborDiscoveryError>;
 
 #[derive(Debug, Error)]
-pub enum NeighborDiscoveryError {
+pub(crate) enum NeighborDiscoveryError {
     #[error("interface {interface} has no MAC address")]
     MissingInterfaceMac { interface: String },
     #[error("interface {interface} has no IPv6 address; specify --sip explicitly")]
@@ -71,7 +71,7 @@ pub enum NeighborDiscoveryError {
 }
 
 /// Attempt to resolve a target IPv6 address to a MAC address using Neighbor Discovery.
-pub fn resolve_mac(
+pub(crate) fn resolve_mac(
     interface: &NetworkInterface,
     source_ip: Ipv6Addr,
     target_ip: Ipv6Addr,

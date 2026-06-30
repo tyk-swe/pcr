@@ -20,12 +20,12 @@ use super::report::{preflight_report, PreflightReport};
 use super::OutputFormat;
 
 #[derive(Debug, Clone)]
-pub struct OutputController {
+pub(crate) struct OutputController {
     default_format: Option<OutputFormat>,
 }
 
 impl OutputController {
-    pub fn new(default_format: Option<OutputFormat>) -> Self {
+    pub(crate) fn new(default_format: Option<OutputFormat>) -> Self {
         Self { default_format }
     }
 
@@ -44,12 +44,16 @@ impl OutputController {
         Ok(())
     }
 
-    pub fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> Result<()> {
+    pub(crate) fn emit_preflight_summary(
+        &self,
+        spec: &PacketSpec,
+        plan: &TransmissionPlan,
+    ) -> Result<()> {
         let view = PreflightView::from_transmission_plan(plan)?;
         self.emit_preflight_view_summary(spec, &view)
     }
 
-    pub fn emit_listener_event(&self, event: &ListenerEvent) {
+    pub(crate) fn emit_listener_event(&self, event: &ListenerEvent) {
         match self.default_format.unwrap_or(OutputFormat::Summary) {
             OutputFormat::Summary => self.print_listener_summary(event),
             OutputFormat::Detailed => self.print_listener_detailed(event),
@@ -59,7 +63,7 @@ impl OutputController {
     }
 
     #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
-    pub fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> Result<()> {
+    pub(crate) fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> Result<()> {
         match self.default_format.unwrap_or(OutputFormat::Summary) {
             OutputFormat::Json => {
                 let report = serde_json::json!({

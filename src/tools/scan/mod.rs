@@ -14,12 +14,12 @@ use std::net::IpAddr;
 use anyhow::Result;
 use log::info;
 
-pub use arp::run_arp;
-pub use icmp::run_icmp;
-pub use ndp::run_ndp;
-pub use sctp::run_sctp_init;
-pub use tcp::{run_tcp_ack, run_tcp_fin, run_tcp_null, run_tcp_syn, run_tcp_xmas};
-pub use udp::run_udp;
+pub(crate) use arp::run_arp;
+pub(crate) use icmp::run_icmp;
+pub(crate) use ndp::run_ndp;
+pub(crate) use sctp::run_sctp_init;
+pub(crate) use tcp::{run_tcp_ack, run_tcp_fin, run_tcp_null, run_tcp_syn, run_tcp_xmas};
+pub(crate) use udp::run_udp;
 
 use crate::domain::command::{PortScanRequest, ScanRequest, TimedScanRequest};
 use crate::domain::policy::TrafficPolicy;
@@ -29,13 +29,13 @@ use crate::domain::policy::{
 use crate::tools::TrafficRuntimeConfig;
 
 #[derive(Debug, Clone)]
-pub struct PreparedScan {
+pub(crate) struct PreparedScan {
     pub traffic_plan: TrafficPlan,
     command: ScanRequest,
 }
 
 impl PreparedScan {
-    pub fn command(&self) -> &ScanRequest {
+    pub(crate) fn command(&self) -> &ScanRequest {
         &self.command
     }
 }
@@ -165,7 +165,7 @@ impl PortScanKind {
     }
 }
 
-pub fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<PreparedScan> {
+pub(crate) fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<PreparedScan> {
     let (prepared_command, target_scope, target_count, port_count, estimated_packets) =
         if let Some((kind, request)) = PortScanKind::from_command(command) {
             let (request, scope, ports, packets) = prepare_port_scan(request)?;
@@ -279,7 +279,10 @@ fn prepare_port_scan(
     ))
 }
 
-pub async fn run_command(command: &ScanRequest, runtime: TrafficRuntimeConfig) -> Result<()> {
+pub(crate) async fn run_command(
+    command: &ScanRequest,
+    runtime: TrafficRuntimeConfig,
+) -> Result<()> {
     if let Some((kind, request)) = PortScanKind::from_command(command) {
         info!(
             "Starting {} scan against {} ports {}",

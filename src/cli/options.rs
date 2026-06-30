@@ -10,7 +10,7 @@ use super::validators::{dns_record_type_validator, mac_address_validator, socket
 
 /// Default one-shot packet crafting configuration.
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct OneShotOptions {
+pub(crate) struct OneShotOptions {
     /// Destination IP address or hostname.
     #[arg(short = 'd', long = "dest")]
     pub destination: Option<String>,
@@ -34,13 +34,13 @@ pub struct OneShotOptions {
 
 /// Stable packet send command options.
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct SendOptions {
+pub(crate) struct SendOptions {
     #[command(flatten, next_help_heading = "One-shot packet crafting")]
     pub oneshot: OneShotOptions,
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct Layer2Options {
+pub(crate) struct Layer2Options {
     /// Source MAC address (e.g., aa:bb:cc:dd:ee:ff).
     #[arg(long = "smac", value_parser = mac_address_validator)]
     pub source_mac: Option<String>,
@@ -57,7 +57,7 @@ pub struct Layer2Options {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct VlanOptions {
+pub(crate) struct VlanOptions {
     /// VLAN ID (1-4094).
     #[arg(long = "vlan-id", value_parser = value_parser!(u16).range(1..=4094))]
     pub id: Option<u16>,
@@ -77,7 +77,7 @@ pub struct VlanOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct IpOptions {
+pub(crate) struct IpOptions {
     /// Source IP address (e.g., 192.168.1.10, fe80::1).
     #[arg(long = "sip")]
     pub source_ip: Option<String>,
@@ -179,7 +179,7 @@ pub struct IpOptions {
 
 #[derive(Debug, Subcommand, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TransportCommand {
+pub(crate) enum TransportCommand {
     /// Craft TCP packets.
     Tcp(TcpOptions),
     /// Craft UDP packets.
@@ -191,10 +191,10 @@ pub enum TransportCommand {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct UdpOptions {}
+pub(crate) struct UdpOptions {}
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct TransportOptions {
+pub(crate) struct TransportOptions {
     #[command(subcommand)]
     pub command: Option<TransportCommand>,
     /// Set the source port (0-65535).
@@ -206,7 +206,7 @@ pub struct TransportOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct TcpOptions {
+pub(crate) struct TcpOptions {
     /// Set TCP flags (available: S, A, F, R, P, U, E, C).
     #[arg(long = "flags")]
     pub flags: Option<String>,
@@ -244,7 +244,7 @@ pub struct TcpOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct IcmpOptions {
+pub(crate) struct IcmpOptions {
     /// ICMP type (e.g., 8=Echo Request, 0=Echo Reply).
     #[arg(long = "icmp-type", value_parser = value_parser!(u8))]
     pub kind: Option<u8>,
@@ -260,7 +260,7 @@ pub struct IcmpOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct Icmpv6Options {
+pub(crate) struct Icmpv6Options {
     /// ICMPv6 type.
     #[arg(long = "icmpv6-type", value_parser = value_parser!(u8))]
     pub kind: Option<u8>,
@@ -288,7 +288,7 @@ pub struct Icmpv6Options {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct PayloadOptions {
+pub(crate) struct PayloadOptions {
     /// Inline string payload (e.g., "GET / HTTP/1.0").
     #[arg(long = "data", group = "payload_source", global = true)]
     pub data: Option<String>,
@@ -325,7 +325,7 @@ pub struct PayloadOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct TransmitOptions {
+pub(crate) struct TransmitOptions {
     /// Number of packets to send; must be greater than zero [default: 1].
     #[arg(long = "count", value_parser = value_parser!(u64))]
     pub count: Option<u64>,
@@ -378,7 +378,7 @@ pub struct TransmitOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct ListenOptions {
+pub(crate) struct ListenOptions {
     /// Listen for replies after sending.
     #[arg(
         long = "listen-reply",
@@ -432,7 +432,7 @@ pub struct ListenOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct RuleOptions {
+pub(crate) struct RuleOptions {
     /// Path to the rules file.
     #[arg(long = "rules")]
     pub rules_file: Option<String>,
@@ -454,7 +454,7 @@ pub struct RuleOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct SafetyOptions {
+pub(crate) struct SafetyOptions {
     /// Allow packet-producing commands to target public IP addresses.
     #[arg(long = "allow-public-targets", global = true)]
     pub allow_public_targets: bool,
@@ -482,7 +482,7 @@ pub struct SafetyOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub struct LoggingOptions {
+pub(crate) struct LoggingOptions {
     /// Log output to a file.
     #[arg(long = "log-file")]
     pub log_file: Option<String>,

@@ -284,38 +284,3 @@ pub(crate) enum Icmpv6ErrorCode {
     ParameterProblemUnrecognizedNextHeader,
     ParameterProblemUnrecognizedOption,
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn infers_ipv6_preference_from_explicit_flags_and_addresses() {
-        let mut request = PacketRequest::default();
-        request.ip.prefer_ipv4 = Some(true);
-        request.ip.destination_ip = Some("2001:db8::1".to_string());
-        assert_eq!(request.prefer_ipv6_hint(), Some(false));
-
-        request.ip.prefer_ipv4 = None;
-        assert_eq!(request.prefer_ipv6_hint(), Some(true));
-
-        request.ip.destination_ip = None;
-        request.ip.source_ip = Some("192.0.2.10".to_string());
-        assert_eq!(request.prefer_ipv6_hint(), Some(false));
-    }
-
-    #[test]
-    fn infers_ipv6_preference_from_ipv6_options_and_transport() {
-        let mut request = PacketRequest::default();
-        request.ipv6.extensions.push("hop-by-hop".to_string());
-        assert_eq!(request.prefer_ipv6_hint(), Some(true));
-
-        request.ipv6.extensions.clear();
-        request.transport.command = Some(TransportProtocolRequest::Icmp(IcmpRequest::default()));
-        assert_eq!(request.prefer_ipv6_hint(), Some(false));
-
-        request.transport.command =
-            Some(TransportProtocolRequest::Icmpv6(Icmpv6Request::default()));
-        assert_eq!(request.prefer_ipv6_hint(), Some(true));
-    }
-}

@@ -1,11 +1,11 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::cli;
-use crate::domain::request as req;
+use super::{commands, enums, options};
+use crate::domain::{command as cmd, request as req};
 
-impl From<&cli::OneShotOptions> for req::PacketRequest {
-    fn from(options: &cli::OneShotOptions) -> Self {
+impl From<&options::OneShotOptions> for req::PacketRequest {
+    fn from(options: &options::OneShotOptions) -> Self {
         Self {
             destination: req::DestinationRequest {
                 destination: options.destination.clone(),
@@ -26,8 +26,137 @@ impl From<&cli::OneShotOptions> for req::PacketRequest {
     }
 }
 
-impl From<&cli::Layer2Options> for req::Layer2Request {
-    fn from(options: &cli::Layer2Options) -> Self {
+impl From<&commands::DnsQueryOptions> for cmd::DnsRequest {
+    fn from(options: &commands::DnsQueryOptions) -> Self {
+        Self {
+            domain: options.domain.clone(),
+            record_type: options.record_type.clone(),
+            server: options.server.clone(),
+            timeout: options.timeout,
+            transaction_id: options.transaction_id,
+            transport: options.transport,
+            retries: options.retries,
+        }
+    }
+}
+
+#[cfg(feature = "repl")]
+impl From<&commands::InteractiveOptions> for cmd::InteractiveRequest {
+    fn from(options: &commands::InteractiveOptions) -> Self {
+        Self {
+            script: options.script.clone(),
+            auto_listen: options.auto_listen,
+        }
+    }
+}
+
+#[cfg(feature = "daemon")]
+impl From<&commands::DaemonOptions> for cmd::DaemonRequest {
+    fn from(options: &commands::DaemonOptions) -> Self {
+        Self {
+            rules_file: options.rule_options.rules_file.clone(),
+            foreground: options.foreground,
+            control_socket: options.control_socket.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "pcap")]
+impl From<&commands::ListenCommandOptions> for cmd::ListenRequest {
+    fn from(options: &commands::ListenCommandOptions) -> Self {
+        Self {
+            listen: req::ListenerRequest::from(&options.listen),
+            persistent: options.persistent,
+        }
+    }
+}
+
+#[cfg(feature = "traceroute")]
+impl From<&commands::TracerouteOptions> for cmd::TracerouteRequest {
+    fn from(options: &commands::TracerouteOptions) -> Self {
+        Self {
+            destination: options.destination.clone(),
+            max_ttl: options.max_ttl,
+            probes: options.probes,
+            protocol: cmd::TracerouteProtocol::from(options.protocol),
+            no_dns: options.no_dns,
+            timeout: options.timeout,
+        }
+    }
+}
+
+#[cfg(feature = "scan")]
+impl From<&commands::ScanCommand> for cmd::ScanRequest {
+    fn from(command: &commands::ScanCommand) -> Self {
+        match command {
+            commands::ScanCommand::TcpSyn(options) => {
+                Self::TcpSyn(cmd::PortScanRequest::from(options))
+            }
+            commands::ScanCommand::TcpFin(options) => {
+                Self::TcpFin(cmd::PortScanRequest::from(options))
+            }
+            commands::ScanCommand::TcpNull(options) => {
+                Self::TcpNull(cmd::PortScanRequest::from(options))
+            }
+            commands::ScanCommand::TcpXmas(options) => {
+                Self::TcpXmas(cmd::PortScanRequest::from(options))
+            }
+            commands::ScanCommand::TcpAck(options) => {
+                Self::TcpAck(cmd::PortScanRequest::from(options))
+            }
+            commands::ScanCommand::SctpInit(options) => {
+                Self::SctpInit(cmd::PortScanRequest::from(options))
+            }
+            commands::ScanCommand::Icmp(options) => {
+                Self::Icmp(cmd::TimedScanRequest::from(options))
+            }
+            commands::ScanCommand::Udp(options) => Self::Udp(cmd::PortScanRequest::from(options)),
+            commands::ScanCommand::Arp(options) => Self::Arp(cmd::TimedScanRequest::from(options)),
+            commands::ScanCommand::Ndp(options) => Self::Ndp(cmd::TimedScanRequest::from(options)),
+        }
+    }
+}
+
+#[cfg(feature = "scan")]
+impl From<&commands::PortScanOptions> for cmd::PortScanRequest {
+    fn from(options: &commands::PortScanOptions) -> Self {
+        Self {
+            target: options.target.clone(),
+            ports: options.ports.clone(),
+            interface: options.interface.clone(),
+            source_ip: options.source_ip.clone(),
+        }
+    }
+}
+
+#[cfg(feature = "scan")]
+impl From<&commands::TimedScanOptions> for cmd::TimedScanRequest {
+    fn from(options: &commands::TimedScanOptions) -> Self {
+        Self {
+            target: options.target.clone(),
+            interface: options.interface.clone(),
+            source_ip: options.source_ip.clone(),
+            timeout: options.timeout,
+        }
+    }
+}
+
+#[cfg(feature = "fuzz")]
+impl From<&commands::FuzzOptions> for cmd::FuzzRequest {
+    fn from(options: &commands::FuzzOptions) -> Self {
+        Self {
+            target: options.target.clone(),
+            port: options.port,
+            protocol: cmd::FuzzProtocol::from(options.protocol),
+            strategy: cmd::FuzzStrategy::from(options.strategy),
+            count: options.count,
+            delay: options.delay,
+        }
+    }
+}
+
+impl From<&options::Layer2Options> for req::Layer2Request {
+    fn from(options: &options::Layer2Options) -> Self {
         Self {
             source_mac: options.source_mac.clone(),
             destination_mac: options.destination_mac.clone(),
@@ -37,8 +166,8 @@ impl From<&cli::Layer2Options> for req::Layer2Request {
     }
 }
 
-impl From<&cli::VlanOptions> for req::VlanRequest {
-    fn from(options: &cli::VlanOptions) -> Self {
+impl From<&options::VlanOptions> for req::VlanRequest {
+    fn from(options: &options::VlanOptions) -> Self {
         Self {
             id: options.id,
             priority: options.priority,
@@ -47,8 +176,8 @@ impl From<&cli::VlanOptions> for req::VlanRequest {
     }
 }
 
-impl From<&cli::IpOptions> for req::IpRequest {
-    fn from(options: &cli::IpOptions) -> Self {
+impl From<&options::IpOptions> for req::IpRequest {
+    fn from(options: &options::IpOptions) -> Self {
         Self {
             source_ip: options.source_ip.clone(),
             destination_ip: options.destination_ip.clone(),
@@ -71,16 +200,16 @@ impl From<&cli::IpOptions> for req::IpRequest {
     }
 }
 
-impl From<&cli::IpOptions> for req::Ipv6Request {
-    fn from(options: &cli::IpOptions) -> Self {
+impl From<&options::IpOptions> for req::Ipv6Request {
+    fn from(options: &options::IpOptions) -> Self {
         Self {
             extensions: options.ipv6_extensions.clone(),
         }
     }
 }
 
-impl From<&cli::TransportOptions> for req::TransportRequest {
-    fn from(options: &cli::TransportOptions) -> Self {
+impl From<&options::TransportOptions> for req::TransportRequest {
+    fn from(options: &options::TransportOptions) -> Self {
         Self {
             command: options
                 .command
@@ -92,21 +221,21 @@ impl From<&cli::TransportOptions> for req::TransportRequest {
     }
 }
 
-impl From<&cli::TransportCommand> for req::TransportProtocolRequest {
-    fn from(command: &cli::TransportCommand) -> Self {
+impl From<&options::TransportCommand> for req::TransportProtocolRequest {
+    fn from(command: &options::TransportCommand) -> Self {
         match command {
-            cli::TransportCommand::Tcp(options) => Self::Tcp(req::TcpRequest::from(options)),
-            cli::TransportCommand::Udp(_) => Self::Udp,
-            cli::TransportCommand::Icmp(options) => Self::Icmp(req::IcmpRequest::from(options)),
-            cli::TransportCommand::Icmpv6(options) => {
+            options::TransportCommand::Tcp(options) => Self::Tcp(req::TcpRequest::from(options)),
+            options::TransportCommand::Udp(_) => Self::Udp,
+            options::TransportCommand::Icmp(options) => Self::Icmp(req::IcmpRequest::from(options)),
+            options::TransportCommand::Icmpv6(options) => {
                 Self::Icmpv6(req::Icmpv6Request::from(options))
             }
         }
     }
 }
 
-impl From<&cli::TcpOptions> for req::TcpRequest {
-    fn from(options: &cli::TcpOptions) -> Self {
+impl From<&options::TcpOptions> for req::TcpRequest {
+    fn from(options: &options::TcpOptions) -> Self {
         Self {
             flags: options.flags.clone(),
             sequence: options.sequence,
@@ -121,8 +250,8 @@ impl From<&cli::TcpOptions> for req::TcpRequest {
     }
 }
 
-impl From<&cli::IcmpOptions> for req::IcmpRequest {
-    fn from(options: &cli::IcmpOptions) -> Self {
+impl From<&options::IcmpOptions> for req::IcmpRequest {
+    fn from(options: &options::IcmpOptions) -> Self {
         Self {
             kind: options.kind,
             code: options.code,
@@ -132,8 +261,8 @@ impl From<&cli::IcmpOptions> for req::IcmpRequest {
     }
 }
 
-impl From<&cli::Icmpv6Options> for req::Icmpv6Request {
-    fn from(options: &cli::Icmpv6Options) -> Self {
+impl From<&options::Icmpv6Options> for req::Icmpv6Request {
+    fn from(options: &options::Icmpv6Options) -> Self {
         Self {
             kind: options.kind,
             code: options.code,
@@ -147,8 +276,8 @@ impl From<&cli::Icmpv6Options> for req::Icmpv6Request {
     }
 }
 
-impl From<&cli::PayloadOptions> for req::PayloadRequest {
-    fn from(options: &cli::PayloadOptions) -> Self {
+impl From<&options::PayloadOptions> for req::PayloadRequest {
+    fn from(options: &options::PayloadOptions) -> Self {
         Self {
             data: options.data.clone(),
             data_hex: options.data_hex.clone(),
@@ -164,8 +293,8 @@ impl From<&cli::PayloadOptions> for req::PayloadRequest {
     }
 }
 
-impl From<&cli::TransmitOptions> for req::TransmissionRequest {
-    fn from(options: &cli::TransmitOptions) -> Self {
+impl From<&options::TransmitOptions> for req::TransmissionRequest {
+    fn from(options: &options::TransmitOptions) -> Self {
         Self {
             count: options.count,
             interval: options.interval.clone(),
@@ -177,8 +306,8 @@ impl From<&cli::TransmitOptions> for req::TransmissionRequest {
     }
 }
 
-impl From<&cli::ListenOptions> for req::ListenerRequest {
-    fn from(options: &cli::ListenOptions) -> Self {
+impl From<&options::ListenOptions> for req::ListenerRequest {
+    fn from(options: &options::ListenOptions) -> Self {
         Self {
             listen: options.listen,
             filter: options.filter.clone(),
@@ -191,8 +320,8 @@ impl From<&cli::ListenOptions> for req::ListenerRequest {
     }
 }
 
-impl From<&cli::LoggingOptions> for req::LoggingRequest {
-    fn from(options: &cli::LoggingOptions) -> Self {
+impl From<&options::LoggingOptions> for req::LoggingRequest {
+    fn from(options: &options::LoggingOptions) -> Self {
         Self {
             log_file: options.log_file.clone(),
             pcap_write: options.pcap_write.clone(),
@@ -205,77 +334,111 @@ impl From<&cli::LoggingOptions> for req::LoggingRequest {
     }
 }
 
-impl From<cli::FragmentProfile> for req::FragmentProfile {
-    fn from(profile: cli::FragmentProfile) -> Self {
+impl From<enums::FragmentProfile> for req::FragmentProfile {
+    fn from(profile: enums::FragmentProfile) -> Self {
         match profile {
-            cli::FragmentProfile::Overlap => Self::Overlap,
-            cli::FragmentProfile::Teardrop => Self::Teardrop,
-            cli::FragmentProfile::TinyOverlap => Self::TinyOverlap,
+            enums::FragmentProfile::Overlap => Self::Overlap,
+            enums::FragmentProfile::Teardrop => Self::Teardrop,
+            enums::FragmentProfile::TinyOverlap => Self::TinyOverlap,
         }
     }
 }
 
-impl From<cli::LogLevel> for req::LogLevel {
-    fn from(level: cli::LogLevel) -> Self {
+impl From<enums::LogLevel> for req::LogLevel {
+    fn from(level: enums::LogLevel) -> Self {
         match level {
-            cli::LogLevel::Trace => Self::Trace,
-            cli::LogLevel::Debug => Self::Debug,
-            cli::LogLevel::Info => Self::Info,
-            cli::LogLevel::Warn => Self::Warn,
-            cli::LogLevel::Error => Self::Error,
+            enums::LogLevel::Trace => Self::Trace,
+            enums::LogLevel::Debug => Self::Debug,
+            enums::LogLevel::Info => Self::Info,
+            enums::LogLevel::Warn => Self::Warn,
+            enums::LogLevel::Error => Self::Error,
         }
     }
 }
 
-impl From<cli::Icmpv6ErrorKind> for req::Icmpv6ErrorKind {
-    fn from(kind: cli::Icmpv6ErrorKind) -> Self {
+impl From<enums::Icmpv6ErrorKind> for req::Icmpv6ErrorKind {
+    fn from(kind: enums::Icmpv6ErrorKind) -> Self {
         match kind {
-            cli::Icmpv6ErrorKind::DestinationUnreachable => Self::DestinationUnreachable,
-            cli::Icmpv6ErrorKind::PacketTooBig => Self::PacketTooBig,
-            cli::Icmpv6ErrorKind::TimeExceeded => Self::TimeExceeded,
-            cli::Icmpv6ErrorKind::ParameterProblem => Self::ParameterProblem,
+            enums::Icmpv6ErrorKind::DestinationUnreachable => Self::DestinationUnreachable,
+            enums::Icmpv6ErrorKind::PacketTooBig => Self::PacketTooBig,
+            enums::Icmpv6ErrorKind::TimeExceeded => Self::TimeExceeded,
+            enums::Icmpv6ErrorKind::ParameterProblem => Self::ParameterProblem,
         }
     }
 }
 
-impl From<cli::Icmpv6ErrorCode> for req::Icmpv6ErrorCode {
-    fn from(code: cli::Icmpv6ErrorCode) -> Self {
+impl From<enums::Icmpv6ErrorCode> for req::Icmpv6ErrorCode {
+    fn from(code: enums::Icmpv6ErrorCode) -> Self {
         match code {
-            cli::Icmpv6ErrorCode::DestinationUnreachableNoRoute => {
+            enums::Icmpv6ErrorCode::DestinationUnreachableNoRoute => {
                 Self::DestinationUnreachableNoRoute
             }
-            cli::Icmpv6ErrorCode::DestinationUnreachableAdminProhibited => {
+            enums::Icmpv6ErrorCode::DestinationUnreachableAdminProhibited => {
                 Self::DestinationUnreachableAdminProhibited
             }
-            cli::Icmpv6ErrorCode::DestinationUnreachableBeyondScope => {
+            enums::Icmpv6ErrorCode::DestinationUnreachableBeyondScope => {
                 Self::DestinationUnreachableBeyondScope
             }
-            cli::Icmpv6ErrorCode::DestinationUnreachableAddressUnreachable => {
+            enums::Icmpv6ErrorCode::DestinationUnreachableAddressUnreachable => {
                 Self::DestinationUnreachableAddressUnreachable
             }
-            cli::Icmpv6ErrorCode::DestinationUnreachablePortUnreachable => {
+            enums::Icmpv6ErrorCode::DestinationUnreachablePortUnreachable => {
                 Self::DestinationUnreachablePortUnreachable
             }
-            cli::Icmpv6ErrorCode::DestinationUnreachableSourcePolicy => {
+            enums::Icmpv6ErrorCode::DestinationUnreachableSourcePolicy => {
                 Self::DestinationUnreachableSourcePolicy
             }
-            cli::Icmpv6ErrorCode::DestinationUnreachableRejectRoute => {
+            enums::Icmpv6ErrorCode::DestinationUnreachableRejectRoute => {
                 Self::DestinationUnreachableRejectRoute
             }
-            cli::Icmpv6ErrorCode::DestinationUnreachableSourceRoutingError => {
+            enums::Icmpv6ErrorCode::DestinationUnreachableSourceRoutingError => {
                 Self::DestinationUnreachableSourceRoutingError
             }
-            cli::Icmpv6ErrorCode::TimeExceededHopLimit => Self::TimeExceededHopLimit,
-            cli::Icmpv6ErrorCode::TimeExceededReassembly => Self::TimeExceededReassembly,
-            cli::Icmpv6ErrorCode::ParameterProblemErroneousHeader => {
+            enums::Icmpv6ErrorCode::TimeExceededHopLimit => Self::TimeExceededHopLimit,
+            enums::Icmpv6ErrorCode::TimeExceededReassembly => Self::TimeExceededReassembly,
+            enums::Icmpv6ErrorCode::ParameterProblemErroneousHeader => {
                 Self::ParameterProblemErroneousHeader
             }
-            cli::Icmpv6ErrorCode::ParameterProblemUnrecognizedNextHeader => {
+            enums::Icmpv6ErrorCode::ParameterProblemUnrecognizedNextHeader => {
                 Self::ParameterProblemUnrecognizedNextHeader
             }
-            cli::Icmpv6ErrorCode::ParameterProblemUnrecognizedOption => {
+            enums::Icmpv6ErrorCode::ParameterProblemUnrecognizedOption => {
                 Self::ParameterProblemUnrecognizedOption
             }
+        }
+    }
+}
+
+#[cfg(feature = "traceroute")]
+impl From<commands::TracerouteProtocol> for cmd::TracerouteProtocol {
+    fn from(protocol: commands::TracerouteProtocol) -> Self {
+        match protocol {
+            commands::TracerouteProtocol::Udp => Self::Udp,
+            commands::TracerouteProtocol::Tcp => Self::Tcp,
+            commands::TracerouteProtocol::Icmp => Self::Icmp,
+        }
+    }
+}
+
+#[cfg(feature = "fuzz")]
+impl From<commands::FuzzProtocol> for cmd::FuzzProtocol {
+    fn from(protocol: commands::FuzzProtocol) -> Self {
+        match protocol {
+            commands::FuzzProtocol::Tcp => Self::Tcp,
+            commands::FuzzProtocol::Udp => Self::Udp,
+            commands::FuzzProtocol::Icmp => Self::Icmp,
+        }
+    }
+}
+
+#[cfg(feature = "fuzz")]
+impl From<commands::FuzzStrategy> for cmd::FuzzStrategy {
+    fn from(strategy: commands::FuzzStrategy) -> Self {
+        match strategy {
+            commands::FuzzStrategy::BitFlip => Self::BitFlip,
+            commands::FuzzStrategy::ByteSwap => Self::ByteSwap,
+            commands::FuzzStrategy::RandomPayload => Self::RandomPayload,
+            commands::FuzzStrategy::Boundary => Self::Boundary,
         }
     }
 }

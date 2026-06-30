@@ -7,6 +7,7 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 
+use crate::domain::event::ListenerEvent;
 use crate::domain::net::MacAddress;
 use crate::domain::policy::{PolicyOutcome, TrafficPlan};
 use crate::domain::report::PreflightView;
@@ -15,7 +16,6 @@ use crate::domain::transmission::TransmissionPlan;
 
 use super::format::{format_preview, render_listener_hex};
 use super::report::{preflight_report, PreflightReport};
-use super::ListenerEvent;
 use super::OutputFormat;
 
 #[derive(Debug, Clone)]

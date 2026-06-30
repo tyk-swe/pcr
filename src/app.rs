@@ -196,7 +196,7 @@ impl PacketcraftApp {
             return Ok(());
         }
         #[cfg(feature = "daemon")]
-        if let crate::cli::PacketcraftCommand::Daemon(opts) = &args.command {
+        if let crate::cli::commands::PacketcraftCommand::Daemon(opts) = &args.command {
             util::daemon::ensure_daemonized(opts.foreground.unwrap_or(false))?;
         }
         Ok(())
@@ -239,7 +239,7 @@ impl PacketcraftApp {
     }
 
     fn build_engine_dependencies(
-        output_format: Option<crate::cli::OutputFormat>,
+        output_format: Option<crate::cli::enums::OutputFormat>,
     ) -> engine::ports::EngineDependencies {
         engine::ports::EngineDependencies {
             target_resolver: Arc::new(adapters::util::SystemTargetResolverAdapter),

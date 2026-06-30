@@ -1,7 +1,8 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::cli::{ListenCommandOptions, OneShotOptions, ScanCommand, TracerouteOptions};
+use crate::cli::commands::{ListenCommandOptions, ScanCommand, TracerouteOptions};
+use crate::cli::options::OneShotOptions;
 use anyhow::{anyhow, bail, Result};
 
 #[derive(Debug, Clone, PartialEq)]

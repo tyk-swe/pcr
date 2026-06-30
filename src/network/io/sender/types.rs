@@ -4,9 +4,9 @@
 use pnet::datalink::NetworkInterface;
 use pnet::packet::ip::IpNextHeaderProtocol;
 
+use crate::domain::policy::TransmissionPolicy;
 use crate::domain::spec::{LoggingSpec, TransmissionSpec};
 
-use super::control::TransmissionPolicy;
 pub use crate::domain::transmission::{
     DestinationSelectionReason, InterfaceSelectionReason, PlanningMode, SourceSelectionReason,
     TransmissionLinkType as LinkType, TransmissionSelection as SelectionMetadata,

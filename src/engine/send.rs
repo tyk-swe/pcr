@@ -8,7 +8,7 @@ use log::debug;
 
 use crate::domain::policy::{
     classify_ip, combine_target_scopes, packet_spec_privileges, packet_spec_target_scope,
-    packet_spec_uses_malformed_options, TrafficMode, TrafficPlan, TransmissionPolicy,
+    packet_spec_uses_malformed_options, TargetScope, TrafficMode, TrafficPlan, TransmissionPolicy,
 };
 use crate::domain::request::PacketRequest;
 use crate::domain::spec::PacketSpec;
@@ -197,10 +197,6 @@ impl SendUseCase {
         spec: &PacketSpec,
         plan: &TransmissionPlan,
     ) -> EngineResult<TrafficPlan> {
-        let accounting = emission_accounting(&spec.transmit, self.policy, plan.frames.len() as u64)
-            .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
-        let unbounded = accounting.attempts.is_none();
-        let estimated_packets = accounting.total_emitted_units;
         let planned_target_scope = match &plan.destination {
             TransmissionTarget::Ipv4(addr) => classify_ip((*addr).into()),
             TransmissionTarget::Ipv6(addr) => classify_ip((*addr).into()),
@@ -208,17 +204,12 @@ impl SendUseCase {
         let target_scope =
             combine_target_scopes([planned_target_scope, packet_spec_target_scope(spec)]);
 
-        let mut traffic_plan = TrafficPlan::new(TrafficMode::Send, target_scope);
-        traffic_plan.target_count = 1;
-        traffic_plan.port_count = 1;
-        traffic_plan.estimated_packets = estimated_packets;
-        traffic_plan.malformed = packet_spec_uses_malformed_options(spec);
-        traffic_plan.unbounded = unbounded;
-        traffic_plan.batch_size = plan.frames.len().max(1);
-        traffic_plan.rate_per_sec = Some(self.policy.budget.max_rate_per_sec);
-        traffic_plan.required_privileges = packet_spec_privileges(spec);
-
-        Ok(traffic_plan)
+        self.traffic_plan_for_spec_emission(
+            spec,
+            TrafficMode::Send,
+            target_scope,
+            plan.frames.len() as u64,
+        )
     }
 
     fn traffic_plan_from_spec(
@@ -226,18 +217,29 @@ impl SendUseCase {
         spec: &PacketSpec,
         mode: TrafficMode,
     ) -> EngineResult<TrafficPlan> {
-        let accounting = emission_accounting(&spec.transmit, self.policy, 1)
+        self.traffic_plan_for_spec_emission(spec, mode, packet_spec_target_scope(spec), 1)
+    }
+
+    fn traffic_plan_for_spec_emission(
+        &self,
+        spec: &PacketSpec,
+        mode: TrafficMode,
+        target_scope: TargetScope,
+        units_per_attempt: u64,
+    ) -> EngineResult<TrafficPlan> {
+        let accounting = emission_accounting(&spec.transmit, self.policy, units_per_attempt)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
         let unbounded = accounting.attempts.is_none();
         let estimated_packets = accounting.total_emitted_units;
 
-        let mut traffic_plan = TrafficPlan::new(mode, packet_spec_target_scope(spec));
+        let mut traffic_plan = TrafficPlan::new(mode, target_scope);
         traffic_plan.target_count = 1;
         traffic_plan.port_count = 1;
         traffic_plan.estimated_packets = estimated_packets;
         traffic_plan.malformed = packet_spec_uses_malformed_options(spec);
         traffic_plan.unbounded = unbounded;
-        traffic_plan.batch_size = 1;
+        traffic_plan.batch_size = units_per_attempt.min(usize::MAX as u64) as usize;
+        traffic_plan.batch_size = traffic_plan.batch_size.max(1);
         traffic_plan.rate_per_sec = Some(self.policy.budget.max_rate_per_sec);
         traffic_plan.required_privileges = packet_spec_privileges(spec);
         Ok(traffic_plan)

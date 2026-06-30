@@ -4,9 +4,9 @@
 #[cfg(feature = "metrics")]
 mod enabled;
 #[cfg(not(feature = "metrics"))]
-mod noop;
+mod unavailable;
 
 #[cfg(feature = "metrics")]
-pub(crate) use enabled::*;
+pub(crate) use enabled::AppTelemetry;
 #[cfg(not(feature = "metrics"))]
-pub(crate) use noop::*;
+pub(crate) use unavailable::AppTelemetry;

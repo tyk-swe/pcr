@@ -1,139 +1,109 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#[cfg(feature = "pcap")]
-use std::fs;
+use crate::network::sender::error::Result;
 
-#[cfg(feature = "pcap")]
-use log::warn;
-
-use crate::network::sender::error::{ExecutorError, Result};
-
-#[cfg(feature = "pcap")]
-use super::super::types::LinkType;
 use super::super::types::NetworkTransmissionPlan;
 
+mod writer;
+
 pub(super) struct PacketRecorder {
-    #[cfg(feature = "pcap")]
-    capture: Option<PacketCapture>,
+    writer: writer::CaptureWriter,
 }
 
 impl PacketRecorder {
     pub(super) fn for_plan(plan: &NetworkTransmissionPlan) -> Result<Self> {
-        #[cfg(feature = "pcap")]
-        {
-            let capture = if let Some(path) = plan.logging.pcap_write.as_ref() {
-                Some(PacketCapture::new(path.as_path(), &plan.link_type)?)
-            } else {
-                None
-            };
-            Ok(Self { capture })
-        }
-
-        #[cfg(not(feature = "pcap"))]
-        {
-            if let Some(path) = plan.logging.pcap_write.as_ref() {
-                return Err(ExecutorError::PcapFeatureRequired { path: path.clone() }.into());
-            }
-            Ok(Self {})
-        }
+        Ok(Self {
+            writer: writer::CaptureWriter::for_plan(plan)?,
+        })
     }
 
     pub(super) fn record(&mut self, frame: &[u8]) -> Result<()> {
-        #[cfg(feature = "pcap")]
-        if let Some(writer) = self.capture.as_mut() {
-            writer.record(frame)?;
-        }
-        #[cfg(not(feature = "pcap"))]
-        let _ = frame;
-        Ok(())
+        self.writer.record(frame)
     }
 
     pub(super) fn flush(&mut self) -> Result<()> {
-        #[cfg(feature = "pcap")]
-        if let Some(writer) = self.capture.as_mut() {
-            writer.flush()?;
-        }
-        Ok(())
+        self.writer.flush()
     }
 }
 
-#[cfg(feature = "pcap")]
-fn linktype_for_plan(link_type: &LinkType) -> pcap::Linktype {
-    match link_type {
-        LinkType::Ethernet => pcap::Linktype::ETHERNET,
-        LinkType::Ipv4 => pcap::Linktype::IPV4,
-        LinkType::Ipv6 => pcap::Linktype::IPV6,
-    }
-}
+#[cfg(all(test, not(feature = "pcap")))]
+mod tests {
+    use std::net::Ipv4Addr;
+    use std::path::PathBuf;
 
-#[cfg(feature = "pcap")]
-struct PacketCapture {
-    writer: pcap::Savefile,
-}
+    use pnet::datalink::NetworkInterface;
+    use pnet::packet::ip::IpNextHeaderProtocol;
 
-#[cfg(feature = "pcap")]
-impl PacketCapture {
-    fn new(path: &std::path::Path, link_type: &LinkType) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).map_err(|source| {
-                    ExecutorError::CreatePcapDirectory {
-                        path: parent.to_path_buf(),
-                        source,
-                    }
-                })?;
-            }
-        }
+    use super::*;
+    use crate::domain::policy::TrafficPolicy;
+    use crate::domain::spec::{LoggingSpec, TransmissionSpec};
+    use crate::domain::transmission::{
+        DestinationSelectionReason, InterfaceSelectionReason, PlanningMode, SourceSelectionReason,
+        TransmissionLinkType, TransmissionSelection, TransmissionSummary, TransmissionTarget,
+    };
+    use crate::network::sender::error::SenderError;
 
-        let handle = pcap::Capture::dead(linktype_for_plan(link_type)).map_err(|source| {
-            ExecutorError::CreatePcapHandle {
-                link_type: link_type.clone(),
-                source,
-            }
-        })?;
-        let writer = handle
-            .savefile(path)
-            .map_err(|source| ExecutorError::OpenPcapOutput {
-                path: path.to_path_buf(),
-                source,
-            })?;
-
-        Ok(Self { writer })
-    }
-
-    fn record(&mut self, frame: &[u8]) -> Result<()> {
-        let now = std::time::SystemTime::now();
-        let duration = match now.duration_since(std::time::UNIX_EPOCH) {
-            Ok(duration) => duration,
-            Err(err) => {
-                warn!(
-                    "system clock is before UNIX_EPOCH; using zero timestamp for capture record: {err}"
-                );
-                std::time::Duration::default()
-            }
-        };
-        let frame_len =
-            u32::try_from(frame.len()).map_err(|_| ExecutorError::FrameLengthTooLarge {
-                length: frame.len(),
-            })?;
-        let header = pcap::PacketHeader {
-            ts: libc::timeval {
-                tv_sec: duration.as_secs() as libc::time_t,
-                tv_usec: duration.subsec_micros() as libc::suseconds_t,
+    fn plan_with_pcap_write(pcap_write: Option<PathBuf>) -> NetworkTransmissionPlan {
+        NetworkTransmissionPlan {
+            frames: vec![vec![0, 1, 2, 3]],
+            link_type: TransmissionLinkType::Ethernet,
+            transmit: TransmissionSpec::default(),
+            destination: TransmissionTarget::Ipv4(Ipv4Addr::LOCALHOST),
+            interface: NetworkInterface {
+                name: "lo".to_string(),
+                description: String::new(),
+                index: 1,
+                mac: None,
+                ips: Vec::new(),
+                flags: 0,
             },
-            caplen: frame_len,
-            len: frame_len,
-        };
-        let packet = pcap::Packet::new(&header, frame);
-        self.writer.write(&packet);
-        Ok(())
+            selection: TransmissionSelection {
+                selected_interface: "lo".to_string(),
+                interface_reason: InterfaceSelectionReason::ExplicitInterface,
+                source_ip: Ipv4Addr::LOCALHOST.into(),
+                source_reason: SourceSelectionReason::ExplicitSourceIp,
+                destination_ip: Ipv4Addr::LOCALHOST.into(),
+                destination_reason: DestinationSelectionReason::TargetLiteral,
+            },
+            protocol: IpNextHeaderProtocol(17),
+            summary: TransmissionSummary {
+                payload_len: 0,
+                largest_frame_len: 4,
+                frame_count: 1,
+                transport: "udp",
+            },
+            logging: LoggingSpec {
+                pcap_write,
+                ..Default::default()
+            },
+            mode: PlanningMode::Live,
+            policy: TrafficPolicy::default(),
+        }
     }
 
-    fn flush(&mut self) -> Result<()> {
-        self.writer
-            .flush()
-            .map_err(|source| ExecutorError::FlushPcap { source })?;
-        Ok(())
+    #[test]
+    fn no_pcap_recorder_without_capture_file_is_noop() {
+        let mut recorder = PacketRecorder::for_plan(&plan_with_pcap_write(None)).unwrap();
+
+        recorder.record(&[0, 1, 2, 3]).unwrap();
+        recorder.flush().unwrap();
+    }
+
+    #[test]
+    fn no_pcap_recorder_rejects_capture_file() {
+        let err = match PacketRecorder::for_plan(&plan_with_pcap_write(Some(PathBuf::from(
+            "out.pcap",
+        )))) {
+            Ok(_) => panic!("recorder unexpectedly accepted pcap output without pcap feature"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(
+            err,
+            SenderError::Executor(
+                crate::network::sender::error::ExecutorError::PcapFeatureRequired { .. }
+            )
+        ));
     }
 }

@@ -22,6 +22,7 @@ use crate::domain::command::ListenRequest;
 use crate::domain::command::ScanRequest;
 #[cfg(feature = "traceroute")]
 use crate::domain::command::TracerouteRequest;
+use crate::domain::policy::TrafficPolicy;
 use crate::domain::request::PacketRequest;
 use crate::engine::config::EngineConfig;
 use crate::engine::error::{EngineError, EngineResult};
@@ -41,11 +42,7 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(config: EngineConfig, dependencies: EngineDependencies) -> EngineResult<Self> {
-        Self::new_with_optional_runtime_handle(config, dependencies, None)
-    }
-
-    pub fn new_with_runtime_handle(
+    pub(crate) fn new_with_runtime_handle(
         config: EngineConfig,
         dependencies: EngineDependencies,
         handle: Handle,
@@ -143,7 +140,7 @@ impl Engine {
             opts,
             &self.config,
             &mut self.rules,
-            Arc::clone(&self.dependencies.event_sink),
+            Arc::clone(&self.dependencies.output),
             Arc::clone(&self.dependencies.daemon_listener_runtime),
         )
         .await
@@ -190,21 +187,19 @@ impl Engine {
 
     #[cfg(feature = "traceroute")]
     pub async fn run_traceroute(&mut self, opts: &TracerouteRequest) -> Result<()> {
-        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
+        let policy = self.effective_policy();
         let prepared = self
             .dependencies
             .traceroute_runner
             .prepare(opts.clone(), policy)
             .await?;
-        self.config
-            .traffic_policy
-            .with_dry_run(self.config.dry_run)
+        policy
             .authorize(prepared.traffic_plan())
             .map_err(|e| EngineError::Traceroute(e.into()))?;
 
         if self.config.dry_run {
             self.dependencies
-                .event_sink
+                .output
                 .emit_traffic_plan_summary(prepared.traffic_plan())?;
             return Ok(());
         }
@@ -216,45 +211,40 @@ impl Engine {
     }
 
     pub async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<String> {
-        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
+        let policy = self.effective_policy();
         let prepared = self
             .dependencies
             .dns_client
             .prepare(options.clone(), policy)
             .await?;
-        self.config
-            .traffic_policy
-            .with_dry_run(self.config.dry_run)
-            .authorize(prepared.traffic_plan())?;
+        policy.authorize(prepared.traffic_plan())?;
 
         if self.config.dry_run {
             info!(
                 "Dry-run: DNS query for {} {} via {}",
                 options.domain, options.record_type, options.server
             );
-            return self.dependencies.event_sink.format_dns_dry_run(options);
+            return self.dependencies.output.format_dns_dry_run(options);
         }
-        let result = prepared.resolve(options.clone()).await?;
-        self.dependencies.event_sink.format_dns_response(&result)
+        let result = prepared.resolve().await?;
+        self.dependencies.output.format_dns_response(&result)
     }
 
     #[cfg(feature = "scan")]
     pub async fn run_scan(&mut self, command: &ScanRequest) -> Result<()> {
-        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
+        let policy = self.effective_policy();
         let prepared = self
             .dependencies
             .scan_runner
             .prepare(command.clone(), policy)
             .await?;
-        self.config
-            .traffic_policy
-            .with_dry_run(self.config.dry_run)
+        policy
             .authorize(prepared.traffic_plan())
             .map_err(|e| EngineError::Scan(e.into()))?;
 
         if self.config.dry_run {
             self.dependencies
-                .event_sink
+                .output
                 .emit_traffic_plan_summary(prepared.traffic_plan())?;
             return Ok(());
         }
@@ -263,28 +253,23 @@ impl Engine {
 
     #[cfg(feature = "fuzz")]
     pub async fn run_fuzz(&mut self, options: &FuzzRequest) -> Result<()> {
-        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
-        let plan = self
+        let policy = self.effective_policy();
+        let prepared = self
             .dependencies
             .fuzz_runner
-            .traffic_plan(options.clone(), policy)
+            .prepare(options.clone(), policy)
             .await?;
-        self.config
-            .traffic_policy
-            .with_dry_run(self.config.dry_run)
-            .authorize(&plan)
+        policy
+            .authorize(prepared.traffic_plan())
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
 
         if self.config.dry_run {
             self.dependencies
-                .event_sink
-                .emit_traffic_plan_summary(&plan)?;
+                .output
+                .emit_traffic_plan_summary(prepared.traffic_plan())?;
             return Ok(());
         }
-        self.dependencies
-            .fuzz_runner
-            .run(options.clone(), policy)
-            .await
+        prepared.run().await
     }
 
     pub fn rule_count(&self) -> usize {
@@ -299,12 +284,16 @@ impl Engine {
         &self.config
     }
 
+    fn effective_policy(&self) -> TrafficPolicy {
+        self.config.traffic_policy.with_dry_run(self.config.dry_run)
+    }
+
     pub(crate) fn listener_handler(&self) -> crate::engine::ports::ListenerEventHandler {
-        let event_sink = Arc::clone(&self.dependencies.event_sink);
+        let output = Arc::clone(&self.dependencies.output);
         let rules = self.rules.clone();
 
         Arc::new(move |event| {
-            event_sink.emit_listener_event(&event);
+            output.emit_listener_event(&event);
 
             if rules.is_empty() {
                 return;

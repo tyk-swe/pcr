@@ -31,9 +31,8 @@ use crate::domain::transmission::{PlanningMode, TransmissionPlan};
 
 pub type PortResult<T> = Result<T, Error>;
 pub type PortFuture<T> = Pin<Box<dyn Future<Output = PortResult<T>> + Send + 'static>>;
-type PreparedDnsResolver =
-    Box<dyn FnOnce(DnsRequest) -> PortFuture<DnsQueryResult> + Send + 'static>;
-#[cfg(any(feature = "scan", feature = "traceroute"))]
+type PreparedDnsResolver = Box<dyn FnOnce() -> PortFuture<DnsQueryResult> + Send + 'static>;
+#[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 type PreparedTrafficExecutor = Box<dyn FnOnce() -> PortFuture<()> + Send + 'static>;
 
 pub struct PreparedDnsQuery {
@@ -53,18 +52,18 @@ impl PreparedDnsQuery {
         &self.traffic_plan
     }
 
-    pub fn resolve(self, request: DnsRequest) -> PortFuture<DnsQueryResult> {
-        (self.resolver)(request)
+    pub fn resolve(self) -> PortFuture<DnsQueryResult> {
+        (self.resolver)()
     }
 }
 
-#[cfg(any(feature = "scan", feature = "traceroute"))]
+#[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 pub struct PreparedTrafficRun {
     traffic_plan: TrafficPlan,
     executor: PreparedTrafficExecutor,
 }
 
-#[cfg(any(feature = "scan", feature = "traceroute"))]
+#[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 impl PreparedTrafficRun {
     pub fn new(traffic_plan: TrafficPlan, executor: PreparedTrafficExecutor) -> Self {
         Self {
@@ -87,6 +86,9 @@ pub type PreparedTracerouteRun = PreparedTrafficRun;
 
 #[cfg(feature = "scan")]
 pub type PreparedScanRun = PreparedTrafficRun;
+
+#[cfg(feature = "fuzz")]
+pub type PreparedFuzzRun = PreparedTrafficRun;
 
 pub trait TargetResolver: Send + Sync {
     fn resolve_target_ip(&self, target: String, prefer_ipv6: Option<bool>) -> PortFuture<IpAddr>;
@@ -159,11 +161,10 @@ pub trait ScanRunner: Send + Sync {
 
 #[cfg(feature = "fuzz")]
 pub trait FuzzRunner: Send + Sync {
-    fn traffic_plan(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<TrafficPlan>;
-    fn run(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<()>;
+    fn prepare(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<PreparedFuzzRun>;
 }
 
-pub trait EngineEventSink: Send + Sync {
+pub trait EngineOutput: Send + Sync {
     fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> PortResult<()>;
     fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> PortResult<()>;
     fn emit_listener_event(&self, event: &ListenerEvent);
@@ -192,7 +193,7 @@ pub struct EngineDependencies {
     pub scan_runner: Arc<dyn ScanRunner>,
     #[cfg(feature = "fuzz")]
     pub fuzz_runner: Arc<dyn FuzzRunner>,
-    pub event_sink: Arc<dyn EngineEventSink>,
+    pub output: Arc<dyn EngineOutput>,
     pub rule_action_telemetry: Arc<dyn RuleActionTelemetry>,
 }
 

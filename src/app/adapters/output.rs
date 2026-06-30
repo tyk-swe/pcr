@@ -6,7 +6,7 @@ use crate::domain::event::ListenerEvent;
 use crate::domain::policy::TrafficPlan;
 use crate::domain::spec::PacketSpec;
 use crate::domain::transmission::TransmissionPlan;
-use crate::engine::ports::{EngineEventSink, PortResult};
+use crate::engine::ports::{EngineOutput, PortResult};
 use crate::output::{self, OutputController, OutputFormat};
 
 #[derive(Debug, Clone)]
@@ -24,7 +24,7 @@ impl OutputEventSink {
     }
 }
 
-impl EngineEventSink for OutputEventSink {
+impl EngineOutput for OutputEventSink {
     fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> PortResult<()> {
         self.controller.emit_preflight_summary(spec, plan)
     }

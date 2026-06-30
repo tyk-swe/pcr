@@ -25,7 +25,7 @@ pub fn run_cli() -> Result<()> {
 }
 
 /// Coordinates application bootstrapping and command dispatch.
-pub struct PacketcraftApp {
+struct PacketcraftApp {
     args: PacketcraftArgs,
     command: EngineCommand,
     runtime: Runtime,
@@ -36,7 +36,7 @@ pub struct PacketcraftApp {
 
 impl PacketcraftApp {
     /// Build the application with its runtime, engine, and telemetry wiring in place.
-    pub fn bootstrap(args: PacketcraftArgs) -> Result<Self> {
+    fn bootstrap(args: PacketcraftArgs) -> Result<Self> {
         Self::init_logging(&args)?;
 
         let config = args.engine_config();
@@ -94,7 +94,7 @@ impl PacketcraftApp {
     }
 
     /// Execute the command requested by the CLI arguments.
-    pub fn run(self) -> Result<()> {
+    fn run(self) -> Result<()> {
         let _args = self.args;
         let command = self.command;
         let mut engine = self.engine;
@@ -165,16 +165,6 @@ impl PacketcraftApp {
         }
 
         Ok(None)
-    }
-
-    /// Access the derived engine configuration for testing or telemetry wiring.
-    pub fn config(&self) -> &engine::config::EngineConfig {
-        self.engine.config()
-    }
-
-    /// Whether the configured engine has any receive rules loaded.
-    pub fn has_receive_rules(&self) -> bool {
-        self.engine.has_receive_rules()
     }
 
     fn init_logging(args: &PacketcraftArgs) -> Result<()> {
@@ -266,7 +256,7 @@ impl PacketcraftApp {
             scan_runner: Arc::new(adapters::tools::ToolsScanRunner),
             #[cfg(feature = "fuzz")]
             fuzz_runner: Arc::new(adapters::tools::ToolsFuzzRunner),
-            event_sink: Arc::new(adapters::output::OutputEventSink::new(
+            output: Arc::new(adapters::output::OutputEventSink::new(
                 output_format.map(crate::output::OutputFormat::from),
             )),
             rule_action_telemetry: Arc::new(adapters::telemetry::UtilRuleActionTelemetry),

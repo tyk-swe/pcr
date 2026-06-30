@@ -19,7 +19,7 @@ use control::{cleanup_control_socket, preflight_control_socket, spawn_control_so
 use crate::domain::command::DaemonRequest;
 use crate::domain::request::ListenerRequest;
 use crate::engine::config::EngineConfig;
-use crate::engine::ports::{DaemonListenerRuntime, EngineEventSink, ListenerEventHandler};
+use crate::engine::ports::{DaemonListenerRuntime, EngineOutput, ListenerEventHandler};
 use crate::rules::{RuleEngine, RuleLoadOptions, RuleLoadReport};
 
 const TIMER_TICK: Duration = Duration::from_secs(5);
@@ -83,7 +83,7 @@ pub async fn run(
     opts: &DaemonRequest,
     _config: &EngineConfig,
     rules: &mut RuleEngine,
-    output: Arc<dyn EngineEventSink>,
+    output: Arc<dyn EngineOutput>,
     listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<()> {
     info!(
@@ -270,7 +270,7 @@ async fn handle_command(
     command: DaemonCommand,
     state: &mut DaemonState,
     rules: &mut RuleEngine,
-    output: Arc<dyn EngineEventSink>,
+    output: Arc<dyn EngineOutput>,
     listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<bool> {
     match command {
@@ -333,7 +333,7 @@ async fn load_rules_from_command(
     path: &str,
     state: &mut DaemonState,
     rules: &mut RuleEngine,
-    output: Arc<dyn EngineEventSink>,
+    output: Arc<dyn EngineOutput>,
     listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> CommandResponse {
     let candidate = build_rule_reload_candidate(path, rules)?;
@@ -363,7 +363,7 @@ fn build_rule_reload_candidate(path: &str, rules: &RuleEngine) -> Result<RuleRel
 async fn prepare_listener_for_rule_reload(
     state: &mut DaemonState,
     candidate_rules: &RuleEngine,
-    output: Arc<dyn EngineEventSink>,
+    output: Arc<dyn EngineOutput>,
     listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<()> {
     if candidate_rules.has_receive_triggers() {
@@ -397,7 +397,7 @@ async fn start_listener(
     state: &mut DaemonState,
     options: ListenerRequest,
     rules: &RuleEngine,
-    output: Arc<dyn EngineEventSink>,
+    output: Arc<dyn EngineOutput>,
     listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<()> {
     start_listener_with_interface_hint(state, options, rules, output, listener_runtime, None).await
@@ -407,7 +407,7 @@ async fn start_listener_with_interface_hint(
     state: &mut DaemonState,
     mut options: ListenerRequest,
     rules: &RuleEngine,
-    output: Arc<dyn EngineEventSink>,
+    output: Arc<dyn EngineOutput>,
     listener_runtime: Arc<dyn DaemonListenerRuntime>,
     interface_hint: Option<&str>,
 ) -> Result<()> {
@@ -446,7 +446,7 @@ async fn start_listener_with_interface_hint(
 
 fn listener_event_handler(
     rules: &RuleEngine,
-    output: Arc<dyn EngineEventSink>,
+    output: Arc<dyn EngineOutput>,
 ) -> ListenerEventHandler {
     let rules = rules.clone();
 

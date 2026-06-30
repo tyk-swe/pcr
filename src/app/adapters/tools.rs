@@ -8,12 +8,10 @@ use crate::domain::command::ScanRequest;
 #[cfg(feature = "traceroute")]
 use crate::domain::command::TracerouteRequest;
 use crate::domain::command::{DnsQueryResult, DnsRequest};
-#[cfg(feature = "fuzz")]
-use crate::domain::policy::TrafficPlan;
 use crate::domain::policy::TrafficPolicy;
-#[cfg(feature = "fuzz")]
-use crate::engine::ports::FuzzRunner;
 use crate::engine::ports::{DnsClient, PortFuture, PreparedDnsQuery};
+#[cfg(feature = "fuzz")]
+use crate::engine::ports::{FuzzRunner, PreparedFuzzRun};
 #[cfg(feature = "scan")]
 use crate::engine::ports::{PreparedScanRun, ScanRunner};
 #[cfg(feature = "traceroute")]
@@ -27,7 +25,7 @@ impl DnsClient for ToolsDnsClient {
         Box::pin(async move {
             let prepared = crate::tools::dns::prepare(&request, policy).await?;
             let traffic_plan = prepared.traffic_plan.clone();
-            let resolver = Box::new(move |request| {
+            let resolver = Box::new(move || {
                 Box::pin(
                     async move { crate::tools::dns::resolve_prepared(&request, prepared).await },
                 ) as PortFuture<DnsQueryResult>
@@ -89,18 +87,17 @@ pub(crate) struct ToolsFuzzRunner;
 
 #[cfg(feature = "fuzz")]
 impl FuzzRunner for ToolsFuzzRunner {
-    fn traffic_plan(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<TrafficPlan> {
+    fn prepare(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<PreparedFuzzRun> {
         Box::pin(async move {
             let config = fuzz_config_for_policy(&request, &policy)?;
-            crate::tools::fuzz::traffic_plan(&config)
-        })
-    }
-
-    fn run(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<()> {
-        Box::pin(async move {
-            let config = fuzz_config_for_policy(&request, &policy)?;
-            crate::tools::fuzz::run_fuzz(config).await?;
-            Ok(())
+            let traffic_plan = crate::tools::fuzz::traffic_plan(&config)?;
+            let executor = Box::new(move || {
+                Box::pin(async move {
+                    crate::tools::fuzz::run_fuzz(config).await?;
+                    Ok(())
+                }) as PortFuture<()>
+            });
+            Ok(PreparedFuzzRun::new(traffic_plan, executor))
         })
     }
 }

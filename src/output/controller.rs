@@ -11,9 +11,7 @@ use crate::domain::net::MacAddress;
 use crate::domain::policy::{PolicyOutcome, TrafficPlan};
 use crate::domain::report::PreflightView;
 use crate::domain::spec::{PacketSpec, PayloadSource};
-use crate::domain::transmission::{
-    emission_accounting, TransmissionLinkType, TransmissionPlan, TransmissionTarget,
-};
+use crate::domain::transmission::TransmissionPlan;
 
 use super::format::{format_preview, render_listener_hex};
 use super::report::{preflight_report, PreflightReport};
@@ -46,7 +44,7 @@ impl OutputController {
     }
 
     pub fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> Result<()> {
-        let view = preflight_view_from_plan(plan)?;
+        let view = PreflightView::from_transmission_plan(plan)?;
         self.emit_preflight_view_summary(spec, &view)
     }
 
@@ -288,63 +286,5 @@ impl OutputController {
                 eprintln!("failed to serialize listener event to JSON: {e}");
             }
         }
-    }
-}
-
-fn preflight_view_from_plan(plan: &TransmissionPlan) -> Result<PreflightView> {
-    let accounting =
-        emission_accounting(&plan.transmit, plan.policy, plan.summary.frame_count as u64)?;
-    let send_mode = if accounting.attempts.is_some() {
-        "finite"
-    } else {
-        "unbounded"
-    };
-
-    Ok(PreflightView {
-        destination: planned_destination(plan),
-        selected_destination_ip: plan.selection.destination_ip.to_string(),
-        destination_reason: plan.selection.destination_reason.as_str(),
-        destination_family: planned_destination_family(plan),
-        interface: plan.interface_name.clone(),
-        interface_reason: plan.selection.interface_reason.as_str(),
-        source_ip: plan.selection.source_ip.to_string(),
-        source_reason: plan.selection.source_reason.as_str(),
-        mode: planned_mode(plan),
-        transport: plan.summary.transport,
-        count: accounting.attempts,
-        attempts: accounting.attempts,
-        units_per_attempt: accounting.units_per_attempt,
-        total_emitted_units: accounting.total_emitted_units,
-        send_mode,
-        frame_count: plan.summary.frame_count,
-        largest_frame_len: plan.summary.largest_frame_len,
-        transmit: plan.transmit.clone(),
-    })
-}
-
-fn planned_destination_family(plan: &TransmissionPlan) -> &'static str {
-    match &plan.destination {
-        TransmissionTarget::Ipv4(_) => "IPv4",
-        TransmissionTarget::Ipv6(_) => "IPv6",
-    }
-}
-
-fn planned_destination(plan: &TransmissionPlan) -> String {
-    match &plan.destination {
-        TransmissionTarget::Ipv4(addr) => addr.to_string(),
-        TransmissionTarget::Ipv6(addr) => addr.to_string(),
-    }
-}
-
-fn planned_mode(plan: &TransmissionPlan) -> &'static str {
-    if plan.transmit.is_layer3()
-        || matches!(
-            &plan.link_type,
-            TransmissionLinkType::Ipv4 | TransmissionLinkType::Ipv6
-        )
-    {
-        "L3"
-    } else {
-        "L2"
     }
 }

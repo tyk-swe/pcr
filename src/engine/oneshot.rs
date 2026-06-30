@@ -186,7 +186,7 @@ impl<'engine> OneShotFlow<'engine> {
     ) -> EngineResult<()> {
         self.engine
             .dependencies
-            .event_sink
+            .output
             .emit_preflight_summary(spec, plan)
             .map_err(EngineError::PreflightSummary)
     }

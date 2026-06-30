@@ -78,10 +78,7 @@ impl SendUseCase {
         self.authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
 
         if check_privileges {
-            self.dependencies
-                .privilege_checker
-                .check_packet_send(Arc::clone(&spec))
-                .await?;
+            self.check_privileges(Arc::clone(&spec)).await?;
         }
 
         let plan = self.plan_live(Arc::clone(&spec)).await?;

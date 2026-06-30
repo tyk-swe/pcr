@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use thiserror::Error;
+
 #[cfg(feature = "pcap")]
 use tokio::task::JoinError;
 
@@ -32,13 +33,19 @@ pub(crate) enum ListenerError {
     #[error("listener queue_capacity must not exceed {max} entries")]
     SpecQueueCapacityTooLarge { max: usize },
     #[cfg(feature = "pcap")]
+    #[error(transparent)]
+    Pcap(#[from] PcapListenerError),
+}
+
+#[cfg(feature = "pcap")]
+#[derive(Debug, Error)]
+pub(crate) enum PcapListenerError {
     #[error("validate captured frame length failed: len={len} bytes")]
     CaptureFrameLength {
         len: usize,
         #[source]
         source: std::num::TryFromIntError,
     },
-    #[cfg(feature = "pcap")]
     #[error(
         "failed to determine capture interface{hint}",
         hint = match hint {
@@ -51,78 +58,65 @@ pub(crate) enum ListenerError {
         #[source]
         source: InterfaceError,
     },
-    #[cfg(feature = "pcap")]
     #[error("failed to join capture task: task panicked or was cancelled")]
     CaptureTaskJoin {
         #[from]
         source: JoinError,
     },
-    #[cfg(feature = "pcap")]
     #[error("capture worker task aborted before completion")]
     CaptureWorkerAborted {
         #[source]
         source: JoinError,
     },
-    #[cfg(feature = "pcap")]
     #[error("error reading packet from {interface}")]
     CaptureRead {
         interface: String,
         #[source]
         source: std::io::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("error reading packet from {interface} via pcap")]
     CaptureReadPcap {
         interface: String,
         #[source]
         source: pcap::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("create pcap directory failed: path={path}")]
     CaptureDirectory {
         path: String,
         #[source]
         source: std::io::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("create pcap capture handle failed: Capture::dead returned error")]
     CaptureHandle {
         #[source]
         source: pcap::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("open listener capture failed: path={path}")]
     CaptureOpen {
         path: String,
         #[source]
         source: pcap::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("flush listener capture failed: savefile flush error")]
     CaptureFlush {
         #[source]
         source: pcap::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("pcap device {name} not found")]
     PcapDeviceNotFound { name: String },
-    #[cfg(feature = "pcap")]
     #[error("pcap device enumeration failed")]
     PcapDeviceList {
         #[source]
         source: pcap::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("failed to open datalink channel on {interface}")]
     CaptureChannel {
         interface: String,
         #[source]
         source: std::io::Error,
     },
-    #[cfg(feature = "pcap")]
     #[error("interface {interface} does not support Ethernet channel operations")]
     UnsupportedChannel { interface: String },
-    #[cfg(feature = "pcap")]
     #[error("failed to apply BPF filter '{filter}' on {interface}: {detail}")]
     BpfFilterFailed {
         filter: String,

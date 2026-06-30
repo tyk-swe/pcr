@@ -1,18 +1,53 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#[cfg(feature = "pcap")]
 use std::path::PathBuf;
+#[cfg(feature = "pcap")]
 use std::time::Duration;
 
-use crate::domain::listener_config::{
-    normalize_queue_capacity, NormalizedListenerRequest, QueueCapacityError,
-};
+#[cfg(not(feature = "pcap"))]
+use crate::domain::listener_config::ListenerPcapRequirement;
+#[cfg(feature = "pcap")]
+use crate::domain::listener_config::NormalizedListenerRequest;
+use crate::domain::listener_config::{normalize_queue_capacity, QueueCapacityError};
 use crate::domain::request::ListenerRequest;
 #[cfg(feature = "pcap")]
 use crate::domain::spec::ListenerSpec;
 
 use super::error::ListenerError;
 
+#[cfg(feature = "pcap")]
+mod availability {
+    use super::*;
+
+    pub(super) fn validate_request(_options: &ListenerRequest) -> Result<(), ListenerError> {
+        Ok(())
+    }
+}
+
+#[cfg(not(feature = "pcap"))]
+mod availability {
+    use super::*;
+
+    pub(super) fn validate_request(options: &ListenerRequest) -> Result<(), ListenerError> {
+        if let Some(requirement) =
+            crate::domain::listener_config::runtime_request_pcap_requirement(options)
+        {
+            return Err(match requirement {
+                ListenerPcapRequirement::Filter => ListenerError::FilterRequiresPcap,
+                ListenerPcapRequirement::Capture => ListenerError::CaptureRequiresPcap,
+                ListenerPcapRequirement::Listen | ListenerPcapRequirement::ShowReply => {
+                    ListenerError::ListenerRequiresPcap
+                }
+            });
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(feature = "pcap")]
 #[derive(Clone, Debug)]
 pub(crate) struct ListenerRuntimeConfig {
     pub filter: Option<String>,
@@ -23,26 +58,17 @@ pub(crate) struct ListenerRuntimeConfig {
     pub queue_capacity: usize,
 }
 
+#[cfg(not(feature = "pcap"))]
+pub(crate) fn validate_request_options(options: &ListenerRequest) -> Result<(), ListenerError> {
+    availability::validate_request(options)?;
+    normalize_queue_capacity(options.queue_capacity).map_err(queue_capacity_request_error)?;
+    Ok(())
+}
+
+#[cfg(feature = "pcap")]
 impl ListenerRuntimeConfig {
     pub(crate) fn from_request(options: &ListenerRequest) -> Result<Self, ListenerError> {
-        #[cfg(not(feature = "pcap"))]
-        if let Some(requirement) =
-            crate::domain::listener_config::runtime_request_pcap_requirement(options)
-        {
-            return Err(match requirement {
-                crate::domain::listener_config::ListenerPcapRequirement::Filter => {
-                    ListenerError::FilterRequiresPcap
-                }
-                crate::domain::listener_config::ListenerPcapRequirement::Capture => {
-                    ListenerError::CaptureRequiresPcap
-                }
-                crate::domain::listener_config::ListenerPcapRequirement::Listen
-                | crate::domain::listener_config::ListenerPcapRequirement::ShowReply => {
-                    ListenerError::ListenerRequiresPcap
-                }
-            });
-        }
-
+        availability::validate_request(options)?;
         let normalized = NormalizedListenerRequest::from_request(options);
         let queue_capacity = normalize_queue_capacity(normalized.queue_capacity)
             .map_err(queue_capacity_request_error)?;
@@ -85,5 +111,38 @@ fn queue_capacity_spec_error(error: QueueCapacityError) -> ListenerError {
     match error {
         QueueCapacityError::Zero => ListenerError::SpecQueueCapacityZero,
         QueueCapacityError::TooLarge { max } => ListenerError::SpecQueueCapacityTooLarge { max },
+    }
+}
+
+#[cfg(all(test, feature = "daemon", not(feature = "pcap")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn daemon_listener_validation_without_pcap_rejects_filter_and_capture() {
+        let filter = validate_request_options(&ListenerRequest {
+            filter: Some("icmp".to_string()),
+            ..Default::default()
+        })
+        .unwrap_err();
+        let capture = validate_request_options(&ListenerRequest {
+            capture_file: Some("capture.pcap".to_string()),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(filter, ListenerError::FilterRequiresPcap));
+        assert!(matches!(capture, ListenerError::CaptureRequiresPcap));
+    }
+
+    #[test]
+    fn daemon_listener_validation_without_pcap_still_checks_queue_capacity() {
+        let err = validate_request_options(&ListenerRequest {
+            queue_capacity: Some(0),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, ListenerError::QueueCapacityZero));
     }
 }

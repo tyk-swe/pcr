@@ -4,14 +4,39 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-#[cfg(not(feature = "pcap"))]
-use super::error::SpecError;
 use super::error::SpecResult;
 
-#[cfg(not(feature = "pcap"))]
-use crate::domain::listener_config::ListenerPcapRequirement;
 use crate::domain::listener_config::NormalizedListenerRequest;
 use crate::domain::request::ListenerRequest;
+
+#[cfg(feature = "pcap")]
+mod availability {
+    use super::*;
+
+    pub(super) fn validate(_request: &ListenerRequest) -> SpecResult<()> {
+        Ok(())
+    }
+}
+
+#[cfg(not(feature = "pcap"))]
+mod availability {
+    use super::super::error::SpecError;
+    use super::*;
+    use crate::domain::listener_config::ListenerPcapRequirement;
+
+    pub(super) fn validate(request: &ListenerRequest) -> SpecResult<()> {
+        if let Some(requirement) = crate::domain::listener_config::spec_pcap_requirement(request) {
+            return Err(match requirement {
+                ListenerPcapRequirement::Listen => SpecError::ListenReplyRequiresPcap,
+                ListenerPcapRequirement::ShowReply => SpecError::ShowReplyRequiresPcap,
+                ListenerPcapRequirement::Filter => SpecError::FilterRequiresPcap,
+                ListenerPcapRequirement::Capture => SpecError::PcapSaveRequiresFeature,
+            });
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ListenerSpec {
@@ -27,16 +52,7 @@ pub(crate) struct ListenerSpec {
 
 impl ListenerSpec {
     pub(crate) fn from_request(request: &ListenerRequest) -> SpecResult<Self> {
-        #[cfg(not(feature = "pcap"))]
-        if let Some(requirement) = crate::domain::listener_config::spec_pcap_requirement(request) {
-            return Err(match requirement {
-                ListenerPcapRequirement::Listen => SpecError::ListenReplyRequiresPcap,
-                ListenerPcapRequirement::ShowReply => SpecError::ShowReplyRequiresPcap,
-                ListenerPcapRequirement::Filter => SpecError::FilterRequiresPcap,
-                ListenerPcapRequirement::Capture => SpecError::PcapSaveRequiresFeature,
-            });
-        }
-
+        availability::validate(request)?;
         let normalized = NormalizedListenerRequest::from_request(request);
 
         Ok(Self {
@@ -49,5 +65,88 @@ impl ListenerSpec {
             implicit: normalized.implicit,
             queue_capacity: normalized.queue_capacity,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[cfg(not(feature = "pcap"))]
+    use crate::domain::spec::error::SpecError;
+
+    #[cfg(not(feature = "pcap"))]
+    fn spec_error(request: ListenerRequest) -> SpecError {
+        ListenerSpec::from_request(&request).unwrap_err()
+    }
+
+    #[test]
+    fn listener_spec_accepts_fully_disabled_request() {
+        let spec = ListenerSpec::from_request(&ListenerRequest::default()).unwrap();
+
+        assert!(!spec.enabled);
+        assert_eq!(spec.queue_capacity, None);
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn listener_spec_without_pcap_rejects_explicit_listen() {
+        let err = spec_error(ListenerRequest {
+            listen: Some(true),
+            ..Default::default()
+        });
+
+        assert!(matches!(err, SpecError::ListenReplyRequiresPcap));
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn listener_spec_without_pcap_rejects_show_reply_filter_and_capture() {
+        assert!(matches!(
+            spec_error(ListenerRequest {
+                show_reply: Some(true),
+                ..Default::default()
+            }),
+            SpecError::ShowReplyRequiresPcap
+        ));
+        assert!(matches!(
+            spec_error(ListenerRequest {
+                filter: Some("icmp".to_string()),
+                ..Default::default()
+            }),
+            SpecError::FilterRequiresPcap
+        ));
+        assert!(matches!(
+            spec_error(ListenerRequest {
+                capture_file: Some("reply.pcap".to_string()),
+                ..Default::default()
+            }),
+            SpecError::PcapSaveRequiresFeature
+        ));
+    }
+
+    #[cfg(feature = "pcap")]
+    #[test]
+    fn listener_spec_with_pcap_accepts_valid_listener_requests() {
+        for request in [
+            ListenerRequest {
+                listen: Some(true),
+                timeout: Some(1),
+                ..Default::default()
+            },
+            ListenerRequest {
+                show_reply: Some(true),
+                ..Default::default()
+            },
+            ListenerRequest {
+                filter: Some("tcp port 443".to_string()),
+                ..Default::default()
+            },
+            ListenerRequest {
+                capture_file: Some("reply.pcap".to_string()),
+                ..Default::default()
+            },
+        ] {
+            assert!(ListenerSpec::from_request(&request).unwrap().enabled);
+        }
     }
 }

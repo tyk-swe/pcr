@@ -1,26 +1,22 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::fs;
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-#[cfg(feature = "pcap")]
 use std::time::SystemTime;
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "pcap")]
 use log::info;
 use log::{error, warn};
-#[cfg(feature = "pcap")]
 use pcap::{Active, Capture, Device, Linktype, Packet as PcapPacket, PacketHeader, Savefile};
 use pnet::datalink::{self, Channel, Config as DatalinkConfig};
-#[cfg(feature = "pcap")]
-use std::fs;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::config::ListenerRuntimeConfig;
-use super::error::ListenerError;
+use super::error::{ListenerError, PcapListenerError};
 use super::ListenerStartupSignal;
 use crate::util::telemetry;
 
@@ -43,35 +39,14 @@ pub(crate) fn spawn_capture_thread(
         let result = tokio::task::spawn_blocking(move || {
             let mut startup = startup;
             if runtime.filter.is_some() {
-                #[cfg(feature = "pcap")]
-                {
-                    let result = capture_loop_with_pcap(
-                        runtime,
-                        interface,
-                        packet_tx,
-                        Arc::clone(&capture_running),
-                        &mut startup,
-                    );
-                    return notify_startup_failure_on_error(&mut startup, result);
-                }
-
-                #[cfg(not(feature = "pcap"))]
-                {
-                    if let Some(filter) = runtime.filter.as_ref() {
-                        warn!(
-                            "pcap feature disabled at compile time; ignoring filter '{}' on {}",
-                            filter, interface.name
-                        );
-                    }
-                    let result = capture_loop(
-                        runtime,
-                        interface,
-                        packet_tx,
-                        Arc::clone(&capture_running),
-                        &mut startup,
-                    );
-                    return notify_startup_failure_on_error(&mut startup, result);
-                }
+                let result = capture_loop_with_pcap(
+                    runtime,
+                    interface,
+                    packet_tx,
+                    Arc::clone(&capture_running),
+                    &mut startup,
+                );
+                return notify_startup_failure_on_error(&mut startup, result);
             }
 
             let result = capture_loop(runtime, interface, packet_tx, capture_running, &mut startup);
@@ -92,7 +67,7 @@ pub(crate) fn spawn_capture_thread(
                 } else {
                     error!("capture loop aborted unexpectedly: {err}");
                 }
-                Err(ListenerError::CaptureWorkerAborted { source: err })
+                Err(PcapListenerError::CaptureWorkerAborted { source: err }.into())
             }
         }
     }))
@@ -116,28 +91,28 @@ fn notify_startup_failure_on_error(
     result
 }
 
-#[cfg(feature = "pcap")]
 struct ListenerCaptureWriter {
     writer: Savefile,
 }
 
-#[cfg(feature = "pcap")]
 impl ListenerCaptureWriter {
     fn new(path: &std::path::Path, linktype: Linktype) -> ListenerResult<Self> {
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).map_err(|source| ListenerError::CaptureDirectory {
-                    path: parent.display().to_string(),
-                    source,
+                fs::create_dir_all(parent).map_err(|source| {
+                    PcapListenerError::CaptureDirectory {
+                        path: parent.display().to_string(),
+                        source,
+                    }
                 })?;
             }
         }
 
-        let handle =
-            Capture::dead(linktype).map_err(|source| ListenerError::CaptureHandle { source })?;
+        let handle = Capture::dead(linktype)
+            .map_err(|source| PcapListenerError::CaptureHandle { source })?;
         let writer = handle
             .savefile(path)
-            .map_err(|source| ListenerError::CaptureOpen {
+            .map_err(|source| PcapListenerError::CaptureOpen {
                 path: path.display().to_string(),
                 source,
             })?;
@@ -157,7 +132,7 @@ impl ListenerCaptureWriter {
             }
         };
         let frame_len =
-            u32::try_from(frame.len()).map_err(|source| ListenerError::CaptureFrameLength {
+            u32::try_from(frame.len()).map_err(|source| PcapListenerError::CaptureFrameLength {
                 len: frame.len(),
                 source,
             })?;
@@ -177,11 +152,10 @@ impl ListenerCaptureWriter {
     fn flush(&mut self) -> ListenerResult<()> {
         self.writer
             .flush()
-            .map_err(|source| ListenerError::CaptureFlush { source })
+            .map_err(|source| PcapListenerError::CaptureFlush { source }.into())
     }
 }
 
-#[cfg(feature = "pcap")]
 fn create_capture_writer(
     capture_file: Option<&std::path::Path>,
     linktype: Linktype,
@@ -204,13 +178,14 @@ fn capture_loop(
     startup: &mut Option<ListenerStartupSignal>,
 ) -> ListenerResult<()> {
     if interface.name.is_empty() {
-        return Err(ListenerError::CaptureChannel {
+        return Err(PcapListenerError::CaptureChannel {
             interface: "<unspecified>".to_string(),
             source: io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "interface name required for capture",
             ),
-        });
+        }
+        .into());
     }
 
     let config = DatalinkConfig {
@@ -224,29 +199,29 @@ fn capture_loop(
     let channel = match datalink::channel(&interface, config) {
         Ok(channel) => channel,
         Err(err) => {
-            return Err(ListenerError::CaptureChannel {
+            return Err(PcapListenerError::CaptureChannel {
                 interface: interface.name.clone(),
                 source: err,
-            });
+            }
+            .into());
         }
     };
 
     let (_, mut rx) = match channel {
         Channel::Ethernet(_, rx) => ((), rx),
         _ => {
-            return Err(ListenerError::UnsupportedChannel {
+            return Err(PcapListenerError::UnsupportedChannel {
                 interface: interface.name.clone(),
-            });
+            }
+            .into());
         }
     };
 
-    #[cfg(feature = "pcap")]
     let capture_label = runtime
         .capture_file
         .as_ref()
         .map(|path| path.display().to_string());
 
-    #[cfg(feature = "pcap")]
     let mut recorder = create_capture_writer(runtime.capture_file.as_deref(), Linktype::ETHERNET)?;
 
     notify_startup_ready(startup);
@@ -258,9 +233,7 @@ fn capture_loop(
     while capture_session_active(&running, start, timeout) {
         match rx.next() {
             Ok(frame) => {
-                #[cfg(feature = "pcap")]
                 let mut drop_writer = false;
-                #[cfg(feature = "pcap")]
                 {
                     if let Some(writer) = recorder.as_mut() {
                         if let Err(err) = writer.record(frame) {
@@ -274,7 +247,6 @@ fn capture_loop(
                         }
                     }
                 }
-                #[cfg(feature = "pcap")]
                 if drop_writer {
                     recorder = None;
                 }
@@ -303,10 +275,11 @@ fn capture_loop(
             }
             Err(err) => {
                 warn!("error reading packet from {}: {err}", interface.name);
-                return Err(ListenerError::CaptureRead {
+                return Err(PcapListenerError::CaptureRead {
                     interface: interface.name.clone(),
                     source: err,
-                });
+                }
+                .into());
             }
         }
     }
@@ -318,7 +291,6 @@ fn capture_loop(
         );
     }
 
-    #[cfg(feature = "pcap")]
     if let Some(writer) = recorder.as_mut() {
         if let Err(err) = writer.flush() {
             if let Some(label) = capture_label.as_ref() {
@@ -347,7 +319,6 @@ fn capture_within_timeout(start: Instant, timeout: Option<Duration>) -> bool {
     }
 }
 
-#[cfg(feature = "pcap")]
 fn capture_loop_with_pcap(
     runtime: ListenerRuntimeConfig,
     interface: datalink::NetworkInterface,
@@ -387,7 +358,7 @@ fn capture_loop_with_pcap(
     if let Some(filter) = runtime.filter.as_ref() {
         capture
             .filter(filter, true)
-            .map_err(|err| ListenerError::BpfFilterFailed {
+            .map_err(|err| PcapListenerError::BpfFilterFailed {
                 filter: filter.clone(),
                 interface: interface.name.clone(),
                 detail: err.to_string(),
@@ -404,7 +375,6 @@ fn capture_loop_with_pcap(
     )
 }
 
-#[cfg(feature = "pcap")]
 fn capture_loop_from_pcap(
     capture: &mut Capture<Active>,
     runtime: ListenerRuntimeConfig,
@@ -470,10 +440,11 @@ fn capture_loop_from_pcap(
                     "error reading packet from {} via pcap: {err}",
                     interface.name
                 );
-                return Err(ListenerError::CaptureReadPcap {
+                return Err(PcapListenerError::CaptureReadPcap {
                     interface: interface.name.clone(),
                     source: err,
-                });
+                }
+                .into());
             }
         }
     }
@@ -498,13 +469,13 @@ fn capture_loop_from_pcap(
     Ok(())
 }
 
-#[cfg(feature = "pcap")]
 fn resolve_pcap_device(name: &str) -> ListenerResult<Device> {
-    let devices = Device::list().map_err(|source| ListenerError::PcapDeviceList { source })?;
+    let devices = Device::list().map_err(|source| PcapListenerError::PcapDeviceList { source })?;
     devices
         .into_iter()
         .find(|device| device.name == name)
-        .ok_or_else(|| ListenerError::PcapDeviceNotFound {
+        .ok_or_else(|| PcapListenerError::PcapDeviceNotFound {
             name: name.to_string(),
         })
+        .map_err(ListenerError::from)
 }

@@ -265,6 +265,158 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "pcap")]
+    #[test]
+    fn engine_command_maps_listen_options() {
+        let command = args(
+            PacketcraftCommand::Listen(commands::ListenCommandOptions {
+                listen: options::ListenOptions {
+                    listen: Some(true),
+                    filter: Some("icmp".to_string()),
+                    queue_capacity: Some(128),
+                    ..Default::default()
+                },
+                persistent: Some(true),
+            }),
+            false,
+        )
+        .engine_command();
+
+        assert!(matches!(
+            command,
+            EngineCommand::Listen(request)
+                if request.listen.listen == Some(true)
+                    && request.listen.filter.as_deref() == Some("icmp")
+                    && request.listen.queue_capacity == Some(128)
+                    && request.persistent == Some(true)
+        ));
+    }
+
+    #[cfg(feature = "daemon")]
+    #[test]
+    fn engine_command_maps_daemon_options() {
+        let command = args(
+            PacketcraftCommand::Daemon(commands::DaemonOptions {
+                rule_options: options::RuleOptions {
+                    rules_file: Some("rules.yml".to_string()),
+                    ..Default::default()
+                },
+                foreground: Some(true),
+                control_socket: Some("/tmp/packetcraftr.sock".to_string()),
+            }),
+            false,
+        )
+        .engine_command();
+
+        assert!(matches!(
+            command,
+            EngineCommand::Daemon(request)
+                if request.rules_file.as_deref() == Some("rules.yml")
+                    && request.foreground == Some(true)
+                    && request.control_socket.as_deref() == Some("/tmp/packetcraftr.sock")
+        ));
+    }
+
+    #[cfg(feature = "repl")]
+    #[test]
+    fn engine_command_maps_interactive_options() {
+        let command = args(
+            PacketcraftCommand::Interactive(commands::InteractiveOptions {
+                script: Some("session.pcr".to_string()),
+                auto_listen: Some(true),
+            }),
+            false,
+        )
+        .engine_command();
+
+        assert!(matches!(
+            command,
+            EngineCommand::Interactive(request)
+                if request.script.as_deref() == Some("session.pcr")
+                    && request.auto_listen == Some(true)
+        ));
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn engine_command_maps_traceroute_options() {
+        let command = args(
+            PacketcraftCommand::Traceroute(commands::TracerouteOptions {
+                destination: "example.test".to_string(),
+                max_ttl: 16,
+                probes: 2,
+                protocol: commands::TracerouteProtocol::Icmp,
+                no_dns: Some(true),
+                timeout: 750,
+            }),
+            false,
+        )
+        .engine_command();
+
+        assert!(matches!(
+            command,
+            EngineCommand::Traceroute(request)
+                if request.destination == "example.test"
+                    && request.max_ttl == 16
+                    && request.probes == 2
+                    && request.protocol == crate::domain::command::TracerouteProtocol::Icmp
+                    && request.no_dns == Some(true)
+                    && request.timeout == 750
+        ));
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn engine_command_maps_scan_options() {
+        let command = args(
+            PacketcraftCommand::Scan(commands::ScanCommand::TcpSyn(commands::PortScanOptions {
+                target: "192.0.2.1".to_string(),
+                ports: "22,80".to_string(),
+                interface: Some("eth0".to_string()),
+                source_ip: Some("192.0.2.10".to_string()),
+            })),
+            false,
+        )
+        .engine_command();
+
+        assert!(matches!(
+            command,
+            EngineCommand::Scan(crate::domain::command::ScanRequest::TcpSyn(request))
+                if request.target == "192.0.2.1"
+                    && request.ports == "22,80"
+                    && request.interface.as_deref() == Some("eth0")
+                    && request.source_ip.as_deref() == Some("192.0.2.10")
+        ));
+    }
+
+    #[cfg(feature = "fuzz")]
+    #[test]
+    fn engine_command_maps_fuzz_options() {
+        let command = args(
+            PacketcraftCommand::Fuzz(commands::FuzzOptions {
+                target: "192.0.2.1".to_string(),
+                port: Some(443),
+                protocol: commands::FuzzProtocol::Tcp,
+                strategy: commands::FuzzStrategy::BitFlip,
+                count: 5,
+                delay: 25,
+            }),
+            false,
+        )
+        .engine_command();
+
+        assert!(matches!(
+            command,
+            EngineCommand::Fuzz(request)
+                if request.target == "192.0.2.1"
+                    && request.port == Some(443)
+                    && request.protocol == crate::domain::command::FuzzProtocol::Tcp
+                    && request.strategy == crate::domain::command::FuzzStrategy::BitFlip
+                    && request.count == 5
+                    && request.delay == 25
+        ));
+    }
+
     #[test]
     fn output_format_mapping_preserves_all_variants() {
         assert!(matches!(

@@ -6,9 +6,7 @@ use std::time::Duration;
 
 use crate::domain::request::ListenerRequest;
 
-#[cfg(any(feature = "daemon", feature = "pcap"))]
 pub(crate) const DEFAULT_QUEUE_CAPACITY: usize = 256;
-#[cfg(any(feature = "daemon", feature = "pcap"))]
 pub(crate) const MAX_QUEUE_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone)]
@@ -45,7 +43,6 @@ impl NormalizedListenerRequest {
     }
 }
 
-#[cfg(not(feature = "pcap"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ListenerPcapRequirement {
     Listen,
@@ -54,7 +51,6 @@ pub(crate) enum ListenerPcapRequirement {
     Capture,
 }
 
-#[cfg(not(feature = "pcap"))]
 pub(crate) fn spec_pcap_requirement(request: &ListenerRequest) -> Option<ListenerPcapRequirement> {
     if request.listen.unwrap_or(false) {
         Some(ListenerPcapRequirement::Listen)
@@ -69,7 +65,6 @@ pub(crate) fn spec_pcap_requirement(request: &ListenerRequest) -> Option<Listene
     }
 }
 
-#[cfg(all(not(feature = "pcap"), feature = "daemon"))]
 pub(crate) fn runtime_request_pcap_requirement(
     request: &ListenerRequest,
 ) -> Option<ListenerPcapRequirement> {
@@ -82,14 +77,12 @@ pub(crate) fn runtime_request_pcap_requirement(
     }
 }
 
-#[cfg(any(feature = "daemon", feature = "pcap"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QueueCapacityError {
     Zero,
     TooLarge { max: usize },
 }
 
-#[cfg(any(feature = "daemon", feature = "pcap"))]
 pub(crate) fn normalize_queue_capacity(
     queue_capacity: Option<usize>,
 ) -> Result<usize, QueueCapacityError> {
@@ -181,7 +174,6 @@ mod tests {
         assert!(normalized.show_reply);
     }
 
-    #[cfg(not(feature = "pcap"))]
     #[test]
     fn spec_pcap_requirement_reports_highest_priority_requirement() {
         let requirement = spec_pcap_requirement(&ListenerRequest {
@@ -195,7 +187,6 @@ mod tests {
         assert_eq!(requirement, Some(ListenerPcapRequirement::Listen));
     }
 
-    #[cfg(not(feature = "pcap"))]
     #[test]
     fn spec_pcap_requirement_reports_each_implicit_pcap_use() {
         assert_eq!(
@@ -222,7 +213,6 @@ mod tests {
         assert_eq!(spec_pcap_requirement(&ListenerRequest::default()), None);
     }
 
-    #[cfg(any(feature = "daemon", feature = "pcap"))]
     #[test]
     fn normalize_queue_capacity_applies_default_and_accepts_bounds() {
         assert_eq!(
@@ -236,7 +226,6 @@ mod tests {
         );
     }
 
-    #[cfg(any(feature = "daemon", feature = "pcap"))]
     #[test]
     fn normalize_queue_capacity_rejects_zero_and_too_large_values() {
         assert_eq!(

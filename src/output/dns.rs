@@ -4,7 +4,6 @@
 use std::fmt::Write;
 
 use anyhow::{Context, Result};
-use trust_dns_proto::op::Message;
 
 use crate::domain::command::{DnsQueryResult, DnsRequest};
 
@@ -43,7 +42,6 @@ pub fn format_dns_dry_run_json(options: &DnsRequest) -> Result<String> {
 
 pub fn format_dns_message(result: &DnsQueryResult) -> String {
     let mut output = String::new();
-    let message = &result.message;
 
     let _ = writeln!(
         &mut output,
@@ -58,36 +56,35 @@ pub fn format_dns_message(result: &DnsQueryResult) -> String {
 
     let _ = writeln!(
         &mut output,
-        "ID: {:04x}, OpCode: {:?}, ResponseCode: {}, Questions: {}, Answers: {}",
-        message.id(),
-        message.op_code(),
-        message.response_code(),
-        message.query_count(),
-        message.answer_count()
+        "ID: {:04x}, OpCode: {}, ResponseCode: {}, Questions: {}, Answers: {}",
+        result.id,
+        result.opcode,
+        result.response_code,
+        result.questions.len(),
+        result.answers.len()
     );
 
-    let flags = dns_flags(message);
-    if !flags.is_empty() {
-        let _ = writeln!(&mut output, "Flags: {}", flags.join(", "));
+    if !result.flags.is_empty() {
+        let _ = writeln!(&mut output, "Flags: {}", result.flags.join(", "));
     }
 
-    if message.answer_count() > 0 {
+    if !result.answers.is_empty() {
         let _ = writeln!(&mut output, "Answers:");
-        for record in message.answers() {
+        for record in &result.answers {
             let _ = writeln!(&mut output, "  {}", record);
         }
     }
 
-    if message.name_server_count() > 0 {
+    if !result.authority.is_empty() {
         let _ = writeln!(&mut output, "Authority:");
-        for record in message.name_servers() {
+        for record in &result.authority {
             let _ = writeln!(&mut output, "  {}", record);
         }
     }
 
-    if message.additional_count() > 0 {
+    if !result.additional.is_empty() {
         let _ = writeln!(&mut output, "Additional:");
-        for record in message.additionals() {
+        for record in &result.additional {
             let _ = writeln!(&mut output, "  {}", record);
         }
     }
@@ -96,33 +93,16 @@ pub fn format_dns_message(result: &DnsQueryResult) -> String {
 }
 
 pub fn format_dns_message_json(result: &DnsQueryResult) -> Result<String> {
-    let message = &result.message;
-    let flags = dns_flags(message);
-    let queries = message
-        .queries()
+    let queries = result
+        .questions
         .iter()
         .map(|query| {
             serde_json::json!({
-                "name": query.name().to_string(),
-                "record_type": query.query_type().to_string(),
-                "class": format!("{:?}", query.query_class())
+                "name": query.name,
+                "record_type": query.record_type,
+                "class": query.class
             })
         })
-        .collect::<Vec<_>>();
-    let answers = message
-        .answers()
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let authority = message
-        .name_servers()
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>();
-    let additional = message
-        .additionals()
-        .iter()
-        .map(ToString::to_string)
         .collect::<Vec<_>>();
 
     let value = serde_json::json!({
@@ -135,38 +115,21 @@ pub fn format_dns_message_json(result: &DnsQueryResult) -> Result<String> {
             "udp_truncated": result.udp_truncated,
             "tcp_fallback_used": result.tcp_fallback_used
         },
-        "id": message.id(),
-        "opcode": format!("{:?}", message.op_code()),
-        "response_code": message.response_code().to_string(),
+        "id": result.id,
+        "opcode": result.opcode,
+        "response_code": result.response_code,
         "counts": {
-            "questions": message.query_count(),
-            "answers": message.answer_count(),
-            "authority": message.name_server_count(),
-            "additional": message.additional_count()
+            "questions": result.questions.len(),
+            "answers": result.answers.len(),
+            "authority": result.authority.len(),
+            "additional": result.additional.len()
         },
-        "flags": flags,
+        "flags": result.flags,
         "questions": queries,
-        "answers": answers,
-        "authority": authority,
-        "additional": additional
+        "answers": result.answers,
+        "authority": result.authority,
+        "additional": result.additional
     });
 
     serde_json::to_string_pretty(&value).context("failed to serialize DNS response JSON")
-}
-
-fn dns_flags(message: &Message) -> Vec<&'static str> {
-    let mut flags = Vec::new();
-    if message.header().authoritative() {
-        flags.push("AA");
-    }
-    if message.header().truncated() {
-        flags.push("TC");
-    }
-    if message.header().recursion_desired() {
-        flags.push("RD");
-    }
-    if message.header().recursion_available() {
-        flags.push("RA");
-    }
-    flags
 }

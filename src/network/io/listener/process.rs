@@ -22,6 +22,7 @@ use pnet::packet::vlan::VlanPacket;
 use pnet::packet::Packet;
 
 use crate::domain::event::{ListenerEvent, ProtocolLabel};
+use crate::domain::net::MacAddress;
 use crate::network::protocol_validation::ipv6_transport_payload;
 use crate::util::telemetry;
 
@@ -69,8 +70,8 @@ pub(crate) fn build_event(data: &[u8], show_reply: bool) -> ListenerEvent {
     };
 
     if let Some(eth) = EthernetPacket::new(data) {
-        event.layer2_source = Some(eth.get_source());
-        event.layer2_destination = Some(eth.get_destination());
+        event.layer2_source = Some(from_pnet_mac(eth.get_source()));
+        event.layer2_destination = Some(from_pnet_mac(eth.get_destination()));
         event.detail = Some(format!("ether type 0x{:04x}", eth.get_ethertype().0));
 
         match eth.get_ethertype() {
@@ -103,6 +104,10 @@ pub(crate) fn build_event(data: &[u8], show_reply: bool) -> ListenerEvent {
     }
 
     event
+}
+
+fn from_pnet_mac(mac: pnet::datalink::MacAddr) -> MacAddress {
+    MacAddress::new([mac.0, mac.1, mac.2, mac.3, mac.4, mac.5])
 }
 
 fn populate_ipv4(event: &mut ListenerEvent, packet: &Ipv4Packet) {

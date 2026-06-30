@@ -8,13 +8,13 @@ use tokio::runtime::Handle;
 
 use crate::domain::policy::TrafficPolicy;
 use crate::domain::request::PacketRequest;
-use crate::engine::send::PacketSendService;
+use crate::engine::ports::RuleActionTelemetry;
+use crate::engine::send::SendUseCase;
 use crate::rules::send::{RuleSendDispatcher, RuleSendTemplate};
 use crate::rules::{
     validate_rule_send_request, BoundedExecutor, ExecutorError, PacketContext, RuleActionError,
     RuleError,
 };
-use crate::util::telemetry;
 
 const RULE_SEND_EXECUTOR_WORKERS: usize = 4;
 const RULE_SEND_EXECUTOR_QUEUE_CAPACITY: usize = 64;
@@ -45,25 +45,33 @@ impl RuleSendConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct RuleSendExecutor {
     executor: Arc<BoundedExecutor>,
+    send: Arc<SendUseCase>,
+    telemetry: Arc<dyn RuleActionTelemetry>,
     traffic_policy: TrafficPolicy,
     dry_run: bool,
 }
 
 impl RuleSendExecutor {
-    pub(crate) fn new_configured(config: RuleSendConfig) -> Result<Self> {
+    pub(crate) fn new_configured(
+        config: RuleSendConfig,
+        send: Arc<SendUseCase>,
+        telemetry: Arc<dyn RuleActionTelemetry>,
+    ) -> Result<Self> {
         let executor = BoundedExecutor::new(
             "rule-send-worker",
             config.workers,
             config.workers + config.queue_capacity,
         )?;
-        Ok(Self::from_executor(config, executor))
+        Ok(Self::from_executor(config, send, telemetry, executor))
     }
 
     pub(crate) fn new_configured_with_runtime_handle(
         config: RuleSendConfig,
+        send: Arc<SendUseCase>,
+        telemetry: Arc<dyn RuleActionTelemetry>,
         handle: Handle,
     ) -> Result<Self> {
         let executor = BoundedExecutor::new_with_handle(
@@ -71,12 +79,19 @@ impl RuleSendExecutor {
             config.workers,
             config.workers + config.queue_capacity,
         )?;
-        Ok(Self::from_executor(config, executor))
+        Ok(Self::from_executor(config, send, telemetry, executor))
     }
 
-    fn from_executor(config: RuleSendConfig, executor: BoundedExecutor) -> Self {
+    fn from_executor(
+        config: RuleSendConfig,
+        send: Arc<SendUseCase>,
+        telemetry: Arc<dyn RuleActionTelemetry>,
+        executor: BoundedExecutor,
+    ) -> Self {
         Self {
             executor: Arc::new(executor),
+            send,
+            telemetry,
             traffic_policy: config.traffic_policy,
             dry_run: config.dry_run,
         }
@@ -86,24 +101,32 @@ impl RuleSendExecutor {
         self.traffic_policy.with_dry_run(self.dry_run)
     }
 
-    async fn send(rule_name: String, request: PacketRequest, policy: TrafficPolicy) -> Result<()> {
-        let service = PacketSendService::new(policy);
-        let prepared = service.prepare(request, true).await.map_err(|source| {
+    async fn send(rule_name: String, request: PacketRequest, send: Arc<SendUseCase>) -> Result<()> {
+        let prepared =
+            send.prepare(request, true)
+                .await
+                .map_err(|source| RuleActionError::SendExecution {
+                    rule: rule_name.clone(),
+                    stage: "preparing packet send",
+                    source,
+                })?;
+        send.execute_plan(prepared.plan).await.map_err(|source| {
             RuleActionError::SendExecution {
-                rule: rule_name.clone(),
-                stage: "preparing packet send",
-                source,
-            }
-        })?;
-        service
-            .execute_plan(prepared.plan)
-            .await
-            .map_err(|source| RuleActionError::SendExecution {
                 rule: rule_name,
                 stage: "executing transmission",
                 source,
-            })?;
+            }
+        })?;
         Ok(())
+    }
+}
+
+impl std::fmt::Debug for RuleSendExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RuleSendExecutor")
+            .field("traffic_policy", &self.traffic_policy)
+            .field("dry_run", &self.dry_run)
+            .finish_non_exhaustive()
     }
 }
 
@@ -123,20 +146,23 @@ impl RuleSendDispatcher for RuleSendExecutor {
                 "rule '{}' send action validated (dry-run); would dispatch templated packet",
                 rule_name
             );
-            telemetry::record_rule_action("send", "dry_run_validated");
+            self.telemetry
+                .record_rule_action("send", "dry_run_validated");
             return Ok(());
         }
 
         let rule_name_owned = rule_name.to_string();
+        let send = Arc::clone(&self.send);
+        let telemetry = Arc::clone(&self.telemetry);
         let spawn_result = self.executor.spawn_async(move || async move {
-            telemetry::record_rule_action("send", "started");
-            match Self::send(rule_name_owned.clone(), rendered, policy).await {
+            telemetry.record_rule_action("send", "started");
+            match Self::send(rule_name_owned.clone(), rendered, send).await {
                 Ok(_) => {
-                    telemetry::record_rule_action("send", "succeeded");
+                    telemetry.record_rule_action("send", "succeeded");
                     info!("rule '{}' dispatched templated packet", rule_name_owned)
                 }
                 Err(err) => {
-                    telemetry::record_rule_action("send", "failed");
+                    telemetry.record_rule_action("send", "failed");
                     error!("rule '{}' send action failed: {err}", rule_name_owned)
                 }
             }
@@ -144,7 +170,7 @@ impl RuleSendDispatcher for RuleSendExecutor {
 
         match spawn_result {
             Ok(()) => {
-                telemetry::record_rule_action("send", "queued");
+                self.telemetry.record_rule_action("send", "queued");
                 Ok(())
             }
             Err(ExecutorError::QueueFull) => {
@@ -152,7 +178,8 @@ impl RuleSendDispatcher for RuleSendExecutor {
                     "rule '{}' send action dropped: executor queue is full",
                     rule_name
                 );
-                telemetry::record_rule_executor_drop("send", "queue_full");
+                self.telemetry
+                    .record_rule_executor_drop("send", "queue_full");
                 Err(RuleActionError::SendQueueFull {
                     rule: rule_name.to_string(),
                 }
@@ -163,7 +190,8 @@ impl RuleSendDispatcher for RuleSendExecutor {
                     "rule '{}' send action failed: executor unavailable",
                     rule_name
                 );
-                telemetry::record_rule_executor_drop("send", "executor_closed");
+                self.telemetry
+                    .record_rule_executor_drop("send", "executor_closed");
                 Err(RuleActionError::SendExecutorUnavailable {
                     rule: rule_name.to_string(),
                 }
@@ -174,7 +202,8 @@ impl RuleSendDispatcher for RuleSendExecutor {
                     "rule '{}' send action failed: executor runtime unavailable: {}",
                     rule_name, details
                 );
-                telemetry::record_rule_executor_drop("send", "runtime_unavailable");
+                self.telemetry
+                    .record_rule_executor_drop("send", "runtime_unavailable");
                 Err(RuleActionError::SendExecutorUnavailable {
                     rule: rule_name.to_string(),
                 }

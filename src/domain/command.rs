@@ -97,13 +97,27 @@ impl std::fmt::Display for DnsTransport {
 
 #[derive(Debug, Clone)]
 pub struct DnsQueryResult {
-    pub message: trust_dns_proto::op::Message,
+    pub id: u16,
+    pub opcode: String,
+    pub response_code: String,
+    pub flags: Vec<String>,
+    pub questions: Vec<DnsQuestion>,
+    pub answers: Vec<String>,
+    pub authority: Vec<String>,
+    pub additional: Vec<String>,
     pub transport_used: DnsTransport,
     pub attempts: u32,
     pub server: String,
     pub response_bytes: usize,
     pub udp_truncated: bool,
     pub tcp_fallback_used: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct DnsQuestion {
+    pub name: String,
+    pub record_type: String,
+    pub class: String,
 }
 
 #[cfg(feature = "scan")]

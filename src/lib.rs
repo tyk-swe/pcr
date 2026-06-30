@@ -1,17 +1,14 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-pub mod app;
-#[doc(hidden)]
-pub mod cli;
+mod app;
+mod cli;
 pub mod domain;
-pub mod engine;
-#[doc(hidden)]
-pub mod network;
-pub mod output;
+mod engine;
+mod network;
+mod output;
 pub mod rules;
-pub mod tools;
-#[doc(hidden)]
-pub mod util;
+mod tools;
+mod util;
 
-pub use app::{run_cli, PacketcraftApp};
+pub use app::run_cli;

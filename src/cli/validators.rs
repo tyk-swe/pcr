@@ -1,12 +1,13 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use pnet::datalink::MacAddr;
 use std::str::FromStr;
+
+use crate::domain::net::MacAddress;
 use trust_dns_proto::rr::RecordType;
 
 pub fn mac_address_validator(s: &str) -> Result<String, String> {
-    MacAddr::from_str(s)
+    MacAddress::from_str(s)
         .map(|_| s.to_string())
         .map_err(|_| format!("invalid MAC address: {s} (expected format xx:xx:xx:xx:xx:xx)"))
 }
@@ -24,7 +25,7 @@ pub fn dns_record_type_validator(s: &str) -> Result<String, String> {
         .map(|_| s.to_string())
         .map_err(|_| {
             format!(
-                "unsupported DNS record type: {s} (valid types: A, AAAA, CNAME, MX, NS, PTR, SOA, SRV, TXT, etc.)"
+                "unsupported DNS record type: {s} (valid types are those supported by trust-dns-proto)"
             )
         })
 }

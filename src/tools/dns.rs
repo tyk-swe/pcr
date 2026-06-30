@@ -9,13 +9,16 @@ use anyhow::{Context, Result};
 use log::{debug, info};
 use trust_dns_proto::rr::RecordType;
 
-use crate::domain::command::{DnsQueryResult, DnsRequest, DnsTransport, DnsTransportMode};
+use crate::domain::command::{
+    DnsQueryResult, DnsQuestion, DnsRequest, DnsTransport, DnsTransportMode,
+};
 use crate::domain::policy::{classify_ip, TrafficMode, TrafficPlan, TrafficPolicy};
 use crate::network::protocols::dns::{
     build_dns_query, query_tcp_with_retries, query_udp_for_auto_with_retries,
     query_udp_with_retries, resolve_dns_server_address, AutoUdpResponse, DnsQueryPlan,
     DnsRateLimiter,
 };
+use trust_dns_proto::op::Message;
 
 #[derive(Debug, Clone)]
 pub struct PreparedDnsQuery {
@@ -66,11 +69,6 @@ fn traffic_plan_for_target(
     plan
 }
 
-pub async fn resolve(options: &DnsRequest, policy: TrafficPolicy) -> Result<DnsQueryResult> {
-    let prepared = prepare(options, policy).await?;
-    resolve_prepared(options, prepared).await
-}
-
 pub async fn resolve_prepared(
     options: &DnsRequest,
     prepared: PreparedDnsQuery,
@@ -107,30 +105,30 @@ pub async fn resolve_prepared(
                     .await?;
             let udp_truncated = response.message.header().truncated();
 
-            Ok(DnsQueryResult {
-                message: response.message,
-                transport_used: DnsTransport::Udp,
+            Ok(dns_query_result(
+                response.message,
+                DnsTransport::Udp,
                 attempts,
-                server: prepared.server_addr,
-                response_bytes: response.response_bytes,
+                prepared.server_addr,
+                response.response_bytes,
                 udp_truncated,
-                tcp_fallback_used: false,
-            })
+                false,
+            ))
         }
         DnsTransportMode::Tcp => {
             let response =
                 query_tcp_with_retries(&plan, options.retries, &mut attempts, &mut rate_limiter)
                     .await?;
 
-            Ok(DnsQueryResult {
-                message: response.message,
-                transport_used: DnsTransport::Tcp,
+            Ok(dns_query_result(
+                response.message,
+                DnsTransport::Tcp,
                 attempts,
-                server: prepared.server_addr,
-                response_bytes: response.response_bytes,
-                udp_truncated: false,
-                tcp_fallback_used: false,
-            })
+                prepared.server_addr,
+                response.response_bytes,
+                false,
+                false,
+            ))
         }
         DnsTransportMode::Auto => {
             let udp_response = query_udp_for_auto_with_retries(
@@ -143,15 +141,15 @@ pub async fn resolve_prepared(
 
             let udp_response_bytes = match udp_response {
                 AutoUdpResponse::Complete(udp_response) => {
-                    return Ok(DnsQueryResult {
-                        message: udp_response.message,
-                        transport_used: DnsTransport::Udp,
+                    return Ok(dns_query_result(
+                        udp_response.message,
+                        DnsTransport::Udp,
                         attempts,
-                        server: prepared.server_addr,
-                        response_bytes: udp_response.response_bytes,
-                        udp_truncated: false,
-                        tcp_fallback_used: false,
-                    });
+                        prepared.server_addr,
+                        udp_response.response_bytes,
+                        false,
+                        false,
+                    ));
                 }
                 AutoUdpResponse::Truncated { response_bytes } => response_bytes,
             };
@@ -163,15 +161,75 @@ pub async fn resolve_prepared(
                 query_tcp_with_retries(&plan, options.retries, &mut attempts, &mut rate_limiter)
                     .await?;
 
-            Ok(DnsQueryResult {
-                message: tcp_response.message,
-                transport_used: DnsTransport::Tcp,
+            Ok(dns_query_result(
+                tcp_response.message,
+                DnsTransport::Tcp,
                 attempts,
-                server: prepared.server_addr,
-                response_bytes: tcp_response.response_bytes,
-                udp_truncated: true,
-                tcp_fallback_used: true,
-            })
+                prepared.server_addr,
+                tcp_response.response_bytes,
+                true,
+                true,
+            ))
         }
     }
+}
+
+fn dns_query_result(
+    message: Message,
+    transport_used: DnsTransport,
+    attempts: u32,
+    server: String,
+    response_bytes: usize,
+    udp_truncated: bool,
+    tcp_fallback_used: bool,
+) -> DnsQueryResult {
+    DnsQueryResult {
+        id: message.id(),
+        opcode: format!("{:?}", message.op_code()),
+        response_code: message.response_code().to_string(),
+        flags: dns_flags(&message),
+        questions: message
+            .queries()
+            .iter()
+            .map(|query| DnsQuestion {
+                name: query.name().to_string(),
+                record_type: query.query_type().to_string(),
+                class: format!("{:?}", query.query_class()),
+            })
+            .collect(),
+        answers: message.answers().iter().map(ToString::to_string).collect(),
+        authority: message
+            .name_servers()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        additional: message
+            .additionals()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        transport_used,
+        attempts,
+        server,
+        response_bytes,
+        udp_truncated,
+        tcp_fallback_used,
+    }
+}
+
+fn dns_flags(message: &Message) -> Vec<String> {
+    let mut flags = Vec::new();
+    if message.header().authoritative() {
+        flags.push("AA".to_string());
+    }
+    if message.header().truncated() {
+        flags.push("TC".to_string());
+    }
+    if message.header().recursion_desired() {
+        flags.push("RD".to_string());
+    }
+    if message.header().recursion_available() {
+        flags.push("RA".to_string());
+    }
+    flags
 }

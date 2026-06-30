@@ -26,15 +26,13 @@ pub struct Icmpv6Spec {
 
 impl Icmpv6Spec {
     pub(crate) fn from_request(icmp: &Icmpv6Request) -> SpecResult<Self> {
-        use pnet::packet::icmpv6::Icmpv6Types;
-
         let mut kind = icmp.kind;
         let mut code = icmp.code;
         let mut parameter = icmp.parameter;
 
         if let Some(selected) = icmp.error {
             let derived = icmpv6_error_kind_to_type(selected);
-            kind.get_or_insert(derived.0);
+            kind.get_or_insert(derived);
             if code.is_none() {
                 code = Some(default_error_code_for(selected));
             }
@@ -43,21 +41,21 @@ impl Icmpv6Spec {
         if let Some(selected_code) = icmp.error_code {
             let (expected_type, resolved_code) = icmpv6_error_code_to_type_and_value(selected_code);
             match kind {
-                Some(existing) if existing != expected_type.0 => {
+                Some(existing) if existing != expected_type => {
                     return Err(SpecError::Icmpv6ErrorCodeMismatch {
                         code: selected_code,
                         existing,
                     });
                 }
                 _ => {
-                    kind = Some(expected_type.0);
+                    kind = Some(expected_type);
                 }
             }
             code = Some(resolved_code);
         }
 
         if let Some(mtu) = icmp.mtu {
-            let packet_too_big = Icmpv6Types::PacketTooBig.0;
+            let packet_too_big = ICMPV6_PACKET_TOO_BIG;
             match kind {
                 Some(existing) if existing != packet_too_big => {
                     return Err(SpecError::Icmpv6MtuRequiresPacketTooBig);
@@ -82,14 +80,17 @@ impl Icmpv6Spec {
     }
 }
 
-fn icmpv6_error_kind_to_type(kind: Icmpv6ErrorKind) -> pnet::packet::icmpv6::Icmpv6Type {
-    use pnet::packet::icmpv6::Icmpv6Types;
+const ICMPV6_DESTINATION_UNREACHABLE: u8 = 1;
+const ICMPV6_PACKET_TOO_BIG: u8 = 2;
+const ICMPV6_TIME_EXCEEDED: u8 = 3;
+const ICMPV6_PARAMETER_PROBLEM: u8 = 4;
 
+fn icmpv6_error_kind_to_type(kind: Icmpv6ErrorKind) -> u8 {
     match kind {
-        Icmpv6ErrorKind::DestinationUnreachable => Icmpv6Types::DestinationUnreachable,
-        Icmpv6ErrorKind::PacketTooBig => Icmpv6Types::PacketTooBig,
-        Icmpv6ErrorKind::TimeExceeded => Icmpv6Types::TimeExceeded,
-        Icmpv6ErrorKind::ParameterProblem => Icmpv6Types::ParameterProblem,
+        Icmpv6ErrorKind::DestinationUnreachable => ICMPV6_DESTINATION_UNREACHABLE,
+        Icmpv6ErrorKind::PacketTooBig => ICMPV6_PACKET_TOO_BIG,
+        Icmpv6ErrorKind::TimeExceeded => ICMPV6_TIME_EXCEEDED,
+        Icmpv6ErrorKind::ParameterProblem => ICMPV6_PARAMETER_PROBLEM,
     }
 }
 
@@ -102,41 +103,29 @@ fn default_error_code_for(kind: Icmpv6ErrorKind) -> u8 {
     }
 }
 
-fn icmpv6_error_code_to_type_and_value(
-    code: Icmpv6ErrorCode,
-) -> (pnet::packet::icmpv6::Icmpv6Type, u8) {
-    use pnet::packet::icmpv6::Icmpv6Types;
-
+fn icmpv6_error_code_to_type_and_value(code: Icmpv6ErrorCode) -> (u8, u8) {
     match code {
-        Icmpv6ErrorCode::DestinationUnreachableNoRoute => (Icmpv6Types::DestinationUnreachable, 0),
+        Icmpv6ErrorCode::DestinationUnreachableNoRoute => (ICMPV6_DESTINATION_UNREACHABLE, 0),
         Icmpv6ErrorCode::DestinationUnreachableAdminProhibited => {
-            (Icmpv6Types::DestinationUnreachable, 1)
+            (ICMPV6_DESTINATION_UNREACHABLE, 1)
         }
-        Icmpv6ErrorCode::DestinationUnreachableBeyondScope => {
-            (Icmpv6Types::DestinationUnreachable, 2)
-        }
+        Icmpv6ErrorCode::DestinationUnreachableBeyondScope => (ICMPV6_DESTINATION_UNREACHABLE, 2),
         Icmpv6ErrorCode::DestinationUnreachableAddressUnreachable => {
-            (Icmpv6Types::DestinationUnreachable, 3)
+            (ICMPV6_DESTINATION_UNREACHABLE, 3)
         }
         Icmpv6ErrorCode::DestinationUnreachablePortUnreachable => {
-            (Icmpv6Types::DestinationUnreachable, 4)
+            (ICMPV6_DESTINATION_UNREACHABLE, 4)
         }
-        Icmpv6ErrorCode::DestinationUnreachableSourcePolicy => {
-            (Icmpv6Types::DestinationUnreachable, 5)
-        }
-        Icmpv6ErrorCode::DestinationUnreachableRejectRoute => {
-            (Icmpv6Types::DestinationUnreachable, 6)
-        }
+        Icmpv6ErrorCode::DestinationUnreachableSourcePolicy => (ICMPV6_DESTINATION_UNREACHABLE, 5),
+        Icmpv6ErrorCode::DestinationUnreachableRejectRoute => (ICMPV6_DESTINATION_UNREACHABLE, 6),
         Icmpv6ErrorCode::DestinationUnreachableSourceRoutingError => {
-            (Icmpv6Types::DestinationUnreachable, 7)
+            (ICMPV6_DESTINATION_UNREACHABLE, 7)
         }
-        Icmpv6ErrorCode::TimeExceededHopLimit => (Icmpv6Types::TimeExceeded, 0),
-        Icmpv6ErrorCode::TimeExceededReassembly => (Icmpv6Types::TimeExceeded, 1),
-        Icmpv6ErrorCode::ParameterProblemErroneousHeader => (Icmpv6Types::ParameterProblem, 0),
-        Icmpv6ErrorCode::ParameterProblemUnrecognizedNextHeader => {
-            (Icmpv6Types::ParameterProblem, 1)
-        }
-        Icmpv6ErrorCode::ParameterProblemUnrecognizedOption => (Icmpv6Types::ParameterProblem, 2),
+        Icmpv6ErrorCode::TimeExceededHopLimit => (ICMPV6_TIME_EXCEEDED, 0),
+        Icmpv6ErrorCode::TimeExceededReassembly => (ICMPV6_TIME_EXCEEDED, 1),
+        Icmpv6ErrorCode::ParameterProblemErroneousHeader => (ICMPV6_PARAMETER_PROBLEM, 0),
+        Icmpv6ErrorCode::ParameterProblemUnrecognizedNextHeader => (ICMPV6_PARAMETER_PROBLEM, 1),
+        Icmpv6ErrorCode::ParameterProblemUnrecognizedOption => (ICMPV6_PARAMETER_PROBLEM, 2),
     }
 }
 

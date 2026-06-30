@@ -11,18 +11,19 @@ use crate::domain::policy::{
     packet_spec_uses_malformed_options, TrafficMode, TrafficPlan, TransmissionPolicy,
 };
 use crate::domain::request::PacketRequest;
-use crate::domain::spec::{PacketSpec, TransportSpec};
-use crate::engine::config::EngineConfig;
-use crate::engine::error::{EngineError, EngineResult};
-use crate::engine::resolve::{resolve_packet_request, SystemTargetResolver};
-use crate::network::io::sender::{
-    emission_accounting, validate_transmission_policy, NetworkTarget, TransmissionPlan,
+use crate::domain::spec::PacketSpec;
+use crate::domain::transmission::{
+    emission_accounting, validate_transmission_policy, PlanningMode, TransmissionPlan,
+    TransmissionTarget,
 };
+use crate::engine::error::{EngineError, EngineResult};
+use crate::engine::ports::{resolve_packet_request, EngineDependencies};
 
 #[derive(Debug, Clone)]
-pub struct PacketSendService {
+pub struct SendUseCase {
     policy: TransmissionPolicy,
     dry_run: bool,
+    dependencies: EngineDependencies,
 }
 
 #[derive(Debug, Clone)]
@@ -31,15 +32,12 @@ pub struct PreparedPacketSend {
     pub plan: TransmissionPlan,
 }
 
-impl PacketSendService {
-    pub fn from_config(config: &EngineConfig) -> Self {
-        Self::new(config.traffic_policy.with_dry_run(config.dry_run))
-    }
-
-    pub fn new(policy: TransmissionPolicy) -> Self {
+impl SendUseCase {
+    pub fn new(policy: TransmissionPolicy, dependencies: EngineDependencies) -> Self {
         Self {
             dry_run: policy.dry_run,
             policy,
+            dependencies,
         }
     }
 
@@ -54,6 +52,13 @@ impl PacketSendService {
     pub fn validate_spec_policy(&self, spec: &PacketSpec) -> EngineResult<()> {
         validate_transmission_policy(&spec.transmit, self.policy)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))
+    }
+
+    pub async fn check_privileges(&self, spec: Arc<PacketSpec>) -> Result<()> {
+        self.dependencies
+            .privilege_checker
+            .check_packet_send(spec)
+            .await
     }
 
     pub async fn prepare(
@@ -73,10 +78,10 @@ impl PacketSendService {
         self.authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
 
         if check_privileges {
-            let spec_for_check = Arc::clone(&spec);
-            tokio::task::spawn_blocking(move || Self::check_privileges(spec_for_check.as_ref()))
-                .await
-                .context("privilege check task failed")??;
+            self.dependencies
+                .privilege_checker
+                .check_packet_send(Arc::clone(&spec))
+                .await?;
         }
 
         let plan = self.plan_live(Arc::clone(&spec)).await?;
@@ -86,13 +91,12 @@ impl PacketSendService {
 
     pub async fn resolve_spec(&self, request: PacketRequest) -> Result<Arc<PacketSpec>> {
         self.validate_request_policy(&request)?;
+        let request = self.resolve_request(request).await?;
         self.build_spec(request).await
     }
 
     async fn build_spec(&self, request: PacketRequest) -> Result<Arc<PacketSpec>> {
         let spec = tokio::task::spawn_blocking(move || {
-            let request = resolve_packet_request(request, &SystemTargetResolver)
-                .map_err(|source| EngineError::PacketSpecBuild(source.into()))?;
             let spec = PacketSpec::from_request(&request)
                 .map_err(|source| EngineError::PacketSpecBuild(source.into()))?;
             debug!("Resolved packet spec: {spec:?}");
@@ -102,6 +106,12 @@ impl PacketSendService {
         .context("packet spec task failed")??;
 
         Ok(Arc::new(spec))
+    }
+
+    async fn resolve_request(&self, request: PacketRequest) -> Result<PacketRequest> {
+        resolve_packet_request(request, Arc::clone(&self.dependencies.target_resolver))
+            .await
+            .map_err(|source| EngineError::PacketSpecBuild(source).into())
     }
 
     pub async fn plan(&self, spec: Arc<PacketSpec>) -> Result<TransmissionPlan> {
@@ -125,20 +135,16 @@ impl PacketSendService {
         spec: Arc<PacketSpec>,
         dry_run: bool,
     ) -> Result<TransmissionPlan> {
-        let policy = self.policy;
-        let tx_plan = tokio::task::spawn_blocking(move || {
-            if dry_run {
-                crate::network::io::sender::plan_transmission_dry_run_with_policy(
-                    spec.as_ref(),
-                    policy,
-                )
-            } else {
-                crate::network::io::sender::plan_transmission_with_policy(spec.as_ref(), policy)
-            }
-            .map_err(|e| EngineError::TransmissionPlan(e.into()))
-        })
-        .await
-        .context("transmission planning task failed")??;
+        let mode = if dry_run {
+            PlanningMode::DryRun
+        } else {
+            PlanningMode::Live
+        };
+        let tx_plan = self
+            .dependencies
+            .packet_planner
+            .plan_packet(spec, mode, self.policy)
+            .await?;
 
         debug!(
             "Transmission plan: transport={} payload={} bytes frames={} largest_frame={} bytes",
@@ -179,36 +185,13 @@ impl PacketSendService {
             log::info!(
                 "Dry-run mode: would send {} frame(s) via {} ({} bytes largest)",
                 plan.summary.frame_count,
-                plan.interface.name,
+                plan.interface_name,
                 plan.summary.largest_frame_len
             );
             return Ok(());
         }
 
-        crate::network::io::sender::emit_metrics_snapshot(&plan)
-            .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
-        crate::network::io::sender::execute_transmission(plan)
-            .await
-            .map_err(|e| EngineError::TransmissionExecution(e.into()))?;
-        Ok(())
-    }
-
-    pub fn check_privileges(spec: &PacketSpec) -> EngineResult<()> {
-        let requires_raw = spec.layer2.source.is_some()
-            || spec.layer2.destination.is_some()
-            || matches!(
-                &spec.transport,
-                TransportSpec::Tcp(_)
-                    | TransportSpec::Udp(_)
-                    | TransportSpec::Icmp(_)
-                    | TransportSpec::Icmpv6(_)
-            )
-            || spec.transmit.is_layer3();
-
-        if requires_raw {
-            crate::util::privileges::assert_raw_socket_capability()
-                .map_err(|e| EngineError::InsufficientPrivileges(e.into()))?;
-        }
+        self.dependencies.packet_transmitter.transmit(plan).await?;
         Ok(())
     }
 
@@ -222,8 +205,8 @@ impl PacketSendService {
         let unbounded = accounting.attempts.is_none();
         let estimated_packets = accounting.total_emitted_units;
         let planned_target_scope = match &plan.destination {
-            NetworkTarget::Ipv4(addr) => classify_ip((*addr).into()),
-            NetworkTarget::Ipv6(addr) => classify_ip((*addr).into()),
+            TransmissionTarget::Ipv4(addr) => classify_ip((*addr).into()),
+            TransmissionTarget::Ipv6(addr) => classify_ip((*addr).into()),
         };
         let target_scope =
             combine_target_scopes([planned_target_scope, packet_spec_target_scope(spec)]);

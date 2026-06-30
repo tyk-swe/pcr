@@ -4,7 +4,7 @@
 use std::net::IpAddr;
 use std::time::SystemTime;
 
-use pnet::datalink::MacAddr;
+use crate::domain::net::MacAddress;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolLabel {
@@ -33,8 +33,8 @@ impl ProtocolLabel {
 pub struct ListenerEvent {
     pub timestamp: SystemTime,
     pub length: usize,
-    pub layer2_source: Option<MacAddr>,
-    pub layer2_destination: Option<MacAddr>,
+    pub layer2_source: Option<MacAddress>,
+    pub layer2_destination: Option<MacAddress>,
     pub network_source: Option<IpAddr>,
     pub network_destination: Option<IpAddr>,
     pub network_protocol: Option<String>,

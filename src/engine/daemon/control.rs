@@ -11,7 +11,6 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time;
 
 use crate::domain::request::ListenerRequest;
-use crate::util::error::operation_failed;
 
 use super::{CommandResponse, DaemonCommand};
 
@@ -22,6 +21,10 @@ const COMMAND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) struct ActiveControlSocket {
     handle: tokio::task::JoinHandle<()>,
     path: String,
+}
+
+fn operation_failed(operation: &str, details: impl std::fmt::Display) -> String {
+    format!("{operation} failed: {details}")
 }
 
 pub(super) fn preflight_control_socket(path: &str) -> Result<()> {

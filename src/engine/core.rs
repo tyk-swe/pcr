@@ -26,30 +26,36 @@ use crate::domain::request::PacketRequest;
 use crate::engine::config::EngineConfig;
 use crate::engine::error::{EngineError, EngineResult};
 use crate::engine::oneshot::OneShotFlow;
+use crate::engine::ports::EngineDependencies;
 use crate::engine::rule_send::{RuleSendConfig, RuleSendExecutor};
-use crate::output::OutputController;
-use crate::output::OutputFormat;
+use crate::engine::send::SendUseCase;
 use crate::rules::RuleEngine;
 
 pub struct Engine {
     pub(crate) config: EngineConfig,
-    pub(crate) output: OutputController,
+    pub(crate) send: Arc<SendUseCase>,
+    pub(crate) dependencies: EngineDependencies,
     pub(crate) rules: RuleEngine,
     #[cfg(feature = "daemon")]
     daemon_rules_preloaded: bool,
 }
 
 impl Engine {
-    pub fn new(config: EngineConfig) -> EngineResult<Self> {
-        Self::new_with_optional_runtime_handle(config, None)
+    pub fn new(config: EngineConfig, dependencies: EngineDependencies) -> EngineResult<Self> {
+        Self::new_with_optional_runtime_handle(config, dependencies, None)
     }
 
-    pub fn new_with_runtime_handle(config: EngineConfig, handle: Handle) -> EngineResult<Self> {
-        Self::new_with_optional_runtime_handle(config, Some(handle))
+    pub fn new_with_runtime_handle(
+        config: EngineConfig,
+        dependencies: EngineDependencies,
+        handle: Handle,
+    ) -> EngineResult<Self> {
+        Self::new_with_optional_runtime_handle(config, dependencies, Some(handle))
     }
 
     fn new_with_optional_runtime_handle(
         config: EngineConfig,
+        dependencies: EngineDependencies,
         handle: Option<Handle>,
     ) -> EngineResult<Self> {
         let rule_config =
@@ -60,6 +66,10 @@ impl Engine {
             config.traffic_policy,
             config.dry_run,
         );
+        let send = Arc::new(SendUseCase::new(
+            config.traffic_policy.with_dry_run(config.dry_run),
+            dependencies.clone(),
+        ));
 
         let mut rules = match handle.as_ref() {
             Some(handle) => {
@@ -69,15 +79,23 @@ impl Engine {
         }
         .map_err(|e| EngineError::RuleEngineInit(e.into()))?;
         let sender = match handle {
-            Some(handle) => {
-                RuleSendExecutor::new_configured_with_runtime_handle(send_config, handle)
-            }
-            None => RuleSendExecutor::new_configured(send_config),
+            Some(handle) => RuleSendExecutor::new_configured_with_runtime_handle(
+                send_config,
+                Arc::clone(&send),
+                Arc::clone(&dependencies.rule_action_telemetry),
+                handle,
+            ),
+            None => RuleSendExecutor::new_configured(
+                send_config,
+                Arc::clone(&send),
+                Arc::clone(&dependencies.rule_action_telemetry),
+            ),
         }
         .map_err(|e| EngineError::RuleSendExecutorInit(e.into()))?;
         rules.configure_sender(sender);
         Ok(Self {
-            output: OutputController::new(config.output_format),
+            send,
+            dependencies,
             rules,
             config,
             #[cfg(feature = "daemon")]
@@ -121,7 +139,14 @@ impl Engine {
             }
         }
         self.daemon_rules_preloaded = false;
-        crate::engine::daemon::run(opts, &self.config, &mut self.rules, &self.output).await
+        crate::engine::daemon::run(
+            opts,
+            &self.config,
+            &mut self.rules,
+            Arc::clone(&self.dependencies.event_sink),
+            Arc::clone(&self.dependencies.daemon_listener_runtime),
+        )
+        .await
     }
 
     #[cfg(feature = "daemon")]
@@ -157,82 +182,93 @@ impl Engine {
             return Ok(());
         }
         info!("Running listener mode");
-        crate::network::io::listener::run_command(opts, None, self.listener_handler())
+        self.dependencies
+            .listener_runner
+            .run_command(opts.clone(), self.listener_handler())
             .await
-            .map_err(anyhow::Error::from)
     }
 
     #[cfg(feature = "traceroute")]
     pub async fn run_traceroute(&mut self, opts: &TracerouteRequest) -> Result<()> {
         let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
-        let prepared = crate::tools::traceroute::prepare(opts, policy)?;
+        let prepared = self
+            .dependencies
+            .traceroute_runner
+            .prepare(opts.clone(), policy)
+            .await?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
-            .authorize(&prepared.traffic_plan)
+            .authorize(prepared.traffic_plan())
             .map_err(|e| EngineError::Traceroute(e.into()))?;
 
         if self.config.dry_run {
-            self.output
-                .emit_traffic_plan_summary(&prepared.traffic_plan)?;
+            self.dependencies
+                .event_sink
+                .emit_traffic_plan_summary(prepared.traffic_plan())?;
             return Ok(());
         }
         info!(
             "Running traceroute to {} max_ttl={} probes={}",
             opts.destination, opts.max_ttl, opts.probes
         );
-        crate::tools::traceroute::run_prepared(opts, prepared).await
+        prepared.run().await
     }
 
     pub async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<String> {
         let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
-        let prepared = crate::tools::dns::prepare(options, policy).await?;
+        let prepared = self
+            .dependencies
+            .dns_client
+            .prepare(options.clone(), policy)
+            .await?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
-            .authorize(&prepared.traffic_plan)?;
+            .authorize(prepared.traffic_plan())?;
 
         if self.config.dry_run {
             info!(
                 "Dry-run: DNS query for {} {} via {}",
                 options.domain, options.record_type, options.server
             );
-            return match self.config.output_format {
-                Some(OutputFormat::Json) => crate::output::format_dns_dry_run_json(options),
-                _ => Ok(crate::output::format_dns_dry_run(options)),
-            };
+            return self.dependencies.event_sink.format_dns_dry_run(options);
         }
-        let result = crate::tools::dns::resolve_prepared(options, prepared).await?;
-        match self.config.output_format {
-            Some(OutputFormat::Json) => crate::output::format_dns_message_json(&result),
-            _ => Ok(crate::output::format_dns_message(&result)),
-        }
+        let result = prepared.resolve(options.clone()).await?;
+        self.dependencies.event_sink.format_dns_response(&result)
     }
 
     #[cfg(feature = "scan")]
     pub async fn run_scan(&mut self, command: &ScanRequest) -> Result<()> {
         let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
-        let prepared = crate::tools::scan::prepare(command, policy)?;
+        let prepared = self
+            .dependencies
+            .scan_runner
+            .prepare(command.clone(), policy)
+            .await?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
-            .authorize(&prepared.traffic_plan)
+            .authorize(prepared.traffic_plan())
             .map_err(|e| EngineError::Scan(e.into()))?;
 
         if self.config.dry_run {
-            self.output
-                .emit_traffic_plan_summary(&prepared.traffic_plan)?;
+            self.dependencies
+                .event_sink
+                .emit_traffic_plan_summary(prepared.traffic_plan())?;
             return Ok(());
         }
-        let runtime = crate::tools::TrafficRuntimeConfig::from_policy(&policy);
-        crate::tools::scan::run_command(prepared.command(), runtime).await
+        prepared.run().await
     }
 
     #[cfg(feature = "fuzz")]
     pub async fn run_fuzz(&mut self, options: &FuzzRequest) -> Result<()> {
-        let mut config = crate::tools::fuzz::FuzzConfig::try_from(options)?;
-        config.apply_traffic_policy(&self.config.traffic_policy);
-        let plan = crate::tools::fuzz::traffic_plan(&config)?;
+        let policy = self.config.traffic_policy.with_dry_run(self.config.dry_run);
+        let plan = self
+            .dependencies
+            .fuzz_runner
+            .traffic_plan(options.clone(), policy)
+            .await?;
         self.config
             .traffic_policy
             .with_dry_run(self.config.dry_run)
@@ -240,11 +276,15 @@ impl Engine {
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
 
         if self.config.dry_run {
-            self.output.emit_traffic_plan_summary(&plan)?;
+            self.dependencies
+                .event_sink
+                .emit_traffic_plan_summary(&plan)?;
             return Ok(());
         }
-        crate::tools::fuzz::run_fuzz(config).await?;
-        Ok(())
+        self.dependencies
+            .fuzz_runner
+            .run(options.clone(), policy)
+            .await
     }
 
     pub fn rule_count(&self) -> usize {
@@ -259,12 +299,12 @@ impl Engine {
         &self.config
     }
 
-    pub(crate) fn listener_handler(&self) -> crate::network::io::listener::ListenerEventHandler {
-        let output = self.output.clone();
+    pub(crate) fn listener_handler(&self) -> crate::engine::ports::ListenerEventHandler {
+        let event_sink = Arc::clone(&self.dependencies.event_sink);
         let rules = self.rules.clone();
 
         Arc::new(move |event| {
-            output.emit_listener_event(&event);
+            event_sink.emit_listener_event(&event);
 
             if rules.is_empty() {
                 return;

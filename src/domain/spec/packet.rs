@@ -4,10 +4,9 @@
 use std::net::IpAddr;
 use std::path::PathBuf;
 
-use pnet::packet::ethernet::EtherTypes;
-
 use super::error::{SpecError, SpecResult};
 
+use crate::domain::net::EtherType;
 use crate::domain::request::{infer_prefer_ipv6_hint, PacketRequest};
 
 use super::destination::{DestinationSpec, TargetAddress};
@@ -89,12 +88,12 @@ impl PacketSpec {
     fn validate_ip_version_consistency(&self, ipv6_target: bool) -> SpecResult<()> {
         if let Some(ethertype) = self.layer2.ethertype {
             let expected = if ipv6_target {
-                EtherTypes::Ipv6.0
+                EtherType::IPV6.0
             } else {
-                EtherTypes::Ipv4.0
+                EtherType::IPV4.0
             };
 
-            if matches!(ethertype, value if value == EtherTypes::Ipv4.0 || value == EtherTypes::Ipv6.0)
+            if matches!(ethertype, value if value == EtherType::IPV4.0 || value == EtherType::IPV6.0)
                 && ethertype != expected
             {
                 return Err(SpecError::EtherTypeIpVersionMismatch {

@@ -8,10 +8,9 @@ use std::sync::Arc;
 use crate::domain::policy::TrafficMode;
 use crate::domain::request::PacketRequest;
 use crate::domain::spec::PacketSpec;
+use crate::domain::transmission::TransmissionPlan;
 use crate::engine::core::Engine;
 use crate::engine::error::{EngineError, EngineResult};
-use crate::engine::send::PacketSendService;
-use crate::network::io::sender::TransmissionPlan;
 
 pub struct OneShotFlow<'engine> {
     engine: &'engine mut Engine,
@@ -33,17 +32,14 @@ impl<'engine> OneShotFlow<'engine> {
     pub async fn with_spec(mut self) -> Result<Self> {
         self.log_one_shot_entry();
         let request = self.request.clone();
-        let spec = PacketSendService::from_config(&self.engine.config)
-            .resolve_spec(request)
-            .await?;
+        let spec = self.engine.send.resolve_spec(request).await?;
         self.announce_listener(spec.as_ref());
         self.spec = Some(spec);
         Ok(self)
     }
 
     pub fn with_policy_validation(self) -> Result<Self> {
-        PacketSendService::from_config(&self.engine.config)
-            .validate_request_policy(&self.request)?;
+        self.engine.send.validate_request_policy(&self.request)?;
         Ok(self)
     }
 
@@ -76,15 +72,17 @@ impl<'engine> OneShotFlow<'engine> {
                 .as_ref()
                 .context("packet spec missing; ensure with_spec() is called first")?,
         );
-        let service = PacketSendService::from_config(&self.engine.config);
-
         if !self.engine.config.dry_run {
-            service.authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
+            self.engine
+                .send
+                .authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
             return Ok(self);
         }
 
-        let plan = service.plan_dry_run(Arc::clone(&spec)).await?;
-        service.authorize_transmission_plan(spec.as_ref(), &plan)?;
+        let plan = self.engine.send.plan_dry_run(Arc::clone(&spec)).await?;
+        self.engine
+            .send
+            .authorize_transmission_plan(spec.as_ref(), &plan)?;
         self.plan = Some(plan);
         Ok(self)
     }
@@ -95,12 +93,10 @@ impl<'engine> OneShotFlow<'engine> {
                 .as_ref()
                 .context("packet spec missing; ensure with_spec() is called first")?,
         );
-        PacketSendService::from_config(&self.engine.config).validate_spec_policy(spec.as_ref())?;
+        self.engine.send.validate_spec_policy(spec.as_ref())?;
 
         if !self.engine.config.dry_run {
-            tokio::task::spawn_blocking(move || PacketSendService::check_privileges(spec.as_ref()))
-                .await
-                .context("privilege check task failed")??;
+            self.engine.send.check_privileges(spec).await?;
         }
 
         Ok(self)
@@ -116,9 +112,10 @@ impl<'engine> OneShotFlow<'engine> {
                 .as_ref()
                 .context("packet spec missing; ensure with_spec() is called first")?,
         );
-        let service = PacketSendService::from_config(&self.engine.config);
-        let plan = service.plan_live(Arc::clone(&spec)).await?;
-        service.authorize_transmission_plan(spec.as_ref(), &plan)?;
+        let plan = self.engine.send.plan_live(Arc::clone(&spec)).await?;
+        self.engine
+            .send
+            .authorize_transmission_plan(spec.as_ref(), &plan)?;
         self.plan = Some(plan);
         Ok(self)
     }
@@ -133,9 +130,7 @@ impl<'engine> OneShotFlow<'engine> {
     pub async fn execute(mut self) -> Result<()> {
         let spec = self.take_spec()?;
         let plan = self.take_plan()?;
-        PacketSendService::from_config(&self.engine.config)
-            .execute_plan(plan)
-            .await?;
+        self.engine.send.execute_plan(plan).await?;
         if !self.engine.config.dry_run {
             self.maybe_run_listener(spec.as_ref()).await?;
         }
@@ -190,25 +185,24 @@ impl<'engine> OneShotFlow<'engine> {
         plan: &TransmissionPlan,
     ) -> EngineResult<()> {
         self.engine
-            .output
+            .dependencies
+            .event_sink
             .emit_preflight_summary(spec, plan)
             .map_err(EngineError::PreflightSummary)
     }
 
     async fn maybe_run_listener(&mut self, plan: &PacketSpec) -> Result<()> {
         if plan.listener.enabled {
-            crate::network::io::listener::run_from_spec(
-                &plan.listener,
-                plan.target.interface.as_deref(),
-                self.engine.listener_handler(),
-            )
-            .await
-            .map_err(anyhow::Error::from)?;
+            self.engine
+                .dependencies
+                .listener_runner
+                .run_for_packet(
+                    plan.listener.clone(),
+                    plan.target.interface.clone(),
+                    self.engine.listener_handler(),
+                )
+                .await?;
         }
         Ok(())
-    }
-
-    pub fn check_privileges(plan: &PacketSpec) -> EngineResult<()> {
-        PacketSendService::check_privileges(plan)
     }
 }

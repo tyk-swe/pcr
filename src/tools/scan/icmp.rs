@@ -30,7 +30,9 @@ use crate::tools::TrafficRuntimeConfig;
 use crate::util::error::operation_failed;
 use crate::util::sync::LockResultExt;
 
-use super::common::{push_scan_target, resolve_source_override, resolve_target};
+use super::common::{
+    push_scan_target, resolve_source_override, resolve_target, TRANSPORT_CHANNEL_BUFFER_SIZE,
+};
 
 pub async fn run_icmp(
     target: &str,
@@ -138,7 +140,7 @@ fn perform_icmp_scan(
 
     if has_v4 {
         let (tx, rx) = open_transport_channel(
-            1024 * 1024,
+            TRANSPORT_CHANNEL_BUFFER_SIZE,
             TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp)),
         )
         .context("open ICMPv4 channel")?;
@@ -149,7 +151,7 @@ fn perform_icmp_scan(
     // For IPv6, we only need receive channel from pnet, because we use socket2 for sending
     if has_v6 {
         let (tx, rx) = open_transport_channel(
-            1024 * 1024,
+            TRANSPORT_CHANNEL_BUFFER_SIZE,
             TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6)),
         )
         .context("open ICMPv6 channel")?;

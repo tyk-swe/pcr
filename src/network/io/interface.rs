@@ -87,6 +87,7 @@ pub enum InterfaceError {
     IpCommandNotFound,
 }
 
+#[cfg(any(feature = "pcap", feature = "scan"))]
 pub fn find_interface(name: Option<&str>) -> Result<NetworkInterface> {
     Ok(find_interface_selection_with_provider_impl(name, &SystemInterfaceProvider)?.interface)
 }
@@ -112,16 +113,6 @@ where
         interface: heuristic_default_interface_with_provider(provider)?,
         reason: InterfaceSelectionReason::Heuristic,
     })
-}
-
-/// Find the interface for a specific destination using the routing table
-pub fn find_interface_for_destination(destination: IpAddr) -> Result<NetworkInterface> {
-    Ok(find_interface_for_destination_selection_with_provider_impl(
-        destination,
-        &SystemInterfaceProvider,
-        query_routing_table,
-    )?
-    .interface)
 }
 
 pub fn find_interface_for_destination_selection(destination: IpAddr) -> Result<InterfaceSelection> {
@@ -182,10 +173,6 @@ fn should_fallback_to_heuristic(error: &InterfaceError) -> bool {
         error,
         InterfaceError::IpCommandNotFound | InterfaceError::UnsupportedPlatform { .. }
     )
-}
-
-pub fn resolve_interface_by_name(name: &str) -> Result<NetworkInterface> {
-    resolve_interface_by_name_with_provider(name, &SystemInterfaceProvider)
 }
 
 fn resolve_interface_by_name_with_provider<P>(name: &str, provider: &P) -> Result<NetworkInterface>

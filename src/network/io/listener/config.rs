@@ -8,6 +8,7 @@ use crate::domain::listener_config::{
     normalize_queue_capacity, NormalizedListenerRequest, QueueCapacityError,
 };
 use crate::domain::request::ListenerRequest;
+#[cfg(feature = "pcap")]
 use crate::domain::spec::ListenerSpec;
 
 use super::error::ListenerError;
@@ -56,17 +57,8 @@ impl ListenerRuntimeConfig {
         })
     }
 
+    #[cfg(feature = "pcap")]
     pub fn from_spec(spec: &ListenerSpec) -> Result<Self, ListenerError> {
-        #[cfg(not(feature = "pcap"))]
-        if spec.filter.is_some() {
-            return Err(ListenerError::FilterRequiresPcap);
-        }
-
-        #[cfg(not(feature = "pcap"))]
-        if spec.capture_file.is_some() {
-            return Err(ListenerError::CaptureRequiresPcap);
-        }
-
         let queue_capacity =
             normalize_queue_capacity(spec.queue_capacity).map_err(queue_capacity_spec_error)?;
 
@@ -88,6 +80,7 @@ fn queue_capacity_request_error(error: QueueCapacityError) -> ListenerError {
     }
 }
 
+#[cfg(feature = "pcap")]
 fn queue_capacity_spec_error(error: QueueCapacityError) -> ListenerError {
     match error {
         QueueCapacityError::Zero => ListenerError::SpecQueueCapacityZero,

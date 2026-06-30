@@ -18,9 +18,7 @@ use crate::network::protocol_validation::{
     extract_original_transport_v4, extract_original_transport_v6,
 };
 
-use super::super::common::{send_with_enobufs_retry, ScanEvent};
-
-const PACKET_POLL_INTERVAL: Duration = Duration::from_millis(1);
+use super::super::common::{send_with_enobufs_retry, ScanEvent, PACKET_POLL_INTERVAL};
 
 pub(super) trait TcpSender: Send {
     fn send_tcp(&mut self, packet: TcpPacket<'_>, destination: SocketAddr) -> Result<()>;

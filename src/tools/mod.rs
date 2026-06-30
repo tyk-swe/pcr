@@ -11,16 +11,20 @@ pub mod scan;
 #[cfg(feature = "traceroute")]
 pub mod traceroute;
 
+#[cfg(feature = "scan")]
 use std::time::Duration;
 
+#[cfg(feature = "scan")]
 use crate::domain::policy::TrafficPolicy;
 
+#[cfg(feature = "scan")]
 #[derive(Debug, Clone, Copy)]
 pub struct TrafficRuntimeConfig {
     pub batch_size: usize,
     pub send_delay: Option<Duration>,
 }
 
+#[cfg(feature = "scan")]
 impl TrafficRuntimeConfig {
     pub fn from_policy(policy: &TrafficPolicy) -> Self {
         Self {

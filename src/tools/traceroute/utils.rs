@@ -21,6 +21,7 @@ use crate::util::error::operation_failed;
 
 use super::common::{
     remaining_probe_time, PacketReceiver, ProbeResult, ICMPV6_PORT_UNREACHABLE_CODE,
+    ICMP_RESPONSE_POLL_INTERVAL,
 };
 
 pub struct IcmpReceiverAdapter<'a, 'b>(pub &'a mut IcmpTransportChannelIterator<'b>);
@@ -164,21 +165,6 @@ pub fn poll_icmp_event_v6_with_source<R: PacketReceiver + ?Sized>(
     }
 }
 
-pub fn classify_icmp_event_v4(
-    packet: &IcmpPacket,
-    expected_protocol: IpNextHeaderProtocol,
-    expected_port: u16,
-    verification_params: Option<(u8, u8)>, // (ttl, probe)
-) -> Option<IcmpEventKind> {
-    classify_icmp_event_v4_with_source(
-        packet,
-        expected_protocol,
-        None,
-        expected_port,
-        verification_params,
-    )
-}
-
 pub fn classify_icmp_event_v4_with_source(
     packet: &IcmpPacket,
     expected_protocol: IpNextHeaderProtocol,
@@ -214,21 +200,6 @@ pub fn classify_icmp_event_v4_with_source(
         }
         _ => IcmpEventKind::Hop,
     })
-}
-
-pub fn classify_icmp_event_v6(
-    packet: &Icmpv6Packet,
-    expected_protocol: IpNextHeaderProtocol,
-    expected_port: u16,
-    verification_params: Option<(u8, u8)>, // ttl, probe
-) -> Option<IcmpEventKind> {
-    classify_icmp_event_v6_with_source(
-        packet,
-        expected_protocol,
-        None,
-        expected_port,
-        verification_params,
-    )
 }
 
 pub fn classify_icmp_event_v6_with_source(
@@ -385,7 +356,7 @@ where
 {
     let start = Instant::now();
     while let Some(remaining) = remaining_probe_time(start, timeout) {
-        let slice = remaining.min(Duration::from_millis(500));
+        let slice = remaining.min(ICMP_RESPONSE_POLL_INTERVAL);
         match poll(slice)? {
             Some(ProbeEvent::Hop(addr)) => {
                 let elapsed = start.elapsed().as_millis();
@@ -410,7 +381,7 @@ pub fn await_icmp_response_v4<R: PacketReceiver + ?Sized>(
 ) -> Result<ProbeResult> {
     let start = Instant::now();
     while let Some(remaining) = remaining_probe_time(start, timeout) {
-        let slice = remaining.min(Duration::from_millis(500));
+        let slice = remaining.min(ICMP_RESPONSE_POLL_INTERVAL);
         if let Some((event, addr)) = poll_icmp_event_v4(
             iter,
             expected_protocol,
@@ -437,7 +408,7 @@ pub fn await_icmp_response_v6<R: PacketReceiver + ?Sized>(
 ) -> Result<ProbeResult> {
     let start = Instant::now();
     while let Some(remaining) = remaining_probe_time(start, timeout) {
-        let slice = remaining.min(Duration::from_millis(500));
+        let slice = remaining.min(ICMP_RESPONSE_POLL_INTERVAL);
         if let Some((event, addr)) = poll_icmp_event_v6(
             iter,
             expected_protocol,

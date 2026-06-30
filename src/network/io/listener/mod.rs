@@ -27,16 +27,18 @@ use crate::network::interface;
 
 #[cfg(feature = "pcap")]
 pub mod capture;
-pub mod config;
+#[cfg(any(feature = "daemon", feature = "pcap"))]
+mod config;
 pub mod error;
 #[cfg(feature = "pcap")]
 pub mod process;
 
-pub use config::ListenerRuntimeConfig;
 pub use error::ListenerError;
 
 #[cfg(feature = "pcap")]
 use capture::spawn_capture_thread;
+#[cfg(any(feature = "daemon", feature = "pcap"))]
+use config::ListenerRuntimeConfig;
 #[cfg(feature = "pcap")]
 use process::process_packet;
 

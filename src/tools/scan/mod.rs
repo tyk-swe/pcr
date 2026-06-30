@@ -40,78 +40,181 @@ impl PreparedScan {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+enum PortScanKind {
+    TcpSyn,
+    TcpFin,
+    TcpNull,
+    TcpXmas,
+    TcpAck,
+    SctpInit,
+    Udp,
+}
+
+impl PortScanKind {
+    fn from_command(command: &ScanRequest) -> Option<(Self, &PortScanRequest)> {
+        match command {
+            ScanRequest::TcpSyn(request) => Some((Self::TcpSyn, request)),
+            ScanRequest::TcpFin(request) => Some((Self::TcpFin, request)),
+            ScanRequest::TcpNull(request) => Some((Self::TcpNull, request)),
+            ScanRequest::TcpXmas(request) => Some((Self::TcpXmas, request)),
+            ScanRequest::TcpAck(request) => Some((Self::TcpAck, request)),
+            ScanRequest::SctpInit(request) => Some((Self::SctpInit, request)),
+            ScanRequest::Udp(request) => Some((Self::Udp, request)),
+            _ => None,
+        }
+    }
+
+    fn command(self, request: PortScanRequest) -> ScanRequest {
+        match self {
+            Self::TcpSyn => ScanRequest::TcpSyn(request),
+            Self::TcpFin => ScanRequest::TcpFin(request),
+            Self::TcpNull => ScanRequest::TcpNull(request),
+            Self::TcpXmas => ScanRequest::TcpXmas(request),
+            Self::TcpAck => ScanRequest::TcpAck(request),
+            Self::SctpInit => ScanRequest::SctpInit(request),
+            Self::Udp => ScanRequest::Udp(request),
+        }
+    }
+
+    fn display_name(self) -> &'static str {
+        match self {
+            Self::TcpSyn => "TCP SYN",
+            Self::TcpFin => "TCP FIN",
+            Self::TcpNull => "TCP NULL",
+            Self::TcpXmas => "TCP XMAS",
+            Self::TcpAck => "TCP ACK",
+            Self::SctpInit => "SCTP INIT",
+            Self::Udp => "UDP",
+        }
+    }
+
+    async fn run(self, request: &PortScanRequest, runtime: TrafficRuntimeConfig) -> Result<()> {
+        match self {
+            Self::TcpSyn => {
+                run_tcp_syn(
+                    &request.target,
+                    &request.ports,
+                    &request.interface,
+                    &request.source_ip,
+                    runtime,
+                )
+                .await
+            }
+            Self::TcpFin => {
+                run_tcp_fin(
+                    &request.target,
+                    &request.ports,
+                    &request.interface,
+                    &request.source_ip,
+                    runtime,
+                )
+                .await
+            }
+            Self::TcpNull => {
+                run_tcp_null(
+                    &request.target,
+                    &request.ports,
+                    &request.interface,
+                    &request.source_ip,
+                    runtime,
+                )
+                .await
+            }
+            Self::TcpXmas => {
+                run_tcp_xmas(
+                    &request.target,
+                    &request.ports,
+                    &request.interface,
+                    &request.source_ip,
+                    runtime,
+                )
+                .await
+            }
+            Self::TcpAck => {
+                run_tcp_ack(
+                    &request.target,
+                    &request.ports,
+                    &request.interface,
+                    &request.source_ip,
+                    runtime,
+                )
+                .await
+            }
+            Self::SctpInit => {
+                run_sctp_init(
+                    &request.target,
+                    &request.ports,
+                    &request.interface,
+                    &request.source_ip,
+                    runtime,
+                )
+                .await
+            }
+            Self::Udp => {
+                run_udp(
+                    &request.target,
+                    &request.ports,
+                    &request.interface,
+                    &request.source_ip,
+                    runtime,
+                )
+                .await
+            }
+        }
+    }
+}
+
 pub fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<PreparedScan> {
     let (prepared_command, target_scope, target_count, port_count, estimated_packets) =
-        match command {
-            ScanRequest::TcpSyn(request) => {
-                let (request, scope, ports, packets) = prepare_port_scan(request)?;
-                (ScanRequest::TcpSyn(request), scope, 1, ports, packets)
-            }
-            ScanRequest::TcpFin(request) => {
-                let (request, scope, ports, packets) = prepare_port_scan(request)?;
-                (ScanRequest::TcpFin(request), scope, 1, ports, packets)
-            }
-            ScanRequest::TcpNull(request) => {
-                let (request, scope, ports, packets) = prepare_port_scan(request)?;
-                (ScanRequest::TcpNull(request), scope, 1, ports, packets)
-            }
-            ScanRequest::TcpXmas(request) => {
-                let (request, scope, ports, packets) = prepare_port_scan(request)?;
-                (ScanRequest::TcpXmas(request), scope, 1, ports, packets)
-            }
-            ScanRequest::TcpAck(request) => {
-                let (request, scope, ports, packets) = prepare_port_scan(request)?;
-                (ScanRequest::TcpAck(request), scope, 1, ports, packets)
-            }
-            ScanRequest::SctpInit(request) => {
-                let (request, scope, ports, packets) = prepare_port_scan(request)?;
-                (ScanRequest::SctpInit(request), scope, 1, ports, packets)
-            }
-            ScanRequest::Udp(request) => {
-                let (request, scope, ports, packets) = prepare_port_scan(request)?;
-                (ScanRequest::Udp(request), scope, 1, ports, packets)
-            }
-            ScanRequest::Icmp(request) => {
-                let targets = icmp::parse_icmp_targets(&request.target)?
-                    .into_iter()
-                    .map(|target| target.ip())
-                    .collect();
-                let prepared = prepare_timed_target_scan(request, targets)?;
-                (
-                    ScanRequest::Icmp(prepared.request),
-                    prepared.target_scope,
-                    prepared.target_count,
-                    1,
-                    prepared.estimated_packets,
-                )
-            }
-            ScanRequest::Arp(request) => {
-                let targets = arp::parse_arp_targets(&request.target)?
-                    .into_iter()
-                    .map(IpAddr::V4)
-                    .collect();
-                let prepared = prepare_timed_target_scan(request, targets)?;
-                (
-                    ScanRequest::Arp(prepared.request),
-                    prepared.target_scope,
-                    prepared.target_count,
-                    1,
-                    prepared.estimated_packets,
-                )
-            }
-            ScanRequest::Ndp(request) => {
-                let targets = ndp::normalize_targets(ndp::parse_ndp_targets(&request.target)?)?
-                    .into_iter()
-                    .map(IpAddr::V6)
-                    .collect();
-                let prepared = prepare_timed_target_scan(request, targets)?;
-                (
-                    ScanRequest::Ndp(prepared.request),
-                    prepared.target_scope,
-                    prepared.target_count,
-                    1,
-                    prepared.estimated_packets,
-                )
+        if let Some((kind, request)) = PortScanKind::from_command(command) {
+            let (request, scope, ports, packets) = prepare_port_scan(request)?;
+            (kind.command(request), scope, 1, ports, packets)
+        } else {
+            match command {
+                ScanRequest::Icmp(request) => {
+                    let targets = icmp::parse_icmp_targets(&request.target)?
+                        .into_iter()
+                        .map(|target| target.ip())
+                        .collect();
+                    let prepared = prepare_timed_target_scan(request, targets)?;
+                    (
+                        ScanRequest::Icmp(prepared.request),
+                        prepared.target_scope,
+                        prepared.target_count,
+                        1,
+                        prepared.estimated_packets,
+                    )
+                }
+                ScanRequest::Arp(request) => {
+                    let targets = arp::parse_arp_targets(&request.target)?
+                        .into_iter()
+                        .map(IpAddr::V4)
+                        .collect();
+                    let prepared = prepare_timed_target_scan(request, targets)?;
+                    (
+                        ScanRequest::Arp(prepared.request),
+                        prepared.target_scope,
+                        prepared.target_count,
+                        1,
+                        prepared.estimated_packets,
+                    )
+                }
+                ScanRequest::Ndp(request) => {
+                    let targets = ndp::normalize_targets(ndp::parse_ndp_targets(&request.target)?)?
+                        .into_iter()
+                        .map(IpAddr::V6)
+                        .collect();
+                    let prepared = prepare_timed_target_scan(request, targets)?;
+                    (
+                        ScanRequest::Ndp(prepared.request),
+                        prepared.target_scope,
+                        prepared.target_count,
+                        1,
+                        prepared.estimated_packets,
+                    )
+                }
+                _ => unreachable!("port scan variants are handled before target-scan dispatch"),
             }
         };
 
@@ -177,105 +280,17 @@ fn prepare_port_scan(
 }
 
 pub async fn run_command(command: &ScanRequest, runtime: TrafficRuntimeConfig) -> Result<()> {
+    if let Some((kind, request)) = PortScanKind::from_command(command) {
+        info!(
+            "Starting {} scan against {} ports {}",
+            kind.display_name(),
+            request.target,
+            request.ports
+        );
+        return kind.run(request, runtime).await;
+    }
+
     match command {
-        ScanRequest::TcpSyn(request) => {
-            info!(
-                "Starting TCP SYN scan against {} ports {}",
-                request.target, request.ports
-            );
-            run_tcp_syn(
-                &request.target,
-                &request.ports,
-                &request.interface,
-                &request.source_ip,
-                runtime,
-            )
-            .await
-        }
-        ScanRequest::TcpFin(request) => {
-            info!(
-                "Starting TCP FIN scan against {} ports {}",
-                request.target, request.ports
-            );
-            run_tcp_fin(
-                &request.target,
-                &request.ports,
-                &request.interface,
-                &request.source_ip,
-                runtime,
-            )
-            .await
-        }
-        ScanRequest::TcpNull(request) => {
-            info!(
-                "Starting TCP NULL scan against {} ports {}",
-                request.target, request.ports
-            );
-            run_tcp_null(
-                &request.target,
-                &request.ports,
-                &request.interface,
-                &request.source_ip,
-                runtime,
-            )
-            .await
-        }
-        ScanRequest::TcpXmas(request) => {
-            info!(
-                "Starting TCP XMAS scan against {} ports {}",
-                request.target, request.ports
-            );
-            run_tcp_xmas(
-                &request.target,
-                &request.ports,
-                &request.interface,
-                &request.source_ip,
-                runtime,
-            )
-            .await
-        }
-        ScanRequest::TcpAck(request) => {
-            info!(
-                "Starting TCP ACK scan against {} ports {}",
-                request.target, request.ports
-            );
-            run_tcp_ack(
-                &request.target,
-                &request.ports,
-                &request.interface,
-                &request.source_ip,
-                runtime,
-            )
-            .await
-        }
-        ScanRequest::SctpInit(request) => {
-            info!(
-                "Starting SCTP INIT scan against {} ports {}",
-                request.target, request.ports
-            );
-            run_sctp_init(
-                &request.target,
-                &request.ports,
-                &request.interface,
-                &request.source_ip,
-                runtime,
-            )
-            .await
-        }
-        ScanRequest::Udp(request) => {
-            info!(
-                "Starting UDP scan against {} ports {}",
-                request.target, request.ports
-            );
-            run_udp(
-                &request.target,
-                &request.ports,
-                &request.interface,
-                &request.source_ip,
-                runtime,
-            )
-            .await
-        }
         ScanRequest::Arp(request) => {
             info!(
                 "Starting ARP probe against {} using interface {:?} timeout {}ms",
@@ -318,5 +333,6 @@ pub async fn run_command(command: &ScanRequest, runtime: TrafficRuntimeConfig) -
             )
             .await
         }
+        _ => unreachable!("port scan variants are handled before target-scan dispatch"),
     }
 }

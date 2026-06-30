@@ -9,6 +9,7 @@ use anyhow::Result;
 
 use crate::domain::event::ListenerEvent;
 use crate::domain::net::MacAddress;
+#[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 use crate::domain::policy::{PolicyOutcome, TrafficPlan};
 use crate::domain::report::PreflightView;
 use crate::domain::spec::{PacketSpec, PayloadSource};
@@ -57,6 +58,7 @@ impl OutputController {
         }
     }
 
+    #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
     pub fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> Result<()> {
         match self.default_format.unwrap_or(OutputFormat::Summary) {
             OutputFormat::Json => {
@@ -86,6 +88,7 @@ impl OutputController {
         println!("{}", report.summary_line());
     }
 
+    #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
     fn print_traffic_plan_summary(&self, plan: &TrafficPlan) {
         let estimated = plan
             .estimated_packets

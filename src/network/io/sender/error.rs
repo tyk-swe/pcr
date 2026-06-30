@@ -135,8 +135,6 @@ pub enum PlannerError {
     PcapFeatureRequired,
     #[error("source and destination IP versions must match")]
     IpVersionMismatch,
-    #[error("a destination address is required")]
-    DestinationRequired,
     #[error("failed to create metrics directory at {path}: {source}")]
     MetricsDirectory {
         path: PathBuf,
@@ -228,9 +226,6 @@ pub enum ExecutorError {
     #[cfg(feature = "pcap")]
     #[error("failed to flush pcap output: {source}")]
     FlushPcap { source: pcap::Error },
-    #[cfg(feature = "pcap")]
-    #[error("pcap recording failed: {source}")]
-    RecordPcap { source: std::io::Error },
     #[error("transmission task panicked")]
     TaskPanicked,
     #[error("transmission task cancelled")]

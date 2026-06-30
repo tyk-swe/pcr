@@ -24,12 +24,9 @@ use super::types::{
     TransmissionPlan, TransmissionSummary,
 };
 
+#[cfg(feature = "fuzz")]
 pub fn plan_transmission(spec: &PacketSpec) -> Result<TransmissionPlan> {
     plan_transmission_with_policy(spec, TransmissionPolicy::default())
-}
-
-pub fn plan_transmission_dry_run(spec: &PacketSpec) -> Result<TransmissionPlan> {
-    plan_transmission_dry_run_with_policy(spec, TransmissionPolicy::new(false, true))
 }
 
 pub fn plan_transmission_with_policy(
@@ -58,31 +55,6 @@ fn plan_transmission_with_mode(
         spec,
         selected.interface,
         selected.reason,
-        mode,
-        policy,
-    )
-}
-
-/// Plan transmission with selected interface.
-pub fn plan_transmission_with_interface(
-    spec: &PacketSpec,
-    interface: pnet::datalink::NetworkInterface,
-    mode: PlanningMode,
-) -> Result<TransmissionPlan> {
-    let policy = TransmissionPolicy::new(false, mode == PlanningMode::DryRun);
-    plan_transmission_with_interface_and_policy(spec, interface, mode, policy)
-}
-
-pub fn plan_transmission_with_interface_and_policy(
-    spec: &PacketSpec,
-    interface: pnet::datalink::NetworkInterface,
-    mode: PlanningMode,
-    policy: TransmissionPolicy,
-) -> Result<TransmissionPlan> {
-    plan_transmission_with_interface_and_reason(
-        spec,
-        interface,
-        InterfaceSelectionReason::ExplicitInterface,
         mode,
         policy,
     )

@@ -6,8 +6,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use pnet::packet::icmp::{self, IcmpTypes};
-use pnet::packet::icmpv6::Icmpv6Types;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::udp::{MutableUdpPacket, UdpPacket};
 use pnet::packet::Packet;
@@ -29,8 +27,9 @@ use crate::util::error::operation_failed;
 use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 
 use super::common::{
-    parse_ports, report_results, resolve_source_override, resolve_target, ConcurrentScanConfig,
-    PortState, ScanEvent, DEFAULT_TIMEOUT, ICMPV6_CODE_PORT_UNREACHABLE,
+    clamp_batch_to_ports, classify_icmp_port_unreachable, join_blocking_scan, report_results,
+    resolve_port_scan, ConcurrentScanConfig, PortState, ScanEvent, DEFAULT_TIMEOUT,
+    PACKET_POLL_INTERVAL, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
 
@@ -41,9 +40,10 @@ pub async fn run_udp(
     source_ip: &Option<String>,
     runtime: TrafficRuntimeConfig,
 ) -> Result<()> {
-    let address = resolve_target(target)?;
-    let source_override = resolve_source_override(interface, source_ip, address.ip())?;
-    let port_list = parse_ports(ports)?;
+    let resolved = resolve_port_scan(target, ports, interface, source_ip)?;
+    let address = resolved.address;
+    let source_override = resolved.source_override;
+    let port_list = resolved.ports;
 
     log::info!(
         "Starting UDP scan against {} ports {:?}",
@@ -60,12 +60,11 @@ pub async fn run_udp(
         send_delay: runtime.send_delay,
     };
 
-    let results = task::spawn_blocking(move || perform_udp_scan(scan_config))
-        .await
-        .context(operation_failed(
-            "join UDP scan task",
-            "spawn_blocking returned JoinError",
-        ))??;
+    let results = join_blocking_scan(
+        task::spawn_blocking(move || perform_udp_scan(scan_config)),
+        "join UDP scan task",
+    )
+    .await?;
 
     report_results("udp", &address.ip(), &results);
     Ok(())
@@ -115,17 +114,21 @@ fn scan_udp_v4(
     batch_size: usize,
     send_delay: Option<Duration>,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let source_ip =
-        super::common::source_ipv4_for_layer4_send(destination, 9, source_override, "UDP")?;
+    let source_ip = super::common::source_ipv4_for_layer4_send(
+        destination,
+        SOURCE_DISCOVERY_PORT,
+        source_override,
+        "UDP",
+    )?;
 
     let (mut udp_sender, mut udp_receiver) = open_transport_channel(
-        1024 * 1024,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Udp)),
     )
     .with_context(|| operation_failed("open UDP transport channel", "protocol=IPv4"))?;
 
     let (_, mut icmp_receiver) = open_transport_channel(
-        1024 * 1024,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp)),
     )
     .with_context(|| operation_failed("open ICMP transport channel", "protocol=IPv4"))?;
@@ -146,7 +149,7 @@ fn scan_udp_v4(
             timeout,
             batch_size,
             send_delay,
-            base_port_offset: 10_000,
+            base_port_offset: SOURCE_PORT_OFFSET,
             base_port_override: None,
             initial_port_state: PortState::OpenOrFiltered,
         },
@@ -169,16 +172,17 @@ fn scan_udp_v6(
         _ => return Err(anyhow!("scan_udp_v6 called with IPv4 address")),
     };
 
-    let source_ip = super::common::source_ipv6_or_discover(dest_ip, 9, source_override)?;
+    let source_ip =
+        super::common::source_ipv6_or_discover(dest_ip, SOURCE_DISCOVERY_PORT, source_override)?;
 
     let (_, mut udp_receiver) = open_transport_channel(
-        1024 * 1024,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Udp)),
     )
     .with_context(|| operation_failed("open UDP transport channel", "protocol=IPv6"))?;
 
     let (_, mut icmp_receiver) = open_transport_channel(
-        1024 * 1024,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6)),
     )
     .with_context(|| operation_failed("open ICMPv6 transport channel", "protocol=IPv6"))?;
@@ -209,7 +213,7 @@ fn scan_udp_v6(
             timeout,
             batch_size,
             send_delay,
-            base_port_offset: 10_000,
+            base_port_offset: SOURCE_PORT_OFFSET,
             base_port_override: None,
             initial_port_state: PortState::OpenOrFiltered,
         },
@@ -225,9 +229,8 @@ fn scan_ports_concurrent_with_config(
     tx: &mut dyn UdpScanTx,
     rx: &mut dyn UdpScanRx,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let max_batch_size = ports.len().max(1);
     let config = ConcurrentScanConfig {
-        batch_size: config.batch_size.clamp(1, max_batch_size),
+        batch_size: clamp_batch_to_ports(config.batch_size, ports),
         ..config
     };
     let destination = config.destination;
@@ -249,36 +252,12 @@ fn scan_ports_concurrent_with_config(
             } => {
                 results.insert(
                     target_port,
-                    classify_udp_icmp_response(destination, icmp_type, icmp_code),
+                    classify_icmp_port_unreachable(destination, icmp_type, icmp_code),
                 );
             }
             _ => {}
         },
     )
-}
-
-fn classify_udp_icmp_response(destination: SocketAddr, icmp_type: u8, icmp_code: u8) -> PortState {
-    match destination.ip() {
-        IpAddr::V4(_) => {
-            if icmp_type == IcmpTypes::DestinationUnreachable.0
-                && icmp_code
-                    == icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable.0
-            {
-                PortState::Closed
-            } else {
-                PortState::Filtered
-            }
-        }
-        IpAddr::V6(_) => {
-            if icmp_type == Icmpv6Types::DestinationUnreachable.0
-                && icmp_code == ICMPV6_CODE_PORT_UNREACHABLE
-            {
-                PortState::Closed
-            } else {
-                PortState::Filtered
-            }
-        }
-    }
 }
 
 // --- Traits and Implementations ---
@@ -371,9 +350,7 @@ impl<'a> UdpScanRx for RealUdpRxV4<'a> {
                 return Ok(None);
             }
 
-            let poll_timeout = Duration::from_millis(1);
-
-            if let Some((packet, addr)) = self.udp_iter.next_with_timeout(poll_timeout)? {
+            if let Some((packet, addr)) = self.udp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 // Poll UDP
                 return Ok(Some(ScanEvent::PacketResponse {
                     source_port: packet.get_source(),
@@ -382,7 +359,7 @@ impl<'a> UdpScanRx for RealUdpRxV4<'a> {
                     flags: None,
                 }));
             }
-            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(poll_timeout)? {
+            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 // Poll ICMP
                 if let Some(transport) = extract_original_transport_v4(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Udp {
@@ -412,9 +389,7 @@ impl<'a> UdpScanRx for RealUdpRxV6<'a> {
                 return Ok(None);
             }
 
-            let poll_timeout = Duration::from_millis(1);
-
-            if let Some((packet, addr)) = self.udp_iter.next_with_timeout(poll_timeout)? {
+            if let Some((packet, addr)) = self.udp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 return Ok(Some(ScanEvent::PacketResponse {
                     source_port: packet.get_source(),
                     dest_port: packet.get_destination(),
@@ -422,7 +397,7 @@ impl<'a> UdpScanRx for RealUdpRxV6<'a> {
                     flags: None,
                 }));
             }
-            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(poll_timeout)? {
+            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 if let Some(transport) = extract_original_transport_v6(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Udp {
                         return Ok(Some(ScanEvent::icmp_response(

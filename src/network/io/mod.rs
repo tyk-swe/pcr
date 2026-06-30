@@ -3,5 +3,6 @@
 
 pub mod interface;
 pub mod listener;
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 pub mod pnet_utils;
 pub mod sender;

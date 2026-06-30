@@ -23,6 +23,8 @@ use crate::util::source_ip::{discover_source_ipv4, discover_source_ipv6};
 
 pub const DEFAULT_PORT: u16 = 33434;
 pub const ICMPV6_PORT_UNREACHABLE_CODE: u8 = 4;
+pub(super) const ICMP_RESPONSE_POLL_INTERVAL: Duration = Duration::from_millis(500);
+pub(super) const TCP_RESPONSE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TRANSPORT_CHANNEL_BUFFER_SIZE: usize = 4096;
 
 pub trait UdpSocketV4 {
@@ -110,13 +112,6 @@ pub fn handle_probe_result(result: ProbeResult, opts: &TracerouteRequest) -> Res
 
 pub trait TracerouteExecutor {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult>;
-}
-
-pub fn run_traceroute_loop<E: TracerouteExecutor + ?Sized>(
-    opts: &TracerouteRequest,
-    executor: &mut E,
-) -> Result<()> {
-    run_traceroute_loop_with_delay(opts, executor, None)
 }
 
 pub fn run_traceroute_loop_with_delay<E: TracerouteExecutor + ?Sized>(
@@ -212,14 +207,6 @@ pub fn remaining_probe_time(start: Instant, timeout: Duration) -> Option<Duratio
     probe::remaining_probe_time(start, timeout)
 }
 
-pub fn remaining_probe_time_at(
-    start: Instant,
-    now: Instant,
-    timeout: Duration,
-) -> Option<Duration> {
-    probe::remaining_probe_time_at(start, now, timeout)
-}
-
 pub fn resolve_hostname(addr: IpAddr, no_dns: bool) -> String {
     if no_dns {
         return addr.to_string();
@@ -228,10 +215,6 @@ pub fn resolve_hostname(addr: IpAddr, no_dns: bool) -> String {
         Ok(host) => format!("{} ({})", host, addr),
         Err(_) => addr.to_string(),
     }
-}
-
-pub fn resolve_destination(target: &str) -> Result<IpAddr> {
-    Ok(resolve_destination_with_reason(target)?.address)
 }
 
 pub struct ResolvedDestination {

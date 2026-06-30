@@ -11,6 +11,8 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, Context, Result};
 use log::{info, warn};
 use pnet::datalink;
+use pnet::packet::icmp::{self, IcmpTypes};
+use pnet::packet::icmpv6::Icmpv6Types;
 use rand::random;
 
 use crate::network::protocol_validation::OriginalTransport;
@@ -24,6 +26,10 @@ use crate::util::sync::LockResultExt;
 
 pub(super) const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
 pub(super) const MAX_SCAN_TARGETS: usize = 4096;
+pub(super) const TRANSPORT_CHANNEL_BUFFER_SIZE: usize = 1024 * 1024;
+pub(super) const SOURCE_DISCOVERY_PORT: u16 = 9;
+pub(super) const SOURCE_PORT_OFFSET: u16 = 10_000;
+pub(super) const PACKET_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const RECEIVER_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_SEND_RETRIES: usize = 3;
 const SEND_RETRY_INITIAL_BACKOFF: Duration = Duration::from_millis(1);
@@ -129,6 +135,29 @@ pub(super) fn parse_ports(spec: &str) -> Result<Vec<u16>> {
 pub(super) fn resolve_target(target: &str) -> Result<SocketAddr> {
     resolve_target_socket_addr(target, 0, Some(false))
         .with_context(|| operation_failed("resolve scan target", format!("target={target}")))
+}
+
+pub(super) struct ResolvedPortScan {
+    pub(super) address: SocketAddr,
+    pub(super) source_override: Option<IpAddr>,
+    pub(super) ports: Vec<u16>,
+}
+
+pub(super) fn resolve_port_scan(
+    target: &str,
+    ports: &str,
+    interface: &Option<String>,
+    source_ip: &Option<String>,
+) -> Result<ResolvedPortScan> {
+    let address = resolve_target(target)?;
+    let source_override = resolve_source_override(interface, source_ip, address.ip())?;
+    let ports = parse_ports(ports)?;
+
+    Ok(ResolvedPortScan {
+        address,
+        source_override,
+        ports,
+    })
 }
 
 pub(super) fn validate_source_override(
@@ -314,6 +343,50 @@ pub(super) fn source_ipv6_or_discover(
     match source_override {
         Some(ip) => Ok(ip),
         None => discover_source_ipv6(destination, discovery_port),
+    }
+}
+
+pub(super) async fn join_blocking_scan<T>(
+    handle: tokio::task::JoinHandle<Result<T>>,
+    operation: &'static str,
+) -> Result<T> {
+    handle.await.context(operation_failed(
+        operation,
+        "spawn_blocking returned JoinError",
+    ))?
+}
+
+pub(super) fn clamp_batch_size(batch_size: usize, max_batch_size: usize) -> usize {
+    batch_size.clamp(1, max_batch_size.max(1))
+}
+
+pub(super) fn clamp_batch_to_ports(batch_size: usize, ports: &[u16]) -> usize {
+    clamp_batch_size(batch_size, ports.len())
+}
+
+pub(super) fn classify_icmp_port_unreachable(
+    destination: SocketAddr,
+    icmp_type: u8,
+    icmp_code: u8,
+) -> PortState {
+    if is_icmp_port_unreachable(destination, icmp_type, icmp_code) {
+        PortState::Closed
+    } else {
+        PortState::Filtered
+    }
+}
+
+fn is_icmp_port_unreachable(destination: SocketAddr, icmp_type: u8, icmp_code: u8) -> bool {
+    match destination.ip() {
+        IpAddr::V4(_) => {
+            icmp_type == IcmpTypes::DestinationUnreachable.0
+                && icmp_code
+                    == icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable.0
+        }
+        IpAddr::V6(_) => {
+            icmp_type == Icmpv6Types::DestinationUnreachable.0
+                && icmp_code == ICMPV6_CODE_PORT_UNREACHABLE
+        }
     }
 }
 

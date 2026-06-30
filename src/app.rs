@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+#[cfg(feature = "metrics")]
+use log::info;
 use log::warn;
 use tokio::runtime::{Builder, Runtime};
 
@@ -222,10 +224,12 @@ impl PacketcraftApp {
                     bind
                 ));
             }
-            Ok(Some(util::telemetry::spawn_prometheus_exporter(
-                runtime.handle(),
-                bind,
-            )?))
+            let handle = util::telemetry::spawn_prometheus_exporter(runtime.handle(), bind)?;
+            info!(
+                "Prometheus exporter bound to http://{}/metrics",
+                handle.addr
+            );
+            Ok(Some(handle))
         } else {
             Ok(None)
         }

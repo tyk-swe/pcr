@@ -87,19 +87,6 @@ pub fn run_icmp_traceroute_v4(
     Ok(())
 }
 
-pub fn run_icmp_traceroute_v4_loop<S, R>(
-    destination: Ipv4Addr,
-    opts: &TracerouteRequest,
-    sender: &mut S,
-    receiver: &mut R,
-) -> Result<()>
-where
-    S: TransportSender,
-    R: PacketReceiver + ?Sized,
-{
-    run_icmp_traceroute_v4_loop_with_delay(destination, opts, None, sender, receiver)
-}
-
 fn run_icmp_traceroute_v4_loop_with_delay<S, R>(
     destination: Ipv4Addr,
     opts: &TracerouteRequest,
@@ -201,20 +188,6 @@ pub fn run_icmp_traceroute_v6(
     drop(sender);
 
     Ok(())
-}
-
-pub fn run_icmp_traceroute_v6_loop<S, R>(
-    destination: Ipv6Addr,
-    source_ip: Ipv6Addr,
-    opts: &TracerouteRequest,
-    sender: &mut S,
-    receiver: &mut R,
-) -> Result<()>
-where
-    S: TransportSender,
-    R: PacketReceiver + ?Sized,
-{
-    run_icmp_traceroute_v6_loop_with_delay(destination, source_ip, opts, None, sender, receiver)
 }
 
 fn run_icmp_traceroute_v6_loop_with_delay<S, R>(

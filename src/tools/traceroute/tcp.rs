@@ -20,7 +20,7 @@ use crate::util::error::operation_failed;
 use super::common::{
     open_ipv4_channel, open_ipv6_channel, remaining_probe_time, request_timeout,
     resolve_source_ipv4, resolve_source_ipv6, run_traceroute_loop_with_delay, tcp_base_source_port,
-    PacketReceiver, ProbeResult, TracerouteExecutor, DEFAULT_PORT,
+    PacketReceiver, ProbeResult, TracerouteExecutor, DEFAULT_PORT, TCP_RESPONSE_POLL_INTERVAL,
 };
 use super::utils::{
     poll_icmp_event_v4_with_source, poll_icmp_event_v6_with_source, IcmpEventKind,
@@ -42,26 +42,9 @@ where
     R: PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
-        // Maintain unique tuple per probe to reliably interpret mixed ICMP and TCP responses.
-        let dest_port_offset = (ttl as u16).wrapping_mul(3).wrapping_add(probe as u16);
-        let dest_port = DEFAULT_PORT.wrapping_add(dest_port_offset);
-        let source_port_offset = (ttl as u16).wrapping_mul(8).wrapping_add(probe as u16);
-        let source_port = self.base_source_port.wrapping_add(source_port_offset);
-        let flags = TcpFlagSet {
-            syn: true,
-            ..Default::default()
-        };
-        let spec = TcpSpec {
-            source_port: Some(source_port),
-            destination_port: Some(dest_port),
-            flags,
-            sequence: Some(random::<u32>()),
-            acknowledgement: Some(0),
-            window_size: Some(65_535),
-            options: None,
-        };
+        let probe = tcp_probe_spec(ttl, probe, self.base_source_port);
         let segment = build_tcp_segment(
-            &spec,
+            &probe.spec,
             &[],
             IpAddr::V4(self.source_ip),
             IpAddr::V4(self.destination),
@@ -70,7 +53,9 @@ where
             "construct TCP packet",
             format!(
                 "destination={} source_port={} dest_port={dest_port}",
-                self.destination, source_port
+                self.destination,
+                probe.source_port,
+                dest_port = probe.destination_port
             ),
         ))?;
         self.tcp_sender.set_ttl(ttl)?;
@@ -80,7 +65,9 @@ where
                 "send TCP probe",
                 format!(
                     "destination={} source_port={} dest_port={dest_port}",
-                    self.destination, source_port
+                    self.destination,
+                    probe.source_port,
+                    dest_port = probe.destination_port
                 ),
             ))?;
 
@@ -88,8 +75,8 @@ where
             self.icmp_adapter,
             self.tcp_iter,
             self.destination,
-            dest_port,
-            source_port,
+            probe.destination_port,
+            probe.source_port,
             self.timeout,
         )
     }
@@ -148,25 +135,9 @@ where
     R: PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
-        let dest_port_offset = (ttl as u16).wrapping_mul(3).wrapping_add(probe as u16);
-        let dest_port = DEFAULT_PORT.wrapping_add(dest_port_offset);
-        let source_port_offset = (ttl as u16).wrapping_mul(8).wrapping_add(probe as u16);
-        let source_port = self.base_source_port.wrapping_add(source_port_offset);
-        let flags = TcpFlagSet {
-            syn: true,
-            ..Default::default()
-        };
-        let spec = TcpSpec {
-            source_port: Some(source_port),
-            destination_port: Some(dest_port),
-            flags,
-            sequence: Some(random::<u32>()),
-            acknowledgement: Some(0),
-            window_size: Some(65_535),
-            options: None,
-        };
+        let probe = tcp_probe_spec(ttl, probe, self.base_source_port);
         let segment = build_tcp_segment(
-            &spec,
+            &probe.spec,
             &[],
             IpAddr::V6(self.source_ip),
             IpAddr::V6(self.destination),
@@ -175,7 +146,9 @@ where
             "construct TCPv6 packet",
             format!(
                 "destination={} source_port={} dest_port={dest_port}",
-                self.destination, source_port
+                self.destination,
+                probe.source_port,
+                dest_port = probe.destination_port
             ),
         ))?;
         self.tcp_sender.set_ttl(ttl)?;
@@ -185,7 +158,9 @@ where
                 "send TCPv6 probe",
                 format!(
                     "destination={} source_port={} dest_port={dest_port}",
-                    self.destination, source_port
+                    self.destination,
+                    probe.source_port,
+                    dest_port = probe.destination_port
                 ),
             ))?;
 
@@ -193,10 +168,50 @@ where
             self.icmp_adapter,
             self.tcp_iter,
             self.destination,
-            dest_port,
-            source_port,
+            probe.destination_port,
+            probe.source_port,
             self.timeout,
         )
+    }
+}
+
+struct TcpProbeSpec {
+    source_port: u16,
+    destination_port: u16,
+    spec: TcpSpec,
+}
+
+fn tcp_probe_spec(ttl: u8, probe: u8, base_source_port: u16) -> TcpProbeSpec {
+    const DESTINATION_PORT_TTL_STRIDE: u16 = 3;
+    const SOURCE_PORT_TTL_STRIDE: u16 = 8;
+    const TCP_WINDOW_SIZE: u16 = 65_535;
+
+    // Maintain a unique tuple per probe to reliably interpret mixed ICMP and TCP responses.
+    let destination_offset = u16::from(ttl)
+        .wrapping_mul(DESTINATION_PORT_TTL_STRIDE)
+        .wrapping_add(u16::from(probe));
+    let destination_port = DEFAULT_PORT.wrapping_add(destination_offset);
+    let source_offset = u16::from(ttl)
+        .wrapping_mul(SOURCE_PORT_TTL_STRIDE)
+        .wrapping_add(u16::from(probe));
+    let source_port = base_source_port.wrapping_add(source_offset);
+    let flags = TcpFlagSet {
+        syn: true,
+        ..Default::default()
+    };
+
+    TcpProbeSpec {
+        source_port,
+        destination_port,
+        spec: TcpSpec {
+            source_port: Some(source_port),
+            destination_port: Some(destination_port),
+            flags,
+            sequence: Some(random::<u32>()),
+            acknowledgement: Some(0),
+            window_size: Some(TCP_WINDOW_SIZE),
+            options: None,
+        },
     }
 }
 
@@ -248,7 +263,7 @@ fn await_tcp_probe_v4<R: PacketReceiver + ?Sized>(
 ) -> Result<ProbeResult> {
     let start = Instant::now();
     while let Some(remaining) = remaining_probe_time(start, timeout) {
-        let slice = remaining.min(Duration::from_millis(100));
+        let slice = remaining.min(TCP_RESPONSE_POLL_INTERVAL);
 
         if let Some((event, addr)) = poll_icmp_event_v4_with_source(
             icmp_iter,
@@ -288,7 +303,7 @@ fn await_tcp_probe_v6<R: PacketReceiver + ?Sized>(
 ) -> Result<ProbeResult> {
     let start = Instant::now();
     while let Some(remaining) = remaining_probe_time(start, timeout) {
-        let slice = remaining.min(Duration::from_millis(100));
+        let slice = remaining.min(TCP_RESPONSE_POLL_INTERVAL);
 
         if let Some((event, addr)) = poll_icmp_event_v6_with_source(
             icmp_iter,

@@ -46,7 +46,7 @@ static BYTES_SENT: LazyLock<IntCounterVec> = LazyLock::new(|| {
         &["link_type", "transport"],
     )
 });
-#[cfg(feature = "metrics")]
+#[cfg(all(feature = "metrics", feature = "pcap"))]
 static LISTENER_PACKETS: LazyLock<IntCounterVec> = LazyLock::new(|| {
     register_metric(
         "packetcraftr_listener_packets_total",
@@ -70,7 +70,7 @@ static RULE_ACTION_DROPS: LazyLock<IntCounterVec> = LazyLock::new(|| {
         &["action", "reason"],
     )
 });
-#[cfg(feature = "metrics")]
+#[cfg(all(feature = "metrics", feature = "pcap"))]
 static LISTENER_DROPPED_PACKETS: LazyLock<IntCounterVec> = LazyLock::new(|| {
     register_metric(
         "packetcraftr_listener_dropped_packets_total",
@@ -98,16 +98,6 @@ fn normalise_label(value: &str) -> &str {
 }
 
 #[cfg(feature = "metrics")]
-pub fn record_frame_sent(link_type: &str, transport: &str, bytes: usize) {
-    let link = normalise_label(link_type);
-    let transport = normalise_label(transport);
-    FRAMES_SENT.with_label_values(&[link, transport]).inc();
-    BYTES_SENT
-        .with_label_values(&[link, transport])
-        .inc_by(bytes as u64);
-}
-
-#[cfg(feature = "metrics")]
 pub fn get_frame_sent_counters(link_type: &str, transport: &str) -> (IntCounter, IntCounter) {
     let link = normalise_label(link_type);
     let transport = normalise_label(transport);
@@ -117,7 +107,7 @@ pub fn get_frame_sent_counters(link_type: &str, transport: &str) -> (IntCounter,
     )
 }
 
-#[cfg(feature = "metrics")]
+#[cfg(all(feature = "metrics", feature = "pcap"))]
 pub fn record_listener_packet(protocol: &str) {
     let proto = normalise_label(protocol);
     LISTENER_PACKETS.with_label_values(&[proto]).inc();
@@ -137,7 +127,7 @@ pub fn record_rule_executor_drop(action: &str, reason: &str) {
     RULE_ACTION_DROPS.with_label_values(&[action, reason]).inc();
 }
 
-#[cfg(feature = "metrics")]
+#[cfg(all(feature = "metrics", feature = "pcap"))]
 pub fn record_listener_dropped_packet(reason: &str) {
     let reason = normalise_label(reason);
     LISTENER_DROPPED_PACKETS.with_label_values(&[reason]).inc();
@@ -155,14 +145,11 @@ impl NoopCounter {
 }
 
 #[cfg(not(feature = "metrics"))]
-pub fn record_frame_sent(_link_type: &str, _transport: &str, _bytes: usize) {}
-
-#[cfg(not(feature = "metrics"))]
 pub fn get_frame_sent_counters(_link_type: &str, _transport: &str) -> (NoopCounter, NoopCounter) {
     (NoopCounter, NoopCounter)
 }
 
-#[cfg(not(feature = "metrics"))]
+#[cfg(all(not(feature = "metrics"), feature = "pcap"))]
 pub fn record_listener_packet(_protocol: &str) {}
 
 #[cfg(not(feature = "metrics"))]
@@ -171,7 +158,7 @@ pub fn record_rule_action(_action: &str, _outcome: &str) {}
 #[cfg(not(feature = "metrics"))]
 pub fn record_rule_executor_drop(_action: &str, _reason: &str) {}
 
-#[cfg(not(feature = "metrics"))]
+#[cfg(all(not(feature = "metrics"), feature = "pcap"))]
 pub fn record_listener_dropped_packet(_reason: &str) {}
 
 #[cfg(feature = "metrics")]

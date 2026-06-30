@@ -272,16 +272,18 @@ impl Engine {
         prepared.run().await
     }
 
+    pub fn config(&self) -> &EngineConfig {
+        &self.config
+    }
+
+    #[cfg(feature = "repl")]
     pub fn rule_count(&self) -> usize {
         self.rules.len()
     }
 
+    #[cfg(feature = "repl")]
     pub fn has_receive_rules(&self) -> bool {
         self.rules.has_receive_triggers()
-    }
-
-    pub fn config(&self) -> &EngineConfig {
-        &self.config
     }
 
     fn effective_policy(&self) -> TrafficPolicy {

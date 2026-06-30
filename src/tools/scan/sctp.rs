@@ -8,8 +8,6 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use crc::{Crc, CRC_32_ISCSI};
-use pnet::packet::icmp::{self, IcmpTypes};
-use pnet::packet::icmpv6::Icmpv6Types;
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::Packet;
 use pnet::transport::{
@@ -30,8 +28,9 @@ use crate::util::error::operation_failed;
 use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 
 use super::common::{
-    parse_ports, report_results, resolve_source_override, resolve_target, ConcurrentScanConfig,
-    PortState, ScanEvent, DEFAULT_TIMEOUT, ICMPV6_CODE_PORT_UNREACHABLE,
+    clamp_batch_size, classify_icmp_port_unreachable, join_blocking_scan, report_results,
+    resolve_port_scan, ConcurrentScanConfig, PortState, ScanEvent, DEFAULT_TIMEOUT,
+    PACKET_POLL_INTERVAL, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
 
@@ -40,7 +39,6 @@ const SCTP_INIT_CHUNK_TYPE: u8 = 1;
 const SCTP_INIT_ACK_CHUNK_TYPE: u8 = 2;
 const SCTP_ABORT_CHUNK_TYPE: u8 = 6;
 const CONCURRENT_SCAN_BATCH_SIZE: usize = 30_000;
-const BASE_PORT_OFFSET: u16 = 10_000;
 
 pub async fn run_sctp_init(
     target: &str,
@@ -49,9 +47,10 @@ pub async fn run_sctp_init(
     source_ip: &Option<String>,
     runtime: TrafficRuntimeConfig,
 ) -> Result<()> {
-    let address = resolve_target(target)?;
-    let source_override = resolve_source_override(interface, source_ip, address.ip())?;
-    let port_list = parse_ports(ports)?;
+    let resolved = resolve_port_scan(target, ports, interface, source_ip)?;
+    let address = resolved.address;
+    let source_override = resolved.source_override;
+    let port_list = resolved.ports;
 
     log::info!(
         "Starting SCTP INIT scan against {} ports {:?}",
@@ -68,12 +67,11 @@ pub async fn run_sctp_init(
         send_delay: runtime.send_delay,
     };
 
-    let results = task::spawn_blocking(move || perform_sctp_scan(scan_config))
-        .await
-        .context(operation_failed(
-            "join SCTP scan task",
-            "spawn_blocking returned JoinError",
-        ))??;
+    let results = join_blocking_scan(
+        task::spawn_blocking(move || perform_sctp_scan(scan_config)),
+        "join SCTP scan task",
+    )
+    .await?;
 
     report_results("sctp-init", &address.ip(), &results);
     Ok(())
@@ -123,23 +121,27 @@ fn scan_sctp_v4(
     batch_size: usize,
     send_delay: Option<Duration>,
 ) -> Result<BTreeMap<u16, PortState>> {
-    let source_ip =
-        super::common::source_ipv4_for_layer4_send(destination, 9, source_override, "SCTP")?;
+    let source_ip = super::common::source_ipv4_for_layer4_send(
+        destination,
+        SOURCE_DISCOVERY_PORT,
+        source_override,
+        "SCTP",
+    )?;
 
     let (mut sctp_sender, _) = open_transport_channel(
-        1024 * 1024,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Sctp)),
     )
     .with_context(|| operation_failed("open SCTP transport channel", "protocol=IPv4"))?;
 
     let (_, mut sctp_receiver) = open_transport_channel(
-        1024 * 1024,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer3(IpNextHeaderProtocols::Sctp),
     )
     .with_context(|| operation_failed("open SCTP receiver channel", "protocol=IPv4"))?;
 
     let (_, mut icmp_receiver) = open_transport_channel(
-        4096,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv4(IpNextHeaderProtocols::Icmp)),
     )
     .with_context(|| operation_failed("open ICMP transport channel", "protocol=IPv4"))?;
@@ -157,7 +159,7 @@ fn scan_sctp_v4(
             timeout,
             batch_size,
             send_delay,
-            base_port_offset: BASE_PORT_OFFSET,
+            base_port_offset: SOURCE_PORT_OFFSET,
             base_port_override: None,
             initial_port_state: PortState::Filtered,
         },
@@ -180,10 +182,11 @@ fn scan_sctp_v6(
         _ => return Err(anyhow!("scan_sctp_v6 called with IPv4 address")),
     };
 
-    let source_ip = super::common::source_ipv6_or_discover(dest_ip, 9, source_override)?;
+    let source_ip =
+        super::common::source_ipv6_or_discover(dest_ip, SOURCE_DISCOVERY_PORT, source_override)?;
 
     let (_sctp_sender, _) = open_transport_channel(
-        1024 * 1024,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Sctp)),
     )
     .with_context(|| operation_failed("open SCTP transport channel", "protocol=IPv6"))?;
@@ -208,7 +211,7 @@ fn scan_sctp_v6(
         ))?;
 
     let (_, mut icmp_receiver) = open_transport_channel(
-        4096,
+        TRANSPORT_CHANNEL_BUFFER_SIZE,
         TransportChannelType::Layer4(TransportProtocol::Ipv6(IpNextHeaderProtocols::Icmpv6)),
     )
     .with_context(|| operation_failed("open ICMPv6 transport channel", "protocol=IPv6"))?;
@@ -245,7 +248,7 @@ fn scan_sctp_v6(
             timeout,
             batch_size,
             send_delay,
-            base_port_offset: BASE_PORT_OFFSET,
+            base_port_offset: SOURCE_PORT_OFFSET,
             base_port_override: None,
             initial_port_state: PortState::Filtered,
         },
@@ -262,7 +265,7 @@ fn scan_ports_concurrent_with_config(
     rx: &mut dyn SctpScanRx,
 ) -> Result<BTreeMap<u16, PortState>> {
     let config = ConcurrentScanConfig {
-        batch_size: config.batch_size.clamp(1, CONCURRENT_SCAN_BATCH_SIZE),
+        batch_size: clamp_batch_size(config.batch_size, CONCURRENT_SCAN_BATCH_SIZE),
         ..config
     };
     let destination = config.destination;
@@ -295,36 +298,12 @@ fn scan_ports_concurrent_with_config(
             } => {
                 results.insert(
                     target_port,
-                    classify_sctp_icmp_response(destination, icmp_type, icmp_code),
+                    classify_icmp_port_unreachable(destination, icmp_type, icmp_code),
                 );
             }
             _ => {}
         },
     )
-}
-
-fn classify_sctp_icmp_response(destination: SocketAddr, icmp_type: u8, icmp_code: u8) -> PortState {
-    match destination.ip() {
-        IpAddr::V4(_) => {
-            if icmp_type == IcmpTypes::DestinationUnreachable.0
-                && icmp_code
-                    == icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable.0
-            {
-                PortState::Closed
-            } else {
-                PortState::Filtered
-            }
-        }
-        IpAddr::V6(_) => {
-            if icmp_type == Icmpv6Types::DestinationUnreachable.0
-                && icmp_code == ICMPV6_CODE_PORT_UNREACHABLE
-            {
-                PortState::Closed
-            } else {
-                PortState::Filtered
-            }
-        }
-    }
 }
 
 // --- Traits and Implementations ---
@@ -392,10 +371,8 @@ impl<'a> SctpScanRx for RealSctpRxV4<'a> {
             if start.elapsed() >= timeout {
                 return Ok(None);
             }
-            let poll_timeout = Duration::from_millis(1);
-
             // Poll SCTP
-            if let Some((packet, _)) = self.sctp_iter.next_with_timeout(poll_timeout)? {
+            if let Some((packet, _)) = self.sctp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 if packet.get_next_level_protocol() == IpNextHeaderProtocols::Sctp {
                     if let Some((src_port, dst_port, chunk_type)) =
                         parse_sctp_info(packet.payload())
@@ -411,7 +388,7 @@ impl<'a> SctpScanRx for RealSctpRxV4<'a> {
             }
 
             // Poll ICMP
-            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(poll_timeout)? {
+            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 if let Some(transport) = extract_original_transport_v4(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Sctp {
                         return Ok(Some(ScanEvent::icmp_response(
@@ -439,8 +416,7 @@ impl<'a> SctpScanRx for RealSctpRxV6<'a> {
         // But socket.recv_from is blocking.
         // We set a short read timeout on the socket.
 
-        self.socket
-            .set_read_timeout(Some(Duration::from_millis(1)))?;
+        self.socket.set_read_timeout(Some(PACKET_POLL_INTERVAL))?;
 
         loop {
             if start.elapsed() >= timeout {
@@ -474,7 +450,7 @@ impl<'a> SctpScanRx for RealSctpRxV6<'a> {
             }
 
             // Poll ICMPv6
-            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(Duration::from_millis(1))? {
+            if let Some((packet, _)) = self.icmp_iter.next_with_timeout(PACKET_POLL_INTERVAL)? {
                 if let Some(transport) = extract_original_transport_v6(&packet) {
                     if transport.protocol == IpNextHeaderProtocols::Sctp {
                         return Ok(Some(ScanEvent::icmp_response(

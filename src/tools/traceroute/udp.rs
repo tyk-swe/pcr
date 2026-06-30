@@ -95,19 +95,6 @@ where
     }
 }
 
-pub fn run_udp_traceroute_v4_loop<S, R>(
-    destination: Ipv4Addr,
-    opts: &TracerouteRequest,
-    socket: &S,
-    receiver: &mut R,
-) -> Result<()>
-where
-    S: UdpSocketV4,
-    R: super::common::PacketReceiver + ?Sized,
-{
-    run_udp_traceroute_v4_loop_with_delay(destination, opts, None, socket, receiver)
-}
-
 fn run_udp_traceroute_v4_loop_with_delay<S, R>(
     destination: Ipv4Addr,
     opts: &TracerouteRequest,
@@ -161,19 +148,6 @@ where
             self.timeout,
         )
     }
-}
-
-pub fn run_udp_traceroute_v6_loop<S, R>(
-    destination: Ipv6Addr,
-    opts: &TracerouteRequest,
-    socket: &S,
-    receiver: &mut R,
-) -> Result<()>
-where
-    S: UdpSocketV6,
-    R: PacketReceiver + ?Sized,
-{
-    run_udp_traceroute_v6_loop_with_delay(destination, opts, None, socket, receiver)
 }
 
 fn run_udp_traceroute_v6_loop_with_delay<S, R>(

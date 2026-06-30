@@ -1,22 +1,25 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::Ipv6Addr;
+#[cfg(any(feature = "scan", feature = "traceroute"))]
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use anyhow::{anyhow, Context, Result};
-use pnet::datalink::{self, NetworkInterface};
+#[cfg(feature = "scan")]
+use pnet::datalink;
+use pnet::datalink::NetworkInterface;
 use pnet::ipnetwork::IpNetwork;
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 use crate::util::error::operation_failed;
 
 /// Attempts to determine the source IP address that the OS would use to reach the given destination.
 ///
 /// This is done by creating a UDP socket and connecting it to the destination. No packets are sent.
 /// The `port` argument is used for the connection but does not need to be open on the remote host.
-pub fn discover_source_ip(destination: IpAddr, port: u16) -> Result<IpAddr> {
-    discover_impl(destination, port)
-}
-
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 pub fn discover_source_ipv4(destination: Ipv4Addr, port: u16) -> Result<Ipv4Addr> {
     match discover_impl(IpAddr::V4(destination), port)? {
         IpAddr::V4(addr) => Ok(addr),
@@ -28,6 +31,7 @@ pub fn discover_source_ipv4(destination: Ipv4Addr, port: u16) -> Result<Ipv4Addr
     }
 }
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 pub fn discover_source_ipv6(destination: Ipv6Addr, port: u16) -> Result<Ipv6Addr> {
     match discover_impl(IpAddr::V6(destination), port)? {
         IpAddr::V6(addr) => Ok(addr),
@@ -39,6 +43,7 @@ pub fn discover_source_ipv6(destination: Ipv6Addr, port: u16) -> Result<Ipv6Addr
     }
 }
 
+#[cfg(feature = "scan")]
 pub fn resolve_interface_or_ip_override(
     interface: Option<&str>,
     target: IpAddr,
@@ -78,6 +83,7 @@ pub fn resolve_interface_or_ip_override(
         .ok_or_else(|| anyhow!("interface {spec} does not have a {family} address"))
 }
 
+#[cfg(feature = "scan")]
 pub fn source_override_ipv4(source_override: Option<IpAddr>) -> Result<Option<Ipv4Addr>> {
     source_override
         .map(|ip| match ip {
@@ -89,6 +95,7 @@ pub fn source_override_ipv4(source_override: Option<IpAddr>) -> Result<Option<Ip
         .transpose()
 }
 
+#[cfg(feature = "scan")]
 pub fn source_override_ipv6(source_override: Option<IpAddr>) -> Result<Option<Ipv6Addr>> {
     source_override
         .map(|ip| match ip {
@@ -100,6 +107,7 @@ pub fn source_override_ipv6(source_override: Option<IpAddr>) -> Result<Option<Ip
         .transpose()
 }
 
+#[cfg(feature = "scan")]
 fn is_matching_ip_family(candidate: IpAddr, target: IpAddr) -> bool {
     (candidate.is_ipv4() && target.is_ipv4()) || (candidate.is_ipv6() && target.is_ipv6())
 }
@@ -148,6 +156,7 @@ pub(crate) fn select_interface_ipv6_source_for_destination(
     )
 }
 
+#[cfg(any(feature = "scan", feature = "traceroute"))]
 fn discover_impl(destination: IpAddr, port: u16) -> Result<IpAddr> {
     let (bind_ip, family) = match destination {
         IpAddr::V4(_) => (IpAddr::V4(Ipv4Addr::UNSPECIFIED), "IPv4"),

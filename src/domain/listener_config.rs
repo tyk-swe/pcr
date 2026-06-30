@@ -6,7 +6,9 @@ use std::time::Duration;
 
 use crate::domain::request::ListenerRequest;
 
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 pub const DEFAULT_QUEUE_CAPACITY: usize = 256;
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 pub const MAX_QUEUE_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone)]
@@ -67,7 +69,7 @@ pub(crate) fn spec_pcap_requirement(request: &ListenerRequest) -> Option<Listene
     }
 }
 
-#[cfg(not(feature = "pcap"))]
+#[cfg(all(not(feature = "pcap"), feature = "daemon"))]
 pub(crate) fn runtime_request_pcap_requirement(
     request: &ListenerRequest,
 ) -> Option<ListenerPcapRequirement> {
@@ -80,12 +82,14 @@ pub(crate) fn runtime_request_pcap_requirement(
     }
 }
 
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum QueueCapacityError {
     Zero,
     TooLarge { max: usize },
 }
 
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 pub(crate) fn normalize_queue_capacity(
     queue_capacity: Option<usize>,
 ) -> Result<usize, QueueCapacityError> {

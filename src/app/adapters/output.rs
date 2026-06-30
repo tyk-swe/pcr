@@ -3,6 +3,7 @@
 
 use crate::domain::command::{DnsQueryResult, DnsRequest};
 use crate::domain::event::ListenerEvent;
+#[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 use crate::domain::policy::TrafficPlan;
 use crate::domain::spec::PacketSpec;
 use crate::domain::transmission::TransmissionPlan;
@@ -29,6 +30,7 @@ impl EngineOutput for OutputEventSink {
         self.controller.emit_preflight_summary(spec, plan)
     }
 
+    #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
     fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> PortResult<()> {
         self.controller.emit_traffic_plan_summary(plan)
     }

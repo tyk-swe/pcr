@@ -38,34 +38,16 @@ pub enum EngineError {
     #[error("transmission execution failed: {0}")]
     TransmissionExecution(#[source] AnyhowError),
 
-    #[error("listener operation failed: {0}")]
-    Listener(#[source] AnyhowError),
-
-    #[error("daemon operation failed: {0}")]
-    Daemon(#[source] AnyhowError),
-
-    #[error("interactive shell failed: {0}")]
-    Interactive(#[source] AnyhowError),
-
+    #[cfg(feature = "traceroute")]
     #[error("traceroute operation failed: {0}")]
     Traceroute(#[source] AnyhowError),
 
+    #[cfg(feature = "scan")]
     #[error("scan operation failed: {0}")]
     Scan(#[source] AnyhowError),
-
-    #[error("tokio runtime construction failed: {0}")]
-    RuntimeConstruction(#[source] AnyhowError),
 }
 
 impl EngineError {
-    pub fn rule_engine_init<S: Into<String>>(msg: S) -> Self {
-        Self::RuleEngineInit(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn rule_send_executor_init<S: Into<String>>(msg: S) -> Self {
-        Self::RuleSendExecutorInit(AnyhowError::msg(msg.into()))
-    }
-
     pub fn rule_load<S: Into<String>>(path: S, source: anyhow::Error) -> Self {
         Self::RuleLoad {
             path: path.into(),
@@ -73,40 +55,8 @@ impl EngineError {
         }
     }
 
-    pub fn preflight_summary<S: Into<String>>(msg: S) -> Self {
-        Self::PreflightSummary(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn insufficient_privileges<S: Into<String>>(msg: S) -> Self {
-        Self::InsufficientPrivileges(AnyhowError::msg(msg.into()))
-    }
-
     pub fn transmission_plan<S: Into<String>>(msg: S) -> Self {
         Self::TransmissionPlan(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn transmission_execution<S: Into<String>>(msg: S) -> Self {
-        Self::TransmissionExecution(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn daemon<S: Into<String>>(msg: S) -> Self {
-        Self::Daemon(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn interactive<S: Into<String>>(msg: S) -> Self {
-        Self::Interactive(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn traceroute<S: Into<String>>(msg: S) -> Self {
-        Self::Traceroute(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn scan<S: Into<String>>(msg: S) -> Self {
-        Self::Scan(AnyhowError::msg(msg.into()))
-    }
-
-    pub fn runtime_construction<S: Into<String>>(msg: S) -> Self {
-        Self::RuntimeConstruction(AnyhowError::msg(msg.into()))
     }
 }
 

@@ -19,10 +19,6 @@ pub enum ResolveHostnameError {
     NoAddresses { host: String },
 }
 
-pub fn resolve_hostname(host: &str, prefer_ipv6: Option<bool>) -> Result<IpAddr> {
-    resolve_target_ip(host, prefer_ipv6)
-}
-
 pub fn resolve_target_ip(target: &str, prefer_ipv6: Option<bool>) -> Result<IpAddr> {
     Ok(resolve_target_socket_addr(target, 0, prefer_ipv6)?.ip())
 }

@@ -24,8 +24,9 @@ use crate::util::error::operation_failed;
 use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 
 use super::common::{
-    parse_ports, report_results, resolve_source_override, resolve_target, ConcurrentScanConfig,
-    PortState, ScanEvent, DEFAULT_TIMEOUT,
+    clamp_batch_size, join_blocking_scan, report_results, resolve_port_scan, ConcurrentScanConfig,
+    PortState, ScanEvent, DEFAULT_TIMEOUT, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET,
+    TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
 
@@ -33,13 +34,10 @@ mod tcp_io;
 
 use tcp_io::{RawSocketSender, RealTcpRxV4, RealTcpRxV6, RealTcpSender, TcpScanRx, TcpSender};
 
-const TRANSPORT_CHANNEL_BUFFER_SIZE: usize = 1024 * 1024;
 const PORT_REUSE_WARNING_THRESHOLD: usize = 32_767;
 const CONCURRENT_SCAN_BATCH_SIZE: usize = 30_000;
-const BASE_PORT_OFFSET: u16 = 10_000;
 const TCP_WINDOW_SIZE: u16 = 65_535;
 const TCP_PACKET_BUFFER_SIZE: usize = 256;
-const SOURCE_DISCOVERY_PORT: u16 = 9;
 const SCAN_DELAY: Duration = Duration::from_micros(100);
 
 /// Shared behavior for TCP scan variants such as SYN, FIN, NULL, XMAS, and ACK.
@@ -279,9 +277,10 @@ async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
     runtime: TrafficRuntimeConfig,
     scan_strategy: S,
 ) -> Result<()> {
-    let address = resolve_target(target)?;
-    let source_override = resolve_source_override(interface, source_ip, address.ip())?;
-    let port_list = parse_ports(ports)?;
+    let resolved = resolve_port_scan(target, ports, interface, source_ip)?;
+    let address = resolved.address;
+    let source_override = resolved.source_override;
+    let port_list = resolved.ports;
 
     if port_list.len() > PORT_REUSE_WARNING_THRESHOLD {
         log::warn!(
@@ -310,12 +309,11 @@ async fn run_tcp_scan<S: TcpScanStrategy + 'static>(
         scan_strategy,
     };
 
-    let results = task::spawn_blocking(move || perform_tcp_scan(scan_config))
-        .await
-        .context(operation_failed(
-            "join TCP scan task",
-            "spawn_blocking returned JoinError",
-        ))??;
+    let results = join_blocking_scan(
+        task::spawn_blocking(move || perform_tcp_scan(scan_config)),
+        "join TCP scan task",
+    )
+    .await?;
 
     report_results(report_name, &address.ip(), &results);
     Ok(())
@@ -375,7 +373,7 @@ where
     RX: TcpScanRx + ?Sized,
 {
     let config = ConcurrentScanConfig {
-        batch_size: config.batch_size.clamp(1, CONCURRENT_SCAN_BATCH_SIZE),
+        batch_size: clamp_batch_size(config.batch_size, CONCURRENT_SCAN_BATCH_SIZE),
         ..config
     };
     let destination = config.destination;
@@ -482,7 +480,7 @@ fn scan_tcp_v4_with_controls<S: TcpScanStrategy>(
             timeout,
             batch_size,
             send_delay,
-            base_port_offset: BASE_PORT_OFFSET,
+            base_port_offset: SOURCE_PORT_OFFSET,
             base_port_override: None,
             initial_port_state: scan_strategy.timeout_state(),
         },
@@ -551,7 +549,7 @@ fn scan_tcp_v6_with_controls<S: TcpScanStrategy>(
             timeout,
             batch_size,
             send_delay,
-            base_port_offset: BASE_PORT_OFFSET,
+            base_port_offset: SOURCE_PORT_OFFSET,
             base_port_override: None,
             initial_port_state: scan_strategy.timeout_state(),
         },

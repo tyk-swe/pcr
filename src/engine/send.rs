@@ -28,7 +28,6 @@ pub struct SendUseCase {
 
 #[derive(Debug, Clone)]
 pub struct PreparedPacketSend {
-    pub spec: Arc<PacketSpec>,
     pub plan: TransmissionPlan,
 }
 
@@ -72,7 +71,7 @@ impl SendUseCase {
         if self.dry_run {
             let plan = self.plan_dry_run(Arc::clone(&spec)).await?;
             self.authorize_transmission_plan(spec.as_ref(), &plan)?;
-            return Ok(PreparedPacketSend { spec, plan });
+            return Ok(PreparedPacketSend { plan });
         }
 
         self.authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
@@ -83,7 +82,7 @@ impl SendUseCase {
 
         let plan = self.plan_live(Arc::clone(&spec)).await?;
         self.authorize_transmission_plan(spec.as_ref(), &plan)?;
-        Ok(PreparedPacketSend { spec, plan })
+        Ok(PreparedPacketSend { plan })
     }
 
     pub async fn resolve_spec(&self, request: PacketRequest) -> Result<Arc<PacketSpec>> {
@@ -109,14 +108,6 @@ impl SendUseCase {
         resolve_packet_request(request, Arc::clone(&self.dependencies.target_resolver))
             .await
             .map_err(|source| EngineError::PacketSpecBuild(source).into())
-    }
-
-    pub async fn plan(&self, spec: Arc<PacketSpec>) -> Result<TransmissionPlan> {
-        if self.dry_run {
-            self.plan_dry_run(spec).await
-        } else {
-            self.plan_live(spec).await
-        }
     }
 
     pub async fn plan_dry_run(&self, spec: Arc<PacketSpec>) -> Result<TransmissionPlan> {

@@ -51,6 +51,59 @@ fn fuzz_dry_run_authorizes_policy_adjusted_batch_and_rate() {
     );
 }
 
+#[cfg(feature = "scan")]
+#[test]
+fn scan_port_variants_support_dry_run() {
+    for variant in [
+        "tcp-syn",
+        "tcp-fin",
+        "tcp-null",
+        "tcp-xmas",
+        "tcp-ack",
+        "udp",
+        "sctp-init",
+    ] {
+        let output = packetcraftr([
+            "--dry-run",
+            "scan",
+            variant,
+            "--target",
+            "127.0.0.1",
+            "--ports",
+            "80",
+        ]);
+
+        assert_success(&output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("mode=scan"),
+            "expected {variant} dry-run output to include a scan plan, got:\n{stdout}"
+        );
+    }
+}
+
+#[cfg(feature = "traceroute")]
+#[test]
+fn traceroute_protocols_support_dry_run() {
+    for protocol in ["udp", "tcp", "icmp"] {
+        let output = packetcraftr([
+            "--dry-run",
+            "traceroute",
+            "--dest",
+            "127.0.0.1",
+            "--protocol",
+            protocol,
+        ]);
+
+        assert_success(&output);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("mode=traceroute"),
+            "expected {protocol} dry-run output to include a traceroute plan, got:\n{stdout}"
+        );
+    }
+}
+
 fn packetcraftr<const N: usize>(args: [&str; N]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
         .args(args)

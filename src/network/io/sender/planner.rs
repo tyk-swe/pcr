@@ -8,10 +8,11 @@ use pnet::packet::ethernet::EthernetPacket;
 use pnet::packet::ipv4::Ipv4Packet;
 use pnet::packet::ipv6::Ipv6Packet;
 
+use crate::domain::policy::TransmissionPolicy;
 use crate::domain::spec::{DestinationSpec, PacketSpec, TargetAddress};
 
 use super::builder::{Ipv4PacketBuilder, Ipv6PacketBuilder, PacketBuildResult, PacketBuilder};
-use super::control::{validate_transmission_policy, TransmissionPolicy};
+use super::control::validate_transmission_policy;
 use super::error::{PlannerError, Result};
 use super::interface::{resolve_ip_addresses_with_selection, select_interface_with_reason};
 use super::ipv6;

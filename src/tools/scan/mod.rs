@@ -9,6 +9,8 @@ mod sctp;
 mod tcp;
 mod udp;
 
+use std::net::IpAddr;
+
 use anyhow::Result;
 use log::info;
 
@@ -19,10 +21,10 @@ pub use sctp::run_sctp_init;
 pub use tcp::{run_tcp_ack, run_tcp_fin, run_tcp_null, run_tcp_syn, run_tcp_xmas};
 pub use udp::run_udp;
 
-use crate::domain::command::{PortScanRequest, ScanRequest};
+use crate::domain::command::{PortScanRequest, ScanRequest, TimedScanRequest};
 use crate::domain::policy::TrafficPolicy;
 use crate::domain::policy::{
-    classify_ip, combine_target_scopes, TrafficMode, TrafficPlan, TrafficPrivilege,
+    classify_ip, combine_target_scopes, TargetScope, TrafficMode, TrafficPlan, TrafficPrivilege,
 };
 use crate::tools::TrafficRuntimeConfig;
 
@@ -70,78 +72,45 @@ pub fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<PreparedS
                 (ScanRequest::Udp(request), scope, 1, ports, packets)
             }
             ScanRequest::Icmp(request) => {
-                let targets = icmp::parse_icmp_targets(&request.target)?;
-                for target in &targets {
-                    common::validate_source_override(
-                        &request.interface,
-                        &request.source_ip,
-                        target.ip(),
-                    )?;
-                }
-                let scope =
-                    combine_target_scopes(targets.iter().map(|target| classify_ip(target.ip())));
-                let mut prepared = request.clone();
-                if targets.len() == 1 {
-                    prepared.target = targets[0].ip().to_string();
-                }
+                let targets = icmp::parse_icmp_targets(&request.target)?
+                    .into_iter()
+                    .map(|target| target.ip())
+                    .collect();
+                let prepared = prepare_timed_target_scan(request, targets)?;
                 (
-                    ScanRequest::Icmp(prepared),
-                    scope,
-                    targets.len(),
+                    ScanRequest::Icmp(prepared.request),
+                    prepared.target_scope,
+                    prepared.target_count,
                     1,
-                    Some(targets.len() as u64),
+                    prepared.estimated_packets,
                 )
             }
             ScanRequest::Arp(request) => {
-                let targets = arp::parse_arp_targets(&request.target)?;
-                for target in &targets {
-                    common::validate_source_override(
-                        &request.interface,
-                        &request.source_ip,
-                        std::net::IpAddr::V4(*target),
-                    )?;
-                }
-                let scope = combine_target_scopes(
-                    targets
-                        .iter()
-                        .map(|target| classify_ip(std::net::IpAddr::V4(*target))),
-                );
-                let mut prepared = request.clone();
-                if targets.len() == 1 {
-                    prepared.target = targets[0].to_string();
-                }
+                let targets = arp::parse_arp_targets(&request.target)?
+                    .into_iter()
+                    .map(IpAddr::V4)
+                    .collect();
+                let prepared = prepare_timed_target_scan(request, targets)?;
                 (
-                    ScanRequest::Arp(prepared),
-                    scope,
-                    targets.len(),
+                    ScanRequest::Arp(prepared.request),
+                    prepared.target_scope,
+                    prepared.target_count,
                     1,
-                    Some(targets.len() as u64),
+                    prepared.estimated_packets,
                 )
             }
             ScanRequest::Ndp(request) => {
-                let targets = ndp::normalize_targets(ndp::parse_ndp_targets(&request.target)?)?;
-                for target in &targets {
-                    common::validate_source_override(
-                        &request.interface,
-                        &request.source_ip,
-                        std::net::IpAddr::V6(*target),
-                    )?;
-                }
-                let scope = combine_target_scopes(
-                    targets
-                        .iter()
-                        .map(|target| classify_ip(std::net::IpAddr::V6(*target))),
-                );
-                let mut prepared = request.clone();
-                if targets.len() == 1 {
-                    prepared.target = targets[0].to_string();
-                }
+                let targets = ndp::normalize_targets(ndp::parse_ndp_targets(&request.target)?)?
+                    .into_iter()
+                    .map(IpAddr::V6)
+                    .collect();
+                let prepared = prepare_timed_target_scan(request, targets)?;
                 (
-                    ScanRequest::Ndp(prepared),
-                    scope,
-                    targets.len(),
+                    ScanRequest::Ndp(prepared.request),
+                    prepared.target_scope,
+                    prepared.target_count,
                     1,
-                    Some(targets.len() as u64),
+                    prepared.estimated_packets,
                 )
             }
         };
@@ -160,14 +129,40 @@ pub fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<PreparedS
     })
 }
 
+struct PreparedTimedTargetScan {
+    request: TimedScanRequest,
+    target_scope: TargetScope,
+    target_count: usize,
+    estimated_packets: Option<u64>,
+}
+
+fn prepare_timed_target_scan(
+    request: &TimedScanRequest,
+    targets: Vec<IpAddr>,
+) -> Result<PreparedTimedTargetScan> {
+    for target in &targets {
+        common::validate_source_override(&request.interface, &request.source_ip, *target)?;
+    }
+
+    let target_scope = combine_target_scopes(targets.iter().copied().map(classify_ip));
+    let target_count = targets.len();
+    let mut prepared = request.clone();
+
+    if let [target] = targets.as_slice() {
+        prepared.target = target.to_string();
+    }
+
+    Ok(PreparedTimedTargetScan {
+        request: prepared,
+        target_scope,
+        target_count,
+        estimated_packets: Some(target_count as u64),
+    })
+}
+
 fn prepare_port_scan(
     request: &PortScanRequest,
-) -> Result<(
-    PortScanRequest,
-    crate::domain::policy::TargetScope,
-    usize,
-    Option<u64>,
-)> {
+) -> Result<(PortScanRequest, TargetScope, usize, Option<u64>)> {
     let address = common::resolve_target(&request.target)?;
     common::validate_source_override(&request.interface, &request.source_ip, address.ip())?;
     let ports = common::parse_ports(&request.ports)?;

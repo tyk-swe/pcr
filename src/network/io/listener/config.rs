@@ -12,8 +12,6 @@ use crate::domain::spec::ListenerSpec;
 
 use super::error::ListenerError;
 
-pub use crate::domain::listener_config::{DEFAULT_QUEUE_CAPACITY, MAX_QUEUE_CAPACITY};
-
 #[derive(Clone, Debug)]
 pub struct ListenerRuntimeConfig {
     pub filter: Option<String>,

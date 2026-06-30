@@ -1,8 +1,22 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::cli::{self, PacketcraftArgs, PacketcraftCommand};
-use crate::domain::command::EngineCommand;
+use crate::cli::commands::PacketcraftCommand;
+use crate::cli::enums::OutputFormat as CliOutputFormat;
+use crate::cli::PacketcraftArgs;
+#[cfg(feature = "daemon")]
+use crate::domain::command::DaemonRequest;
+#[cfg(feature = "fuzz")]
+use crate::domain::command::FuzzRequest;
+#[cfg(feature = "repl")]
+use crate::domain::command::InteractiveRequest;
+#[cfg(feature = "pcap")]
+use crate::domain::command::ListenRequest;
+#[cfg(feature = "scan")]
+use crate::domain::command::ScanRequest;
+#[cfg(feature = "traceroute")]
+use crate::domain::command::TracerouteRequest;
+use crate::domain::command::{DnsRequest, EngineCommand};
 use crate::domain::policy::{TrafficBudget, TrafficPolicy};
 use crate::domain::request::PacketRequest;
 use crate::engine::config::EngineConfig;
@@ -65,32 +79,38 @@ impl PacketcraftArgs {
             }
             #[cfg(feature = "repl")]
             PacketcraftCommand::Interactive(options) => {
-                EngineCommand::Interactive(options.to_request())
+                EngineCommand::Interactive(InteractiveRequest::from(options))
             }
             #[cfg(feature = "daemon")]
-            PacketcraftCommand::Daemon(options) => EngineCommand::Daemon(options.to_request()),
+            PacketcraftCommand::Daemon(options) => {
+                EngineCommand::Daemon(DaemonRequest::from(options))
+            }
             #[cfg(feature = "pcap")]
-            PacketcraftCommand::Listen(options) => EngineCommand::Listen(options.to_request()),
+            PacketcraftCommand::Listen(options) => {
+                EngineCommand::Listen(ListenRequest::from(options))
+            }
             #[cfg(feature = "traceroute")]
             PacketcraftCommand::Traceroute(options) => {
-                EngineCommand::Traceroute(options.to_request())
+                EngineCommand::Traceroute(TracerouteRequest::from(options))
             }
             #[cfg(feature = "scan")]
-            PacketcraftCommand::Scan(command) => EngineCommand::Scan(command.to_request()),
-            PacketcraftCommand::DnsQuery(options) => EngineCommand::DnsQuery(options.to_request()),
+            PacketcraftCommand::Scan(command) => EngineCommand::Scan(ScanRequest::from(command)),
+            PacketcraftCommand::DnsQuery(options) => {
+                EngineCommand::DnsQuery(DnsRequest::from(options))
+            }
             #[cfg(feature = "fuzz")]
-            PacketcraftCommand::Fuzz(options) => EngineCommand::Fuzz(options.to_request()),
+            PacketcraftCommand::Fuzz(options) => EngineCommand::Fuzz(FuzzRequest::from(options)),
         }
     }
 }
 
-impl From<cli::OutputFormat> for crate::output::OutputFormat {
-    fn from(format: cli::OutputFormat) -> Self {
+impl From<CliOutputFormat> for crate::output::OutputFormat {
+    fn from(format: CliOutputFormat) -> Self {
         match format {
-            cli::OutputFormat::Summary => Self::Summary,
-            cli::OutputFormat::Detailed => Self::Detailed,
-            cli::OutputFormat::Hex => Self::Hex,
-            cli::OutputFormat::Json => Self::Json,
+            CliOutputFormat::Summary => Self::Summary,
+            CliOutputFormat::Detailed => Self::Detailed,
+            CliOutputFormat::Hex => Self::Hex,
+            CliOutputFormat::Json => Self::Json,
         }
     }
 }

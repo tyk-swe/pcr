@@ -4,7 +4,9 @@
 pub mod io;
 pub mod protocols;
 
-pub use io::{interface, listener, pnet_utils, sender};
+#[cfg(any(feature = "scan", feature = "traceroute"))]
+pub use io::pnet_utils;
+pub use io::{interface, sender};
 #[cfg(any(feature = "pcap", feature = "scan", feature = "traceroute"))]
 pub use protocols::protocol_validation;
 pub use protocols::{arp, checksum, dns, ndp};

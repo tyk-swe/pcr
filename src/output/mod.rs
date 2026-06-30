@@ -5,10 +5,8 @@ mod controller;
 mod dns;
 mod format;
 mod report;
-pub use crate::domain::event::{ListenerEvent, ProtocolLabel};
 pub use controller::OutputController;
 pub use dns::{
     format_dns_dry_run, format_dns_dry_run_json, format_dns_message, format_dns_message_json,
 };
 pub use format::OutputFormat;
-pub use report::PreflightReport;

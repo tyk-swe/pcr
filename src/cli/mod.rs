@@ -9,26 +9,6 @@ pub(crate) mod repl;
 mod request;
 pub mod validators;
 
-#[cfg(feature = "daemon")]
-pub use commands::DaemonOptions;
-#[cfg(feature = "fuzz")]
-pub use commands::FuzzOptions;
-#[cfg(feature = "repl")]
-pub use commands::InteractiveOptions;
-#[cfg(feature = "pcap")]
-pub use commands::ListenCommandOptions;
-pub use commands::{DnsQueryOptions, PacketcraftCommand};
-#[cfg(feature = "scan")]
-pub use commands::{PortScanOptions, ScanCommand, TimedScanOptions};
-#[cfg(feature = "traceroute")]
-pub use commands::{TracerouteOptions, TracerouteProtocol};
-pub use enums::{FragmentProfile, Icmpv6ErrorCode, Icmpv6ErrorKind, LogLevel, OutputFormat};
-pub use options::{
-    IcmpOptions, Icmpv6Options, IpOptions, Layer2Options, ListenOptions, LoggingOptions,
-    OneShotOptions, PayloadOptions, RuleOptions, SafetyOptions, SendOptions, TcpOptions,
-    TransmitOptions, TransportCommand, TransportOptions, UdpOptions, VlanOptions,
-};
-
 use clap::Parser;
 
 /// Top-level CLI arguments for PacketcraftR.
@@ -60,7 +40,7 @@ pub struct PacketcraftArgs {
     pub verbose: u8,
     /// Set the output format for display and logging.
     #[arg(long, value_enum)]
-    pub output_format: Option<OutputFormat>,
+    pub output_format: Option<enums::OutputFormat>,
     /// Preview what would be sent without transmitting any packets.
     #[arg(
         long,
@@ -69,23 +49,22 @@ pub struct PacketcraftArgs {
     )]
     pub dry_run: bool,
     #[command(flatten, next_help_heading = "Safety")]
-    pub safety: SafetyOptions,
+    pub safety: options::SafetyOptions,
     /// Select an operation mode.
     #[command(subcommand)]
-    pub command: PacketcraftCommand,
+    pub command: commands::PacketcraftCommand,
 }
 
 impl PacketcraftArgs {
-    pub fn one_shot_options(&self) -> Option<&OneShotOptions> {
+    pub fn one_shot_options(&self) -> Option<&options::OneShotOptions> {
         match &self.command {
-            PacketcraftCommand::Send(options) | PacketcraftCommand::DryRun(options) => {
-                Some(&options.oneshot)
-            }
+            commands::PacketcraftCommand::Send(options)
+            | commands::PacketcraftCommand::DryRun(options) => Some(&options.oneshot),
             _ => None,
         }
     }
 
     pub fn effective_dry_run(&self) -> bool {
-        self.dry_run || matches!(&self.command, PacketcraftCommand::DryRun(_))
+        self.dry_run || matches!(&self.command, commands::PacketcraftCommand::DryRun(_))
     }
 }

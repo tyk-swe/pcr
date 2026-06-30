@@ -8,7 +8,7 @@ use anyhow::Result;
 
 use crate::domain::policy::{classify_ip, TrafficMode, TrafficPlan, TrafficPrivilege};
 
-pub use config::{FuzzConfig, FuzzProtocol, FuzzStrategy};
+pub use config::FuzzConfig;
 pub use engine::run_fuzz;
 
 pub fn traffic_plan(config: &FuzzConfig) -> Result<TrafficPlan> {

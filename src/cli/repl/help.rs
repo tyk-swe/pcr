@@ -3,7 +3,8 @@
 
 use clap::{Args, Subcommand};
 
-use crate::cli::{ListenCommandOptions, OneShotOptions, ScanCommand, TracerouteOptions};
+use crate::cli::commands::{ListenCommandOptions, ScanCommand, TracerouteOptions};
+use crate::cli::options::OneShotOptions;
 
 pub(super) fn print_help() {
     println!("\nAvailable Commands:");

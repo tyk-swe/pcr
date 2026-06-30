@@ -128,17 +128,19 @@ async fn handle_send(
 async fn handle_listen(args: &[String], engine: &mut impl ReplEngine) -> Result<()> {
     let mut options = parse_listen(args)?;
     options.listen.listen = Some(true);
-    engine.run_listener(options.to_request()).await
+    engine.run_listener(ListenRequest::from(&options)).await
 }
 
 async fn handle_scan(args: &[String], engine: &mut impl ReplEngine) -> Result<()> {
     let command = parse_scan(args)?;
-    engine.run_scan(command.to_request()).await
+    engine.run_scan(ScanRequest::from(&command)).await
 }
 
 async fn handle_traceroute(args: &[String], engine: &mut impl ReplEngine) -> Result<()> {
     let options = parse_traceroute(args)?;
-    engine.run_traceroute(options.to_request()).await
+    engine
+        .run_traceroute(TracerouteRequest::from(&options))
+        .await
 }
 
 // ─── Entry Point ───────────────────────────────────────────────

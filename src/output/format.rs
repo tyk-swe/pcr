@@ -1,9 +1,9 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::ListenerEvent;
-
 use serde::{Deserialize, Serialize};
+
+use crate::domain::event::ListenerEvent;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

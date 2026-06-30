@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -12,6 +13,11 @@ use crate::cli::PacketcraftArgs;
 use crate::domain::command::EngineCommand;
 use crate::{engine, util};
 
+mod adapters;
+mod cli_mapping;
+#[cfg(feature = "repl")]
+mod repl_engine;
+
 pub fn run_cli() -> Result<()> {
     let args = PacketcraftArgs::parse();
     let app = PacketcraftApp::bootstrap(args)?;
@@ -19,7 +25,7 @@ pub fn run_cli() -> Result<()> {
 }
 
 /// Coordinates application bootstrapping and command dispatch.
-pub struct PacketcraftApp {
+struct PacketcraftApp {
     args: PacketcraftArgs,
     command: EngineCommand,
     runtime: Runtime,
@@ -30,7 +36,7 @@ pub struct PacketcraftApp {
 
 impl PacketcraftApp {
     /// Build the application with its runtime, engine, and telemetry wiring in place.
-    pub fn bootstrap(args: PacketcraftArgs) -> Result<Self> {
+    fn bootstrap(args: PacketcraftArgs) -> Result<Self> {
         Self::init_logging(&args)?;
 
         let config = args.engine_config();
@@ -46,8 +52,12 @@ impl PacketcraftApp {
         Self::maybe_daemonize(&args)?;
 
         let runtime = Self::build_runtime()?;
-        let engine =
-            engine::core::Engine::new_with_runtime_handle(config, runtime.handle().clone())?;
+        let dependencies = Self::build_engine_dependencies(args.output_format);
+        let engine = engine::core::Engine::new_with_runtime_handle(
+            config,
+            dependencies,
+            runtime.handle().clone(),
+        )?;
 
         #[cfg(feature = "daemon")]
         let mut engine = engine;
@@ -84,7 +94,7 @@ impl PacketcraftApp {
     }
 
     /// Execute the command requested by the CLI arguments.
-    pub fn run(self) -> Result<()> {
+    fn run(self) -> Result<()> {
         let _args = self.args;
         let command = self.command;
         let mut engine = self.engine;
@@ -157,16 +167,6 @@ impl PacketcraftApp {
         Ok(None)
     }
 
-    /// Access the derived engine configuration for testing or telemetry wiring.
-    pub fn config(&self) -> &engine::config::EngineConfig {
-        self.engine.config()
-    }
-
-    /// Whether the configured engine has any receive rules loaded.
-    pub fn has_receive_rules(&self) -> bool {
-        self.engine.has_receive_rules()
-    }
-
     fn init_logging(args: &PacketcraftArgs) -> Result<()> {
         let logging = args.one_shot_options().map(|options| &options.logging);
         let level_override = logging
@@ -236,5 +236,30 @@ impl PacketcraftApp {
             .enable_all()
             .build()
             .context("initialise tokio runtime failed: builder construction error")
+    }
+
+    fn build_engine_dependencies(
+        output_format: Option<crate::cli::OutputFormat>,
+    ) -> engine::ports::EngineDependencies {
+        engine::ports::EngineDependencies {
+            target_resolver: Arc::new(adapters::util::SystemTargetResolverAdapter),
+            privilege_checker: Arc::new(adapters::util::RawSocketPrivilegeChecker),
+            packet_planner: Arc::new(adapters::network::NetworkPacketPlanner),
+            packet_transmitter: Arc::new(adapters::network::NetworkPacketTransmitter),
+            listener_runner: Arc::new(adapters::network::NetworkListenerRunner),
+            #[cfg(feature = "daemon")]
+            daemon_listener_runtime: Arc::new(adapters::network::NetworkListenerRunner),
+            dns_client: Arc::new(adapters::tools::ToolsDnsClient),
+            #[cfg(feature = "traceroute")]
+            traceroute_runner: Arc::new(adapters::tools::ToolsTracerouteRunner),
+            #[cfg(feature = "scan")]
+            scan_runner: Arc::new(adapters::tools::ToolsScanRunner),
+            #[cfg(feature = "fuzz")]
+            fuzz_runner: Arc::new(adapters::tools::ToolsFuzzRunner),
+            output: Arc::new(adapters::output::OutputEventSink::new(
+                output_format.map(crate::output::OutputFormat::from),
+            )),
+            rule_action_telemetry: Arc::new(adapters::telemetry::UtilRuleActionTelemetry),
+        }
     }
 }

@@ -86,15 +86,6 @@ fn traceroute_selection(
     }
 }
 
-pub fn traffic_plan(opts: &TracerouteRequest, policy: TrafficPolicy) -> Result<TrafficPlan> {
-    Ok(prepare(opts, policy)?.traffic_plan)
-}
-
-pub async fn run(opts: &TracerouteRequest, policy: TrafficPolicy) -> Result<()> {
-    let prepared = prepare(opts, policy)?;
-    run_prepared(opts, prepared).await
-}
-
 pub async fn run_prepared(opts: &TracerouteRequest, prepared: PreparedTraceroute) -> Result<()> {
     tokio::task::spawn_blocking({
         let opts = opts.clone();

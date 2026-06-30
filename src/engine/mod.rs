@@ -7,8 +7,6 @@ pub mod core;
 pub mod daemon;
 pub mod error;
 pub mod oneshot;
-#[doc(hidden)]
-pub mod preflight;
-pub mod resolve;
+pub mod ports;
 pub(crate) mod rule_send;
 pub mod send;

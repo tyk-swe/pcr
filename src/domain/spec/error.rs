@@ -4,9 +4,9 @@
 use std::net::{IpAddr, Ipv6Addr};
 use std::num::ParseIntError;
 
-use pnet::util::ParseMacAddrErr;
 use thiserror::Error;
 
+use crate::domain::net::MacAddressParseError;
 use crate::domain::request::Icmpv6ErrorCode;
 
 pub type SpecResult<T> = std::result::Result<T, SpecError>;
@@ -92,7 +92,7 @@ pub enum SpecError {
     MacAddressParse {
         value: String,
         #[source]
-        source: ParseMacAddrErr,
+        source: MacAddressParseError,
     },
     #[error("parse EtherType failed: value='{value}'")]
     EtherTypeParse {

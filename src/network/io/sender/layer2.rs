@@ -11,6 +11,7 @@ use pnet::packet::ethernet::{EtherType, EtherTypes, MutableEthernetPacket};
 use pnet::packet::vlan::{ClassOfService, MutableVlanPacket};
 use pnet::packet::MutablePacket;
 
+use crate::domain::net::MacAddress;
 use crate::domain::spec::{PacketSpec, VlanTag};
 use crate::network::sender::error::{Layer2Error, Result};
 use crate::network::{arp, ndp};
@@ -38,7 +39,7 @@ pub(crate) fn resolve_layer2_ipv4(
     mode: super::types::PlanningMode,
 ) -> Result<Option<Layer2Resolved>> {
     let destination = match spec.layer2.destination {
-        Some(mac) => Some(mac),
+        Some(mac) => Some(to_pnet_mac(mac)),
         None => {
             if mode == super::types::PlanningMode::DryRun {
                 None
@@ -75,7 +76,7 @@ pub(crate) fn resolve_layer2_ipv4(
     };
 
     let source = if let Some(mac) = spec.layer2.source {
-        mac
+        to_pnet_mac(mac)
     } else if let Some(mac) = interface.mac {
         mac
     } else {
@@ -138,7 +139,7 @@ pub(crate) fn resolve_layer2_ipv6(
             }
         }
     } else {
-        spec.layer2.destination
+        spec.layer2.destination.map(to_pnet_mac)
     };
 
     let destination = match destination {
@@ -147,7 +148,7 @@ pub(crate) fn resolve_layer2_ipv6(
     };
 
     let source = if let Some(mac) = spec.layer2.source {
-        mac
+        to_pnet_mac(mac)
     } else if let Some(mac) = interface.mac {
         mac
     } else {
@@ -169,6 +170,11 @@ pub(crate) fn resolve_layer2_ipv6(
         ethertype,
         vlan: spec.layer2.vlan,
     }))
+}
+
+fn to_pnet_mac(mac: MacAddress) -> MacAddr {
+    let [a, b, c, d, e, f] = mac.octets();
+    MacAddr::new(a, b, c, d, e, f)
 }
 
 pub(crate) fn wrap_link_layer(

@@ -4,16 +4,15 @@
 use std::str::FromStr;
 
 use super::error::{SpecError, SpecResult};
-use pnet::packet::ethernet::EtherTypes;
-use pnet::util::MacAddr;
 use serde::{Deserialize, Serialize};
 
+use crate::domain::net::{EtherType, MacAddress};
 use crate::domain::request::{Layer2Request, VlanRequest};
 
 #[derive(Debug, Clone, Default)]
 pub struct Layer2Spec {
-    pub source: Option<MacAddr>,
-    pub destination: Option<MacAddr>,
+    pub source: Option<MacAddress>,
+    pub destination: Option<MacAddress>,
     pub ethertype: Option<u16>,
     pub vlan: Option<VlanTag>,
 }
@@ -71,11 +70,11 @@ pub(crate) fn parse_vlan_tag(request: &VlanRequest) -> SpecResult<Option<VlanTag
     }))
 }
 
-pub(crate) fn parse_mac_option(value: Option<&str>) -> SpecResult<Option<MacAddr>> {
+pub(crate) fn parse_mac_option(value: Option<&str>) -> SpecResult<Option<MacAddress>> {
     match value {
         Some(raw) => {
             let trimmed = raw.trim();
-            Ok(Some(MacAddr::from_str(trimmed).map_err(|source| {
+            Ok(Some(MacAddress::from_str(trimmed).map_err(|source| {
                 SpecError::MacAddressParse {
                     value: raw.to_string(),
                     source,
@@ -93,12 +92,12 @@ pub(crate) fn parse_ethertype_option(value: Option<&str>) -> SpecResult<Option<u
 pub(crate) fn parse_ethertype(value: &str) -> SpecResult<u16> {
     let lower = value.trim().to_ascii_lowercase();
     let ethertype = match lower.as_str() {
-        "ipv4" => EtherTypes::Ipv4.0,
-        "ipv6" => EtherTypes::Ipv6.0,
-        "arp" => EtherTypes::Arp.0,
-        "vlan" => EtherTypes::Vlan.0,
-        "pppoe" => EtherTypes::PppoeDiscovery.0,
-        "pppoe-session" => EtherTypes::PppoeSession.0,
+        "ipv4" => EtherType::IPV4.0,
+        "ipv6" => EtherType::IPV6.0,
+        "arp" => EtherType::ARP.0,
+        "vlan" => EtherType::VLAN.0,
+        "pppoe" => EtherType::PPPOE_DISCOVERY.0,
+        "pppoe-session" => EtherType::PPPOE_SESSION.0,
         other => {
             if let Some(hex) = other.strip_prefix("0x") {
                 u16::from_str_radix(hex, 16).map_err(|source| SpecError::EtherTypeParse {

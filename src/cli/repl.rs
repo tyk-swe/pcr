@@ -10,8 +10,6 @@ use rustyline::{Config, Editor};
 
 use crate::domain::command::{InteractiveRequest, ListenRequest, ScanRequest, TracerouteRequest};
 use crate::domain::request::PacketRequest;
-use crate::engine::core::Engine;
-use crate::util::error::operation_failed;
 
 mod command;
 mod completion;
@@ -27,6 +25,10 @@ use help::{print_command_help, print_help};
 use history::{history_path, print_history, recall_from_history, should_record_command};
 
 const MAX_HISTORY_ENTRIES: usize = 500;
+
+fn operation_failed(operation: &str, details: impl std::fmt::Display) -> String {
+    format!("{operation} failed: {details}")
+}
 
 pub trait ReplEngine {
     fn rule_count(&self) -> usize;
@@ -47,44 +49,6 @@ pub trait ReplEngine {
         &'a mut self,
         request: TracerouteRequest,
     ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>>;
-}
-
-impl ReplEngine for Engine {
-    fn rule_count(&self) -> usize {
-        Engine::rule_count(self)
-    }
-
-    fn has_receive_rules(&self) -> bool {
-        Engine::has_receive_rules(self)
-    }
-
-    fn run_one_shot<'a>(
-        &'a mut self,
-        request: PacketRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(Engine::run_one_shot(self, request))
-    }
-
-    fn run_listener<'a>(
-        &'a mut self,
-        request: ListenRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Engine::run_listener(self, &request).await })
-    }
-
-    fn run_scan<'a>(
-        &'a mut self,
-        request: ScanRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Engine::run_scan(self, &request).await })
-    }
-
-    fn run_traceroute<'a>(
-        &'a mut self,
-        request: TracerouteRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(async move { Engine::run_traceroute(self, &request).await })
-    }
 }
 
 // ─── Execution ─────────────────────────────────────────────────

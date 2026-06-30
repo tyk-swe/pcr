@@ -6,11 +6,12 @@ use std::net::IpAddr;
 use std::time::SystemTime;
 
 use anyhow::Result;
-use pnet::datalink::MacAddr;
 
+use crate::domain::net::MacAddress;
 use crate::domain::policy::{PolicyOutcome, TrafficPlan};
 use crate::domain::report::PreflightView;
 use crate::domain::spec::{PacketSpec, PayloadSource};
+use crate::domain::transmission::TransmissionPlan;
 
 use super::format::{format_preview, render_listener_hex};
 use super::report::{preflight_report, PreflightReport};
@@ -40,6 +41,11 @@ impl OutputController {
             OutputFormat::Json => self.print_json_preview(&report)?,
         }
         Ok(())
+    }
+
+    pub fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> Result<()> {
+        let view = PreflightView::from_transmission_plan(plan)?;
+        self.emit_preflight_view_summary(spec, &view)
     }
 
     pub fn emit_listener_event(&self, event: &ListenerEvent) {
@@ -163,7 +169,7 @@ impl OutputController {
     fn print_listener_summary(&self, event: &ListenerEvent) {
         struct AddrDisplay<'a> {
             net: Option<&'a IpAddr>,
-            l2: Option<&'a MacAddr>,
+            l2: Option<&'a MacAddress>,
         }
 
         impl fmt::Display for AddrDisplay<'_> {

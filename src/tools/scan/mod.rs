@@ -160,10 +160,6 @@ pub fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<PreparedS
     })
 }
 
-pub fn traffic_plan(command: &ScanRequest, policy: TrafficPolicy) -> Result<TrafficPlan> {
-    Ok(prepare(command, policy)?.traffic_plan)
-}
-
 fn prepare_port_scan(
     request: &PortScanRequest,
 ) -> Result<(

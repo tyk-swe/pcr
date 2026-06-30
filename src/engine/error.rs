@@ -39,7 +39,7 @@ pub enum EngineError {
     TransmissionExecution(#[source] AnyhowError),
 
     #[error("listener operation failed: {0}")]
-    Listener(#[from] crate::network::io::listener::ListenerError),
+    Listener(#[source] AnyhowError),
 
     #[error("daemon operation failed: {0}")]
     Daemon(#[source] AnyhowError),

@@ -70,17 +70,6 @@ impl LogLevel {
     }
 }
 
-impl From<OutputFormat> for crate::output::OutputFormat {
-    fn from(format: OutputFormat) -> Self {
-        match format {
-            OutputFormat::Summary => Self::Summary,
-            OutputFormat::Detailed => Self::Detailed,
-            OutputFormat::Hex => Self::Hex,
-            OutputFormat::Json => Self::Json,
-        }
-    }
-}
-
 /// Common ICMPv6 error message families.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[clap(rename_all = "kebab-case")]

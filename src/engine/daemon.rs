@@ -19,8 +19,7 @@ use control::{cleanup_control_socket, preflight_control_socket, spawn_control_so
 use crate::domain::command::DaemonRequest;
 use crate::domain::request::ListenerRequest;
 use crate::engine::config::EngineConfig;
-use crate::network::listener;
-use crate::output::OutputController;
+use crate::engine::ports::{DaemonListenerRuntime, EngineOutput, ListenerEventHandler};
 use crate::rules::{RuleEngine, RuleLoadOptions, RuleLoadReport};
 
 const TIMER_TICK: Duration = Duration::from_secs(5);
@@ -84,7 +83,8 @@ pub async fn run(
     opts: &DaemonRequest,
     _config: &EngineConfig,
     rules: &mut RuleEngine,
-    output: &OutputController,
+    output: Arc<dyn EngineOutput>,
+    listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<()> {
     info!(
         "Daemon started (mode: {})",
@@ -136,8 +136,14 @@ pub async fn run(
 
     if rules.has_receive_triggers() {
         debug!("Auto-starting listener because receive rules are active");
-        if let Err(err) =
-            start_listener(&mut state, default_listener_options(), rules, output).await
+        if let Err(err) = start_listener(
+            &mut state,
+            default_listener_options(),
+            rules,
+            Arc::clone(&output),
+            Arc::clone(&listener_runtime),
+        )
+        .await
         {
             #[cfg(unix)]
             cleanup_control_socket(&mut control_socket).await;
@@ -162,7 +168,15 @@ pub async fn run(
                     break;
                 }
                 Some(command) = cmd_rx.recv() => {
-                    if handle_command(command, &mut state, rules, output).await? {
+                    if handle_command(
+                        command,
+                        &mut state,
+                        rules,
+                        Arc::clone(&output),
+                        Arc::clone(&listener_runtime),
+                    )
+                    .await?
+                    {
                         info!("Daemon received shutdown command via control socket");
                         break;
                     }
@@ -183,7 +197,15 @@ pub async fn run(
                 break;
             }
             Some(command) = cmd_rx.recv() => {
-                if handle_command(command, &mut state, rules, output).await? {
+                if handle_command(
+                    command,
+                    &mut state,
+                    rules,
+                    Arc::clone(&output),
+                    Arc::clone(&listener_runtime),
+                )
+                .await?
+                {
                     info!("Daemon received shutdown command via control socket");
                     break;
                 }
@@ -206,7 +228,7 @@ pub async fn run(
 
 struct ActiveListener {
     shutdown: Arc<AtomicBool>,
-    handle: tokio::task::JoinHandle<crate::network::listener::ListenerResult<()>>,
+    handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
 struct DaemonState {
@@ -248,11 +270,13 @@ async fn handle_command(
     command: DaemonCommand,
     state: &mut DaemonState,
     rules: &mut RuleEngine,
-    output: &OutputController,
+    output: Arc<dyn EngineOutput>,
+    listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<bool> {
     match command {
         DaemonCommand::LoadRules { path, respond_to } => {
-            let result = load_rules_from_command(&path, state, rules, output).await;
+            let result =
+                load_rules_from_command(&path, state, rules, output, listener_runtime).await;
             send_response(respond_to, result);
             Ok(false)
         }
@@ -262,7 +286,7 @@ async fn handle_command(
         } => {
             let mut opts = options;
             opts.listen = Some(true);
-            let outcome = start_listener(state, opts.clone(), rules, output)
+            let outcome = start_listener(state, opts.clone(), rules, output, listener_runtime)
                 .await
                 .map(|_| {
                     format!(
@@ -309,11 +333,12 @@ async fn load_rules_from_command(
     path: &str,
     state: &mut DaemonState,
     rules: &mut RuleEngine,
-    output: &OutputController,
+    output: Arc<dyn EngineOutput>,
+    listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> CommandResponse {
     let candidate = build_rule_reload_candidate(path, rules)?;
 
-    prepare_listener_for_rule_reload(state, &candidate.rules, output).await?;
+    prepare_listener_for_rule_reload(state, &candidate.rules, output, listener_runtime).await?;
     replace_rules_after_reload(rules, candidate.rules);
 
     Ok(format!("loaded {} rule(s)", candidate.loaded_count))
@@ -338,14 +363,15 @@ fn build_rule_reload_candidate(path: &str, rules: &RuleEngine) -> Result<RuleRel
 async fn prepare_listener_for_rule_reload(
     state: &mut DaemonState,
     candidate_rules: &RuleEngine,
-    output: &OutputController,
+    output: Arc<dyn EngineOutput>,
+    listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<()> {
     if candidate_rules.has_receive_triggers() {
         let options = state
             .listener_options
             .clone()
             .unwrap_or_else(default_listener_options);
-        return start_listener(state, options, candidate_rules, output)
+        return start_listener(state, options, candidate_rules, output, listener_runtime)
             .await
             .map_err(|err| {
                 warn!("failed to restart listener after rule reload: {err}");
@@ -371,31 +397,32 @@ async fn start_listener(
     state: &mut DaemonState,
     options: ListenerRequest,
     rules: &RuleEngine,
-    output: &OutputController,
+    output: Arc<dyn EngineOutput>,
+    listener_runtime: Arc<dyn DaemonListenerRuntime>,
 ) -> Result<()> {
-    start_listener_with_interface_hint(state, options, rules, output, None).await
+    start_listener_with_interface_hint(state, options, rules, output, listener_runtime, None).await
 }
 
 async fn start_listener_with_interface_hint(
     state: &mut DaemonState,
     mut options: ListenerRequest,
     rules: &RuleEngine,
-    output: &OutputController,
+    output: Arc<dyn EngineOutput>,
+    listener_runtime: Arc<dyn DaemonListenerRuntime>,
     interface_hint: Option<&str>,
 ) -> Result<()> {
     ensure_listener_feature_available()?;
-    listener::validate_options(&options).map_err(anyhow::Error::from)?;
+    listener_runtime.validate_options(&options)?;
     stop_listener(state).await?;
     let shutdown = Arc::new(AtomicBool::new(true));
     let (startup_tx, startup_rx) = oneshot::channel();
-    let handle = listener::spawn_background(
-        &options,
-        interface_hint,
+    let handle = listener_runtime.spawn_background(
+        options.clone(),
+        interface_hint.map(str::to_string),
         listener_event_handler(rules, output),
         shutdown.clone(),
         Some(startup_tx),
-    )
-    .map_err(anyhow::Error::from)?;
+    )?;
     match time::timeout(LISTENER_STARTUP_TIMEOUT, startup_rx).await {
         Ok(Ok(Ok(()))) => {}
         Ok(Ok(Err(message))) => {
@@ -419,10 +446,9 @@ async fn start_listener_with_interface_hint(
 
 fn listener_event_handler(
     rules: &RuleEngine,
-    output: &OutputController,
-) -> listener::ListenerEventHandler {
+    output: Arc<dyn EngineOutput>,
+) -> ListenerEventHandler {
     let rules = rules.clone();
-    let output = output.clone();
 
     Arc::new(move |event| {
         output.emit_listener_event(&event);
@@ -439,9 +465,7 @@ fn listener_event_handler(
 pub(crate) fn ensure_listener_feature_available() -> Result<()> {
     #[cfg(not(feature = "pcap"))]
     {
-        Err(anyhow::Error::new(
-            listener::ListenerError::ListenerRequiresPcap,
-        ))
+        Err(anyhow!("listener support requires the 'pcap' feature"))
     }
 
     #[cfg(feature = "pcap")]
@@ -496,18 +520,16 @@ async fn stop_listener(state: &mut DaemonState) -> Result<()> {
     Ok(())
 }
 
-async fn stop_joined_listener(
-    handle: tokio::task::JoinHandle<crate::network::listener::ListenerResult<()>>,
-) -> Result<()> {
+async fn stop_joined_listener(handle: tokio::task::JoinHandle<anyhow::Result<()>>) -> Result<()> {
     match handle.await {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(err)) => Err(anyhow::Error::from(err)),
+        Ok(Err(err)) => Err(err),
         Err(join_err) => Err(anyhow::Error::from(join_err)),
     }
 }
 
 async fn stop_unacknowledged_listener(
-    mut handle: tokio::task::JoinHandle<crate::network::listener::ListenerResult<()>>,
+    mut handle: tokio::task::JoinHandle<anyhow::Result<()>>,
 ) -> Result<()> {
     let missing_ack =
         || anyhow!("listener startup ended before the capture worker reported readiness");
@@ -516,7 +538,7 @@ async fn stop_unacknowledged_listener(
         result = &mut handle => {
             match result {
                 Ok(Ok(())) => Err(missing_ack()),
-                Ok(Err(err)) => Err(anyhow::Error::from(err)),
+                Ok(Err(err)) => Err(err),
                 Err(join_err) => Err(anyhow::Error::from(join_err)),
             }
         }

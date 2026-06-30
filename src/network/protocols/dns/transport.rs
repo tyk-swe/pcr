@@ -322,3 +322,47 @@ pub(super) fn decode_tcp_frame_length(length_prefix: [u8; 2]) -> Result<usize> {
     }
     Ok(response_len)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_tcp_frame_prefixes_query_with_big_endian_length() {
+        let frame = encode_tcp_frame(&[0xde, 0xad, 0xbe, 0xef]).unwrap();
+
+        assert_eq!(frame, [0, 4, 0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn encode_tcp_frame_rejects_empty_queries() {
+        let err = encode_tcp_frame(&[]).unwrap_err();
+
+        assert!(err.to_string().contains("cannot be empty"));
+    }
+
+    #[test]
+    fn encode_tcp_frame_rejects_queries_larger_than_u16() {
+        let query = vec![0u8; u16::MAX as usize + 1];
+        let err = encode_tcp_frame(&query).unwrap_err();
+
+        assert!(err.to_string().contains("too large"));
+        assert!(err.to_string().contains("exceeds 65535 byte frame limit"));
+    }
+
+    #[test]
+    fn decode_tcp_frame_length_accepts_nonzero_length() {
+        assert_eq!(decode_tcp_frame_length([0x12, 0x34]).unwrap(), 0x1234);
+        assert_eq!(
+            decode_tcp_frame_length(u16::MAX.to_be_bytes()).unwrap(),
+            u16::MAX as usize
+        );
+    }
+
+    #[test]
+    fn decode_tcp_frame_length_rejects_zero_length() {
+        let err = decode_tcp_frame_length([0, 0]).unwrap_err();
+
+        assert!(err.to_string().contains("cannot be zero"));
+    }
+}

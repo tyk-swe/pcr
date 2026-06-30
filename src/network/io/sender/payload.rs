@@ -246,3 +246,125 @@ fn decode_hex_payload(hex: &str) -> Result<Vec<u8>> {
 
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::network::sender::error::SenderError;
+    use std::fs;
+
+    #[test]
+    fn prepare_payload_decodes_hex_with_whitespace_and_case() {
+        let payload = prepare_payload(&PayloadSource::Hex("de AD\nbe ef".to_string())).unwrap();
+
+        assert_eq!(payload, [0xde, 0xad, 0xbe, 0xef]);
+    }
+
+    #[test]
+    fn prepare_payload_rejects_odd_length_hex() {
+        let err = prepare_payload(&PayloadSource::Hex("abc".to_string())).unwrap_err();
+
+        assert!(matches!(err, SenderError::Payload(PayloadError::HexLength)));
+    }
+
+    #[test]
+    fn prepare_payload_rejects_invalid_hex_byte() {
+        let err = prepare_payload(&PayloadSource::Hex("00xz".to_string())).unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Payload(PayloadError::InvalidHexByte { byte: b'x' })
+        ));
+    }
+
+    #[test]
+    fn prepare_payload_builds_http_request_with_defaults() {
+        let payload = prepare_payload(&PayloadSource::Http {
+            method: "get".to_string(),
+            path: "/health".to_string(),
+            host: Some("example.test".to_string()),
+        })
+        .unwrap();
+        let text = String::from_utf8(payload).unwrap();
+
+        assert!(text.starts_with("GET /health HTTP/1.1\r\n"));
+        assert!(text.contains("Host: example.test\r\n"));
+        assert!(text.contains("User-Agent: PacketcraftR\r\n"));
+        assert!(text.ends_with("\r\n\r\n"));
+    }
+
+    #[test]
+    fn prepare_payload_builds_tls_client_hello_containing_sni() {
+        let payload = prepare_payload(&PayloadSource::TlsClientHello {
+            server_name: "example.test".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(payload[0], 0x16);
+        assert!(payload
+            .windows("example.test".len())
+            .any(|window| window == b"example.test"));
+    }
+
+    #[test]
+    fn prepare_payload_rejects_blank_tls_sni() {
+        let err = prepare_payload(&PayloadSource::TlsClientHello {
+            server_name: "  ".to_string(),
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Payload(PayloadError::InvalidInput(message))
+                if message.contains("non-empty SNI")
+        ));
+    }
+
+    #[test]
+    fn prepare_payload_reads_file_source() {
+        let path = std::env::temp_dir().join(format!(
+            "packetcraftr-payload-test-{}-{}.bin",
+            std::process::id(),
+            "read"
+        ));
+        fs::write(&path, b"from-file").unwrap();
+
+        let payload = prepare_payload(&PayloadSource::File(path.clone())).unwrap();
+
+        assert_eq!(payload, b"from-file");
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn prepare_payload_rejects_oversized_random_payload_before_allocating() {
+        let err =
+            prepare_payload(&PayloadSource::Random((MAX_PAYLOAD_SIZE + 1) as usize)).unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Payload(PayloadError::PayloadTooLarge { size, limit })
+                if size == MAX_PAYLOAD_SIZE + 1 && limit == MAX_PAYLOAD_SIZE
+        ));
+    }
+
+    #[test]
+    fn prepare_payload_preserves_bytes_source() {
+        let payload = prepare_payload(&PayloadSource::Bytes(vec![1, 2, 3])).unwrap();
+
+        assert_eq!(payload, [1, 2, 3]);
+    }
+
+    #[test]
+    fn prepare_payload_builds_dns_query_bytes() {
+        let payload = prepare_payload(&PayloadSource::Dns {
+            query: "example.test".to_string(),
+            record_type: "AAAA".to_string(),
+        })
+        .unwrap();
+
+        assert!(payload.len() > 12);
+        assert!(payload
+            .windows("example".len())
+            .any(|window| window == b"example"));
+    }
+}

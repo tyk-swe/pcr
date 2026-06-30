@@ -243,3 +243,94 @@ pub(super) fn resolve_source_ipv4(destination: Ipv4Addr) -> Result<Ipv4Addr> {
 pub(super) fn resolve_source_ipv6(destination: Ipv6Addr) -> Result<Ipv6Addr> {
     discover_source_ipv6(destination, DEFAULT_PORT)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::command::TracerouteProtocol;
+    use std::collections::VecDeque;
+
+    struct MockExecutor {
+        results: VecDeque<ProbeResult>,
+        calls: Vec<(u8, u8)>,
+    }
+
+    impl MockExecutor {
+        fn new(results: impl IntoIterator<Item = ProbeResult>) -> Self {
+            Self {
+                results: results.into_iter().collect(),
+                calls: Vec::new(),
+            }
+        }
+    }
+
+    impl TracerouteExecutor for MockExecutor {
+        fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
+            self.calls.push((ttl, probe));
+            self.results
+                .pop_front()
+                .ok_or_else(|| anyhow::anyhow!("missing mock probe result"))
+        }
+    }
+
+    fn request(max_ttl: u8, probes: u8) -> TracerouteRequest {
+        TracerouteRequest {
+            destination: "127.0.0.1".to_string(),
+            max_ttl,
+            probes,
+            protocol: TracerouteProtocol::Udp,
+            no_dns: Some(true),
+            timeout: 250,
+        }
+    }
+
+    #[test]
+    fn request_timeout_uses_milliseconds() {
+        assert_eq!(request_timeout(&request(1, 1)), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn resolve_destination_with_reason_accepts_ip_literals_without_dns() {
+        let resolved = resolve_destination_with_reason("127.0.0.1").unwrap();
+
+        assert_eq!(resolved.address, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(resolved.reason, "target_literal");
+    }
+
+    #[test]
+    fn handle_probe_result_returns_true_for_destination() {
+        assert!(handle_probe_result(
+            ProbeResult::Destination(IpAddr::V4(Ipv4Addr::LOCALHOST), 10),
+            &request(1, 1),
+        )
+        .unwrap());
+        assert!(!handle_probe_result(ProbeResult::Timeout, &request(1, 1)).unwrap());
+    }
+
+    #[test]
+    fn run_traceroute_loop_stops_after_destination_response() {
+        let mut executor = MockExecutor::new([
+            ProbeResult::Timeout,
+            ProbeResult::Destination(IpAddr::V4(Ipv4Addr::LOCALHOST), 5),
+            ProbeResult::Timeout,
+        ]);
+
+        run_traceroute_loop_with_delay(&request(5, 3), &mut executor, None).unwrap();
+
+        assert_eq!(executor.calls, vec![(1, 0), (1, 1)]);
+    }
+
+    #[test]
+    fn run_traceroute_loop_runs_all_probes_when_destination_is_not_seen() {
+        let mut executor = MockExecutor::new([
+            ProbeResult::Timeout,
+            ProbeResult::Timeout,
+            ProbeResult::Hop(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 3),
+            ProbeResult::Timeout,
+        ]);
+
+        run_traceroute_loop_with_delay(&request(2, 2), &mut executor, None).unwrap();
+
+        assert_eq!(executor.calls, vec![(1, 0), (1, 1), (2, 0), (2, 1)]);
+    }
+}

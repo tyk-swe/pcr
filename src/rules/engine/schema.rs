@@ -400,3 +400,135 @@ pub(super) fn collect_unknown_rule_schema_fields(
 
     diagnostics
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    fn diagnostics_for(input: &str, severity: RuleDiagnosticSeverity) -> Vec<RuleDiagnostic> {
+        let value = yaml::from_str::<yaml::Value>(input).unwrap();
+        collect_unknown_rule_schema_fields(&value, severity)
+    }
+
+    fn paths(diagnostics: &[RuleDiagnostic]) -> BTreeSet<String> {
+        diagnostics
+            .iter()
+            .map(|diagnostic| diagnostic.path.clone())
+            .collect()
+    }
+
+    #[test]
+    fn collect_unknown_rule_schema_fields_ignores_non_sequence_documents() {
+        let value = yaml::from_str::<yaml::Value>("name: not-a-rule-list").unwrap();
+
+        assert!(
+            collect_unknown_rule_schema_fields(&value, RuleDiagnosticSeverity::Warning).is_empty()
+        );
+    }
+
+    #[test]
+    fn collect_unknown_rule_schema_fields_reports_nested_matcher_unknowns() {
+        let diagnostics = diagnostics_for(
+            r#"
+- name: nested-condition
+  condition:
+    description:
+      contains: TCP
+      extra_matcher: true
+      not:
+        equals: UDP
+        extra_nested: true
+  actions:
+    - type: log
+      message: hi
+"#,
+            RuleDiagnosticSeverity::Warning,
+        );
+
+        assert_eq!(
+            paths(&diagnostics),
+            BTreeSet::from([
+                "rules[0].condition.description.extra_matcher".to_string(),
+                "rules[0].condition.description.not.extra_nested".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn collect_unknown_rule_schema_fields_reports_deep_send_action_unknowns() {
+        let diagnostics = diagnostics_for(
+            r#"
+- name: send-unknowns
+  actions:
+    - type: send
+      unexpected_send: true
+      destination:
+        destination: 127.0.0.1
+        extra_destination: true
+      layer2:
+        vlan:
+          extra_vlan: true
+      transport:
+        extra_transport: true
+        command:
+          tcp:
+            flags: S
+            extra_tcp: true
+          udp:
+            extra_udp: true
+      payload:
+        data: hi
+        extra_payload: true
+"#,
+            RuleDiagnosticSeverity::Warning,
+        );
+
+        assert_eq!(
+            paths(&diagnostics),
+            BTreeSet::from([
+                "rules[0].actions[0].unexpected_send".to_string(),
+                "rules[0].actions[0].destination.extra_destination".to_string(),
+                "rules[0].actions[0].layer2.vlan.extra_vlan".to_string(),
+                "rules[0].actions[0].transport.extra_transport".to_string(),
+                "rules[0].actions[0].transport.command.tcp.extra_tcp".to_string(),
+                "rules[0].actions[0].transport.command.udp.extra_udp".to_string(),
+                "rules[0].actions[0].payload.extra_payload".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn collect_unknown_rule_schema_fields_reports_non_string_keys() {
+        let diagnostics = diagnostics_for(
+            r#"
+- name: non-string
+  1: numeric-key
+  actions:
+    - type: log
+      message: hi
+"#,
+            RuleDiagnosticSeverity::Warning,
+        );
+
+        assert_eq!(
+            paths(&diagnostics),
+            BTreeSet::from(["rules[0].<non_string_key>".to_string()])
+        );
+    }
+
+    #[test]
+    fn collect_unknown_rule_schema_fields_preserves_requested_severity() {
+        let diagnostics = diagnostics_for(
+            r#"
+- name: strict
+  unexpected: true
+"#,
+            RuleDiagnosticSeverity::Error,
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].severity, RuleDiagnosticSeverity::Error);
+        assert!(diagnostics[0].is_error());
+    }
+}

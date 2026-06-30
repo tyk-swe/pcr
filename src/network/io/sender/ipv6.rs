@@ -315,3 +315,126 @@ fn assemble_ipv6_fragment(
 
     Ok(buffer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{FragmentRequest, IpRequest, PacketRequest};
+    use crate::network::sender::error::{Ipv6Error, SenderError};
+    use pnet::packet::ipv6::Ipv6Packet;
+    use pnet::packet::Packet;
+
+    fn spec(fragment: FragmentRequest) -> PacketSpec {
+        PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                ttl: Some(32),
+                tos: Some(0xcd),
+                fragment,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    fn source() -> Ipv6Addr {
+        Ipv6Addr::LOCALHOST
+    }
+
+    fn destination() -> Ipv6Addr {
+        Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)
+    }
+
+    #[test]
+    fn build_ipv6_packets_builds_unfragmented_packet() {
+        let packets = build_ipv6_packets(
+            &spec(FragmentRequest::default()),
+            b"udp",
+            source(),
+            destination(),
+            IpNextHeaderProtocols::Udp,
+        )
+        .unwrap();
+
+        assert_eq!(packets.len(), 1);
+        let packet = Ipv6Packet::new(&packets[0]).unwrap();
+        assert_eq!(packet.get_version(), 6);
+        assert_eq!(packet.get_traffic_class(), 0xcd);
+        assert_eq!(packet.get_payload_length(), 3);
+        assert_eq!(packet.get_next_header(), IpNextHeaderProtocols::Udp);
+        assert_eq!(packet.get_hop_limit(), 32);
+        assert_eq!(packet.get_source(), source());
+        assert_eq!(packet.get_destination(), destination());
+        assert_eq!(packet.payload(), b"udp");
+    }
+
+    #[test]
+    fn build_ipv6_packets_rejects_dont_fragment_with_fragmentation_directives() {
+        let err = build_ipv6_packets(
+            &spec(FragmentRequest {
+                mtu: Some(64),
+                dont_fragment: Some(true),
+                ..Default::default()
+            }),
+            b"payload",
+            source(),
+            destination(),
+            IpNextHeaderProtocols::Udp,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Ipv6(Ipv6Error::DontFragmentConflict)
+        ));
+    }
+
+    #[test]
+    fn build_ipv6_packets_ignores_lone_dont_fragment_flag() {
+        let packets = build_ipv6_packets(
+            &spec(FragmentRequest {
+                dont_fragment: Some(true),
+                ..Default::default()
+            }),
+            b"payload",
+            source(),
+            destination(),
+            IpNextHeaderProtocols::Udp,
+        )
+        .unwrap();
+
+        assert_eq!(packets.len(), 1);
+        assert_eq!(
+            Ipv6Packet::new(&packets[0]).unwrap().get_next_header(),
+            IpNextHeaderProtocols::Udp
+        );
+    }
+
+    #[test]
+    fn build_ipv6_packets_inserts_fragment_headers_and_offsets() {
+        let packets = build_ipv6_packets(
+            &spec(FragmentRequest {
+                mtu: Some(64),
+                fragment_id: Some(0x0102_0304),
+                ..Default::default()
+            }),
+            &[0xaa; 40],
+            source(),
+            destination(),
+            IpNextHeaderProtocols::Udp,
+        )
+        .unwrap();
+
+        assert_eq!(packets.len(), 3);
+        let first = Ipv6Packet::new(&packets[0]).unwrap();
+        let second = Ipv6Packet::new(&packets[1]).unwrap();
+        assert_eq!(first.get_next_header(), IpNextHeaderProtocols::Ipv6Frag);
+        assert_eq!(second.get_next_header(), IpNextHeaderProtocols::Ipv6Frag);
+        assert_eq!(first.payload()[0], IpNextHeaderProtocols::Udp.0);
+        assert_eq!(&first.payload()[4..8], &0x0102_0304u32.to_be_bytes());
+        let first_offset = u16::from_be_bytes([first.payload()[2], first.payload()[3]]);
+        let second_offset = u16::from_be_bytes([second.payload()[2], second.payload()[3]]);
+        assert_eq!(first_offset & 0x0001, 1);
+        assert_eq!(second_offset >> 3, 2);
+    }
+}

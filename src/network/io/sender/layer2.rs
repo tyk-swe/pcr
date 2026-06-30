@@ -222,3 +222,77 @@ pub(crate) fn wrap_link_layer(
         Ok((packets, fallback))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::packet::ethernet::EthernetPacket;
+    use pnet::packet::vlan::VlanPacket;
+    use pnet::packet::Packet;
+
+    fn layer2(vlan: Option<VlanTag>) -> Layer2Resolved {
+        Layer2Resolved {
+            source: MacAddr::new(0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff),
+            destination: MacAddr::new(0x11, 0x22, 0x33, 0x44, 0x55, 0x66),
+            ethertype: EtherTypes::Ipv4,
+            vlan,
+        }
+    }
+
+    #[test]
+    fn wrap_link_layer_without_layer2_returns_packets_with_fallback_type() {
+        let packets = vec![vec![0x45, 0, 0, 0]];
+
+        let (frames, link_type) = wrap_link_layer(None, packets.clone(), LinkType::Ipv4).unwrap();
+
+        assert_eq!(frames, packets);
+        assert!(matches!(link_type, LinkType::Ipv4));
+    }
+
+    #[test]
+    fn wrap_link_layer_adds_ethernet_header() {
+        let packet = vec![0x45, 0, 0, 0];
+
+        let (frames, link_type) =
+            wrap_link_layer(Some(&layer2(None)), vec![packet.clone()], LinkType::Ipv4).unwrap();
+
+        assert!(matches!(link_type, LinkType::Ethernet));
+        assert_eq!(frames.len(), 1);
+        let eth = EthernetPacket::new(&frames[0]).unwrap();
+        assert_eq!(
+            eth.get_source(),
+            MacAddr::new(0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff)
+        );
+        assert_eq!(
+            eth.get_destination(),
+            MacAddr::new(0x11, 0x22, 0x33, 0x44, 0x55, 0x66)
+        );
+        assert_eq!(eth.get_ethertype(), EtherTypes::Ipv4);
+        assert_eq!(eth.payload(), packet.as_slice());
+    }
+
+    #[test]
+    fn wrap_link_layer_adds_vlan_header_when_configured() {
+        let packet = vec![0x60, 0, 0, 0];
+        let vlan = VlanTag {
+            identifier: 200,
+            priority: 5,
+            drop_eligible_indicator: true,
+        };
+        let mut config = layer2(Some(vlan));
+        config.ethertype = EtherTypes::Ipv6;
+
+        let (frames, link_type) =
+            wrap_link_layer(Some(&config), vec![packet.clone()], LinkType::Ipv6).unwrap();
+
+        assert!(matches!(link_type, LinkType::Ethernet));
+        let eth = EthernetPacket::new(&frames[0]).unwrap();
+        assert_eq!(eth.get_ethertype(), EtherTypes::Vlan);
+        let vlan_packet = VlanPacket::new(eth.payload()).unwrap();
+        assert_eq!(vlan_packet.get_vlan_identifier(), 200);
+        assert_eq!(vlan_packet.get_priority_code_point().0, 5);
+        assert_eq!(vlan_packet.get_drop_eligible_indicator(), 1);
+        assert_eq!(vlan_packet.get_ethertype(), EtherTypes::Ipv6);
+        assert_eq!(vlan_packet.payload(), packet.as_slice());
+    }
+}

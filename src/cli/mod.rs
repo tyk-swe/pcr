@@ -68,3 +68,86 @@ impl PacketcraftArgs {
         self.dry_run || matches!(&self.command, commands::PacketcraftCommand::DryRun(_))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(command: commands::PacketcraftCommand, dry_run: bool) -> PacketcraftArgs {
+        PacketcraftArgs {
+            verbose: 0,
+            output_format: None,
+            dry_run,
+            safety: options::SafetyOptions::default(),
+            command,
+        }
+    }
+
+    #[test]
+    fn one_shot_options_returns_send_options() {
+        let args = args(
+            commands::PacketcraftCommand::Send(options::SendOptions {
+                oneshot: options::OneShotOptions {
+                    destination: Some("127.0.0.1".to_string()),
+                    ..Default::default()
+                },
+            }),
+            false,
+        );
+
+        assert_eq!(
+            args.one_shot_options()
+                .and_then(|opts| opts.destination.as_deref()),
+            Some("127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn one_shot_options_returns_dry_run_options() {
+        let args = args(
+            commands::PacketcraftCommand::DryRun(options::SendOptions {
+                oneshot: options::OneShotOptions {
+                    destination: Some("localhost".to_string()),
+                    ..Default::default()
+                },
+            }),
+            false,
+        );
+
+        assert_eq!(
+            args.one_shot_options()
+                .and_then(|opts| opts.destination.as_deref()),
+            Some("localhost")
+        );
+    }
+
+    #[test]
+    fn one_shot_options_returns_none_for_dns_query() {
+        let args = args(
+            commands::PacketcraftCommand::DnsQuery(commands::DnsQueryOptions::default()),
+            false,
+        );
+
+        assert!(args.one_shot_options().is_none());
+    }
+
+    #[test]
+    fn effective_dry_run_honors_global_flag_and_subcommand() {
+        let global = args(
+            commands::PacketcraftCommand::Send(options::SendOptions::default()),
+            true,
+        );
+        let subcommand = args(
+            commands::PacketcraftCommand::DryRun(options::SendOptions::default()),
+            false,
+        );
+        let live = args(
+            commands::PacketcraftCommand::Send(options::SendOptions::default()),
+            false,
+        );
+
+        assert!(global.effective_dry_run());
+        assert!(subcommand.effective_dry_run());
+        assert!(!live.effective_dry_run());
+    }
+}

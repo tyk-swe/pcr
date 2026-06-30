@@ -339,3 +339,111 @@ pub(crate) async fn run_command(
         _ => unreachable!("port scan variants are handled before target-scan dispatch"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::policy::{TrafficBudget, TrafficPrivilege};
+
+    fn port_request(target: &str, ports: &str) -> PortScanRequest {
+        PortScanRequest {
+            target: target.to_string(),
+            ports: ports.to_string(),
+            interface: None,
+            source_ip: None,
+        }
+    }
+
+    fn timed_request(target: &str) -> TimedScanRequest {
+        TimedScanRequest {
+            target: target.to_string(),
+            interface: None,
+            source_ip: None,
+            timeout: 1000,
+        }
+    }
+
+    #[test]
+    fn prepare_port_scan_normalizes_literal_target_and_counts_ports() {
+        let (prepared, scope, port_count, estimated_packets) =
+            prepare_port_scan(&port_request("127.0.0.1", "443,80-81")).unwrap();
+
+        assert_eq!(prepared.target, "127.0.0.1");
+        assert_eq!(scope, TargetScope::Local);
+        assert_eq!(port_count, 3);
+        assert_eq!(estimated_packets, Some(3));
+    }
+
+    #[test]
+    fn prepare_rejects_invalid_port_scan_ports() {
+        let err = prepare(
+            &ScanRequest::TcpSyn(port_request("127.0.0.1", "20-10")),
+            TrafficPolicy::default(),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("invalid port range"));
+    }
+
+    #[test]
+    fn prepare_builds_scan_traffic_plan_with_policy_limits() {
+        let policy = TrafficPolicy {
+            budget: TrafficBudget {
+                max_batch_size: 2,
+                max_rate_per_sec: 9,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let prepared = prepare(
+            &ScanRequest::Udp(port_request("127.0.0.1", "53,123,161")),
+            policy,
+        )
+        .unwrap();
+
+        assert_eq!(prepared.traffic_plan.mode, TrafficMode::Scan);
+        assert_eq!(prepared.traffic_plan.target_scope, TargetScope::Local);
+        assert_eq!(prepared.traffic_plan.target_count, 1);
+        assert_eq!(prepared.traffic_plan.port_count, 3);
+        assert_eq!(prepared.traffic_plan.estimated_packets, Some(3));
+        assert_eq!(prepared.traffic_plan.batch_size, 2);
+        assert_eq!(prepared.traffic_plan.rate_per_sec, Some(9));
+        assert_eq!(
+            prepared.traffic_plan.required_privileges,
+            vec![TrafficPrivilege::RawSocket]
+        );
+        assert!(
+            matches!(prepared.command(), ScanRequest::Udp(request) if request.target == "127.0.0.1")
+        );
+    }
+
+    #[test]
+    fn prepare_icmp_cidr_scan_counts_expanded_targets() {
+        let prepared = prepare(
+            &ScanRequest::Icmp(timed_request("127.0.0.0/30")),
+            TrafficPolicy::default(),
+        )
+        .unwrap();
+
+        assert_eq!(prepared.traffic_plan.target_count, 4);
+        assert_eq!(prepared.traffic_plan.port_count, 1);
+        assert_eq!(prepared.traffic_plan.estimated_packets, Some(4));
+        assert!(
+            matches!(prepared.command(), ScanRequest::Icmp(request) if request.target == "127.0.0.0/30")
+        );
+    }
+
+    #[test]
+    fn prepare_arp_single_target_normalizes_request_target() {
+        let prepared = prepare(
+            &ScanRequest::Arp(timed_request("192.168.1.10")),
+            TrafficPolicy::default(),
+        )
+        .unwrap();
+
+        assert_eq!(prepared.traffic_plan.target_count, 1);
+        assert!(
+            matches!(prepared.command(), ScanRequest::Arp(request) if request.target == "192.168.1.10")
+        );
+    }
+}

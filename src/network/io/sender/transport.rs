@@ -411,3 +411,235 @@ pub(crate) fn tcp_flags_value(flags: &TcpFlagSet) -> u8 {
     }
     value
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::packet::icmpv6::{Icmpv6Packet, Icmpv6Types};
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::tcp::{TcpFlags, TcpPacket};
+    use pnet::packet::udp::UdpPacket;
+    use pnet::packet::Packet;
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    fn v4_pair() -> (IpAddr, IpAddr) {
+        (
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+        )
+    }
+
+    fn v6_pair() -> (IpAddr, IpAddr) {
+        (
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1)),
+        )
+    }
+
+    #[test]
+    fn tcp_flags_value_combines_supported_bits() {
+        let flags = TcpFlagSet {
+            fin: true,
+            syn: true,
+            rst: true,
+            psh: true,
+            ack: true,
+            urg: true,
+            ece: true,
+            cwr: true,
+        };
+
+        assert_eq!(tcp_flags_value(&flags), 0xff);
+    }
+
+    #[test]
+    fn build_tcp_segment_sets_header_payload_options_and_checksum() {
+        let (source, destination) = v4_pair();
+        let bytes = build_tcp_segment(
+            &TcpSpec {
+                source_port: Some(1234),
+                destination_port: Some(443),
+                flags: TcpFlagSet {
+                    syn: true,
+                    ack: true,
+                    ..Default::default()
+                },
+                sequence: Some(10),
+                acknowledgement: Some(20),
+                window_size: Some(4096),
+                options: Some(vec![1, 1, 0, 0]),
+            },
+            b"payload",
+            source,
+            destination,
+        )
+        .unwrap();
+        let packet = TcpPacket::new(&bytes).unwrap();
+
+        assert_eq!(packet.get_source(), 1234);
+        assert_eq!(packet.get_destination(), 443);
+        assert_eq!(packet.get_flags(), TcpFlags::SYN | TcpFlags::ACK);
+        assert_eq!(packet.get_sequence(), 10);
+        assert_eq!(packet.get_acknowledgement(), 20);
+        assert_eq!(packet.get_window(), 4096);
+        assert_eq!(packet.get_data_offset(), 6);
+        assert_eq!(
+            &packet.packet()[TCP_HEADER_LEN..TCP_HEADER_LEN + 4],
+            [1, 1, 0, 0]
+        );
+        assert_eq!(packet.payload(), b"payload");
+        assert_ne!(packet.get_checksum(), 0);
+    }
+
+    #[test]
+    fn build_tcp_segment_rejects_misaligned_options() {
+        let (source, destination) = v4_pair();
+        let err = build_tcp_segment(
+            &TcpSpec {
+                options: Some(vec![1, 2]),
+                ..Default::default()
+            },
+            &[],
+            source,
+            destination,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, TransportBuildError::TcpHeaderAlignment));
+    }
+
+    #[test]
+    fn build_tcp_segment_into_rejects_short_buffer() {
+        let (source, destination) = v4_pair();
+        let mut buffer = [0u8; TCP_HEADER_LEN - 1];
+        let err =
+            build_tcp_segment_into(&TcpSpec::default(), &[], source, destination, &mut buffer)
+                .unwrap_err();
+
+        assert!(matches!(
+            err,
+            TransportBuildError::AllocationFailed { protocol: "TCP" }
+        ));
+    }
+
+    #[test]
+    fn build_udp_segment_sets_header_payload_and_checksum() {
+        let (source, destination) = v4_pair();
+        let bytes = build_udp_segment(
+            &UdpSpec {
+                source_port: Some(5353),
+                destination_port: Some(53),
+            },
+            b"dns",
+            source,
+            destination,
+        )
+        .unwrap();
+        let packet = UdpPacket::new(&bytes).unwrap();
+
+        assert_eq!(packet.get_source(), 5353);
+        assert_eq!(packet.get_destination(), 53);
+        assert_eq!(packet.get_length(), (UDP_HEADER_LEN + 3) as u16);
+        assert_eq!(packet.payload(), b"dns");
+        assert_ne!(packet.get_checksum(), 0);
+    }
+
+    #[test]
+    fn build_udp_segment_rejects_protocol_length_overflow() {
+        let (source, destination) = v4_pair();
+        let payload = vec![0u8; u16::MAX as usize - UDP_HEADER_LEN + 1];
+        let err =
+            build_udp_segment(&UdpSpec::default(), &payload, source, destination).unwrap_err();
+
+        assert!(matches!(
+            err,
+            TransportBuildError::UdpDatagramTooLong { length, max }
+                if length == u16::MAX as usize + 1 && max == u16::MAX as usize
+        ));
+    }
+
+    #[test]
+    fn finalize_udp_checksum_maps_zero_to_protocol_sentinel() {
+        assert_eq!(finalize_udp_checksum(0), 0xffff);
+        assert_eq!(finalize_udp_checksum(0x1234), 0x1234);
+    }
+
+    #[test]
+    fn build_transport_segment_auto_selects_icmp_by_destination_family() {
+        let (source_v4, destination_v4) = v4_pair();
+        let (source_v6, destination_v6) = v6_pair();
+
+        let v4 =
+            build_transport_segment(&TransportSpec::Auto, &[], source_v4, destination_v4).unwrap();
+        let v6 =
+            build_transport_segment(&TransportSpec::Auto, &[], source_v6, destination_v6).unwrap();
+
+        assert_eq!(v4.protocol, IpNextHeaderProtocols::Icmp);
+        assert_eq!(v4.label, "ICMP");
+        assert_eq!(v6.protocol, IpNextHeaderProtocols::Icmpv6);
+        assert_eq!(v6.label, "ICMPv6");
+    }
+
+    #[test]
+    fn build_transport_segment_rejects_icmp_family_mismatch() {
+        let (source_v6, destination_v6) = v6_pair();
+
+        let err = build_transport_segment(
+            &TransportSpec::Icmp(IcmpSpec::default()),
+            &[],
+            source_v6,
+            destination_v6,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, TransportBuildError::IcmpRequiresIpv4));
+    }
+
+    #[test]
+    fn build_icmpv6_unknown_type_without_extra_fields_places_payload_immediately() {
+        let (source, destination) = v6_pair();
+        let bytes = build_icmpv6_segment(
+            &Icmpv6Spec {
+                kind: Some(200),
+                code: Some(1),
+                ..Default::default()
+            },
+            b"abc",
+            source,
+            destination,
+        )
+        .unwrap();
+        let packet = Icmpv6Packet::new(&bytes).unwrap();
+
+        assert_eq!(
+            packet.get_icmpv6_type(),
+            pnet::packet::icmpv6::Icmpv6Type::new(200)
+        );
+        assert_eq!(
+            packet.get_icmpv6_code(),
+            pnet::packet::icmpv6::Icmpv6Code(1)
+        );
+        assert_eq!(packet.payload(), b"abc");
+    }
+
+    #[test]
+    fn build_icmpv6_error_uses_explicit_parameter_as_rest_of_header() {
+        let (source, destination) = v6_pair();
+        let bytes = build_icmpv6_segment(
+            &Icmpv6Spec {
+                kind: Some(2),
+                parameter: Some(1280),
+                ..Default::default()
+            },
+            b"mtu",
+            source,
+            destination,
+        )
+        .unwrap();
+        let packet = Icmpv6Packet::new(&bytes).unwrap();
+
+        assert_eq!(packet.get_icmpv6_type(), Icmpv6Types::PacketTooBig);
+        assert_eq!(&packet.payload()[0..4], &1280u32.to_be_bytes());
+        assert_eq!(&packet.payload()[4..], b"mtu");
+    }
+}

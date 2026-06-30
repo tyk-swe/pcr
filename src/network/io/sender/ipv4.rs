@@ -157,3 +157,97 @@ fn assemble_ipv4_fragment(
     }
     Ok(buffer)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{FragmentRequest, IpRequest, PacketRequest};
+    use crate::network::sender::error::{Ipv4Error, SenderError};
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::{Ipv4Flags, Ipv4Packet};
+    use pnet::packet::Packet;
+
+    fn spec(fragment: FragmentRequest) -> PacketSpec {
+        PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                ttl: Some(31),
+                tos: Some(0x2b),
+                identification: Some(123),
+                fragment,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn build_ipv4_packets_builds_unfragmented_packet() {
+        let packets = build_ipv4_packets(
+            &spec(FragmentRequest::default()),
+            b"udp",
+            Ipv4Addr::new(192, 0, 2, 1),
+            Ipv4Addr::new(198, 51, 100, 1),
+            IpNextHeaderProtocols::Udp,
+        )
+        .unwrap();
+
+        assert_eq!(packets.len(), 1);
+        let packet = Ipv4Packet::new(&packets[0]).unwrap();
+        assert_eq!(packet.get_version(), 4);
+        assert_eq!(packet.get_ttl(), 31);
+        assert_eq!(packet.get_dscp(), 0x0a);
+        assert_eq!(packet.get_ecn(), 0x03);
+        assert_eq!(packet.get_identification(), 123);
+        assert_eq!(packet.get_next_level_protocol(), IpNextHeaderProtocols::Udp);
+        assert_eq!(packet.get_source(), Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(packet.get_destination(), Ipv4Addr::new(198, 51, 100, 1));
+        assert_eq!(packet.payload(), b"udp");
+        assert_ne!(packet.get_checksum(), 0);
+    }
+
+    #[test]
+    fn build_ipv4_packets_sets_fragment_offsets_and_more_flags() {
+        let packets = build_ipv4_packets(
+            &spec(FragmentRequest {
+                mtu: Some(44),
+                offset: Some(8),
+                ..Default::default()
+            }),
+            &[0xaa; 40],
+            Ipv4Addr::new(192, 0, 2, 1),
+            Ipv4Addr::new(198, 51, 100, 1),
+            IpNextHeaderProtocols::Udp,
+        )
+        .unwrap();
+
+        assert_eq!(packets.len(), 2);
+        let first = Ipv4Packet::new(&packets[0]).unwrap();
+        let second = Ipv4Packet::new(&packets[1]).unwrap();
+        assert_eq!(first.get_fragment_offset(), 8);
+        assert_ne!(first.get_flags() & Ipv4Flags::MoreFragments, 0);
+        assert_eq!(first.payload().len(), 24);
+        assert_eq!(second.get_fragment_offset(), 11);
+        assert_eq!(second.get_flags() & Ipv4Flags::MoreFragments, 0);
+        assert_eq!(second.payload().len(), 16);
+    }
+
+    #[test]
+    fn build_ipv4_packets_rejects_oversized_unfragmented_payload() {
+        let payload = vec![0u8; u16::MAX as usize - IPV4_HEADER_LEN + 1];
+        let err = build_ipv4_packets(
+            &spec(FragmentRequest::default()),
+            &payload,
+            Ipv4Addr::new(192, 0, 2, 1),
+            Ipv4Addr::new(198, 51, 100, 1),
+            IpNextHeaderProtocols::Udp,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Ipv4(Ipv4Error::FragmentTooLarge { length, max })
+                if length == u16::MAX as usize + 1 && max == u16::MAX as usize
+        ));
+    }
+}

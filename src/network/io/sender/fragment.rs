@@ -282,3 +282,198 @@ fn ensure_fragment_allowed(frag: &FragmentSpec) -> Result<()> {
 fn align_down(value: usize, alignment: usize) -> usize {
     value / alignment * alignment
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frag() -> FragmentSpec {
+        FragmentSpec::default()
+    }
+
+    #[test]
+    fn plan_fragments_returns_single_empty_fragment_for_empty_payload() {
+        let plans = plan_fragments(
+            &FragmentSpec {
+                more_fragments: true,
+                ..frag()
+            },
+            0,
+            20,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].start, 0);
+        assert_eq!(plans[0].len, 0);
+        assert!(plans[0].more);
+    }
+
+    #[test]
+    fn plan_fragments_splits_mtu_payload_on_eight_byte_boundaries() {
+        let plans = plan_fragments(
+            &FragmentSpec {
+                mtu: Some(44),
+                ..frag()
+            },
+            40,
+            20,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(plans.len(), 2);
+        assert_eq!((plans[0].start, plans[0].len, plans[0].more), (0, 24, true));
+        assert_eq!(
+            (plans[1].start, plans[1].len, plans[1].more),
+            (24, 16, false)
+        );
+    }
+
+    #[test]
+    fn plan_fragments_accounts_for_first_fragment_extra_headers() {
+        let plans = plan_fragments(
+            &FragmentSpec {
+                mtu: Some(64),
+                ..frag()
+            },
+            48,
+            40,
+            8,
+        )
+        .unwrap();
+
+        assert_eq!((plans[0].start, plans[0].len), (0, 16));
+        assert_eq!((plans[1].start, plans[1].len), (16, 24));
+        assert_eq!((plans[2].start, plans[2].len), (40, 8));
+    }
+
+    #[test]
+    fn plan_fragments_rejects_mtu_too_small_for_headers() {
+        let err = plan_fragments(
+            &FragmentSpec {
+                mtu: Some(20),
+                ..frag()
+            },
+            10,
+            20,
+            0,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            FragmentError::MtuTooSmall {
+                mtu: 20,
+                context: "headers"
+            }
+        ));
+    }
+
+    #[test]
+    fn plan_fragments_rejects_mtu_that_leaves_no_payload() {
+        let err = plan_fragments(
+            &FragmentSpec {
+                mtu: Some(27),
+                ..frag()
+            },
+            10,
+            20,
+            0,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, FragmentError::MtuLeavesNoPayload { mtu: 27 }));
+    }
+
+    #[test]
+    fn plan_overlap_fragments_creates_overlapping_pair() {
+        let plans = plan_fragments(
+            &FragmentSpec {
+                overlap: true,
+                ..frag()
+            },
+            32,
+            20,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(plans.len(), 2);
+        assert_eq!((plans[0].start, plans[0].len, plans[0].more), (0, 16, true));
+        assert_eq!(
+            (plans[1].start, plans[1].len, plans[1].more),
+            (8, 24, false)
+        );
+    }
+
+    #[test]
+    fn plan_overlap_fragments_rejects_dont_fragment() {
+        let err = plan_fragments(
+            &FragmentSpec {
+                overlap: true,
+                dont_fragment: true,
+                ..frag()
+            },
+            32,
+            20,
+            0,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, FragmentError::FragmentationNotAllowed));
+    }
+
+    #[test]
+    fn plan_teardrop_fragments_uses_classic_overlapping_offsets() {
+        let plans = plan_fragments(
+            &FragmentSpec {
+                teardrop: true,
+                more_fragments: true,
+                ..frag()
+            },
+            48,
+            20,
+            0,
+        )
+        .unwrap();
+
+        assert_eq!(plans.len(), 3);
+        assert_eq!((plans[0].start, plans[0].len, plans[0].more), (0, 24, true));
+        assert_eq!(
+            (plans[1].start, plans[1].len, plans[1].more),
+            (16, 24, true)
+        );
+        assert_eq!(
+            (plans[2].start, plans[2].len, plans[2].more),
+            (32, 16, true)
+        );
+    }
+
+    #[test]
+    fn extract_fragment_payload_zero_fills_beyond_transport() {
+        let payload = extract_fragment_payload(
+            &FragmentPlan {
+                start: 2,
+                len: 4,
+                more: false,
+            },
+            &[10, 11, 12],
+        );
+
+        assert_eq!(payload, [12, 0, 0, 0]);
+    }
+
+    #[test]
+    fn determine_more_flag_forces_more_for_intermediate_fragments() {
+        let plan = FragmentPlan {
+            start: 0,
+            len: 8,
+            more: false,
+        };
+
+        assert!(determine_more_flag(&plan, 0, 2));
+        assert!(!determine_more_flag(&plan, 1, 2));
+    }
+}

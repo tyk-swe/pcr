@@ -74,6 +74,54 @@ impl std::str::FromStr for DnsTransportMode {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+
+    #[test]
+    fn dns_transport_mode_defaults_to_auto() {
+        assert_eq!(DnsTransportMode::default(), DnsTransportMode::Auto);
+    }
+
+    #[test]
+    fn dns_transport_mode_display_matches_cli_values() {
+        assert_eq!(DnsTransportMode::Auto.to_string(), "auto");
+        assert_eq!(DnsTransportMode::Udp.to_string(), "udp");
+        assert_eq!(DnsTransportMode::Tcp.to_string(), "tcp");
+    }
+
+    #[test]
+    fn dns_transport_mode_from_str_is_case_insensitive() {
+        assert_eq!(
+            DnsTransportMode::from_str("AUTO").unwrap(),
+            DnsTransportMode::Auto
+        );
+        assert_eq!(
+            DnsTransportMode::from_str("Udp").unwrap(),
+            DnsTransportMode::Udp
+        );
+        assert_eq!(
+            DnsTransportMode::from_str("tcp").unwrap(),
+            DnsTransportMode::Tcp
+        );
+    }
+
+    #[test]
+    fn dns_transport_mode_from_str_rejects_unknown_values() {
+        let err = DnsTransportMode::from_str("quic").unwrap_err();
+
+        assert!(err.contains("unsupported DNS transport: quic"));
+        assert!(err.contains("auto, udp, tcp"));
+    }
+
+    #[test]
+    fn dns_transport_display_matches_result_transport_values() {
+        assert_eq!(DnsTransport::Udp.to_string(), "udp");
+        assert_eq!(DnsTransport::Tcp.to_string(), "tcp");
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DnsTransport {
     Udp,

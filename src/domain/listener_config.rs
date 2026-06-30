@@ -104,3 +104,150 @@ pub(crate) fn normalize_queue_capacity(
     }
     Ok(queue_capacity)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn normalized_listener_request_stays_disabled_for_empty_request() {
+        let normalized = NormalizedListenerRequest::from_request(&ListenerRequest::default());
+
+        assert!(!normalized.enabled);
+        assert!(!normalized.implicit);
+        assert_eq!(normalized.filter, None);
+        assert_eq!(normalized.timeout, None);
+        assert_eq!(normalized.capture_file, None);
+        assert_eq!(normalized.queue_capacity, None);
+    }
+
+    #[test]
+    fn normalized_listener_request_uses_explicit_listen_without_implicit_flag() {
+        let normalized = NormalizedListenerRequest::from_request(&ListenerRequest {
+            listen: Some(true),
+            promiscuous: Some(true),
+            timeout: Some(7),
+            queue_capacity: Some(128),
+            ..Default::default()
+        });
+
+        assert!(normalized.enabled);
+        assert!(!normalized.implicit);
+        assert!(normalized.promiscuous);
+        assert_eq!(normalized.timeout, Some(Duration::from_secs(7)));
+        assert_eq!(normalized.queue_capacity, Some(128));
+    }
+
+    #[test]
+    fn normalized_listener_request_auto_enables_for_reply_filter_or_capture() {
+        for request in [
+            ListenerRequest {
+                show_reply: Some(true),
+                ..Default::default()
+            },
+            ListenerRequest {
+                filter: Some("icmp".to_string()),
+                ..Default::default()
+            },
+            ListenerRequest {
+                capture_file: Some("capture.pcap".to_string()),
+                ..Default::default()
+            },
+        ] {
+            let normalized = NormalizedListenerRequest::from_request(&request);
+
+            assert!(normalized.enabled);
+            assert!(normalized.implicit);
+        }
+    }
+
+    #[test]
+    fn normalized_listener_request_preserves_capture_and_filter_values() {
+        let normalized = NormalizedListenerRequest::from_request(&ListenerRequest {
+            filter: Some("tcp port 443".to_string()),
+            capture_file: Some("reply.pcap".to_string()),
+            show_reply: Some(true),
+            ..Default::default()
+        });
+
+        assert_eq!(normalized.filter.as_deref(), Some("tcp port 443"));
+        assert_eq!(
+            normalized
+                .capture_file
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            Some("reply.pcap".to_string())
+        );
+        assert!(normalized.show_reply);
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn spec_pcap_requirement_reports_highest_priority_requirement() {
+        let requirement = spec_pcap_requirement(&ListenerRequest {
+            listen: Some(true),
+            show_reply: Some(true),
+            filter: Some("icmp".to_string()),
+            capture_file: Some("out.pcap".to_string()),
+            ..Default::default()
+        });
+
+        assert_eq!(requirement, Some(ListenerPcapRequirement::Listen));
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn spec_pcap_requirement_reports_each_implicit_pcap_use() {
+        assert_eq!(
+            spec_pcap_requirement(&ListenerRequest {
+                show_reply: Some(true),
+                ..Default::default()
+            }),
+            Some(ListenerPcapRequirement::ShowReply)
+        );
+        assert_eq!(
+            spec_pcap_requirement(&ListenerRequest {
+                filter: Some("udp".to_string()),
+                ..Default::default()
+            }),
+            Some(ListenerPcapRequirement::Filter)
+        );
+        assert_eq!(
+            spec_pcap_requirement(&ListenerRequest {
+                capture_file: Some("out.pcap".to_string()),
+                ..Default::default()
+            }),
+            Some(ListenerPcapRequirement::Capture)
+        );
+        assert_eq!(spec_pcap_requirement(&ListenerRequest::default()), None);
+    }
+
+    #[cfg(any(feature = "daemon", feature = "pcap"))]
+    #[test]
+    fn normalize_queue_capacity_applies_default_and_accepts_bounds() {
+        assert_eq!(
+            normalize_queue_capacity(None).unwrap(),
+            DEFAULT_QUEUE_CAPACITY
+        );
+        assert_eq!(normalize_queue_capacity(Some(1)).unwrap(), 1);
+        assert_eq!(
+            normalize_queue_capacity(Some(MAX_QUEUE_CAPACITY)).unwrap(),
+            MAX_QUEUE_CAPACITY
+        );
+    }
+
+    #[cfg(any(feature = "daemon", feature = "pcap"))]
+    #[test]
+    fn normalize_queue_capacity_rejects_zero_and_too_large_values() {
+        assert_eq!(
+            normalize_queue_capacity(Some(0)).unwrap_err(),
+            QueueCapacityError::Zero
+        );
+        assert_eq!(
+            normalize_queue_capacity(Some(MAX_QUEUE_CAPACITY + 1)).unwrap_err(),
+            QueueCapacityError::TooLarge {
+                max: MAX_QUEUE_CAPACITY
+            }
+        );
+    }
+}

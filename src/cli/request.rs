@@ -442,3 +442,325 @@ impl From<commands::FuzzStrategy> for cmd::FuzzStrategy {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::command::DnsTransportMode;
+
+    #[test]
+    fn packet_request_from_oneshot_maps_nested_sections() {
+        let options = options::OneShotOptions {
+            destination: Some("example.test".to_string()),
+            layer2: options::Layer2Options {
+                source_mac: Some("aa:bb:cc:dd:ee:ff".to_string()),
+                destination_mac: Some("11:22:33:44:55:66".to_string()),
+                ethertype: Some("ipv4".to_string()),
+                vlan: options::VlanOptions {
+                    id: Some(100),
+                    priority: Some(3),
+                    drop_eligible_indicator: Some(true),
+                },
+            },
+            ip: options::IpOptions {
+                source_ip: Some("192.0.2.1".to_string()),
+                destination_ip: Some("192.0.2.2".to_string()),
+                ttl: Some(32),
+                tos: Some(12),
+                identification: Some(55),
+                fragment_mtu: Some(576),
+                fragment_offset: Some(8),
+                more_fragments: Some(true),
+                fragment_profile: Some(enums::FragmentProfile::Overlap),
+                ipv6_extensions: vec!["dest:options=0102".to_string()],
+                ..Default::default()
+            },
+            transmit: options::TransmitOptions {
+                count: Some(3),
+                interval: Some("10ms".to_string()),
+                interface: Some("eth-test".to_string()),
+                force_layer3: Some(true),
+                ipv6_nd: Some(true),
+                ..Default::default()
+            },
+            listen: options::ListenOptions {
+                listen: Some(true),
+                filter: Some("icmp".to_string()),
+                show_reply: Some(true),
+                timeout: Some(5),
+                capture_file: Some("out.pcap".to_string()),
+                queue_capacity: Some(64),
+                ..Default::default()
+            },
+            rule: options::RuleOptions {
+                rules_file: Some("rules.yml".to_string()),
+                ..Default::default()
+            },
+            logging: options::LoggingOptions {
+                log_file: Some("app.log".to_string()),
+                pcap_write: Some("sent.pcap".to_string()),
+                metrics_json: Some("metrics.json".to_string()),
+                log_level: Some(enums::LogLevel::Debug),
+                structured: Some(true),
+                prometheus_bind: Some("127.0.0.1:9090".to_string()),
+                allow_public_metrics: Some(true),
+            },
+            ..Default::default()
+        };
+
+        let request = req::PacketRequest::from(&options);
+
+        assert_eq!(
+            request.destination.destination.as_deref(),
+            Some("example.test")
+        );
+        assert_eq!(request.destination.interface.as_deref(), Some("eth-test"));
+        assert_eq!(
+            request.layer2.source_mac.as_deref(),
+            Some("aa:bb:cc:dd:ee:ff")
+        );
+        assert_eq!(request.layer2.vlan.id, Some(100));
+        assert_eq!(request.ip.source_ip.as_deref(), Some("192.0.2.1"));
+        assert_eq!(request.ip.fragment.mtu, Some(576));
+        assert_eq!(request.ip.fragment.offset, Some(8));
+        assert_eq!(request.ip.fragment.more_fragments, Some(true));
+        assert_eq!(
+            request.ip.fragment.profile,
+            Some(req::FragmentProfile::Overlap)
+        );
+        assert_eq!(request.ipv6.extensions, ["dest:options=0102"]);
+        assert_eq!(request.transmit.count, Some(3));
+        assert_eq!(request.listener.filter.as_deref(), Some("icmp"));
+        assert_eq!(request.rules_file.as_deref(), Some("rules.yml"));
+        assert_eq!(request.logging.log_level, Some(req::LogLevel::Debug));
+        assert_eq!(
+            request.logging.prometheus_bind.as_deref(),
+            Some("127.0.0.1:9090")
+        );
+    }
+
+    #[test]
+    fn dns_query_options_map_all_fields() {
+        let request = cmd::DnsRequest::from(&commands::DnsQueryOptions {
+            domain: "example.test".to_string(),
+            record_type: "TXT".to_string(),
+            server: "9.9.9.9".to_string(),
+            timeout: 750,
+            transaction_id: Some(7),
+            transport: DnsTransportMode::Udp,
+            retries: 4,
+        });
+
+        assert_eq!(request.domain, "example.test");
+        assert_eq!(request.record_type, "TXT");
+        assert_eq!(request.server, "9.9.9.9");
+        assert_eq!(request.timeout, 750);
+        assert_eq!(request.transaction_id, Some(7));
+        assert_eq!(request.transport, DnsTransportMode::Udp);
+        assert_eq!(request.retries, 4);
+    }
+
+    #[test]
+    fn transport_command_maps_tcp_udp_icmp_and_icmpv6() {
+        let tcp = req::TransportProtocolRequest::from(&options::TransportCommand::Tcp(
+            options::TcpOptions {
+                flags: Some("SA".to_string()),
+                sequence: Some(1),
+                acknowledgement: Some(2),
+                window_size: Some(3),
+                mss: Some(4),
+                window_scale: Some(5),
+                sack_permitted: Some(true),
+                timestamps: Some("6:7".to_string()),
+                options_hex: None,
+            },
+        ));
+        let udp = req::TransportProtocolRequest::from(&options::TransportCommand::Udp(
+            options::UdpOptions::default(),
+        ));
+        let icmp = req::TransportProtocolRequest::from(&options::TransportCommand::Icmp(
+            options::IcmpOptions {
+                kind: Some(8),
+                code: Some(0),
+                identifier: Some(10),
+                sequence: Some(11),
+            },
+        ));
+        let icmpv6 = req::TransportProtocolRequest::from(&options::TransportCommand::Icmpv6(
+            options::Icmpv6Options {
+                kind: Some(128),
+                code: Some(0),
+                identifier: Some(12),
+                sequence: Some(13),
+                parameter: Some(14),
+                error: Some(enums::Icmpv6ErrorKind::PacketTooBig),
+                error_code: Some(enums::Icmpv6ErrorCode::ParameterProblemUnrecognizedOption),
+                mtu: Some(1500),
+            },
+        ));
+
+        assert!(matches!(
+            tcp,
+            req::TransportProtocolRequest::Tcp(tcp)
+                if tcp.flags.as_deref() == Some("SA")
+                    && tcp.sequence == Some(1)
+                    && tcp.acknowledgement == Some(2)
+                    && tcp.window_size == Some(3)
+                    && tcp.mss == Some(4)
+                    && tcp.window_scale == Some(5)
+                    && tcp.sack_permitted == Some(true)
+                    && tcp.timestamps.as_deref() == Some("6:7")
+        ));
+        assert!(matches!(udp, req::TransportProtocolRequest::Udp));
+        assert!(matches!(
+            icmp,
+            req::TransportProtocolRequest::Icmp(icmp)
+                if icmp.kind == Some(8)
+                    && icmp.code == Some(0)
+                    && icmp.identifier == Some(10)
+                    && icmp.sequence == Some(11)
+        ));
+        assert!(matches!(
+            icmpv6,
+            req::TransportProtocolRequest::Icmpv6(icmpv6)
+                if icmpv6.kind == Some(128)
+                    && icmpv6.parameter == Some(14)
+                    && icmpv6.error == Some(req::Icmpv6ErrorKind::PacketTooBig)
+                    && icmpv6.error_code
+                        == Some(req::Icmpv6ErrorCode::ParameterProblemUnrecognizedOption)
+                    && icmpv6.mtu == Some(1500)
+        ));
+    }
+
+    #[test]
+    fn enum_mappings_preserve_cli_variants() {
+        assert_eq!(
+            req::FragmentProfile::from(enums::FragmentProfile::TinyOverlap),
+            req::FragmentProfile::TinyOverlap
+        );
+        assert_eq!(
+            req::LogLevel::from(enums::LogLevel::Warn),
+            req::LogLevel::Warn
+        );
+        assert_eq!(
+            req::Icmpv6ErrorKind::from(enums::Icmpv6ErrorKind::ParameterProblem),
+            req::Icmpv6ErrorKind::ParameterProblem
+        );
+        assert_eq!(
+            req::Icmpv6ErrorCode::from(enums::Icmpv6ErrorCode::TimeExceededReassembly),
+            req::Icmpv6ErrorCode::TimeExceededReassembly
+        );
+    }
+
+    #[test]
+    fn payload_and_transmission_options_map_without_interpretation() {
+        let payload = req::PayloadRequest::from(&options::PayloadOptions {
+            data: Some("hello".to_string()),
+            data_hex: Some("6869".to_string()),
+            data_file: Some("payload.bin".to_string()),
+            random_payload_size: Some(8),
+            dns_query: Some("example.test".to_string()),
+            dns_type: Some("AAAA".to_string()),
+            http_method: Some("GET".to_string()),
+            http_path: Some("/".to_string()),
+            http_host: Some("example.test".to_string()),
+            tls_client_hello: Some("example.test".to_string()),
+        });
+        let transmit = req::TransmissionRequest::from(&options::TransmitOptions {
+            count: Some(9),
+            interval: Some("1s".to_string()),
+            flood: Some(true),
+            loop_forever: Some(true),
+            interface: Some("eth0".to_string()),
+            force_layer3: Some(true),
+            ipv6_nd: Some(true),
+        });
+
+        assert_eq!(payload.data.as_deref(), Some("hello"));
+        assert_eq!(payload.data_hex.as_deref(), Some("6869"));
+        assert_eq!(payload.dns_type.as_deref(), Some("AAAA"));
+        assert_eq!(transmit.count, Some(9));
+        assert_eq!(transmit.interval.as_deref(), Some("1s"));
+        assert_eq!(transmit.flood, Some(true));
+        assert_eq!(transmit.loop_forever, Some(true));
+        assert_eq!(transmit.force_layer3, Some(true));
+        assert_eq!(transmit.ipv6_nd, Some(true));
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn scan_command_maps_port_and_timed_variants() {
+        let port = commands::PortScanOptions {
+            target: "192.0.2.1".to_string(),
+            ports: "80,443".to_string(),
+            interface: Some("eth0".to_string()),
+            source_ip: Some("192.0.2.10".to_string()),
+        };
+        let timed = commands::TimedScanOptions {
+            target: "192.0.2.0/30".to_string(),
+            interface: Some("eth1".to_string()),
+            source_ip: Some("192.0.2.11".to_string()),
+            timeout: 500,
+        };
+
+        let tcp = cmd::ScanRequest::from(&commands::ScanCommand::TcpSyn(port.clone()));
+        let arp = cmd::ScanRequest::from(&commands::ScanCommand::Arp(timed.clone()));
+
+        assert!(matches!(
+            tcp,
+            cmd::ScanRequest::TcpSyn(request)
+                if request.target == "192.0.2.1"
+                    && request.ports == "80,443"
+                    && request.interface.as_deref() == Some("eth0")
+                    && request.source_ip.as_deref() == Some("192.0.2.10")
+        ));
+        assert!(matches!(
+            arp,
+            cmd::ScanRequest::Arp(request)
+                if request.target == "192.0.2.0/30"
+                    && request.interface.as_deref() == Some("eth1")
+                    && request.source_ip.as_deref() == Some("192.0.2.11")
+                    && request.timeout == 500
+        ));
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn traceroute_options_map_protocol_and_controls() {
+        let request = cmd::TracerouteRequest::from(&commands::TracerouteOptions {
+            destination: "example.test".to_string(),
+            max_ttl: 12,
+            probes: 3,
+            protocol: commands::TracerouteProtocol::Tcp,
+            no_dns: Some(true),
+            timeout: 2000,
+        });
+
+        assert_eq!(request.destination, "example.test");
+        assert_eq!(request.max_ttl, 12);
+        assert_eq!(request.probes, 3);
+        assert_eq!(request.protocol, cmd::TracerouteProtocol::Tcp);
+        assert_eq!(request.no_dns, Some(true));
+        assert_eq!(request.timeout, 2000);
+    }
+
+    #[cfg(feature = "fuzz")]
+    #[test]
+    fn fuzz_options_map_protocol_strategy_and_limits() {
+        let request = cmd::FuzzRequest::from(&commands::FuzzOptions {
+            target: "192.0.2.1".to_string(),
+            port: Some(53),
+            protocol: commands::FuzzProtocol::Udp,
+            strategy: commands::FuzzStrategy::Boundary,
+            count: 10,
+            delay: 20,
+        });
+
+        assert_eq!(request.target, "192.0.2.1");
+        assert_eq!(request.port, Some(53));
+        assert_eq!(request.protocol, cmd::FuzzProtocol::Udp);
+        assert_eq!(request.strategy, cmd::FuzzStrategy::Boundary);
+        assert_eq!(request.count, 10);
+        assert_eq!(request.delay, 20);
+    }
+}

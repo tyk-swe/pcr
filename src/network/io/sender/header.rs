@@ -125,3 +125,120 @@ impl IpHeaderContext {
         self.fragment.offset.unwrap_or(0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{FragmentRequest, IpRequest, PacketRequest};
+    use pnet::packet::ip::IpNextHeaderProtocols;
+
+    fn packet_spec(ip: IpRequest) -> PacketSpec {
+        PacketSpec::from_request(&PacketRequest {
+            ip,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn ip_header_context_defaults_match_send_defaults() {
+        let context = IpHeaderContext::from_spec(&PacketSpec::default());
+
+        assert_eq!(context.ttl(), 64);
+        assert_eq!(context.hop_limit(), 64);
+        assert_eq!(context.traffic_class(), 0);
+        assert_eq!(context.fragment_offset(), 0);
+        assert!(context.fragment().is_default());
+    }
+
+    #[test]
+    fn ip_header_context_reads_ip_fields_from_spec() {
+        let context = IpHeaderContext::from_spec(&packet_spec(IpRequest {
+            ttl: Some(31),
+            tos: Some(0b1010_0011),
+            fragment: FragmentRequest {
+                offset: Some(16),
+                more_fragments: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        }));
+
+        assert_eq!(context.ttl(), 31);
+        assert_eq!(context.dscp(), 0b0010_1000);
+        assert_eq!(context.ecn(), 0b11);
+        assert_eq!(context.fragment_offset(), 16);
+        assert!(context.fragment().more_fragments);
+    }
+
+    #[test]
+    fn initialize_ipv4_header_sets_core_fields_and_flags() {
+        let context = IpHeaderContext::from_spec(&packet_spec(IpRequest {
+            ttl: Some(40),
+            tos: Some(0b0011_0101),
+            ..Default::default()
+        }));
+        let mut buffer = [0u8; 20];
+        let packet = initialize_ipv4_header(
+            &mut buffer,
+            &context,
+            Ipv4HeaderParams {
+                total_length: 20,
+                identification: 99,
+                protocol: IpNextHeaderProtocols::Tcp,
+                source_ip: Ipv4Addr::new(192, 0, 2, 1),
+                destination_ip: Ipv4Addr::new(198, 51, 100, 1),
+                dont_fragment: true,
+                more_flag: true,
+                fragment_offset: 8,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(packet.get_version(), 4);
+        assert_eq!(packet.get_header_length(), 5);
+        assert_eq!(packet.get_total_length(), 20);
+        assert_eq!(packet.get_ttl(), 40);
+        assert_eq!(packet.get_dscp(), 0b0000_1101);
+        assert_eq!(packet.get_ecn(), 0b01);
+        assert_eq!(packet.get_identification(), 99);
+        assert_eq!(
+            packet.get_flags(),
+            pnet::packet::ipv4::Ipv4Flags::DontFragment
+                | pnet::packet::ipv4::Ipv4Flags::MoreFragments
+        );
+        assert_eq!(packet.get_fragment_offset(), 8);
+        assert_eq!(packet.get_next_level_protocol(), IpNextHeaderProtocols::Tcp);
+        assert_eq!(packet.get_source(), Ipv4Addr::new(192, 0, 2, 1));
+        assert_eq!(packet.get_destination(), Ipv4Addr::new(198, 51, 100, 1));
+    }
+
+    #[test]
+    fn initialize_ipv6_header_sets_core_fields() {
+        let context = IpHeaderContext::from_spec(&packet_spec(IpRequest {
+            ttl: Some(44),
+            tos: Some(0xab),
+            ..Default::default()
+        }));
+        let source = Ipv6Addr::LOCALHOST;
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
+        let mut buffer = [0u8; 40];
+        let packet = initialize_ipv6_header(
+            &mut buffer,
+            &context,
+            16,
+            IpNextHeaderProtocols::Udp,
+            source,
+            destination,
+        )
+        .unwrap();
+
+        assert_eq!(packet.get_version(), 6);
+        assert_eq!(packet.get_traffic_class(), 0xab);
+        assert_eq!(packet.get_payload_length(), 16);
+        assert_eq!(packet.get_next_header(), IpNextHeaderProtocols::Udp);
+        assert_eq!(packet.get_hop_limit(), 44);
+        assert_eq!(packet.get_source(), source);
+        assert_eq!(packet.get_destination(), destination);
+    }
+}

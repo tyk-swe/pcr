@@ -69,3 +69,60 @@ pub(crate) trait RuleSendDispatcher: std::fmt::Debug + Send + Sync {
         packet: Option<&PacketContext>,
     ) -> std::result::Result<(), RuleError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{Ipv6Request, PayloadRequest, TcpRequest, TransportRequest};
+    use std::time::SystemTime;
+
+    fn packet() -> PacketContext {
+        PacketContext {
+            description: "TCP".to_string(),
+            source: Some("192.0.2.10".to_string()),
+            destination: Some("198.51.100.20".to_string()),
+            length: 40,
+            timestamp: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn rule_send_template_renders_nested_request_fields() {
+        let template = RuleSendTemplate::new(PacketRequest {
+            destination: crate::domain::request::DestinationRequest {
+                destination: Some("{destination}".to_string()),
+                ..Default::default()
+            },
+            ipv6: Ipv6Request {
+                extensions: vec!["dest:{source}".to_string()],
+            },
+            payload: PayloadRequest {
+                data: Some("seen {description}".to_string()),
+                ..Default::default()
+            },
+            transport: TransportRequest {
+                command: Some(TransportProtocolRequest::Tcp(TcpRequest {
+                    flags: Some("{description}".to_string()),
+                    options_hex: Some("{length}".to_string()),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+
+        let rendered = template.render(Some(&packet()));
+
+        assert_eq!(
+            rendered.destination.destination.as_deref(),
+            Some("198.51.100.20")
+        );
+        assert_eq!(rendered.ipv6.extensions, vec!["dest:192.0.2.10"]);
+        assert_eq!(rendered.payload.data.as_deref(), Some("seen TCP"));
+        let Some(TransportProtocolRequest::Tcp(tcp)) = rendered.transport.command else {
+            panic!("expected rendered TCP request");
+        };
+        assert_eq!(tcp.flags.as_deref(), Some("TCP"));
+        assert_eq!(tcp.options_hex.as_deref(), Some("40"));
+    }
+}

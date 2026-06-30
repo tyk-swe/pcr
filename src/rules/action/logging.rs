@@ -32,3 +32,20 @@ pub(super) fn execute(
 
     log_message(level, rule_name, &rendered);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn validate_message_accepts_non_empty_text() {
+        validate_message("packet received").unwrap();
+    }
+
+    #[test]
+    fn validate_message_rejects_blank_text() {
+        let err = validate_message(" \t ").unwrap_err();
+
+        assert!(matches!(err, RuleActionError::EmptyLogMessage));
+    }
+}

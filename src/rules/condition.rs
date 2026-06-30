@@ -202,3 +202,151 @@ impl TryFrom<MatcherDef> for Matcher {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn packet() -> PacketContext {
+        PacketContext {
+            description: "TCP packet SYN".to_string(),
+            source: Some("192.0.2.10".to_string()),
+            destination: Some("198.51.100.20".to_string()),
+            length: 64,
+            timestamp: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    fn complex(
+        contains: Option<&str>,
+        equals: Option<&str>,
+        starts_with: Option<&str>,
+        ends_with: Option<&str>,
+        regex: Option<&str>,
+        case_insensitive: bool,
+        not: Option<MatcherDef>,
+    ) -> MatcherDef {
+        MatcherDef::Complex {
+            contains: contains.map(str::to_string),
+            equals: equals.map(str::to_string),
+            starts_with: starts_with.map(str::to_string),
+            ends_with: ends_with.map(str::to_string),
+            regex: regex.map(str::to_string),
+            case_insensitive,
+            not: not.map(Box::new),
+        }
+    }
+
+    #[test]
+    fn simple_matcher_is_case_insensitive_contains() {
+        let matcher = Matcher::try_from(MatcherDef::Simple("syn".to_string())).unwrap();
+
+        assert!(matcher.matches(Some("TCP SYN packet")));
+        assert!(!matcher.matches(None));
+    }
+
+    #[test]
+    fn complex_matchers_cover_string_semantics() {
+        let cases = [
+            (
+                complex(Some("Packet"), None, None, None, None, true, None),
+                true,
+            ),
+            (
+                complex(None, Some("tcp packet syn"), None, None, None, true, None),
+                true,
+            ),
+            (
+                complex(None, None, Some("tcp"), None, None, true, None),
+                true,
+            ),
+            (
+                complex(None, None, None, Some("SYN"), None, false, None),
+                true,
+            ),
+            (
+                complex(None, None, None, None, Some(r"TCP\s+packet"), false, None),
+                true,
+            ),
+        ];
+
+        for (definition, expected) in cases {
+            let matcher = Matcher::try_from(definition).unwrap();
+            assert_eq!(matcher.matches(Some("TCP packet SYN")), expected);
+        }
+    }
+
+    #[test]
+    fn not_matcher_inverts_nested_matcher() {
+        let matcher = Matcher::try_from(complex(
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            Some(MatcherDef::Simple("udp".to_string())),
+        ))
+        .unwrap();
+
+        assert!(matcher.matches(Some("TCP packet")));
+        assert!(!matcher.matches(Some("UDP packet")));
+    }
+
+    #[test]
+    fn matcher_definition_rejects_missing_conflicting_and_invalid_regex() {
+        assert!(matches!(
+            Matcher::try_from(complex(None, None, None, None, None, false, None)).unwrap_err(),
+            MatcherError::MissingDefinition
+        ));
+        assert!(matches!(
+            Matcher::try_from(complex(Some("a"), Some("b"), None, None, None, false, None))
+                .unwrap_err(),
+            MatcherError::ConflictingDefinitions
+        ));
+        assert!(matches!(
+            Matcher::try_from(complex(None, None, None, None, Some("["), false, None)).unwrap_err(),
+            MatcherError::Regex { .. }
+        ));
+    }
+
+    #[test]
+    fn matcher_definition_rejects_not_with_sibling_definition() {
+        let err = Matcher::try_from(complex(
+            Some("tcp"),
+            None,
+            None,
+            None,
+            None,
+            false,
+            Some(MatcherDef::Simple("udp".to_string())),
+        ))
+        .unwrap_err();
+
+        assert!(matches!(err, MatcherError::NotWithSiblingDefinitions));
+    }
+
+    #[test]
+    fn rule_condition_matches_all_defined_fields() {
+        let condition = RuleCondition::try_from(RuleConditionDocument {
+            source: Some(MatcherDef::Simple("192.0.2".to_string())),
+            destination: Some(complex(None, None, Some("198.51"), None, None, false, None)),
+            description: Some(MatcherDef::Simple("syn".to_string())),
+        })
+        .unwrap();
+
+        assert!(condition.matches(&packet()));
+    }
+
+    #[test]
+    fn rule_condition_fails_when_any_defined_field_misses() {
+        let condition = RuleCondition::try_from(RuleConditionDocument {
+            source: Some(MatcherDef::Simple("203.0.113".to_string())),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(!condition.matches(&packet()));
+    }
+}

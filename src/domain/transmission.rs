@@ -214,3 +214,138 @@ pub(crate) fn emission_accounting(
         total_emitted_units,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec() -> TransmissionSpec {
+        TransmissionSpec::default()
+    }
+
+    #[test]
+    fn validate_transmission_policy_rejects_zero_count() {
+        let err = validate_transmission_policy(
+            &TransmissionSpec {
+                count: Some(0),
+                ..spec()
+            },
+            TransmissionPolicy::default(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err, SendControlError::CountMustBePositive);
+    }
+
+    #[test]
+    fn validate_transmission_policy_rejects_unbounded_modes_without_opt_in() {
+        let loop_err = validate_transmission_policy(
+            &TransmissionSpec {
+                loop_send: true,
+                ..spec()
+            },
+            TransmissionPolicy::default(),
+        )
+        .unwrap_err();
+        let flood_err = validate_transmission_policy(
+            &TransmissionSpec {
+                flood: true,
+                ..spec()
+            },
+            TransmissionPolicy::default(),
+        )
+        .unwrap_err();
+
+        assert_eq!(loop_err, SendControlError::LoopRequiresAllowUnbounded);
+        assert_eq!(flood_err, SendControlError::FloodRequiresCount);
+    }
+
+    #[test]
+    fn determine_send_mode_defaults_to_single_attempt() {
+        let mode = determine_send_mode(&spec(), TransmissionPolicy::default()).unwrap();
+
+        assert!(matches!(mode, SendMode::Finite(1)));
+    }
+
+    #[test]
+    fn determine_send_mode_uses_count_and_infinite_modes() {
+        let finite = determine_send_mode(
+            &TransmissionSpec {
+                count: Some(7),
+                ..spec()
+            },
+            TransmissionPolicy::default(),
+        )
+        .unwrap();
+        let infinite = determine_send_mode(
+            &TransmissionSpec {
+                loop_send: true,
+                ..spec()
+            },
+            TransmissionPolicy::new(true, false),
+        )
+        .unwrap();
+
+        assert!(matches!(finite, SendMode::Finite(7)));
+        assert!(matches!(infinite, SendMode::Infinite));
+    }
+
+    #[test]
+    fn emission_accounting_calculates_total_units() {
+        let accounting = emission_accounting(
+            &TransmissionSpec {
+                count: Some(3),
+                ..spec()
+            },
+            TransmissionPolicy::default(),
+            4,
+        )
+        .unwrap();
+
+        assert_eq!(
+            accounting,
+            EmissionAccounting {
+                attempts: Some(3),
+                units_per_attempt: 4,
+                total_emitted_units: Some(12)
+            }
+        );
+    }
+
+    #[test]
+    fn emission_accounting_represents_unbounded_total_as_none() {
+        let accounting = emission_accounting(
+            &TransmissionSpec {
+                flood: true,
+                ..spec()
+            },
+            TransmissionPolicy::new(true, false),
+            4,
+        )
+        .unwrap();
+
+        assert_eq!(accounting.attempts, None);
+        assert_eq!(accounting.total_emitted_units, None);
+    }
+
+    #[test]
+    fn emission_accounting_rejects_total_overflow() {
+        let err = emission_accounting(
+            &TransmissionSpec {
+                count: Some(u64::MAX),
+                ..spec()
+            },
+            TransmissionPolicy::default(),
+            2,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            err,
+            SendControlError::EmittedUnitsOverflow {
+                attempts: u64::MAX,
+                units_per_attempt: 2
+            }
+        );
+    }
+}

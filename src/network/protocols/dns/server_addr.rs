@@ -58,3 +58,52 @@ pub(crate) fn resolve_dns_server_address(server: &str) -> Result<String> {
         Ok(format!("{}:53", server))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_dns_server_address_adds_default_ports() {
+        assert_eq!(resolve_dns_server_address("1.1.1.1").unwrap(), "1.1.1.1:53");
+        assert_eq!(
+            resolve_dns_server_address("2001:4860:4860::8888").unwrap(),
+            "[2001:4860:4860::8888]:53"
+        );
+        assert_eq!(
+            resolve_dns_server_address("dns.example").unwrap(),
+            "dns.example:53"
+        );
+    }
+
+    #[test]
+    fn resolve_dns_server_address_preserves_socket_addresses() {
+        assert_eq!(
+            resolve_dns_server_address("1.1.1.1:5353").unwrap(),
+            "1.1.1.1:5353"
+        );
+        assert_eq!(
+            resolve_dns_server_address("[2001:4860:4860::8888]:5353").unwrap(),
+            "[2001:4860:4860::8888]:5353"
+        );
+    }
+
+    #[test]
+    fn resolve_dns_server_address_treats_unbracketed_ipv6_like_value_as_ip() {
+        assert_eq!(
+            resolve_dns_server_address("2001:4860:4860::8888:5353").unwrap(),
+            "[2001:4860:4860::8888:5353]:53"
+        );
+    }
+
+    #[test]
+    fn resolve_dns_server_address_rejects_empty_and_invalid_ports() {
+        assert!(resolve_dns_server_address(" ").is_err());
+        assert!(resolve_dns_server_address("dns.example:notaport").is_err());
+    }
+
+    #[test]
+    fn resolve_dns_server_address_rejects_malformed_ipv6_like_input() {
+        assert!(resolve_dns_server_address("2001:db8::1:99999").is_err());
+    }
+}

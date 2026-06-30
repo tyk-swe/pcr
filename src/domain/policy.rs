@@ -578,3 +578,326 @@ fn classify_ipv6(addr: Ipv6Addr) -> TargetScope {
 
     TargetScope::Public
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::TransmissionRequest;
+    use crate::domain::request::{
+        FragmentProfile, FragmentRequest, IpRequest, Layer2Request, PacketRequest,
+    };
+
+    fn plan_with(scope: TargetScope) -> TrafficPlan {
+        TrafficPlan::new(TrafficMode::Send, scope)
+    }
+
+    fn rejection_code(plan: TrafficPlan) -> PolicyRejectionCode {
+        TrafficPolicy::default().authorize(&plan).unwrap_err().code
+    }
+
+    #[test]
+    fn traffic_policy_allows_default_private_plan() {
+        let outcome = TrafficPolicy::default()
+            .authorize(&plan_with(TargetScope::Private))
+            .unwrap();
+
+        assert_eq!(outcome.status, "allowed");
+    }
+
+    #[test]
+    fn traffic_policy_rejects_zero_counts_first() {
+        let mut plan = plan_with(TargetScope::Private);
+        plan.target_count = 0;
+
+        assert_eq!(
+            rejection_code(plan),
+            PolicyRejectionCode::CountMustBePositive
+        );
+    }
+
+    #[test]
+    fn traffic_policy_rejects_unbounded_without_opt_in() {
+        let mut plan = plan_with(TargetScope::Private);
+        plan.unbounded = true;
+        plan.estimated_packets = None;
+
+        assert_eq!(rejection_code(plan), PolicyRejectionCode::UnboundedSend);
+    }
+
+    #[test]
+    fn traffic_policy_rejects_public_target_without_opt_in() {
+        assert_eq!(
+            rejection_code(plan_with(TargetScope::Public)),
+            PolicyRejectionCode::PublicTarget
+        );
+    }
+
+    #[test]
+    fn traffic_policy_rejects_malformed_without_opt_in() {
+        let mut plan = plan_with(TargetScope::Private);
+        plan.malformed = true;
+
+        assert_eq!(
+            rejection_code(plan),
+            PolicyRejectionCode::MalformedRequiresOptIn
+        );
+    }
+
+    #[test]
+    fn traffic_policy_rejects_high_volume_and_specific_caps() {
+        let mut high_volume = plan_with(TargetScope::Private);
+        high_volume.port_count = DEFAULT_MAX_PORTS + 1;
+        assert_eq!(
+            rejection_code(high_volume.clone()),
+            PolicyRejectionCode::HighVolumeRequiresOptIn
+        );
+
+        let policy = TrafficPolicy {
+            allow_high_volume: true,
+            budget: TrafficBudget {
+                max_ports: DEFAULT_MAX_PORTS,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert_eq!(
+            policy.authorize(&high_volume).unwrap_err().code,
+            PolicyRejectionCode::PortCapExceeded
+        );
+    }
+
+    #[test]
+    fn traffic_policy_rejects_each_configured_cap() {
+        let policy = TrafficPolicy {
+            allow_high_volume: true,
+            budget: TrafficBudget {
+                max_targets: 1,
+                max_ports: 1,
+                max_estimated_packets: 1,
+                max_batch_size: 1,
+                max_rate_per_sec: 1,
+            },
+            ..Default::default()
+        };
+
+        let mut target_plan = plan_with(TargetScope::Private);
+        target_plan.target_count = 2;
+        let mut packet_plan = plan_with(TargetScope::Private);
+        packet_plan.estimated_packets = Some(2);
+        let mut batch_plan = plan_with(TargetScope::Private);
+        batch_plan.batch_size = 2;
+        let mut rate_plan = plan_with(TargetScope::Private);
+        rate_plan.rate_per_sec = Some(2);
+
+        assert_eq!(
+            policy.authorize(&target_plan).unwrap_err().code,
+            PolicyRejectionCode::TargetCapExceeded
+        );
+        assert_eq!(
+            policy.authorize(&packet_plan).unwrap_err().code,
+            PolicyRejectionCode::PacketCapExceeded
+        );
+        assert_eq!(
+            policy.authorize(&batch_plan).unwrap_err().code,
+            PolicyRejectionCode::BatchCapExceeded
+        );
+        assert_eq!(
+            policy.authorize(&rate_plan).unwrap_err().code,
+            PolicyRejectionCode::RateCapExceeded
+        );
+    }
+
+    #[test]
+    fn traffic_policy_validate_configuration_requires_high_volume_for_raised_caps() {
+        let policy = TrafficPolicy {
+            budget: TrafficBudget {
+                max_targets: DEFAULT_MAX_TARGETS + 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            policy.validate_configuration().unwrap_err().code,
+            PolicyRejectionCode::HighVolumeRequiresOptIn
+        );
+        assert!(TrafficPolicy {
+            allow_high_volume: true,
+            ..policy
+        }
+        .validate_configuration()
+        .is_ok());
+    }
+
+    #[test]
+    fn traffic_policy_rate_delay_handles_zero_and_nonzero_rates() {
+        assert_eq!(
+            TrafficPolicy {
+                budget: TrafficBudget {
+                    max_rate_per_sec: 2,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .rate_delay(),
+            Some(std::time::Duration::from_millis(500))
+        );
+        assert_eq!(
+            TrafficPolicy {
+                budget: TrafficBudget {
+                    max_rate_per_sec: 0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+            .rate_delay(),
+            None
+        );
+    }
+
+    #[test]
+    fn classify_ip_covers_ipv4_scopes() {
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))),
+            TargetScope::Local
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+            TargetScope::Private
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+            TargetScope::Documentation
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))),
+            TargetScope::Public
+        );
+    }
+
+    #[test]
+    fn classify_ip_covers_ipv6_scopes() {
+        assert_eq!(
+            classify_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            TargetScope::Local
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V6("fd00::1".parse().unwrap())),
+            TargetScope::Private
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V6("2001:db8::1".parse().unwrap())),
+            TargetScope::Documentation
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V6("2606:4700:4700::1111".parse().unwrap())),
+            TargetScope::Public
+        );
+    }
+
+    #[test]
+    fn combine_target_scopes_returns_highest_risk_scope() {
+        assert_eq!(
+            combine_target_scopes([TargetScope::Local, TargetScope::Documentation]),
+            TargetScope::Documentation
+        );
+        assert_eq!(
+            combine_target_scopes([TargetScope::Private, TargetScope::Public]),
+            TargetScope::Public
+        );
+    }
+
+    #[test]
+    fn traffic_plan_from_packet_request_detects_unbounded_malformed_and_privileges() {
+        let request = PacketRequest {
+            destination: crate::domain::request::DestinationRequest {
+                destination_ip: Some("192.168.1.10".to_string()),
+                ..Default::default()
+            },
+            layer2: Layer2Request {
+                source_mac: Some("00:11:22:33:44:55".to_string()),
+                ..Default::default()
+            },
+            ip: IpRequest {
+                fragment: FragmentRequest {
+                    profile: Some(FragmentProfile::Overlap),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            transmit: TransmissionRequest {
+                flood: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let plan = TrafficPlan::from_packet_request(
+            &request,
+            TrafficMode::Send,
+            &TrafficPolicy::default(),
+        );
+
+        assert_eq!(plan.target_scope, TargetScope::Private);
+        assert!(plan.malformed);
+        assert!(plan.unbounded);
+        assert_eq!(plan.estimated_packets, None);
+        assert_eq!(plan.required_privileges, vec![TrafficPrivilege::RawSocket]);
+    }
+
+    #[test]
+    fn packet_spec_helpers_classify_routing_segments_and_malformed_options() {
+        let mut spec = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("2001:db8::1".to_string()),
+                fragment: FragmentRequest {
+                    teardrop: Some(true),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+        spec.ipv6.exthdrs = vec![Ipv6ExtHeader::Routing {
+            routing_type: 0,
+            segments: vec!["2001:db8::1".parse().unwrap(), "8::1".parse().unwrap()],
+            data: None,
+        }];
+
+        assert_eq!(packet_spec_target_scope(&spec), TargetScope::Public);
+        assert!(packet_spec_uses_malformed_options(&spec));
+    }
+
+    #[test]
+    fn packet_spec_privileges_detect_raw_socket_requirements() {
+        let no_raw = PacketSpec::default();
+        let raw = PacketSpec {
+            transport: TransportSpec::Icmp(crate::domain::spec::IcmpSpec::default()),
+            ..Default::default()
+        };
+
+        assert!(packet_spec_privileges(&no_raw).is_empty());
+        assert_eq!(
+            packet_spec_privileges(&raw),
+            vec![TrafficPrivilege::RawSocket]
+        );
+    }
+
+    #[test]
+    fn validate_unbounded_request_policy_reuses_packet_policy() {
+        let request = TransmissionRequest {
+            loop_forever: Some(true),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            validate_unbounded_request_policy(&request, TrafficPolicy::default())
+                .unwrap_err()
+                .code,
+            PolicyRejectionCode::UnboundedSend
+        );
+        assert!(
+            validate_unbounded_request_policy(&request, TrafficPolicy::new(true, false)).is_ok()
+        );
+    }
+}

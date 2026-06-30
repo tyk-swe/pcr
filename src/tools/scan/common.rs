@@ -749,3 +749,157 @@ where
 
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ports_sorts_deduplicates_and_expands_ranges() {
+        assert_eq!(parse_ports("80, 22-24, 22").unwrap(), vec![22, 23, 24, 80]);
+    }
+
+    #[test]
+    fn parse_ports_rejects_empty_invalid_and_reversed_ranges() {
+        assert!(parse_ports(" , ").is_err());
+        assert!(parse_ports("abc").is_err());
+        assert!(parse_ports("10-9").is_err());
+    }
+
+    #[test]
+    fn push_scan_target_enforces_target_limit() {
+        let mut targets = vec![0u8; MAX_SCAN_TARGETS];
+
+        assert!(push_scan_target(&mut targets, 1).is_err());
+    }
+
+    #[test]
+    fn require_ipv6_destination_rejects_ipv4() {
+        let v6 = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 0);
+        let v4 = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0);
+
+        assert_eq!(
+            require_ipv6_destination(v6, "test").unwrap(),
+            Ipv6Addr::LOCALHOST
+        );
+        assert!(require_ipv6_destination(v4, "test").is_err());
+    }
+
+    #[test]
+    fn validate_source_override_rejects_conflict_and_family_mismatch() {
+        assert!(validate_source_override(
+            &Some("192.0.2.1".to_string()),
+            &Some("192.0.2.2".to_string()),
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))
+        )
+        .is_err());
+        assert!(validate_source_override(
+            &None,
+            &Some("2001:db8::1".to_string()),
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn resolve_explicit_source_override_accepts_source_ip_and_interface_literal() {
+        assert_eq!(
+            resolve_explicit_source_override(
+                &None,
+                &Some("192.0.2.5".to_string()),
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))
+            )
+            .unwrap(),
+            Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)))
+        );
+        assert_eq!(
+            resolve_explicit_source_override(
+                &Some("2001:db8::5".to_string()),
+                &None,
+                IpAddr::V6("2001:db8::10".parse().unwrap())
+            )
+            .unwrap(),
+            Some(IpAddr::V6("2001:db8::5".parse().unwrap()))
+        );
+    }
+
+    #[test]
+    fn clamp_batch_helpers_keep_values_within_bounds() {
+        assert_eq!(clamp_batch_size(0, 10), 1);
+        assert_eq!(clamp_batch_size(20, 10), 10);
+        assert_eq!(clamp_batch_to_ports(10, &[1, 2, 3]), 3);
+    }
+
+    #[test]
+    fn classify_icmp_port_unreachable_maps_expected_codes_to_closed() {
+        let v4_dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 0);
+        let v6_dest = SocketAddr::new(IpAddr::V6("2001:db8::1".parse().unwrap()), 0);
+
+        assert_eq!(
+            classify_icmp_port_unreachable(
+                v4_dest,
+                IcmpTypes::DestinationUnreachable.0,
+                icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable.0
+            ),
+            PortState::Closed
+        );
+        assert_eq!(
+            classify_icmp_port_unreachable(
+                v6_dest,
+                Icmpv6Types::DestinationUnreachable.0,
+                ICMPV6_CODE_PORT_UNREACHABLE
+            ),
+            PortState::Closed
+        );
+        assert_eq!(
+            classify_icmp_port_unreachable(v4_dest, IcmpTypes::EchoReply.0, 0),
+            PortState::Filtered
+        );
+    }
+
+    #[test]
+    fn calculate_source_port_stays_in_ephemeral_range_and_wraps() {
+        assert_eq!(calculate_source_port(0, 0), 32768);
+        assert_eq!(calculate_source_port(u16::MAX, 1), 32768);
+    }
+
+    #[test]
+    fn handle_scan_event_matches_packet_and_icmp_responses() {
+        let config = ConcurrentScanConfig {
+            destination: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0),
+            source_ip: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)),
+            timeout: Duration::ZERO,
+            batch_size: 1,
+            send_delay: None,
+            base_port_offset: 0,
+            base_port_override: Some(40000),
+            initial_port_state: PortState::Filtered,
+        };
+        let port_map = build_port_map(&[80], 40000, 0);
+        let mut results = initial_results(&[80], PortState::Filtered);
+
+        assert!(handle_scan_event(
+            config,
+            &port_map,
+            &mut results,
+            &|_, results, port| {
+                results.insert(port, PortState::Open);
+            },
+            ScanEvent::PacketResponse {
+                source_port: 80,
+                dest_port: 40000,
+                src_addr: config.destination.ip(),
+                flags: None,
+            },
+        ));
+        assert_eq!(results[&80], PortState::Open);
+
+        assert!(!handle_scan_event(
+            config,
+            &port_map,
+            &mut results,
+            &|_, _, _| {},
+            ScanEvent::Other,
+        ));
+    }
+}

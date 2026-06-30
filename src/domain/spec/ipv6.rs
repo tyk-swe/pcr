@@ -336,3 +336,224 @@ fn measure_ipv6_options_header(header: &'static str, options: &[u8]) -> SpecResu
     }
     Ok(total)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::Ipv6Request;
+
+    #[test]
+    fn parse_ipv6_ext_header_accepts_hop_options_hex() {
+        let header = parse_ipv6_ext_header("hopopts:options=01 02 0a").unwrap();
+
+        assert_eq!(
+            header,
+            Ipv6ExtHeader::HopByHop {
+                options: vec![1, 2, 10]
+            }
+        );
+    }
+
+    #[test]
+    fn parse_ipv6_ext_header_accepts_destination_options_alias() {
+        let header = parse_ipv6_ext_header("dest:0x0a0b").unwrap();
+
+        assert_eq!(
+            header,
+            Ipv6ExtHeader::DestinationOptions {
+                options: vec![0x0a, 0x0b]
+            }
+        );
+    }
+
+    #[test]
+    fn parse_ipv6_ext_header_accepts_simple_routing_segments() {
+        let header = parse_ipv6_ext_header("route:2001:db8::1;2001:db8::2").unwrap();
+
+        assert_eq!(
+            header,
+            Ipv6ExtHeader::Routing {
+                routing_type: 0,
+                segments: vec![
+                    "2001:db8::1".parse().unwrap(),
+                    "2001:db8::2".parse().unwrap()
+                ],
+                data: None,
+            }
+        );
+    }
+
+    #[test]
+    fn parse_ipv6_ext_header_accepts_keyed_routing_descriptor() {
+        let header =
+            parse_ipv6_ext_header("routing:type=4,data=0x10,segments=2001:db8::5,2001:db8::6")
+                .unwrap();
+
+        assert_eq!(
+            header,
+            Ipv6ExtHeader::Routing {
+                routing_type: 4,
+                segments: vec![
+                    "2001:db8::5".parse().unwrap(),
+                    "2001:db8::6".parse().unwrap()
+                ],
+                data: Some(0x10),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_ipv6_ext_header_rejects_empty_and_unknown_headers() {
+        assert!(matches!(
+            parse_ipv6_ext_header(" ").unwrap_err(),
+            SpecError::EmptyIpv6ExtensionDescriptor
+        ));
+        assert!(matches!(
+            parse_ipv6_ext_header("bogus").unwrap_err(),
+            SpecError::UnknownIpv6ExtensionHeader { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_ipv6_ext_header_rejects_unknown_options_parameter() {
+        let err = parse_ipv6_ext_header("hopopts:data=00").unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::UnknownIpv6ExtensionParameter { .. }
+        ));
+    }
+
+    #[test]
+    fn parse_ipv6_ext_header_wraps_bad_options_hex() {
+        let err = parse_ipv6_ext_header("dest:0x0").unwrap_err();
+
+        assert!(matches!(err, SpecError::Ipv6ExtensionPayloadParse { .. }));
+    }
+
+    #[test]
+    fn parse_routing_segments_rejects_empty_special_and_too_many() {
+        assert!(matches!(
+            parse_routing_segments("").unwrap_err(),
+            SpecError::Ipv6RoutingSegmentsEmpty
+        ));
+        assert!(matches!(
+            parse_routing_segments("::1").unwrap_err(),
+            SpecError::Ipv6RoutingSegmentSpecialAddress { .. }
+        ));
+
+        let too_many = (0..=MAX_ROUTING_SEGMENTS)
+            .map(|idx| format!("2001:db8::{idx:x}"))
+            .collect::<Vec<_>>()
+            .join(";");
+        assert!(matches!(
+            parse_routing_segments(&too_many).unwrap_err(),
+            SpecError::Ipv6RoutingSegmentsTooMany {
+                max_segments: MAX_ROUTING_SEGMENTS
+            }
+        ));
+    }
+
+    #[test]
+    fn validate_ipv6_ext_chain_accepts_ordered_unique_headers() {
+        let headers = vec![
+            Ipv6ExtHeader::HopByHop { options: vec![] },
+            Ipv6ExtHeader::Routing {
+                routing_type: 0,
+                segments: vec!["2001:db8::1".parse().unwrap()],
+                data: None,
+            },
+            Ipv6ExtHeader::DestinationOptions {
+                options: vec![0, 1],
+            },
+        ];
+
+        validate_ipv6_ext_chain(&headers).unwrap();
+    }
+
+    #[test]
+    fn validate_ipv6_ext_chain_rejects_hop_by_hop_not_first() {
+        let err = validate_ipv6_ext_chain(&[
+            Ipv6ExtHeader::DestinationOptions { options: vec![] },
+            Ipv6ExtHeader::HopByHop { options: vec![] },
+        ])
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::Ipv6HopByHopNotFirst));
+    }
+
+    #[test]
+    fn validate_ipv6_ext_chain_rejects_duplicate_hop_by_hop() {
+        let err = validate_ipv6_ext_chain(&[
+            Ipv6ExtHeader::HopByHop { options: vec![] },
+            Ipv6ExtHeader::HopByHop { options: vec![] },
+        ])
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::Ipv6HopByHopDuplicate));
+    }
+
+    #[test]
+    fn validate_ipv6_ext_chain_rejects_too_many_destination_headers() {
+        let err = validate_ipv6_ext_chain(&[
+            Ipv6ExtHeader::DestinationOptions { options: vec![] },
+            Ipv6ExtHeader::DestinationOptions { options: vec![] },
+            Ipv6ExtHeader::DestinationOptions { options: vec![] },
+        ])
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::Ipv6DestinationOptionsTooMany));
+    }
+
+    #[test]
+    fn validate_ipv6_ext_chain_rejects_duplicate_routing_header() {
+        let routing = Ipv6ExtHeader::Routing {
+            routing_type: 0,
+            segments: vec!["2001:db8::1".parse().unwrap()],
+            data: None,
+        };
+        let err = validate_ipv6_ext_chain(&[routing.clone(), routing]).unwrap_err();
+
+        assert!(matches!(err, SpecError::Ipv6RoutingDuplicate));
+    }
+
+    #[test]
+    fn validate_ipv6_ext_chain_rejects_oversized_options_header() {
+        let err = validate_ipv6_ext_chain(&[Ipv6ExtHeader::HopByHop {
+            options: vec![0; 2047],
+        }])
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::Ipv6OptionsHeaderTooLong {
+                header: "Hop-by-Hop",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn ipv6_spec_from_request_parses_and_validates_chain() {
+        let spec = Ipv6Spec::from_request(&Ipv6Request {
+            extensions: vec![
+                "hop".to_string(),
+                "routing:segments=2001:db8::1".to_string(),
+                "dest:aa".to_string(),
+            ],
+        })
+        .unwrap();
+
+        assert_eq!(spec.exthdrs.len(), 3);
+    }
+
+    #[test]
+    fn ipv6_spec_from_request_rejects_blank_descriptor() {
+        let err = Ipv6Spec::from_request(&Ipv6Request {
+            extensions: vec![" ".to_string()],
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::EmptyIpv6ExtensionDescriptor));
+    }
+}

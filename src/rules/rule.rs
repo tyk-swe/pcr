@@ -130,3 +130,116 @@ impl Rule {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::action::RuleActionDocument;
+    use crate::rules::condition::{MatcherDef, RuleConditionDocument};
+    use crate::rules::error::RuleActionError;
+    use crate::rules::model::RuleLogLevel;
+    use std::time::SystemTime;
+
+    fn log_action(message: &str) -> RuleActionDocument {
+        RuleActionDocument::Log {
+            message: message.to_string(),
+            level: Some(RuleLogLevel::Info),
+        }
+    }
+
+    fn packet(description: &str) -> PacketContext {
+        PacketContext {
+            description: description.to_string(),
+            source: None,
+            destination: None,
+            length: 1,
+            timestamp: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn rule_from_document_rejects_missing_actions_with_context() {
+        let err = Rule::from_document(
+            RuleDocument {
+                name: Some("empty".to_string()),
+                trigger: RuleTrigger::Receive,
+                condition: None,
+                actions: vec![],
+            },
+            2,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::MissingAction {
+                rule_index: 2,
+                rule,
+                ..
+            } if rule == "empty"
+        ));
+    }
+
+    #[test]
+    fn rule_from_document_wraps_action_errors_with_action_context() {
+        let err = Rule::from_document(
+            RuleDocument {
+                name: Some("bad-action".to_string()),
+                trigger: RuleTrigger::Receive,
+                condition: None,
+                actions: vec![log_action(" ")],
+            },
+            1,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::ActionContext {
+                rule_index: 1,
+                action_index: 0,
+                source: RuleActionError::EmptyLogMessage,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rule_from_document_builds_condition_and_actions() {
+        let rule = Rule::from_document(
+            RuleDocument {
+                name: Some("tcp".to_string()),
+                trigger: RuleTrigger::Timer,
+                condition: Some(RuleConditionDocument {
+                    description: Some(MatcherDef::Simple("tcp".to_string())),
+                    ..Default::default()
+                }),
+                actions: vec![log_action("matched")],
+            },
+            0,
+        )
+        .unwrap();
+
+        assert!(rule.triggers_on_timer());
+        assert!(!rule.triggers_on_receive());
+        assert!(rule.matches(&packet("TCP packet")));
+        assert!(!rule.matches(&packet("UDP packet")));
+        assert_eq!(rule.actions.len(), 1);
+    }
+
+    #[test]
+    fn rule_without_condition_matches_every_packet() {
+        let rule = Rule::from_document(
+            RuleDocument {
+                name: None,
+                trigger: RuleTrigger::Receive,
+                condition: None,
+                actions: vec![log_action("matched")],
+            },
+            0,
+        )
+        .unwrap();
+
+        assert!(rule.matches(&packet("anything")));
+    }
+}

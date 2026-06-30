@@ -115,3 +115,70 @@ pub(super) fn validate_dns_response(
 
     Ok(message)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use trust_dns_proto::op::{OpCode, Query};
+    use trust_dns_proto::rr::DNSClass;
+
+    fn response_bytes(id: u16, name: &str, record_type: RecordType) -> Vec<u8> {
+        let mut message = Message::new();
+        message.set_id(id);
+        message.set_message_type(MessageType::Response);
+        message.set_op_code(OpCode::Query);
+        message.set_response_code(ResponseCode::NoError);
+        let mut query = Query::new();
+        query.set_name(Name::from_str(name).unwrap());
+        query.set_query_type(record_type);
+        query.set_query_class(DNSClass::IN);
+        message.add_query(query);
+        message.to_vec().unwrap()
+    }
+
+    #[test]
+    fn inspect_dns_response_header_accepts_response_and_reports_truncation() {
+        let response = [0x12, 0x34, 0x82, 0x00, 0, 1, 0, 0, 0, 0, 0, 0];
+        let summary = inspect_dns_response_header(&response, 0x1234).unwrap();
+
+        assert!(summary.truncated);
+    }
+
+    #[test]
+    fn inspect_dns_response_header_rejects_short_query_error_and_wrong_id() {
+        assert!(inspect_dns_response_header(&[0; 2], 1).is_err());
+        assert!(inspect_dns_response_header(&[0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 1).is_err());
+        assert!(
+            inspect_dns_response_header(&[0, 1, 0x80, 0x03, 0, 0, 0, 0, 0, 0, 0, 0], 1).is_err()
+        );
+        assert!(inspect_dns_response_header(&[0, 2, 0x80, 0, 0, 0, 0, 0, 0, 0, 0, 0], 1).is_err());
+    }
+
+    #[test]
+    fn validate_dns_response_accepts_matching_query() {
+        let bytes = response_bytes(7, "example.test.", RecordType::AAAA);
+        let message = validate_dns_response(&bytes, 7, "example.test", RecordType::AAAA).unwrap();
+
+        assert_eq!(message.id(), 7);
+        assert_eq!(message.queries()[0].query_type(), RecordType::AAAA);
+    }
+
+    #[test]
+    fn validate_dns_response_rejects_query_name_type_and_id_mismatch() {
+        let bytes = response_bytes(7, "example.test.", RecordType::A);
+
+        assert!(validate_dns_response(&bytes, 8, "example.test", RecordType::A).is_err());
+        assert!(validate_dns_response(&bytes, 7, "other.test", RecordType::A).is_err());
+        assert!(validate_dns_response(&bytes, 7, "example.test", RecordType::AAAA).is_err());
+    }
+
+    #[test]
+    fn validate_dns_response_rejects_response_without_queries() {
+        let mut message = Message::new();
+        message.set_id(1);
+        message.set_message_type(MessageType::Response);
+        let bytes = message.to_vec().unwrap();
+
+        assert!(validate_dns_response(&bytes, 1, "example.test", RecordType::A).is_err());
+    }
+}

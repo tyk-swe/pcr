@@ -125,3 +125,75 @@ impl RuleAction {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_action_defaults_to_info_level() {
+        let action = RuleAction::try_from(RuleActionDocument::Log {
+            message: "hello".to_string(),
+            level: None,
+        })
+        .unwrap();
+
+        assert!(matches!(
+            action,
+            RuleAction::Log {
+                level: RuleLogLevel::Info,
+                message
+            } if message == "hello"
+        ));
+    }
+
+    #[test]
+    fn log_action_rejects_empty_message() {
+        let err = RuleAction::try_from(RuleActionDocument::Log {
+            message: " ".to_string(),
+            level: None,
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::Action(RuleActionError::EmptyLogMessage)
+        ));
+    }
+
+    #[test]
+    fn send_action_rejects_legacy_options_wrapper() {
+        let yaml = r#"
+type: send
+options:
+  destination:
+    destination_ip: 192.0.2.1
+"#;
+        let doc: RuleActionDocument = crate::rules::yaml::from_str(yaml).unwrap();
+        let err = RuleAction::try_from(doc).unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::Action(RuleActionError::LegacySendOptionsWrapper)
+        ));
+    }
+
+    #[test]
+    fn send_action_execute_requires_sender_context() {
+        let action = RuleAction::try_from(RuleActionDocument::Send {
+            legacy_options: None,
+            request: Box::default(),
+        })
+        .unwrap();
+        let executor = BoundedExecutor::new("test-rule-worker", 1, 1).unwrap();
+        let err = action
+            .execute("send-rule", None, None, &executor)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::Action(RuleActionError::MissingSendExecutor { rule })
+                if rule == "send-rule"
+        ));
+    }
+}

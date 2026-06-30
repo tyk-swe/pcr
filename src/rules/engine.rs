@@ -273,3 +273,189 @@ impl RuleEngine {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::diagnostic::RULE_PARSE_UNKNOWN_FIELD;
+    use crate::rules::error::RuleActionError;
+
+    const VALID_RULE: &str = r#"
+- name: log-tcp
+  trigger: receive
+  condition:
+    description:
+      contains: TCP
+      case_insensitive: true
+  actions:
+    - type: log
+      level: info
+      message: "packet {description}"
+"#;
+
+    #[test]
+    fn load_rules_from_str_parses_valid_rule() {
+        let report = RuleEngine::validate_rules_from_str(VALID_RULE).unwrap();
+
+        assert_eq!(report.rule_count(), 1);
+        assert!(!report.has_errors());
+        assert!(report.diagnostics().is_empty());
+    }
+
+    #[test]
+    fn load_rules_from_str_rejects_empty_rule_list() {
+        let err = RuleEngine::validate_rules_from_str("[]").unwrap_err();
+
+        assert!(matches!(err, RuleError::EmptyRulesFile));
+    }
+
+    #[test]
+    fn unknown_fields_are_warnings_by_default() {
+        let yaml = r#"
+- name: unknowns
+  unexpected_rule_field: true
+  condition:
+    description:
+      contains: TCP
+      extra_matcher_field: true
+  actions:
+    - type: log
+      message: hi
+      extra_action_field: true
+"#;
+        let report = RuleEngine::validate_rules_from_str(yaml).unwrap();
+
+        let diagnostics = report.diagnostics();
+        assert_eq!(diagnostics.len(), 3);
+        assert!(diagnostics.iter().all(|d| {
+            d.code == RULE_PARSE_UNKNOWN_FIELD
+                && d.severity == RuleDiagnosticSeverity::Warning
+                && !d.is_error()
+        }));
+    }
+
+    #[test]
+    fn unknown_fields_are_errors_in_strict_mode() {
+        let yaml = r#"
+- name: strict
+  actions:
+    - type: send
+      payload:
+        data: hi
+        unknown_payload_field: true
+"#;
+        let err = RuleEngine::validate_rules_from_str_with_options(
+            yaml,
+            RuleLoadOptions::validation().with_strict(true),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::Validation {
+                errors: 1,
+                diagnostics
+            } if diagnostics[0].path == "rules[0].actions[0].payload.unknown_payload_field"
+                && diagnostics[0].severity == RuleDiagnosticSeverity::Error
+        ));
+    }
+
+    #[test]
+    fn missing_action_from_yaml_includes_rule_context() {
+        let err = RuleEngine::validate_rules_from_str(
+            r#"
+- name: no-actions
+  trigger: receive
+"#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::MissingAction {
+                rule_index: 0,
+                rule,
+                ..
+            } if rule == "no-actions"
+        ));
+    }
+
+    #[test]
+    fn command_definition_errors_are_wrapped_with_action_context() {
+        let err = RuleEngine::validate_rules_from_str(
+            r#"
+- name: command
+  actions:
+    - type: command
+      program: /bin/echo
+      enabled: true
+"#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::ActionContext {
+                rule_index: 0,
+                action_index: 0,
+                source: RuleActionError::MissingCommandAllowlist,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn legacy_send_options_wrapper_is_rejected_from_yaml() {
+        let err = RuleEngine::validate_rules_from_str(
+            r#"
+- name: legacy-send
+  actions:
+    - type: send
+      options:
+        payload:
+          data: hi
+"#,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleError::ActionContext {
+                source: RuleActionError::LegacySendOptionsWrapper,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn rule_engine_reports_trigger_presence_after_replace() {
+        let rules = RuleEngine::validate_rules_from_str(
+            r#"
+- name: timer
+  trigger: timer
+  actions:
+    - type: log
+      message: timer
+- name: startup
+  trigger: startup
+  actions:
+    - type: log
+      message: startup
+"#,
+        )
+        .unwrap()
+        .into_rules();
+        let mut engine = RuleEngine::new_configured(RuleExecutorConfig {
+            workers: 1,
+            queue_capacity: 1,
+        })
+        .unwrap();
+
+        engine.replace_rules(rules);
+
+        assert_eq!(engine.len(), 2);
+        assert!(!engine.has_receive_triggers());
+        assert!(engine.has_timer_triggers());
+        assert!(engine.has_startup_triggers());
+    }
+}

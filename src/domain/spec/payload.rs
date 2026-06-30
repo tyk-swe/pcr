@@ -183,3 +183,181 @@ pub(crate) enum PayloadSource {
     },
     Bytes(Vec<u8>),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn payload_spec_defaults_to_empty_source() {
+        let spec = PayloadSpec::from_request(&PayloadRequest::default()).unwrap();
+
+        assert!(matches!(spec.source, PayloadSource::Empty));
+    }
+
+    #[test]
+    fn payload_spec_accepts_each_primary_source() {
+        let cases = [
+            (
+                PayloadRequest {
+                    data: Some("hello".to_string()),
+                    ..Default::default()
+                },
+                "inline",
+            ),
+            (
+                PayloadRequest {
+                    data_hex: Some("6869".to_string()),
+                    ..Default::default()
+                },
+                "hex",
+            ),
+            (
+                PayloadRequest {
+                    data_file: Some("/tmp/payload.bin".to_string()),
+                    ..Default::default()
+                },
+                "file",
+            ),
+            (
+                PayloadRequest {
+                    random_payload_size: Some(32),
+                    ..Default::default()
+                },
+                "random",
+            ),
+        ];
+
+        for (request, expected) in cases {
+            let spec = PayloadSpec::from_request(&request).unwrap();
+            let actual = match spec.source {
+                PayloadSource::Inline(_) => "inline",
+                PayloadSource::Hex(_) => "hex",
+                PayloadSource::File(_) => "file",
+                PayloadSource::Random(_) => "random",
+                _ => "other",
+            };
+            assert_eq!(actual, expected);
+        }
+    }
+
+    #[test]
+    fn payload_spec_rejects_multiple_sources() {
+        let err = PayloadSpec::from_request(&PayloadRequest {
+            data: Some("hello".to_string()),
+            data_hex: Some("6869".to_string()),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::MultiplePayloadSources));
+    }
+
+    #[test]
+    fn payload_spec_defaults_dns_record_type_to_a() {
+        let spec = PayloadSpec::from_request(&PayloadRequest {
+            dns_query: Some("example.test".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(matches!(
+            spec.source,
+            PayloadSource::Dns {
+                query,
+                record_type
+            } if query == "example.test" && record_type == "A"
+        ));
+    }
+
+    #[test]
+    fn payload_spec_rejects_invalid_dns_hostname() {
+        let err = PayloadSpec::from_request(&PayloadRequest {
+            dns_query: Some("bad name".to_string()),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::InvalidDnsHostname { field: "DNS query" }
+        ));
+    }
+
+    #[test]
+    fn payload_spec_accepts_http_with_defaults() {
+        let spec = PayloadSpec::from_request(&PayloadRequest {
+            http_method: Some("GET".to_string()),
+            http_host: Some("example.test".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(matches!(
+            spec.source,
+            PayloadSource::Http {
+                method,
+                path,
+                host: Some(host)
+            } if method == "GET" && path == "/" && host == "example.test"
+        ));
+    }
+
+    #[test]
+    fn payload_spec_rejects_invalid_http_fields() {
+        assert!(matches!(
+            PayloadSpec::from_request(&PayloadRequest {
+                http_method: Some("bad method".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::InvalidHttpMethod
+        ));
+        assert!(matches!(
+            PayloadSpec::from_request(&PayloadRequest {
+                http_method: Some("GET".to_string()),
+                http_path: Some("relative".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::InvalidHttpPath
+        ));
+        assert!(matches!(
+            PayloadSpec::from_request(&PayloadRequest {
+                http_method: Some("GET".to_string()),
+                http_host: Some("bad host".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::InvalidHttpHost
+        ));
+    }
+
+    #[test]
+    fn payload_spec_accepts_tls_sni() {
+        let spec = PayloadSpec::from_request(&PayloadRequest {
+            tls_client_hello: Some("example.test".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(matches!(
+            spec.source,
+            PayloadSource::TlsClientHello { server_name } if server_name == "example.test"
+        ));
+    }
+
+    #[test]
+    fn payload_spec_rejects_root_tls_sni() {
+        let err = PayloadSpec::from_request(&PayloadRequest {
+            tls_client_hello: Some(".".to_string()),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::InvalidDnsHostname { field: "TLS SNI" }
+        ));
+    }
+}

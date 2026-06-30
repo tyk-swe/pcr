@@ -116,3 +116,117 @@ pub(crate) fn parse_ethertype(value: &str) -> SpecResult<u16> {
     };
     Ok(ethertype)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{Layer2Request, VlanRequest};
+
+    #[test]
+    fn parse_vlan_tag_returns_none_for_empty_request() {
+        assert!(parse_vlan_tag(&VlanRequest::default()).unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_vlan_tag_applies_defaults() {
+        let tag = parse_vlan_tag(&VlanRequest {
+            id: Some(100),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(tag.identifier, 100);
+        assert_eq!(tag.priority, 0);
+        assert!(!tag.drop_eligible_indicator);
+    }
+
+    #[test]
+    fn parse_vlan_tag_preserves_priority_and_dei() {
+        let tag = parse_vlan_tag(&VlanRequest {
+            id: Some(4094),
+            priority: Some(7),
+            drop_eligible_indicator: Some(true),
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(tag.identifier, 4094);
+        assert_eq!(tag.priority, 7);
+        assert!(tag.drop_eligible_indicator);
+    }
+
+    #[test]
+    fn parse_vlan_tag_rejects_priority_without_id() {
+        let err = parse_vlan_tag(&VlanRequest {
+            priority: Some(1),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::VlanPriorityRequiresId));
+    }
+
+    #[test]
+    fn parse_vlan_tag_rejects_reserved_id_and_bad_priority() {
+        let id_err = parse_vlan_tag(&VlanRequest {
+            id: Some(0),
+            ..Default::default()
+        })
+        .unwrap_err();
+        let prio_err = parse_vlan_tag(&VlanRequest {
+            id: Some(10),
+            priority: Some(8),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(id_err, SpecError::VlanIdInvalid { value: 0 }));
+        assert!(matches!(
+            prio_err,
+            SpecError::VlanPriorityInvalid { value: 8 }
+        ));
+    }
+
+    #[test]
+    fn parse_mac_option_trims_input() {
+        let mac = parse_mac_option(Some(" aa:bb:cc:dd:ee:ff ")).unwrap();
+
+        assert_eq!(mac.unwrap().to_string(), "aa:bb:cc:dd:ee:ff");
+    }
+
+    #[test]
+    fn parse_ethertype_accepts_names_decimal_and_hex() {
+        assert_eq!(parse_ethertype("ipv4").unwrap(), EtherType::IPV4.0);
+        assert_eq!(parse_ethertype(" IPV6 ").unwrap(), EtherType::IPV6.0);
+        assert_eq!(parse_ethertype("34525").unwrap(), EtherType::IPV6.0);
+        assert_eq!(parse_ethertype("0x0806").unwrap(), EtherType::ARP.0);
+    }
+
+    #[test]
+    fn parse_ethertype_rejects_invalid_value() {
+        let err = parse_ethertype("not-an-ethertype").unwrap_err();
+
+        assert!(matches!(err, SpecError::EtherTypeParse { .. }));
+    }
+
+    #[test]
+    fn layer2_spec_from_request_parses_all_fields() {
+        let spec = Layer2Spec::from_request(&Layer2Request {
+            source_mac: Some("00:11:22:33:44:55".to_string()),
+            destination_mac: Some("66-77-88-99-aa-bb".to_string()),
+            ethertype: Some("vlan".to_string()),
+            vlan: VlanRequest {
+                id: Some(20),
+                priority: Some(3),
+                drop_eligible_indicator: Some(true),
+            },
+        })
+        .unwrap();
+
+        assert_eq!(spec.source.unwrap().to_string(), "00:11:22:33:44:55");
+        assert_eq!(spec.destination.unwrap().to_string(), "66:77:88:99:aa:bb");
+        assert_eq!(spec.ethertype, Some(EtherType::VLAN.0));
+        assert_eq!(spec.vlan.unwrap().identifier, 20);
+    }
+}

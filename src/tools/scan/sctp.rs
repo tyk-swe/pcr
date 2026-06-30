@@ -523,3 +523,74 @@ fn calculate_crc32c(data: &[u8]) -> u32 {
     let crc = Crc::<u32>::new(&CRC_32_ISCSI);
     crc.checksum(data)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sctp_packet_with_chunk(source: u16, destination: u16, chunk_type: u8) -> Vec<u8> {
+        let mut packet = Vec::new();
+        packet.extend_from_slice(&source.to_be_bytes());
+        packet.extend_from_slice(&destination.to_be_bytes());
+        packet.extend_from_slice(&0u32.to_be_bytes());
+        packet.extend_from_slice(&0u32.to_be_bytes());
+        packet.push(chunk_type);
+        packet.push(0);
+        packet.extend_from_slice(&4u16.to_be_bytes());
+        packet
+    }
+
+    #[test]
+    fn parse_sctp_info_extracts_init_ack_and_abort_chunks() {
+        assert_eq!(
+            parse_sctp_info(&sctp_packet_with_chunk(1234, 80, SCTP_INIT_ACK_CHUNK_TYPE)),
+            Some((1234, 80, SCTP_INIT_ACK_CHUNK_TYPE))
+        );
+        assert_eq!(
+            parse_sctp_info(&sctp_packet_with_chunk(1234, 80, SCTP_ABORT_CHUNK_TYPE)),
+            Some((1234, 80, SCTP_ABORT_CHUNK_TYPE))
+        );
+    }
+
+    #[test]
+    fn parse_sctp_info_skips_unknown_padded_chunks() {
+        let mut packet = Vec::new();
+        packet.extend_from_slice(&1234u16.to_be_bytes());
+        packet.extend_from_slice(&80u16.to_be_bytes());
+        packet.extend_from_slice(&0u32.to_be_bytes());
+        packet.extend_from_slice(&0u32.to_be_bytes());
+        packet.extend_from_slice(&[99, 0, 0, 8, 1, 2, 3, 4]);
+        packet.extend_from_slice(&[SCTP_ABORT_CHUNK_TYPE, 0, 0, 4]);
+
+        assert_eq!(
+            parse_sctp_info(&packet),
+            Some((1234, 80, SCTP_ABORT_CHUNK_TYPE))
+        );
+    }
+
+    #[test]
+    fn parse_sctp_info_rejects_short_or_malformed_chunks() {
+        assert_eq!(parse_sctp_info(&[0; 11]), None);
+        assert_eq!(
+            parse_sctp_info(&sctp_packet_with_chunk(1, 2, SCTP_INIT_CHUNK_TYPE)),
+            None
+        );
+
+        let mut invalid = sctp_packet_with_chunk(1, 2, SCTP_ABORT_CHUNK_TYPE);
+        invalid[14] = 0;
+        invalid[15] = 3;
+        assert_eq!(parse_sctp_info(&invalid), None);
+    }
+
+    #[test]
+    fn build_sctp_init_packet_writes_ports_chunk_and_crc() {
+        let packet = build_sctp_init_packet(1234, 80, 0, 0x01020304);
+
+        assert_eq!(&packet[0..2], &1234u16.to_be_bytes());
+        assert_eq!(&packet[2..4], &80u16.to_be_bytes());
+        assert_eq!(packet[12], SCTP_INIT_CHUNK_TYPE);
+        assert_eq!(packet.len(), 32);
+        assert_ne!(&packet[8..12], &[0, 0, 0, 0]);
+        assert_eq!(parse_sctp_info(&packet), None);
+    }
+}

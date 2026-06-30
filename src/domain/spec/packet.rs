@@ -166,3 +166,186 @@ impl PacketSpec {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{
+        IcmpRequest, Icmpv6Request, IpRequest, Ipv6Request, Layer2Request,
+        TransportProtocolRequest, TransportRequest,
+    };
+
+    #[test]
+    fn packet_spec_builds_ipv4_icmp_request() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("192.0.2.10".to_string()),
+                ttl: Some(64),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(matches!(spec.transport, TransportSpec::Icmp(_)));
+        assert_eq!(spec.ip.unwrap().ttl, Some(64));
+    }
+
+    #[test]
+    fn packet_spec_builds_ipv6_request_and_applies_layer3_default() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("2001:db8::10".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(matches!(spec.transport, TransportSpec::Icmpv6(_)));
+        assert!(spec.transmit.auto_layer3);
+    }
+
+    #[test]
+    fn packet_spec_rejects_ethertype_ip_version_mismatch() {
+        let err = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("2001:db8::10".to_string()),
+                ..Default::default()
+            },
+            layer2: Layer2Request {
+                ethertype: Some("ipv4".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::EtherTypeIpVersionMismatch {
+                ethertype: 0x0800,
+                target_version: 6
+            }
+        ));
+    }
+
+    #[test]
+    fn packet_spec_rejects_source_ip_version_mismatch() {
+        let err = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                source_ip: Some("192.0.2.1".to_string()),
+                destination_ip: Some("2001:db8::10".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::SourceIpVersionMismatch {
+                target_version: 6,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn packet_spec_rejects_preference_mismatch_against_target() {
+        let err = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("192.0.2.1".to_string()),
+                prefer_ipv6: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::TargetIpVersionPreferenceMismatch {
+                prefer_version: 6,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn packet_spec_rejects_ipv4_only_options_for_ipv6_target() {
+        let err = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("2001:db8::10".to_string()),
+                identification: Some(100),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::IpV4OptionWithIpV6Target { option: "--id" }
+        ));
+    }
+
+    #[test]
+    fn packet_spec_rejects_ipv6_options_for_ipv4_target() {
+        let err = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("192.0.2.1".to_string()),
+                ..Default::default()
+            },
+            ipv6: Ipv6Request {
+                extensions: vec!["dest".to_string()],
+            },
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::IpV6OptionWithIpV4Target {
+                option: "--ipv6-ext"
+            }
+        ));
+    }
+
+    #[test]
+    fn packet_spec_rejects_transport_family_conflicts() {
+        let icmp_err = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("2001:db8::10".to_string()),
+                ..Default::default()
+            },
+            transport: TransportRequest {
+                command: Some(TransportProtocolRequest::Icmp(IcmpRequest::default())),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap_err();
+        let icmpv6_err = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("192.0.2.10".to_string()),
+                ..Default::default()
+            },
+            transport: TransportRequest {
+                command: Some(TransportProtocolRequest::Icmpv6(Icmpv6Request::default())),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            icmp_err,
+            SpecError::IpV4OptionWithIpV6Target { option: "icmp" }
+        ));
+        assert!(matches!(
+            icmpv6_err,
+            SpecError::IpV6OptionWithIpV4Target { option: "icmpv6" }
+        ));
+    }
+}

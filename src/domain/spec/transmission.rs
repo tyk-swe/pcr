@@ -99,3 +99,103 @@ pub(crate) fn parse_interval(raw: &str) -> SpecResult<Duration> {
         value: raw.to_string(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::net::MacAddress;
+
+    #[test]
+    fn parse_interval_treats_bare_number_as_milliseconds() {
+        assert_eq!(parse_interval("250").unwrap(), Duration::from_millis(250));
+    }
+
+    #[test]
+    fn parse_interval_accepts_humantime_units_case_insensitively() {
+        assert_eq!(parse_interval("1.5s").unwrap(), Duration::from_millis(1500));
+        assert_eq!(parse_interval("2S").unwrap(), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn parse_interval_rejects_empty_and_invalid_values() {
+        assert!(matches!(
+            parse_interval(" ").unwrap_err(),
+            SpecError::EmptyIntervalValue
+        ));
+        assert!(matches!(
+            parse_interval("later").unwrap_err(),
+            SpecError::IntervalParse { .. }
+        ));
+    }
+
+    #[test]
+    fn transmission_spec_rejects_conflicting_modes() {
+        let flood_err = TransmissionSpec::from_request(&TransmissionRequest {
+            flood: Some(true),
+            interval: Some("1s".to_string()),
+            ..Default::default()
+        })
+        .unwrap_err();
+        let loop_err = TransmissionSpec::from_request(&TransmissionRequest {
+            count: Some(2),
+            loop_forever: Some(true),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(flood_err, SpecError::IntervalConflictsWithFlood));
+        assert!(matches!(loop_err, SpecError::LoopConflictsWithCount));
+    }
+
+    #[test]
+    fn transmission_spec_rejects_zero_count() {
+        let err = TransmissionSpec::from_request(&TransmissionRequest {
+            count: Some(0),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::CountMustBePositive));
+    }
+
+    #[test]
+    fn transmission_spec_from_request_parses_all_fields() {
+        let spec = TransmissionSpec::from_request(&TransmissionRequest {
+            count: Some(3),
+            interval: Some("10ms".to_string()),
+            force_layer3: Some(true),
+            ipv6_nd: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(spec.count, Some(3));
+        assert_eq!(spec.interval, Some(Duration::from_millis(10)));
+        assert!(spec.force_layer3);
+        assert!(spec.ipv6_nd);
+        assert!(spec.is_layer3());
+    }
+
+    #[test]
+    fn apply_ipv6_defaults_selects_layer3_when_no_layer2_options() {
+        let mut spec = TransmissionSpec::default();
+
+        spec.apply_ipv6_defaults(&Layer2Spec::default(), true);
+
+        assert!(spec.auto_layer3);
+        assert!(spec.is_layer3());
+    }
+
+    #[test]
+    fn apply_ipv6_defaults_preserves_layer2_explicit_path() {
+        let mut spec = TransmissionSpec::default();
+        let layer2 = Layer2Spec {
+            destination: Some(MacAddress::new([0, 1, 2, 3, 4, 5])),
+            ..Default::default()
+        };
+
+        spec.apply_ipv6_defaults(&layer2, true);
+
+        assert!(!spec.auto_layer3);
+    }
+}

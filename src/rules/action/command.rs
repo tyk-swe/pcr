@@ -510,3 +510,188 @@ enum CommandRunOutcome {
     SpawnError,
     WaitError,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    fn packet_with_source(source: &str) -> PacketContext {
+        PacketContext {
+            description: "packet".to_string(),
+            source: Some(source.to_string()),
+            destination: Some("198.51.100.20".to_string()),
+            length: 42,
+            timestamp: SystemTime::UNIX_EPOCH,
+        }
+    }
+
+    #[test]
+    fn command_action_from_document_accepts_disabled_relative_program() {
+        let action = CommandAction::from_document(
+            "echo".to_string(),
+            vec!["hello".to_string()],
+            None,
+            false,
+            vec![],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(action.program, "echo");
+        assert_eq!(action.timeout_seconds, RULE_COMMAND_TIMEOUT_SECONDS);
+        assert!(!action.enabled);
+        assert_eq!(action.working_dir, "/");
+    }
+
+    #[test]
+    fn command_action_from_document_requires_program() {
+        let err = CommandAction::from_document(" ".to_string(), vec![], None, false, vec![], None)
+            .unwrap_err();
+
+        assert!(matches!(err, RuleActionError::MissingCommandProgram));
+    }
+
+    #[test]
+    fn command_action_from_document_rejects_enabled_command_without_allowlist() {
+        let err =
+            CommandAction::from_document("/bin/echo".to_string(), vec![], None, true, vec![], None)
+                .unwrap_err();
+
+        assert!(matches!(err, RuleActionError::MissingCommandAllowlist));
+    }
+
+    #[test]
+    fn command_action_from_document_rejects_relative_enabled_program() {
+        let err = CommandAction::from_document(
+            "echo".to_string(),
+            vec![],
+            None,
+            true,
+            vec!["/bin/echo".to_string()],
+            None,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, RuleActionError::InvalidCommandProgram { .. }));
+    }
+
+    #[test]
+    fn command_action_from_document_rejects_invalid_allowlist_and_working_dir() {
+        let allowlist_err = CommandAction::from_document(
+            "/bin/echo".to_string(),
+            vec![],
+            None,
+            true,
+            vec!["echo".to_string()],
+            None,
+        )
+        .unwrap_err();
+        let cwd_err = CommandAction::from_document(
+            "echo".to_string(),
+            vec![],
+            None,
+            false,
+            vec![],
+            Some("relative".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            allowlist_err,
+            RuleActionError::InvalidCommandAllowlistEntry { index: 0, .. }
+        ));
+        assert!(matches!(
+            cwd_err,
+            RuleActionError::InvalidCommandWorkingDir { .. }
+        ));
+    }
+
+    #[test]
+    fn command_action_from_document_rejects_timeout_out_of_range() {
+        let err = CommandAction::from_document(
+            "echo".to_string(),
+            vec![],
+            Some(RULE_COMMAND_TIMEOUT_MAX_SECONDS + 1),
+            false,
+            vec![],
+            None,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleActionError::CommandTimeoutOutOfRange { .. }
+        ));
+    }
+
+    #[test]
+    fn command_action_from_document_rejects_shape_limits() {
+        let err = CommandAction::from_document(
+            "e".repeat(RULE_COMMAND_MAX_PROGRAM_LENGTH + 1),
+            vec![],
+            None,
+            false,
+            vec![],
+            None,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            RuleActionError::CommandShapeLimitExceeded { .. }
+        ));
+    }
+
+    #[test]
+    fn render_invocation_applies_templates() {
+        let packet = packet_with_source("192.0.2.10");
+        let rendered = render_invocation(
+            "rule",
+            Some(&packet),
+            "/bin/echo",
+            &["source={source}".to_string()],
+            "/",
+        )
+        .unwrap();
+
+        assert_eq!(rendered.program, "/bin/echo");
+        assert_eq!(rendered.args, vec!["source=192.0.2.10"]);
+        assert_eq!(rendered.working_dir, "/");
+    }
+
+    #[test]
+    fn render_invocation_blocks_argument_injection_from_templates() {
+        let packet = packet_with_source("--danger");
+        let result = render_invocation(
+            "rule",
+            Some(&packet),
+            "/bin/echo",
+            &["{source}".to_string()],
+            "/",
+        );
+
+        assert!(matches!(
+            result,
+            Err(RuleActionError::ArgumentInjection {
+                rule,
+                arg
+            }) if rule == "rule" && arg == "--danger"
+        ));
+    }
+
+    #[test]
+    fn render_invocation_allows_flag_template_that_starts_as_flag() {
+        let packet = packet_with_source("danger");
+        let rendered = render_invocation(
+            "rule",
+            Some(&packet),
+            "/bin/echo",
+            &["--value={source}".to_string()],
+            "/",
+        )
+        .unwrap();
+
+        assert_eq!(rendered.args, vec!["--value=danger"]);
+    }
+}

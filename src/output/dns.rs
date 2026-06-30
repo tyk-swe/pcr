@@ -133,3 +133,85 @@ pub(crate) fn format_dns_message_json(result: &DnsQueryResult) -> Result<String>
 
     serde_json::to_string_pretty(&value).context("failed to serialize DNS response JSON")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::command::{DnsQuestion, DnsTransport, DnsTransportMode};
+
+    fn request() -> DnsRequest {
+        DnsRequest {
+            domain: "example.test".to_string(),
+            record_type: "A".to_string(),
+            server: "1.1.1.1:53".to_string(),
+            timeout: 500,
+            transaction_id: Some(0x1234),
+            transport: DnsTransportMode::Tcp,
+            retries: 2,
+        }
+    }
+
+    fn result() -> DnsQueryResult {
+        DnsQueryResult {
+            id: 0x1234,
+            opcode: "Query".to_string(),
+            response_code: "NoError".to_string(),
+            flags: vec!["RD".to_string(), "RA".to_string()],
+            questions: vec![DnsQuestion {
+                name: "example.test.".to_string(),
+                record_type: "A".to_string(),
+                class: "IN".to_string(),
+            }],
+            answers: vec!["example.test. 300 IN A 192.0.2.1".to_string()],
+            authority: vec![],
+            additional: vec![],
+            transport_used: DnsTransport::Udp,
+            attempts: 1,
+            server: "1.1.1.1:53".to_string(),
+            response_bytes: 64,
+            udp_truncated: false,
+            tcp_fallback_used: false,
+        }
+    }
+
+    #[test]
+    fn format_dns_dry_run_includes_query_metadata() {
+        let output = format_dns_dry_run(&request());
+
+        assert!(output.contains("domain=example.test"));
+        assert!(output.contains("transaction_id=4660"));
+        assert!(output.contains("transport=tcp"));
+        assert!(output.contains("retries=2"));
+    }
+
+    #[test]
+    fn format_dns_dry_run_json_serializes_expected_fields() {
+        let json = format_dns_dry_run_json(&request()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["mode"], "dry_run");
+        assert_eq!(value["query"]["transport_mode"], "tcp");
+        assert_eq!(value["query"]["transaction_id"], 4660);
+    }
+
+    #[test]
+    fn format_dns_message_includes_metadata_flags_and_answers() {
+        let output = format_dns_message(&result());
+
+        assert!(output.contains("Metadata: transport=udp attempts=1"));
+        assert!(output.contains("ID: 1234"));
+        assert!(output.contains("Flags: RD, RA"));
+        assert!(output.contains("Answers:"));
+    }
+
+    #[test]
+    fn format_dns_message_json_serializes_counts_and_questions() {
+        let json = format_dns_message_json(&result()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["mode"], "response");
+        assert_eq!(value["counts"]["questions"], 1);
+        assert_eq!(value["metadata"]["transport_used"], "udp");
+        assert_eq!(value["questions"][0]["name"], "example.test.");
+    }
+}

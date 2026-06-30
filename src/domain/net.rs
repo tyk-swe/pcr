@@ -68,3 +68,38 @@ impl EtherType {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct IpProtocol(pub u8);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mac_address_displays_lowercase_colon_hex() {
+        let mac = MacAddress::new([0x00, 0x0a, 0x1B, 0xc0, 0xff, 0x42]);
+
+        assert_eq!(mac.to_string(), "00:0a:1b:c0:ff:42");
+    }
+
+    #[test]
+    fn mac_address_parses_colon_and_hyphen_forms() {
+        let colon = "aa:bb:cc:dd:ee:ff".parse::<MacAddress>().unwrap();
+        let hyphen = "AA-BB-CC-DD-EE-FF".parse::<MacAddress>().unwrap();
+
+        assert_eq!(colon.octets(), [0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]);
+        assert_eq!(hyphen, colon);
+    }
+
+    #[test]
+    fn mac_address_rejects_wrong_segment_count() {
+        let err = "aa:bb:cc:dd:ee".parse::<MacAddress>().unwrap_err();
+
+        assert_eq!(err, MacAddressParseError);
+    }
+
+    #[test]
+    fn mac_address_rejects_non_hex_segment() {
+        let err = "aa:bb:cc:dd:ee:gg".parse::<MacAddress>().unwrap_err();
+
+        assert_eq!(err, MacAddressParseError);
+    }
+}

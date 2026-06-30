@@ -401,3 +401,280 @@ fn validate_tcp_options(options: &[u8]) -> SpecResult<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{
+        Icmpv6ErrorCode, Icmpv6ErrorKind, Icmpv6Request, TcpRequest, TransportProtocolRequest,
+    };
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn tcp_flags_accept_all_supported_flags_case_insensitively() {
+        let flags = TcpFlagSet::from_string("safrpuec").unwrap();
+
+        assert!(flags.syn);
+        assert!(flags.ack);
+        assert!(flags.fin);
+        assert!(flags.rst);
+        assert!(flags.psh);
+        assert!(flags.urg);
+        assert!(flags.ece);
+        assert!(flags.cwr);
+    }
+
+    #[test]
+    fn tcp_flags_reject_duplicate_and_unknown_flags() {
+        assert!(matches!(
+            TcpFlagSet::from_string("SS").unwrap_err(),
+            SpecError::DuplicateTcpFlag { flag: 'S' }
+        ));
+        assert!(matches!(
+            TcpFlagSet::from_string("X").unwrap_err(),
+            SpecError::UnsupportedTcpFlag { flag: 'X' }
+        ));
+    }
+
+    #[test]
+    fn build_tcp_options_from_individual_flags_pads_to_word_boundary() {
+        let options = build_tcp_options_from_flags(&TcpRequest {
+            mss: Some(1460),
+            window_scale: Some(7),
+            sack_permitted: Some(true),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            options,
+            vec![0x02, 0x04, 0x05, 0xb4, 0x03, 0x03, 0x07, 0x04, 0x02, 0, 0, 0]
+        );
+    }
+
+    #[test]
+    fn build_tcp_options_from_timestamps() {
+        let options = build_tcp_options_from_flags(&TcpRequest {
+            timestamps: Some("9:10".to_string()),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(options, vec![0x08, 0x0a, 0, 0, 0, 9, 0, 0, 0, 10, 0, 0]);
+    }
+
+    #[test]
+    fn build_tcp_options_prefers_raw_hex() {
+        let options = build_tcp_options_from_flags(&TcpRequest {
+            options_hex: Some("01 01 00 00".to_string()),
+            mss: Some(1460),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(options, vec![1, 1, 0, 0]);
+    }
+
+    #[test]
+    fn build_tcp_options_rejects_bad_window_scale_timestamp_and_alignment() {
+        assert!(matches!(
+            build_tcp_options_from_flags(&TcpRequest {
+                window_scale: Some(15),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::TcpWindowScaleOutOfRange
+        ));
+        assert!(matches!(
+            build_tcp_options_from_flags(&TcpRequest {
+                timestamps: Some("1".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::TcpTimestampsFormat
+        ));
+        assert!(matches!(
+            build_tcp_options_from_flags(&TcpRequest {
+                options_hex: Some("010203".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::TcpOptionsNotAligned { length: 3 }
+        ));
+    }
+
+    #[test]
+    fn build_tcp_options_rejects_too_long_header() {
+        let err = build_tcp_options_from_flags(&TcpRequest {
+            options_hex: Some("00".repeat(44)),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::TcpHeaderTooLong {
+                length: 64,
+                max: 60
+            }
+        ));
+    }
+
+    #[test]
+    fn tcp_spec_from_request_parses_ports_flags_and_options() {
+        let spec = TcpSpec::from_request(
+            &TransportRequest {
+                source_port: Some(1234),
+                destination_port: Some(80),
+                ..Default::default()
+            },
+            &TcpRequest {
+                flags: Some("SA".to_string()),
+                sequence: Some(10),
+                acknowledgement: Some(20),
+                window_size: Some(4096),
+                options_hex: Some("01010000".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(spec.source_port, Some(1234));
+        assert_eq!(spec.destination_port, Some(80));
+        assert!(spec.flags.syn);
+        assert!(spec.flags.ack);
+        assert_eq!(spec.sequence, Some(10));
+        assert_eq!(spec.acknowledgement, Some(20));
+        assert_eq!(spec.window_size, Some(4096));
+        assert_eq!(spec.options, Some(vec![1, 1, 0, 0]));
+    }
+
+    #[test]
+    fn transport_spec_infers_udp_when_ports_are_present() {
+        let spec = TransportSpec::from_request(
+            &TransportRequest {
+                destination_port: Some(53),
+                ..Default::default()
+            },
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            spec,
+            TransportSpec::Udp(UdpSpec {
+                destination_port: Some(53),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn transport_spec_infers_icmp_from_destination_family() {
+        let v4 = TransportSpec::from_request(
+            &TransportRequest::default(),
+            Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))),
+            true,
+        )
+        .unwrap();
+        let v6 = TransportSpec::from_request(
+            &TransportRequest::default(),
+            Some(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            false,
+        )
+        .unwrap();
+
+        assert!(matches!(v4, TransportSpec::Icmp(_)));
+        assert!(matches!(v6, TransportSpec::Icmpv6(_)));
+    }
+
+    #[test]
+    fn transport_spec_infers_icmpv6_from_preference_without_destination() {
+        let spec = TransportSpec::from_request(&TransportRequest::default(), None, true).unwrap();
+
+        assert!(matches!(spec, TransportSpec::Icmpv6(_)));
+        assert_eq!(spec.label(), "ICMPv6");
+    }
+
+    #[test]
+    fn transport_spec_uses_explicit_command() {
+        let spec = TransportSpec::from_request(
+            &TransportRequest {
+                command: Some(TransportProtocolRequest::Tcp(TcpRequest {
+                    flags: Some("S".to_string()),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            None,
+            false,
+        )
+        .unwrap();
+
+        assert!(matches!(spec, TransportSpec::Tcp(_)));
+        assert_eq!(spec.label(), "TCP");
+    }
+
+    #[test]
+    fn icmpv6_spec_derives_type_and_default_code_from_error_kind() {
+        let spec = Icmpv6Spec::from_request(&Icmpv6Request {
+            error: Some(Icmpv6ErrorKind::TimeExceeded),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(spec.kind, Some(3));
+        assert_eq!(spec.code, Some(0));
+    }
+
+    #[test]
+    fn icmpv6_spec_derives_type_and_code_from_named_error_code() {
+        let spec = Icmpv6Spec::from_request(&Icmpv6Request {
+            error_code: Some(Icmpv6ErrorCode::DestinationUnreachablePortUnreachable),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(spec.kind, Some(1));
+        assert_eq!(spec.code, Some(4));
+    }
+
+    #[test]
+    fn icmpv6_spec_rejects_mismatched_code_and_mtu_kind() {
+        assert!(matches!(
+            Icmpv6Spec::from_request(&Icmpv6Request {
+                kind: Some(3),
+                error_code: Some(Icmpv6ErrorCode::DestinationUnreachableNoRoute),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::Icmpv6ErrorCodeMismatch { existing: 3, .. }
+        ));
+        assert!(matches!(
+            Icmpv6Spec::from_request(&Icmpv6Request {
+                kind: Some(1),
+                mtu: Some(1280),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::Icmpv6MtuRequiresPacketTooBig
+        ));
+    }
+
+    #[test]
+    fn icmpv6_spec_derives_packet_too_big_parameter_from_mtu() {
+        let spec = Icmpv6Spec::from_request(&Icmpv6Request {
+            mtu: Some(1280),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(spec.kind, Some(2));
+        assert_eq!(spec.code, Some(0));
+        assert_eq!(spec.parameter, Some(1280));
+    }
+}

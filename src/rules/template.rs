@@ -87,3 +87,64 @@ pub(crate) fn render_option(field: &mut Option<String>, packet: Option<&PacketCo
         *value = rendered;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{Duration, SystemTime};
+
+    fn packet() -> PacketContext {
+        PacketContext {
+            description: "TCP\nSYN".to_string(),
+            source: Some("192.0.2.10\r".to_string()),
+            destination: Some("198.51.100.20".to_string()),
+            length: 128,
+            timestamp: SystemTime::UNIX_EPOCH + Duration::from_secs(1),
+        }
+    }
+
+    #[test]
+    fn apply_template_renders_known_fields_and_sanitizes_controls() {
+        let rendered = apply_template(
+            "{description} {source}->{destination} len={length} at {timestamp}",
+            Some(&packet()),
+        );
+
+        assert_eq!(
+            rendered,
+            "TCPSYN 192.0.2.10->198.51.100.20 len=128 at 1970-01-01T00:00:01Z"
+        );
+    }
+
+    #[test]
+    fn apply_template_uses_unknown_for_missing_packet_or_fields() {
+        assert_eq!(
+            apply_template("{source}:{length}", None),
+            "<unknown>:<unknown>"
+        );
+
+        let mut packet = packet();
+        packet.source = None;
+        assert_eq!(apply_template("{source}", Some(&packet)), "<unknown>");
+    }
+
+    #[test]
+    fn apply_template_preserves_unrecognized_placeholders() {
+        assert_eq!(
+            apply_template("prefix {unknown} suffix", Some(&packet())),
+            "prefix {unknown} suffix"
+        );
+    }
+
+    #[test]
+    fn render_option_updates_present_value_only() {
+        let mut field = Some("packet {description}".to_string());
+        let mut none = None;
+
+        render_option(&mut field, Some(&packet()));
+        render_option(&mut none, Some(&packet()));
+
+        assert_eq!(field.as_deref(), Some("packet TCPSYN"));
+        assert_eq!(none, None);
+    }
+}

@@ -66,3 +66,70 @@ impl FragmentSpec {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_fragment_spec_is_effectively_empty() {
+        assert!(FragmentSpec::from_request(&FragmentRequest::default()).is_default());
+    }
+
+    #[test]
+    fn fragment_spec_preserves_explicit_flags() {
+        let spec = FragmentSpec::from_request(&FragmentRequest {
+            mtu: Some(1280),
+            offset: Some(8),
+            more_fragments: Some(true),
+            dont_fragment: Some(true),
+            fragment_id: Some(42),
+            ..Default::default()
+        });
+
+        assert_eq!(spec.mtu, Some(1280));
+        assert_eq!(spec.offset, Some(8));
+        assert!(spec.more_fragments);
+        assert!(spec.dont_fragment);
+        assert_eq!(spec.fragment_id, Some(42));
+    }
+
+    #[test]
+    fn overlap_profile_sets_overlap_more_fragments_and_default_mtu() {
+        let spec = FragmentSpec::from_request(&FragmentRequest {
+            profile: Some(FragmentProfile::Overlap),
+            dont_fragment: Some(true),
+            ..Default::default()
+        });
+
+        assert!(spec.overlap);
+        assert!(spec.more_fragments);
+        assert_eq!(spec.mtu, Some(68));
+        assert!(!spec.dont_fragment);
+    }
+
+    #[test]
+    fn tiny_overlap_profile_keeps_explicit_mtu() {
+        let spec = FragmentSpec::from_request(&FragmentRequest {
+            mtu: Some(96),
+            profile: Some(FragmentProfile::TinyOverlap),
+            ..Default::default()
+        });
+
+        assert_eq!(spec.mtu, Some(96));
+        assert!(spec.overlap);
+        assert!(spec.more_fragments);
+    }
+
+    #[test]
+    fn teardrop_profile_sets_teardrop_without_forcing_mtu() {
+        let spec = FragmentSpec::from_request(&FragmentRequest {
+            profile: Some(FragmentProfile::Teardrop),
+            ..Default::default()
+        });
+
+        assert!(spec.teardrop);
+        assert!(spec.more_fragments);
+        assert_eq!(spec.mtu, None);
+    }
+}

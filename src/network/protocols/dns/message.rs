@@ -44,3 +44,37 @@ pub(crate) fn build_dns_query(
     let bytes = message.to_vec()?;
     Ok((bytes, id))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_dns_query_uses_provided_transaction_id_and_fqdn() {
+        let (bytes, id) = build_dns_query("example.test", "aaaa", Some(0x1234)).unwrap();
+        let message = Message::from_vec(&bytes).unwrap();
+
+        assert_eq!(id, 0x1234);
+        assert_eq!(message.id(), 0x1234);
+        assert_eq!(message.message_type(), MessageType::Query);
+        assert!(message.recursion_desired());
+        assert_eq!(message.queries().len(), 1);
+        assert_eq!(message.queries()[0].name().to_string(), "example.test.");
+        assert_eq!(message.queries()[0].query_type(), RecordType::AAAA);
+        assert_eq!(message.queries()[0].query_class(), DNSClass::IN);
+    }
+
+    #[test]
+    fn build_dns_query_preserves_existing_trailing_dot() {
+        let (bytes, _) = build_dns_query("example.test.", "A", Some(1)).unwrap();
+        let message = Message::from_vec(&bytes).unwrap();
+
+        assert_eq!(message.queries()[0].name().to_string(), "example.test.");
+    }
+
+    #[test]
+    fn build_dns_query_rejects_empty_domain_and_unknown_type() {
+        assert!(build_dns_query(" ", "A", Some(1)).is_err());
+        assert!(build_dns_query("example.test", "NOPE", Some(1)).is_err());
+    }
+}

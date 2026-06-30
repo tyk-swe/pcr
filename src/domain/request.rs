@@ -284,3 +284,75 @@ pub(crate) enum Icmpv6ErrorCode {
     ParameterProblemUnrecognizedNextHeader,
     ParameterProblemUnrecognizedOption,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefer_ipv6_setting_prefers_explicit_ipv6_flag() {
+        let request = IpRequest {
+            prefer_ipv6: Some(true),
+            prefer_ipv4: Some(false),
+            ..Default::default()
+        };
+
+        assert_eq!(request.prefer_ipv6_setting(), Some(true));
+    }
+
+    #[test]
+    fn prefer_ipv6_setting_converts_prefer_ipv4_to_false() {
+        let request = IpRequest {
+            prefer_ipv4: Some(true),
+            ..Default::default()
+        };
+
+        assert_eq!(request.prefer_ipv6_setting(), Some(false));
+    }
+
+    #[test]
+    fn prefer_ipv6_hint_uses_destination_ip_before_source_ip() {
+        let request = PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("198.51.100.10".to_string()),
+                source_ip: Some("2001:db8::1".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(infer_prefer_ipv6_hint(&request), Some(false));
+    }
+
+    #[test]
+    fn prefer_ipv6_hint_detects_ipv6_extensions() {
+        let request = PacketRequest {
+            ipv6: Ipv6Request {
+                extensions: vec!["dest".to_string()],
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(infer_prefer_ipv6_hint(&request), Some(true));
+    }
+
+    #[test]
+    fn prefer_ipv6_hint_detects_icmpv6_command() {
+        let request = PacketRequest {
+            transport: TransportRequest {
+                command: Some(TransportProtocolRequest::Icmpv6(Icmpv6Request::default())),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(request.prefer_ipv6_hint(), Some(true));
+    }
+
+    #[test]
+    fn fragment_profile_display_matches_cli_values() {
+        assert_eq!(FragmentProfile::Overlap.to_string(), "overlap");
+        assert_eq!(FragmentProfile::Teardrop.to_string(), "teardrop");
+        assert_eq!(FragmentProfile::TinyOverlap.to_string(), "tiny-overlap");
+    }
+}

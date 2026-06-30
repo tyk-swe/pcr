@@ -67,3 +67,95 @@ impl IpSpec {
             && self.fragmentation.is_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{FragmentProfile, FragmentRequest};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    #[test]
+    fn ip_spec_from_empty_request_returns_none() {
+        assert!(IpSpec::from_request(&IpRequest::default())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn ip_spec_from_request_parses_addresses_and_options() {
+        let spec = IpSpec::from_request(&IpRequest {
+            source_ip: Some("192.0.2.1".to_string()),
+            destination_ip: Some("198.51.100.2".to_string()),
+            ttl: Some(64),
+            tos: Some(16),
+            identification: Some(99),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(spec.source, Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1))));
+        assert_eq!(
+            spec.destination,
+            Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)))
+        );
+        assert_eq!(spec.ttl, Some(64));
+        assert_eq!(spec.tos, Some(16));
+        assert_eq!(spec.identification, Some(99));
+    }
+
+    #[test]
+    fn ip_spec_from_request_keeps_prefer_ipv6_false() {
+        let spec = IpSpec::from_request(&IpRequest {
+            prefer_ipv4: Some(true),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(spec.prefer_ipv6, Some(false));
+    }
+
+    #[test]
+    fn ip_spec_from_request_rejects_conflicting_preferences() {
+        let err = IpSpec::from_request(&IpRequest {
+            prefer_ipv6: Some(true),
+            prefer_ipv4: Some(true),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::PreferIpv4AndIpv6Conflict));
+    }
+
+    #[test]
+    fn ip_spec_from_request_includes_ipv6_address() {
+        let spec = IpSpec::from_request(&IpRequest {
+            destination_ip: Some("2001:db8::1".to_string()),
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(
+            spec.destination,
+            Some(IpAddr::V6(Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, 1)))
+        );
+    }
+
+    #[test]
+    fn ip_spec_from_request_includes_fragment_spec() {
+        let spec = IpSpec::from_request(&IpRequest {
+            fragment: FragmentRequest {
+                profile: Some(FragmentProfile::Overlap),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap()
+        .unwrap();
+
+        assert!(spec.fragmentation.overlap);
+        assert_eq!(spec.fragmentation.profile, Some(FragmentProfile::Overlap));
+    }
+}

@@ -10,14 +10,9 @@ readme = "README.md"
 keywords = ["packet", "network", "cli", "testing"]
 categories = ["command-line-utilities", "network-programming"]
 
-[lib]
-test = false
-doctest = false
-
 [[bin]]
 name = "packetcraftr"
 path = "src/main.rs"
-test = false
 
 [features]
 default = []

@@ -1,8 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use anyhow::anyhow;
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use crate::domain::command::TracerouteRequest;
 use crate::util::error::operation_failed;
@@ -12,24 +11,13 @@ use pnet::transport::{icmp_packet_iter, icmpv6_packet_iter};
 
 use super::common::{
     open_ipv4_channel, open_ipv6_channel, request_timeout, run_traceroute_loop_with_delay,
-    PacketReceiver, ProbeResult, TracerouteExecutor, UdpSocketV4, UdpSocketV6, DEFAULT_PORT,
+    udp_run_cookie, PacketReceiver, ProbeIdentity, ProbeResult, TracerouteExecutor, UdpProbeCookie,
+    UdpSocketV4, UdpSocketV6,
 };
 use super::utils::{
     await_icmp_response_v4, await_icmp_response_v6, IcmpReceiverAdapter, Icmpv6ReceiverAdapter,
+    ProbeExpectation,
 };
-
-fn probe_destination_port(ttl: u8, probe: u8) -> Result<u16> {
-    let ttl_offset = u16::from(ttl)
-        .checked_mul(3)
-        .and_then(|offset| offset.checked_add(u16::from(probe)))
-        .ok_or_else(|| {
-            anyhow!("traceroute port calculation overflowed: ttl={ttl} probe={probe}")
-        })?;
-
-    DEFAULT_PORT
-        .checked_add(ttl_offset)
-        .ok_or_else(|| anyhow!("traceroute port exceeded u16 range: ttl={ttl} probe={probe}"))
-}
 
 pub(super) fn run_udp_traceroute_v4(
     destination: Ipv4Addr,
@@ -62,6 +50,9 @@ struct UdpV4Executor<'a, S, R: ?Sized> {
     timeout: std::time::Duration,
     socket: &'a S,
     receiver: &'a mut R,
+    probes_per_hop: u8,
+    source_port: u16,
+    run_cookie: u64,
 }
 
 impl<'a, S, R: ?Sized> TracerouteExecutor for UdpV4Executor<'a, S, R>
@@ -70,14 +61,12 @@ where
     R: super::common::PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
-        // Use predictable port offsets so responses can be mapped back to their TTL/probe pair.
-        // Note: This heuristic can be fragile behind NATs that rewrite source ports or alter flow paths,
-        // but it is the standard mechanism for UDP traceroute correlation without payload injection.
-        let port = probe_destination_port(ttl, probe)?;
+        let identity = ProbeIdentity::new(ttl, probe, self.probes_per_hop)?;
+        let port = identity.destination_port()?;
+        let cookie = UdpProbeCookie::new(self.run_cookie, identity);
         self.socket.set_ttl(ttl as u32)?;
-        let payload = [ttl, probe, 0xBE, 0xEF];
         self.socket
-            .send_to(&payload, (self.destination, port))
+            .send_to(&cookie.bytes(), (self.destination, port))
             .with_context(|| {
                 operation_failed(
                     "send UDP probe",
@@ -85,13 +74,15 @@ where
                 )
             })?;
 
-        await_icmp_response_v4(
-            self.receiver,
+        let expectation = ProbeExpectation::udp(
             IpNextHeaderProtocols::Udp,
+            None,
+            IpAddr::V4(self.destination),
+            Some(self.source_port),
             port,
-            Some((ttl, probe)),
-            self.timeout,
-        )
+            cookie,
+        );
+        await_icmp_response_v4(self.receiver, &expectation, self.timeout)
     }
 }
 
@@ -106,11 +97,15 @@ where
     S: UdpSocketV4,
     R: super::common::PacketReceiver + ?Sized,
 {
+    let source_port = socket.local_addr()?.port();
     let mut executor = UdpV4Executor {
         destination,
         timeout: request_timeout(opts),
         socket,
         receiver,
+        probes_per_hop: opts.probes,
+        source_port,
+        run_cookie: udp_run_cookie(),
     };
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }
@@ -120,6 +115,9 @@ struct UdpV6Executor<'a, S, R: ?Sized> {
     timeout: std::time::Duration,
     socket: &'a S,
     receiver: &'a mut R,
+    probes_per_hop: u8,
+    source_port: u16,
+    run_cookie: u64,
 }
 
 impl<'a, S, R: ?Sized> TracerouteExecutor for UdpV6Executor<'a, S, R>
@@ -128,11 +126,12 @@ where
     R: PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
-        let port = probe_destination_port(ttl, probe)?;
+        let identity = ProbeIdentity::new(ttl, probe, self.probes_per_hop)?;
+        let port = identity.destination_port()?;
+        let cookie = UdpProbeCookie::new(self.run_cookie, identity);
         self.socket.set_unicast_hops_v6(u32::from(ttl))?;
-        let payload = [ttl, probe, 0xBE, 0xEF];
         self.socket
-            .send_to(&payload, (self.destination, port))
+            .send_to(&cookie.bytes(), (self.destination, port))
             .with_context(|| {
                 operation_failed(
                     "send IPv6 UDP probe",
@@ -140,13 +139,15 @@ where
                 )
             })?;
 
-        await_icmp_response_v6(
-            self.receiver,
+        let expectation = ProbeExpectation::udp(
             IpNextHeaderProtocols::Udp,
+            None,
+            IpAddr::V6(self.destination),
+            Some(self.source_port),
             port,
-            Some((ttl, probe)),
-            self.timeout,
-        )
+            cookie,
+        );
+        await_icmp_response_v6(self.receiver, &expectation, self.timeout)
     }
 }
 
@@ -161,11 +162,15 @@ where
     S: UdpSocketV6,
     R: PacketReceiver + ?Sized,
 {
+    let source_port = socket.local_addr()?.port();
     let mut executor = UdpV6Executor {
         destination,
         timeout: request_timeout(opts),
         socket,
         receiver,
+        probes_per_hop: opts.probes,
+        source_port,
+        run_cookie: udp_run_cookie(),
     };
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }

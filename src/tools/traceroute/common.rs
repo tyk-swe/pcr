@@ -5,16 +5,17 @@ use pnet::packet::icmp::IcmpPacket;
 use pnet::packet::icmpv6::Icmpv6Packet;
 use pnet::packet::ip::IpNextHeaderProtocol;
 use pnet::transport::{TransportChannelType, TransportProtocol};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use dns_lookup::lookup_addr;
 use log::{info, warn};
 use rand::random;
 
-use crate::domain::command::TracerouteRequest;
+use crate::domain::command::{TracerouteProtocol, TracerouteRequest};
 use crate::network::pnet_utils::open_transport_channel;
 use crate::tools::probe;
 use crate::util::error::operation_failed;
@@ -26,15 +27,23 @@ pub(super) const ICMPV6_PORT_UNREACHABLE_CODE: u8 = 4;
 pub(super) const ICMP_RESPONSE_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub(super) const TCP_RESPONSE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const TRANSPORT_CHANNEL_BUFFER_SIZE: usize = 4096;
+const TCP_MIN_SOURCE_PORT: u16 = 1024;
+const TCP_PREFERRED_SOURCE_PORT_MIN: u16 = 40_000;
+const TCP_PREFERRED_SOURCE_PORT_MAX: u16 = 60_000;
 
 pub(super) trait UdpSocketV4 {
     fn set_ttl(&self, ttl: u32) -> Result<()>;
+    fn local_addr(&self) -> Result<SocketAddr>;
     fn send_to(&self, buf: &[u8], addr: (Ipv4Addr, u16)) -> Result<usize>;
 }
 
 impl UdpSocketV4 for std::net::UdpSocket {
     fn set_ttl(&self, ttl: u32) -> Result<()> {
         self.set_ttl(ttl).map_err(anyhow::Error::new)
+    }
+
+    fn local_addr(&self) -> Result<SocketAddr> {
+        self.local_addr().map_err(anyhow::Error::new)
     }
 
     fn send_to(&self, buf: &[u8], addr: (Ipv4Addr, u16)) -> Result<usize> {
@@ -44,6 +53,7 @@ impl UdpSocketV4 for std::net::UdpSocket {
 
 pub(super) trait UdpSocketV6 {
     fn set_unicast_hops_v6(&self, ttl: u32) -> Result<()>;
+    fn local_addr(&self) -> Result<SocketAddr>;
     fn send_to(&self, buf: &[u8], addr: (Ipv6Addr, u16)) -> Result<usize>;
 }
 
@@ -52,6 +62,10 @@ impl UdpSocketV6 for std::net::UdpSocket {
         socket2::SockRef::from(self)
             .set_unicast_hops_v6(ttl)
             .map_err(anyhow::Error::new)
+    }
+
+    fn local_addr(&self) -> Result<SocketAddr> {
+        self.local_addr().map_err(anyhow::Error::new)
     }
 
     fn send_to(&self, buf: &[u8], addr: (Ipv6Addr, u16)) -> Result<usize> {
@@ -88,19 +102,196 @@ pub(super) trait PacketReceiver {
 pub(super) enum ProbeResult {
     Hop(IpAddr, u128),
     Destination(IpAddr, u128),
+    TerminalUnreachable(IpAddr, u128, String),
     Timeout,
 }
 
-pub(super) fn handle_probe_result(result: ProbeResult, opts: &TracerouteRequest) -> Result<bool> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ValidatedTraceroute {
+    pub estimated_packets: u64,
+    pub max_ordinal: u16,
+}
+
+pub(super) fn validate_request(opts: &TracerouteRequest) -> Result<ValidatedTraceroute> {
+    if opts.max_ttl == 0 {
+        return Err(anyhow!("traceroute max_ttl must be greater than zero"));
+    }
+    if opts.probes == 0 {
+        return Err(anyhow!("traceroute probes must be greater than zero"));
+    }
+    if opts.timeout == 0 {
+        return Err(anyhow!("traceroute timeout must be greater than zero"));
+    }
+
+    let estimated_packets = u64::from(opts.max_ttl)
+        .checked_mul(u64::from(opts.probes))
+        .ok_or_else(|| {
+            anyhow!(
+                "traceroute estimated packet calculation overflowed: max_ttl={} probes={}",
+                opts.max_ttl,
+                opts.probes
+            )
+        })?;
+    let max_identity = ProbeIdentity::new(opts.max_ttl, opts.probes - 1, opts.probes)?;
+    let max_ordinal = max_identity.ordinal();
+
+    match opts.protocol {
+        TracerouteProtocol::Udp => {
+            port_for_ordinal(DEFAULT_PORT, max_ordinal, "UDP destination port")?;
+        }
+        TracerouteProtocol::Tcp => {
+            port_for_ordinal(DEFAULT_PORT, max_ordinal, "TCP destination port")?;
+            validate_tcp_source_port_capacity(max_ordinal)?;
+        }
+        TracerouteProtocol::Icmp => {
+            // ProbeIdentity construction above guarantees the ICMP sequence fits in u16.
+        }
+    }
+
+    Ok(ValidatedTraceroute {
+        estimated_packets,
+        max_ordinal,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct ProbeIdentity {
+    ordinal: u16,
+}
+
+impl ProbeIdentity {
+    pub(super) fn new(ttl: u8, probe: u8, probes_per_hop: u8) -> Result<Self> {
+        if ttl == 0 {
+            return Err(anyhow!("traceroute TTL must be greater than zero"));
+        }
+        if probes_per_hop == 0 {
+            return Err(anyhow!(
+                "traceroute probes per hop must be greater than zero"
+            ));
+        }
+        if probe >= probes_per_hop {
+            return Err(anyhow!(
+                "traceroute probe index is outside probes-per-hop: probe={} probes_per_hop={}",
+                probe,
+                probes_per_hop
+            ));
+        }
+
+        let ttl_index = u64::from(ttl - 1);
+        let ordinal = ttl_index
+            .checked_mul(u64::from(probes_per_hop))
+            .and_then(|offset| offset.checked_add(u64::from(probe)))
+            .ok_or_else(|| {
+                anyhow!(
+                    "traceroute probe ordinal calculation overflowed: ttl={} probe={} probes_per_hop={}",
+                    ttl,
+                    probe,
+                    probes_per_hop
+                )
+            })?;
+        let ordinal = u16::try_from(ordinal).map_err(|_| {
+            anyhow!(
+                "traceroute probe ordinal exceeded u16 range: ttl={} probe={} probes_per_hop={}",
+                ttl,
+                probe,
+                probes_per_hop
+            )
+        })?;
+
+        Ok(Self { ordinal })
+    }
+
+    pub(super) fn ordinal(self) -> u16 {
+        self.ordinal
+    }
+
+    pub(super) fn destination_port(self) -> Result<u16> {
+        port_for_ordinal(DEFAULT_PORT, self.ordinal, "traceroute destination port")
+    }
+
+    pub(super) fn source_port(self, base_source_port: u16) -> Result<u16> {
+        port_for_ordinal(base_source_port, self.ordinal, "traceroute TCP source port")
+    }
+}
+
+pub(super) fn port_for_ordinal(base: u16, ordinal: u16, label: &'static str) -> Result<u16> {
+    base.checked_add(ordinal)
+        .ok_or_else(|| anyhow!("{label} exceeded u16 range: base={base} ordinal={ordinal}"))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct UdpProbeCookie([u8; 8]);
+
+impl UdpProbeCookie {
+    pub(super) fn new(run_cookie: u64, identity: ProbeIdentity) -> Self {
+        let ordinal = u64::from(identity.ordinal());
+        let per_probe_cookie = run_cookie ^ ordinal.rotate_left(17) ^ ordinal;
+        Self(per_probe_cookie.to_be_bytes())
+    }
+
+    pub(super) fn bytes(self) -> [u8; 8] {
+        self.0
+    }
+
+    pub(super) fn matches_payload(self, payload: &[u8]) -> bool {
+        payload.is_empty() || payload.get(..self.0.len()) == Some(self.0.as_slice())
+    }
+}
+
+pub(super) fn udp_run_cookie() -> u64 {
+    random::<u64>()
+}
+
+pub(super) struct ReverseDnsCache {
+    no_dns: bool,
+    names: HashMap<IpAddr, String>,
+}
+
+impl ReverseDnsCache {
+    fn new(no_dns: bool) -> Self {
+        Self {
+            no_dns,
+            names: HashMap::new(),
+        }
+    }
+
+    fn resolve(&mut self, addr: IpAddr) -> String {
+        self.resolve_with(addr, |addr| lookup_addr(addr))
+    }
+
+    fn resolve_with<Lookup, Error>(&mut self, addr: IpAddr, mut lookup: Lookup) -> String
+    where
+        Lookup: FnMut(&IpAddr) -> std::result::Result<String, Error>,
+    {
+        if self.no_dns {
+            return addr.to_string();
+        }
+
+        self.names
+            .entry(addr)
+            .or_insert_with(|| lookup(&addr).unwrap_or_else(|_| addr.to_string()))
+            .clone()
+    }
+}
+
+pub(super) fn handle_probe_result(
+    result: ProbeResult,
+    dns_cache: &mut ReverseDnsCache,
+) -> Result<bool> {
     match result {
         ProbeResult::Hop(addr, elapsed) => {
-            let host_display = resolve_hostname(addr, opts.no_dns.unwrap_or(false));
+            let host_display = dns_cache.resolve(addr);
             info!("  {} ms {}", elapsed, host_display);
             Ok(false)
         }
         ProbeResult::Destination(addr, elapsed) => {
-            let host_display = resolve_hostname(addr, opts.no_dns.unwrap_or(false));
+            let host_display = dns_cache.resolve(addr);
             info!("  {} ms {} (destination)", elapsed, host_display);
+            Ok(true)
+        }
+        ProbeResult::TerminalUnreachable(addr, elapsed, marker) => {
+            let host_display = dns_cache.resolve(addr);
+            info!("  {} ms {} ({marker})", elapsed, host_display);
             Ok(true)
         }
         ProbeResult::Timeout => {
@@ -120,12 +311,13 @@ pub(super) fn run_traceroute_loop_with_delay<E: TracerouteExecutor + ?Sized>(
     send_delay: Option<Duration>,
 ) -> Result<()> {
     let mut last_probe: Option<Instant> = None;
+    let mut dns_cache = ReverseDnsCache::new(opts.no_dns.unwrap_or(false));
     for ttl in 1..=opts.max_ttl {
         info!("ttl {:>2}:", ttl);
         for probe in 0..opts.probes {
             wait_for_probe_delay(send_delay, &mut last_probe);
             let result = executor.execute_probe(ttl, probe)?;
-            if handle_probe_result(result, opts)? {
+            if handle_probe_result(result, &mut dns_cache)? {
                 return Ok(());
             }
         }
@@ -154,8 +346,36 @@ pub(super) fn request_timeout(opts: &TracerouteRequest) -> Duration {
     Duration::from_millis(opts.timeout)
 }
 
-pub(super) fn tcp_base_source_port() -> u16 {
-    (random::<u16>() % 20_000) + 40_000
+pub(super) fn tcp_base_source_port(max_ordinal: u16) -> Result<u16> {
+    let upper = tcp_source_port_upper(max_ordinal)?;
+    let lower = if upper >= TCP_PREFERRED_SOURCE_PORT_MIN {
+        TCP_PREFERRED_SOURCE_PORT_MIN
+    } else {
+        TCP_MIN_SOURCE_PORT
+    };
+    if upper < lower {
+        return Err(anyhow!(
+            "traceroute TCP source port range exhausted: max_ordinal={max_ordinal}"
+        ));
+    }
+
+    let upper = upper.min(TCP_PREFERRED_SOURCE_PORT_MAX);
+    let span = upper - lower + 1;
+    Ok(lower + (random::<u16>() % span))
+}
+
+fn validate_tcp_source_port_capacity(max_ordinal: u16) -> Result<()> {
+    tcp_source_port_upper(max_ordinal).map(|_| ())
+}
+
+fn tcp_source_port_upper(max_ordinal: u16) -> Result<u16> {
+    let upper = u16::MAX - max_ordinal;
+    if upper < TCP_MIN_SOURCE_PORT {
+        return Err(anyhow!(
+            "traceroute TCP source ports cannot cover all probes without wrapping: max_ordinal={max_ordinal}"
+        ));
+    }
+    Ok(upper)
 }
 
 pub(super) fn open_ipv4_channel(
@@ -207,16 +427,6 @@ pub(super) fn remaining_probe_time(start: Instant, timeout: Duration) -> Option<
     probe::remaining_probe_time(start, timeout)
 }
 
-pub(super) fn resolve_hostname(addr: IpAddr, no_dns: bool) -> String {
-    if no_dns {
-        return addr.to_string();
-    }
-    match lookup_addr(&addr) {
-        Ok(host) => format!("{} ({})", host, addr),
-        Err(_) => addr.to_string(),
-    }
-}
-
 pub(super) struct ResolvedDestination {
     pub address: IpAddr,
     pub reason: &'static str,
@@ -247,7 +457,6 @@ pub(super) fn resolve_source_ipv6(destination: Ipv6Addr) -> Result<Ipv6Addr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::command::TracerouteProtocol;
     use std::collections::VecDeque;
 
     struct MockExecutor {
@@ -299,12 +508,28 @@ mod tests {
 
     #[test]
     fn handle_probe_result_returns_true_for_destination() {
+        let mut dns_cache = ReverseDnsCache::new(true);
         assert!(handle_probe_result(
             ProbeResult::Destination(IpAddr::V4(Ipv4Addr::LOCALHOST), 10),
-            &request(1, 1),
+            &mut dns_cache,
         )
         .unwrap());
-        assert!(!handle_probe_result(ProbeResult::Timeout, &request(1, 1)).unwrap());
+        assert!(!handle_probe_result(ProbeResult::Timeout, &mut dns_cache).unwrap());
+    }
+
+    #[test]
+    fn handle_probe_result_stops_for_terminal_unreachable() {
+        let mut dns_cache = ReverseDnsCache::new(true);
+
+        assert!(handle_probe_result(
+            ProbeResult::TerminalUnreachable(
+                IpAddr::V4(Ipv4Addr::LOCALHOST),
+                10,
+                "!host-unreachable/code=1".to_string(),
+            ),
+            &mut dns_cache,
+        )
+        .unwrap());
     }
 
     #[test]
@@ -332,5 +557,133 @@ mod tests {
         run_traceroute_loop_with_delay(&request(2, 2), &mut executor, None).unwrap();
 
         assert_eq!(executor.calls, vec![(1, 0), (1, 1), (2, 0), (2, 1)]);
+    }
+
+    #[test]
+    fn validate_request_rejects_zero_values() {
+        let mut opts = request(0, 1);
+        assert!(validate_request(&opts)
+            .unwrap_err()
+            .to_string()
+            .contains("max_ttl"));
+
+        opts = request(1, 0);
+        assert!(validate_request(&opts)
+            .unwrap_err()
+            .to_string()
+            .contains("probes"));
+
+        opts = request(1, 1);
+        opts.timeout = 0;
+        assert!(validate_request(&opts)
+            .unwrap_err()
+            .to_string()
+            .contains("timeout"));
+    }
+
+    #[test]
+    fn validate_request_computes_checked_packet_estimate() {
+        let validated = validate_request(&request(12, 3)).unwrap();
+
+        assert_eq!(validated.estimated_packets, 36);
+        assert_eq!(validated.max_ordinal, 35);
+    }
+
+    #[test]
+    fn validate_request_rejects_udp_destination_port_exhaustion() {
+        let mut opts = request(255, 255);
+
+        let err = validate_request(&opts).unwrap_err().to_string();
+
+        assert!(err.contains("UDP destination port"));
+        opts.protocol = TracerouteProtocol::Icmp;
+        assert!(validate_request(&opts).is_ok());
+    }
+
+    #[test]
+    fn probe_identity_uses_non_colliding_zero_based_ordinals() {
+        assert_eq!(ProbeIdentity::new(1, 0, 3).unwrap().ordinal(), 0);
+        assert_eq!(ProbeIdentity::new(1, 2, 3).unwrap().ordinal(), 2);
+        assert_eq!(ProbeIdentity::new(2, 0, 3).unwrap().ordinal(), 3);
+        assert_eq!(ProbeIdentity::new(30, 2, 3).unwrap().ordinal(), 89);
+    }
+
+    #[test]
+    fn probe_identity_rejects_invalid_inputs() {
+        assert!(ProbeIdentity::new(0, 0, 3).is_err());
+        assert!(ProbeIdentity::new(1, 0, 0).is_err());
+        assert!(ProbeIdentity::new(1, 3, 3).is_err());
+    }
+
+    #[test]
+    fn tcp_base_source_port_never_wraps_full_run() {
+        let base = tcp_base_source_port(100).unwrap();
+
+        assert!(base >= TCP_PREFERRED_SOURCE_PORT_MIN);
+        assert!(port_for_ordinal(base, 100, "test").is_ok());
+    }
+
+    #[test]
+    fn udp_probe_cookie_accepts_minimal_quotes_and_rejects_wrong_payload() {
+        let identity = ProbeIdentity::new(4, 2, 3).unwrap();
+        let cookie = UdpProbeCookie::new(0x1122_3344_5566_7788, identity);
+        let mut payload = cookie.bytes().to_vec();
+        payload.extend_from_slice(&[1, 2, 3]);
+
+        assert!(cookie.matches_payload(&[]));
+        assert!(cookie.matches_payload(&payload));
+        assert!(!cookie.matches_payload(&payload[..4]));
+
+        payload[0] ^= 1;
+        assert!(!cookie.matches_payload(&payload));
+    }
+
+    #[test]
+    fn reverse_dns_cache_reuses_successes_and_failures() {
+        let mut cache = ReverseDnsCache::new(false);
+        let mut calls = 0;
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        let first = cache.resolve_with(addr, |_| {
+            calls += 1;
+            Ok::<_, ()>("hop.example".to_string())
+        });
+        let second = cache.resolve_with(addr, |_| {
+            calls += 1;
+            Ok::<_, ()>("changed.example".to_string())
+        });
+
+        assert_eq!(first, "hop.example");
+        assert_eq!(second, "hop.example");
+        assert_eq!(calls, 1);
+
+        let failed_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+        let first = cache.resolve_with(failed_addr, |_| {
+            calls += 1;
+            Err::<String, _>(())
+        });
+        let second = cache.resolve_with(failed_addr, |_| {
+            calls += 1;
+            Ok::<_, ()>("unused.example".to_string())
+        });
+
+        assert_eq!(first, failed_addr.to_string());
+        assert_eq!(second, failed_addr.to_string());
+        assert_eq!(calls, 2);
+    }
+
+    #[test]
+    fn reverse_dns_cache_bypasses_lookup_when_disabled() {
+        let mut cache = ReverseDnsCache::new(true);
+        let mut calls = 0;
+        let addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+
+        let display = cache.resolve_with(addr, |_| {
+            calls += 1;
+            Ok::<_, ()>("hop.example".to_string())
+        });
+
+        assert_eq!(display, addr.to_string());
+        assert_eq!(calls, 0);
     }
 }

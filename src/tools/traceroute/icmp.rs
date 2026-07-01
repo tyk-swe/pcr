@@ -17,12 +17,12 @@ use crate::util::error::operation_failed;
 
 use super::common::{
     open_ipv4_channel, open_ipv6_channel, request_timeout, resolve_source_ipv6,
-    run_traceroute_loop_with_delay, PacketReceiver, ProbeResult, TracerouteExecutor,
+    run_traceroute_loop_with_delay, PacketReceiver, ProbeIdentity, ProbeResult, TracerouteExecutor,
     TransportSender,
 };
 use super::utils::{
     await_icmp_echo_v4, await_icmpv6_echo, build_echo_request, IcmpReceiverAdapter,
-    Icmpv6ReceiverAdapter,
+    Icmpv6ReceiverAdapter, ProbeExpectation,
 };
 
 struct IcmpV4Executor<'a, S, R: ?Sized> {
@@ -31,6 +31,7 @@ struct IcmpV4Executor<'a, S, R: ?Sized> {
     sender: &'a mut S,
     receiver: &'a mut R,
     identifier: u16,
+    probes_per_hop: u8,
 }
 
 impl<'a, S, R: ?Sized> TracerouteExecutor for IcmpV4Executor<'a, S, R>
@@ -39,7 +40,8 @@ where
     R: PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
-        let sequence = (ttl as u16).wrapping_mul(10).wrapping_add(probe as u16);
+        let identity = ProbeIdentity::new(ttl, probe, self.probes_per_hop)?;
+        let sequence = identity.ordinal();
         let mut buffer = [0u8; 32];
         build_echo_request(&mut buffer, self.identifier, sequence)?;
         self.sender.set_ttl(ttl)?;
@@ -59,7 +61,14 @@ where
                 ),
             ))?;
 
-        await_icmp_echo_v4(self.receiver, self.identifier, sequence, self.timeout)
+        let expectation = ProbeExpectation::icmp(
+            IpNextHeaderProtocols::Icmp,
+            None,
+            IpAddr::V4(self.destination),
+            self.identifier,
+            sequence,
+        );
+        await_icmp_echo_v4(self.receiver, &expectation, self.timeout)
     }
 }
 
@@ -106,6 +115,7 @@ where
         sender,
         receiver,
         identifier,
+        probes_per_hop: opts.probes,
     };
 
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
@@ -118,6 +128,7 @@ struct IcmpV6Executor<'a, S, R: ?Sized> {
     sender: &'a mut S,
     receiver: &'a mut R,
     identifier: u16,
+    probes_per_hop: u8,
 }
 
 impl<'a, S, R: ?Sized> TracerouteExecutor for IcmpV6Executor<'a, S, R>
@@ -126,7 +137,8 @@ where
     R: PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
-        let sequence = (ttl as u16).wrapping_mul(10).wrapping_add(probe as u16);
+        let identity = ProbeIdentity::new(ttl, probe, self.probes_per_hop)?;
+        let sequence = identity.ordinal();
         let spec = Icmpv6Spec {
             kind: Some(Icmpv6Types::EchoRequest.0),
             code: Some(0),
@@ -158,7 +170,14 @@ where
                 ),
             ))?;
 
-        await_icmpv6_echo(self.receiver, self.identifier, sequence, self.timeout)
+        let expectation = ProbeExpectation::icmp(
+            IpNextHeaderProtocols::Icmpv6,
+            Some(IpAddr::V6(self.source_ip)),
+            IpAddr::V6(self.destination),
+            self.identifier,
+            sequence,
+        );
+        await_icmpv6_echo(self.receiver, &expectation, self.timeout)
     }
 }
 
@@ -211,6 +230,7 @@ where
         sender,
         receiver,
         identifier,
+        probes_per_hop: opts.probes,
     };
 
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)

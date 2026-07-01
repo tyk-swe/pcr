@@ -48,6 +48,15 @@ impl OriginalTransport {
     }
 }
 
+#[cfg(feature = "traceroute")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OriginalEcho {
+    pub(crate) source_ip: IpAddr,
+    pub(crate) destination_ip: IpAddr,
+    pub(crate) identifier: u16,
+    pub(crate) sequence: u16,
+}
+
 pub(crate) struct Ipv6TransportPayload<'a> {
     pub(crate) protocol: IpNextHeaderProtocol,
     pub(crate) payload: &'a [u8],
@@ -115,7 +124,7 @@ pub(crate) fn extract_original_transport_v4(packet: &IcmpPacket) -> Option<Origi
     ) {
         return None;
     }
-    let payload = packet.payload();
+    let payload = icmp_error_original_datagram(packet.payload())?;
     if payload.len() < Ipv4Packet::minimum_packet_size() {
         // Guard against truncated IPv4 headers before attempting to parse transport bytes.
         return None;
@@ -150,7 +159,7 @@ pub(crate) fn extract_original_transport_v6(packet: &Icmpv6Packet) -> Option<Ori
     ) {
         return None;
     }
-    let payload = packet.payload();
+    let payload = icmp_error_original_datagram(packet.payload())?;
     if payload.len() < Ipv6Packet::minimum_packet_size() {
         // An incomplete IPv6 header means we cannot trust the embedded transport data.
         return None;
@@ -218,36 +227,44 @@ fn original_transport_from_payload(
 }
 
 #[cfg(feature = "traceroute")]
-pub(crate) fn extract_inner_echo_v4(packet: &IcmpPacket) -> Option<(u16, u16)> {
+pub(crate) fn extract_inner_echo_v4(packet: &IcmpPacket) -> Option<OriginalEcho> {
     if !matches!(
         packet.get_icmp_type(),
         IcmpTypes::TimeExceeded | IcmpTypes::DestinationUnreachable | IcmpTypes::ParameterProblem
     ) {
         return None;
     }
-    let payload = packet.payload();
+    let payload = icmp_error_original_datagram(packet.payload())?;
     if payload.len() < Ipv4Packet::minimum_packet_size() {
         // ICMP timeouts only carry the first bytes of the original datagram; ensure it is intact.
         return None;
     }
     let inner = Ipv4Packet::new(payload)?;
+    if inner.get_next_level_protocol() != IpNextHeaderProtocols::Icmp {
+        return None;
+    }
     let inner_payload = inner.payload();
     if inner_payload.len() < 8 {
         return None;
     }
     let echo = EchoRequestPacket::new(inner_payload)?;
-    Some((echo.get_identifier(), echo.get_sequence_number()))
+    Some(OriginalEcho {
+        source_ip: IpAddr::V4(inner.get_source()),
+        destination_ip: IpAddr::V4(inner.get_destination()),
+        identifier: echo.get_identifier(),
+        sequence: echo.get_sequence_number(),
+    })
 }
 
 #[cfg(feature = "traceroute")]
-pub(crate) fn extract_inner_echo_v6(packet: &Icmpv6Packet) -> Option<(u16, u16)> {
+pub(crate) fn extract_inner_echo_v6(packet: &Icmpv6Packet) -> Option<OriginalEcho> {
     if !matches!(
         packet.get_icmpv6_type(),
         Icmpv6Types::DestinationUnreachable | Icmpv6Types::PacketTooBig | Icmpv6Types::TimeExceeded
     ) {
         return None;
     }
-    let payload = packet.payload();
+    let payload = icmp_error_original_datagram(packet.payload())?;
     if payload.len() < Ipv6Packet::minimum_packet_size() {
         return None;
     }
@@ -260,7 +277,21 @@ pub(crate) fn extract_inner_echo_v6(packet: &Icmpv6Packet) -> Option<(u16, u16)>
         return None;
     }
     let inner_packet = Icmpv6Packet::new(transport.payload)?;
-    parse_icmpv6_echo(&inner_packet)
+    let (identifier, sequence) = parse_icmpv6_echo(&inner_packet)?;
+    Some(OriginalEcho {
+        source_ip: IpAddr::V6(inner.get_source()),
+        destination_ip: IpAddr::V6(inner.get_destination()),
+        identifier,
+        sequence,
+    })
+}
+
+#[cfg(any(feature = "scan", feature = "traceroute"))]
+fn icmp_error_original_datagram(payload: &[u8]) -> Option<&[u8]> {
+    // Generic pnet ICMP/ICMPv6 packets expose the type-specific 32-bit
+    // "rest of header" field as the first payload bytes. The embedded original
+    // datagram starts after that field for error messages.
+    payload.get(4..)
 }
 
 #[cfg(feature = "traceroute")]

@@ -279,7 +279,6 @@ pub(super) fn classify_icmp_event_v4_with_source(
         IcmpTypes::DestinationUnreachable => {
             if packet.get_icmp_code() == IcmpDestinationUnreachableCodes::DestinationPortUnreachable
                 && expectation.protocol == IpNextHeaderProtocols::Udp
-                && addr == expectation.destination_ip
             {
                 IcmpEventKind::Destination
             } else if addr == expectation.destination_ip {
@@ -309,7 +308,6 @@ pub(super) fn classify_icmp_event_v6_with_source(
         Icmpv6Types::DestinationUnreachable => {
             if packet.get_icmpv6_code().0 == ICMPV6_PORT_UNREACHABLE_CODE
                 && expectation.protocol == IpNextHeaderProtocols::Udp
-                && addr == expectation.destination_ip
             {
                 IcmpEventKind::Destination
             } else if addr == expectation.destination_ip {
@@ -567,7 +565,7 @@ mod tests {
     use pnet::packet::icmp::echo_reply;
     use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
     use std::collections::VecDeque;
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     fn icmp_expectation(destination: Ipv4Addr, identifier: u16, sequence: u16) -> ProbeExpectation {
         ProbeExpectation::icmp(
@@ -590,6 +588,23 @@ mod tests {
             IpNextHeaderProtocols::Udp,
             Some(IpAddr::V4(source)),
             IpAddr::V4(destination),
+            Some(source_port),
+            destination_port,
+            cookie,
+        )
+    }
+
+    fn udp_expectation_v6(
+        source: Ipv6Addr,
+        destination: Ipv6Addr,
+        source_port: u16,
+        destination_port: u16,
+        cookie: UdpProbeCookie,
+    ) -> ProbeExpectation {
+        ProbeExpectation::udp(
+            IpNextHeaderProtocols::Udp,
+            Some(IpAddr::V6(source)),
+            IpAddr::V6(destination),
             Some(source_port),
             destination_port,
             cookie,
@@ -621,6 +636,23 @@ mod tests {
         bytes[2..4].copy_from_slice(&destination_port.to_be_bytes());
         bytes[4..6].copy_from_slice(&(len as u16).to_be_bytes());
         bytes[8..].copy_from_slice(payload);
+        bytes
+    }
+
+    fn ipv6_packet(
+        protocol: IpNextHeaderProtocol,
+        source: Ipv6Addr,
+        destination: Ipv6Addr,
+        payload: &[u8],
+    ) -> Vec<u8> {
+        let mut bytes = vec![0u8; 40 + payload.len()];
+        bytes[0] = 0x60;
+        bytes[4..6].copy_from_slice(&(payload.len() as u16).to_be_bytes());
+        bytes[6] = protocol.0;
+        bytes[7] = 64;
+        bytes[8..24].copy_from_slice(&source.octets());
+        bytes[24..40].copy_from_slice(&destination.octets());
+        bytes[40..].copy_from_slice(payload);
         bytes
     }
 
@@ -743,6 +775,14 @@ mod tests {
             classify_icmp_event_v4_with_source(&packet, IpAddr::V4(destination), &expectation),
             Some(IcmpEventKind::Destination)
         );
+        assert_eq!(
+            classify_icmp_event_v4_with_source(
+                &packet,
+                IpAddr::V4(Ipv4Addr::new(203, 0, 113, 1)),
+                &expectation
+            ),
+            Some(IcmpEventKind::Destination)
+        );
 
         let minimal_udp = udp_datagram(49_000, destination_port, &[]);
         let minimal_inner = ipv4_packet(
@@ -764,6 +804,30 @@ mod tests {
                 IpAddr::V4(destination),
                 &expectation
             ),
+            Some(IcmpEventKind::Destination)
+        );
+    }
+
+    #[test]
+    fn classify_icmp_event_v6_accepts_matching_udp_port_unreachable_from_alias_source() {
+        let source = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 20);
+        let alias = Ipv6Addr::new(0x2001, 0xdb8, 0xffff, 0, 0, 0, 0, 1);
+        let identity = ProbeIdentity::new(3, 1, 4).unwrap();
+        let destination_port = identity.destination_port().unwrap();
+        let cookie = UdpProbeCookie::new(0x1122_3344_5566_7788, identity);
+        let expectation = udp_expectation_v6(source, destination, 49_000, destination_port, cookie);
+        let udp = udp_datagram(49_000, destination_port, &cookie.bytes());
+        let inner = ipv6_packet(IpNextHeaderProtocols::Udp, source, destination, &udp);
+        let bytes = icmp_error_packet(
+            Icmpv6Types::DestinationUnreachable.0,
+            ICMPV6_PORT_UNREACHABLE_CODE,
+            &inner,
+        );
+        let packet = Icmpv6Packet::new(&bytes).unwrap();
+
+        assert_eq!(
+            classify_icmp_event_v6_with_source(&packet, IpAddr::V6(alias), &expectation),
             Some(IcmpEventKind::Destination)
         );
     }

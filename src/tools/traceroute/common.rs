@@ -244,14 +244,14 @@ pub(super) fn udp_run_cookie() -> u64 {
 
 pub(super) struct ReverseDnsCache {
     no_dns: bool,
-    names: HashMap<IpAddr, String>,
+    displays: HashMap<IpAddr, String>,
 }
 
 impl ReverseDnsCache {
     fn new(no_dns: bool) -> Self {
         Self {
             no_dns,
-            names: HashMap::new(),
+            displays: HashMap::new(),
         }
     }
 
@@ -267,9 +267,12 @@ impl ReverseDnsCache {
             return addr.to_string();
         }
 
-        self.names
+        self.displays
             .entry(addr)
-            .or_insert_with(|| lookup(&addr).unwrap_or_else(|_| addr.to_string()))
+            .or_insert_with(|| match lookup(&addr) {
+                Ok(host) => format!("{host} ({addr})"),
+                Err(_) => addr.to_string(),
+            })
             .clone()
     }
 }
@@ -653,8 +656,8 @@ mod tests {
             Ok::<_, ()>("changed.example".to_string())
         });
 
-        assert_eq!(first, "hop.example");
-        assert_eq!(second, "hop.example");
+        assert_eq!(first, "hop.example (192.0.2.1)");
+        assert_eq!(second, "hop.example (192.0.2.1)");
         assert_eq!(calls, 1);
 
         let failed_addr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));

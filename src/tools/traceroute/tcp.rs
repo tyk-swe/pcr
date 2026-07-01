@@ -28,6 +28,36 @@ use super::utils::{
     IcmpReceiverAdapter, Icmpv6ReceiverAdapter, ProbeExpectation,
 };
 
+#[derive(Debug, Clone, Copy)]
+struct TcpProbeResponse {
+    source_port: u16,
+    destination_port: u16,
+}
+
+trait TcpProbeReceiver {
+    fn next_tcp_response(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<(TcpProbeResponse, IpAddr)>>;
+}
+
+impl<'a> TcpProbeReceiver for TcpTransportChannelIterator<'a> {
+    fn next_tcp_response(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<(TcpProbeResponse, IpAddr)>> {
+        Ok(self.next_with_timeout(timeout)?.map(|(packet, addr)| {
+            (
+                TcpProbeResponse {
+                    source_port: packet.get_source(),
+                    destination_port: packet.get_destination(),
+                },
+                addr,
+            )
+        }))
+    }
+}
+
 struct TcpV4Executor<'a, R: ?Sized> {
     destination: Ipv4Addr,
     source_ip: Ipv4Addr,
@@ -259,27 +289,33 @@ pub(super) fn run_tcp_traceroute_v6(
     Ok(())
 }
 
-fn await_tcp_probe_v4<R: PacketReceiver + ?Sized>(
+fn await_tcp_probe_v4<R, T>(
     icmp_iter: &mut R,
-    tcp_iter: &mut TcpTransportChannelIterator,
+    tcp_iter: &mut T,
     expected_source: Ipv4Addr,
     expected_destination: Ipv4Addr,
     expected_dest_port: u16,
     expected_source_port: u16,
     timeout: Duration,
-) -> Result<ProbeResult> {
+) -> Result<ProbeResult>
+where
+    R: PacketReceiver + ?Sized,
+    T: TcpProbeReceiver + ?Sized,
+{
     let start = Instant::now();
-    while let Some(remaining) = remaining_probe_time(start, timeout) {
-        let slice = remaining.min(TCP_RESPONSE_POLL_INTERVAL);
-        let expectation = ProbeExpectation::tcp(
-            IpNextHeaderProtocols::Tcp,
-            IpAddr::V4(expected_source),
-            IpAddr::V4(expected_destination),
-            expected_source_port,
-            expected_dest_port,
-        );
+    let expectation = ProbeExpectation::tcp(
+        IpNextHeaderProtocols::Tcp,
+        IpAddr::V4(expected_source),
+        IpAddr::V4(expected_destination),
+        expected_source_port,
+        expected_dest_port,
+    );
 
-        if let Some((event, addr)) = poll_icmp_event_v4_with_source(icmp_iter, &expectation, slice)?
+    while let Some(remaining) = remaining_probe_time(start, timeout) {
+        let (icmp_slice, tcp_slice) = split_tcp_poll_window(remaining);
+
+        if let Some((event, addr)) =
+            poll_icmp_event_v4_with_source(icmp_iter, &expectation, icmp_slice)?
         {
             let elapsed = start.elapsed().as_millis();
             return Ok(match event {
@@ -291,14 +327,10 @@ fn await_tcp_probe_v4<R: PacketReceiver + ?Sized>(
             });
         }
 
-        let Some(remaining) = remaining_probe_time(start, timeout) else {
-            break;
-        };
-        let slice = remaining.min(TCP_RESPONSE_POLL_INTERVAL);
-        if let Some((packet, addr)) = tcp_iter.next_with_timeout(slice)? {
+        if let Some((packet, addr)) = tcp_iter.next_tcp_response(tcp_slice)? {
             if addr == IpAddr::V4(expected_destination)
-                && packet.get_source() == expected_dest_port
-                && packet.get_destination() == expected_source_port
+                && packet.source_port == expected_dest_port
+                && packet.destination_port == expected_source_port
             {
                 let elapsed = start.elapsed().as_millis();
                 return Ok(ProbeResult::Destination(addr, elapsed));
@@ -308,27 +340,33 @@ fn await_tcp_probe_v4<R: PacketReceiver + ?Sized>(
     Ok(ProbeResult::Timeout)
 }
 
-fn await_tcp_probe_v6<R: PacketReceiver + ?Sized>(
+fn await_tcp_probe_v6<R, T>(
     icmp_iter: &mut R,
-    tcp_iter: &mut TcpTransportChannelIterator,
+    tcp_iter: &mut T,
     expected_source: Ipv6Addr,
     expected_destination: Ipv6Addr,
     expected_dest_port: u16,
     expected_source_port: u16,
     timeout: Duration,
-) -> Result<ProbeResult> {
+) -> Result<ProbeResult>
+where
+    R: PacketReceiver + ?Sized,
+    T: TcpProbeReceiver + ?Sized,
+{
     let start = Instant::now();
-    while let Some(remaining) = remaining_probe_time(start, timeout) {
-        let slice = remaining.min(TCP_RESPONSE_POLL_INTERVAL);
-        let expectation = ProbeExpectation::tcp(
-            IpNextHeaderProtocols::Tcp,
-            IpAddr::V6(expected_source),
-            IpAddr::V6(expected_destination),
-            expected_source_port,
-            expected_dest_port,
-        );
+    let expectation = ProbeExpectation::tcp(
+        IpNextHeaderProtocols::Tcp,
+        IpAddr::V6(expected_source),
+        IpAddr::V6(expected_destination),
+        expected_source_port,
+        expected_dest_port,
+    );
 
-        if let Some((event, addr)) = poll_icmp_event_v6_with_source(icmp_iter, &expectation, slice)?
+    while let Some(remaining) = remaining_probe_time(start, timeout) {
+        let (icmp_slice, tcp_slice) = split_tcp_poll_window(remaining);
+
+        if let Some((event, addr)) =
+            poll_icmp_event_v6_with_source(icmp_iter, &expectation, icmp_slice)?
         {
             let elapsed = start.elapsed().as_millis();
             return Ok(match event {
@@ -340,14 +378,10 @@ fn await_tcp_probe_v6<R: PacketReceiver + ?Sized>(
             });
         }
 
-        let Some(remaining) = remaining_probe_time(start, timeout) else {
-            break;
-        };
-        let slice = remaining.min(TCP_RESPONSE_POLL_INTERVAL);
-        if let Some((packet, addr)) = tcp_iter.next_with_timeout(slice)? {
+        if let Some((packet, addr)) = tcp_iter.next_tcp_response(tcp_slice)? {
             if addr == IpAddr::V6(expected_destination)
-                && packet.get_source() == expected_dest_port
-                && packet.get_destination() == expected_source_port
+                && packet.source_port == expected_dest_port
+                && packet.destination_port == expected_source_port
             {
                 let elapsed = start.elapsed().as_millis();
                 return Ok(ProbeResult::Destination(addr, elapsed));
@@ -355,4 +389,135 @@ fn await_tcp_probe_v6<R: PacketReceiver + ?Sized>(
         }
     }
     Ok(ProbeResult::Timeout)
+}
+
+fn split_tcp_poll_window(remaining: Duration) -> (Duration, Duration) {
+    // Reserve time for both sockets before either blocking read starts.
+    let window = remaining.min(TCP_RESPONSE_POLL_INTERVAL);
+    let icmp_slice = window / 2;
+    if icmp_slice.is_zero() {
+        (window, window)
+    } else {
+        (icmp_slice, window - icmp_slice)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    struct SleepingIcmpReceiver {
+        calls: Vec<Duration>,
+    }
+
+    impl SleepingIcmpReceiver {
+        fn new() -> Self {
+            Self { calls: Vec::new() }
+        }
+    }
+
+    impl PacketReceiver for SleepingIcmpReceiver {
+        fn next_packet(&mut self, timeout: Duration) -> Result<Option<(Vec<u8>, IpAddr)>> {
+            self.calls.push(timeout);
+            std::thread::sleep(timeout);
+            Ok(None)
+        }
+    }
+
+    struct FakeTcpReceiver {
+        calls: Vec<Duration>,
+        responses: VecDeque<Option<(TcpProbeResponse, IpAddr)>>,
+    }
+
+    impl FakeTcpReceiver {
+        fn new(responses: impl IntoIterator<Item = Option<(TcpProbeResponse, IpAddr)>>) -> Self {
+            Self {
+                calls: Vec::new(),
+                responses: responses.into_iter().collect(),
+            }
+        }
+    }
+
+    impl TcpProbeReceiver for FakeTcpReceiver {
+        fn next_tcp_response(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<(TcpProbeResponse, IpAddr)>> {
+            self.calls.push(timeout);
+            Ok(self.responses.pop_front().flatten())
+        }
+    }
+
+    #[test]
+    fn await_tcp_probe_v4_checks_tcp_after_icmp_uses_reserved_final_slice() {
+        let expected_source = Ipv4Addr::new(192, 0, 2, 10);
+        let expected_destination = Ipv4Addr::new(198, 51, 100, 20);
+        let expected_dest_port = 33_434;
+        let expected_source_port = 45_000;
+        let mut icmp = SleepingIcmpReceiver::new();
+        let mut tcp = FakeTcpReceiver::new([Some((
+            TcpProbeResponse {
+                source_port: expected_dest_port,
+                destination_port: expected_source_port,
+            },
+            IpAddr::V4(expected_destination),
+        ))]);
+
+        let result = await_tcp_probe_v4(
+            &mut icmp,
+            &mut tcp,
+            expected_source,
+            expected_destination,
+            expected_dest_port,
+            expected_source_port,
+            Duration::from_millis(4),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            result,
+            ProbeResult::Destination(IpAddr::V4(addr), _) if addr == expected_destination
+        ));
+        assert_eq!(icmp.calls.len(), 1);
+        assert_eq!(tcp.calls.len(), 1);
+        assert!(icmp.calls[0] < Duration::from_millis(4));
+        assert!(!tcp.calls[0].is_zero());
+    }
+
+    #[test]
+    fn await_tcp_probe_v6_checks_tcp_after_icmp_uses_reserved_final_slice() {
+        let expected_source = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
+        let expected_destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 20);
+        let expected_dest_port = 33_434;
+        let expected_source_port = 45_000;
+        let mut icmp = SleepingIcmpReceiver::new();
+        let mut tcp = FakeTcpReceiver::new([Some((
+            TcpProbeResponse {
+                source_port: expected_dest_port,
+                destination_port: expected_source_port,
+            },
+            IpAddr::V6(expected_destination),
+        ))]);
+
+        let result = await_tcp_probe_v6(
+            &mut icmp,
+            &mut tcp,
+            expected_source,
+            expected_destination,
+            expected_dest_port,
+            expected_source_port,
+            Duration::from_millis(4),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            result,
+            ProbeResult::Destination(IpAddr::V6(addr), _) if addr == expected_destination
+        ));
+        assert_eq!(icmp.calls.len(), 1);
+        assert_eq!(tcp.calls.len(), 1);
+        assert!(icmp.calls[0] < Duration::from_millis(4));
+        assert!(!tcp.calls[0].is_zero());
+    }
 }

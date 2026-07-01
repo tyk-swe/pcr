@@ -8,7 +8,9 @@ use log::{info, warn};
 use rustyline::error::ReadlineError;
 use rustyline::{Config, Editor};
 
-use crate::domain::command::{InteractiveRequest, ListenRequest, ScanRequest, TracerouteRequest};
+use crate::domain::command::{
+    DnsRequest, InteractiveRequest, ListenRequest, ScanRequest, TracerouteRequest,
+};
 use crate::domain::request::PacketRequest;
 use crate::engine::mode::ExecutionMode;
 
@@ -22,8 +24,8 @@ use super::options::{
     IcmpOptions, Icmpv6Options, OneShotOptions, TcpOptions, TransportCommand, UdpOptions,
 };
 use command::{
-    parse_listen, parse_oneshot, parse_repl_line, parse_scan, parse_traceroute, CommandFlow,
-    ReplCommand,
+    parse_dns, parse_dns_query, parse_listen, parse_oneshot, parse_repl_line, parse_scan,
+    parse_traceroute, CommandFlow, ReplCommand,
 };
 use completion::ReplHelper;
 use help::{print_command_help, print_help};
@@ -56,6 +58,10 @@ pub(crate) trait ReplEngine {
     fn run_traceroute<'a>(
         &'a mut self,
         request: TracerouteRequest,
+    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>>;
+    fn run_dns_query<'a>(
+        &'a mut self,
+        request: DnsRequest,
     ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>>;
 }
 
@@ -221,6 +227,22 @@ async fn execute_command(
             )?;
             Ok(CommandFlow::Continue)
         }
+        ReplCommand::Dns(args) => {
+            report_command_result(
+                "dns",
+                handle_dns(&args, engine).await,
+                session.script_fail_fast,
+            )?;
+            Ok(CommandFlow::Continue)
+        }
+        ReplCommand::DnsQuery(args) => {
+            report_command_result(
+                "dns-query",
+                handle_dns_query(&args, engine).await,
+                session.script_fail_fast,
+            )?;
+            Ok(CommandFlow::Continue)
+        }
         ReplCommand::Source { path, fail_fast } => {
             let previous = session.script_fail_fast;
             session.script_fail_fast = previous || fail_fast;
@@ -307,6 +329,28 @@ async fn handle_traceroute(args: &[String], engine: &mut impl ReplEngine) -> Res
     engine
         .run_traceroute(TracerouteRequest::from(&options))
         .await
+}
+
+async fn handle_dns(args: &[String], engine: &mut impl ReplEngine) -> Result<()> {
+    let command = parse_dns(args)?;
+    match command {
+        crate::cli::commands::DnsCommand::Query(options) => {
+            handle_dns_query_options(options, engine).await
+        }
+    }
+}
+
+async fn handle_dns_query(args: &[String], engine: &mut impl ReplEngine) -> Result<()> {
+    let options = parse_dns_query(args)?;
+    handle_dns_query_options(options, engine).await
+}
+
+async fn handle_dns_query_options(
+    options: crate::cli::commands::DnsQueryOptions,
+    engine: &mut impl ReplEngine,
+) -> Result<()> {
+    let request = crate::app::normalize_dns_query_options(&options)?;
+    engine.run_dns_query(request).await
 }
 
 async fn run_source_file(
@@ -912,6 +956,7 @@ mod tests {
     #[derive(Default)]
     struct MockReplEngine {
         sent: Vec<(PacketRequest, ExecutionMode)>,
+        dns_queries: Vec<DnsRequest>,
         output_formats: Vec<CliOutputFormat>,
         failing_sends: usize,
     }
@@ -970,6 +1015,14 @@ mod tests {
             &'a mut self,
             _request: TracerouteRequest,
         ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn run_dns_query<'a>(
+            &'a mut self,
+            request: DnsRequest,
+        ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+            self.dns_queries.push(request);
             Box::pin(async { Ok(()) })
         }
     }
@@ -1105,6 +1158,53 @@ mod tests {
 
         assert_eq!(engine.sent.len(), 1);
         assert_eq!(engine.sent[0].0.listener.listen, None);
+    }
+
+    #[tokio::test]
+    async fn dns_query_command_routes_to_engine() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+
+        execute_command(
+            ReplCommand::Dns(repl_args(&[
+                "query",
+                "example.test",
+                "--type",
+                "AAAA",
+                "--server",
+                "1.1.1.1",
+            ])),
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(engine.dns_queries.len(), 1);
+        assert_eq!(engine.dns_queries[0].domain, "example.test");
+        assert_eq!(engine.dns_queries[0].record_type, "AAAA");
+        assert_eq!(engine.dns_queries[0].server, "1.1.1.1");
+    }
+
+    #[tokio::test]
+    async fn legacy_dns_query_command_routes_to_engine() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+
+        execute_command(
+            ReplCommand::DnsQuery(repl_args(&["--domain", "example.test"])),
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(engine.dns_queries.len(), 1);
+        assert_eq!(engine.dns_queries[0].domain, "example.test");
     }
 
     #[tokio::test]

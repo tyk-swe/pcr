@@ -26,7 +26,8 @@ mod telemetry;
 pub(crate) use cli_mapping::CliMappingError;
 #[cfg(feature = "repl")]
 pub(crate) use cli_mapping::{
-    normalize_one_shot_options, transport_compact_target_has_port, transport_has_compact_target,
+    normalize_dns_query_options, normalize_one_shot_options, transport_compact_target_has_port,
+    transport_has_compact_target,
 };
 
 pub fn run_cli() -> Result<()> {

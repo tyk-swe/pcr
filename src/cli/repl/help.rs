@@ -39,6 +39,9 @@ pub(super) fn print_help() {
     println!("  scan <args>              Run a network scan");
     println!("                           Example: scan tcp-syn --target 1.1.1.1 --ports 80,443");
     println!();
+    println!("  dns query <domain>       Perform a DNS query");
+    println!("                           Example: dns query example.com --type A --server 1.1.1.1");
+    println!();
     println!("  trace | traceroute <args> Perform traceroute-style path discovery");
     println!("                           Example: trace --dest example.com");
     println!();

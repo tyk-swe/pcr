@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::app::adapters::output::OutputEventSink;
 use crate::cli::enums::OutputFormat as CliOutputFormat;
 use crate::cli::repl::ReplEngine;
-use crate::domain::command::{ListenRequest, ScanRequest, TracerouteRequest};
+use crate::domain::command::{DnsRequest, ListenRequest, ScanRequest, TracerouteRequest};
 use crate::domain::request::PacketRequest;
 use crate::engine::core::Engine;
 use crate::engine::mode::ExecutionMode;
@@ -57,5 +57,12 @@ impl ReplEngine for Engine {
         request: TracerouteRequest,
     ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move { Engine::run_traceroute(self, &request).await })
+    }
+
+    fn run_dns_query<'a>(
+        &'a mut self,
+        request: DnsRequest,
+    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move { Engine::run_dns_query(self, &request).await })
     }
 }

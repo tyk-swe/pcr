@@ -1,7 +1,9 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::cli::commands::{ListenCommandOptions, ScanCommand, TracerouteOptions};
+use crate::cli::commands::{
+    DnsCommand, DnsQueryOptions, ListenCommandOptions, ScanCommand, TracerouteOptions,
+};
 use crate::cli::options::OneShotOptions;
 use anyhow::{anyhow, bail, Result};
 
@@ -20,6 +22,8 @@ pub(super) enum ReplCommand {
     Listen(Vec<String>),
     Scan(Vec<String>),
     Traceroute(Vec<String>),
+    Dns(Vec<String>),
+    DnsQuery(Vec<String>),
     Source { path: String, fail_fast: bool },
     Save(String),
     Status,
@@ -74,6 +78,8 @@ pub(super) fn parse_repl_line(input: &str) -> Result<Option<ReplCommand>> {
         "listen" => ReplCommand::Listen(args),
         "scan" => ReplCommand::Scan(args),
         "trace" | "traceroute" => ReplCommand::Traceroute(args),
+        "dns" => ReplCommand::Dns(args),
+        "dns-query" => ReplCommand::DnsQuery(args),
         "source" => parse_source_command(args),
         "save" if args.len() == 1 => ReplCommand::Save(args[0].clone()),
         "save" => ReplCommand::Unknown("save".to_string()),
@@ -142,6 +148,26 @@ pub(super) fn parse_traceroute(args: &[String]) -> Result<TracerouteOptions> {
     parse_args("traceroute", args)
 }
 
+#[derive(clap::Parser)]
+#[command(name = "dns")]
+struct ReplDnsArgs {
+    #[command(subcommand)]
+    command: DnsCommand,
+}
+
+pub(super) fn parse_dns(args: &[String]) -> Result<DnsCommand> {
+    let parsed = <ReplDnsArgs as clap::Parser>::try_parse_from(command_arguments("dns", args))
+        .map_err(|err| {
+            let msg = err.to_string();
+            anyhow!("{msg}\nTry: help dns")
+        })?;
+    Ok(parsed.command)
+}
+
+pub(super) fn parse_dns_query(args: &[String]) -> Result<DnsQueryOptions> {
+    parse_args("dns-query", args)
+}
+
 pub(super) fn command_arguments(name: &str, args: &[String]) -> Vec<String> {
     let mut argv = Vec::with_capacity(args.len() + 1);
     argv.push(name.to_string());
@@ -189,6 +215,23 @@ mod tests {
                 "--dport".to_string(),
                 "9".to_string(),
             ])
+        );
+    }
+
+    #[test]
+    fn parse_repl_line_supports_dns_query_commands() {
+        assert_eq!(
+            parse("dns query example.test --type AAAA"),
+            ReplCommand::Dns(vec![
+                "query".to_string(),
+                "example.test".to_string(),
+                "--type".to_string(),
+                "AAAA".to_string(),
+            ])
+        );
+        assert_eq!(
+            parse("dns-query --domain example.test"),
+            ReplCommand::DnsQuery(vec!["--domain".to_string(), "example.test".to_string(),])
         );
     }
 
@@ -258,5 +301,33 @@ mod tests {
         let parsed = parse_scan(&args).unwrap();
 
         assert!(matches!(parsed, ScanCommand::TcpSyn(_)));
+    }
+
+    #[test]
+    fn parse_dns_reconstructs_nested_query_command() {
+        let args = vec![
+            "query".to_string(),
+            "example.test".to_string(),
+            "--type".to_string(),
+            "AAAA".to_string(),
+        ];
+
+        let parsed = parse_dns(&args).unwrap();
+
+        assert!(matches!(
+            parsed,
+            DnsCommand::Query(options)
+                if options.domain_name() == Some("example.test")
+                    && options.record_type == "AAAA"
+        ));
+    }
+
+    #[test]
+    fn parse_dns_query_reconstructs_legacy_query_options() {
+        let args = vec!["--domain".to_string(), "example.test".to_string()];
+
+        let parsed = parse_dns_query(&args).unwrap();
+
+        assert_eq!(parsed.domain_name(), Some("example.test"));
     }
 }

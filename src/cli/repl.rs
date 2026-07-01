@@ -179,7 +179,7 @@ async fn execute_command(
         ReplCommand::Plan(args) => {
             report_command_result(
                 "plan",
-                handle_send(&args, opts, session, engine, ExecutionMode::Plan).await,
+                handle_send(&args, session, engine, ExecutionMode::Plan).await,
                 session.script_fail_fast,
             )?;
             Ok(CommandFlow::Continue)
@@ -192,7 +192,7 @@ async fn execute_command(
             };
             report_command_result(
                 "send",
-                handle_send(&args, opts, session, engine, mode).await,
+                handle_send(&args, session, engine, mode).await,
                 session.script_fail_fast,
             )?;
             Ok(CommandFlow::Continue)
@@ -278,16 +278,13 @@ fn report_command_result(action: &str, result: Result<()>, fail_fast: bool) -> R
 
 async fn handle_send(
     args: &[String],
-    opts: &InteractiveRequest,
     session: &ReplSession,
     engine: &mut impl ReplEngine,
     mode: ExecutionMode,
 ) -> Result<()> {
     let local = parse_oneshot(args)?;
     let mut options = merge_one_shot_options(&session.draft, local)?;
-    if (opts.auto_listen.unwrap_or(false) || session.auto_listen)
-        && !options.listen.listen.unwrap_or(false)
-    {
+    if session.auto_listen && !options.listen.listen.unwrap_or(false) {
         options.listen.listen = Some(true);
     }
     let request = crate::app::normalize_one_shot_options(&options)?;
@@ -435,8 +432,8 @@ fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> Resul
     } = local;
 
     if local_has_compact_target {
-        merged.destination = None;
-        merged.ip.destination_ip = None;
+        merged.destination = destination;
+        merged.ip.destination_ip = ip.destination_ip.clone();
     } else {
         replace_option(&mut merged.destination, destination);
     }
@@ -1020,6 +1017,33 @@ mod tests {
         assert_eq!(request.transport.destination_port, Some(53));
     }
 
+    #[test]
+    fn local_compact_target_preserves_local_destination_conflicts() {
+        let base = OneShotOptions::default();
+        let local_dest =
+            parse_oneshot(&repl_args(&["-d", "192.0.2.1", "udp", "127.0.0.1:9"])).unwrap();
+        let local_dip =
+            parse_oneshot(&repl_args(&["--dip", "192.0.2.1", "udp", "127.0.0.1:9"])).unwrap();
+
+        let dest_error = crate::app::normalize_one_shot_options(
+            &merge_one_shot_options(&base, local_dest).unwrap(),
+        )
+        .unwrap_err();
+        let dip_error = crate::app::normalize_one_shot_options(
+            &merge_one_shot_options(&base, local_dip).unwrap(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            dest_error,
+            crate::app::CliMappingError::CompactTargetConflict { option: "--dest" }
+        ));
+        assert!(matches!(
+            dip_error,
+            crate::app::CliMappingError::CompactTargetConflict { option: "--dip" }
+        ));
+    }
+
     #[tokio::test]
     async fn set_output_format_updates_engine_output_format() {
         let opts = InteractiveRequest::default();
@@ -1048,6 +1072,39 @@ mod tests {
 
         assert_eq!(engine.output_formats, vec![CliOutputFormat::Json]);
         assert_eq!(engine.sent.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn disabled_auto_listen_honors_current_session_state() {
+        let opts = InteractiveRequest {
+            auto_listen: Some(true),
+            ..Default::default()
+        };
+        let mut session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+
+        execute_command(
+            ReplCommand::Set {
+                key: "auto-listen".to_string(),
+                value: "false".to_string(),
+            },
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap();
+        execute_command(
+            ReplCommand::Send(repl_args(&["udp", "127.0.0.1:9"])),
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(engine.sent.len(), 1);
+        assert_eq!(engine.sent[0].0.listener.listen, None);
     }
 
     #[tokio::test]

@@ -208,6 +208,11 @@ fn parse_compact_target(raw: &str) -> Result<CompactTarget, CliMappingError> {
 
     if target.matches(':').count() == 1 {
         if let Some((host, port)) = target.rsplit_once(':') {
+            if host.is_empty() {
+                return Err(CliMappingError::CompactTargetMalformed {
+                    target: target.to_string(),
+                });
+            }
             if let Some(port) = parse_port(port) {
                 return Ok(CompactTarget {
                     host: host.to_string(),
@@ -215,6 +220,15 @@ fn parse_compact_target(raw: &str) -> Result<CompactTarget, CliMappingError> {
                 });
             }
         }
+        return Err(CliMappingError::CompactTargetMalformed {
+            target: target.to_string(),
+        });
+    }
+
+    if target.contains(':') {
+        return Err(CliMappingError::CompactTargetMalformed {
+            target: target.to_string(),
+        });
     }
 
     Ok(CompactTarget {
@@ -587,6 +601,25 @@ mod tests {
         ));
         assert!(matches!(
             missing_close,
+            CliMappingError::CompactTargetMalformed { .. }
+        ));
+    }
+
+    #[test]
+    fn malformed_unbracketed_compact_target_ports_are_mapping_errors() {
+        let tcp_bad_port = parse_cli(&["plan", "tcp", "example.com:http", "--dport", "80"])
+            .try_engine_command()
+            .unwrap_err();
+        let udp_empty_host = parse_cli(&["plan", "udp", ":53"])
+            .try_engine_command()
+            .unwrap_err();
+
+        assert!(matches!(
+            tcp_bad_port,
+            CliMappingError::CompactTargetMalformed { .. }
+        ));
+        assert!(matches!(
+            udp_empty_host,
             CliMappingError::CompactTargetMalformed { .. }
         ));
     }

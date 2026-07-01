@@ -11,19 +11,26 @@ use crate::domain::spec::PacketSpec;
 use crate::domain::transmission::TransmissionPlan;
 use crate::engine::core::Engine;
 use crate::engine::error::{EngineError, EngineResult};
+use crate::engine::mode::ExecutionMode;
 
 pub(crate) struct OneShotFlow<'engine> {
     engine: &'engine mut Engine,
     request: PacketRequest,
+    mode: ExecutionMode,
     spec: Option<std::sync::Arc<PacketSpec>>,
     plan: Option<TransmissionPlan>,
 }
 
 impl<'engine> OneShotFlow<'engine> {
-    pub(crate) fn new(engine: &'engine mut Engine, request: PacketRequest) -> Self {
+    pub(crate) fn new(
+        engine: &'engine mut Engine,
+        request: PacketRequest,
+        mode: ExecutionMode,
+    ) -> Self {
         Self {
             engine,
             request,
+            mode,
             spec: None,
             plan: None,
         }
@@ -32,14 +39,16 @@ impl<'engine> OneShotFlow<'engine> {
     pub(crate) async fn with_spec(mut self) -> Result<Self> {
         self.log_one_shot_entry();
         let request = self.request.clone();
-        let spec = self.engine.send.resolve_spec(request).await?;
+        let spec = self.engine.send.resolve_spec(request, self.mode).await?;
         self.announce_listener(spec.as_ref());
         self.spec = Some(spec);
         Ok(self)
     }
 
     pub(crate) fn with_policy_validation(self) -> Result<Self> {
-        self.engine.send.validate_request_policy(&self.request)?;
+        self.engine
+            .send
+            .validate_request_policy(&self.request, self.mode)?;
         Ok(self)
     }
 
@@ -60,7 +69,7 @@ impl<'engine> OneShotFlow<'engine> {
     }
 
     pub(crate) fn with_startup_rules(self) -> Self {
-        if self.engine.rules.has_startup_triggers() && !self.engine.config.dry_run {
+        if self.engine.rules.has_startup_triggers() && !self.mode.is_plan() {
             self.engine.rules.run_startup_actions();
         }
         self
@@ -72,17 +81,17 @@ impl<'engine> OneShotFlow<'engine> {
                 .as_ref()
                 .context("packet spec missing; ensure with_spec() is called first")?,
         );
-        if !self.engine.config.dry_run {
+        if !self.mode.is_plan() {
             self.engine
                 .send
-                .authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
+                .authorize_spec_traffic(spec.as_ref(), TrafficMode::Send, self.mode)?;
             return Ok(self);
         }
 
         let plan = self.engine.send.plan_dry_run(Arc::clone(&spec)).await?;
         self.engine
             .send
-            .authorize_transmission_plan(spec.as_ref(), &plan)?;
+            .authorize_transmission_plan(spec.as_ref(), &plan, self.mode)?;
         self.plan = Some(plan);
         Ok(self)
     }
@@ -93,9 +102,11 @@ impl<'engine> OneShotFlow<'engine> {
                 .as_ref()
                 .context("packet spec missing; ensure with_spec() is called first")?,
         );
-        self.engine.send.validate_spec_policy(spec.as_ref())?;
+        self.engine
+            .send
+            .validate_spec_policy(spec.as_ref(), self.mode)?;
 
-        if !self.engine.config.dry_run {
+        if !self.mode.is_plan() {
             self.engine.send.check_privileges(spec).await?;
         }
 
@@ -103,7 +114,7 @@ impl<'engine> OneShotFlow<'engine> {
     }
 
     pub(crate) async fn with_plan(mut self) -> Result<Self> {
-        if self.engine.config.dry_run {
+        if self.mode.is_plan() {
             return Ok(self);
         }
 
@@ -115,7 +126,7 @@ impl<'engine> OneShotFlow<'engine> {
         let plan = self.engine.send.plan_live(Arc::clone(&spec)).await?;
         self.engine
             .send
-            .authorize_transmission_plan(spec.as_ref(), &plan)?;
+            .authorize_transmission_plan(spec.as_ref(), &plan, self.mode)?;
         self.plan = Some(plan);
         Ok(self)
     }
@@ -130,8 +141,8 @@ impl<'engine> OneShotFlow<'engine> {
     pub(crate) async fn execute(mut self) -> Result<()> {
         let spec = self.take_spec()?;
         let plan = self.take_plan()?;
-        self.engine.send.execute_plan(plan).await?;
-        if !self.engine.config.dry_run {
+        self.engine.send.execute_plan(plan, self.mode).await?;
+        if !self.mode.is_plan() {
             self.maybe_run_listener(spec.as_ref()).await?;
         }
         Ok(())

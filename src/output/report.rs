@@ -34,6 +34,7 @@ pub(super) struct PreflightReport {
 }
 
 impl PreflightReport {
+    #[cfg(test)]
     pub(crate) fn summary_line(&self) -> String {
         let count = self
             .count
@@ -194,7 +195,9 @@ fn transport_json(plan: &PacketSpec) -> serde_json::Value {
                 "fin": spec.flags.fin,
                 "rst": spec.flags.rst,
                 "psh": spec.flags.psh,
-                "urg": spec.flags.urg
+                "urg": spec.flags.urg,
+                "ece": spec.flags.ece,
+                "cwr": spec.flags.cwr
             },
             "seq": spec.sequence,
             "ack": spec.acknowledgement,

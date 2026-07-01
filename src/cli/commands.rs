@@ -8,7 +8,6 @@
     feature = "traceroute"
 ))]
 use clap::builder::BoolishValueParser;
-#[cfg(any(feature = "fuzz", feature = "traceroute"))]
 use clap::ValueEnum;
 use clap::{value_parser, Args, Subcommand};
 
@@ -26,8 +25,10 @@ pub(crate) enum PacketcraftCommand {
     /// Send a finite packet request.
     Send(SendOptions),
     /// Preview a packet request without transmitting.
+    #[command(name = "plan", visible_alias = "dry-run")]
     DryRun(SendOptions),
     /// Start the interactive REPL shell.
+    #[command(name = "repl", visible_alias = "interactive")]
     #[cfg(feature = "repl")]
     Interactive(InteractiveOptions),
     /// Run as a background daemon with automation.
@@ -37,17 +38,38 @@ pub(crate) enum PacketcraftCommand {
     #[cfg(feature = "pcap")]
     Listen(ListenCommandOptions),
     /// Map network routes (traceroute).
+    #[command(name = "trace", visible_alias = "traceroute")]
     #[cfg(feature = "traceroute")]
     Traceroute(TracerouteOptions),
     /// Execute network scans (TCP SYN, UDP, etc.).
     #[command(subcommand)]
     #[cfg(feature = "scan")]
     Scan(ScanCommand),
+    /// Perform DNS operations.
+    #[command(subcommand)]
+    Dns(DnsCommand),
     /// Perform a DNS query.
+    #[command(name = "dns-query")]
     DnsQuery(DnsQueryOptions),
+    /// Run local readiness and environment checks.
+    Doctor(DoctorOptions),
+    /// Print compiled feature status.
+    Features(FeatureOptions),
+    /// Print curated command examples.
+    Examples(ExamplesOptions),
+    /// Generate shell completions.
+    Completions(CompletionsOptions),
+    /// Generate a manual page.
+    Man,
     /// Fuzz a target with malformed packets.
     #[cfg(feature = "fuzz")]
     Fuzz(FuzzOptions),
+}
+
+#[derive(Debug, Subcommand, Clone)]
+pub(crate) enum DnsCommand {
+    /// Query a DNS record.
+    Query(DnsQueryOptions),
 }
 
 #[cfg(feature = "fuzz")]
@@ -111,8 +133,11 @@ pub(crate) enum FuzzStrategy {
 #[derive(Debug, Args, Clone, Default)]
 pub(crate) struct DnsQueryOptions {
     /// Domain to query.
-    #[arg(long = "domain")]
-    pub domain: String,
+    #[arg(value_name = "DOMAIN", conflicts_with = "domain_option")]
+    pub domain: Option<String>,
+    /// Domain to query (legacy option form).
+    #[arg(long = "domain", value_name = "DOMAIN")]
+    pub domain_option: Option<String>,
     /// DNS record type.
     #[arg(long = "type", default_value = "A", value_parser = dns_record_type_validator)]
     pub record_type: String,
@@ -131,6 +156,49 @@ pub(crate) struct DnsQueryOptions {
     /// Extra attempts after the first attempt.
     #[arg(long = "retries", value_parser = value_parser!(u8).range(0..=5), default_value_t = 0)]
     pub retries: u8,
+}
+
+impl DnsQueryOptions {
+    pub(crate) fn domain_name(&self) -> Option<&str> {
+        self.domain.as_deref().or(self.domain_option.as_deref())
+    }
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub(crate) struct DoctorOptions {
+    /// Render doctor output as JSON.
+    #[arg(long = "json")]
+    pub json: bool,
+    /// Include target-specific route/source checks.
+    #[arg(long = "target")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub(crate) struct FeatureOptions {
+    /// Render feature output as JSON.
+    #[arg(long = "json")]
+    pub json: bool,
+}
+
+#[derive(Debug, Args, Clone, Default)]
+pub(crate) struct ExamplesOptions {
+    /// Example topic, such as send, dns, repl, or doctor.
+    pub topic: Option<String>,
+}
+
+#[derive(Debug, Args, Clone)]
+pub(crate) struct CompletionsOptions {
+    /// Shell to generate completions for.
+    #[arg(value_enum)]
+    pub shell: CompletionShell,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub(crate) enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
 }
 
 #[cfg(feature = "repl")]
@@ -315,7 +383,7 @@ mod tests {
     fn dns_query_defaults_are_stable_for_dry_planning() {
         let parsed = parse_dns(&["--domain", "example.test"]).unwrap();
 
-        assert_eq!(parsed.options.domain, "example.test");
+        assert_eq!(parsed.options.domain_name(), Some("example.test"));
         assert_eq!(parsed.options.record_type, "A");
         assert_eq!(parsed.options.server, "8.8.8.8");
         assert_eq!(parsed.options.timeout, 1000);
@@ -329,6 +397,13 @@ mod tests {
         let parsed = parse_dns(&["--domain", "example.test", "--type", "aaaa"]).unwrap();
 
         assert_eq!(parsed.options.record_type, "aaaa");
+    }
+
+    #[test]
+    fn dns_query_accepts_positional_domain() {
+        let parsed = parse_dns(&["example.test", "--type", "A"]).unwrap();
+
+        assert_eq!(parsed.options.domain_name(), Some("example.test"));
     }
 
     #[test]

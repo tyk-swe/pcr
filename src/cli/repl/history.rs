@@ -1,7 +1,6 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 
@@ -9,10 +8,8 @@ use log::warn;
 
 use super::command::ReplCommand;
 
-const HISTORY_FILE: &str = "repl_history";
-
 pub(super) fn history_path() -> Option<PathBuf> {
-    let mut root = packetcraftr_home_dir();
+    let root = crate::util::paths::packetcraftr_home_dir();
     if let Err(err) = fs::create_dir_all(&root) {
         warn!(
             "unable to prepare repl history directory {}: {}",
@@ -21,14 +18,7 @@ pub(super) fn history_path() -> Option<PathBuf> {
         );
         return None;
     }
-    root.push(HISTORY_FILE);
-    Some(root)
-}
-
-pub(super) fn packetcraftr_home_dir() -> PathBuf {
-    env::var("PACKETCRAFTR_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".packetcraftr"))
+    Some(crate::util::paths::repl_history_path())
 }
 
 pub(super) fn should_record_command(command: &ReplCommand) -> bool {

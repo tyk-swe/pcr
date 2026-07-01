@@ -26,6 +26,7 @@ use crate::domain::policy::TrafficPolicy;
 use crate::domain::request::PacketRequest;
 use crate::engine::config::EngineConfig;
 use crate::engine::error::{EngineError, EngineResult};
+use crate::engine::mode::ExecutionMode;
 use crate::engine::oneshot::OneShotFlow;
 use crate::engine::ports::EngineDependencies;
 #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
@@ -66,7 +67,7 @@ impl Engine {
             config.dry_run,
         );
         let send = Arc::new(SendUseCase::new(
-            config.traffic_policy.with_dry_run(config.dry_run),
+            config.traffic_policy,
             dependencies.clone(),
         ));
 
@@ -103,7 +104,20 @@ impl Engine {
     }
 
     pub(crate) async fn run_one_shot(&mut self, request: PacketRequest) -> Result<()> {
-        OneShotFlow::new(self, request)
+        let mode = if self.config.dry_run {
+            ExecutionMode::Plan
+        } else {
+            ExecutionMode::Live
+        };
+        self.run_one_shot_with_mode(request, mode).await
+    }
+
+    pub(crate) async fn run_one_shot_with_mode(
+        &mut self,
+        request: PacketRequest,
+        mode: ExecutionMode,
+    ) -> Result<()> {
+        OneShotFlow::new(self, request, mode)
             .with_policy_validation()?
             .with_spec()
             .await?
@@ -204,7 +218,7 @@ impl Engine {
         .await
     }
 
-    pub(crate) async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<String> {
+    pub(crate) async fn run_dns_query(&mut self, options: &DnsRequest) -> Result<()> {
         let policy = self.effective_policy();
         let prepared = self
             .dependencies
@@ -218,10 +232,12 @@ impl Engine {
                 "Dry-run: DNS query for {} {} via {}",
                 options.domain, options.record_type, options.server
             );
-            return self.dependencies.output.format_dns_dry_run(options);
+            self.dependencies.output.emit_dns_dry_run(options)?;
+            return Ok(());
         }
         let result = prepared.resolve().await?;
-        self.dependencies.output.format_dns_response(&result)
+        self.dependencies.output.emit_dns_response(&result)?;
+        Ok(())
     }
 
     #[cfg(feature = "scan")]
@@ -436,6 +452,10 @@ mod prepared_traffic_tests {
     }
 
     impl EngineOutput for FakeOutput {
+        fn stdout(&self, _bytes: &[u8]) -> crate::engine::ports::PortResult<()> {
+            Ok(())
+        }
+
         fn emit_preflight_summary(
             &self,
             _spec: &PacketSpec,
@@ -453,6 +473,17 @@ mod prepared_traffic_tests {
         }
 
         fn emit_listener_event(&self, _event: &ListenerEvent) {}
+
+        fn emit_dns_dry_run(&self, _request: &DnsRequest) -> crate::engine::ports::PortResult<()> {
+            Ok(())
+        }
+
+        fn emit_dns_response(
+            &self,
+            _result: &DnsQueryResult,
+        ) -> crate::engine::ports::PortResult<()> {
+            Ok(())
+        }
 
         fn format_dns_dry_run(
             &self,

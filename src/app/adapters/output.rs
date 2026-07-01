@@ -10,7 +10,7 @@ use crate::domain::transmission::TransmissionPlan;
 use crate::engine::ports::{EngineOutput, PortResult};
 use crate::output::{self, OutputController, OutputFormat};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct OutputEventSink {
     controller: OutputController,
     format: Option<OutputFormat>,
@@ -26,6 +26,11 @@ impl OutputEventSink {
 }
 
 impl EngineOutput for OutputEventSink {
+    fn stdout(&self, bytes: &[u8]) -> PortResult<()> {
+        self.controller.write_stdout(bytes)?;
+        Ok(())
+    }
+
     fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> PortResult<()> {
         self.controller.emit_preflight_summary(spec, plan)
     }
@@ -37,6 +42,18 @@ impl EngineOutput for OutputEventSink {
 
     fn emit_listener_event(&self, event: &ListenerEvent) {
         self.controller.emit_listener_event(event);
+    }
+
+    fn emit_dns_dry_run(&self, request: &DnsRequest) -> PortResult<()> {
+        let output = self.format_dns_dry_run(request)?;
+        self.controller.write_stdout_line(&output)?;
+        Ok(())
+    }
+
+    fn emit_dns_response(&self, result: &DnsQueryResult) -> PortResult<()> {
+        let output = self.format_dns_response(result)?;
+        self.controller.write_stdout_line(&output)?;
+        Ok(())
     }
 
     fn format_dns_dry_run(&self, request: &DnsRequest) -> PortResult<String> {

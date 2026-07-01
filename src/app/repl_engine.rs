@@ -7,6 +7,7 @@ use crate::cli::repl::ReplEngine;
 use crate::domain::command::{ListenRequest, ScanRequest, TracerouteRequest};
 use crate::domain::request::PacketRequest;
 use crate::engine::core::Engine;
+use crate::engine::mode::ExecutionMode;
 
 impl ReplEngine for Engine {
     fn rule_count(&self) -> usize {
@@ -17,11 +18,16 @@ impl ReplEngine for Engine {
         Engine::has_receive_rules(self)
     }
 
-    fn run_one_shot<'a>(
+    fn global_dry_run(&self) -> bool {
+        self.config().dry_run
+    }
+
+    fn run_one_shot_with_mode<'a>(
         &'a mut self,
         request: PacketRequest,
+        mode: ExecutionMode,
     ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(Engine::run_one_shot(self, request))
+        Box::pin(Engine::run_one_shot_with_mode(self, request, mode))
     }
 
     fn run_listener<'a>(

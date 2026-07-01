@@ -29,13 +29,54 @@ impl From<&options::OneShotOptions> for req::PacketRequest {
 impl From<&commands::DnsQueryOptions> for cmd::DnsRequest {
     fn from(options: &commands::DnsQueryOptions) -> Self {
         Self {
-            domain: options.domain.clone(),
+            domain: options.domain_name().unwrap_or_default().to_string(),
             record_type: options.record_type.clone(),
             server: options.server.clone(),
             timeout: options.timeout,
             transaction_id: options.transaction_id,
             transport: options.transport,
             retries: options.retries,
+        }
+    }
+}
+
+impl From<&commands::DoctorOptions> for cmd::DoctorRequest {
+    fn from(options: &commands::DoctorOptions) -> Self {
+        Self {
+            json: options.json,
+            target: options.target.clone(),
+        }
+    }
+}
+
+impl From<&commands::FeatureOptions> for cmd::FeatureRequest {
+    fn from(options: &commands::FeatureOptions) -> Self {
+        Self { json: options.json }
+    }
+}
+
+impl From<&commands::ExamplesOptions> for cmd::ExamplesRequest {
+    fn from(options: &commands::ExamplesOptions) -> Self {
+        Self {
+            topic: options.topic.clone(),
+        }
+    }
+}
+
+impl From<commands::CompletionShell> for cmd::CompletionShell {
+    fn from(shell: commands::CompletionShell) -> Self {
+        match shell {
+            commands::CompletionShell::Bash => Self::Bash,
+            commands::CompletionShell::Zsh => Self::Zsh,
+            commands::CompletionShell::Fish => Self::Fish,
+        }
+    }
+}
+
+impl From<&commands::CompletionsOptions> for cmd::CompletionsRequest {
+    fn from(options: &commands::CompletionsOptions) -> Self {
+        Self {
+            shell: cmd::CompletionShell::from(options.shell),
         }
     }
 }
@@ -237,7 +278,7 @@ impl From<&options::TransportCommand> for req::TransportProtocolRequest {
 impl From<&options::TcpOptions> for req::TcpRequest {
     fn from(options: &options::TcpOptions) -> Self {
         Self {
-            flags: options.flags.clone(),
+            flags: merged_tcp_flags(options),
             sequence: options.sequence,
             acknowledgement: options.acknowledgement,
             window_size: options.window_size,
@@ -247,6 +288,32 @@ impl From<&options::TcpOptions> for req::TcpRequest {
             timestamps: options.timestamps.clone(),
             options_hex: options.options_hex.clone(),
         }
+    }
+}
+
+fn merged_tcp_flags(options: &options::TcpOptions) -> Option<String> {
+    let mut flags = options.flags.clone().unwrap_or_default();
+    for (enabled, flag) in [
+        (options.syn, "S"),
+        (options.ack_flag, "A"),
+        (options.fin, "F"),
+        (options.rst, "R"),
+        (options.psh, "P"),
+        (options.urg, "U"),
+        (options.ece, "E"),
+        (options.cwr, "C"),
+    ] {
+        if enabled {
+            if !flags.is_empty() {
+                flags.push(' ');
+            }
+            flags.push_str(flag);
+        }
+    }
+    if flags.is_empty() {
+        None
+    } else {
+        Some(flags)
     }
 }
 
@@ -542,7 +609,8 @@ mod tests {
     #[test]
     fn dns_query_options_map_all_fields() {
         let request = cmd::DnsRequest::from(&commands::DnsQueryOptions {
-            domain: "example.test".to_string(),
+            domain: Some("example.test".to_string()),
+            domain_option: None,
             record_type: "TXT".to_string(),
             server: "9.9.9.9".to_string(),
             timeout: 750,
@@ -573,6 +641,7 @@ mod tests {
                 sack_permitted: Some(true),
                 timestamps: Some("6:7".to_string()),
                 options_hex: None,
+                ..Default::default()
             },
         ));
         let udp = req::TransportProtocolRequest::from(&options::TransportCommand::Udp(
@@ -584,6 +653,7 @@ mod tests {
                 code: Some(0),
                 identifier: Some(10),
                 sequence: Some(11),
+                ..Default::default()
             },
         ));
         let icmpv6 = req::TransportProtocolRequest::from(&options::TransportCommand::Icmpv6(
@@ -596,6 +666,7 @@ mod tests {
                 error: Some(enums::Icmpv6ErrorKind::PacketTooBig),
                 error_code: Some(enums::Icmpv6ErrorCode::ParameterProblemUnrecognizedOption),
                 mtu: Some(1500),
+                ..Default::default()
             },
         ));
 

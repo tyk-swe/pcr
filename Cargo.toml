@@ -27,6 +27,8 @@ metrics = ["dep:hyper", "dep:prometheus"]
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
+clap_mangen = "0.2"
 futures = { version = "0.3", optional = true }
 log = "0.4"
 env_logger = "0.11"

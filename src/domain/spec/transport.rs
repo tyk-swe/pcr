@@ -248,39 +248,114 @@ pub(crate) struct TcpFlagSet {
 impl TcpFlagSet {
     pub(crate) fn from_string(flags: &str) -> SpecResult<Self> {
         let mut set = Self::default();
-        for ch in flags.chars() {
-            let flag = ch.to_ascii_uppercase();
-            let is_duplicate = match flag {
-                'S' if set.syn => true,
-                'A' if set.ack => true,
-                'F' if set.fin => true,
-                'R' if set.rst => true,
-                'P' if set.psh => true,
-                'U' if set.urg => true,
-                'E' if set.ece => true,
-                'C' if set.cwr => true,
-                _ => false,
-            };
-
-            if is_duplicate {
-                return Err(SpecError::DuplicateTcpFlag { flag });
-            }
-
-            match flag {
-                'S' => set.syn = true,
-                'A' => set.ack = true,
-                'F' => set.fin = true,
-                'R' => set.rst = true,
-                'P' => set.psh = true,
-                'U' => set.urg = true,
-                'E' => set.ece = true,
-                'C' => set.cwr = true,
-                other => {
-                    return Err(SpecError::UnsupportedTcpFlag { flag: other });
-                }
+        for token in tcp_flag_tokens(flags) {
+            for flag in parse_tcp_flag_token(&token)? {
+                set.insert(flag)?;
             }
         }
         Ok(set)
+    }
+
+    fn insert(&mut self, flag: TcpFlag) -> SpecResult<()> {
+        let slot = match flag {
+            TcpFlag::Syn => &mut self.syn,
+            TcpFlag::Ack => &mut self.ack,
+            TcpFlag::Fin => &mut self.fin,
+            TcpFlag::Rst => &mut self.rst,
+            TcpFlag::Psh => &mut self.psh,
+            TcpFlag::Urg => &mut self.urg,
+            TcpFlag::Ece => &mut self.ece,
+            TcpFlag::Cwr => &mut self.cwr,
+        };
+        if *slot {
+            return Err(SpecError::DuplicateTcpFlag { flag: flag.name() });
+        }
+        *slot = true;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TcpFlag {
+    Syn,
+    Ack,
+    Fin,
+    Rst,
+    Psh,
+    Urg,
+    Ece,
+    Cwr,
+}
+
+impl TcpFlag {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Syn => "syn",
+            Self::Ack => "ack",
+            Self::Fin => "fin",
+            Self::Rst => "rst",
+            Self::Psh => "psh",
+            Self::Urg => "urg",
+            Self::Ece => "ece",
+            Self::Cwr => "cwr",
+        }
+    }
+}
+
+fn tcp_flag_tokens(flags: &str) -> impl Iterator<Item = String> + '_ {
+    flags
+        .split(|ch: char| ch == ',' || ch == '+' || ch.is_whitespace())
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn parse_tcp_flag_token(token: &str) -> SpecResult<Vec<TcpFlag>> {
+    let normalized = token.to_ascii_lowercase();
+    let named = match normalized.as_str() {
+        "syn" => Some(TcpFlag::Syn),
+        "ack" => Some(TcpFlag::Ack),
+        "fin" => Some(TcpFlag::Fin),
+        "rst" => Some(TcpFlag::Rst),
+        "psh" | "push" => Some(TcpFlag::Psh),
+        "urg" => Some(TcpFlag::Urg),
+        "ece" => Some(TcpFlag::Ece),
+        "cwr" => Some(TcpFlag::Cwr),
+        _ => None,
+    };
+    if let Some(flag) = named {
+        return Ok(vec![flag]);
+    }
+
+    if token.chars().all(is_compact_tcp_flag) {
+        return token.chars().map(compact_tcp_flag).collect();
+    }
+
+    Err(SpecError::UnsupportedTcpFlagToken {
+        token: token.to_string(),
+    })
+}
+
+fn is_compact_tcp_flag(ch: char) -> bool {
+    matches!(
+        ch.to_ascii_uppercase(),
+        'S' | 'A' | 'F' | 'R' | 'P' | 'U' | 'E' | 'C'
+    )
+}
+
+fn compact_tcp_flag(ch: char) -> SpecResult<TcpFlag> {
+    match ch.to_ascii_uppercase() {
+        'S' => Ok(TcpFlag::Syn),
+        'A' => Ok(TcpFlag::Ack),
+        'F' => Ok(TcpFlag::Fin),
+        'R' => Ok(TcpFlag::Rst),
+        'P' => Ok(TcpFlag::Psh),
+        'U' => Ok(TcpFlag::Urg),
+        'E' => Ok(TcpFlag::Ece),
+        'C' => Ok(TcpFlag::Cwr),
+        _ => Err(SpecError::UnsupportedTcpFlagToken {
+            token: ch.to_string(),
+        }),
     }
 }
 
@@ -428,12 +503,23 @@ mod tests {
     fn tcp_flags_reject_duplicate_and_unknown_flags() {
         assert!(matches!(
             TcpFlagSet::from_string("SS").unwrap_err(),
-            SpecError::DuplicateTcpFlag { flag: 'S' }
+            SpecError::DuplicateTcpFlag { flag: "syn" }
         ));
         assert!(matches!(
             TcpFlagSet::from_string("X").unwrap_err(),
-            SpecError::UnsupportedTcpFlag { flag: 'X' }
+            SpecError::UnsupportedTcpFlagToken { token } if token == "X"
         ));
+    }
+
+    #[test]
+    fn tcp_flags_accept_named_and_separated_forms() {
+        for value in ["S", "SA", "syn", "syn,ack", "syn+ack", "syn ack", "SyN,Ack"] {
+            let flags = TcpFlagSet::from_string(value).unwrap();
+            assert!(flags.syn, "expected SYN from {value}");
+            if value != "S" && value != "syn" {
+                assert!(flags.ack, "expected ACK from {value}");
+            }
+        }
     }
 
     #[test]

@@ -8,7 +8,8 @@ use log::debug;
 
 use crate::domain::policy::{
     classify_ip, combine_target_scopes, packet_spec_privileges, packet_spec_target_scope,
-    packet_spec_uses_malformed_options, TargetScope, TrafficMode, TrafficPlan, TransmissionPolicy,
+    packet_spec_uses_malformed_options, TargetScope, TrafficMode, TrafficPlan, TrafficPolicy,
+    TransmissionPolicy,
 };
 use crate::domain::request::PacketRequest;
 use crate::domain::spec::PacketSpec;
@@ -17,12 +18,12 @@ use crate::domain::transmission::{
     TransmissionTarget,
 };
 use crate::engine::error::{EngineError, EngineResult};
+use crate::engine::mode::ExecutionMode;
 use crate::engine::ports::{resolve_packet_request, EngineDependencies};
 
 #[derive(Debug, Clone)]
 pub(crate) struct SendUseCase {
     policy: TransmissionPolicy,
-    dry_run: bool,
     dependencies: EngineDependencies,
 }
 
@@ -34,22 +35,30 @@ pub(crate) struct PreparedPacketSend {
 impl SendUseCase {
     pub(crate) fn new(policy: TransmissionPolicy, dependencies: EngineDependencies) -> Self {
         Self {
-            dry_run: policy.dry_run,
-            policy,
+            policy: policy.with_dry_run(false),
             dependencies,
         }
     }
 
-    pub(crate) fn validate_request_policy(&self, request: &PacketRequest) -> EngineResult<()> {
-        let plan = TrafficPlan::from_packet_request(request, TrafficMode::Send, &self.policy);
-        self.policy
+    pub(crate) fn validate_request_policy(
+        &self,
+        request: &PacketRequest,
+        mode: ExecutionMode,
+    ) -> EngineResult<()> {
+        let policy = self.policy_for_mode(mode);
+        let plan = TrafficPlan::from_packet_request(request, TrafficMode::Send, &policy);
+        policy
             .authorize(&plan)
             .map(|_| ())
             .map_err(|e| EngineError::TransmissionPlan(e.into()))
     }
 
-    pub(crate) fn validate_spec_policy(&self, spec: &PacketSpec) -> EngineResult<()> {
-        validate_transmission_policy(&spec.transmit, self.policy)
+    pub(crate) fn validate_spec_policy(
+        &self,
+        spec: &PacketSpec,
+        mode: ExecutionMode,
+    ) -> EngineResult<()> {
+        validate_transmission_policy(&spec.transmit, self.policy_for_mode(mode))
             .map_err(|e| EngineError::TransmissionPlan(e.into()))
     }
 
@@ -63,30 +72,35 @@ impl SendUseCase {
     pub(crate) async fn prepare(
         &self,
         request: PacketRequest,
+        mode: ExecutionMode,
         check_privileges: bool,
     ) -> Result<PreparedPacketSend> {
-        let spec = self.resolve_spec(request).await?;
-        self.validate_spec_policy(spec.as_ref())?;
+        let spec = self.resolve_spec(request, mode).await?;
+        self.validate_spec_policy(spec.as_ref(), mode)?;
 
-        if self.dry_run {
+        if mode.is_plan() {
             let plan = self.plan_dry_run(Arc::clone(&spec)).await?;
-            self.authorize_transmission_plan(spec.as_ref(), &plan)?;
+            self.authorize_transmission_plan(spec.as_ref(), &plan, mode)?;
             return Ok(PreparedPacketSend { plan });
         }
 
-        self.authorize_spec_traffic(spec.as_ref(), TrafficMode::Send)?;
+        self.authorize_spec_traffic(spec.as_ref(), TrafficMode::Send, mode)?;
 
         if check_privileges {
             self.check_privileges(Arc::clone(&spec)).await?;
         }
 
         let plan = self.plan_live(Arc::clone(&spec)).await?;
-        self.authorize_transmission_plan(spec.as_ref(), &plan)?;
+        self.authorize_transmission_plan(spec.as_ref(), &plan, mode)?;
         Ok(PreparedPacketSend { plan })
     }
 
-    pub(crate) async fn resolve_spec(&self, request: PacketRequest) -> Result<Arc<PacketSpec>> {
-        self.validate_request_policy(&request)?;
+    pub(crate) async fn resolve_spec(
+        &self,
+        request: PacketRequest,
+        mode: ExecutionMode,
+    ) -> Result<Arc<PacketSpec>> {
+        self.validate_request_policy(&request, mode)?;
         let request = self.resolve_request(request).await?;
         self.build_spec(request).await
     }
@@ -131,7 +145,7 @@ impl SendUseCase {
         let tx_plan = self
             .dependencies
             .packet_planner
-            .plan_packet(spec, mode, self.policy)
+            .plan_packet(spec, mode, self.policy_for_planning_mode(mode))
             .await?;
 
         debug!(
@@ -148,9 +162,10 @@ impl SendUseCase {
         &self,
         spec: &PacketSpec,
         plan: &TransmissionPlan,
+        mode: ExecutionMode,
     ) -> EngineResult<TrafficPlan> {
         let traffic_plan = self.traffic_plan_from_transmission(spec, plan)?;
-        self.policy
+        self.policy_for_mode(mode)
             .authorize(&traffic_plan)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
         Ok(traffic_plan)
@@ -160,16 +175,21 @@ impl SendUseCase {
         &self,
         spec: &PacketSpec,
         mode: TrafficMode,
+        execution_mode: ExecutionMode,
     ) -> EngineResult<TrafficPlan> {
         let traffic_plan = self.traffic_plan_from_spec(spec, mode)?;
-        self.policy
+        self.policy_for_mode(execution_mode)
             .authorize(&traffic_plan)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
         Ok(traffic_plan)
     }
 
-    pub(crate) async fn execute_plan(&self, plan: TransmissionPlan) -> Result<()> {
-        if self.dry_run {
+    pub(crate) async fn execute_plan(
+        &self,
+        plan: TransmissionPlan,
+        mode: ExecutionMode,
+    ) -> Result<()> {
+        if mode.is_plan() {
             log::info!(
                 "Dry-run mode: would send {} frame(s) via {} ({} bytes largest)",
                 plan.summary.frame_count,
@@ -181,6 +201,15 @@ impl SendUseCase {
 
         self.dependencies.packet_transmitter.transmit(plan).await?;
         Ok(())
+    }
+
+    fn policy_for_mode(&self, mode: ExecutionMode) -> TrafficPolicy {
+        self.policy.with_dry_run(mode.is_plan())
+    }
+
+    fn policy_for_planning_mode(&self, mode: PlanningMode) -> TrafficPolicy {
+        self.policy
+            .with_dry_run(matches!(mode, PlanningMode::DryRun))
     }
 
     fn traffic_plan_from_transmission(

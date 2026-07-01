@@ -53,29 +53,90 @@ impl Completer for ReplHelper {
             return Ok((start, scan_subcommands(prefix)));
         }
 
+        if cmd == "dns"
+            && ((tokens.len() == 2 && !before.ends_with(' '))
+                || (tokens.len() == 1 && before.ends_with(' ')))
+        {
+            let prefix = tokens.get(1).copied().unwrap_or("");
+            let start = if before.ends_with(' ') {
+                pos
+            } else {
+                before.rfind(prefix).unwrap_or(pos)
+            };
+            return Ok((start, filter_candidates(&["query"], prefix)));
+        }
+
+        if cmd == "set"
+            && ((tokens.len() == 2 && !before.ends_with(' '))
+                || (tokens.len() == 1 && before.ends_with(' ')))
+        {
+            let prefix = tokens.get(1).copied().unwrap_or("");
+            let start = if before.ends_with(' ') {
+                pos
+            } else {
+                before.rfind(prefix).unwrap_or(pos)
+            };
+            return Ok((start, filter_candidates(SESSION_KEYS, prefix)));
+        }
+
+        if cmd == "use"
+            && ((tokens.len() == 2 && !before.ends_with(' '))
+                || (tokens.len() == 1 && before.ends_with(' ')))
+        {
+            let prefix = tokens.get(1).copied().unwrap_or("");
+            let start = if before.ends_with(' ') {
+                pos
+            } else {
+                before.rfind(prefix).unwrap_or(pos)
+            };
+            return Ok((start, filter_candidates(PROTOCOLS, prefix)));
+        }
+
+        if cmd == "set"
+            && tokens.get(1) == Some(&"tcp-flags")
+            && ((tokens.len() == 3 && !before.ends_with(' '))
+                || (tokens.len() == 2 && before.ends_with(' ')))
+        {
+            let prefix = tokens.get(2).copied().unwrap_or("");
+            let start = if before.ends_with(' ') {
+                pos
+            } else {
+                before.rfind(prefix).unwrap_or(pos)
+            };
+            return Ok((start, filter_candidates(TCP_FLAGS, prefix)));
+        }
+
         Ok((pos, vec![]))
     }
 }
 
+const SESSION_KEYS: &[&str] = &[
+    "target",
+    "protocol",
+    "src-ip",
+    "dst-ip",
+    "src-port",
+    "dst-port",
+    "interface",
+    "tcp-flags",
+    "count",
+    "output-format",
+    "auto-listen",
+    "mode",
+];
+
+const PROTOCOLS: &[&str] = &["udp", "tcp", "tcp-syn", "icmp", "icmpv6"];
+const TCP_FLAGS: &[&str] = &[
+    "syn", "ack", "fin", "rst", "psh", "push", "urg", "ece", "cwr",
+];
+
 fn top_level_commands(prefix: &str) -> Vec<Pair> {
-    let all = [
-        "exit",
-        "help",
-        "history",
-        "listen",
-        "quit",
-        "scan",
-        "send",
-        "status",
-        "traceroute",
-    ];
-    all.iter()
-        .filter(|c| c.starts_with(prefix))
-        .map(|c| Pair {
-            display: c.to_string(),
-            replacement: c.to_string(),
-        })
-        .collect()
+    let mut all = crate::cli::catalog::top_level_command_names();
+    all.extend([
+        "exit", "help", "history", "payload", "quit", "reset", "save", "set", "show", "source",
+        "status", "unset", "use",
+    ]);
+    filter_candidates(&all, prefix)
 }
 
 fn scan_subcommands(prefix: &str) -> Vec<Pair> {
@@ -91,11 +152,17 @@ fn scan_subcommands(prefix: &str) -> Vec<Pair> {
         "tcp-xmas",
         "udp",
     ];
-    all.iter()
-        .filter(|c| c.starts_with(prefix))
-        .map(|c| Pair {
-            display: c.to_string(),
-            replacement: c.to_string(),
+    filter_candidates(&all, prefix)
+}
+
+fn filter_candidates(candidates: &[&str], prefix: &str) -> Vec<Pair> {
+    candidates
+        .iter()
+        .copied()
+        .filter(|candidate| candidate.starts_with(prefix))
+        .map(|candidate| Pair {
+            display: candidate.to_string(),
+            replacement: candidate.to_string(),
         })
         .collect()
 }
@@ -121,6 +188,8 @@ mod tests {
         assert_eq!(start, 0);
         assert!(candidates.contains(&"send".to_string()));
         assert!(candidates.contains(&"traceroute".to_string()));
+        assert!(candidates.contains(&"set".to_string()));
+        assert!(candidates.contains(&"source".to_string()));
     }
 
     #[test]
@@ -163,5 +232,40 @@ mod tests {
 
         assert_eq!(start, 7);
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn complete_dns_trailing_space_inserts_query_subcommand() {
+        let (start, candidates) = complete("dns ", 4);
+
+        assert_eq!(start, 4);
+        assert_eq!(candidates, vec!["query".to_string()]);
+    }
+
+    #[test]
+    fn complete_set_key_prefix_replaces_only_key() {
+        let (start, candidates) = complete("set dst-", 8);
+
+        assert_eq!(start, 4);
+        assert_eq!(
+            candidates,
+            vec!["dst-ip".to_string(), "dst-port".to_string()]
+        );
+    }
+
+    #[test]
+    fn complete_use_protocol_prefix_replaces_only_protocol() {
+        let (start, candidates) = complete("use tcp", 7);
+
+        assert_eq!(start, 4);
+        assert_eq!(candidates, vec!["tcp".to_string(), "tcp-syn".to_string()]);
+    }
+
+    #[test]
+    fn complete_set_tcp_flags_suggests_named_flags() {
+        let (start, candidates) = complete("set tcp-flags s", 15);
+
+        assert_eq!(start, 14);
+        assert_eq!(candidates, vec!["syn".to_string()]);
     }
 }

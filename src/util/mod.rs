@@ -6,6 +6,7 @@ pub(crate) mod daemon;
 pub(crate) mod error;
 pub(crate) mod logging;
 pub(crate) mod net;
+pub(crate) mod paths;
 pub(crate) mod privileges;
 pub(crate) mod source_ip;
 #[cfg(any(feature = "metrics", feature = "scan"))]

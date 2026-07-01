@@ -1,6 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+pub(crate) mod catalog;
 pub(crate) mod commands;
 pub(crate) mod enums;
 pub(crate) mod options;
@@ -20,19 +21,7 @@ use clap::Parser;
     long_about = "PacketcraftR builds packets layer-by-layer (Ethernet -> IP -> Transport -> Payload) for authorized lab, protocol-development, and network-testing work. \
 The stable rescue surface focuses on safe dry-run previews, packet validation, and finite packet transmission planning. \
 Advanced operational tools are experimental and appear only when their Cargo features are enabled.",
-    after_help = "EXAMPLES:
-
-  1. Preview a UDP payload to loopback without transmitting:
-     packetcraftr dry-run -d 127.0.0.1 --data hello udp --dport 9
-
-  2. Preview JSON output for automation:
-     packetcraftr --output-format json dry-run -d 127.0.0.1 --data hello udp --dport 9
-
-  3. Build an ICMP Echo Request preview:
-     packetcraftr dry-run -d 127.0.0.1 icmp --icmp-type 8 --icmp-code 0
-
-  4. Preview a raw payload from hex:
-     packetcraftr dry-run -d 127.0.0.1 --data-hex \"aa bb cc\" udp --dport 9"
+    after_help = catalog::CLI_AFTER_HELP
 )]
 pub(crate) struct PacketcraftArgs {
     /// Set the verbosity level (-v: info, -vv: debug, -vvv: trace).

@@ -20,6 +20,11 @@ pub(crate) enum EngineCommand {
     #[cfg(feature = "scan")]
     Scan(ScanRequest),
     DnsQuery(DnsRequest),
+    Doctor(DoctorRequest),
+    Features(FeatureRequest),
+    Examples(ExamplesRequest),
+    Completions(CompletionsRequest),
+    Man,
     #[cfg(feature = "fuzz")]
     Fuzz(FuzzRequest),
 }
@@ -33,6 +38,34 @@ pub(crate) struct DnsRequest {
     pub transaction_id: Option<u16>,
     pub transport: DnsTransportMode,
     pub retries: u8,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct DoctorRequest {
+    pub json: bool,
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct FeatureRequest {
+    pub json: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ExamplesRequest {
+    pub topic: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CompletionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CompletionsRequest {
+    pub shell: CompletionShell,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

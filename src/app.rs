@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -19,12 +20,27 @@ mod dependencies;
 mod dispatch;
 #[cfg(feature = "repl")]
 mod repl_engine;
+mod support;
 mod telemetry;
+
+#[cfg(feature = "repl")]
+pub(crate) use cli_mapping::normalize_one_shot_options;
+pub(crate) use cli_mapping::CliMappingError;
 
 pub fn run_cli() -> Result<()> {
     let args = PacketcraftArgs::parse();
-    let app = PacketcraftApp::bootstrap(args)?;
-    app.run()
+    PacketcraftApp::run_args(args)
+}
+
+pub fn run_cli_entry() -> std::process::ExitCode {
+    match run_cli() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(error) => {
+            let diagnostic = crate::output::CliDiagnostic::from_error(&error);
+            eprint!("{}", diagnostic.render());
+            std::process::ExitCode::from(diagnostic.exit_code as u8)
+        }
+    }
 }
 
 /// Coordinates application bootstrapping and command dispatch.
@@ -37,17 +53,25 @@ struct PacketcraftApp {
 }
 
 impl PacketcraftApp {
-    /// Build the application with its runtime, engine, and telemetry wiring in place.
-    fn bootstrap(args: PacketcraftArgs) -> Result<Self> {
+    fn run_args(args: PacketcraftArgs) -> Result<()> {
         Self::init_logging(&args)?;
+        let command = args.try_engine_command()?;
+        if Self::run_support_command(&args, &command)? {
+            return Ok(());
+        }
 
+        let app = Self::bootstrap(args, command)?;
+        app.run()
+    }
+
+    /// Build the application with its runtime, engine, and telemetry wiring in place.
+    fn bootstrap(args: PacketcraftArgs, command: EngineCommand) -> Result<Self> {
         let config = args.engine_config();
         config
             .traffic_policy
             .validate_configuration()
             .map_err(anyhow::Error::from)?;
         telemetry::AppTelemetry::validate_requested_options(&args, &config)?;
-        let command = args.engine_command();
 
         let daemon_bootstrap = daemon_bootstrap::DaemonBootstrap::prepare(&args, &command)?;
         daemon_bootstrap::DaemonBootstrap::daemonize_if_needed(&args)?;
@@ -119,5 +143,23 @@ impl PacketcraftApp {
             .enable_all()
             .build()
             .context("initialise tokio runtime failed: builder construction error")
+    }
+
+    fn run_support_command(args: &PacketcraftArgs, command: &EngineCommand) -> Result<bool> {
+        let output: Arc<dyn engine::ports::EngineOutput> =
+            Arc::new(adapters::output::OutputEventSink::new(
+                args.output_format.map(crate::output::OutputFormat::from),
+            ));
+
+        match command {
+            EngineCommand::Doctor(opts) => support::run_doctor(&output, opts)?,
+            EngineCommand::Features(opts) => support::run_features(&output, opts)?,
+            EngineCommand::Examples(opts) => support::run_examples(&output, opts)?,
+            EngineCommand::Completions(opts) => support::run_completions(&output, opts)?,
+            EngineCommand::Man => support::run_man(&output)?,
+            _ => return Ok(false),
+        }
+
+        Ok(true)
     }
 }

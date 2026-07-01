@@ -16,6 +16,7 @@ mod transport;
 mod utils;
 
 pub(crate) use destination::{DestinationSpec, TargetAddress};
+pub(crate) use error::SpecError;
 pub(crate) use fragment::FragmentSpec;
 pub(crate) use ipv6::{Ipv6ExtHeader, MAX_ROUTING_SEGMENTS};
 pub(crate) use layer2::VlanTag;

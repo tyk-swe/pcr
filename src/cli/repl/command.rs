@@ -9,10 +9,19 @@ use anyhow::{anyhow, bail, Result};
 pub(super) enum ReplCommand {
     Help(Option<String>),
     Quit,
+    Set { key: String, value: String },
+    Unset(String),
+    Show,
+    Reset,
+    Use(String),
+    Payload(String),
+    Plan(Vec<String>),
     Send(Vec<String>),
     Listen(Vec<String>),
     Scan(Vec<String>),
     Traceroute(Vec<String>),
+    Source { path: String, fail_fast: bool },
+    Save(String),
     Status,
     History,
     Unknown(String),
@@ -47,16 +56,47 @@ pub(super) fn parse_repl_line(input: &str) -> Result<Option<ReplCommand>> {
             }
         }
         "quit" | "exit" | "q" => ReplCommand::Quit,
+        "set" if args.len() >= 2 => ReplCommand::Set {
+            key: args[0].clone(),
+            value: args[1..].join(" "),
+        },
+        "set" => ReplCommand::Unknown("set".to_string()),
+        "unset" if args.len() == 1 => ReplCommand::Unset(args[0].clone()),
+        "unset" => ReplCommand::Unknown("unset".to_string()),
+        "show" => ReplCommand::Show,
+        "reset" => ReplCommand::Reset,
+        "use" if args.len() == 1 => ReplCommand::Use(args[0].clone()),
+        "use" => ReplCommand::Unknown("use".to_string()),
+        "payload" if !args.is_empty() => ReplCommand::Payload(args.join(" ")),
+        "payload" => ReplCommand::Unknown("payload".to_string()),
+        "plan" | "dry-run" => ReplCommand::Plan(args),
         "send" => ReplCommand::Send(args),
         "listen" => ReplCommand::Listen(args),
         "scan" => ReplCommand::Scan(args),
-        "traceroute" => ReplCommand::Traceroute(args),
+        "trace" | "traceroute" => ReplCommand::Traceroute(args),
+        "source" => parse_source_command(args),
+        "save" if args.len() == 1 => ReplCommand::Save(args[0].clone()),
+        "save" => ReplCommand::Unknown("save".to_string()),
         "status" => ReplCommand::Status,
         "history" | "h" => ReplCommand::History,
         other => ReplCommand::Unknown(other.to_string()),
     };
 
     Ok(Some(command))
+}
+
+fn parse_source_command(args: Vec<String>) -> ReplCommand {
+    match args.as_slice() {
+        [path] => ReplCommand::Source {
+            path: path.clone(),
+            fail_fast: false,
+        },
+        [flag, path] if flag == "--fail-fast" => ReplCommand::Source {
+            path: path.clone(),
+            fail_fast: true,
+        },
+        _ => ReplCommand::Unknown("source".to_string()),
+    }
 }
 
 fn parse_args<T: clap::Args + clap::FromArgMatches>(

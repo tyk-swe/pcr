@@ -8,6 +8,7 @@ use tokio::runtime::Handle;
 
 use crate::domain::policy::TrafficPolicy;
 use crate::domain::request::PacketRequest;
+use crate::engine::mode::ExecutionMode;
 use crate::engine::ports::RuleActionTelemetry;
 use crate::engine::send::SendUseCase;
 use crate::rules::send::{RuleSendDispatcher, RuleSendTemplate};
@@ -102,21 +103,21 @@ impl RuleSendExecutor {
     }
 
     async fn send(rule_name: String, request: PacketRequest, send: Arc<SendUseCase>) -> Result<()> {
-        let prepared =
-            send.prepare(request, true)
-                .await
-                .map_err(|source| RuleActionError::SendExecution {
-                    rule: rule_name.clone(),
-                    stage: "preparing packet send",
-                    source,
-                })?;
-        send.execute_plan(prepared.plan).await.map_err(|source| {
-            RuleActionError::SendExecution {
+        let prepared = send
+            .prepare(request, ExecutionMode::Live, true)
+            .await
+            .map_err(|source| RuleActionError::SendExecution {
+                rule: rule_name.clone(),
+                stage: "preparing packet send",
+                source,
+            })?;
+        send.execute_plan(prepared.plan, ExecutionMode::Live)
+            .await
+            .map_err(|source| RuleActionError::SendExecution {
                 rule: rule_name,
                 stage: "executing transmission",
                 source,
-            }
-        })?;
+            })?;
         Ok(())
     }
 }

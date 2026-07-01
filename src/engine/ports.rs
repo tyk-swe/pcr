@@ -165,10 +165,13 @@ pub(crate) trait FuzzRunner: Send + Sync {
 }
 
 pub(crate) trait EngineOutput: Send + Sync {
+    fn stdout(&self, bytes: &[u8]) -> PortResult<()>;
     fn emit_preflight_summary(&self, spec: &PacketSpec, plan: &TransmissionPlan) -> PortResult<()>;
     #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
     fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> PortResult<()>;
     fn emit_listener_event(&self, event: &ListenerEvent);
+    fn emit_dns_dry_run(&self, request: &DnsRequest) -> PortResult<()>;
+    fn emit_dns_response(&self, result: &DnsQueryResult) -> PortResult<()>;
     fn format_dns_dry_run(&self, request: &DnsRequest) -> PortResult<String>;
     fn format_dns_response(&self, result: &DnsQueryResult) -> PortResult<String>;
 }

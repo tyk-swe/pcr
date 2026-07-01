@@ -116,10 +116,10 @@ pub(crate) enum SpecError {
     Icmpv6ErrorCodeMismatch { code: Icmpv6ErrorCode, existing: u8 },
     #[error("--mtu can only be used with the packet-too-big message type")]
     Icmpv6MtuRequiresPacketTooBig,
-    #[error("unsupported TCP flag character '{flag}'")]
-    UnsupportedTcpFlag { flag: char },
-    #[error("duplicate TCP flag character '{flag}'")]
-    DuplicateTcpFlag { flag: char },
+    #[error("unsupported TCP flag token '{token}'")]
+    UnsupportedTcpFlagToken { token: String },
+    #[error("duplicate TCP flag '{flag}'")]
+    DuplicateTcpFlag { flag: &'static str },
     #[error("window scale must be between 0 and 14")]
     TcpWindowScaleOutOfRange,
     #[error("timestamps must use format value:echo (e.g., 12345:0)")]

@@ -6,6 +6,7 @@ pub(crate) mod core;
 #[cfg(feature = "daemon")]
 pub(crate) mod daemon;
 pub(crate) mod error;
+pub(crate) mod mode;
 pub(crate) mod oneshot;
 pub(crate) mod ports;
 pub(crate) mod rule_send;

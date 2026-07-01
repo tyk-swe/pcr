@@ -191,7 +191,11 @@ pub(crate) enum TransportCommand {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub(crate) struct UdpOptions {}
+pub(crate) struct UdpOptions {
+    /// Destination host or address, optionally with a destination port.
+    #[arg(value_name = "TARGET")]
+    pub target: Option<String>,
+}
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
 pub(crate) struct TransportOptions {
@@ -207,9 +211,36 @@ pub(crate) struct TransportOptions {
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
 pub(crate) struct TcpOptions {
+    /// Destination host or address, optionally with a destination port.
+    #[arg(value_name = "TARGET")]
+    pub target: Option<String>,
     /// Set TCP flags (available: S, A, F, R, P, U, E, C).
     #[arg(long = "flags")]
     pub flags: Option<String>,
+    /// Set the TCP SYN flag.
+    #[arg(long = "syn", action = clap::ArgAction::SetTrue)]
+    pub syn: bool,
+    /// Set the TCP ACK flag.
+    #[arg(long = "ack-flag", visible_alias = "tcp-ack", action = clap::ArgAction::SetTrue)]
+    pub ack_flag: bool,
+    /// Set the TCP FIN flag.
+    #[arg(long = "fin", action = clap::ArgAction::SetTrue)]
+    pub fin: bool,
+    /// Set the TCP RST flag.
+    #[arg(long = "rst", action = clap::ArgAction::SetTrue)]
+    pub rst: bool,
+    /// Set the TCP PSH flag.
+    #[arg(long = "psh", visible_alias = "push", action = clap::ArgAction::SetTrue)]
+    pub psh: bool,
+    /// Set the TCP URG flag.
+    #[arg(long = "urg", action = clap::ArgAction::SetTrue)]
+    pub urg: bool,
+    /// Set the TCP ECE flag.
+    #[arg(long = "ece", action = clap::ArgAction::SetTrue)]
+    pub ece: bool,
+    /// Set the TCP CWR flag.
+    #[arg(long = "cwr", action = clap::ArgAction::SetTrue)]
+    pub cwr: bool,
     /// TCP sequence number [default: random].
     #[arg(long = "seq", value_parser = value_parser!(u32))]
     pub sequence: Option<u32>,
@@ -245,6 +276,9 @@ pub(crate) struct TcpOptions {
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
 pub(crate) struct IcmpOptions {
+    /// Destination host or address.
+    #[arg(value_name = "TARGET")]
+    pub target: Option<String>,
     /// ICMP type (e.g., 8=Echo Request, 0=Echo Reply).
     #[arg(long = "icmp-type", value_parser = value_parser!(u8))]
     pub kind: Option<u8>,
@@ -261,6 +295,9 @@ pub(crate) struct IcmpOptions {
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
 pub(crate) struct Icmpv6Options {
+    /// Destination host or address.
+    #[arg(value_name = "TARGET")]
+    pub target: Option<String>,
     /// ICMPv6 type.
     #[arg(long = "icmpv6-type", value_parser = value_parser!(u8))]
     pub kind: Option<u8>,

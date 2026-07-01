@@ -3,6 +3,7 @@
 
 use crate::cli::commands::PacketcraftCommand;
 use crate::cli::enums::OutputFormat as CliOutputFormat;
+use crate::cli::options::{OneShotOptions, TransportCommand};
 use crate::cli::PacketcraftArgs;
 #[cfg(feature = "daemon")]
 use crate::domain::command::DaemonRequest;
@@ -20,6 +21,175 @@ use crate::domain::command::{DnsRequest, EngineCommand};
 use crate::domain::policy::{TrafficBudget, TrafficPolicy};
 use crate::domain::request::PacketRequest;
 use crate::engine::config::EngineConfig;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub(crate) enum CliMappingError {
+    #[error("compact target conflicts with {option}")]
+    CompactTargetConflict { option: &'static str },
+    #[error("{protocol} target '{target}' must include a destination port or use --dport")]
+    CompactTargetMissingPort {
+        protocol: &'static str,
+        target: String,
+    },
+    #[error("compact target port {target_port} conflicts with --dport {explicit_port}")]
+    CompactTargetPortConflict {
+        target_port: u16,
+        explicit_port: u16,
+    },
+    #[error("{protocol} target '{target}' must not include a port")]
+    CompactTargetUnexpectedPort {
+        protocol: &'static str,
+        target: String,
+    },
+    #[error("DNS query requires a domain")]
+    DnsQueryInvalid,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CompactTarget {
+    host: String,
+    port: Option<u16>,
+}
+
+pub(crate) fn normalize_send_options(
+    options: &crate::cli::options::SendOptions,
+) -> Result<PacketRequest, CliMappingError> {
+    normalize_one_shot_options(&options.oneshot)
+}
+
+pub(crate) fn normalize_dns_query_options(
+    options: &crate::cli::commands::DnsQueryOptions,
+) -> Result<DnsRequest, CliMappingError> {
+    let Some(domain) = options
+        .domain_name()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(CliMappingError::DnsQueryInvalid);
+    };
+
+    Ok(DnsRequest {
+        domain: domain.to_string(),
+        record_type: options.record_type.clone(),
+        server: options.server.clone(),
+        timeout: options.timeout,
+        transaction_id: options.transaction_id,
+        transport: options.transport,
+        retries: options.retries,
+    })
+}
+
+pub(crate) fn normalize_one_shot_options(
+    options: &OneShotOptions,
+) -> Result<PacketRequest, CliMappingError> {
+    let mut request = PacketRequest::from(options);
+    apply_compact_target(options, &mut request)?;
+    Ok(request)
+}
+
+fn apply_compact_target(
+    options: &OneShotOptions,
+    request: &mut PacketRequest,
+) -> Result<(), CliMappingError> {
+    let Some((protocol, target)) = compact_target(&options.transport.command) else {
+        return Ok(());
+    };
+
+    if options.destination.is_some() {
+        return Err(CliMappingError::CompactTargetConflict { option: "--dest" });
+    }
+    if options.ip.destination_ip.is_some() {
+        return Err(CliMappingError::CompactTargetConflict { option: "--dip" });
+    }
+
+    let parsed = parse_compact_target(target);
+    request.destination.destination = Some(parsed.host.clone());
+
+    match protocol {
+        "tcp" | "udp" => match (parsed.port, options.transport.destination_port) {
+            (Some(target_port), Some(explicit_port)) if target_port != explicit_port => {
+                return Err(CliMappingError::CompactTargetPortConflict {
+                    target_port,
+                    explicit_port,
+                });
+            }
+            (Some(port), _) => request.transport.destination_port = Some(port),
+            (None, None) => {
+                return Err(CliMappingError::CompactTargetMissingPort {
+                    protocol,
+                    target: target.to_string(),
+                });
+            }
+            (None, Some(_)) => {}
+        },
+        "icmp" | "icmpv6" if parsed.port.is_some() => {
+            return Err(CliMappingError::CompactTargetUnexpectedPort {
+                protocol,
+                target: target.to_string(),
+            });
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn compact_target(command: &Option<TransportCommand>) -> Option<(&'static str, &str)> {
+    match command.as_ref()? {
+        TransportCommand::Tcp(options) => options.target.as_deref().map(|target| ("tcp", target)),
+        TransportCommand::Udp(options) => options.target.as_deref().map(|target| ("udp", target)),
+        TransportCommand::Icmp(options) => options.target.as_deref().map(|target| ("icmp", target)),
+        TransportCommand::Icmpv6(options) => {
+            options.target.as_deref().map(|target| ("icmpv6", target))
+        }
+    }
+}
+
+fn parse_compact_target(raw: &str) -> CompactTarget {
+    let target = raw.trim();
+    if let Some(rest) = target.strip_prefix('[') {
+        if let Some((host, suffix)) = rest.split_once(']') {
+            if let Some(port) = suffix.strip_prefix(':').and_then(parse_port) {
+                return CompactTarget {
+                    host: host.to_string(),
+                    port: Some(port),
+                };
+            }
+            return CompactTarget {
+                host: host.to_string(),
+                port: None,
+            };
+        }
+    }
+
+    if target.parse::<std::net::IpAddr>().is_ok() {
+        return CompactTarget {
+            host: target.to_string(),
+            port: None,
+        };
+    }
+
+    if target.matches(':').count() == 1 {
+        if let Some((host, port)) = target.rsplit_once(':') {
+            if let Some(port) = parse_port(port) {
+                return CompactTarget {
+                    host: host.to_string(),
+                    port: Some(port),
+                };
+            }
+        }
+    }
+
+    CompactTarget {
+        host: target.to_string(),
+        port: None,
+    }
+}
+
+fn parse_port(raw: &str) -> Option<u16> {
+    raw.parse().ok()
+}
 
 impl PacketcraftArgs {
     pub(crate) fn engine_config(&self) -> EngineConfig {
@@ -69,38 +239,66 @@ impl PacketcraftArgs {
         }
     }
 
-    pub(crate) fn engine_command(&self) -> EngineCommand {
+    pub(crate) fn try_engine_command(&self) -> Result<EngineCommand, CliMappingError> {
         match &self.command {
             PacketcraftCommand::Send(options) => {
-                EngineCommand::Send(PacketRequest::from(&options.oneshot))
+                Ok(EngineCommand::Send(normalize_send_options(options)?))
             }
             PacketcraftCommand::DryRun(options) => {
-                EngineCommand::DryRun(PacketRequest::from(&options.oneshot))
+                Ok(EngineCommand::DryRun(normalize_send_options(options)?))
             }
             #[cfg(feature = "repl")]
-            PacketcraftCommand::Interactive(options) => {
-                EngineCommand::Interactive(InteractiveRequest::from(options))
-            }
+            PacketcraftCommand::Interactive(options) => Ok(EngineCommand::Interactive(
+                InteractiveRequest::from(options),
+            )),
             #[cfg(feature = "daemon")]
             PacketcraftCommand::Daemon(options) => {
-                EngineCommand::Daemon(DaemonRequest::from(options))
+                Ok(EngineCommand::Daemon(DaemonRequest::from(options)))
             }
             #[cfg(feature = "pcap")]
             PacketcraftCommand::Listen(options) => {
-                EngineCommand::Listen(ListenRequest::from(options))
+                Ok(EngineCommand::Listen(ListenRequest::from(options)))
             }
             #[cfg(feature = "traceroute")]
             PacketcraftCommand::Traceroute(options) => {
-                EngineCommand::Traceroute(TracerouteRequest::from(options))
+                Ok(EngineCommand::Traceroute(TracerouteRequest::from(options)))
             }
             #[cfg(feature = "scan")]
-            PacketcraftCommand::Scan(command) => EngineCommand::Scan(ScanRequest::from(command)),
-            PacketcraftCommand::DnsQuery(options) => {
-                EngineCommand::DnsQuery(DnsRequest::from(options))
+            PacketcraftCommand::Scan(command) => {
+                Ok(EngineCommand::Scan(ScanRequest::from(command)))
             }
+            PacketcraftCommand::Dns(command) => match command {
+                crate::cli::commands::DnsCommand::Query(options) => Ok(EngineCommand::DnsQuery(
+                    normalize_dns_query_options(options)?,
+                )),
+            },
+            PacketcraftCommand::DnsQuery(options) => Ok(EngineCommand::DnsQuery(
+                normalize_dns_query_options(options)?,
+            )),
+            PacketcraftCommand::Doctor(options) => Ok(EngineCommand::Doctor(
+                crate::domain::command::DoctorRequest::from(options),
+            )),
+            PacketcraftCommand::Features(options) => Ok(EngineCommand::Features(
+                crate::domain::command::FeatureRequest::from(options),
+            )),
+            PacketcraftCommand::Examples(options) => Ok(EngineCommand::Examples(
+                crate::domain::command::ExamplesRequest::from(options),
+            )),
+            PacketcraftCommand::Completions(options) => Ok(EngineCommand::Completions(
+                crate::domain::command::CompletionsRequest::from(options),
+            )),
+            PacketcraftCommand::Man => Ok(EngineCommand::Man),
             #[cfg(feature = "fuzz")]
-            PacketcraftCommand::Fuzz(options) => EngineCommand::Fuzz(FuzzRequest::from(options)),
+            PacketcraftCommand::Fuzz(options) => {
+                Ok(EngineCommand::Fuzz(FuzzRequest::from(options)))
+            }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn engine_command(&self) -> EngineCommand {
+        self.try_engine_command()
+            .expect("test helper received invalid CLI mapping input")
     }
 }
 
@@ -120,7 +318,9 @@ mod tests {
     use super::*;
     use crate::cli::{commands, options};
     use crate::domain::command::{DnsTransportMode, EngineCommand};
+    use crate::domain::request::TransportProtocolRequest;
     use crate::output::OutputFormat;
+    use clap::Parser;
 
     fn args(command: PacketcraftCommand, dry_run: bool) -> PacketcraftArgs {
         PacketcraftArgs {
@@ -130,6 +330,10 @@ mod tests {
             safety: options::SafetyOptions::default(),
             command,
         }
+    }
+
+    fn parse_cli(args: &[&str]) -> PacketcraftArgs {
+        PacketcraftArgs::parse_from(std::iter::once("packetcraftr").chain(args.iter().copied()))
     }
 
     #[test]
@@ -237,10 +441,116 @@ mod tests {
     }
 
     #[test]
+    fn plan_and_dry_run_alias_map_to_plan_mode_command() {
+        let plan = parse_cli(&["plan", "udp", "127.0.0.1:9", "--data", "hello"])
+            .try_engine_command()
+            .unwrap();
+        let dry_run = parse_cli(&[
+            "dry-run",
+            "-d",
+            "127.0.0.1",
+            "--data",
+            "hello",
+            "udp",
+            "--dport",
+            "9",
+        ])
+        .try_engine_command()
+        .unwrap();
+
+        assert!(matches!(
+            plan,
+            EngineCommand::DryRun(request)
+                if request.destination.destination.as_deref() == Some("127.0.0.1")
+                    && request.transport.destination_port == Some(9)
+        ));
+        assert!(matches!(
+            dry_run,
+            EngineCommand::DryRun(request)
+                if request.destination.destination.as_deref() == Some("127.0.0.1")
+                    && request.transport.destination_port == Some(9)
+        ));
+    }
+
+    #[test]
+    fn compact_tcp_and_udp_targets_normalize_destination_and_port() {
+        let udp = parse_cli(&["plan", "udp", "127.0.0.1:9", "--data", "hello"])
+            .try_engine_command()
+            .unwrap();
+        let tcp = parse_cli(&["send", "tcp", "[::1]:443", "--flags", "syn"])
+            .try_engine_command()
+            .unwrap();
+
+        assert!(matches!(
+            udp,
+            EngineCommand::DryRun(request)
+                if request.destination.destination.as_deref() == Some("127.0.0.1")
+                    && request.transport.destination_port == Some(9)
+                    && matches!(request.transport.command, Some(TransportProtocolRequest::Udp))
+        ));
+        assert!(matches!(
+            tcp,
+            EngineCommand::Send(request)
+                if request.destination.destination.as_deref() == Some("::1")
+                    && request.transport.destination_port == Some(443)
+                    && matches!(request.transport.command, Some(TransportProtocolRequest::Tcp(_)))
+        ));
+    }
+
+    #[test]
+    fn compact_target_conflicts_and_missing_ports_are_mapping_errors() {
+        let conflict = parse_cli(&["plan", "-d", "127.0.0.1", "udp", "localhost:9"])
+            .try_engine_command()
+            .unwrap_err();
+        let missing_port = parse_cli(&["plan", "udp", "localhost"])
+            .try_engine_command()
+            .unwrap_err();
+        let port_conflict = parse_cli(&["plan", "udp", "localhost:9", "--dport", "10"])
+            .try_engine_command()
+            .unwrap_err();
+
+        assert!(matches!(
+            conflict,
+            CliMappingError::CompactTargetConflict { option: "--dest" }
+        ));
+        assert!(matches!(
+            missing_port,
+            CliMappingError::CompactTargetMissingPort {
+                protocol: "udp",
+                ..
+            }
+        ));
+        assert!(matches!(
+            port_conflict,
+            CliMappingError::CompactTargetPortConflict {
+                target_port: 9,
+                explicit_port: 10
+            }
+        ));
+    }
+
+    #[test]
+    fn dns_query_and_legacy_dns_query_map_identically() {
+        let nested = parse_cli(&["dns", "query", "example.test", "--type", "AAAA"])
+            .try_engine_command()
+            .unwrap();
+        let legacy = parse_cli(&["dns-query", "--domain", "example.test", "--type", "AAAA"])
+            .try_engine_command()
+            .unwrap();
+
+        assert!(matches!(
+            (&nested, &legacy),
+            (EngineCommand::DnsQuery(a), EngineCommand::DnsQuery(b))
+                if a.domain == b.domain && a.record_type == b.record_type
+        ));
+    }
+
+    #[test]
     fn engine_command_maps_dns_query_options() {
         let command = args(
             PacketcraftCommand::DnsQuery(commands::DnsQueryOptions {
-                domain: "example.test".to_string(),
+                domain: Some("example.test".to_string()),
+                domain_option: None,
                 record_type: "AAAA".to_string(),
                 server: "1.1.1.1".to_string(),
                 timeout: 250,

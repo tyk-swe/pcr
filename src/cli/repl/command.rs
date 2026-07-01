@@ -7,6 +7,31 @@ use crate::cli::commands::{
 use crate::cli::options::OneShotOptions;
 use anyhow::{anyhow, bail, Result};
 
+pub(super) const EXECUTABLE_REPL_COMMANDS: &[&str] = &[
+    "send",
+    "plan",
+    "dry-run",
+    "listen",
+    "scan",
+    "dns",
+    "dns-query",
+    "trace",
+    "traceroute",
+    "help",
+    "exit",
+    "quit",
+    "set",
+    "unset",
+    "show",
+    "reset",
+    "use",
+    "payload",
+    "source",
+    "save",
+    "status",
+    "history",
+];
+
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum ReplCommand {
     Help(Option<String>),
@@ -249,6 +274,26 @@ mod tests {
             parse("NoSuchCommand"),
             ReplCommand::Unknown("nosuchcommand".to_string())
         );
+    }
+
+    #[test]
+    fn executable_repl_commands_parse_to_known_commands() {
+        for command in EXECUTABLE_REPL_COMMANDS {
+            let line = match *command {
+                "set" => "set target example.test",
+                "unset" => "unset target",
+                "use" => "use udp",
+                "payload" => "payload hello",
+                "source" => "source session.pcr",
+                "save" => "save session.pcr",
+                other => other,
+            };
+
+            assert!(
+                !matches!(parse(line), ReplCommand::Unknown(_)),
+                "{command} should parse to an executable REPL command"
+            );
+        }
     }
 
     #[test]

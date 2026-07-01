@@ -258,7 +258,16 @@ async fn execute_command(
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Save(path) => {
-            let contents = render_session_script(session);
+            let contents = match render_session_script(session) {
+                Ok(contents) => contents,
+                Err(err) => {
+                    println!("save failed: {err}");
+                    if session.script_fail_fast {
+                        return Err(err);
+                    }
+                    return Ok(CommandFlow::Continue);
+                }
+            };
             if let Err(err) = tokio::fs::write(&path, contents).await {
                 println!("save failed: {err}");
                 if session.script_fail_fast {
@@ -678,24 +687,84 @@ fn render_session(session: &ReplSession, global_dry_run: bool) -> String {
     )
 }
 
-fn render_session_script(session: &ReplSession) -> String {
+fn render_session_script(session: &ReplSession) -> Result<String> {
     let mut output = String::new();
+    push_script_command(&mut output, &["reset"])?;
     if let Some(target) = session.draft.destination.as_deref() {
-        output.push_str(&format!("set target {target}\n"));
+        push_script_set(&mut output, "target", target)?;
     }
     if let Some(protocol) = protocol_label(&session.draft.transport.command) {
-        output.push_str(&format!("use {protocol}\n"));
+        push_script_set(&mut output, "protocol", protocol)?;
+    }
+    if let Some(source_ip) = session.draft.ip.source_ip.as_deref() {
+        push_script_set(&mut output, "src-ip", source_ip)?;
+    }
+    if let Some(destination_ip) = session.draft.ip.destination_ip.as_deref() {
+        push_script_set(&mut output, "dst-ip", destination_ip)?;
+    }
+    if let Some(port) = session.draft.transport.source_port {
+        push_script_set(&mut output, "src-port", &port.to_string())?;
     }
     if let Some(port) = session.draft.transport.destination_port {
-        output.push_str(&format!("set dst-port {port}\n"));
+        push_script_set(&mut output, "dst-port", &port.to_string())?;
+    }
+    if let Some(interface) = session.draft.transmit.interface.as_deref() {
+        push_script_set(&mut output, "interface", interface)?;
     }
     if let Some(flags) = tcp_flags(&session.draft) {
-        output.push_str(&format!("set tcp-flags {flags}\n"));
+        push_script_set(&mut output, "tcp-flags", flags)?;
     }
+    if let Some(count) = session.draft.transmit.count {
+        push_script_set(&mut output, "count", &count.to_string())?;
+    }
+    push_script_set(
+        &mut output,
+        "output-format",
+        output_format_label(session.output_format),
+    )?;
+    push_script_set(&mut output, "auto-listen", bool_label(session.auto_listen))?;
+    push_script_set(&mut output, "mode", execution_mode_label(session.mode))?;
     if let Some(data) = session.draft.payload.data.as_deref() {
-        output.push_str(&format!("payload \"{}\"\n", data.replace('"', "\\\"")));
+        push_script_command(&mut output, &["payload", data])?;
     }
-    output
+    Ok(output)
+}
+
+fn push_script_set(output: &mut String, key: &str, value: &str) -> Result<()> {
+    push_script_command(output, &["set", key, value])
+}
+
+fn push_script_command(output: &mut String, words: &[&str]) -> Result<()> {
+    output.push_str(
+        &shlex::try_join(words.iter().copied())
+            .with_context(|| format!("failed to quote REPL script command '{}'", words[0]))?,
+    );
+    output.push('\n');
+    Ok(())
+}
+
+fn output_format_label(format: CliOutputFormat) -> &'static str {
+    match format {
+        CliOutputFormat::Summary => "summary",
+        CliOutputFormat::Detailed => "detailed",
+        CliOutputFormat::Hex => "hex",
+        CliOutputFormat::Json => "json",
+    }
+}
+
+fn execution_mode_label(mode: ExecutionMode) -> &'static str {
+    match mode {
+        ExecutionMode::Plan => "plan",
+        ExecutionMode::Live => "live",
+    }
+}
+
+fn bool_label(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn protocol_label(command: &Option<TransportCommand>) -> Option<&'static str> {
@@ -1205,6 +1274,98 @@ mod tests {
 
         assert_eq!(engine.dns_queries.len(), 1);
         assert_eq!(engine.dns_queries[0].domain, "example.test");
+    }
+
+    #[tokio::test]
+    async fn saved_session_script_preserves_all_repl_defaults() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+
+        for (key, value) in [
+            ("target", "example.test"),
+            ("protocol", "tcp"),
+            ("src-ip", "192.0.2.10"),
+            ("dst-ip", "198.51.100.20"),
+            ("src-port", "12345"),
+            ("dst-port", "443"),
+            ("interface", "lab iface"),
+            ("tcp-flags", "syn"),
+            ("count", "7"),
+            ("output-format", "json"),
+            ("auto-listen", "true"),
+            ("mode", "plan"),
+        ] {
+            set_session_value(&mut session, key, value).unwrap();
+        }
+        set_payload(&mut session, r#"hello "world""#.to_string());
+
+        let script = render_session_script(&session).unwrap();
+
+        for expected in [
+            "reset\n",
+            "set target example.test\n",
+            "set protocol tcp\n",
+            "set src-ip 192.0.2.10\n",
+            "set dst-ip 198.51.100.20\n",
+            "set src-port 12345\n",
+            "set dst-port 443\n",
+            "set tcp-flags syn\n",
+            "set count 7\n",
+            "set output-format json\n",
+            "set auto-listen true\n",
+            "set mode plan\n",
+        ] {
+            assert!(script.contains(expected), "missing script line: {expected}");
+        }
+
+        let mut restored = ReplSession::new(&opts);
+        set_session_value(&mut restored, "target", "stale.test").unwrap();
+        set_session_value(&mut restored, "dst-ip", "203.0.113.10").unwrap();
+        set_payload(&mut restored, "stale".to_string());
+        let mut pending = script
+            .lines()
+            .enumerate()
+            .map(|(index, line)| ScriptCommand {
+                path: "saved.pcr".to_string(),
+                line_number: index + 1,
+                text: line.to_string(),
+            })
+            .collect();
+
+        run_script_session(&mut pending, &opts, &mut restored, &mut engine)
+            .await
+            .unwrap();
+        execute_command(ReplCommand::Send(vec![]), &opts, &mut restored, &mut engine)
+            .await
+            .unwrap();
+
+        assert_eq!(restored.draft.destination.as_deref(), Some("example.test"));
+        assert_eq!(restored.draft.ip.source_ip.as_deref(), Some("192.0.2.10"));
+        assert_eq!(
+            restored.draft.ip.destination_ip.as_deref(),
+            Some("198.51.100.20")
+        );
+        assert_eq!(restored.draft.transport.source_port, Some(12345));
+        assert_eq!(restored.draft.transport.destination_port, Some(443));
+        assert_eq!(
+            restored.draft.transmit.interface.as_deref(),
+            Some("lab iface")
+        );
+        assert_eq!(tcp_flags(&restored.draft), Some("syn"));
+        assert_eq!(restored.draft.transmit.count, Some(7));
+        assert_eq!(restored.output_format, CliOutputFormat::Json);
+        assert!(restored.auto_listen);
+        assert_eq!(restored.mode, ExecutionMode::Plan);
+        assert_eq!(
+            restored.draft.payload.data.as_deref(),
+            Some(r#"hello "world""#)
+        );
+        assert_eq!(engine.output_formats.last(), Some(&CliOutputFormat::Json));
+        assert_eq!(
+            engine.sent.last().map(|(_, mode)| *mode),
+            Some(ExecutionMode::Plan)
+        );
     }
 
     #[tokio::test]

@@ -6,6 +6,8 @@ use rustyline::highlight::Highlighter;
 use rustyline::hint::Hinter;
 use rustyline::validate::Validator;
 
+use super::command::EXECUTABLE_REPL_COMMANDS;
+
 pub(super) struct ReplHelper;
 
 impl rustyline::Helper for ReplHelper {}
@@ -131,12 +133,7 @@ const TCP_FLAGS: &[&str] = &[
 ];
 
 fn top_level_commands(prefix: &str) -> Vec<Pair> {
-    let mut all = crate::cli::catalog::top_level_command_names();
-    all.extend([
-        "exit", "help", "history", "payload", "quit", "reset", "save", "set", "show", "source",
-        "status", "unset", "use",
-    ]);
-    filter_candidates(&all, prefix)
+    filter_candidates(EXECUTABLE_REPL_COMMANDS, prefix)
 }
 
 fn scan_subcommands(prefix: &str) -> Vec<Pair> {
@@ -190,6 +187,26 @@ mod tests {
         assert!(candidates.contains(&"traceroute".to_string()));
         assert!(candidates.contains(&"set".to_string()));
         assert!(candidates.contains(&"source".to_string()));
+    }
+
+    #[test]
+    fn complete_empty_line_excludes_cli_only_commands() {
+        let (_start, candidates) = complete("", 0);
+
+        for unsupported in [
+            "doctor",
+            "features",
+            "examples",
+            "completions",
+            "man",
+            "repl",
+            "interactive",
+        ] {
+            assert!(
+                !candidates.contains(&unsupported.to_string()),
+                "{unsupported} should not be offered in REPL completion"
+            );
+        }
     }
 
     #[test]

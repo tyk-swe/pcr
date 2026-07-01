@@ -39,6 +39,7 @@ pub(crate) trait ReplEngine {
     fn rule_count(&self) -> usize;
     fn has_receive_rules(&self) -> bool;
     fn global_dry_run(&self) -> bool;
+    fn set_output_format(&mut self, format: CliOutputFormat);
     fn run_one_shot_with_mode<'a>(
         &'a mut self,
         request: PacketRequest,
@@ -136,12 +137,20 @@ async fn execute_command(
         ReplCommand::Set { key, value } => {
             if let Err(err) = set_session_value(session, &key, &value) {
                 println!("set failed: {err}");
+                if session.script_fail_fast {
+                    return Err(err);
+                }
+            } else if key == "output-format" {
+                engine.set_output_format(session.output_format);
             }
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Unset(key) => {
             if let Err(err) = unset_session_value(session, &key) {
                 println!("unset failed: {err}");
+                if session.script_fail_fast {
+                    return Err(err);
+                }
             }
             Ok(CommandFlow::Continue)
         }
@@ -151,11 +160,15 @@ async fn execute_command(
         }
         ReplCommand::Reset => {
             *session = ReplSession::new(opts);
+            engine.set_output_format(session.output_format);
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Use(protocol) => {
             if let Err(err) = use_protocol(session, &protocol) {
                 println!("use failed: {err}");
+                if session.script_fail_fast {
+                    return Err(err);
+                }
             }
             Ok(CommandFlow::Continue)
         }
@@ -164,9 +177,11 @@ async fn execute_command(
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Plan(args) => {
-            if let Err(err) = handle_send(&args, opts, session, engine, ExecutionMode::Plan).await {
-                println!("plan failed: {err}");
-            }
+            report_command_result(
+                "plan",
+                handle_send(&args, opts, session, engine, ExecutionMode::Plan).await,
+                session.script_fail_fast,
+            )?;
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Send(args) => {
@@ -175,34 +190,47 @@ async fn execute_command(
             } else {
                 session.mode
             };
-            if let Err(err) = handle_send(&args, opts, session, engine, mode).await {
-                println!("send failed: {err}");
-            }
+            report_command_result(
+                "send",
+                handle_send(&args, opts, session, engine, mode).await,
+                session.script_fail_fast,
+            )?;
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Listen(args) => {
-            if let Err(err) = handle_listen(&args, engine).await {
-                println!("listen failed: {err}");
-            }
+            report_command_result(
+                "listen",
+                handle_listen(&args, engine).await,
+                session.script_fail_fast,
+            )?;
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Scan(args) => {
-            if let Err(err) = handle_scan(&args, engine).await {
-                println!("scan failed: {err}");
-            }
+            report_command_result(
+                "scan",
+                handle_scan(&args, engine).await,
+                session.script_fail_fast,
+            )?;
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Traceroute(args) => {
-            if let Err(err) = handle_traceroute(&args, engine).await {
-                println!("traceroute failed: {err}");
-            }
+            report_command_result(
+                "traceroute",
+                handle_traceroute(&args, engine).await,
+                session.script_fail_fast,
+            )?;
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Source { path, fail_fast } => {
             let previous = session.script_fail_fast;
-            session.script_fail_fast = fail_fast;
+            session.script_fail_fast = previous || fail_fast;
             if let Err(err) = Box::pin(run_source_file(&path, opts, session, engine)).await {
                 println!("source failed: {err}");
+                session.script_fail_fast = previous;
+                if previous {
+                    return Err(err);
+                }
+                return Ok(CommandFlow::Continue);
             }
             session.script_fail_fast = previous;
             Ok(CommandFlow::Continue)
@@ -211,6 +239,9 @@ async fn execute_command(
             let contents = render_session_script(session);
             if let Err(err) = tokio::fs::write(&path, contents).await {
                 println!("save failed: {err}");
+                if session.script_fail_fast {
+                    return Err(err.into());
+                }
             }
             Ok(CommandFlow::Continue)
         }
@@ -235,6 +266,16 @@ async fn execute_command(
     }
 }
 
+fn report_command_result(action: &str, result: Result<()>, fail_fast: bool) -> Result<()> {
+    if let Err(err) = result {
+        println!("{action} failed: {err}");
+        if fail_fast {
+            return Err(err);
+        }
+    }
+    Ok(())
+}
+
 async fn handle_send(
     args: &[String],
     opts: &InteractiveRequest,
@@ -243,7 +284,7 @@ async fn handle_send(
     mode: ExecutionMode,
 ) -> Result<()> {
     let local = parse_oneshot(args)?;
-    let mut options = merge_one_shot_options(&session.draft, local);
+    let mut options = merge_one_shot_options(&session.draft, local)?;
     if (opts.auto_listen.unwrap_or(false) || session.auto_listen)
         && !options.listen.listen.unwrap_or(false)
     {
@@ -374,7 +415,12 @@ fn ensure_tcp_options(options: &mut OneShotOptions) -> &mut TcpOptions {
     }
 }
 
-fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> OneShotOptions {
+fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> Result<OneShotOptions> {
+    let local_has_compact_target =
+        crate::app::transport_has_compact_target(&local.transport.command);
+    let local_compact_target_has_port =
+        crate::app::transport_compact_target_has_port(&local.transport.command)?;
+    let local_destination_port = local.transport.destination_port;
     let mut merged = base.clone();
     let OneShotOptions {
         destination,
@@ -388,7 +434,12 @@ fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> OneSh
         logging,
     } = local;
 
-    replace_option(&mut merged.destination, destination);
+    if local_has_compact_target {
+        merged.destination = None;
+        merged.ip.destination_ip = None;
+    } else {
+        replace_option(&mut merged.destination, destination);
+    }
 
     replace_option(&mut merged.layer2.source_mac, layer2.source_mac);
     replace_option(&mut merged.layer2.destination_mac, layer2.destination_mac);
@@ -401,7 +452,9 @@ fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> OneSh
     );
 
     replace_option(&mut merged.ip.source_ip, ip.source_ip);
-    replace_option(&mut merged.ip.destination_ip, ip.destination_ip);
+    if !local_has_compact_target {
+        replace_option(&mut merged.ip.destination_ip, ip.destination_ip);
+    }
     replace_option(&mut merged.ip.prefer_ipv6, ip.prefer_ipv6);
     replace_option(&mut merged.ip.prefer_ipv4, ip.prefer_ipv4);
     replace_option(&mut merged.ip.ttl, ip.ttl);
@@ -426,6 +479,10 @@ fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> OneSh
     );
     merged.transport.command =
         merge_transport_command(merged.transport.command.take(), transport.command);
+    if local_has_compact_target && local_compact_target_has_port && local_destination_port.is_none()
+    {
+        merged.transport.destination_port = None;
+    }
 
     merge_payload_options(&mut merged, payload);
 
@@ -465,7 +522,7 @@ fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> OneSh
         logging.allow_public_metrics,
     );
 
-    merged
+    Ok(merged)
 }
 
 fn replace_option<T>(target: &mut Option<T>, value: Option<T>) {
@@ -849,3 +906,179 @@ async fn load_script_commands(opts: &InteractiveRequest) -> Result<VecDeque<Scri
 }
 
 // ─── Tests ─────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use anyhow::anyhow;
+
+    #[derive(Default)]
+    struct MockReplEngine {
+        sent: Vec<(PacketRequest, ExecutionMode)>,
+        output_formats: Vec<CliOutputFormat>,
+        failing_sends: usize,
+    }
+
+    impl ReplEngine for MockReplEngine {
+        fn rule_count(&self) -> usize {
+            0
+        }
+
+        fn has_receive_rules(&self) -> bool {
+            false
+        }
+
+        fn global_dry_run(&self) -> bool {
+            false
+        }
+
+        fn set_output_format(&mut self, format: CliOutputFormat) {
+            self.output_formats.push(format);
+        }
+
+        fn run_one_shot_with_mode<'a>(
+            &'a mut self,
+            request: PacketRequest,
+            mode: ExecutionMode,
+        ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+            self.sent.push((request, mode));
+            let should_fail = self.failing_sends > 0;
+            if should_fail {
+                self.failing_sends -= 1;
+            }
+            Box::pin(async move {
+                if should_fail {
+                    Err(anyhow!("mock send failed"))
+                } else {
+                    Ok(())
+                }
+            })
+        }
+
+        fn run_listener<'a>(
+            &'a mut self,
+            _request: ListenRequest,
+        ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn run_scan<'a>(
+            &'a mut self,
+            _request: ScanRequest,
+        ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+
+        fn run_traceroute<'a>(
+            &'a mut self,
+            _request: TracerouteRequest,
+        ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn repl_args(args: &[&str]) -> Vec<String> {
+        args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn local_compact_target_overrides_repl_destination_and_port_defaults() {
+        let mut base = OneShotOptions {
+            destination: Some("default.test".to_string()),
+            ..Default::default()
+        };
+        base.ip.destination_ip = Some("192.0.2.10".to_string());
+        base.transport.destination_port = Some(53);
+        base.transport.command = Some(TransportCommand::Udp(Default::default()));
+        let local = parse_oneshot(&repl_args(&["udp", "127.0.0.1:9"])).unwrap();
+
+        let merged = merge_one_shot_options(&base, local).unwrap();
+        let request = crate::app::normalize_one_shot_options(&merged).unwrap();
+
+        assert_eq!(
+            request.destination.destination.as_deref(),
+            Some("127.0.0.1")
+        );
+        assert_eq!(request.destination.destination_ip, None);
+        assert_eq!(request.transport.destination_port, Some(9));
+    }
+
+    #[test]
+    fn local_compact_target_without_port_keeps_repl_port_default() {
+        let mut base = OneShotOptions::default();
+        base.transport.destination_port = Some(53);
+        base.transport.command = Some(TransportCommand::Udp(Default::default()));
+        let local = parse_oneshot(&repl_args(&["udp", "127.0.0.1"])).unwrap();
+
+        let merged = merge_one_shot_options(&base, local).unwrap();
+        let request = crate::app::normalize_one_shot_options(&merged).unwrap();
+
+        assert_eq!(
+            request.destination.destination.as_deref(),
+            Some("127.0.0.1")
+        );
+        assert_eq!(request.transport.destination_port, Some(53));
+    }
+
+    #[tokio::test]
+    async fn set_output_format_updates_engine_output_format() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+
+        execute_command(
+            ReplCommand::Set {
+                key: "output-format".to_string(),
+                value: "json".to_string(),
+            },
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap();
+        execute_command(
+            ReplCommand::Plan(repl_args(&["udp", "127.0.0.1:9"])),
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(engine.output_formats, vec![CliOutputFormat::Json]);
+        assert_eq!(engine.sent.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn sourced_script_fail_fast_stops_after_command_error() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        session.script_fail_fast = true;
+        let mut engine = MockReplEngine {
+            failing_sends: 1,
+            ..Default::default()
+        };
+        let mut pending = VecDeque::from([
+            ScriptCommand {
+                path: "session.pcr".to_string(),
+                line_number: 1,
+                text: "plan udp 127.0.0.1:9".to_string(),
+            },
+            ScriptCommand {
+                path: "session.pcr".to_string(),
+                line_number: 2,
+                text: "set target later.test".to_string(),
+            },
+        ]);
+
+        let err = run_script_session(&mut pending, &opts, &mut session, &mut engine)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("mock send failed"));
+        assert_eq!(engine.sent.len(), 1);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(session.draft.destination, None);
+    }
+}

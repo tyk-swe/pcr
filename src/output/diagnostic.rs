@@ -119,6 +119,18 @@ fn diagnostic_for_cli_mapping(error: &CliMappingError) -> CliDiagnostic {
             ],
             exit_code: 2,
         },
+        CliMappingError::CompactTargetMalformed { target } => CliDiagnostic {
+            code: "compact_target_malformed".to_string(),
+            title: "compact target is malformed".to_string(),
+            sections: vec![
+                section("target", [target.clone()]),
+                section(
+                    "next",
+                    ["Use `[IPv6]`, `[IPv6]:port`, `host`, or `host:port`.".to_string()],
+                ),
+            ],
+            exit_code: 2,
+        },
         CliMappingError::DnsQueryInvalid => CliDiagnostic {
             code: "dns_query_invalid".to_string(),
             title: "DNS query is missing a domain".to_string(),

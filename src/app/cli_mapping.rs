@@ -42,6 +42,8 @@ pub(crate) enum CliMappingError {
         protocol: &'static str,
         target: String,
     },
+    #[error("compact target '{target}' is malformed")]
+    CompactTargetMalformed { target: String },
     #[error("DNS query requires a domain")]
     DnsQueryInvalid,
 }
@@ -103,7 +105,7 @@ fn apply_compact_target(
         return Err(CliMappingError::CompactTargetConflict { option: "--dip" });
     }
 
-    let parsed = parse_compact_target(target);
+    let parsed = parse_compact_target(target)?;
     request.destination.destination = Some(parsed.host.clone());
 
     match protocol {
@@ -146,45 +148,79 @@ fn compact_target(command: &Option<TransportCommand>) -> Option<(&'static str, &
     }
 }
 
-fn parse_compact_target(raw: &str) -> CompactTarget {
+#[cfg(feature = "repl")]
+pub(crate) fn transport_has_compact_target(command: &Option<TransportCommand>) -> bool {
+    compact_target(command).is_some()
+}
+
+#[cfg(feature = "repl")]
+pub(crate) fn transport_compact_target_has_port(
+    command: &Option<TransportCommand>,
+) -> Result<bool, CliMappingError> {
+    let Some((_, target)) = compact_target(command) else {
+        return Ok(false);
+    };
+
+    Ok(parse_compact_target(target)?.port.is_some())
+}
+
+fn parse_compact_target(raw: &str) -> Result<CompactTarget, CliMappingError> {
     let target = raw.trim();
     if let Some(rest) = target.strip_prefix('[') {
         if let Some((host, suffix)) = rest.split_once(']') {
-            if let Some(port) = suffix.strip_prefix(':').and_then(parse_port) {
-                return CompactTarget {
+            if host.trim().is_empty() {
+                return Err(CliMappingError::CompactTargetMalformed {
+                    target: target.to_string(),
+                });
+            }
+            if suffix.is_empty() {
+                return Ok(CompactTarget {
+                    host: host.to_string(),
+                    port: None,
+                });
+            }
+            if let Some(raw_port) = suffix.strip_prefix(':') {
+                let Some(port) = parse_port(raw_port) else {
+                    return Err(CliMappingError::CompactTargetMalformed {
+                        target: target.to_string(),
+                    });
+                };
+                return Ok(CompactTarget {
                     host: host.to_string(),
                     port: Some(port),
-                };
+                });
             }
-            return CompactTarget {
-                host: host.to_string(),
-                port: None,
-            };
+            return Err(CliMappingError::CompactTargetMalformed {
+                target: target.to_string(),
+            });
         }
+        return Err(CliMappingError::CompactTargetMalformed {
+            target: target.to_string(),
+        });
     }
 
     if target.parse::<std::net::IpAddr>().is_ok() {
-        return CompactTarget {
+        return Ok(CompactTarget {
             host: target.to_string(),
             port: None,
-        };
+        });
     }
 
     if target.matches(':').count() == 1 {
         if let Some((host, port)) = target.rsplit_once(':') {
             if let Some(port) = parse_port(port) {
-                return CompactTarget {
+                return Ok(CompactTarget {
                     host: host.to_string(),
                     port: Some(port),
-                };
+                });
             }
         }
     }
 
-    CompactTarget {
+    Ok(CompactTarget {
         host: target.to_string(),
         port: None,
-    }
+    })
 }
 
 fn parse_port(raw: &str) -> Option<u16> {
@@ -526,6 +562,32 @@ mod tests {
                 target_port: 9,
                 explicit_port: 10
             }
+        ));
+    }
+
+    #[test]
+    fn malformed_bracketed_compact_targets_are_mapping_errors() {
+        let tcp_bad_port = parse_cli(&["plan", "tcp", "[::1]:bogus", "--dport", "443"])
+            .try_engine_command()
+            .unwrap_err();
+        let icmpv6_bad_suffix = parse_cli(&["plan", "icmpv6", "[::1]:bogus"])
+            .try_engine_command()
+            .unwrap_err();
+        let missing_close = parse_cli(&["plan", "tcp", "[::1", "--dport", "443"])
+            .try_engine_command()
+            .unwrap_err();
+
+        assert!(matches!(
+            tcp_bad_port,
+            CliMappingError::CompactTargetMalformed { .. }
+        ));
+        assert!(matches!(
+            icmpv6_bad_suffix,
+            CliMappingError::CompactTargetMalformed { .. }
+        ));
+        assert!(matches!(
+            missing_close,
+            CliMappingError::CompactTargetMalformed { .. }
         ));
     }
 

@@ -23,9 +23,11 @@ mod repl_engine;
 mod support;
 mod telemetry;
 
-#[cfg(feature = "repl")]
-pub(crate) use cli_mapping::normalize_one_shot_options;
 pub(crate) use cli_mapping::CliMappingError;
+#[cfg(feature = "repl")]
+pub(crate) use cli_mapping::{
+    normalize_one_shot_options, transport_compact_target_has_port, transport_has_compact_target,
+};
 
 pub fn run_cli() -> Result<()> {
     let args = PacketcraftArgs::parse();

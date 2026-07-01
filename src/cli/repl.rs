@@ -92,6 +92,14 @@ impl ReplSession {
         }
     }
 
+    fn reset_user_defaults(&mut self, opts: &InteractiveRequest) {
+        let script_fail_fast = self.script_fail_fast;
+        *self = Self {
+            script_fail_fast,
+            ..Self::new(opts)
+        };
+    }
+
     fn prompt(&self, global_dry_run: bool) -> String {
         let mut parts = Vec::new();
         if global_dry_run {
@@ -165,7 +173,7 @@ async fn execute_command(
             Ok(CommandFlow::Continue)
         }
         ReplCommand::Reset => {
-            *session = ReplSession::new(opts);
+            session.reset_user_defaults(opts);
             engine.set_output_format(session.output_format);
             Ok(CommandFlow::Continue)
         }
@@ -1398,5 +1406,44 @@ mod tests {
         assert_eq!(engine.sent.len(), 1);
         assert_eq!(pending.len(), 1);
         assert_eq!(session.draft.destination, None);
+    }
+
+    #[tokio::test]
+    async fn reset_preserves_sourced_script_fail_fast() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        session.script_fail_fast = true;
+        set_session_value(&mut session, "target", "stale.test").unwrap();
+        let mut engine = MockReplEngine {
+            failing_sends: 1,
+            ..Default::default()
+        };
+        let mut pending = VecDeque::from([
+            ScriptCommand {
+                path: "session.pcr".to_string(),
+                line_number: 1,
+                text: "reset".to_string(),
+            },
+            ScriptCommand {
+                path: "session.pcr".to_string(),
+                line_number: 2,
+                text: "plan udp 127.0.0.1:9".to_string(),
+            },
+            ScriptCommand {
+                path: "session.pcr".to_string(),
+                line_number: 3,
+                text: "set target later.test".to_string(),
+            },
+        ]);
+
+        let err = run_script_session(&mut pending, &opts, &mut session, &mut engine)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("mock send failed"));
+        assert_eq!(engine.sent.len(), 1);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(session.draft.destination, None);
+        assert!(session.script_fail_fast);
     }
 }

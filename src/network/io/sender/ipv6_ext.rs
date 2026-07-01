@@ -258,3 +258,207 @@ fn round_up_to_multiple_of_eight(value: usize) -> Ipv6Result<usize> {
         .checked_add(8 - remainder)
         .ok_or(Ipv6Error::ExtensionLengthOverflow)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::spec::Ipv6ExtHeader;
+
+    fn addr(value: u16) -> Ipv6Addr {
+        Ipv6Addr::new(0x2001, 0x0db8, 0, 0, 0, 0, 0, value)
+    }
+
+    #[test]
+    fn split_fragment_extension_headers_moves_trailing_destination_options_after_fragment() {
+        let headers = vec![
+            Ipv6ExtHeader::HopByHop { options: vec![] },
+            Ipv6ExtHeader::DestinationOptions { options: vec![1] },
+            Ipv6ExtHeader::DestinationOptions { options: vec![2] },
+        ];
+
+        let (before, after) = split_fragment_extension_headers(&headers);
+
+        assert_eq!(before, &headers[..1]);
+        assert_eq!(after, &headers[1..]);
+    }
+
+    #[test]
+    fn split_fragment_extension_headers_keeps_non_trailing_destination_options_before_fragment() {
+        let headers = vec![
+            Ipv6ExtHeader::DestinationOptions { options: vec![1] },
+            Ipv6ExtHeader::Routing {
+                routing_type: 0,
+                segments: vec![addr(1)],
+                data: None,
+            },
+        ];
+
+        let (before, after) = split_fragment_extension_headers(&headers);
+
+        assert_eq!(before, headers.as_slice());
+        assert!(after.is_empty());
+    }
+
+    #[test]
+    fn get_header_protocol_maps_supported_extension_headers() {
+        assert_eq!(
+            get_header_protocol(&Ipv6ExtHeader::HopByHop { options: vec![] }),
+            IpNextHeaderProtocols::Hopopt
+        );
+        assert_eq!(
+            get_header_protocol(&Ipv6ExtHeader::DestinationOptions { options: vec![] }),
+            IpNextHeaderProtocols::Ipv6Opts
+        );
+        assert_eq!(
+            get_header_protocol(&Ipv6ExtHeader::Routing {
+                routing_type: 0,
+                segments: vec![addr(1)],
+                data: None,
+            }),
+            IpNextHeaderProtocols::Ipv6Route
+        );
+    }
+
+    #[test]
+    fn encode_extension_headers_returns_terminal_for_empty_chain() {
+        let (bytes, next) =
+            encode_extension_headers(&[], IpNextHeaderProtocols::Udp, addr(10)).unwrap();
+
+        assert!(bytes.is_empty());
+        assert_eq!(next, IpNextHeaderProtocols::Udp);
+    }
+
+    #[test]
+    fn options_header_uses_minimum_eight_byte_encoding() {
+        let headers = [Ipv6ExtHeader::HopByHop { options: vec![] }];
+
+        let (bytes, next) =
+            encode_extension_headers(&headers, IpNextHeaderProtocols::Tcp, addr(10)).unwrap();
+
+        assert_eq!(next, IpNextHeaderProtocols::Hopopt);
+        assert_eq!(bytes.len(), 8);
+        assert_eq!(bytes[0], IpNextHeaderProtocols::Tcp.0);
+        assert_eq!(bytes[1], 0);
+        assert_eq!(&bytes[2..], &[0, 0, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn options_header_copies_options_and_zero_pads_to_eight_bytes() {
+        let headers = [Ipv6ExtHeader::DestinationOptions {
+            options: vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11],
+        }];
+
+        let (bytes, _) =
+            encode_extension_headers(&headers, IpNextHeaderProtocols::Udp, addr(10)).unwrap();
+
+        assert_eq!(bytes.len(), 16);
+        assert_eq!(&bytes[2..9], &[0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x11]);
+        assert!(bytes[9..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn routing_initial_destination_uses_first_routing_segment() {
+        let headers = [Ipv6ExtHeader::Routing {
+            routing_type: 0,
+            segments: vec![addr(1), addr(2)],
+            data: None,
+        }];
+
+        assert_eq!(routing_initial_destination(&headers, addr(99)), addr(1));
+    }
+
+    #[test]
+    fn routing_initial_destination_uses_default_without_routing_header() {
+        let headers = [Ipv6ExtHeader::HopByHop { options: vec![] }];
+
+        assert_eq!(routing_initial_destination(&headers, addr(99)), addr(99));
+    }
+
+    #[test]
+    fn routing_header_omits_extra_final_destination_when_last_segment_is_final() {
+        let headers = [Ipv6ExtHeader::Routing {
+            routing_type: 4,
+            segments: vec![addr(1), addr(2)],
+            data: Some(0x11223344),
+        }];
+
+        let (bytes, next) =
+            encode_extension_headers(&headers, IpNextHeaderProtocols::Tcp, addr(2)).unwrap();
+
+        assert_eq!(next, IpNextHeaderProtocols::Ipv6Route);
+        assert_eq!(bytes.len(), 24);
+        assert_eq!(bytes[0], IpNextHeaderProtocols::Tcp.0);
+        assert_eq!(bytes[2], 4);
+        assert_eq!(bytes[3], 1);
+        assert_eq!(&bytes[4..8], &0x11223344u32.to_be_bytes());
+        assert_eq!(&bytes[8..24], &addr(2).octets());
+    }
+
+    #[test]
+    fn routing_header_appends_final_destination_when_last_segment_differs() {
+        let headers = [Ipv6ExtHeader::Routing {
+            routing_type: 4,
+            segments: vec![addr(1), addr(2)],
+            data: None,
+        }];
+
+        let (bytes, _) =
+            encode_extension_headers(&headers, IpNextHeaderProtocols::Tcp, addr(3)).unwrap();
+
+        assert_eq!(bytes.len(), 40);
+        assert_eq!(bytes[3], 2);
+        assert_eq!(&bytes[8..24], &addr(2).octets());
+        assert_eq!(&bytes[24..40], &addr(3).octets());
+    }
+
+    #[test]
+    fn routing_header_rejects_missing_segments() {
+        let err = measure_extension_headers(
+            &[Ipv6ExtHeader::Routing {
+                routing_type: 0,
+                segments: vec![],
+                data: None,
+            }],
+            addr(1),
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, Ipv6Error::RoutingMissingSegment));
+    }
+
+    #[test]
+    fn routing_header_rejects_too_many_segments() {
+        let err = measure_extension_headers(
+            &[Ipv6ExtHeader::Routing {
+                routing_type: 0,
+                segments: (0..=MAX_ROUTING_SEGMENTS)
+                    .map(|idx| addr(idx as u16))
+                    .collect(),
+                data: None,
+            }],
+            addr(1),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            Ipv6Error::RoutingTooManySegments {
+                max: MAX_ROUTING_SEGMENTS,
+                count
+            } if count == MAX_ROUTING_SEGMENTS + 1
+        ));
+    }
+
+    #[test]
+    fn options_header_rejects_payloads_that_exceed_limit_after_padding() {
+        let err = measure_extension_headers(
+            &[Ipv6ExtHeader::HopByHop {
+                options: vec![0; 2047],
+            }],
+            addr(1),
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, Ipv6Error::OptionsTooLong));
+    }
+}

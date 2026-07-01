@@ -214,3 +214,208 @@ pub(crate) fn resolve_ip_addresses_with_selection(
         destination_reason,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::net::MacAddress;
+    use crate::domain::request::{
+        DestinationRequest, IpRequest, Layer2Request, PacketRequest, TransmissionRequest,
+    };
+    use pnet::datalink::MacAddr;
+
+    fn interface(ips: &[&str]) -> NetworkInterface {
+        NetworkInterface {
+            name: "eth-test".to_string(),
+            description: String::new(),
+            index: 1,
+            mac: Some(MacAddr::new(0x02, 0, 0, 0, 0, 1)),
+            ips: ips.iter().map(|value| value.parse().unwrap()).collect(),
+            flags: 0,
+        }
+    }
+
+    #[test]
+    fn interface_ip_helpers_extract_first_address_for_each_family() {
+        let interface = interface(&["192.0.2.5/24", "2001:db8::5/64"]);
+
+        assert_eq!(
+            interface_ipv4(&interface),
+            Some(Ipv4Addr::new(192, 0, 2, 5))
+        );
+        assert_eq!(
+            interface_ipv6(&interface),
+            Some("2001:db8::5".parse().unwrap())
+        );
+    }
+
+    #[test]
+    fn desired_ipv6_prefers_explicit_destination_family() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("2001:db8::10".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(desired_ipv6(&spec), Some(true));
+    }
+
+    #[test]
+    fn desired_ipv6_uses_resolved_target_address() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            destination: DestinationRequest {
+                destination: Some("example.test".to_string()),
+                resolved_destination: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(desired_ipv6(&spec), Some(false));
+    }
+
+    #[test]
+    fn desired_ipv6_uses_source_address_when_destination_is_unknown() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                source_ip: Some("2001:db8::5".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(desired_ipv6(&spec), Some(true));
+    }
+
+    #[test]
+    fn interface_requires_mac_for_layer2_transmission_or_layer2_overrides() {
+        let default_spec = PacketSpec::default();
+        let layer3_spec = PacketSpec::from_request(&PacketRequest {
+            transmit: TransmissionRequest {
+                force_layer3: Some(true),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+        let mut layer2_override = layer3_spec.clone();
+        layer2_override.layer2.destination = Some(MacAddress::new([1, 2, 3, 4, 5, 6]));
+
+        assert!(interface_requires_mac(&default_spec));
+        assert!(!interface_requires_mac(&layer3_spec));
+        assert!(interface_requires_mac(&layer2_override));
+    }
+
+    #[test]
+    fn layer2_request_fixture_can_express_mac_override_without_hostname_resolution() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            layer2: Layer2Request {
+                destination_mac: Some("01:02:03:04:05:06".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            spec.layer2.destination.map(|mac| mac.to_string()),
+            Some("01:02:03:04:05:06".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_prefers_explicit_source_and_destination() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            ip: IpRequest {
+                source_ip: Some("192.0.2.9".to_string()),
+                destination_ip: Some("198.51.100.10".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        let selected =
+            resolve_ip_addresses_with_selection(&spec, &interface(&["192.0.2.5/24"])).unwrap();
+
+        assert_eq!(selected.source_ip, IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9)));
+        assert_eq!(
+            selected.source_reason,
+            SourceSelectionReason::ExplicitSourceIp
+        );
+        assert_eq!(
+            selected.destination_ip,
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 10))
+        );
+        assert_eq!(
+            selected.destination_reason,
+            DestinationSelectionReason::TargetLiteral
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_marks_resolved_host_and_interface_source() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            destination: DestinationRequest {
+                destination: Some("example.test".to_string()),
+                resolved_destination: Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 10))),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        let selected =
+            resolve_ip_addresses_with_selection(&spec, &interface(&["192.0.2.5/24"])).unwrap();
+
+        assert_eq!(selected.source_ip, IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)));
+        assert_eq!(
+            selected.source_reason,
+            SourceSelectionReason::InterfaceAddress
+        );
+        assert_eq!(
+            selected.destination_reason,
+            DestinationSelectionReason::HostnameResolution
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_uses_ipv6_scope_match_for_source() {
+        let spec = PacketSpec::from_request(&PacketRequest {
+            destination: DestinationRequest {
+                destination_ip: Some("fe80::abcd".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+
+        let selected = resolve_ip_addresses_with_selection(
+            &spec,
+            &interface(&["2001:db8::5/64", "fe80::5/64"]),
+        )
+        .unwrap();
+
+        assert_eq!(selected.source_ip, IpAddr::V6("fe80::5".parse().unwrap()));
+        assert_eq!(
+            selected.source_reason,
+            SourceSelectionReason::Ipv6ScopeMatch
+        );
+    }
+
+    #[test]
+    fn resolve_ip_addresses_requires_destination() {
+        let err = match resolve_ip_addresses_with_selection(&PacketSpec::default(), &interface(&[]))
+        {
+            Ok(_) => panic!("expected destination-required error"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, InterfaceError::DestinationRequired));
+    }
+}

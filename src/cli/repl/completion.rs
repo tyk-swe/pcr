@@ -99,3 +99,69 @@ fn scan_subcommands(prefix: &str) -> Vec<Pair> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustyline::completion::Completer;
+    use rustyline::history::DefaultHistory;
+
+    fn complete(line: &str, pos: usize) -> (usize, Vec<String>) {
+        let history = DefaultHistory::new();
+        let context = rustyline::Context::new(&history);
+        let (start, pairs) = ReplHelper.complete(line, pos, &context).unwrap();
+        let replacements = pairs.into_iter().map(|pair| pair.replacement).collect();
+        (start, replacements)
+    }
+
+    #[test]
+    fn complete_empty_line_lists_top_level_commands_from_start() {
+        let (start, candidates) = complete("", 0);
+
+        assert_eq!(start, 0);
+        assert!(candidates.contains(&"send".to_string()));
+        assert!(candidates.contains(&"traceroute".to_string()));
+    }
+
+    #[test]
+    fn complete_top_level_prefix_replaces_from_line_start() {
+        let (start, candidates) = complete("st", 2);
+
+        assert_eq!(start, 0);
+        assert_eq!(candidates, vec!["status".to_string()]);
+    }
+
+    #[test]
+    fn complete_scan_trailing_space_inserts_subcommand_at_cursor() {
+        let (start, candidates) = complete("scan ", 5);
+
+        assert_eq!(start, 5);
+        assert!(candidates.contains(&"tcp-syn".to_string()));
+        assert!(candidates.contains(&"udp".to_string()));
+    }
+
+    #[test]
+    fn complete_scan_subcommand_prefix_replaces_only_subcommand() {
+        let (start, candidates) = complete("scan tcp-", 9);
+
+        assert_eq!(start, 5);
+        assert_eq!(
+            candidates,
+            vec![
+                "tcp-ack".to_string(),
+                "tcp-fin".to_string(),
+                "tcp-null".to_string(),
+                "tcp-syn".to_string(),
+                "tcp-xmas".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn complete_non_scan_arguments_returns_no_candidates_at_cursor() {
+        let (start, candidates) = complete("send --", 7);
+
+        assert_eq!(start, 7);
+        assert!(candidates.is_empty());
+    }
+}

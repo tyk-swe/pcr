@@ -305,3 +305,214 @@ fn solicited_node_mac(target: Ipv6Addr) -> MacAddr {
     let bytes = target.octets();
     MacAddr::new(0x33, 0x33, 0xff, bytes[13], bytes[14], bytes[15])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::packet::icmpv6::ndp::{MutableNeighborAdvertPacket, NeighborSolicitPacket};
+    use pnet::packet::ip::IpNextHeaderProtocols;
+
+    fn target_ip() -> Ipv6Addr {
+        "2001:db8::1234:5678".parse().unwrap()
+    }
+
+    fn source_mac() -> MacAddr {
+        MacAddr::new(0x02, 0, 0, 0, 0, 1)
+    }
+
+    fn target_mac() -> MacAddr {
+        MacAddr::new(0x02, 0, 0, 0, 0, 2)
+    }
+
+    fn neighbor_advert_frame(target: Ipv6Addr, include_option: bool) -> Vec<u8> {
+        let option_len = if include_option {
+            SOURCE_LL_OPTION_LEN
+        } else {
+            0
+        };
+        let mut frame =
+            vec![0u8; ETHERNET_HEADER_LEN + IPV6_HEADER_LEN + NEIGHBOR_SOLICIT_LEN + option_len];
+        let mut ethernet = MutableEthernetPacket::new(&mut frame).unwrap();
+        ethernet.set_destination(source_mac());
+        ethernet.set_source(target_mac());
+        ethernet.set_ethertype(EtherTypes::Ipv6);
+
+        let mut ipv6 = MutableIpv6Packet::new(ethernet.payload_mut()).unwrap();
+        ipv6.set_version(6);
+        ipv6.set_payload_length((NEIGHBOR_SOLICIT_LEN + option_len) as u16);
+        ipv6.set_next_header(IpNextHeaderProtocols::Icmpv6);
+        ipv6.set_hop_limit(255);
+        ipv6.set_source(target);
+        ipv6.set_destination("fe80::1".parse().unwrap());
+
+        let mut advert = MutableNeighborAdvertPacket::new(ipv6.payload_mut()).unwrap();
+        advert.set_icmpv6_type(Icmpv6Types::NeighborAdvert);
+        advert.set_icmpv6_code(Icmpv6Code(0));
+        advert.set_target_addr(target);
+        if include_option {
+            advert.set_options(&[NdpOption {
+                option_type: NdpOptionTypes::TargetLLAddr,
+                length: 1,
+                data: vec![0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f],
+            }]);
+        }
+
+        frame
+    }
+
+    #[test]
+    fn solicited_node_multicast_uses_low_24_bits_of_target() {
+        assert_eq!(
+            solicited_node_multicast(target_ip()),
+            "ff02::1:ff34:5678".parse::<Ipv6Addr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn solicited_node_mac_uses_low_24_bits_of_target() {
+        assert_eq!(
+            solicited_node_mac(target_ip()),
+            MacAddr::new(0x33, 0x33, 0xff, 0x34, 0x56, 0x78)
+        );
+    }
+
+    #[test]
+    fn build_neighbor_solicit_frame_sets_ethernet_ipv6_and_icmpv6_fields() {
+        let source_ip = "fe80::1".parse().unwrap();
+        let multicast = solicited_node_multicast(target_ip());
+        let mut frame =
+            vec![
+                0u8;
+                ETHERNET_HEADER_LEN + IPV6_HEADER_LEN + NEIGHBOR_SOLICIT_LEN + SOURCE_LL_OPTION_LEN
+            ];
+
+        build_neighbor_solicit_frame(
+            &mut frame,
+            source_mac(),
+            solicited_node_mac(target_ip()),
+            source_ip,
+            multicast,
+            target_ip(),
+        )
+        .unwrap();
+
+        let ethernet = EthernetPacket::new(&frame).unwrap();
+        assert_eq!(ethernet.get_destination(), solicited_node_mac(target_ip()));
+        assert_eq!(ethernet.get_source(), source_mac());
+        assert_eq!(ethernet.get_ethertype(), EtherTypes::Ipv6);
+
+        let ipv6 = Ipv6Packet::new(ethernet.payload()).unwrap();
+        assert_eq!(ipv6.get_next_header(), IpNextHeaderProtocols::Icmpv6);
+        assert_eq!(ipv6.get_hop_limit(), 255);
+        assert_eq!(ipv6.get_source(), source_ip);
+        assert_eq!(ipv6.get_destination(), multicast);
+
+        let solicit = NeighborSolicitPacket::new(ipv6.payload()).unwrap();
+        assert_eq!(solicit.get_icmpv6_type(), Icmpv6Types::NeighborSolicit);
+        assert_eq!(solicit.get_icmpv6_code(), Icmpv6Code(0));
+        assert_eq!(solicit.get_target_addr(), target_ip());
+        assert_ne!(solicit.get_checksum(), 0);
+
+        let options = solicit.get_options();
+        assert_eq!(options.len(), 1);
+        assert_eq!(options[0].option_type, NdpOptionTypes::SourceLLAddr);
+        assert_eq!(options[0].data, vec![0x02, 0, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn parse_neighbor_advert_prefers_target_link_layer_option() {
+        assert_eq!(
+            parse_neighbor_advert(&neighbor_advert_frame(target_ip(), true), target_ip()),
+            Some(MacAddr::new(0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f))
+        );
+    }
+
+    #[test]
+    fn parse_neighbor_advert_falls_back_to_ethernet_source_without_option() {
+        assert_eq!(
+            parse_neighbor_advert(&neighbor_advert_frame(target_ip(), false), target_ip()),
+            Some(target_mac())
+        );
+    }
+
+    #[test]
+    fn parse_neighbor_advert_rejects_non_ipv6_ethertype() {
+        let mut frame = neighbor_advert_frame(target_ip(), true);
+        MutableEthernetPacket::new(&mut frame)
+            .unwrap()
+            .set_ethertype(EtherTypes::Ipv4);
+
+        assert_eq!(parse_neighbor_advert(&frame, target_ip()), None);
+    }
+
+    #[test]
+    fn parse_neighbor_advert_rejects_non_icmpv6_next_header() {
+        let mut frame = neighbor_advert_frame(target_ip(), true);
+        let mut ethernet = MutableEthernetPacket::new(&mut frame).unwrap();
+        let payload = ethernet.payload_mut();
+        MutableIpv6Packet::new(payload)
+            .unwrap()
+            .set_next_header(IpNextHeaderProtocols::Udp);
+
+        assert_eq!(parse_neighbor_advert(&frame, target_ip()), None);
+    }
+
+    #[test]
+    fn parse_neighbor_advert_requires_hop_limit_255() {
+        let mut frame = neighbor_advert_frame(target_ip(), true);
+        let mut ethernet = MutableEthernetPacket::new(&mut frame).unwrap();
+        let payload = ethernet.payload_mut();
+        MutableIpv6Packet::new(payload).unwrap().set_hop_limit(64);
+
+        assert_eq!(parse_neighbor_advert(&frame, target_ip()), None);
+    }
+
+    #[test]
+    fn parse_neighbor_advert_rejects_wrong_type_or_code() {
+        let mut wrong_type = neighbor_advert_frame(target_ip(), true);
+        let mut wrong_type_ethernet = MutableEthernetPacket::new(&mut wrong_type).unwrap();
+        let ipv6_payload = wrong_type_ethernet.payload_mut();
+        MutableNeighborAdvertPacket::new(
+            MutableIpv6Packet::new(ipv6_payload).unwrap().payload_mut(),
+        )
+        .unwrap()
+        .set_icmpv6_type(Icmpv6Types::NeighborSolicit);
+
+        let mut wrong_code = neighbor_advert_frame(target_ip(), true);
+        let mut wrong_code_ethernet = MutableEthernetPacket::new(&mut wrong_code).unwrap();
+        let ipv6_payload = wrong_code_ethernet.payload_mut();
+        MutableNeighborAdvertPacket::new(
+            MutableIpv6Packet::new(ipv6_payload).unwrap().payload_mut(),
+        )
+        .unwrap()
+        .set_icmpv6_code(Icmpv6Code(1));
+
+        assert_eq!(parse_neighbor_advert(&wrong_type, target_ip()), None);
+        assert_eq!(parse_neighbor_advert(&wrong_code, target_ip()), None);
+    }
+
+    #[test]
+    fn parse_neighbor_advert_rejects_wrong_target() {
+        assert_eq!(
+            parse_neighbor_advert(
+                &neighbor_advert_frame(target_ip(), true),
+                "2001:db8::ffff".parse().unwrap()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_neighbor_advert_rejects_truncated_frames() {
+        let frame = neighbor_advert_frame(target_ip(), true);
+
+        assert_eq!(parse_neighbor_advert(&frame[..10], target_ip()), None);
+        assert_eq!(
+            parse_neighbor_advert(
+                &frame[..ETHERNET_HEADER_LEN + IPV6_HEADER_LEN + 4],
+                target_ip()
+            ),
+            None
+        );
+    }
+}

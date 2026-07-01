@@ -190,3 +190,96 @@ fn discover_impl(destination: IpAddr, port: u16) -> Result<IpAddr> {
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_ipv6_source_prefers_link_local_for_link_local_destination() {
+        let link_local = "fe80::1".parse().unwrap();
+        let global = "2001:db8::1".parse().unwrap();
+
+        assert_eq!(
+            select_ipv6_source_for_destination([global, link_local], "fe80::abcd".parse().unwrap()),
+            Some(link_local)
+        );
+    }
+
+    #[test]
+    fn select_ipv6_source_prefers_global_for_global_destination() {
+        let link_local = "fe80::1".parse().unwrap();
+        let global = "2001:db8::1".parse().unwrap();
+
+        assert_eq!(
+            select_ipv6_source_for_destination(
+                [link_local, global],
+                "2001:db8::abcd".parse().unwrap()
+            ),
+            Some(global)
+        );
+    }
+
+    #[test]
+    fn select_ipv6_source_skips_unspecified_addresses() {
+        let global = "2001:db8::1".parse().unwrap();
+
+        assert_eq!(
+            select_ipv6_source_for_destination(
+                [Ipv6Addr::UNSPECIFIED, global],
+                "2001:db8::abcd".parse().unwrap()
+            ),
+            Some(global)
+        );
+    }
+
+    #[test]
+    fn select_ipv6_source_uses_first_non_unspecified_as_fallback() {
+        let link_local = "fe80::1".parse().unwrap();
+
+        assert_eq!(
+            select_ipv6_source_for_destination([link_local], "2001:db8::abcd".parse().unwrap()),
+            Some(link_local)
+        );
+    }
+
+    #[test]
+    fn select_ipv6_source_returns_none_when_no_usable_addresses_exist() {
+        assert_eq!(
+            select_ipv6_source_for_destination(
+                [Ipv6Addr::UNSPECIFIED],
+                "2001:db8::abcd".parse().unwrap()
+            ),
+            None
+        );
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn source_override_ipv4_extracts_ipv4_and_rejects_ipv6() {
+        assert_eq!(
+            source_override_ipv4(Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)))).unwrap(),
+            Some(Ipv4Addr::new(192, 0, 2, 5))
+        );
+        assert!(source_override_ipv4(Some(IpAddr::V6("2001:db8::5".parse().unwrap()))).is_err());
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn source_override_ipv6_extracts_ipv6_and_rejects_ipv4() {
+        let v6 = "2001:db8::5".parse().unwrap();
+
+        assert_eq!(
+            source_override_ipv6(Some(IpAddr::V6(v6))).unwrap(),
+            Some(v6)
+        );
+        assert!(source_override_ipv6(Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)))).is_err());
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn source_overrides_pass_through_empty_override() {
+        assert_eq!(source_override_ipv4(None).unwrap(), None);
+        assert_eq!(source_override_ipv6(None).unwrap(), None);
+    }
+}

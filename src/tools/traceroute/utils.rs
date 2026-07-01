@@ -425,3 +425,67 @@ pub(super) fn await_icmp_response_v6<R: PacketReceiver + ?Sized>(
     }
     Ok(ProbeResult::Timeout)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::packet::icmp::echo_reply;
+    use pnet::packet::icmp::echo_request::MutableEchoRequestPacket;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn build_echo_request_sets_identifier_sequence_and_checksum() {
+        let mut bytes = [0u8; 8];
+
+        build_echo_request(&mut bytes, 0x1234, 0xabcd).unwrap();
+
+        let packet = EchoRequestPacket::new(&bytes).unwrap();
+        assert_eq!(packet.get_icmp_type(), IcmpTypes::EchoRequest);
+        assert_eq!(packet.get_identifier(), 0x1234);
+        assert_eq!(packet.get_sequence_number(), 0xabcd);
+        assert_ne!(packet.get_checksum(), 0);
+    }
+
+    #[test]
+    fn classify_icmp_echo_v4_accepts_matching_echo_reply_as_destination() {
+        let mut bytes = [0u8; 8];
+        let mut packet = MutableEchoRequestPacket::new(&mut bytes).unwrap();
+        packet.set_icmp_type(IcmpTypes::EchoReply);
+        packet.set_icmp_code(echo_reply::IcmpCodes::NoCode);
+        packet.set_identifier(7);
+        packet.set_sequence_number(9);
+        let packet = IcmpPacket::new(&bytes).unwrap();
+
+        let event = classify_icmp_echo_v4(&packet, IpAddr::V4(Ipv4Addr::LOCALHOST), 7, 9)
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            event,
+            ProbeEvent::Destination(IpAddr::V4(addr)) if addr == Ipv4Addr::LOCALHOST
+        ));
+    }
+
+    #[test]
+    fn classify_icmp_echo_v4_ignores_mismatched_echo_reply() {
+        let mut bytes = [0u8; 8];
+        let mut packet = MutableEchoRequestPacket::new(&mut bytes).unwrap();
+        packet.set_icmp_type(IcmpTypes::EchoReply);
+        packet.set_identifier(7);
+        packet.set_sequence_number(9);
+        let packet = IcmpPacket::new(&bytes).unwrap();
+
+        assert!(
+            classify_icmp_echo_v4(&packet, IpAddr::V4(Ipv4Addr::LOCALHOST), 7, 10)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn run_probe_loop_returns_timeout_without_events() {
+        let result = run_probe_loop(Duration::ZERO, |_| Ok(None)).unwrap();
+
+        assert!(matches!(result, ProbeResult::Timeout));
+    }
+}

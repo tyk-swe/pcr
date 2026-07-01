@@ -553,3 +553,73 @@ fn scan_tcp_v6_with_controls<S: TcpScanStrategy>(
 
     Ok(results)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn syn_scan_metadata_flags_and_classification_are_stable() {
+        let scan = GenericTcpScan::syn();
+
+        assert_eq!(scan.protocol_name(), "TCP SYN");
+        assert_eq!(scan.report_name(), "tcp-syn");
+        assert!(scan.get_tcp_flags().syn);
+        assert_eq!(scan.timeout_state(), PortState::Filtered);
+        assert_eq!(
+            scan.classify(TcpFlags::SYN | TcpFlags::ACK),
+            Some(PortState::Open)
+        );
+        assert_eq!(scan.classify(TcpFlags::RST), Some(PortState::Closed));
+        assert_eq!(scan.classify(TcpFlags::ACK), None);
+    }
+
+    #[test]
+    fn inverse_scan_variants_classify_rst_as_closed_and_timeout_as_open_or_filtered() {
+        for scan in [
+            GenericTcpScan::fin(),
+            GenericTcpScan::null(),
+            GenericTcpScan::xmas(),
+        ] {
+            assert_eq!(scan.classify(TcpFlags::RST), Some(PortState::Closed));
+            assert_eq!(scan.classify(TcpFlags::SYN | TcpFlags::ACK), None);
+            assert_eq!(scan.timeout_state(), PortState::OpenOrFiltered);
+        }
+    }
+
+    #[test]
+    fn ack_scan_classifies_rst_as_unfiltered() {
+        let scan = GenericTcpScan::ack();
+
+        assert_eq!(scan.protocol_name(), "TCP ACK");
+        assert_eq!(scan.report_name(), "tcp-ack");
+        assert!(scan.get_tcp_flags().ack);
+        assert_eq!(scan.timeout_state(), PortState::Filtered);
+        assert_eq!(scan.classify(TcpFlags::RST), Some(PortState::Unfiltered));
+        assert_eq!(scan.classify(TcpFlags::SYN | TcpFlags::ACK), None);
+    }
+
+    #[test]
+    fn xmas_scan_sets_fin_push_and_urg_flags_only() {
+        let flags = GenericTcpScan::xmas().get_tcp_flags();
+
+        assert!(flags.fin);
+        assert!(flags.psh);
+        assert!(flags.urg);
+        assert!(!flags.syn);
+        assert!(!flags.ack);
+        assert!(!flags.rst);
+    }
+
+    #[test]
+    fn null_scan_uses_empty_flag_set() {
+        let flags = GenericTcpScan::null().get_tcp_flags();
+
+        assert!(!flags.fin);
+        assert!(!flags.syn);
+        assert!(!flags.rst);
+        assert!(!flags.psh);
+        assert!(!flags.ack);
+        assert!(!flags.urg);
+    }
+}

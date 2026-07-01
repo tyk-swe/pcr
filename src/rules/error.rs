@@ -118,6 +118,141 @@ fn rule_context(rule_index: usize, rule_name: Option<&str>) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::diagnostic::{RuleDiagnostic, RuleDiagnosticSeverity};
+    use std::error::Error;
+
+    fn unknown_error() -> RuleDiagnostic {
+        RuleDiagnostic::unknown_field("rules[0].extra".to_string(), RuleDiagnosticSeverity::Error)
+    }
+
+    #[test]
+    fn missing_action_uses_named_rule_context() {
+        let err = RuleError::missing_action(3, Some("named".to_string()));
+
+        assert_eq!(
+            err.to_string(),
+            "rules[3] ('named'): rule is missing at least one action"
+        );
+        assert!(matches!(
+            err,
+            RuleError::MissingAction {
+                rule_index: 3,
+                rule,
+                context,
+            } if rule == "named" && context == "rules[3] ('named')"
+        ));
+    }
+
+    #[test]
+    fn missing_action_uses_index_context_for_unnamed_rule() {
+        let err = RuleError::missing_action(1, None);
+
+        assert_eq!(
+            err.to_string(),
+            "rules[1]: rule is missing at least one action"
+        );
+        assert!(matches!(
+            err,
+            RuleError::MissingAction { rule, .. } if rule == "<unnamed>"
+        ));
+    }
+
+    #[test]
+    fn rule_context_wraps_nested_rule_error() {
+        let err = RuleError::rule_context(2, Some("outer"), RuleError::EmptyRulesFile);
+
+        assert_eq!(
+            err.to_string(),
+            "rules[2] ('outer'): loaded rules file must contain at least one rule"
+        );
+        assert_eq!(
+            err.source().unwrap().to_string(),
+            "loaded rules file must contain at least one rule"
+        );
+    }
+
+    #[test]
+    fn action_context_includes_rule_and_action_indices() {
+        let err =
+            RuleError::action_context(2, Some("log-rule"), 4, RuleActionError::EmptyLogMessage);
+
+        assert_eq!(
+            err.to_string(),
+            "rules[2] ('log-rule').actions[4]: log action requires a non-empty message"
+        );
+        assert!(matches!(
+            err,
+            RuleError::ActionContext {
+                rule_index: 2,
+                rule,
+                action_index: 4,
+                context,
+                ..
+            } if rule == "log-rule" && context == "rules[2] ('log-rule').actions[4]"
+        ));
+    }
+
+    #[test]
+    fn validation_error_counts_only_error_diagnostics() {
+        let warning = RuleDiagnostic::unknown_field(
+            "rules[1].extra".to_string(),
+            RuleDiagnosticSeverity::Warning,
+        );
+        let err = RuleError::validation(vec![unknown_error(), warning]);
+
+        assert_eq!(
+            err.to_string(),
+            "rule validation failed with 1 error diagnostic(s)"
+        );
+        assert!(matches!(err, RuleError::Validation { errors: 1, .. }));
+    }
+
+    #[test]
+    fn diagnostics_accessor_only_returns_validation_diagnostics() {
+        let diagnostics = vec![unknown_error()];
+        let validation = RuleError::validation(diagnostics.clone());
+
+        assert_eq!(validation.diagnostics(), Some(diagnostics.as_slice()));
+        assert!(RuleError::EmptyRulesFile.diagnostics().is_none());
+    }
+
+    #[test]
+    fn representative_rule_action_errors_display_context() {
+        assert_eq!(
+            RuleActionError::CommandTimeoutOutOfRange {
+                timeout_seconds: 90,
+                min_seconds: 1,
+                max_seconds: 60
+            }
+            .to_string(),
+            "command action timeout 90s is out of range (1..=60s)"
+        );
+        assert_eq!(
+            RuleActionError::ArgumentInjection {
+                rule: "deny".to_string(),
+                arg: "--danger".to_string()
+            }
+            .to_string(),
+            "rule 'deny' command argument injection detected: template '--danger' looks like a flag"
+        );
+    }
+
+    #[test]
+    fn representative_matcher_errors_display_context() {
+        assert_eq!(
+            MatcherError::MissingDefinition.to_string(),
+            "complex matcher must define at least one of: contains, equals, starts_with, ends_with, regex"
+        );
+        assert_eq!(
+            MatcherError::NotWithSiblingDefinitions.to_string(),
+            "complex matcher with 'not' must not define sibling matcher fields"
+        );
+    }
+}
+
 #[derive(Debug, Error)]
 pub(crate) enum RuleActionError {
     #[error("log action requires a non-empty message")]

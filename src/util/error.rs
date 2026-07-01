@@ -41,3 +41,40 @@ pub(crate) enum UtilError {
     #[error(transparent)]
     Network(#[from] crate::util::net::ResolveHostnameError),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn operation_failed_uses_standard_context_format() {
+        assert_eq!(
+            operation_failed("open socket", "permission denied"),
+            "open socket failed: permission denied"
+        );
+    }
+
+    #[test]
+    fn filesystem_error_displays_path_and_preserves_source() {
+        let err = UtilError::Filesystem {
+            path: "/tmp/missing".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::NotFound, "missing"),
+        };
+
+        assert_eq!(err.to_string(), "filesystem error for '/tmp/missing'");
+        assert_eq!(err.source().unwrap().to_string(), "missing");
+    }
+
+    #[test]
+    fn parse_file_error_displays_format_and_path() {
+        let err = UtilError::ParseFile {
+            path: "rules.yml".to_string(),
+            format: "YAML".to_string(),
+            source: Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "bad")),
+        };
+
+        assert_eq!(err.to_string(), "failed to parse YAML from 'rules.yml'");
+        assert_eq!(err.source().unwrap().to_string(), "bad");
+    }
+}

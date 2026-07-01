@@ -428,3 +428,66 @@ fn build_udp_packet(
 
     Ok(vec)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_udp_packet_sets_ports_length_and_ipv4_checksum() {
+        let packet = build_udp_packet(
+            40000,
+            53,
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)),
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+        )
+        .unwrap();
+        let udp = UdpPacket::new(&packet).unwrap();
+
+        assert_eq!(udp.get_source(), 40000);
+        assert_eq!(udp.get_destination(), 53);
+        assert_eq!(udp.get_length(), 8);
+        assert_ne!(udp.get_checksum(), 0);
+    }
+
+    #[test]
+    fn build_udp_packet_sets_ipv6_checksum() {
+        let packet = build_udp_packet(
+            40000,
+            53,
+            IpAddr::V6("2001:db8::5".parse().unwrap()),
+            IpAddr::V6("2001:db8::10".parse().unwrap()),
+        )
+        .unwrap();
+        let udp = UdpPacket::new(&packet).unwrap();
+
+        assert_ne!(udp.get_checksum(), 0);
+    }
+
+    #[test]
+    fn build_udp_packet_rejects_ip_family_mismatch() {
+        let err = build_udp_packet(
+            40000,
+            53,
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)),
+            IpAddr::V6("2001:db8::10".parse().unwrap()),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("IP version mismatch"));
+    }
+
+    #[test]
+    fn send_udp_with_retry_rejects_invalid_packet_bytes_before_send() {
+        let err = send_udp_with_retry(
+            &[0; 4],
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9),
+            |_, _| {
+                panic!("send closure should not be called for invalid packet");
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("rebuild UDP packet failed"));
+    }
+}

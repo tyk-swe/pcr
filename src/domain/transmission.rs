@@ -224,6 +224,67 @@ mod tests {
     }
 
     #[test]
+    fn transmission_link_type_strings_are_stable() {
+        assert_eq!(TransmissionLinkType::Ethernet.as_str(), "ethernet");
+        assert_eq!(TransmissionLinkType::Ipv4.as_str(), "ipv4");
+        assert_eq!(TransmissionLinkType::Ipv6.as_str(), "ipv6");
+    }
+
+    #[test]
+    fn interface_selection_reason_strings_are_stable() {
+        assert_eq!(
+            InterfaceSelectionReason::ExplicitInterface.as_str(),
+            "explicit_interface"
+        );
+        assert_eq!(InterfaceSelectionReason::RouteTable.as_str(), "route_table");
+        assert_eq!(InterfaceSelectionReason::Heuristic.as_str(), "heuristic");
+    }
+
+    #[test]
+    fn source_selection_reason_strings_are_stable() {
+        assert_eq!(
+            SourceSelectionReason::ExplicitSourceIp.as_str(),
+            "explicit_source_ip"
+        );
+        assert_eq!(
+            SourceSelectionReason::InterfaceAddress.as_str(),
+            "interface_address"
+        );
+        assert_eq!(
+            SourceSelectionReason::Ipv6ScopeMatch.as_str(),
+            "ipv6_scope_match"
+        );
+    }
+
+    #[test]
+    fn destination_selection_reason_strings_are_stable() {
+        assert_eq!(
+            DestinationSelectionReason::HostnameResolution.as_str(),
+            "hostname_resolution"
+        );
+        assert_eq!(
+            DestinationSelectionReason::TargetLiteral.as_str(),
+            "target_literal"
+        );
+    }
+
+    #[test]
+    fn send_control_errors_display_actionable_cli_context() {
+        assert_eq!(
+            SendControlError::FloodRequiresCount.to_string(),
+            "--flood without --count requires explicit unbounded-send opt-in"
+        );
+        assert_eq!(
+            SendControlError::LoopRequiresAllowUnbounded.to_string(),
+            "--loop requires explicit unbounded-send opt-in"
+        );
+        assert_eq!(
+            SendControlError::CountMustBePositive.to_string(),
+            "--count must be greater than zero"
+        );
+    }
+
+    #[test]
     fn validate_transmission_policy_rejects_zero_count() {
         let err = validate_transmission_policy(
             &TransmissionSpec {

@@ -302,3 +302,126 @@ fn format_target(target: &DestinationSpec) -> String {
         .map(TargetAddress::to_string)
         .unwrap_or_else(|| "<unspecified destination>".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::super::error::SenderError;
+    use super::*;
+    #[cfg(not(feature = "pcap"))]
+    use crate::domain::spec::LoggingSpec;
+    use pnet::packet::ethernet::MutableEthernetPacket;
+    use pnet::packet::ipv4::MutableIpv4Packet;
+    use pnet::packet::ipv6::MutableIpv6Packet;
+    #[cfg(not(feature = "pcap"))]
+    use std::path::PathBuf;
+
+    fn ipv4_frame() -> Vec<u8> {
+        let mut bytes = vec![0u8; 20];
+        MutableIpv4Packet::new(&mut bytes).unwrap().set_version(4);
+        bytes
+    }
+
+    fn ipv6_frame() -> Vec<u8> {
+        let mut bytes = vec![0u8; 40];
+        MutableIpv6Packet::new(&mut bytes).unwrap().set_version(6);
+        bytes
+    }
+
+    fn ethernet_frame() -> Vec<u8> {
+        let mut bytes = vec![0u8; 14];
+        MutableEthernetPacket::new(&mut bytes).unwrap();
+        bytes
+    }
+
+    fn context(payload: Vec<u8>) -> PlanningContext {
+        PlanningContext {
+            payload,
+            source_ip: "192.0.2.5".parse().unwrap(),
+            source_reason: super::super::types::SourceSelectionReason::ExplicitSourceIp,
+            destination_ip: "192.0.2.10".parse().unwrap(),
+            destination_reason: super::super::types::DestinationSelectionReason::TargetLiteral,
+            ipv6_first_hop: None,
+        }
+    }
+
+    #[test]
+    fn format_target_reports_unspecified_destination() {
+        assert_eq!(
+            format_target(&DestinationSpec::default()),
+            "<unspecified destination>"
+        );
+    }
+
+    #[test]
+    fn format_target_uses_target_address_display() {
+        let target = DestinationSpec {
+            address: Some(TargetAddress::Ip("192.0.2.10".parse().unwrap())),
+            interface: None,
+        };
+
+        assert_eq!(format_target(&target), "192.0.2.10");
+    }
+
+    #[test]
+    fn build_summary_uses_payload_len_frame_count_and_largest_frame() {
+        let summary = build_summary(&context(vec![1, 2, 3]), &[vec![0; 4], vec![0; 9]], "udp");
+
+        assert_eq!(summary.payload_len, 3);
+        assert_eq!(summary.frame_count, 2);
+        assert_eq!(summary.largest_frame_len, 9);
+        assert_eq!(summary.transport, "udp");
+    }
+
+    #[test]
+    fn validate_built_frames_rejects_empty_plan() {
+        let err = validate_built_frames(&[], &LinkType::Ipv4).unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Planner(PlannerError::EmptyFramePlan)
+        ));
+    }
+
+    #[test]
+    fn validate_built_frames_accepts_matching_link_types() {
+        validate_built_frames(&[ipv4_frame()], &LinkType::Ipv4).unwrap();
+        validate_built_frames(&[ipv6_frame()], &LinkType::Ipv6).unwrap();
+        validate_built_frames(&[ethernet_frame()], &LinkType::Ethernet).unwrap();
+    }
+
+    #[test]
+    fn validate_built_frames_rejects_ip_version_mismatch() {
+        let err = validate_built_frames(&[ipv6_frame()], &LinkType::Ipv4).unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Planner(PlannerError::InvalidBuiltFrame { link_type: "ipv4" })
+        ));
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn enforce_feature_constraints_rejects_pcap_write_without_feature() {
+        let spec = PacketSpec {
+            logging: LoggingSpec {
+                pcap_write: Some(PathBuf::from("out.pcap")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let err = enforce_feature_constraints(&spec).unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Planner(PlannerError::PcapFeatureRequired)
+        ));
+    }
+
+    #[test]
+    fn enforce_feature_constraints_accepts_default_logging() {
+        let spec = PacketSpec::default();
+
+        enforce_feature_constraints(&spec).unwrap();
+    }
+}

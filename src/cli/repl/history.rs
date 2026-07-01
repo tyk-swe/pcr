@@ -77,3 +77,57 @@ pub(super) fn recall_from_history(input: &str, history: &[String]) -> Option<(us
     }
     Some((index, history[index - 1].clone()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_history_reports_empty_history() {
+        assert_eq!(render_history(Vec::<String>::new()), "(history is empty)\n");
+    }
+
+    #[test]
+    fn render_history_numbers_entries_from_one() {
+        let rendered = render_history(["send --dest 127.0.0.1", "status"]);
+
+        assert_eq!(rendered, "   1: send --dest 127.0.0.1\n   2: status\n");
+    }
+
+    #[test]
+    fn recall_from_history_uses_one_based_indices() {
+        let history = vec!["first".to_string(), "second".to_string()];
+
+        assert_eq!(
+            recall_from_history("!2", &history),
+            Some((2, "second".to_string()))
+        );
+    }
+
+    #[test]
+    fn recall_from_history_rejects_invalid_syntax_and_out_of_range_indices() {
+        let history = vec!["first".to_string()];
+
+        assert_eq!(recall_from_history("1", &history), None);
+        assert_eq!(recall_from_history("!", &history), None);
+        assert_eq!(recall_from_history("!abc", &history), None);
+        assert_eq!(recall_from_history("!0", &history), None);
+        assert_eq!(recall_from_history("!2", &history), None);
+    }
+
+    #[test]
+    fn should_record_command_skips_help_history_and_quit() {
+        assert!(!should_record_command(&ReplCommand::Help(None)));
+        assert!(!should_record_command(&ReplCommand::History));
+        assert!(!should_record_command(&ReplCommand::Quit));
+    }
+
+    #[test]
+    fn should_record_command_keeps_executable_or_unknown_commands() {
+        assert!(should_record_command(&ReplCommand::Send(vec![])));
+        assert!(should_record_command(&ReplCommand::Scan(vec![])));
+        assert!(should_record_command(&ReplCommand::Unknown(
+            "bogus".to_string()
+        )));
+    }
+}

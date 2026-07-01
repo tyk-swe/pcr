@@ -108,3 +108,115 @@ pub(super) fn command_arguments(name: &str, args: &[String]) -> Vec<String> {
     argv.extend(args.iter().cloned());
     argv
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(input: &str) -> ReplCommand {
+        parse_repl_line(input).unwrap().unwrap()
+    }
+
+    #[test]
+    fn parse_repl_line_ignores_blank_or_whitespace_only_input() {
+        assert_eq!(parse_repl_line("").unwrap(), None);
+        assert_eq!(parse_repl_line(" \t ").unwrap(), None);
+    }
+
+    #[test]
+    fn parse_repl_line_supports_quit_help_and_history_aliases() {
+        assert_eq!(parse("?"), ReplCommand::Help(None));
+        assert_eq!(parse("q"), ReplCommand::Quit);
+        assert_eq!(parse("h"), ReplCommand::History);
+    }
+
+    #[test]
+    fn parse_repl_line_keeps_only_first_help_argument_as_command_name() {
+        assert_eq!(
+            parse("help scan tcp-syn"),
+            ReplCommand::Help(Some("scan".to_string()))
+        );
+    }
+
+    #[test]
+    fn parse_repl_line_reconstructs_quoted_arguments() {
+        assert_eq!(
+            parse(r#"send --data "hello world" udp --dport 9"#),
+            ReplCommand::Send(vec![
+                "--data".to_string(),
+                "hello world".to_string(),
+                "udp".to_string(),
+                "--dport".to_string(),
+                "9".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_repl_line_reports_unbalanced_quotes() {
+        let err = parse_repl_line(r#"send --data "unterminated"#).unwrap_err();
+
+        assert!(err.to_string().contains("quotes are balanced"));
+    }
+
+    #[test]
+    fn parse_repl_line_lowercases_unknown_command_names() {
+        assert_eq!(parse("SeNd"), ReplCommand::Send(vec![]));
+        assert_eq!(
+            parse("NoSuchCommand"),
+            ReplCommand::Unknown("nosuchcommand".to_string())
+        );
+    }
+
+    #[test]
+    fn command_arguments_prepends_repl_command_name() {
+        let args = vec!["--dest".to_string(), "127.0.0.1".to_string()];
+
+        assert_eq!(
+            command_arguments("send", &args),
+            vec![
+                "send".to_string(),
+                "--dest".to_string(),
+                "127.0.0.1".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_oneshot_maps_repl_args_into_one_shot_options() {
+        let args = vec![
+            "--dest".to_string(),
+            "127.0.0.1".to_string(),
+            "udp".to_string(),
+            "--dport".to_string(),
+            "9".to_string(),
+        ];
+
+        let parsed = parse_oneshot(&args).unwrap();
+
+        assert_eq!(parsed.destination.as_deref(), Some("127.0.0.1"));
+        assert_eq!(parsed.transport.destination_port, Some(9));
+    }
+
+    #[test]
+    fn parse_oneshot_errors_include_help_hint() {
+        let err = parse_oneshot(&["--vlan-id".to_string(), "0".to_string()]).unwrap_err();
+
+        assert!(err.to_string().contains("Try: help send"));
+    }
+
+    #[test]
+    fn parse_scan_reconstructs_nested_scan_command() {
+        let args = vec![
+            "tcp-syn".to_string(),
+            "--target".to_string(),
+            "192.0.2.1".to_string(),
+            "--ports".to_string(),
+            "80".to_string(),
+        ];
+
+        let parsed = parse_scan(&args).unwrap();
+
+        assert!(matches!(parsed, ScanCommand::TcpSyn(_)));
+    }
+}

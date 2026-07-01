@@ -242,3 +242,110 @@ fn parse_arp_reply(packet: &[u8], expected_target: std::net::Ipv4Addr) -> Option
     }
     Some(arp.get_sender_hw_addr())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    const TARGET_IP: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 10);
+    const OTHER_IP: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 20);
+
+    fn arp_frame(operation: pnet::packet::arp::ArpOperation) -> Vec<u8> {
+        let sender_mac = MacAddr::new(0x02, 0x00, 0x00, 0x00, 0x00, 0x01);
+        let mut frame = vec![0u8; ETHERNET_HEADER_LEN + ARP_PACKET_LEN];
+        let mut ethernet = MutableEthernetPacket::new(&mut frame).unwrap();
+        ethernet.set_destination(MacAddr::broadcast());
+        ethernet.set_source(sender_mac);
+        ethernet.set_ethertype(EtherTypes::Arp);
+
+        let mut arp = MutableArpPacket::new(ethernet.payload_mut()).unwrap();
+        arp.set_hardware_type(ArpHardwareTypes::Ethernet);
+        arp.set_protocol_type(EtherTypes::Ipv4);
+        arp.set_hw_addr_len(6);
+        arp.set_proto_addr_len(4);
+        arp.set_operation(operation);
+        arp.set_sender_hw_addr(sender_mac);
+        arp.set_sender_proto_addr(TARGET_IP);
+        arp.set_target_hw_addr(MacAddr::zero());
+        arp.set_target_proto_addr(Ipv4Addr::new(192, 0, 2, 5));
+
+        frame
+    }
+
+    #[test]
+    fn parse_arp_reply_returns_sender_mac_for_matching_reply() {
+        assert_eq!(
+            parse_arp_reply(&arp_frame(ArpOperations::Reply), TARGET_IP),
+            Some(MacAddr::new(0x02, 0, 0, 0, 0, 1))
+        );
+    }
+
+    #[test]
+    fn parse_arp_reply_rejects_non_arp_ethertype() {
+        let mut frame = arp_frame(ArpOperations::Reply);
+        MutableEthernetPacket::new(&mut frame)
+            .unwrap()
+            .set_ethertype(EtherTypes::Ipv4);
+
+        assert_eq!(parse_arp_reply(&frame, TARGET_IP), None);
+    }
+
+    #[test]
+    fn parse_arp_reply_rejects_requests() {
+        assert_eq!(
+            parse_arp_reply(&arp_frame(ArpOperations::Request), TARGET_IP),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_arp_reply_rejects_wrong_hardware_or_protocol_lengths() {
+        let mut bad_hw_len = arp_frame(ArpOperations::Reply);
+        MutableArpPacket::new(
+            MutableEthernetPacket::new(&mut bad_hw_len)
+                .unwrap()
+                .payload_mut(),
+        )
+        .unwrap()
+        .set_hw_addr_len(5);
+
+        let mut bad_proto_len = arp_frame(ArpOperations::Reply);
+        MutableArpPacket::new(
+            MutableEthernetPacket::new(&mut bad_proto_len)
+                .unwrap()
+                .payload_mut(),
+        )
+        .unwrap()
+        .set_proto_addr_len(16);
+
+        assert_eq!(parse_arp_reply(&bad_hw_len, TARGET_IP), None);
+        assert_eq!(parse_arp_reply(&bad_proto_len, TARGET_IP), None);
+    }
+
+    #[test]
+    fn parse_arp_reply_rejects_wrong_sender_ip() {
+        assert_eq!(
+            parse_arp_reply(&arp_frame(ArpOperations::Reply), OTHER_IP),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_arp_reply_rejects_truncated_ethernet_frame() {
+        assert_eq!(
+            parse_arp_reply(&arp_frame(ArpOperations::Reply)[..10], TARGET_IP),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_arp_reply_rejects_truncated_arp_payload() {
+        let frame = arp_frame(ArpOperations::Reply);
+
+        assert_eq!(
+            parse_arp_reply(&frame[..ETHERNET_HEADER_LEN + 10], TARGET_IP),
+            None
+        );
+    }
+}

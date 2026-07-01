@@ -273,3 +273,164 @@ pub(crate) fn parse_icmpv6_echo(packet: &Icmpv6Packet) -> Option<(u16, u16)> {
     let sequence = u16::from_be_bytes([payload[2], payload[3]]);
     Some((identifier, sequence))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::packet::ipv6::MutableIpv6Packet;
+    use pnet::packet::MutablePacket;
+
+    fn ipv6_bytes(next: IpNextHeaderProtocol, payload: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![0u8; Ipv6Packet::minimum_packet_size() + payload.len()];
+        let mut packet = MutableIpv6Packet::new(&mut bytes).unwrap();
+        packet.set_version(6);
+        packet.set_payload_length(payload.len() as u16);
+        packet.set_next_header(next);
+        packet.payload_mut().copy_from_slice(payload);
+        bytes
+    }
+
+    fn packet(bytes: &[u8]) -> Ipv6Packet<'_> {
+        Ipv6Packet::new(bytes).unwrap()
+    }
+
+    fn options_header(next: IpNextHeaderProtocol) -> [u8; 8] {
+        [next.0, 0, 0, 0, 0, 0, 0, 0]
+    }
+
+    #[test]
+    fn ipv6_transport_payload_returns_direct_transport_payload() {
+        let payload = [0xde, 0xad, 0xbe, 0xef];
+        let bytes = ipv6_bytes(IpNextHeaderProtocols::Udp, &payload);
+        let parsed = packet(&bytes);
+        let transport = ipv6_transport_payload(&parsed).unwrap();
+
+        assert_eq!(transport.protocol, IpNextHeaderProtocols::Udp);
+        assert_eq!(transport.payload, payload);
+    }
+
+    #[test]
+    fn ipv6_transport_payload_walks_options_and_routing_headers() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&options_header(IpNextHeaderProtocols::Ipv6Opts));
+        payload.extend_from_slice(&options_header(IpNextHeaderProtocols::Ipv6Route));
+        payload.extend_from_slice(&options_header(IpNextHeaderProtocols::Tcp));
+        payload.extend_from_slice(&[1, 2, 3, 4]);
+        let bytes = ipv6_bytes(IpNextHeaderProtocols::Hopopt, &payload);
+        let parsed = packet(&bytes);
+        let transport = ipv6_transport_payload(&parsed).unwrap();
+
+        assert_eq!(transport.protocol, IpNextHeaderProtocols::Tcp);
+        assert_eq!(transport.payload, &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn ipv6_transport_payload_accepts_first_fragment() {
+        let mut payload = vec![IpNextHeaderProtocols::Udp.0, 0, 0, 0, 0, 0, 0, 1];
+        payload.extend_from_slice(&[9, 8, 7, 6]);
+        let bytes = ipv6_bytes(IpNextHeaderProtocols::Ipv6Frag, &payload);
+        let parsed = packet(&bytes);
+        let transport = ipv6_transport_payload(&parsed).unwrap();
+
+        assert_eq!(transport.protocol, IpNextHeaderProtocols::Udp);
+        assert_eq!(transport.payload, &[9, 8, 7, 6]);
+    }
+
+    #[test]
+    fn ipv6_transport_payload_rejects_nonzero_fragment_offset() {
+        let payload = [
+            IpNextHeaderProtocols::Udp.0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+            1,
+            1,
+            2,
+            3,
+            4,
+        ];
+        let bytes = ipv6_bytes(IpNextHeaderProtocols::Ipv6Frag, &payload);
+
+        assert!(ipv6_transport_payload(&packet(&bytes)).is_none());
+    }
+
+    #[test]
+    fn ipv6_transport_payload_walks_ah_header() {
+        let mut payload = vec![
+            IpNextHeaderProtocols::Sctp.0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ];
+        payload.extend_from_slice(&[1, 2, 3, 4]);
+        let bytes = ipv6_bytes(IpNextHeaderProtocols::Ah, &payload);
+        let parsed = packet(&bytes);
+        let transport = ipv6_transport_payload(&parsed).unwrap();
+
+        assert_eq!(transport.protocol, IpNextHeaderProtocols::Sctp);
+        assert_eq!(transport.payload, &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn ipv6_transport_payload_rejects_no_next_header() {
+        let bytes = ipv6_bytes(IpNextHeaderProtocols::Ipv6NoNxt, &[]);
+
+        assert!(ipv6_transport_payload(&packet(&bytes)).is_none());
+    }
+
+    #[test]
+    fn ipv6_transport_payload_rejects_truncated_extension_headers() {
+        let truncated_options = ipv6_bytes(
+            IpNextHeaderProtocols::Hopopt,
+            &[IpNextHeaderProtocols::Udp.0],
+        );
+        let truncated_fragment = ipv6_bytes(
+            IpNextHeaderProtocols::Ipv6Frag,
+            &[IpNextHeaderProtocols::Udp.0, 0, 0],
+        );
+
+        assert!(ipv6_transport_payload(&packet(&truncated_options)).is_none());
+        assert!(ipv6_transport_payload(&packet(&truncated_fragment)).is_none());
+    }
+
+    #[test]
+    fn ipv6_transport_payload_rejects_overlong_extension_chain() {
+        let mut payload = Vec::new();
+        for _ in 0..9 {
+            payload.extend_from_slice(&options_header(IpNextHeaderProtocols::Hopopt));
+        }
+        payload.extend_from_slice(&[1, 2, 3, 4]);
+        let bytes = ipv6_bytes(IpNextHeaderProtocols::Hopopt, &payload);
+
+        assert!(ipv6_transport_payload(&packet(&bytes)).is_none());
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn parse_icmpv6_echo_extracts_identifier_and_sequence() {
+        let bytes = [128, 0, 0, 0, 0x12, 0x34, 0xab, 0xcd];
+        let packet = Icmpv6Packet::new(&bytes).unwrap();
+
+        assert_eq!(parse_icmpv6_echo(&packet), Some((0x1234, 0xabcd)));
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn parse_icmpv6_echo_rejects_short_payload() {
+        let bytes = [128, 0, 0, 0, 0x12];
+        let packet = Icmpv6Packet::new(&bytes).unwrap();
+
+        assert_eq!(parse_icmpv6_echo(&packet), None);
+    }
+}

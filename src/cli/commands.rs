@@ -295,3 +295,82 @@ pub(crate) enum ScanCommand {
     /// Perform an NDP scan (IPv6 local network discovery).
     Ndp(TimedScanOptions),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Debug, Parser)]
+    struct DnsHarness {
+        #[command(flatten)]
+        options: DnsQueryOptions,
+    }
+
+    fn parse_dns(args: &[&str]) -> Result<DnsHarness, clap::Error> {
+        DnsHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn dns_query_defaults_are_stable_for_dry_planning() {
+        let parsed = parse_dns(&["--domain", "example.test"]).unwrap();
+
+        assert_eq!(parsed.options.domain, "example.test");
+        assert_eq!(parsed.options.record_type, "A");
+        assert_eq!(parsed.options.server, "8.8.8.8");
+        assert_eq!(parsed.options.timeout, 1000);
+        assert_eq!(parsed.options.transaction_id, None);
+        assert_eq!(parsed.options.transport, DnsTransportMode::Auto);
+        assert_eq!(parsed.options.retries, 0);
+    }
+
+    #[test]
+    fn dns_query_accepts_supported_record_types_without_normalizing_case() {
+        let parsed = parse_dns(&["--domain", "example.test", "--type", "aaaa"]).unwrap();
+
+        assert_eq!(parsed.options.record_type, "aaaa");
+    }
+
+    #[test]
+    fn dns_query_rejects_unknown_record_type() {
+        let err = parse_dns(&["--domain", "example.test", "--type", "notatype"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn dns_query_retries_accept_configured_range_boundaries() {
+        let min = parse_dns(&["--domain", "example.test", "--retries", "0"]).unwrap();
+        let max = parse_dns(&["--domain", "example.test", "--retries", "5"]).unwrap();
+
+        assert_eq!(min.options.retries, 0);
+        assert_eq!(max.options.retries, 5);
+    }
+
+    #[test]
+    fn dns_query_retries_reject_values_above_cap() {
+        let err = parse_dns(&["--domain", "example.test", "--retries", "6"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[derive(Debug, Parser)]
+    struct TracerouteHarness {
+        #[command(flatten)]
+        options: TracerouteOptions,
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn traceroute_boolish_no_dns_accepts_missing_and_explicit_values() {
+        let implicit =
+            TracerouteHarness::try_parse_from(["test", "--dest", "192.0.2.1", "--no-dns"]).unwrap();
+        let explicit =
+            TracerouteHarness::try_parse_from(["test", "--dest", "192.0.2.1", "--no-dns=false"])
+                .unwrap();
+
+        assert_eq!(implicit.options.no_dns, Some(true));
+        assert_eq!(explicit.options.no_dns, Some(false));
+    }
+}

@@ -269,3 +269,108 @@ pub(crate) enum InterfaceError {
         source: crate::network::interface::InterfaceError,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn planner_error_display_includes_link_type_for_invalid_frame() {
+        assert_eq!(
+            PlannerError::InvalidBuiltFrame { link_type: "ipv6" }.to_string(),
+            "transmission planner produced a frame that does not match link type ipv6"
+        );
+    }
+
+    #[test]
+    fn executor_error_display_includes_interface_and_source() {
+        let err = ExecutorError::OpenDatalinkChannel {
+            interface: "eth0".to_string(),
+            source: std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "opening datalink channel on interface eth0 failed: denied"
+        );
+        assert_eq!(err.source().unwrap().to_string(), "denied");
+    }
+
+    #[test]
+    fn payload_error_display_includes_limits_and_paths() {
+        assert_eq!(
+            PayloadError::PayloadTooLarge {
+                size: 1025,
+                limit: 1024
+            }
+            .to_string(),
+            "payload file size 1025 bytes exceeds limit of 1024 bytes"
+        );
+        assert_eq!(
+            PayloadError::InvalidHexByte { byte: b'g' }.to_string(),
+            "invalid hex byte '67'"
+        );
+    }
+
+    #[test]
+    fn interface_error_display_preserves_hostname_resolution_context() {
+        let err = InterfaceError::HostnameResolution {
+            host: "example.test".to_string(),
+            source: ResolveHostnameError::NoAddresses {
+                host: "example.test".to_string(),
+            },
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "failed to resolve hostname 'example.test': hostname 'example.test' did not resolve to any addresses"
+        );
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn ipv4_error_display_mentions_protocol_limit() {
+        assert_eq!(
+            Ipv4Error::FragmentTooLarge {
+                length: 70000,
+                max: 65535
+            }
+            .to_string(),
+            "IPv4 fragment length 70000 exceeds protocol maximum of 65535 bytes; enable fragmentation or reduce the payload"
+        );
+    }
+
+    #[test]
+    fn ipv6_error_display_includes_routing_segment_count() {
+        assert_eq!(
+            Ipv6Error::RoutingTooManySegments {
+                max: 127,
+                count: 128
+            }
+            .to_string(),
+            "routing header supports at most 127 segments (got 128)"
+        );
+    }
+
+    #[test]
+    fn layer2_error_display_identifies_missing_interface_mac() {
+        assert_eq!(
+            Layer2Error::MissingInterfaceMac {
+                interface: "eth-test".to_string()
+            }
+            .to_string(),
+            "interface eth-test has no MAC address; specify --smac explicitly"
+        );
+    }
+
+    #[test]
+    fn sender_error_wraps_source_variant_without_losing_display() {
+        let err = SenderError::from(PlannerError::IpVersionMismatch);
+
+        assert_eq!(
+            err.to_string(),
+            "source and destination IP versions must match"
+        );
+    }
+}

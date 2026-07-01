@@ -523,3 +523,196 @@ pub(crate) struct LoggingOptions {
     #[cfg_attr(not(feature = "metrics"), arg(hide = true))]
     pub allow_public_metrics: Option<bool>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Debug, Parser)]
+    struct OneShotHarness {
+        #[command(flatten)]
+        options: OneShotOptions,
+    }
+
+    #[derive(Debug, Parser)]
+    struct SafetyHarness {
+        #[command(flatten)]
+        options: SafetyOptions,
+    }
+
+    #[derive(Debug, Parser)]
+    struct LoggingHarness {
+        #[command(flatten)]
+        options: LoggingOptions,
+    }
+
+    fn parse_oneshot(args: &[&str]) -> Result<OneShotHarness, clap::Error> {
+        OneShotHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+    }
+
+    fn parse_safety(args: &[&str]) -> Result<SafetyHarness, clap::Error> {
+        SafetyHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+    }
+
+    fn parse_logging(args: &[&str]) -> Result<LoggingHarness, clap::Error> {
+        LoggingHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn boolish_ip_preference_flags_accept_missing_and_explicit_values() {
+        let implicit = parse_oneshot(&["--prefer-ipv4"]).unwrap();
+        let explicit_false = parse_oneshot(&["--prefer-ipv6=false"]).unwrap();
+        let explicit_true = parse_oneshot(&["--prefer-ipv6=true"]).unwrap();
+
+        assert_eq!(implicit.options.ip.prefer_ipv4, Some(true));
+        assert_eq!(explicit_false.options.ip.prefer_ipv6, Some(false));
+        assert_eq!(explicit_true.options.ip.prefer_ipv6, Some(true));
+    }
+
+    #[test]
+    fn ip_preference_flags_conflict_even_when_values_are_explicit() {
+        let err = parse_oneshot(&["--prefer-ipv4=true", "--prefer-ipv6=false"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn fragment_control_flags_accept_boolish_values_and_reject_conflicts() {
+        let mf = parse_oneshot(&["--mf-flag=false"]).unwrap();
+        let df = parse_oneshot(&["--df-flag"]).unwrap();
+        let err = parse_oneshot(&["--mf-flag", "--df-flag"]).unwrap_err();
+
+        assert_eq!(mf.options.ip.more_fragments, Some(false));
+        assert_eq!(df.options.ip.dont_fragment, Some(true));
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn fragmentation_profiles_conflict_with_named_fragment_modes() {
+        let overlap_err =
+            parse_oneshot(&["--frag-overlap", "--frag-profile", "overlap"]).unwrap_err();
+        let teardrop_err =
+            parse_oneshot(&["--teardrop", "--frag-profile", "teardrop"]).unwrap_err();
+
+        assert_eq!(overlap_err.kind(), clap::error::ErrorKind::ArgumentConflict);
+        assert_eq!(
+            teardrop_err.kind(),
+            clap::error::ErrorKind::ArgumentConflict
+        );
+    }
+
+    #[test]
+    fn vlan_ranges_accept_protocol_boundaries() {
+        let low = parse_oneshot(&["--vlan-id", "1", "--vlan-prio", "0"]).unwrap();
+        let high = parse_oneshot(&["--vlan-id", "4094", "--vlan-prio", "7"]).unwrap();
+
+        assert_eq!(low.options.layer2.vlan.id, Some(1));
+        assert_eq!(low.options.layer2.vlan.priority, Some(0));
+        assert_eq!(high.options.layer2.vlan.id, Some(4094));
+        assert_eq!(high.options.layer2.vlan.priority, Some(7));
+    }
+
+    #[test]
+    fn vlan_ranges_reject_reserved_ids_and_priority_overflow() {
+        let low_id = parse_oneshot(&["--vlan-id", "0"]).unwrap_err();
+        let high_id = parse_oneshot(&["--vlan-id", "4095"]).unwrap_err();
+        let priority = parse_oneshot(&["--vlan-id", "10", "--vlan-prio", "8"]).unwrap_err();
+
+        assert_eq!(low_id.kind(), clap::error::ErrorKind::ValueValidation);
+        assert_eq!(high_id.kind(), clap::error::ErrorKind::ValueValidation);
+        assert_eq!(priority.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn tcp_window_scale_accepts_legal_maximum_and_rejects_next_value() {
+        let parsed = parse_oneshot(&["tcp", "--tcp-window-scale", "14"]).unwrap();
+        let err = parse_oneshot(&["tcp", "--tcp-window-scale", "15"]).unwrap_err();
+
+        let Some(TransportCommand::Tcp(tcp)) = parsed.options.transport.command else {
+            panic!("expected TCP subcommand");
+        };
+        assert_eq!(tcp.window_scale, Some(14));
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn tcp_raw_options_conflict_with_structured_tcp_options() {
+        let err = parse_oneshot(&["tcp", "--tcp-options-hex", "020405b4", "--tcp-mss", "1460"])
+            .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn payload_sources_are_mutually_exclusive() {
+        let err = parse_oneshot(&["--data", "hello", "--data-hex", "6869"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn dns_type_requires_dns_query_payload() {
+        let err = parse_oneshot(&["--dns-type", "AAAA"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn traffic_caps_reject_zero_values() {
+        for flag in [
+            "--traffic-max-targets",
+            "--traffic-max-ports",
+            "--traffic-max-packets",
+            "--traffic-batch-size",
+            "--traffic-rate",
+        ] {
+            let err = parse_safety(&[flag, "0"]).unwrap_err();
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        }
+    }
+
+    #[test]
+    fn traffic_caps_accept_positive_values() {
+        let parsed = parse_safety(&[
+            "--traffic-max-targets",
+            "1",
+            "--traffic-max-ports",
+            "2",
+            "--traffic-max-packets",
+            "3",
+            "--traffic-batch-size",
+            "4",
+            "--traffic-rate",
+            "5",
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.options.traffic_max_targets, Some(1));
+        assert_eq!(parsed.options.traffic_max_ports, Some(2));
+        assert_eq!(parsed.options.traffic_max_packets, Some(3));
+        assert_eq!(parsed.options.traffic_batch_size, Some(4));
+        assert_eq!(parsed.options.traffic_rate, Some(5));
+    }
+
+    #[test]
+    fn prometheus_bind_uses_socket_address_validator() {
+        let parsed = parse_logging(&["--prometheus-bind", "127.0.0.1:9898"]).unwrap();
+        let err = parse_logging(&["--prometheus-bind", "127.0.0.1"]).unwrap_err();
+
+        assert_eq!(
+            parsed.options.prometheus_bind.as_deref(),
+            Some("127.0.0.1:9898")
+        );
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    #[test]
+    fn logging_boolish_flags_accept_missing_and_explicit_values() {
+        let structured = parse_logging(&["--log-structured"]).unwrap();
+        let public_metrics = parse_logging(&["--allow-public-metrics=false"]).unwrap();
+
+        assert_eq!(structured.options.structured, Some(true));
+        assert_eq!(public_metrics.options.allow_public_metrics, Some(false));
+    }
+}

@@ -197,14 +197,16 @@ fn original_transport_from_payload(
             })
         }
         IpNextHeaderProtocols::Tcp => {
-            let tcp = TcpPacket::new(inner_payload)?;
+            let payload = TcpPacket::new(inner_payload)
+                .map(|tcp| tcp.payload().to_vec())
+                .unwrap_or_default();
             Some(OriginalTransport {
                 protocol: proto,
                 source_ip,
                 destination_ip,
-                source: tcp.get_source(),
-                destination: tcp.get_destination(),
-                payload: tcp.payload().to_vec(),
+                source: u16::from_be_bytes([inner_payload[0], inner_payload[1]]),
+                destination: u16::from_be_bytes([inner_payload[2], inner_payload[3]]),
+                payload,
             })
         }
         IpNextHeaderProtocols::Sctp => {
@@ -445,6 +447,25 @@ mod tests {
         let bytes = ipv6_bytes(IpNextHeaderProtocols::Hopopt, &payload);
 
         assert!(ipv6_transport_payload(&packet(&bytes)).is_none());
+    }
+
+    #[cfg(any(feature = "scan", feature = "traceroute"))]
+    #[test]
+    fn original_transport_from_payload_accepts_short_tcp_quote() {
+        let quote = [0x12, 0x34, 0xab, 0xcd, 0, 0, 0, 0];
+
+        let original = original_transport_from_payload(
+            IpNextHeaderProtocols::Tcp,
+            &quote,
+            "192.0.2.10".parse().unwrap(),
+            "198.51.100.20".parse().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(original.protocol, IpNextHeaderProtocols::Tcp);
+        assert_eq!(original.source, 0x1234);
+        assert_eq!(original.destination, 0xabcd);
+        assert!(original.payload.is_empty());
     }
 
     #[cfg(feature = "traceroute")]

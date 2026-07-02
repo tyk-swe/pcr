@@ -51,7 +51,6 @@ struct UdpV4Executor<'a, S, R: ?Sized> {
     socket: &'a S,
     receiver: &'a mut R,
     probes_per_hop: u8,
-    source_port: u16,
     run_cookie: u64,
 }
 
@@ -78,7 +77,7 @@ where
             IpNextHeaderProtocols::Udp,
             None,
             IpAddr::V4(self.destination),
-            Some(self.source_port),
+            None,
             port,
             cookie,
         );
@@ -97,14 +96,12 @@ where
     S: UdpSocketV4,
     R: super::common::PacketReceiver + ?Sized,
 {
-    let source_port = socket.local_addr()?.port();
     let mut executor = UdpV4Executor {
         destination,
         timeout: request_timeout(opts),
         socket,
         receiver,
         probes_per_hop: opts.probes,
-        source_port,
         run_cookie: udp_run_cookie(),
     };
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
@@ -116,7 +113,6 @@ struct UdpV6Executor<'a, S, R: ?Sized> {
     socket: &'a S,
     receiver: &'a mut R,
     probes_per_hop: u8,
-    source_port: u16,
     run_cookie: u64,
 }
 
@@ -143,7 +139,7 @@ where
             IpNextHeaderProtocols::Udp,
             None,
             IpAddr::V6(self.destination),
-            Some(self.source_port),
+            None,
             port,
             cookie,
         );
@@ -162,14 +158,12 @@ where
     S: UdpSocketV6,
     R: PacketReceiver + ?Sized,
 {
-    let source_port = socket.local_addr()?.port();
     let mut executor = UdpV6Executor {
         destination,
         timeout: request_timeout(opts),
         socket,
         receiver,
         probes_per_hop: opts.probes,
-        source_port,
         run_cookie: udp_run_cookie(),
     };
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)

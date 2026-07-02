@@ -6,7 +6,7 @@ use pnet::packet::icmpv6::Icmpv6Packet;
 use pnet::packet::ip::IpNextHeaderProtocol;
 use pnet::transport::{TransportChannelType, TransportProtocol};
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -33,17 +33,12 @@ const TCP_PREFERRED_SOURCE_PORT_MAX: u16 = 60_000;
 
 pub(super) trait UdpSocketV4 {
     fn set_ttl(&self, ttl: u32) -> Result<()>;
-    fn local_addr(&self) -> Result<SocketAddr>;
     fn send_to(&self, buf: &[u8], addr: (Ipv4Addr, u16)) -> Result<usize>;
 }
 
 impl UdpSocketV4 for std::net::UdpSocket {
     fn set_ttl(&self, ttl: u32) -> Result<()> {
         self.set_ttl(ttl).map_err(anyhow::Error::new)
-    }
-
-    fn local_addr(&self) -> Result<SocketAddr> {
-        self.local_addr().map_err(anyhow::Error::new)
     }
 
     fn send_to(&self, buf: &[u8], addr: (Ipv4Addr, u16)) -> Result<usize> {
@@ -53,7 +48,6 @@ impl UdpSocketV4 for std::net::UdpSocket {
 
 pub(super) trait UdpSocketV6 {
     fn set_unicast_hops_v6(&self, ttl: u32) -> Result<()>;
-    fn local_addr(&self) -> Result<SocketAddr>;
     fn send_to(&self, buf: &[u8], addr: (Ipv6Addr, u16)) -> Result<usize>;
 }
 
@@ -62,10 +56,6 @@ impl UdpSocketV6 for std::net::UdpSocket {
         socket2::SockRef::from(self)
             .set_unicast_hops_v6(ttl)
             .map_err(anyhow::Error::new)
-    }
-
-    fn local_addr(&self) -> Result<SocketAddr> {
-        self.local_addr().map_err(anyhow::Error::new)
     }
 
     fn send_to(&self, buf: &[u8], addr: (Ipv6Addr, u16)) -> Result<usize> {

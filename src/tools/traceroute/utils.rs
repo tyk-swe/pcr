@@ -594,6 +594,22 @@ mod tests {
         )
     }
 
+    fn udp_expectation_without_source(
+        source: Ipv4Addr,
+        destination: Ipv4Addr,
+        destination_port: u16,
+        cookie: UdpProbeCookie,
+    ) -> ProbeExpectation {
+        ProbeExpectation::udp(
+            IpNextHeaderProtocols::Udp,
+            Some(IpAddr::V4(source)),
+            IpAddr::V4(destination),
+            None,
+            destination_port,
+            cookie,
+        )
+    }
+
     fn udp_expectation_v6(
         source: Ipv6Addr,
         destination: Ipv6Addr,
@@ -606,6 +622,22 @@ mod tests {
             Some(IpAddr::V6(source)),
             IpAddr::V6(destination),
             Some(source_port),
+            destination_port,
+            cookie,
+        )
+    }
+
+    fn udp_expectation_v6_without_source(
+        source: Ipv6Addr,
+        destination: Ipv6Addr,
+        destination_port: u16,
+        cookie: UdpProbeCookie,
+    ) -> ProbeExpectation {
+        ProbeExpectation::udp(
+            IpNextHeaderProtocols::Udp,
+            Some(IpAddr::V6(source)),
+            IpAddr::V6(destination),
+            None,
             destination_port,
             cookie,
         )
@@ -809,6 +841,30 @@ mod tests {
     }
 
     #[test]
+    fn classify_icmp_event_v4_accepts_matching_udp_cookie_when_source_port_is_agnostic() {
+        let source = Ipv4Addr::new(192, 0, 2, 10);
+        let destination = Ipv4Addr::new(198, 51, 100, 20);
+        let identity = ProbeIdentity::new(3, 1, 4).unwrap();
+        let destination_port = identity.destination_port().unwrap();
+        let cookie = UdpProbeCookie::new(0x1122_3344_5566_7788, identity);
+        let expectation =
+            udp_expectation_without_source(source, destination, destination_port, cookie);
+        let udp = udp_datagram(53_000, destination_port, &cookie.bytes());
+        let inner = ipv4_packet(IpNextHeaderProtocols::Udp, source, destination, &udp);
+        let bytes = icmp_error_packet(
+            IcmpTypes::DestinationUnreachable.0,
+            IcmpDestinationUnreachableCodes::DestinationPortUnreachable.0,
+            &inner,
+        );
+        let packet = IcmpPacket::new(&bytes).unwrap();
+
+        assert_eq!(
+            classify_icmp_event_v4_with_source(&packet, IpAddr::V4(destination), &expectation),
+            Some(IcmpEventKind::Destination)
+        );
+    }
+
+    #[test]
     fn classify_icmp_event_v6_accepts_matching_udp_port_unreachable_from_alias_source() {
         let source = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
         let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 20);
@@ -828,6 +884,30 @@ mod tests {
 
         assert_eq!(
             classify_icmp_event_v6_with_source(&packet, IpAddr::V6(alias), &expectation),
+            Some(IcmpEventKind::Destination)
+        );
+    }
+
+    #[test]
+    fn classify_icmp_event_v6_matches_udp_when_source_port_is_agnostic() {
+        let source = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 20);
+        let identity = ProbeIdentity::new(3, 1, 4).unwrap();
+        let destination_port = identity.destination_port().unwrap();
+        let cookie = UdpProbeCookie::new(0x1122_3344_5566_7788, identity);
+        let expectation =
+            udp_expectation_v6_without_source(source, destination, destination_port, cookie);
+        let udp = udp_datagram(53_000, destination_port, &cookie.bytes());
+        let inner = ipv6_packet(IpNextHeaderProtocols::Udp, source, destination, &udp);
+        let bytes = icmp_error_packet(
+            Icmpv6Types::DestinationUnreachable.0,
+            ICMPV6_PORT_UNREACHABLE_CODE,
+            &inner,
+        );
+        let packet = Icmpv6Packet::new(&bytes).unwrap();
+
+        assert_eq!(
+            classify_icmp_event_v6_with_source(&packet, IpAddr::V6(destination), &expectation),
             Some(IcmpEventKind::Destination)
         );
     }

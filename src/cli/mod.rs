@@ -19,7 +19,7 @@ use clap::Parser;
     about = "Modular packet crafting, transmission, and automation toolkit",
     long_about = "PacketcraftR builds packets layer-by-layer (Ethernet -> IP -> Transport -> Payload) for authorized lab, protocol-development, and network-testing work. \
 The stable rescue surface focuses on safe dry-run previews, packet validation, and finite packet transmission planning. \
-Advanced operational tools are experimental and appear only when their Cargo features are enabled.",
+Optional operational tools appear when their Cargo features are enabled.",
     after_help = "EXAMPLES:
 
   1. Preview a UDP payload to loopback without transmitting:

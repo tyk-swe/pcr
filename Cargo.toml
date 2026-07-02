@@ -14,9 +14,9 @@ name = "packetcraftr"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["traceroute"]
 pcap = ["dep:pcap"]
-experimental = ["scan", "traceroute", "fuzz", "daemon", "repl", "metrics"]
+experimental = ["scan", "fuzz", "daemon", "repl", "metrics"]
 scan = []
 traceroute = []
 fuzz = []

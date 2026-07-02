@@ -18,7 +18,7 @@ use crate::domain::policy::{
     TrafficSelectionValue,
 };
 
-use self::common::resolve_destination_with_reason;
+use self::common::{resolve_destination_with_reason, validate_request};
 use self::icmp::{run_icmp_traceroute_v4, run_icmp_traceroute_v6};
 use self::tcp::{run_tcp_traceroute_v4, run_tcp_traceroute_v6};
 use self::udp::{run_udp_traceroute_v4, run_udp_traceroute_v6};
@@ -34,12 +34,13 @@ pub(crate) fn prepare(
     opts: &TracerouteRequest,
     policy: TrafficPolicy,
 ) -> Result<PreparedTraceroute> {
+    let validated = validate_request(opts)?;
     let resolved_destination = resolve_destination_with_reason(&opts.destination)?;
     let destination = resolved_destination.address;
     let mut plan = TrafficPlan::new(TrafficMode::Traceroute, classify_ip(destination));
     plan.target_count = 1;
     plan.port_count = 1;
-    plan.estimated_packets = Some(u64::from(opts.max_ttl) * u64::from(opts.probes));
+    plan.estimated_packets = Some(validated.estimated_packets);
     plan.batch_size = 1;
     plan.rate_per_sec = Some(policy.budget.max_rate_per_sec);
     plan.required_privileges = vec![TrafficPrivilege::RawSocket];
@@ -106,6 +107,7 @@ fn traceroute_blocking(
     destination: IpAddr,
     send_delay: Option<std::time::Duration>,
 ) -> Result<()> {
+    validate_request(opts)?;
     info!(
         "Traceroute destination {} using {:?}",
         destination, opts.protocol

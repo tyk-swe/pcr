@@ -196,10 +196,10 @@ pub(crate) struct TracerouteOptions {
     #[arg(long = "dest")]
     pub destination: String,
     /// Maximum TTL.
-    #[arg(long = "max-ttl", value_parser = value_parser!(u8), default_value_t = 30)]
+    #[arg(long = "max-ttl", value_parser = value_parser!(u8).range(1..), default_value_t = 30)]
     pub max_ttl: u8,
     /// Number of probes per hop.
-    #[arg(long = "probes", value_parser = value_parser!(u8), default_value_t = 3)]
+    #[arg(long = "probes", value_parser = value_parser!(u8).range(1..), default_value_t = 3)]
     pub probes: u8,
     /// Probe protocol.
     #[arg(long = "protocol", value_enum, default_value_t = TracerouteProtocol::Udp)]
@@ -215,7 +215,7 @@ pub(crate) struct TracerouteOptions {
     )]
     pub no_dns: Option<bool>,
     /// Probe timeout (in ms).
-    #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 3000)]
+    #[arg(long = "timeout", value_parser = value_parser!(u64).range(1..), default_value_t = 3000)]
     pub timeout: u64,
 }
 
@@ -372,5 +372,29 @@ mod tests {
 
         assert_eq!(implicit.options.no_dns, Some(true));
         assert_eq!(explicit.options.no_dns, Some(false));
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn traceroute_rejects_zero_controls() {
+        for args in [
+            ["test", "--dest", "192.0.2.1", "--max-ttl", "0"].as_slice(),
+            ["test", "--dest", "192.0.2.1", "--probes", "0"].as_slice(),
+            ["test", "--dest", "192.0.2.1", "--timeout", "0"].as_slice(),
+        ] {
+            let err = TracerouteHarness::try_parse_from(args).unwrap_err();
+
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        }
+    }
+
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn traceroute_preserves_valid_defaults() {
+        let parsed = TracerouteHarness::try_parse_from(["test", "--dest", "192.0.2.1"]).unwrap();
+
+        assert_eq!(parsed.options.max_ttl, 30);
+        assert_eq!(parsed.options.probes, 3);
+        assert_eq!(parsed.options.timeout, 3000);
     }
 }

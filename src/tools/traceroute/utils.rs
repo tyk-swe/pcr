@@ -167,8 +167,10 @@ impl ProbeExpectation {
         true
     }
 
-    fn matches_direct_echo_reply(&self, _addr: IpAddr, identifier: u16, sequence: u16) -> bool {
-        self.icmp_identifier == Some(identifier) && self.icmp_sequence == Some(sequence)
+    fn matches_direct_echo_reply(&self, addr: IpAddr, identifier: u16, sequence: u16) -> bool {
+        addr == self.destination_ip
+            && self.icmp_identifier == Some(identifier)
+            && self.icmp_sequence == Some(sequence)
     }
 
     fn matches_original_echo(&self, original: &OriginalEcho) -> bool {

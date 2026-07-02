@@ -224,8 +224,7 @@ impl UdpProbeCookie {
     }
 
     pub(super) fn matches_payload(self, payload: &[u8]) -> bool {
-        let quoted_len = payload.len().min(self.0.len());
-        payload[..quoted_len] == self.0[..quoted_len]
+        payload.is_empty() || payload.starts_with(&self.0)
     }
 }
 

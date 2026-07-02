@@ -117,7 +117,19 @@ impl Engine {
         request: PacketRequest,
         mode: ExecutionMode,
     ) -> Result<()> {
-        OneShotFlow::new(self, request, mode)
+        self.run_one_shot_with_policy_options(request, mode, false)
+            .await
+    }
+
+    pub(crate) async fn run_one_shot_with_policy_options(
+        &mut self,
+        request: PacketRequest,
+        mode: ExecutionMode,
+        allow_unbounded_sends: bool,
+    ) -> Result<()> {
+        let previous_allow_unbounded = self.config.traffic_policy.allow_unbounded_sends;
+        self.config.traffic_policy.allow_unbounded_sends |= allow_unbounded_sends;
+        let result = OneShotFlow::new(self, request, mode)
             .with_policy_validation()?
             .with_spec()
             .await?
@@ -132,7 +144,9 @@ impl Engine {
             .with_startup_rules()
             .with_preflight_output()?
             .execute()
-            .await
+            .await;
+        self.config.traffic_policy.allow_unbounded_sends = previous_allow_unbounded;
+        result
     }
 
     #[cfg(feature = "daemon")]

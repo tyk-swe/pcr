@@ -247,8 +247,15 @@ pub(crate) struct TcpFlagSet {
 
 impl TcpFlagSet {
     pub(crate) fn from_string(flags: &str) -> SpecResult<Self> {
+        let tokens: Vec<_> = tcp_flag_tokens(flags).collect();
+        if !flags.is_empty() && tokens.is_empty() {
+            return Err(SpecError::UnsupportedTcpFlagToken {
+                token: flags.to_string(),
+            });
+        }
+
         let mut set = Self::default();
-        for token in tcp_flag_tokens(flags) {
+        for token in tokens {
             for flag in parse_tcp_flag_token(&token)? {
                 set.insert(flag)?;
             }
@@ -497,6 +504,14 @@ mod tests {
         assert!(flags.urg);
         assert!(flags.ece);
         assert!(flags.cwr);
+    }
+
+    #[test]
+    fn tcp_flags_reject_separator_only_values() {
+        assert!(matches!(
+            TcpFlagSet::from_string(",+ ").unwrap_err(),
+            SpecError::UnsupportedTcpFlagToken { token } if token == ",+ "
+        ));
     }
 
     #[test]

@@ -50,8 +50,8 @@ impl CliDiagnostic {
         }
 
         Self {
-            code: "internal".to_string(),
-            title: "internal error".to_string(),
+            code: "cli_validation".to_string(),
+            title: "invalid command options".to_string(),
             sections: vec![DiagnosticSection {
                 heading: "details".to_string(),
                 lines: vec![error.to_string()],

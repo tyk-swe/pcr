@@ -46,6 +46,7 @@ pub(crate) trait ReplEngine {
         &'a mut self,
         request: PacketRequest,
         mode: ExecutionMode,
+        allow_unbounded_sends: bool,
     ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>>;
     fn run_listener<'a>(
         &'a mut self,
@@ -332,8 +333,11 @@ async fn handle_send(
     if session.auto_listen && !options.listen.listen.unwrap_or(false) {
         options.listen.listen = Some(true);
     }
+    let allow_unbounded_sends = options.rule.allow_unbounded_sends;
     let request = crate::app::normalize_one_shot_options(&options)?;
-    engine.run_one_shot_with_mode(request, mode).await
+    engine
+        .run_one_shot_with_mode(request, mode, allow_unbounded_sends)
+        .await
 }
 
 async fn handle_listen(args: &[String], engine: &mut impl ReplEngine) -> Result<()> {
@@ -402,7 +406,10 @@ async fn run_source_file(
 
 fn set_session_value(session: &mut ReplSession, key: &str, value: &str) -> Result<()> {
     match key {
-        "target" => session.draft.destination = Some(value.to_string()),
+        "target" => {
+            session.draft.destination = Some(value.to_string());
+            session.draft.ip.destination_ip = None;
+        }
         "protocol" => use_protocol(session, value)?,
         "src-ip" => session.draft.ip.source_ip = Some(value.to_string()),
         "dst-ip" => session.draft.ip.destination_ip = Some(value.to_string()),
@@ -1049,6 +1056,7 @@ mod tests {
     #[derive(Default)]
     struct MockReplEngine {
         sent: Vec<(PacketRequest, ExecutionMode)>,
+        allow_unbounded_sends: Vec<bool>,
         dns_queries: Vec<DnsRequest>,
         output_formats: Vec<CliOutputFormat>,
         failing_sends: usize,
@@ -1075,8 +1083,10 @@ mod tests {
             &'a mut self,
             request: PacketRequest,
             mode: ExecutionMode,
+            allow_unbounded_sends: bool,
         ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
             self.sent.push((request, mode));
+            self.allow_unbounded_sends.push(allow_unbounded_sends);
             let should_fail = self.failing_sends > 0;
             if should_fail {
                 self.failing_sends -= 1;
@@ -1253,6 +1263,24 @@ mod tests {
             request.destination.destination_ip.as_deref(),
             Some("198.51.100.20")
         );
+    }
+
+    #[tokio::test]
+    async fn repl_send_forwards_unbounded_send_opt_in() {
+        let opts = InteractiveRequest::default();
+        let session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+
+        handle_send(
+            &repl_args(&["--loop", "--allow-unbounded-sends", "udp", "127.0.0.1:9"]),
+            &session,
+            &mut engine,
+            ExecutionMode::Live,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(engine.allow_unbounded_sends, vec![true]);
     }
 
     #[tokio::test]

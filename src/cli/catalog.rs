@@ -42,14 +42,14 @@ pub(crate) const CLI_AFTER_HELP: &str = "EXAMPLES:
      packetcraftr plan icmp 127.0.0.1 --icmp-type 8 --icmp-code 0
 
   4. Query DNS:
-     packetcraftr dns query example.com --type A --server 1.1.1.1";
+     packetcraftr dns query example.com --type A --server 127.0.0.1";
 
 pub(crate) const COMMANDS: &[CommandMetadata] = &[
     CommandMetadata {
         name: "send",
         aliases: &[],
         examples: &[
-            "packetcraftr send tcp example.com:443 --flags syn",
+            "packetcraftr send tcp 127.0.0.1:443 --flags syn",
             "packetcraftr --dry-run send udp 127.0.0.1:9 --data hello",
         ],
         help_topics: &["send", "tcp", "udp", "icmp", "payload"],
@@ -71,8 +71,8 @@ pub(crate) const COMMANDS: &[CommandMetadata] = &[
         name: "dns",
         aliases: &["dns-query"],
         examples: &[
-            "packetcraftr dns query example.com --type A --server 1.1.1.1",
-            "packetcraftr dns-query --domain example.com --type AAAA",
+            "packetcraftr dns query example.com --type A --server 127.0.0.1",
+            "packetcraftr dns-query --domain example.com --type AAAA --server 127.0.0.1",
         ],
         help_topics: &["dns", "dns query", "dns-query"],
         feature_gate: None,

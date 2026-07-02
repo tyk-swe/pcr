@@ -34,8 +34,14 @@ impl ReplEngine for Engine {
         &'a mut self,
         request: PacketRequest,
         mode: ExecutionMode,
+        allow_unbounded_sends: bool,
     ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
-        Box::pin(Engine::run_one_shot_with_mode(self, request, mode))
+        Box::pin(Engine::run_one_shot_with_policy_options(
+            self,
+            request,
+            mode,
+            allow_unbounded_sends,
+        ))
     }
 
     fn run_listener<'a>(

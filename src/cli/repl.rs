@@ -254,16 +254,19 @@ async fn execute_command(
         ReplCommand::Source { path, fail_fast } => {
             let previous = session.script_fail_fast;
             session.script_fail_fast = previous || fail_fast;
-            if let Err(err) = Box::pin(run_source_file(&path, opts, session, engine)).await {
-                println!("source failed: {err}");
-                session.script_fail_fast = previous;
-                if previous {
-                    return Err(err);
-                }
-                return Ok(CommandFlow::Continue);
-            }
+            let result = Box::pin(run_source_file(&path, opts, session, engine)).await;
             session.script_fail_fast = previous;
-            Ok(CommandFlow::Continue)
+            match result {
+                Ok(flow) => Ok(flow),
+                Err(err) => {
+                    println!("source failed: {err}");
+                    if previous || fail_fast {
+                        Err(err)
+                    } else {
+                        Ok(CommandFlow::Continue)
+                    }
+                }
+            }
         }
         ReplCommand::Save(path) => {
             let contents = match render_session_script(session) {
@@ -300,6 +303,9 @@ async fn execute_command(
         }
         ReplCommand::Unknown(other) => {
             println!("Unknown command: {other}. Type 'help' for a list of commands.");
+            if session.script_fail_fast {
+                bail!("unknown command '{other}'");
+            }
             Ok(CommandFlow::Continue)
         }
     }
@@ -491,6 +497,8 @@ fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> Resul
         rule,
         logging,
     } = local;
+    let local_destination_provided = destination.is_some();
+    let local_destination_ip_provided = ip.destination_ip.is_some();
 
     if local_has_compact_target {
         merged.destination = destination;
@@ -511,6 +519,9 @@ fn merge_one_shot_options(base: &OneShotOptions, local: OneShotOptions) -> Resul
 
     replace_option(&mut merged.ip.source_ip, ip.source_ip);
     if !local_has_compact_target {
+        if local_destination_provided && !local_destination_ip_provided {
+            merged.ip.destination_ip = None;
+        }
         replace_option(&mut merged.ip.destination_ip, ip.destination_ip);
     }
     replace_option(&mut merged.ip.prefer_ipv6, ip.prefer_ipv6);
@@ -874,7 +885,12 @@ async fn run_script_session(
             Err(err) => {
                 println!("(script:{}:{}) error: {err}", cmd.path, cmd.line_number);
                 if session.script_fail_fast {
-                    break;
+                    return Err(err).with_context(|| {
+                        format!(
+                            "parse REPL script command failed: path={}, line={}",
+                            cmd.path, cmd.line_number
+                        )
+                    });
                 }
                 continue;
             }
@@ -1108,6 +1124,20 @@ mod tests {
         args.iter().map(|arg| (*arg).to_string()).collect()
     }
 
+    fn temp_script_path(name: &str) -> String {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir()
+            .join(format!(
+                "packetcraftr-{name}-{}-{unique}.pcr",
+                std::process::id()
+            ))
+            .to_string_lossy()
+            .into_owned()
+    }
+
     #[test]
     fn local_compact_target_overrides_repl_destination_and_port_defaults() {
         let mut base = OneShotOptions {
@@ -1172,6 +1202,57 @@ mod tests {
             dip_error,
             crate::app::CliMappingError::CompactTargetConflict { option: "--dip" }
         ));
+    }
+
+    #[test]
+    fn local_destination_clears_stale_repl_destination_ip_default() {
+        let mut base = OneShotOptions {
+            destination: Some("default.test".to_string()),
+            ..Default::default()
+        };
+        base.ip.destination_ip = Some("192.0.2.10".to_string());
+        let local =
+            parse_oneshot(&repl_args(&["-d", "example.test", "udp", "--dport", "9"])).unwrap();
+
+        let merged = merge_one_shot_options(&base, local).unwrap();
+        let request = crate::app::normalize_one_shot_options(&merged).unwrap();
+
+        assert_eq!(
+            request.destination.destination.as_deref(),
+            Some("example.test")
+        );
+        assert_eq!(request.destination.destination_ip, None);
+    }
+
+    #[test]
+    fn local_destination_keeps_local_destination_ip_override() {
+        let mut base = OneShotOptions {
+            destination: Some("default.test".to_string()),
+            ..Default::default()
+        };
+        base.ip.destination_ip = Some("192.0.2.10".to_string());
+        let local = parse_oneshot(&repl_args(&[
+            "-d",
+            "example.test",
+            "--dip",
+            "198.51.100.20",
+            "udp",
+            "--dport",
+            "9",
+        ]))
+        .unwrap();
+
+        let merged = merge_one_shot_options(&base, local).unwrap();
+        let request = crate::app::normalize_one_shot_options(&merged).unwrap();
+
+        assert_eq!(
+            request.destination.destination.as_deref(),
+            Some("example.test")
+        );
+        assert_eq!(
+            request.destination.destination_ip.as_deref(),
+            Some("198.51.100.20")
+        );
     }
 
     #[tokio::test]
@@ -1406,6 +1487,116 @@ mod tests {
         assert_eq!(engine.sent.len(), 1);
         assert_eq!(pending.len(), 1);
         assert_eq!(session.draft.destination, None);
+    }
+
+    #[tokio::test]
+    async fn source_propagates_exit_after_restoring_fail_fast() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+        let path = temp_script_path("source-exit");
+        tokio::fs::write(&path, "quit\n").await.unwrap();
+
+        let flow = execute_command(
+            ReplCommand::Source {
+                path: path.clone(),
+                fail_fast: true,
+            },
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(flow, CommandFlow::Exit);
+        assert!(!session.script_fail_fast);
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn source_fail_fast_returns_parse_error_after_restoring_flag() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        let mut engine = MockReplEngine::default();
+        let path = temp_script_path("source-parse-error");
+        tokio::fs::write(&path, "send --data \"unterminated\n")
+            .await
+            .unwrap();
+
+        let err = execute_command(
+            ReplCommand::Source {
+                path: path.clone(),
+                fail_fast: true,
+            },
+            &opts,
+            &mut session,
+            &mut engine,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("parse REPL script command failed"));
+        assert!(!session.script_fail_fast);
+        let _ = tokio::fs::remove_file(&path).await;
+    }
+
+    #[tokio::test]
+    async fn sourced_script_fail_fast_errors_on_parse_error() {
+        let opts = InteractiveRequest::default();
+        let mut session = ReplSession::new(&opts);
+        session.script_fail_fast = true;
+        let mut engine = MockReplEngine::default();
+        let mut pending = VecDeque::from([
+            ScriptCommand {
+                path: "session.pcr".to_string(),
+                line_number: 1,
+                text: "send --data \"unterminated".to_string(),
+            },
+            ScriptCommand {
+                path: "session.pcr".to_string(),
+                line_number: 2,
+                text: "set target later.test".to_string(),
+            },
+        ]);
+
+        let err = run_script_session(&mut pending, &opts, &mut session, &mut engine)
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("parse REPL script command failed"));
+        assert_eq!(pending.len(), 1);
+        assert_eq!(session.draft.destination, None);
+    }
+
+    #[tokio::test]
+    async fn sourced_script_fail_fast_errors_on_unknown_or_malformed_command() {
+        for text in ["set", "nosuchcommand"] {
+            let opts = InteractiveRequest::default();
+            let mut session = ReplSession::new(&opts);
+            session.script_fail_fast = true;
+            let mut engine = MockReplEngine::default();
+            let mut pending = VecDeque::from([
+                ScriptCommand {
+                    path: "session.pcr".to_string(),
+                    line_number: 1,
+                    text: text.to_string(),
+                },
+                ScriptCommand {
+                    path: "session.pcr".to_string(),
+                    line_number: 2,
+                    text: "set target later.test".to_string(),
+                },
+            ]);
+
+            let err = run_script_session(&mut pending, &opts, &mut session, &mut engine)
+                .await
+                .unwrap_err();
+
+            assert!(err.to_string().contains("unknown command"));
+            assert_eq!(pending.len(), 1);
+            assert_eq!(session.draft.destination, None);
+        }
     }
 
     #[tokio::test]

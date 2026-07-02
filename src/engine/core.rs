@@ -28,6 +28,8 @@ use crate::engine::config::EngineConfig;
 use crate::engine::error::{EngineError, EngineResult};
 use crate::engine::oneshot::OneShotFlow;
 use crate::engine::ports::EngineDependencies;
+#[cfg(feature = "fuzz")]
+use crate::engine::ports::GeneratedPacketSender;
 #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 use crate::engine::ports::PreparedTrafficRun;
 use crate::engine::rule_send::{RuleSendConfig, RuleSendExecutor};
@@ -239,10 +241,15 @@ impl Engine {
     #[cfg(feature = "fuzz")]
     pub(crate) async fn run_fuzz(&mut self, options: &FuzzRequest) -> Result<()> {
         let policy = self.effective_policy();
+        let send = Arc::clone(&self.send);
+        let sender: GeneratedPacketSender = Arc::new(move |spec| {
+            let send = Arc::clone(&send);
+            Box::pin(async move { send.execute_generated_fuzz_packet(spec).await })
+        });
         let prepared = self
             .dependencies
             .fuzz_runner
-            .prepare(options.clone(), policy)
+            .prepare(options.clone(), policy, sender)
             .await?;
         self.run_prepared_traffic(policy, prepared, EngineError::TransmissionPlan, || {})
             .await
@@ -424,6 +431,7 @@ mod prepared_traffic_tests {
             &self,
             _request: FuzzRequest,
             _policy: TrafficPolicy,
+            _sender: crate::engine::ports::GeneratedPacketSender,
         ) -> PortFuture<PreparedTrafficRun> {
             let state = Arc::clone(&self.state);
             Box::pin(async move { Ok(state.prepared_run()) })

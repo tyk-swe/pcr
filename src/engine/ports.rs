@@ -34,6 +34,9 @@ pub(crate) type PortFuture<T> = Pin<Box<dyn Future<Output = PortResult<T>> + Sen
 type PreparedDnsResolver = Box<dyn FnOnce() -> PortFuture<DnsQueryResult> + Send + 'static>;
 #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
 type PreparedTrafficExecutor = Box<dyn FnOnce() -> PortFuture<()> + Send + 'static>;
+#[cfg(feature = "fuzz")]
+pub(crate) type GeneratedPacketSender =
+    Arc<dyn Fn(PacketSpec) -> PortFuture<()> + Send + Sync + 'static>;
 
 pub(crate) struct PreparedDnsQuery {
     traffic_plan: TrafficPlan,
@@ -161,7 +164,12 @@ pub(crate) trait ScanRunner: Send + Sync {
 
 #[cfg(feature = "fuzz")]
 pub(crate) trait FuzzRunner: Send + Sync {
-    fn prepare(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<PreparedFuzzRun>;
+    fn prepare(
+        &self,
+        request: FuzzRequest,
+        policy: TrafficPolicy,
+        sender: GeneratedPacketSender,
+    ) -> PortFuture<PreparedFuzzRun>;
 }
 
 pub(crate) trait EngineOutput: Send + Sync {

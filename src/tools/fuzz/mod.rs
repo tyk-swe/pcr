@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::domain::policy::{classify_ip, TrafficMode, TrafficPlan, TrafficPrivilege};
 
 pub(crate) use config::FuzzConfig;
-pub(crate) use engine::run_fuzz;
+pub(crate) use engine::run_fuzz_with_executor;
 
 pub(crate) fn traffic_plan(config: &FuzzConfig) -> Result<TrafficPlan> {
     let target_ip: std::net::IpAddr = config.target_ip.parse()?;

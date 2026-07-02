@@ -24,11 +24,6 @@ use super::types::{
     SelectionMetadata, TransmissionSummary,
 };
 
-#[cfg(feature = "fuzz")]
-pub(crate) fn plan_transmission(spec: &PacketSpec) -> Result<NetworkTransmissionPlan> {
-    plan_transmission_with_policy(spec, TransmissionPolicy::default())
-}
-
 pub(crate) fn plan_transmission_with_policy(
     spec: &PacketSpec,
     policy: TransmissionPolicy,

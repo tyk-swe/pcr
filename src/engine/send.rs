@@ -85,6 +85,26 @@ impl SendUseCase {
         Ok(PreparedPacketSend { plan })
     }
 
+    #[cfg(feature = "fuzz")]
+    pub(crate) async fn execute_generated_fuzz_packet(&self, spec: PacketSpec) -> Result<()> {
+        let spec = Arc::new(spec);
+        self.validate_spec_policy(spec.as_ref())?;
+
+        if self.dry_run {
+            let plan = self.plan_dry_run(Arc::clone(&spec)).await?;
+            self.authorize_transmission_plan_for_mode(spec.as_ref(), &plan, TrafficMode::Fuzz)?;
+            self.execute_plan(plan).await?;
+            return Ok(());
+        }
+
+        self.authorize_spec_traffic(spec.as_ref(), TrafficMode::Fuzz)?;
+        self.check_privileges(Arc::clone(&spec)).await?;
+
+        let plan = self.plan_live(Arc::clone(&spec)).await?;
+        self.authorize_transmission_plan_for_mode(spec.as_ref(), &plan, TrafficMode::Fuzz)?;
+        self.execute_plan(plan).await
+    }
+
     pub(crate) async fn resolve_spec(&self, request: PacketRequest) -> Result<Arc<PacketSpec>> {
         self.validate_request_policy(&request)?;
         let request = self.resolve_request(request).await?;
@@ -149,7 +169,16 @@ impl SendUseCase {
         spec: &PacketSpec,
         plan: &TransmissionPlan,
     ) -> EngineResult<TrafficPlan> {
-        let traffic_plan = self.traffic_plan_from_transmission(spec, plan)?;
+        self.authorize_transmission_plan_for_mode(spec, plan, TrafficMode::Send)
+    }
+
+    fn authorize_transmission_plan_for_mode(
+        &self,
+        spec: &PacketSpec,
+        plan: &TransmissionPlan,
+        mode: TrafficMode,
+    ) -> EngineResult<TrafficPlan> {
+        let traffic_plan = self.traffic_plan_from_transmission(spec, plan, mode)?;
         self.policy
             .authorize(&traffic_plan)
             .map_err(|e| EngineError::TransmissionPlan(e.into()))?;
@@ -187,6 +216,7 @@ impl SendUseCase {
         &self,
         spec: &PacketSpec,
         plan: &TransmissionPlan,
+        mode: TrafficMode,
     ) -> EngineResult<TrafficPlan> {
         let planned_target_scope = match &plan.destination {
             TransmissionTarget::Ipv4(addr) => classify_ip((*addr).into()),
@@ -195,12 +225,7 @@ impl SendUseCase {
         let target_scope =
             combine_target_scopes([planned_target_scope, packet_spec_target_scope(spec)]);
 
-        self.traffic_plan_for_spec_emission(
-            spec,
-            TrafficMode::Send,
-            target_scope,
-            plan.frames.len() as u64,
-        )
+        self.traffic_plan_for_spec_emission(spec, mode, target_scope, plan.frames.len() as u64)
     }
 
     fn traffic_plan_from_spec(

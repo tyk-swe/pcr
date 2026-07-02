@@ -5,28 +5,21 @@ use crate::domain::spec::{
     DestinationSpec, IcmpSpec, Icmpv6Spec, PacketSpec, PayloadSource, PayloadSpec, TargetAddress,
     TcpSpec, TransmissionSpec, TransportSpec, UdpSpec,
 };
-use crate::network::sender::execute_transmission;
-use crate::network::sender::plan_transmission;
 use crate::tools::fuzz::config::{FuzzConfig, FuzzProtocol, FuzzStrategy};
 use log::info;
 use rand::Rng;
+use std::future::Future;
 use std::net::IpAddr;
 use std::time::Duration;
 use tokio::time::sleep;
 
-pub(crate) async fn run_fuzz(config: FuzzConfig) -> anyhow::Result<()> {
-    run_fuzz_internal(config, |spec| async move {
-        let plan = plan_transmission(&spec)?;
-        execute_transmission(plan).await?;
-        Ok(())
-    })
-    .await
-}
-
-async fn run_fuzz_internal<F, Fut>(config: FuzzConfig, mut executor: F) -> anyhow::Result<()>
+pub(crate) async fn run_fuzz_with_executor<F, Fut>(
+    config: FuzzConfig,
+    mut executor: F,
+) -> anyhow::Result<()>
 where
     F: FnMut(PacketSpec) -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<()>>,
+    Fut: Future<Output = anyhow::Result<()>>,
 {
     info!(
         "Starting fuzzer on {} with strategy {:?}",
@@ -158,5 +151,87 @@ fn mutate_payload<R: Rng>(payload: &mut Vec<u8>, strategy: &FuzzStrategy, rng: &
                 rng.fill(&mut payload[..]);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    fn config(protocol: FuzzProtocol, target_port: Option<u16>, count: u64) -> FuzzConfig {
+        FuzzConfig {
+            target_ip: "192.0.2.10".to_string(),
+            target_port,
+            protocol,
+            strategy: FuzzStrategy::RandomPayload,
+            count,
+            delay_ms: 0,
+            batch_size: 16,
+            rate_per_sec: 0,
+        }
+    }
+
+    async fn collect_generated_specs(config: FuzzConfig) -> Vec<PacketSpec> {
+        let specs = Arc::new(Mutex::new(Vec::new()));
+        let captured = Arc::clone(&specs);
+
+        run_fuzz_with_executor(config, move |spec| {
+            let captured = Arc::clone(&captured);
+            async move {
+                captured
+                    .lock()
+                    .expect("test generated specs lock")
+                    .push(spec);
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+
+        Arc::try_unwrap(specs)
+            .expect("test still holds generated specs reference")
+            .into_inner()
+            .expect("test generated specs lock")
+    }
+
+    #[tokio::test]
+    async fn run_fuzz_with_executor_generates_configured_tcp_specs() {
+        let specs = collect_generated_specs(config(FuzzProtocol::Tcp, Some(8443), 3)).await;
+
+        assert_eq!(specs.len(), 3);
+        for spec in specs {
+            assert_eq!(
+                spec.target.address,
+                Some(TargetAddress::Ip("192.0.2.10".parse().unwrap()))
+            );
+            match spec.transport {
+                TransportSpec::Tcp(tcp) => assert_eq!(tcp.destination_port, Some(8443)),
+                other => panic!("expected TCP fuzz packet, got {other:?}"),
+            }
+            assert!(matches!(spec.payload.source, PayloadSource::Bytes(_)));
+        }
+    }
+
+    #[tokio::test]
+    async fn run_fuzz_with_executor_generates_configured_udp_specs() {
+        let specs = collect_generated_specs(config(FuzzProtocol::Udp, Some(53), 2)).await;
+
+        assert_eq!(specs.len(), 2);
+        for spec in specs {
+            match spec.transport {
+                TransportSpec::Udp(udp) => assert_eq!(udp.destination_port, Some(53)),
+                other => panic!("expected UDP fuzz packet, got {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn run_fuzz_with_executor_generates_icmp_for_ipv4_targets() {
+        let specs = collect_generated_specs(config(FuzzProtocol::Icmp, None, 1)).await;
+
+        assert_eq!(specs.len(), 1);
+        assert!(matches!(specs[0].transport, TransportSpec::Icmp(_)));
     }
 }

@@ -11,7 +11,7 @@ use crate::domain::command::{DnsQueryResult, DnsRequest};
 use crate::domain::policy::TrafficPolicy;
 use crate::engine::ports::{DnsClient, PortFuture, PreparedDnsQuery};
 #[cfg(feature = "fuzz")]
-use crate::engine::ports::{FuzzRunner, PreparedFuzzRun};
+use crate::engine::ports::{FuzzRunner, GeneratedPacketSender, PreparedFuzzRun};
 #[cfg(feature = "scan")]
 use crate::engine::ports::{PreparedScanRun, ScanRunner};
 #[cfg(feature = "traceroute")]
@@ -87,13 +87,19 @@ pub(crate) struct ToolsFuzzRunner;
 
 #[cfg(feature = "fuzz")]
 impl FuzzRunner for ToolsFuzzRunner {
-    fn prepare(&self, request: FuzzRequest, policy: TrafficPolicy) -> PortFuture<PreparedFuzzRun> {
+    fn prepare(
+        &self,
+        request: FuzzRequest,
+        policy: TrafficPolicy,
+        sender: GeneratedPacketSender,
+    ) -> PortFuture<PreparedFuzzRun> {
         Box::pin(async move {
             let config = fuzz_config_for_policy(&request, &policy)?;
             let traffic_plan = crate::tools::fuzz::traffic_plan(&config)?;
             let executor = Box::new(move || {
                 Box::pin(async move {
-                    crate::tools::fuzz::run_fuzz(config).await?;
+                    crate::tools::fuzz::run_fuzz_with_executor(config, move |spec| (sender)(spec))
+                        .await?;
                     Ok(())
                 }) as PortFuture<()>
             });
@@ -110,4 +116,70 @@ fn fuzz_config_for_policy(
     let mut config = crate::tools::fuzz::FuzzConfig::try_from(request)?;
     config.apply_traffic_policy(policy);
     Ok(config)
+}
+
+#[cfg(all(test, feature = "fuzz"))]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::domain::command::{FuzzProtocol, FuzzRequest, FuzzStrategy};
+    use crate::domain::policy::{TrafficBudget, TrafficMode, TrafficPolicy};
+    use crate::domain::spec::{PacketSpec, TransportSpec};
+    use crate::engine::ports::{FuzzRunner, GeneratedPacketSender};
+
+    fn request() -> FuzzRequest {
+        FuzzRequest {
+            target: "192.0.2.10".to_string(),
+            port: Some(9000),
+            protocol: FuzzProtocol::Udp,
+            strategy: FuzzStrategy::RandomPayload,
+            count: 2,
+            delay: 0,
+        }
+    }
+
+    fn no_delay_policy() -> TrafficPolicy {
+        TrafficPolicy {
+            budget: TrafficBudget {
+                max_batch_size: 8,
+                max_rate_per_sec: 0,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn tools_fuzz_runner_uses_supplied_sender_for_generated_specs() {
+        let sent_specs = Arc::new(Mutex::new(Vec::<PacketSpec>::new()));
+        let observed_specs = Arc::clone(&sent_specs);
+        let sender: GeneratedPacketSender = Arc::new(move |spec| {
+            let sent_specs = Arc::clone(&sent_specs);
+            Box::pin(async move {
+                sent_specs.lock().expect("test sent specs lock").push(spec);
+                Ok(())
+            })
+        });
+        let runner = ToolsFuzzRunner;
+
+        let prepared = runner
+            .prepare(request(), no_delay_policy(), sender)
+            .await
+            .unwrap();
+
+        assert_eq!(prepared.traffic_plan().mode, TrafficMode::Fuzz);
+        assert!(prepared.traffic_plan().malformed);
+
+        prepared.run().await.unwrap();
+
+        let specs = observed_specs.lock().expect("test sent specs lock");
+        assert_eq!(specs.len(), 2);
+        for spec in specs.iter() {
+            match &spec.transport {
+                TransportSpec::Udp(udp) => assert_eq!(udp.destination_port, Some(9000)),
+                other => panic!("expected UDP fuzz packet, got {other:?}"),
+            }
+        }
+    }
 }

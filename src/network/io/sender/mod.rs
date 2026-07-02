@@ -21,8 +21,6 @@ mod types;
 pub(crate) use executor::execute_transmission;
 
 pub(crate) use metrics::emit_metrics_snapshot;
-#[cfg(feature = "fuzz")]
-pub(crate) use planner::plan_transmission;
 pub(crate) use planner::{plan_transmission_dry_run_with_policy, plan_transmission_with_policy};
 #[cfg(feature = "traceroute")]
 pub(crate) use transport::{build_icmpv6_segment, build_tcp_segment};

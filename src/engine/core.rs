@@ -127,25 +127,33 @@ impl Engine {
         mode: ExecutionMode,
         allow_unbounded_sends: bool,
     ) -> Result<()> {
-        let previous_allow_unbounded = self.config.traffic_policy.allow_unbounded_sends;
+        let previous_policy = self.config.traffic_policy;
+        let previous_send = Arc::clone(&self.send);
         self.config.traffic_policy.allow_unbounded_sends |= allow_unbounded_sends;
-        let result = OneShotFlow::new(self, request, mode)
-            .with_policy_validation()?
-            .with_spec()
-            .await?
-            .with_authorized_preflight_traffic()
-            .await?
-            .with_rules()
-            .await?
-            .with_preflight()
-            .await?
-            .with_plan()
-            .await?
-            .with_startup_rules()
-            .with_preflight_output()?
-            .execute()
-            .await;
-        self.config.traffic_policy.allow_unbounded_sends = previous_allow_unbounded;
+        self.send = Arc::new(previous_send.with_policy_override(self.config.traffic_policy));
+
+        let result = async {
+            OneShotFlow::new(self, request, mode)
+                .with_policy_validation()?
+                .with_spec()
+                .await?
+                .with_authorized_preflight_traffic()
+                .await?
+                .with_rules()
+                .await?
+                .with_preflight()
+                .await?
+                .with_plan()
+                .await?
+                .with_startup_rules()
+                .with_preflight_output()?
+                .execute()
+                .await
+        }
+        .await;
+
+        self.config.traffic_policy = previous_policy;
+        self.send = previous_send;
         result
     }
 

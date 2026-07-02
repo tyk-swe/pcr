@@ -40,6 +40,13 @@ impl SendUseCase {
         }
     }
 
+    pub(crate) fn with_policy_override(&self, policy: TransmissionPolicy) -> Self {
+        Self {
+            policy: policy.with_dry_run(false),
+            dependencies: self.dependencies.clone(),
+        }
+    }
+
     pub(crate) fn validate_request_policy(
         &self,
         request: &PacketRequest,

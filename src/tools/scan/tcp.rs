@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use pnet::packet::ip::IpNextHeaderProtocols;
 use pnet::packet::tcp::{TcpFlags, TcpPacket};
 use pnet::transport::{
@@ -16,7 +16,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::task;
 
 use crate::domain::spec::{TcpFlagSet, TcpSpec};
-use crate::network::checksum::ip_version_pair;
+use crate::network::checksum::{ip_version_pair, IpVersionPair};
 use crate::network::sender::{build_tcp_segment_optimized, tcp_flags_value};
 use crate::tools::TrafficRuntimeConfig;
 use crate::util::error::operation_failed;
@@ -369,11 +369,11 @@ where
 {
     let config = ConcurrentScanConfig {
         batch_size: clamp_batch_size(config.batch_size, CONCURRENT_PORT_SCAN_BATCH_LIMIT),
+        send_delay: config.send_delay.or(Some(SCAN_DELAY)),
         ..config
     };
     let destination = config.destination;
     let source_ip = config.source_ip;
-    let send_delay = config.send_delay;
 
     // Reuse one packet buffer while sending this batch.
     let mut buffer = [0u8; TCP_PACKET_BUFFER_SIZE];
@@ -397,22 +397,15 @@ where
         config,
         ports,
         |source_port, dest_port| {
-            if send_delay.is_none() {
-                std::thread::sleep(SCAN_DELAY);
-            }
-
-            spec.source_port = Some(source_port);
-            spec.destination_port = Some(dest_port);
-            spec.sequence = Some(random());
-
-            if let Ok(len) =
-                build_tcp_segment_optimized(&spec, flags_value, &[], &ip_pair, &mut buffer)
-            {
-                if let Some(packet) = TcpPacket::new(&buffer[..len]) {
-                    tx.send_tcp(packet, destination)?;
-                }
-            }
-            Ok(())
+            send_tcp_scan_probe(
+                &mut spec,
+                flags_value,
+                &ip_pair,
+                &mut buffer,
+                tx,
+                destination,
+                (source_port, dest_port),
+            )
         },
         |timeout| rx.next_event(timeout),
         |event, results, target_port| match event {
@@ -429,6 +422,34 @@ where
             _ => {}
         },
     )
+}
+
+fn send_tcp_scan_probe<TX: TcpSender + ?Sized>(
+    spec: &mut TcpSpec,
+    flags_value: u8,
+    ip_pair: &IpVersionPair,
+    buffer: &mut [u8],
+    tx: &mut TX,
+    destination: SocketAddr,
+    ports: (u16, u16),
+) -> Result<()> {
+    let (source_port, dest_port) = ports;
+    spec.source_port = Some(source_port);
+    spec.destination_port = Some(dest_port);
+    spec.sequence = Some(random());
+
+    let detail = || {
+        format!(
+            "destination={} source_port={} dest_port={}",
+            destination, source_port, dest_port
+        )
+    };
+    let len = build_tcp_segment_optimized(spec, flags_value, &[], ip_pair, buffer)
+        .with_context(|| operation_failed("build TCP scan probe", detail()))?;
+    let packet = TcpPacket::new(&buffer[..len])
+        .ok_or_else(|| anyhow!(operation_failed("rebuild TCP scan packet", detail())))?;
+
+    tx.send_tcp(packet, destination)
 }
 
 fn scan_tcp_v4_with_controls<S: TcpScanStrategy>(
@@ -558,6 +579,17 @@ fn scan_tcp_v6_with_controls<S: TcpScanStrategy>(
 mod tests {
     use super::*;
 
+    struct MockTcpSender {
+        sends: usize,
+    }
+
+    impl TcpSender for MockTcpSender {
+        fn send_tcp(&mut self, _packet: TcpPacket<'_>, _destination: SocketAddr) -> Result<()> {
+            self.sends += 1;
+            Ok(())
+        }
+    }
+
     #[test]
     fn syn_scan_metadata_flags_and_classification_are_stable() {
         let scan = GenericTcpScan::syn();
@@ -621,5 +653,39 @@ mod tests {
         assert!(!flags.psh);
         assert!(!flags.ack);
         assert!(!flags.urg);
+    }
+
+    #[test]
+    fn tcp_probe_build_failure_is_returned_without_sending() {
+        let source = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5));
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0);
+        let ip_pair = ip_version_pair(source, destination.ip()).unwrap();
+        let flags = GenericTcpScan::syn().get_tcp_flags();
+        let flags_value = tcp_flags_value(&flags);
+        let mut spec = TcpSpec {
+            source_port: None,
+            destination_port: None,
+            flags,
+            sequence: None,
+            acknowledgement: Some(0),
+            window_size: Some(TCP_WINDOW_SIZE),
+            options: None,
+        };
+        let mut buffer = [0u8; 4];
+        let mut tx = MockTcpSender { sends: 0 };
+
+        let err = send_tcp_scan_probe(
+            &mut spec,
+            flags_value,
+            &ip_pair,
+            &mut buffer,
+            &mut tx,
+            destination,
+            (40000, 80),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("build TCP scan probe failed"));
+        assert_eq!(tx.sends, 0);
     }
 }

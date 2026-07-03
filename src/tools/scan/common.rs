@@ -437,15 +437,17 @@ where
     F: FnMut() -> std::io::Result<()>,
 {
     let mut backoff = SEND_RETRY_INITIAL_BACKOFF;
+    let mut retries = 0;
 
-    for attempt in 0..=MAX_SEND_RETRIES {
+    loop {
         match send_once() {
             Ok(_) => return Ok(()),
             Err(e) => {
                 let is_transient = e.raw_os_error() == Some(libc::ENOBUFS);
 
-                if is_transient && attempt < MAX_SEND_RETRIES {
+                if is_transient && retries < MAX_SEND_RETRIES {
                     std::thread::sleep(backoff);
+                    retries += 1;
                     backoff = backoff.saturating_mul(2);
                     continue;
                 }
@@ -457,8 +459,6 @@ where
             }
         }
     }
-
-    unreachable!("send_with_enobufs_retry loop should always return")
 }
 
 pub(super) fn wait_for_send_delay(send_delay: Option<Duration>, last_send: &mut Option<Instant>) {
@@ -466,14 +466,23 @@ pub(super) fn wait_for_send_delay(send_delay: Option<Duration>, last_send: &mut 
         return;
     };
 
-    if let Some(last) = *last_send {
-        let elapsed = last.elapsed();
-        if elapsed < delay {
-            thread::sleep(delay - elapsed);
-        }
+    if let Some(remaining) = send_delay_sleep_duration(Instant::now(), delay, *last_send) {
+        thread::sleep(remaining);
     }
 
     *last_send = Some(Instant::now());
+}
+
+fn send_delay_sleep_duration(
+    now: Instant,
+    delay: Duration,
+    last_send: Option<Instant>,
+) -> Option<Duration> {
+    let last = last_send?;
+    let elapsed = now.checked_duration_since(last).unwrap_or(Duration::ZERO);
+    delay
+        .checked_sub(elapsed)
+        .filter(|remaining| !remaining.is_zero())
 }
 
 pub(super) fn report_results(protocol: &str, address: &IpAddr, results: &BTreeMap<u16, PortState>) {
@@ -530,13 +539,36 @@ pub(super) fn report_results(protocol: &str, address: &IpAddr, results: &BTreeMa
     }
 }
 
-pub(super) fn calculate_source_port(base_port: u16, idx: usize) -> u16 {
-    const MIN_PORT: u32 = 32768;
-    const MAX_PORT: u32 = 65535;
-    const RANGE_SIZE: u32 = MAX_PORT - MIN_PORT + 1;
+pub(super) fn calculate_source_port(base_port: u16, idx: usize) -> Result<u16> {
+    const MIN_PORT: u128 = 32768;
+    const MAX_PORT: u128 = 65_535;
+    const RANGE_SIZE: u128 = MAX_PORT - MIN_PORT + 1;
 
-    let offset = (base_port as u32 + idx as u32) % RANGE_SIZE;
-    (MIN_PORT + offset) as u16
+    let idx = u128::try_from(idx).map_err(|_| {
+        anyhow!(
+            "scan source port index exceeded u128 range: base_port={} index={}",
+            base_port,
+            idx
+        )
+    })?;
+    let offset = u128::from(base_port)
+        .checked_add(idx % RANGE_SIZE)
+        .ok_or_else(|| {
+            anyhow!(
+                "scan source port calculation overflowed: base_port={} index={}",
+                base_port,
+                idx
+            )
+        })?
+        % RANGE_SIZE;
+    let port = MIN_PORT + offset;
+    u16::try_from(port).map_err(|_| {
+        anyhow!(
+            "scan source port calculation exceeded u16 range: base_port={} index={}",
+            base_port,
+            idx
+        )
+    })
 }
 
 type PortMap = HashMap<u16, HashSet<u16>>;
@@ -565,6 +597,10 @@ where
     FRecv: FnMut(Duration) -> Result<Option<ScanEvent>>,
     FClassify: Fn(ScanEvent, &mut BTreeMap<u16, PortState>, u16),
 {
+    let config = ConcurrentScanConfig {
+        batch_size: clamp_batch_to_ports(config.batch_size, ports),
+        ..config
+    };
     let mut base_port: u16 = config.base_port_override.unwrap_or_else(random);
     if base_port < config.base_port_offset {
         base_port = base_port.wrapping_add(config.base_port_offset);
@@ -574,7 +610,7 @@ where
 
     let mut batch_base_idx = 0;
     for chunk in ports.chunks(config.batch_size) {
-        let port_map = build_port_map(chunk, base_port, batch_base_idx);
+        let port_map = build_port_map(chunk, base_port, batch_base_idx)?;
         let chunk_owned = chunk.to_vec();
         let start_idx = batch_base_idx;
 
@@ -590,11 +626,16 @@ where
 
         thread::scope(|s| {
             s.spawn(move || {
+                let mut last_send = None;
                 for (idx, port) in chunk_owned.iter().enumerate() {
-                    if let Some(delay) = config.send_delay {
-                        thread::sleep(delay);
-                    }
-                    let source_port = calculate_source_port(base_port, start_idx + idx);
+                    wait_for_send_delay(config.send_delay, &mut last_send);
+                    let source_port = match calculate_source_port(base_port, start_idx + idx) {
+                        Ok(port) => port,
+                        Err(err) => {
+                            *tx_error_ref.lock().ignore_poison() = Some(err);
+                            break;
+                        }
+                    };
                     if let Err(e) = send_fn_ref(source_port, *port) {
                         log::warn!(
                             "failed to send probe to {}:{} from source port {}: {}",
@@ -651,13 +692,13 @@ fn initial_results(ports: &[u16], initial_port_state: PortState) -> BTreeMap<u16
         .collect()
 }
 
-fn build_port_map(chunk: &[u16], base_port: u16, batch_base_idx: usize) -> PortMap {
+fn build_port_map(chunk: &[u16], base_port: u16, batch_base_idx: usize) -> Result<PortMap> {
     let mut port_map: PortMap = HashMap::new();
     for (idx, port) in chunk.iter().enumerate() {
-        let src_port = calculate_source_port(base_port, batch_base_idx + idx);
+        let src_port = calculate_source_port(base_port, batch_base_idx + idx)?;
         port_map.entry(src_port).or_default().insert(*port);
     }
-    port_map
+    Ok(port_map)
 }
 
 fn run_receive_loop<FRecv, FClassify>(
@@ -831,6 +872,29 @@ mod tests {
     }
 
     #[test]
+    fn send_delay_duration_skips_first_send_and_spaces_followups() {
+        let now = Instant::now();
+        let delay = Duration::from_millis(100);
+        let recent_send = now
+            .checked_sub(Duration::from_millis(40))
+            .expect("test instant can move back 40ms");
+        let old_send = now
+            .checked_sub(delay)
+            .expect("test instant can move back by delay");
+
+        assert_eq!(send_delay_sleep_duration(now, delay, None), None);
+        assert_eq!(
+            send_delay_sleep_duration(now, delay, Some(now)),
+            Some(delay)
+        );
+        assert_eq!(
+            send_delay_sleep_duration(now, delay, Some(recent_send)),
+            Some(Duration::from_millis(60))
+        );
+        assert_eq!(send_delay_sleep_duration(now, delay, Some(old_send)), None);
+    }
+
+    #[test]
     fn classify_icmp_port_unreachable_maps_expected_codes_to_closed() {
         let v4_dest = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)), 0);
         let v6_dest = SocketAddr::new(IpAddr::V6("2001:db8::1".parse().unwrap()), 0);
@@ -859,8 +923,55 @@ mod tests {
 
     #[test]
     fn calculate_source_port_stays_in_ephemeral_range_and_wraps() {
-        assert_eq!(calculate_source_port(0, 0), 32768);
-        assert_eq!(calculate_source_port(u16::MAX, 1), 32768);
+        assert_eq!(calculate_source_port(0, 0).unwrap(), 32768);
+        assert_eq!(calculate_source_port(u16::MAX, 1).unwrap(), 32768);
+
+        let idx = usize::MAX;
+        let expected =
+            32768u128 + ((u128::from(1234u16) + (u128::try_from(idx).unwrap() % 32768)) % 32768);
+        assert_eq!(
+            u128::from(calculate_source_port(1234, idx).unwrap()),
+            expected
+        );
+    }
+
+    #[test]
+    fn scan_ports_concurrent_normalizes_zero_batch_size() {
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0);
+        let source_ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5));
+        let config = ConcurrentScanConfig {
+            destination,
+            source_ip,
+            timeout: Duration::ZERO,
+            batch_size: 0,
+            send_delay: None,
+            base_port_offset: 0,
+            base_port_override: Some(40000),
+            initial_port_state: PortState::Filtered,
+        };
+        let mut sent = Vec::new();
+
+        let results = scan_ports_concurrent(
+            config,
+            &[80, 443],
+            |source_port, dest_port| {
+                sent.push((source_port, dest_port));
+                Ok(())
+            },
+            |_| Ok(None),
+            |_, _, _| {},
+        )
+        .unwrap();
+
+        assert_eq!(
+            sent,
+            [
+                (calculate_source_port(40000, 0).unwrap(), 80),
+                (calculate_source_port(40000, 1).unwrap(), 443)
+            ]
+        );
+        assert_eq!(results[&80], PortState::Filtered);
+        assert_eq!(results[&443], PortState::Filtered);
     }
 
     #[test]
@@ -875,7 +986,7 @@ mod tests {
             base_port_override: Some(40000),
             initial_port_state: PortState::Filtered,
         };
-        let port_map = build_port_map(&[80], 40000, 0);
+        let port_map = build_port_map(&[80], 40000, 0).unwrap();
         let mut results = initial_results(&[80], PortState::Filtered);
 
         assert!(handle_scan_event(

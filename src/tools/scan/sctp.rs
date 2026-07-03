@@ -29,9 +29,9 @@ use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
 
 use super::common::{
     clamp_batch_size, classify_icmp_port_unreachable, join_blocking_scan, report_results,
-    require_ipv6_destination, resolve_port_scan_run, ConcurrentScanConfig, PortScanRunConfig,
-    PortState, ScanEvent, CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT, PACKET_POLL_INTERVAL,
-    SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
+    require_ipv6_destination, resolve_port_scan_run, send_with_enobufs_retry, ConcurrentScanConfig,
+    PortScanRunConfig, PortState, ScanEvent, CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT,
+    PACKET_POLL_INTERVAL, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
 
@@ -315,14 +315,10 @@ impl<'a> Packet for RawPacket<'a> {
 
 impl<'a> SctpScanTx for RealSctpSender<'a> {
     fn send_sctp(&mut self, packet: &[u8], destination: SocketAddr) -> Result<()> {
-        let raw_packet = RawPacket(packet);
-        self.0
-            .send_to(raw_packet, destination.ip())
-            .map(|_| ())
-            .context(operation_failed(
-                "send SCTP packet",
-                format!("dest={}", destination),
-            ))
+        send_sctp_with_retry(packet, destination, |packet, dest| {
+            let raw_packet = RawPacket(packet);
+            self.0.send_to(raw_packet, dest.ip()).map(|_| ())
+        })
     }
 }
 
@@ -333,14 +329,19 @@ struct RawSctpSender {
 impl SctpScanTx for RawSctpSender {
     fn send_sctp(&mut self, packet: &[u8], destination: SocketAddr) -> Result<()> {
         let dest_addr = SockAddr::from(destination);
-        self.socket
-            .send_to(packet, &dest_addr)
-            .map(|_| ())
-            .context(operation_failed(
-                "send SCTP packet",
-                format!("dest={}", destination),
-            ))
+        send_sctp_with_retry(packet, destination, |packet, _| {
+            self.socket.send_to(packet, &dest_addr).map(|_| ())
+        })
     }
+}
+
+fn send_sctp_with_retry<F>(packet: &[u8], destination: SocketAddr, mut send_fn: F) -> Result<()>
+where
+    F: FnMut(&[u8], SocketAddr) -> io::Result<()>,
+{
+    send_with_enobufs_retry("send SCTP probe", destination, || {
+        send_fn(packet, destination)
+    })
 }
 
 struct RealSctpRxV4<'a> {
@@ -592,5 +593,43 @@ mod tests {
         assert_eq!(packet.len(), 32);
         assert_ne!(&packet[8..12], &[0, 0, 0, 0]);
         assert_eq!(parse_sctp_info(&packet), None);
+    }
+
+    #[test]
+    fn send_sctp_with_retry_retries_transient_enobufs() {
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
+        let mut attempts = 0;
+
+        send_sctp_with_retry(&[0; 12], destination, |packet, dest| {
+            attempts += 1;
+            assert_eq!(packet.len(), 12);
+            assert_eq!(dest, destination);
+            if attempts == 1 {
+                Err(std::io::Error::from_raw_os_error(libc::ENOBUFS))
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+
+        assert_eq!(attempts, 2);
+    }
+
+    #[test]
+    fn send_sctp_with_retry_returns_final_error() {
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
+        let mut attempts = 0;
+
+        let err = send_sctp_with_retry(&[0; 12], destination, |_, _| {
+            attempts += 1;
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "denied",
+            ))
+        })
+        .unwrap_err();
+
+        assert_eq!(attempts, 1);
+        assert!(err.to_string().contains("send SCTP probe failed"));
     }
 }

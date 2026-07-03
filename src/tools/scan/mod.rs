@@ -11,7 +11,7 @@ mod udp;
 
 use std::net::IpAddr;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use log::info;
 
 pub(crate) use arp::run_arp;
@@ -214,7 +214,11 @@ pub(crate) fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<Pr
                         prepared.estimated_packets,
                     )
                 }
-                _ => unreachable!("port scan variants are handled before target-scan dispatch"),
+                _ => {
+                    return Err(anyhow!(
+                        "unhandled scan request during preparation: {command:?}"
+                    ))
+                }
             }
         };
 
@@ -336,7 +340,9 @@ pub(crate) async fn run_command(
             )
             .await
         }
-        _ => unreachable!("port scan variants are handled before target-scan dispatch"),
+        _ => Err(anyhow!(
+            "unhandled scan request during execution: {command:?}"
+        )),
     }
 }
 

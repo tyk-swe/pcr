@@ -26,6 +26,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tokio::task;
 
 use crate::network::pnet_utils::open_transport_channel;
+use crate::tools::probe::remaining_probe_time;
 use crate::tools::TrafficRuntimeConfig;
 use crate::util::error::operation_failed;
 use crate::util::sync::LockResultExt;
@@ -33,6 +34,8 @@ use crate::util::sync::LockResultExt;
 use super::common::{
     push_scan_target, resolve_source_override, resolve_target, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
+
+const ICMP_RECEIVE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub(crate) async fn run_icmp(
     target: &str,
@@ -234,7 +237,14 @@ fn scan_hosts_concurrent_with_delay(
             let mut last_send = None;
             for (seq, target) in targets_owned.iter().enumerate() {
                 super::common::wait_for_send_delay(send_delay, &mut last_send);
-                if let Err(err) = tx.send_echo_request(*target, id, seq as u16) {
+                let sequence = match icmp_sequence_number(seq) {
+                    Ok(sequence) => sequence,
+                    Err(err) => {
+                        *send_error_ref.lock().ignore_poison() = Some(err);
+                        break;
+                    }
+                };
+                if let Err(err) = tx.send_echo_request(*target, id, sequence) {
                     *send_error_ref.lock().ignore_poison() = Some(err);
                     break;
                 }
@@ -246,21 +256,21 @@ fn scan_hosts_concurrent_with_delay(
         });
 
         // Receiver
-        let mut deadline_after_send: Option<Instant> = None;
+        let mut receive_window_started: Option<Instant> = None;
         loop {
-            if deadline_after_send.is_none()
+            if receive_window_started.is_none()
                 && sending_complete_ref.load(std::sync::atomic::Ordering::Acquire)
             {
-                deadline_after_send = Some(Instant::now() + timeout);
-            }
-            if let Some(deadline) = deadline_after_send {
-                if Instant::now() >= deadline {
-                    break;
-                }
+                receive_window_started = Some(Instant::now());
             }
 
+            let Some(poll_timeout) = icmp_receive_poll_timeout(receive_window_started, timeout)
+            else {
+                break;
+            };
+
             // Poll
-            match rx.next_reply(Duration::from_millis(100)) {
+            match rx.next_reply(poll_timeout) {
                 Ok(Some((src, reply_id, _seq))) => {
                     if reply_id == id {
                         // Found host
@@ -298,6 +308,23 @@ fn scan_hosts_concurrent_with_delay(
     verified.sort();
 
     Ok(verified)
+}
+
+fn icmp_sequence_number(seq: usize) -> Result<u16> {
+    u16::try_from(seq)
+        .map_err(|_| anyhow!("ICMP scan sequence number exceeded u16 range: index={seq}"))
+}
+
+fn icmp_receive_poll_timeout(
+    receive_window_started: Option<Instant>,
+    timeout: Duration,
+) -> Option<Duration> {
+    match receive_window_started {
+        Some(started_at) => remaining_probe_time(started_at, timeout)
+            .filter(|remaining| !remaining.is_zero())
+            .map(|remaining| ICMP_RECEIVE_POLL_INTERVAL.min(remaining)),
+        None => Some(ICMP_RECEIVE_POLL_INTERVAL),
+    }
 }
 
 // Traits
@@ -575,6 +602,35 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("scan target expansion exceeds limit"));
+    }
+
+    #[test]
+    fn icmp_sequence_number_rejects_values_outside_u16_range() {
+        assert_eq!(icmp_sequence_number(u16::MAX as usize).unwrap(), u16::MAX);
+
+        let err = icmp_sequence_number(usize::from(u16::MAX) + 1).unwrap_err();
+
+        assert!(err.to_string().contains("exceeded u16 range"));
+    }
+
+    #[test]
+    fn icmp_receive_poll_timeout_uses_remaining_time_without_deadline_addition() {
+        assert_eq!(
+            icmp_receive_poll_timeout(None, Duration::MAX),
+            Some(ICMP_RECEIVE_POLL_INTERVAL)
+        );
+        assert_eq!(
+            icmp_receive_poll_timeout(Some(Instant::now()), Duration::MAX),
+            Some(ICMP_RECEIVE_POLL_INTERVAL)
+        );
+
+        let expired_start = Instant::now()
+            .checked_sub(Duration::from_millis(200))
+            .expect("test instant can move back 200ms");
+        assert_eq!(
+            icmp_receive_poll_timeout(Some(expired_start), Duration::from_millis(100)),
+            None
+        );
     }
 
     #[test]

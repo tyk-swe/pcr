@@ -7,7 +7,7 @@ use crate::domain::spec::{
 };
 use crate::tools::fuzz::config::{FuzzConfig, FuzzProtocol, FuzzStrategy};
 use log::info;
-use rand::Rng;
+use rand::{Rng, RngExt};
 use std::future::Future;
 use std::net::IpAddr;
 use std::time::Duration;
@@ -110,12 +110,12 @@ fn rate_delay(rate_per_sec: u64) -> Duration {
 }
 
 fn generate_payload(strategy: &FuzzStrategy) -> Vec<u8> {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let mut payload = match strategy {
         FuzzStrategy::Boundary => Vec::new(),
         _ => {
-            let base_size = rng.gen_range(10..1024);
+            let base_size = rng.random_range(10..1024);
             let mut p = vec![0u8; base_size];
             rng.fill(&mut p[..]);
             p
@@ -130,21 +130,21 @@ fn mutate_payload<R: Rng>(payload: &mut Vec<u8>, strategy: &FuzzStrategy, rng: &
     match strategy {
         FuzzStrategy::BitFlip => {
             if !payload.is_empty() {
-                let byte_idx = rng.gen_range(0..payload.len());
-                let bit_idx = rng.gen_range(0..8);
+                let byte_idx = rng.random_range(0..payload.len());
+                let bit_idx = rng.random_range(0..8);
                 payload[byte_idx] ^= 1 << bit_idx;
             }
         }
         FuzzStrategy::ByteSwap => {
             if payload.len() >= 2 {
-                let idx1 = rng.gen_range(0..payload.len());
-                let idx2 = rng.gen_range(0..payload.len());
+                let idx1 = rng.random_range(0..payload.len());
+                let idx2 = rng.random_range(0..payload.len());
                 payload.swap(idx1, idx2);
             }
         }
         FuzzStrategy::RandomPayload => {} // Already random
         FuzzStrategy::Boundary => {
-            if rng.gen_bool(0.5) {
+            if rng.random_bool(0.5) {
                 payload.clear();
             } else {
                 payload.resize(1400, 0); // Resize to near MTU and fill with random data

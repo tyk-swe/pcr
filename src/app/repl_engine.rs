@@ -20,28 +20,28 @@ impl ReplEngine for Engine {
     fn run_one_shot<'a>(
         &'a mut self,
         request: PacketRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(Engine::run_one_shot(self, request))
     }
 
     fn run_listener<'a>(
         &'a mut self,
         request: ListenRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move { Engine::run_listener(self, &request).await })
     }
 
     fn run_scan<'a>(
         &'a mut self,
         request: ScanRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move { Engine::run_scan(self, &request).await })
     }
 
     fn run_traceroute<'a>(
         &'a mut self,
         request: TracerouteRequest,
-    ) -> std::pin::Pin<Box<dyn futures::Future<Output = Result<()>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move { Engine::run_traceroute(self, &request).await })
     }
 }

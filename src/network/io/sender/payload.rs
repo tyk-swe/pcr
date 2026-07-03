@@ -4,7 +4,7 @@
 use std::fs::{self, File};
 use std::io::Read;
 
-use rand::Rng;
+use rand::RngExt;
 
 use crate::domain::spec::PayloadSource;
 use crate::network::sender::error::{PayloadError, Result};
@@ -66,7 +66,7 @@ pub(crate) fn prepare_payload(source: &PayloadSource) -> Result<Vec<u8>> {
         }
         PayloadSource::Random(size) => {
             ensure_payload_size(*size as u64)?;
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             let mut buf = vec![0u8; *size];
             rng.fill(&mut buf[..]);
             buf
@@ -129,7 +129,7 @@ fn build_tls_client_hello_payload(server_name: &str) -> Result<Vec<u8>> {
     client_hello.extend_from_slice(&0x0303u16.to_be_bytes()); // Client Version
 
     // Random: 32 bytes (random-only for simplicity)
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut random = [0u8; 32];
     rng.fill(&mut random);
     client_hello.extend_from_slice(&random);

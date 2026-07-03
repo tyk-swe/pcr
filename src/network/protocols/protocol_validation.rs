@@ -33,21 +33,6 @@ pub(crate) struct OriginalTransport {
     pub(crate) payload: Vec<u8>,
 }
 
-#[cfg(any(feature = "scan", feature = "traceroute"))]
-impl OriginalTransport {
-    #[allow(dead_code)]
-    pub(crate) fn matches_expected(
-        &self,
-        expected_protocol: IpNextHeaderProtocol,
-        expected_source: Option<u16>,
-        expected_destination: u16,
-    ) -> bool {
-        self.protocol == expected_protocol
-            && expected_source.is_none_or(|source| self.source == source)
-            && self.destination == expected_destination
-    }
-}
-
 #[cfg(feature = "traceroute")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OriginalEcho {

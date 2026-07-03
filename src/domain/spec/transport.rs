@@ -170,16 +170,6 @@ impl TransportSpec {
         Self::infer_default(request, destination, prefer_ipv6)
     }
 
-    pub(crate) fn label(&self) -> &'static str {
-        match self {
-            TransportSpec::Auto => "AUTO",
-            TransportSpec::Tcp(_) => "TCP",
-            TransportSpec::Udp(_) => "UDP",
-            TransportSpec::Icmp(_) => "ICMP",
-            TransportSpec::Icmpv6(_) => "ICMPv6",
-        }
-    }
-
     fn infer_default(
         request: &TransportRequest,
         destination: Option<IpAddr>,
@@ -597,7 +587,6 @@ mod tests {
         let spec = TransportSpec::from_request(&TransportRequest::default(), None, true).unwrap();
 
         assert!(matches!(spec, TransportSpec::Icmpv6(_)));
-        assert_eq!(spec.label(), "ICMPv6");
     }
 
     #[test]
@@ -616,7 +605,6 @@ mod tests {
         .unwrap();
 
         assert!(matches!(spec, TransportSpec::Tcp(_)));
-        assert_eq!(spec.label(), "TCP");
     }
 
     #[test]

@@ -84,6 +84,7 @@ pub(crate) fn render_listener_hex(event: &ListenerEvent) -> (String, Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "pcap")]
     use crate::domain::event::ProtocolLabel;
     use std::time::SystemTime;
 
@@ -98,6 +99,7 @@ mod tests {
             network_protocol: None,
             transport: None,
             detail: None,
+            #[cfg(feature = "pcap")]
             protocol_label: ProtocolLabel::Unknown,
             data,
             show_payload: true,

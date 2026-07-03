@@ -44,25 +44,12 @@ impl fmt::Display for RuleDiagnostic {
 
 #[derive(Debug, Clone)]
 pub(crate) struct RuleLoadReport {
-    pub diagnostics: Vec<RuleDiagnostic>,
     rules: Vec<Rule>,
 }
 
 impl RuleLoadReport {
-    pub(crate) fn new(rules: Vec<Rule>, diagnostics: Vec<RuleDiagnostic>) -> Self {
-        Self { diagnostics, rules }
-    }
-
-    pub(crate) fn diagnostics(&self) -> &[RuleDiagnostic] {
-        &self.diagnostics
-    }
-
-    pub(crate) fn rule_count(&self) -> usize {
-        self.rules.len()
-    }
-
-    pub(crate) fn has_errors(&self) -> bool {
-        self.diagnostics.iter().any(RuleDiagnostic::is_error)
+    pub(crate) fn new(rules: Vec<Rule>) -> Self {
+        Self { rules }
     }
 
     #[cfg(feature = "daemon")]
@@ -91,27 +78,6 @@ impl Default for RuleLoadOptions {
 }
 
 impl RuleLoadOptions {
-    pub(crate) fn strict() -> Self {
-        Self {
-            strict: true,
-            ..Self::default()
-        }
-    }
-
-    pub(crate) fn with_strict(mut self, strict: bool) -> Self {
-        self.strict = strict;
-        self
-    }
-
-    pub(crate) fn with_diagnostic_logging(mut self, log_diagnostics: bool) -> Self {
-        self.log_diagnostics = log_diagnostics;
-        self
-    }
-
-    pub(crate) fn validation() -> Self {
-        Self::default().with_diagnostic_logging(false)
-    }
-
     pub(crate) fn unknown_field_severity(&self) -> RuleDiagnosticSeverity {
         if self.strict {
             RuleDiagnosticSeverity::Error
@@ -175,7 +141,10 @@ mod tests {
 
     #[test]
     fn rule_load_options_strict_promotes_unknown_fields_to_errors() {
-        let options = RuleLoadOptions::strict();
+        let options = RuleLoadOptions {
+            strict: true,
+            ..Default::default()
+        };
 
         assert!(options.strict);
         assert_eq!(
@@ -185,18 +154,22 @@ mod tests {
     }
 
     #[test]
-    fn rule_load_options_validation_disables_diagnostic_logging() {
-        let options = RuleLoadOptions::validation();
+    fn rule_load_options_can_disable_diagnostic_logging() {
+        let options = RuleLoadOptions {
+            log_diagnostics: false,
+            ..Default::default()
+        };
 
         assert!(!options.strict);
         assert!(!options.log_diagnostics);
     }
 
     #[test]
-    fn rule_load_options_builder_methods_update_single_fields() {
-        let options = RuleLoadOptions::default()
-            .with_strict(true)
-            .with_diagnostic_logging(false);
+    fn rule_load_options_struct_literal_can_configure_strict_no_log_mode() {
+        let options = RuleLoadOptions {
+            strict: true,
+            log_diagnostics: false,
+        };
 
         assert!(options.strict);
         assert!(!options.log_diagnostics);
@@ -207,25 +180,8 @@ mod tests {
     }
 
     #[test]
-    fn rule_load_report_accessors_borrow_diagnostics_and_count_rules() {
-        let diagnostics = vec![diagnostic(RuleDiagnosticSeverity::Warning)];
-        let report = RuleLoadReport::new(vec![rule("startup")], diagnostics.clone());
-
-        assert_eq!(report.rule_count(), 1);
-        assert_eq!(report.diagnostics(), diagnostics.as_slice());
-        assert!(!report.has_errors());
-    }
-
-    #[test]
-    fn rule_load_report_has_errors_detects_error_diagnostics() {
-        let report = RuleLoadReport::new(vec![], vec![diagnostic(RuleDiagnosticSeverity::Error)]);
-
-        assert!(report.has_errors());
-    }
-
-    #[test]
     fn rule_load_report_into_rules_returns_owned_rules() {
-        let rules = RuleLoadReport::new(vec![rule("one"), rule("two")], vec![]).into_rules();
+        let rules = RuleLoadReport::new(vec![rule("one"), rule("two")]).into_rules();
 
         assert_eq!(rules.len(), 2);
         assert_eq!(rules[0].name.as_deref(), Some("one"));

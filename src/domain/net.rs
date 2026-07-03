@@ -10,6 +10,7 @@ use thiserror::Error;
 pub(crate) struct MacAddress([u8; 6]);
 
 impl MacAddress {
+    #[cfg(any(test, feature = "pcap"))]
     pub(crate) fn new(octets: [u8; 6]) -> Self {
         Self(octets)
     }
@@ -65,9 +66,6 @@ impl EtherType {
     pub(crate) const PPPOE_DISCOVERY: Self = Self(0x8863);
     pub(crate) const PPPOE_SESSION: Self = Self(0x8864);
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct IpProtocol(pub u8);
 
 #[cfg(test)]
 mod tests {

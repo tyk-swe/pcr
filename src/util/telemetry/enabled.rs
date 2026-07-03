@@ -31,6 +31,7 @@ static BYTES_SENT: LazyLock<IntCounterVec> = LazyLock::new(|| {
         &["link_type", "transport"],
     )
 });
+#[cfg(feature = "pcap")]
 static LISTENER_PACKETS: LazyLock<IntCounterVec> = LazyLock::new(|| {
     register_metric(
         "packetcraftr_listener_packets_total",
@@ -52,6 +53,7 @@ static RULE_ACTION_DROPS: LazyLock<IntCounterVec> = LazyLock::new(|| {
         &["action", "reason"],
     )
 });
+#[cfg(feature = "pcap")]
 static LISTENER_DROPPED_PACKETS: LazyLock<IntCounterVec> = LazyLock::new(|| {
     register_metric(
         "packetcraftr_listener_dropped_packets_total",
@@ -102,7 +104,7 @@ pub(crate) fn get_frame_sent_counters(
     )
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "pcap")]
 pub(crate) fn record_listener_packet(protocol: &str) {
     let proto = normalise_label(protocol);
     LISTENER_PACKETS.with_label_values(&[proto]).inc();
@@ -120,7 +122,7 @@ pub(crate) fn record_rule_executor_drop(action: &str, reason: &str) {
     RULE_ACTION_DROPS.with_label_values(&[action, reason]).inc();
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "pcap")]
 pub(crate) fn record_listener_dropped_packet(reason: &str) {
     let reason = normalise_label(reason);
     LISTENER_DROPPED_PACKETS.with_label_values(&[reason]).inc();

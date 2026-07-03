@@ -181,6 +181,7 @@ pub(crate) enum PayloadSource {
     TlsClientHello {
         server_name: String,
     },
+    #[cfg(any(test, feature = "fuzz"))]
     Bytes(Vec<u8>),
 }
 

@@ -10,10 +10,9 @@ use crate::domain::policy::TrafficPolicy;
 use crate::domain::request::PacketRequest;
 use crate::engine::ports::RuleActionTelemetry;
 use crate::engine::send::SendUseCase;
-use crate::rules::send::{RuleSendDispatcher, RuleSendTemplate};
 use crate::rules::{
     validate_rule_send_request, BoundedExecutor, ExecutorError, PacketContext, RuleActionError,
-    RuleError,
+    RuleError, RuleSendDispatcher, RuleSendTemplate,
 };
 
 const RULE_SEND_EXECUTOR_WORKERS: usize = 4;

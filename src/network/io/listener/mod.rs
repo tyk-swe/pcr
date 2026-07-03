@@ -18,12 +18,12 @@ use crate::domain::request::ListenerRequest;
 use crate::domain::spec::ListenerSpec;
 
 #[cfg(feature = "pcap")]
-pub(crate) mod capture;
+mod capture;
 #[cfg(any(feature = "daemon", feature = "pcap"))]
 mod config;
 pub(crate) mod error;
 #[cfg(feature = "pcap")]
-pub(crate) mod process;
+mod process;
 mod runtime;
 
 pub(crate) use error::ListenerError;

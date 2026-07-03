@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 use crate::domain::net::MacAddress;
 
+#[cfg(feature = "pcap")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProtocolLabel {
     Tcp,
@@ -16,6 +17,7 @@ pub(crate) enum ProtocolLabel {
     Unknown,
 }
 
+#[cfg(feature = "pcap")]
 impl ProtocolLabel {
     pub(crate) fn as_str(&self) -> &'static str {
         match self {
@@ -40,13 +42,14 @@ pub(crate) struct ListenerEvent {
     pub network_protocol: Option<String>,
     pub transport: Option<String>,
     pub detail: Option<String>,
+    #[cfg(feature = "pcap")]
     pub protocol_label: ProtocolLabel,
     pub data: Vec<u8>,
     pub show_payload: bool,
     pub truncated: bool,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "pcap"))]
 mod tests {
     use super::*;
 

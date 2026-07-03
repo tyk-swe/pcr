@@ -7,9 +7,7 @@ use std::sync::Arc;
 use log::{debug, error, trace, warn};
 use tokio::runtime::Handle;
 
-use crate::rules::config::{
-    RuleExecutorConfig, RULE_EXECUTOR_QUEUE_CAPACITY, RULE_EXECUTOR_WORKERS,
-};
+use crate::rules::config::RuleExecutorConfig;
 use crate::rules::diagnostic::{
     RuleDiagnostic, RuleDiagnosticSeverity, RuleLoadOptions, RuleLoadReport,
 };
@@ -44,27 +42,10 @@ pub(crate) struct RuleEngine {
 }
 
 impl RuleEngine {
-    pub(crate) fn new() -> std::result::Result<Self, RuleError> {
-        Self::new_configured(RuleExecutorConfig {
-            workers: RULE_EXECUTOR_WORKERS,
-            queue_capacity: RULE_EXECUTOR_QUEUE_CAPACITY,
-        })
-    }
-
     pub(crate) fn new_configured(
         config: RuleExecutorConfig,
     ) -> std::result::Result<Self, RuleError> {
         Self::new_configured_with_runtime_source(config, None)
-    }
-
-    pub(crate) fn new_with_runtime_handle(handle: Handle) -> std::result::Result<Self, RuleError> {
-        Self::new_configured_with_runtime_handle(
-            RuleExecutorConfig {
-                workers: RULE_EXECUTOR_WORKERS,
-                queue_capacity: RULE_EXECUTOR_QUEUE_CAPACITY,
-            },
-            handle,
-        )
     }
 
     pub(crate) fn new_configured_with_runtime_handle(
@@ -113,30 +94,6 @@ impl RuleEngine {
         self.sender.as_deref()
     }
 
-    pub(crate) fn validate_rules_from_path<P: AsRef<std::path::Path>>(
-        path: P,
-    ) -> Result<RuleLoadReport> {
-        Self::load_rules_from_path_with_options(path, RuleLoadOptions::validation())
-    }
-
-    pub(crate) fn validate_rules_from_path_with_options<P: AsRef<std::path::Path>>(
-        path: P,
-        options: RuleLoadOptions,
-    ) -> Result<RuleLoadReport> {
-        Self::load_rules_from_path_with_options(path, options.with_diagnostic_logging(false))
-    }
-
-    pub(crate) fn validate_rules_from_str(input: &str) -> Result<RuleLoadReport> {
-        Self::load_rules_from_str_with_options(input, RuleLoadOptions::validation())
-    }
-
-    pub(crate) fn validate_rules_from_str_with_options(
-        input: &str,
-        options: RuleLoadOptions,
-    ) -> Result<RuleLoadReport> {
-        Self::load_rules_from_str_with_options(input, options.with_diagnostic_logging(false))
-    }
-
     pub(crate) fn load_rules_from_path_with_options<P: AsRef<std::path::Path>>(
         path: P,
         options: RuleLoadOptions,
@@ -148,13 +105,6 @@ impl RuleEngine {
             source,
         })?;
         Self::load_rules_from_str_with_source(&data, source_name, options)
-    }
-
-    pub(crate) fn load_rules_from_str_with_options(
-        input: &str,
-        options: RuleLoadOptions,
-    ) -> Result<RuleLoadReport> {
-        Self::load_rules_from_str_with_source(input, "<rules>".to_string(), options)
     }
 
     pub(crate) fn load_rules_from_path<P: AsRef<std::path::Path>>(path: P) -> Result<Vec<Rule>> {
@@ -196,24 +146,16 @@ impl RuleEngine {
             return Err(RuleError::validation(diagnostics));
         }
 
-        Ok(RuleLoadReport::new(parsed, diagnostics))
+        Ok(RuleLoadReport::new(parsed))
     }
 
+    #[cfg(feature = "daemon")]
     pub(crate) fn load_from_path<P: AsRef<std::path::Path>>(&mut self, path: P) -> Result<()> {
         self.rules = Self::load_rules_from_path(path)?;
         Ok(())
     }
 
-    pub(crate) fn load_from_path_with_options<P: AsRef<std::path::Path>>(
-        &mut self,
-        path: P,
-        options: RuleLoadOptions,
-    ) -> Result<RuleLoadReport> {
-        let report = Self::load_rules_from_path_with_options(path, options)?;
-        self.rules = report.clone().into_rules();
-        Ok(report)
-    }
-
+    #[cfg(any(test, feature = "daemon", feature = "repl"))]
     pub(crate) fn len(&self) -> usize {
         self.rules.len()
     }
@@ -239,10 +181,12 @@ impl RuleEngine {
         }
     }
 
+    #[cfg(any(test, feature = "daemon", feature = "repl"))]
     pub(crate) fn has_receive_triggers(&self) -> bool {
         self.rules.iter().any(|rule| rule.triggers_on_receive())
     }
 
+    #[cfg(any(test, feature = "daemon"))]
     pub(crate) fn has_timer_triggers(&self) -> bool {
         self.rules.iter().any(|rule| rule.triggers_on_timer())
     }
@@ -253,6 +197,7 @@ impl RuleEngine {
             .any(|rule| matches!(&rule.trigger, RuleTrigger::Startup))
     }
 
+    #[cfg(feature = "daemon")]
     pub(crate) fn run_timer_actions(&self) {
         for rule in &self.rules {
             if rule.triggers_on_timer() {
@@ -277,7 +222,6 @@ impl RuleEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::rules::diagnostic::RULE_PARSE_UNKNOWN_FIELD;
     use crate::rules::error::RuleActionError;
 
     const VALID_RULE: &str = r#"
@@ -291,26 +235,40 @@ mod tests {
     - type: log
       level: info
       message: "packet {description}"
-"#;
+    "#;
+
+    fn load_rules(input: &str) -> Result<RuleLoadReport> {
+        RuleEngine::load_rules_from_str_with_source(
+            input,
+            "<test-rules>".to_string(),
+            RuleLoadOptions {
+                log_diagnostics: false,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn load_rules_with_options(input: &str, options: RuleLoadOptions) -> Result<RuleLoadReport> {
+        RuleEngine::load_rules_from_str_with_source(input, "<test-rules>".to_string(), options)
+    }
 
     #[test]
     fn load_rules_from_str_parses_valid_rule() {
-        let report = RuleEngine::validate_rules_from_str(VALID_RULE).unwrap();
+        let rules = load_rules(VALID_RULE).unwrap().into_rules();
 
-        assert_eq!(report.rule_count(), 1);
-        assert!(!report.has_errors());
-        assert!(report.diagnostics().is_empty());
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].name.as_deref(), Some("log-tcp"));
     }
 
     #[test]
     fn load_rules_from_str_rejects_empty_rule_list() {
-        let err = RuleEngine::validate_rules_from_str("[]").unwrap_err();
+        let err = load_rules("[]").unwrap_err();
 
         assert!(matches!(err, RuleError::EmptyRulesFile));
     }
 
     #[test]
-    fn unknown_fields_are_warnings_by_default() {
+    fn unknown_fields_are_accepted_as_warnings_by_default() {
         let yaml = r#"
 - name: unknowns
   unexpected_rule_field: true
@@ -323,15 +281,12 @@ mod tests {
       message: hi
       extra_action_field: true
 "#;
-        let report = RuleEngine::validate_rules_from_str(yaml).unwrap();
+        let rules = load_rules_with_options(yaml, RuleLoadOptions::default())
+            .unwrap()
+            .into_rules();
 
-        let diagnostics = report.diagnostics();
-        assert_eq!(diagnostics.len(), 3);
-        assert!(diagnostics.iter().all(|d| {
-            d.code == RULE_PARSE_UNKNOWN_FIELD
-                && d.severity == RuleDiagnosticSeverity::Warning
-                && !d.is_error()
-        }));
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].name.as_deref(), Some("unknowns"));
     }
 
     #[test]
@@ -344,9 +299,12 @@ mod tests {
         data: hi
         unknown_payload_field: true
 "#;
-        let err = RuleEngine::validate_rules_from_str_with_options(
+        let err = load_rules_with_options(
             yaml,
-            RuleLoadOptions::validation().with_strict(true),
+            RuleLoadOptions {
+                strict: true,
+                log_diagnostics: false,
+            },
         )
         .unwrap_err();
 
@@ -362,7 +320,7 @@ mod tests {
 
     #[test]
     fn missing_action_from_yaml_includes_rule_context() {
-        let err = RuleEngine::validate_rules_from_str(
+        let err = load_rules(
             r#"
 - name: no-actions
   trigger: receive
@@ -382,7 +340,7 @@ mod tests {
 
     #[test]
     fn command_definition_errors_are_wrapped_with_action_context() {
-        let err = RuleEngine::validate_rules_from_str(
+        let err = load_rules(
             r#"
 - name: command
   actions:
@@ -406,7 +364,7 @@ mod tests {
 
     #[test]
     fn legacy_send_options_wrapper_is_rejected_from_yaml() {
-        let err = RuleEngine::validate_rules_from_str(
+        let err = load_rules(
             r#"
 - name: legacy-send
   actions:
@@ -429,7 +387,7 @@ mod tests {
 
     #[test]
     fn rule_engine_reports_trigger_presence_after_replace() {
-        let rules = RuleEngine::validate_rules_from_str(
+        let rules = load_rules(
             r#"
 - name: timer
   trigger: timer

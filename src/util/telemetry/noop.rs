@@ -17,12 +17,12 @@ pub(crate) fn get_frame_sent_counters(
     (NoopCounter, NoopCounter)
 }
 
-#[allow(dead_code)]
+#[cfg(feature = "pcap")]
 pub(crate) fn record_listener_packet(_protocol: &str) {}
 
 pub(crate) fn record_rule_action(_action: &str, _outcome: &str) {}
 
 pub(crate) fn record_rule_executor_drop(_action: &str, _reason: &str) {}
 
-#[allow(dead_code)]
+#[cfg(feature = "pcap")]
 pub(crate) fn record_listener_dropped_packet(_reason: &str) {}

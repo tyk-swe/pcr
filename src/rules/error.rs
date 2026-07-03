@@ -102,13 +102,6 @@ impl RuleError {
             diagnostics,
         }
     }
-
-    pub(crate) fn diagnostics(&self) -> Option<&[RuleDiagnostic]> {
-        match self {
-            RuleError::Validation { diagnostics, .. } => Some(diagnostics),
-            _ => None,
-        }
-    }
 }
 
 fn rule_context(rule_index: usize, rule_name: Option<&str>) -> String {
@@ -208,15 +201,6 @@ mod tests {
             "rule validation failed with 1 error diagnostic(s)"
         );
         assert!(matches!(err, RuleError::Validation { errors: 1, .. }));
-    }
-
-    #[test]
-    fn diagnostics_accessor_only_returns_validation_diagnostics() {
-        let diagnostics = vec![unknown_error()];
-        let validation = RuleError::validation(diagnostics.clone());
-
-        assert_eq!(validation.diagnostics(), Some(diagnostics.as_slice()));
-        assert!(RuleError::EmptyRulesFile.diagnostics().is_none());
     }
 
     #[test]

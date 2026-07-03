@@ -7,6 +7,7 @@ use crate::domain::policy::PolicyOutcome;
 use crate::domain::report::PreflightView;
 use crate::domain::spec::{PacketSpec, PayloadSource, TransportSpec};
 
+#[cfg(any(test, feature = "fuzz"))]
 use super::format::format_preview;
 
 #[derive(Debug, Clone, Serialize)]
@@ -173,6 +174,7 @@ fn payload_json(plan: &PacketSpec) -> serde_json::Value {
             "type": "tls_client_hello",
             "server_name": server_name
         }),
+        #[cfg(any(test, feature = "fuzz"))]
         PayloadSource::Bytes(bytes) => serde_json::json!({
             "type": "bytes",
             "size": bytes.len(),
@@ -310,7 +312,6 @@ mod tests {
             log_file: Some(PathBuf::from("app.log")),
             pcap_write: Some(PathBuf::from("sent.pcap")),
             metrics_json: Some(PathBuf::from("metrics.json")),
-            ..Default::default()
         };
         spec
     }
@@ -332,8 +333,6 @@ mod tests {
             units_per_attempt: 1,
             total_emitted_units: Some(2),
             send_mode: "finite",
-            frame_count: 1,
-            largest_frame_len: 64,
             transmit,
         }
     }

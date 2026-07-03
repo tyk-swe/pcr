@@ -12,7 +12,7 @@ use crate::rules::send::{RuleSendDispatcher, RuleSendTemplate};
 
 type Result<T> = std::result::Result<T, RuleError>;
 
-pub(crate) mod command;
+mod command;
 mod logging;
 
 #[derive(Debug, Deserialize, Clone)]

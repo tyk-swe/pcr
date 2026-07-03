@@ -83,6 +83,7 @@ pub(crate) fn prepare_payload(source: &PayloadSource) -> Result<Vec<u8>> {
         PayloadSource::TlsClientHello { server_name } => {
             build_tls_client_hello_payload(server_name)?
         }
+        #[cfg(any(test, feature = "fuzz"))]
         PayloadSource::Bytes(b) => {
             ensure_payload_size(b.len() as u64)?;
             b.clone()

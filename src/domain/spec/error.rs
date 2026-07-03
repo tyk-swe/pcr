@@ -136,36 +136,6 @@ pub(crate) enum SpecError {
         #[source]
         source: ParseIntError,
     },
-    #[error("parse MSS option failed: token='{token}'")]
-    TcpOptionMssParse {
-        token: String,
-        #[source]
-        source: ParseIntError,
-    },
-    #[error("parse window scale option failed: token='{token}'")]
-    TcpOptionWindowScaleParse {
-        token: String,
-        #[source]
-        source: ParseIntError,
-    },
-    #[error("timestamps option '{token}' must use ts=val:ecr")]
-    TcpOptionTimestampFormat { token: String },
-    #[error("raw TCP option '{token}' must contain an even number of hexadecimal characters")]
-    TcpOptionRawOddLength { token: String },
-    #[error("invalid hex digit '{digit}' in option '{token}'")]
-    TcpOptionInvalidHexDigit { digit: char, token: String },
-    #[error("parse timestamp option value failed: token='{token}'")]
-    TcpOptionTimestampValueParse {
-        token: String,
-        #[source]
-        source: ParseIntError,
-    },
-    #[error("parse timestamp option echo value failed: token='{token}'")]
-    TcpOptionTimestampEchoParse {
-        token: String,
-        #[source]
-        source: ParseIntError,
-    },
     #[error("TCP total header length {length} exceeds maximum of {max} bytes")]
     TcpHeaderTooLong { length: usize, max: usize },
     #[error("TCP options length {length} must be 4-byte aligned")]
@@ -184,20 +154,24 @@ pub(crate) enum SpecError {
     InvalidHttpHost,
     #[error("{field} must be a non-empty ASCII DNS hostname within DNS length limits")]
     InvalidDnsHostname { field: &'static str },
+    #[cfg(not(feature = "pcap"))]
     #[error("--filter requires Packetcraft to be built with the 'pcap' feature")]
     FilterRequiresPcap,
+    #[cfg(not(feature = "pcap"))]
     #[error("--listen-reply requires Packetcraft to be built with the 'pcap' feature")]
     ListenReplyRequiresPcap,
+    #[cfg(not(feature = "pcap"))]
     #[error("--show-reply requires Packetcraft to be built with the 'pcap' feature")]
     ShowReplyRequiresPcap,
+    #[cfg(not(feature = "pcap"))]
     #[error("--pcap-save requires Packetcraft to be built with the 'pcap' feature")]
     PcapSaveRequiresFeature,
+    #[cfg(not(feature = "pcap"))]
     #[error("--pcap-write requires Packetcraft to be built with the 'pcap' feature")]
     PcapWriteRequiresFeature,
+    #[cfg(not(feature = "metrics"))]
     #[error("metrics options require PacketcraftR to be built with the 'metrics' feature")]
     MetricsRequiresFeature,
-    #[error("resolve hostname failed: host='{host}': {message}")]
-    HostnameResolution { host: String, message: String },
     #[error("source IP address {src_ip} does not match target IP version (IPv{target_version})")]
     SourceIpVersionMismatch { src_ip: IpAddr, target_version: u8 },
     #[error("target address {target} conflicts with --prefer-ipv{prefer_version}")]

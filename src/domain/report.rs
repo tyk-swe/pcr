@@ -24,8 +24,6 @@ pub(crate) struct PreflightView {
     pub units_per_attempt: u64,
     pub total_emitted_units: Option<u64>,
     pub send_mode: &'static str,
-    pub frame_count: usize,
-    pub largest_frame_len: usize,
     pub transmit: TransmissionSpec,
 }
 
@@ -57,8 +55,6 @@ impl PreflightView {
             units_per_attempt: accounting.units_per_attempt,
             total_emitted_units: accounting.total_emitted_units,
             send_mode,
-            frame_count: plan.summary.frame_count,
-            largest_frame_len: plan.summary.largest_frame_len,
             transmit: plan.transmit.clone(),
         })
     }
@@ -176,8 +172,6 @@ mod tests {
         assert_eq!(view.source_ip, "192.0.2.5");
         assert_eq!(view.source_reason, "explicit_source_ip");
         assert_eq!(view.transport, "udp");
-        assert_eq!(view.frame_count, 2);
-        assert_eq!(view.largest_frame_len, 9);
     }
 
     #[test]
@@ -252,7 +246,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        plan.policy = TransmissionPolicy::new(true, false);
+        plan.policy = TransmissionPolicy {
+            allow_unbounded_sends: true,
+            ..Default::default()
+        };
 
         let view = PreflightView::from_transmission_plan(&plan).unwrap();
 

@@ -105,6 +105,7 @@ impl Rule {
         matches!(&self.trigger, RuleTrigger::Receive)
     }
 
+    #[cfg(any(test, feature = "daemon"))]
     pub(crate) fn triggers_on_timer(&self) -> bool {
         matches!(&self.trigger, RuleTrigger::Timer)
     }

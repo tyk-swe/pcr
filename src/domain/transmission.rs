@@ -343,7 +343,10 @@ mod tests {
                 loop_send: true,
                 ..spec()
             },
-            TransmissionPolicy::new(true, false),
+            TransmissionPolicy {
+                allow_unbounded_sends: true,
+                ..Default::default()
+            },
         )
         .unwrap();
 
@@ -380,7 +383,10 @@ mod tests {
                 flood: true,
                 ..spec()
             },
-            TransmissionPolicy::new(true, false),
+            TransmissionPolicy {
+                allow_unbounded_sends: true,
+                ..Default::default()
+            },
             4,
         )
         .unwrap();

@@ -7,7 +7,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::domain::request::{PacketRequest, TransmissionRequest};
+use crate::domain::request::PacketRequest;
 use crate::domain::spec::{Ipv6ExtHeader, PacketSpec, TargetAddress, TransportSpec};
 
 pub(crate) const DEFAULT_MAX_TARGETS: usize = 256;
@@ -48,14 +48,6 @@ pub(crate) struct TrafficPolicy {
 }
 
 impl TrafficPolicy {
-    pub(crate) fn new(allow_unbounded_sends: bool, dry_run: bool) -> Self {
-        Self {
-            allow_unbounded_sends,
-            dry_run,
-            ..Default::default()
-        }
-    }
-
     pub(crate) fn with_dry_run(mut self, dry_run: bool) -> Self {
         self.dry_run = dry_run;
         self
@@ -389,23 +381,6 @@ impl fmt::Display for PolicyRejectionCode {
     }
 }
 
-pub(crate) fn validate_unbounded_request_policy(
-    request: &TransmissionRequest,
-    policy: TransmissionPolicy,
-) -> Result<(), PolicyRejection> {
-    let packet_request = PacketRequest {
-        transmit: request.clone(),
-        ..Default::default()
-    };
-    policy
-        .authorize(&TrafficPlan::from_packet_request(
-            &packet_request,
-            TrafficMode::Send,
-            &policy,
-        ))
-        .map(|_| ())
-}
-
 pub(crate) fn classify_ip(addr: IpAddr) -> TargetScope {
     match addr {
         IpAddr::V4(addr) => classify_ipv4(addr),
@@ -622,6 +597,15 @@ mod tests {
         plan.estimated_packets = None;
 
         assert_eq!(rejection_code(plan), PolicyRejectionCode::UnboundedSend);
+
+        let policy = TrafficPolicy {
+            allow_unbounded_sends: true,
+            ..Default::default()
+        };
+        let mut allowed = plan_with(TargetScope::Private);
+        allowed.unbounded = true;
+        allowed.estimated_packets = None;
+        assert!(policy.authorize(&allowed).is_ok());
     }
 
     #[test]
@@ -880,24 +864,6 @@ mod tests {
         assert_eq!(
             packet_spec_privileges(&raw),
             vec![TrafficPrivilege::RawSocket]
-        );
-    }
-
-    #[test]
-    fn validate_unbounded_request_policy_reuses_packet_policy() {
-        let request = TransmissionRequest {
-            loop_forever: Some(true),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            validate_unbounded_request_policy(&request, TrafficPolicy::default())
-                .unwrap_err()
-                .code,
-            PolicyRejectionCode::UnboundedSend
-        );
-        assert!(
-            validate_unbounded_request_policy(&request, TrafficPolicy::new(true, false)).is_ok()
         );
     }
 }

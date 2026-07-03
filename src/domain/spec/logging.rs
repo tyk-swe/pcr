@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use super::error::SpecResult;
 
-use crate::domain::request::{LogLevel, LoggingRequest};
+use crate::domain::request::LoggingRequest;
 
 #[cfg(feature = "pcap")]
 mod pcap_write {
@@ -59,10 +59,6 @@ pub(crate) struct LoggingSpec {
     pub log_file: Option<PathBuf>,
     pub pcap_write: Option<PathBuf>,
     pub metrics_json: Option<PathBuf>,
-    pub log_level: Option<LogLevel>,
-    pub structured: bool,
-    pub prometheus_bind: Option<String>,
-    pub allow_public_metrics: bool,
 }
 
 impl LoggingSpec {
@@ -74,10 +70,6 @@ impl LoggingSpec {
             log_file: request.log_file.as_ref().map(PathBuf::from),
             pcap_write: request.pcap_write.as_ref().map(PathBuf::from),
             metrics_json: request.metrics_json.as_ref().map(PathBuf::from),
-            log_level: request.log_level,
-            structured: request.structured.unwrap_or(false),
-            prometheus_bind: request.prometheus_bind.clone(),
-            allow_public_metrics: request.allow_public_metrics.unwrap_or(false),
         })
     }
 }
@@ -93,8 +85,6 @@ mod tests {
     fn logging_spec_maps_supported_fields() {
         let spec = LoggingSpec::from_request(&LoggingRequest {
             log_file: Some("packets.log".to_string()),
-            log_level: Some(LogLevel::Info),
-            structured: Some(true),
             ..Default::default()
         })
         .unwrap();
@@ -105,8 +95,6 @@ mod tests {
                 .map(|path| path.display().to_string()),
             Some("packets.log".to_string())
         );
-        assert_eq!(spec.log_level, Some(LogLevel::Info));
-        assert!(spec.structured);
     }
 
     #[cfg(not(feature = "pcap"))]

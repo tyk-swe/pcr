@@ -161,6 +161,7 @@ impl OutputController {
             PayloadSource::TlsClientHello { server_name } => {
                 println!("payload: TLS Client Hello (SNI: {})", server_name);
             }
+            #[cfg(any(test, feature = "fuzz"))]
             PayloadSource::Bytes(bytes) => {
                 println!("payload: {} bytes (raw)", bytes.len());
             }

@@ -246,7 +246,7 @@ impl ReverseDnsCache {
     }
 
     fn resolve(&mut self, addr: IpAddr) -> String {
-        self.resolve_with(addr, |addr| lookup_addr(addr))
+        self.resolve_with(addr, lookup_addr)
     }
 
     fn resolve_with<Lookup, Error>(&mut self, addr: IpAddr, mut lookup: Lookup) -> String

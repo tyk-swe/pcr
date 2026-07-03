@@ -236,3 +236,135 @@ fn dns_flags(message: &Message) -> Vec<String> {
     }
     flags
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::policy::{TargetScope, TrafficBudget};
+    use std::net::{IpAddr, Ipv4Addr};
+    use trust_dns_proto::op::{MessageType, OpCode, Query, ResponseCode};
+    use trust_dns_proto::rr::rdata::A;
+    use trust_dns_proto::rr::{DNSClass, Name, RData, Record};
+
+    fn dns_request(transport: DnsTransportMode, retries: u8) -> DnsRequest {
+        DnsRequest {
+            domain: "example.test".to_string(),
+            record_type: "A".to_string(),
+            server: "192.0.2.53".to_string(),
+            timeout: 500,
+            transaction_id: Some(7),
+            transport,
+            retries,
+        }
+    }
+
+    #[test]
+    fn traffic_plan_for_udp_counts_initial_attempt_plus_retries() {
+        let options = dns_request(DnsTransportMode::Udp, 2);
+        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 53);
+        let plan = traffic_plan_for_target(&options, TrafficPolicy::default(), target);
+
+        assert_eq!(plan.estimated_packets, Some(3));
+    }
+
+    #[test]
+    fn traffic_plan_for_auto_counts_udp_and_tcp_retry_budgets() {
+        let options = dns_request(DnsTransportMode::Auto, 2);
+        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 53);
+        let plan = traffic_plan_for_target(&options, TrafficPolicy::default(), target);
+
+        assert_eq!(plan.estimated_packets, Some(6));
+    }
+
+    #[test]
+    fn traffic_plan_records_target_scope_and_rate_metadata() {
+        let options = dns_request(DnsTransportMode::Tcp, 0);
+        let policy = TrafficPolicy {
+            budget: TrafficBudget {
+                max_rate_per_sec: 7,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
+        let plan = traffic_plan_for_target(&options, policy, target);
+
+        assert_eq!(plan.target_scope, TargetScope::Public);
+        assert_eq!(plan.rate_per_sec, Some(7));
+    }
+
+    #[test]
+    fn traffic_plan_sets_single_target_port_and_batch_metadata() {
+        let options = dns_request(DnsTransportMode::Tcp, 1);
+        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 5353);
+        let plan = traffic_plan_for_target(&options, TrafficPolicy::default(), target);
+
+        assert_eq!(plan.target_count, 1);
+        assert_eq!(plan.port_count, 1);
+        assert_eq!(plan.batch_size, 1);
+    }
+
+    #[test]
+    fn dns_flags_returns_flags_in_display_order() {
+        let mut message = Message::new();
+        message
+            .set_authoritative(true)
+            .set_truncated(true)
+            .set_recursion_desired(true)
+            .set_recursion_available(true);
+
+        assert_eq!(dns_flags(&message), ["AA", "TC", "RD", "RA"]);
+    }
+
+    #[test]
+    fn dns_flags_omits_unset_flags() {
+        assert!(dns_flags(&Message::new()).is_empty());
+    }
+
+    #[test]
+    fn dns_query_result_extracts_message_fields_and_metadata() {
+        let mut message = Message::new();
+        message.set_id(0x1234);
+        message.set_message_type(MessageType::Response);
+        message.set_op_code(OpCode::Query);
+        message.set_response_code(ResponseCode::NoError);
+        message.set_recursion_available(true);
+
+        let mut query = Query::new();
+        query.set_name(Name::from_ascii("example.test.").unwrap());
+        query.set_query_type(RecordType::A);
+        query.set_query_class(DNSClass::IN);
+        message.add_query(query);
+        message.add_answer(Record::from_rdata(
+            Name::from_ascii("example.test.").unwrap(),
+            60,
+            RData::A(A(Ipv4Addr::new(192, 0, 2, 10))),
+        ));
+
+        let result = dns_query_result(
+            message,
+            DnsTransport::Tcp,
+            3,
+            "192.0.2.53:53".to_string(),
+            128,
+            true,
+            true,
+        );
+
+        assert_eq!(result.id, 0x1234);
+        assert_eq!(result.opcode, "Query");
+        assert_eq!(result.response_code, "No Error");
+        assert_eq!(result.flags, ["RA"]);
+        assert_eq!(result.questions.len(), 1);
+        assert_eq!(result.questions[0].name, "example.test.");
+        assert_eq!(result.questions[0].record_type, "A");
+        assert_eq!(result.questions[0].class, "IN");
+        assert_eq!(result.answers.len(), 1);
+        assert_eq!(result.transport_used, DnsTransport::Tcp);
+        assert_eq!(result.attempts, 3);
+        assert_eq!(result.server, "192.0.2.53:53");
+        assert_eq!(result.response_bytes, 128);
+        assert!(result.udp_truncated);
+        assert!(result.tcp_fallback_used);
+    }
+}

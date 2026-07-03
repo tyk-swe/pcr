@@ -52,3 +52,83 @@ pub(crate) fn parse_hex_bytes(hex: &str) -> SpecResult<Vec<u8>> {
 
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_ip_address_rejects_invalid_ipv4_and_preserves_value() {
+        let err = parse_ip_address("999.0.2.1").unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::IpAddressParse { ref value, .. } if value == "999.0.2.1"
+        ));
+    }
+
+    #[test]
+    fn parse_ip_address_rejects_empty_input() {
+        let err = parse_ip_address("").unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::IpAddressParse { ref value, .. } if value.is_empty()
+        ));
+    }
+
+    #[test]
+    fn parse_hex_bytes_ignores_ascii_whitespace() {
+        assert_eq!(
+            parse_hex_bytes("de ad\nbe\tef").unwrap(),
+            [0xde, 0xad, 0xbe, 0xef]
+        );
+    }
+
+    #[test]
+    fn parse_hex_bytes_accepts_upper_and_lower_prefixes() {
+        assert_eq!(parse_hex_bytes("0xCAFE").unwrap(), [0xca, 0xfe]);
+        assert_eq!(parse_hex_bytes("0Xcafe").unwrap(), [0xca, 0xfe]);
+    }
+
+    #[test]
+    fn parse_hex_bytes_rejects_odd_length_after_cleanup() {
+        let err = parse_hex_bytes("0xabc").unwrap_err();
+
+        assert!(matches!(err, SpecError::HexStringOddLength));
+    }
+
+    #[test]
+    fn parse_hex_bytes_reports_invalid_high_digit() {
+        let err = parse_hex_bytes("zg").unwrap_err();
+
+        assert!(matches!(err, SpecError::InvalidHexDigit { digit: 'z' }));
+    }
+
+    #[test]
+    fn parse_hex_bytes_reports_invalid_low_digit() {
+        let err = parse_hex_bytes("0g").unwrap_err();
+
+        assert!(matches!(err, SpecError::InvalidHexDigit { digit: 'g' }));
+    }
+
+    #[test]
+    fn parse_hex_bytes_accepts_empty_input() {
+        assert_eq!(parse_hex_bytes("").unwrap(), Vec::<u8>::new());
+        assert_eq!(parse_hex_bytes("0x").unwrap(), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn parse_hex_bytes_accepts_exact_max_and_rejects_too_long_input() {
+        let exact = "aa".repeat(MAX_HEX_INPUT_BYTES);
+        let too_long = "aa".repeat(MAX_HEX_INPUT_BYTES + 1);
+
+        assert_eq!(parse_hex_bytes(&exact).unwrap().len(), MAX_HEX_INPUT_BYTES);
+        assert!(matches!(
+            parse_hex_bytes(&too_long).unwrap_err(),
+            SpecError::HexStringTooLong {
+                max_bytes: MAX_HEX_INPUT_BYTES
+            }
+        ));
+    }
+}

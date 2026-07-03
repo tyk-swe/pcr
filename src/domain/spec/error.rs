@@ -207,3 +207,38 @@ pub(crate) enum SpecError {
     #[error("option '{option}' is valid only for IPv6, but the target address is IPv4")]
     IpV6OptionWithIpV4Target { option: &'static str },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn ip_address_parse_display_keeps_context_and_source() {
+        let source = "not-an-ip".parse::<IpAddr>().unwrap_err();
+        let err = SpecError::IpAddressParse {
+            value: "not-an-ip".to_string(),
+            source,
+        };
+
+        assert_eq!(
+            err.to_string(),
+            "parse IP address failed: value='not-an-ip'"
+        );
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn ipv6_extension_payload_parse_preserves_nested_source() {
+        let err = SpecError::Ipv6ExtensionPayloadParse {
+            kind: "destination".to_string(),
+            source: Box::new(SpecError::InvalidHexDigit { digit: 'z' }),
+        };
+
+        assert!(err.to_string().contains("kind=destination"));
+        assert_eq!(
+            err.source().map(ToString::to_string),
+            Some("invalid hex digit 'z'".to_string())
+        );
+    }
+}

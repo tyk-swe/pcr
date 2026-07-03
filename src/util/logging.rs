@@ -90,3 +90,25 @@ fn level_from_verbosity(verbose: u8) -> LevelFilter {
         _ => LevelFilter::Trace,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn level_from_verbosity_maps_quiet_and_single_verbose_to_info() {
+        assert_eq!(level_from_verbosity(0), LevelFilter::Info);
+        assert_eq!(level_from_verbosity(1), LevelFilter::Info);
+    }
+
+    #[test]
+    fn level_from_verbosity_maps_double_verbose_to_debug() {
+        assert_eq!(level_from_verbosity(2), LevelFilter::Debug);
+    }
+
+    #[test]
+    fn level_from_verbosity_maps_three_or_more_to_trace() {
+        assert_eq!(level_from_verbosity(3), LevelFilter::Trace);
+        assert_eq!(level_from_verbosity(u8::MAX), LevelFilter::Trace);
+    }
+}

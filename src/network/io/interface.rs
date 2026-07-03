@@ -385,3 +385,276 @@ fn parse_interface_from_route_output(destination: IpAddr, stdout: &str) -> Resul
 
     Err(InterfaceError::RouteNotFound { destination })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::datalink::MacAddr;
+
+    #[derive(Debug, Clone)]
+    struct FakeProvider {
+        interfaces: Vec<NetworkInterface>,
+    }
+
+    impl InterfaceProvider for FakeProvider {
+        fn interfaces(&self) -> Vec<NetworkInterface> {
+            self.interfaces.clone()
+        }
+    }
+
+    fn iface(name: &str, flags: u32, mac: Option<MacAddr>, ips: &[&str]) -> NetworkInterface {
+        NetworkInterface {
+            name: name.to_string(),
+            description: String::new(),
+            index: 1,
+            mac,
+            ips: ips.iter().map(|value| value.parse().unwrap()).collect(),
+            flags,
+        }
+    }
+
+    fn up_flag() -> u32 {
+        libc::IFF_UP as u32
+    }
+
+    fn loopback_flag() -> u32 {
+        (libc::IFF_UP | libc::IFF_LOOPBACK) as u32
+    }
+
+    #[test]
+    fn parse_interface_from_json_returns_first_non_empty_dev() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let stdout = r#"[{"dst":"192.0.2.10","dev":"eth0"}]"#;
+
+        assert_eq!(
+            parse_interface_from_json(destination, stdout).unwrap(),
+            "eth0"
+        );
+    }
+
+    #[test]
+    fn parse_interface_from_json_skips_empty_dev_and_finds_later_route() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let stdout = r#"[{"dev":"  "},{"dev":"wlan0"}]"#;
+
+        assert_eq!(
+            parse_interface_from_json(destination, stdout).unwrap(),
+            "wlan0"
+        );
+    }
+
+    #[test]
+    fn parse_interface_from_json_rejects_malformed_json() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let err = parse_interface_from_json(destination, "{").unwrap_err();
+
+        assert!(matches!(
+            err,
+            InterfaceError::RouteOutputJson {
+                destination: actual,
+                ..
+            } if actual == destination
+        ));
+    }
+
+    #[test]
+    fn parse_interface_from_json_rejects_missing_dev() {
+        let destination = IpAddr::V6("2001:db8::10".parse().unwrap());
+        let err = parse_interface_from_json(destination, r#"[{"gateway":"fe80::1"}]"#).unwrap_err();
+
+        assert!(matches!(
+            err,
+            InterfaceError::RouteNotFound {
+                destination: actual
+            } if actual == destination
+        ));
+    }
+
+    #[test]
+    fn parse_interface_from_route_output_extracts_ipv4_dev() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let stdout = "192.0.2.10 via 192.0.2.1 dev eth0 src 192.0.2.5";
+
+        assert_eq!(
+            parse_interface_from_route_output(destination, stdout).unwrap(),
+            "eth0"
+        );
+    }
+
+    #[test]
+    fn parse_interface_from_route_output_extracts_ipv6_dev() {
+        let destination = IpAddr::V6("2001:db8::10".parse().unwrap());
+        let stdout = "2001:db8::10 dev eth1 src 2001:db8::5 metric 1024";
+
+        assert_eq!(
+            parse_interface_from_route_output(destination, stdout).unwrap(),
+            "eth1"
+        );
+    }
+
+    #[test]
+    fn parse_interface_from_route_output_rejects_missing_dev() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let err = parse_interface_from_route_output(destination, "local 192.0.2.10 src 192.0.2.5")
+            .unwrap_err();
+
+        assert!(matches!(err, InterfaceError::RouteNotFound { .. }));
+    }
+
+    #[test]
+    fn resolve_interface_by_name_with_provider_matches_name() {
+        let provider = FakeProvider {
+            interfaces: vec![iface(
+                "eth0",
+                up_flag(),
+                Some(MacAddr::new(0x02, 0, 0, 0, 0, 1)),
+                &["192.0.2.5/24"],
+            )],
+        };
+
+        assert_eq!(
+            resolve_interface_by_name_with_provider("eth0", &provider)
+                .unwrap()
+                .name,
+            "eth0"
+        );
+    }
+
+    #[test]
+    fn find_interface_selection_with_provider_explicit_maps_reason() {
+        let provider = FakeProvider {
+            interfaces: vec![iface(
+                "eth0",
+                up_flag(),
+                Some(MacAddr::new(0x02, 0, 0, 0, 0, 1)),
+                &["192.0.2.5/24"],
+            )],
+        };
+        let selection =
+            find_interface_selection_with_provider_impl(Some("eth0"), &provider).unwrap();
+
+        assert_eq!(selection.interface.name, "eth0");
+        assert_eq!(
+            selection.reason,
+            InterfaceSelectionReason::ExplicitInterface
+        );
+    }
+
+    #[test]
+    fn find_interface_for_destination_selection_with_provider_uses_route_table() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let provider = FakeProvider {
+            interfaces: vec![iface(
+                "eth0",
+                up_flag(),
+                Some(MacAddr::new(0x02, 0, 0, 0, 0, 1)),
+                &["192.0.2.5/24"],
+            )],
+        };
+        let selection = find_interface_for_destination_selection_with_provider_impl(
+            destination,
+            &provider,
+            |_| Ok("eth0".to_string()),
+        )
+        .unwrap();
+
+        assert_eq!(selection.interface.name, "eth0");
+        assert_eq!(selection.reason, InterfaceSelectionReason::RouteTable);
+    }
+
+    #[test]
+    fn find_interface_for_destination_reports_missing_route_interface() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let provider = FakeProvider {
+            interfaces: Vec::new(),
+        };
+        let err = find_interface_for_destination_selection_with_provider_impl(
+            destination,
+            &provider,
+            |_| Ok("eth-missing".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            InterfaceError::RouteInterfaceMissing {
+                destination: actual,
+                ref interface,
+            } if actual == destination && interface == "eth-missing"
+        ));
+    }
+
+    #[test]
+    fn find_interface_for_destination_falls_back_when_ip_command_is_missing() {
+        let destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
+        let provider = FakeProvider {
+            interfaces: vec![iface(
+                "eth0",
+                up_flag(),
+                Some(MacAddr::new(0x02, 0, 0, 0, 0, 1)),
+                &["192.0.2.5/24"],
+            )],
+        };
+        let selection = find_interface_for_destination_selection_with_provider_impl(
+            destination,
+            &provider,
+            |_| Err(InterfaceError::IpCommandNotFound),
+        )
+        .unwrap();
+
+        assert_eq!(selection.interface.name, "eth0");
+        assert_eq!(selection.reason, InterfaceSelectionReason::Heuristic);
+    }
+
+    #[test]
+    fn heuristic_default_interface_skips_loopback_down_missing_mac_and_unspecified_ips() {
+        let provider = FakeProvider {
+            interfaces: vec![
+                iface(
+                    "lo",
+                    loopback_flag(),
+                    Some(MacAddr::new(0x02, 0, 0, 0, 0, 1)),
+                    &["127.0.0.1/8"],
+                ),
+                iface(
+                    "down0",
+                    0,
+                    Some(MacAddr::new(0x02, 0, 0, 0, 0, 2)),
+                    &["192.0.2.5/24"],
+                ),
+                iface("nomac0", up_flag(), None, &["192.0.2.6/24"]),
+                iface(
+                    "unspecified0",
+                    up_flag(),
+                    Some(MacAddr::new(0x02, 0, 0, 0, 0, 3)),
+                    &["0.0.0.0/0"],
+                ),
+                iface(
+                    "eth0",
+                    up_flag(),
+                    Some(MacAddr::new(0x02, 0, 0, 0, 0, 4)),
+                    &["192.0.2.7/24"],
+                ),
+            ],
+        };
+
+        assert_eq!(
+            heuristic_default_interface_with_provider(&provider)
+                .unwrap()
+                .name,
+            "eth0"
+        );
+    }
+
+    #[test]
+    fn heuristic_default_interface_rejects_empty_candidates() {
+        let provider = FakeProvider {
+            interfaces: vec![iface("lo", loopback_flag(), None, &["127.0.0.1/8"])],
+        };
+
+        assert!(matches!(
+            heuristic_default_interface_with_provider(&provider).unwrap_err(),
+            InterfaceError::HeuristicUnavailable
+        ));
+    }
+}

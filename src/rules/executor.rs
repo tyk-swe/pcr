@@ -167,3 +167,165 @@ pub(crate) fn validate_rule_send_request(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::request::{DestinationRequest, TransmissionRequest};
+    use tokio::sync::{mpsc, oneshot};
+    use tokio::time::{sleep, timeout, Duration};
+
+    #[test]
+    fn bounded_executor_without_runtime_reports_runtime_unavailable_on_spawn() {
+        let executor = BoundedExecutor::new("test", 1, 1).unwrap();
+
+        let err = executor.spawn_async(|| async {}).unwrap_err();
+
+        assert!(matches!(err, ExecutorError::RuntimeUnavailable(_)));
+    }
+
+    #[tokio::test]
+    async fn bounded_executor_new_with_handle_spawns_job() {
+        let executor = BoundedExecutor::new_with_handle(Handle::current(), 1, 1).unwrap();
+        let (done_tx, done_rx) = oneshot::channel();
+
+        executor
+            .spawn_async(move || async move {
+                done_tx.send(()).unwrap();
+            })
+            .unwrap();
+
+        timeout(Duration::from_secs(1), done_rx)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn bounded_executor_rejects_when_capacity_is_full() {
+        let executor = BoundedExecutor::new_with_handle(Handle::current(), 1, 1).unwrap();
+        let (release_tx, release_rx) = oneshot::channel();
+
+        executor
+            .spawn_async(move || async move {
+                let _ = release_rx.await;
+            })
+            .unwrap();
+        let err = executor.spawn_async(|| async {}).unwrap_err();
+
+        assert!(matches!(err, ExecutorError::QueueFull));
+        release_tx.send(()).unwrap();
+    }
+
+    #[tokio::test]
+    async fn bounded_executor_releases_capacity_after_completion() {
+        let executor = BoundedExecutor::new_with_handle(Handle::current(), 1, 1).unwrap();
+        let (done_tx, done_rx) = oneshot::channel();
+
+        executor
+            .spawn_async(move || async move {
+                done_tx.send(()).unwrap();
+            })
+            .unwrap();
+        timeout(Duration::from_secs(1), done_rx)
+            .await
+            .unwrap()
+            .unwrap();
+
+        for _ in 0..20 {
+            match executor.spawn_async(|| async {}) {
+                Ok(()) => return,
+                Err(ExecutorError::QueueFull) => sleep(Duration::from_millis(5)).await,
+                Err(err) => panic!("unexpected executor error: {err:?}"),
+            }
+        }
+
+        panic!("capacity permit was not released");
+    }
+
+    #[tokio::test]
+    async fn bounded_executor_serializes_jobs_with_single_worker() {
+        let executor = BoundedExecutor::new_with_handle(Handle::current(), 1, 2).unwrap();
+        let (release_tx, release_rx) = oneshot::channel();
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel();
+        let first_events = event_tx.clone();
+
+        executor
+            .spawn_async(move || async move {
+                first_events.send("first-started").unwrap();
+                let _ = release_rx.await;
+                first_events.send("first-done").unwrap();
+            })
+            .unwrap();
+        executor
+            .spawn_async(move || async move {
+                event_tx.send("second-started").unwrap();
+            })
+            .unwrap();
+
+        assert_eq!(
+            timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap(),
+            Some("first-started")
+        );
+        sleep(Duration::from_millis(20)).await;
+        assert!(event_rx.try_recv().is_err());
+
+        release_tx.send(()).unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap(),
+            Some("first-done")
+        );
+        assert_eq!(
+            timeout(Duration::from_secs(1), event_rx.recv())
+                .await
+                .unwrap(),
+            Some("second-started")
+        );
+    }
+
+    #[test]
+    fn validate_rule_send_request_accepts_bounded_request() {
+        let request = PacketRequest {
+            destination: DestinationRequest {
+                destination: Some("192.0.2.10".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        validate_rule_send_request("bounded", &request, TrafficPolicy::default()).unwrap();
+    }
+
+    #[test]
+    fn validate_rule_send_request_rejects_invalid_mode_and_policy_denial() {
+        let zero_count = PacketRequest {
+            transmit: TransmissionRequest {
+                count: Some(0),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let public_target = PacketRequest {
+            destination: DestinationRequest {
+                destination: Some("8.8.8.8".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        for (rule, request) in [("zero", zero_count), ("public", public_target)] {
+            let err =
+                validate_rule_send_request(rule, &request, TrafficPolicy::default()).unwrap_err();
+
+            assert!(matches!(
+                err,
+                RuleError::Action(RuleActionError::InvalidSendMode { rule: ref actual })
+                    if actual == rule
+            ));
+        }
+    }
+}

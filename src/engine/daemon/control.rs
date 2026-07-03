@@ -385,3 +385,223 @@ where
         Err(err) => Ok(format!("ERR {err}")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn send_ok(respond_to: oneshot::Sender<CommandResponse>, message: &str) {
+        respond_to.send(Ok(message.to_string())).unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_text_status_maps_to_status_command() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::Status { respond_to } => send_ok(respond_to, "ready"),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_text_command("status", &tx).await.unwrap();
+
+        assert_eq!(response, "OK ready");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_text_load_maps_trimmed_path() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::LoadRules { path, respond_to } => {
+                    assert_eq!(path, "/tmp/rules.yml");
+                    send_ok(respond_to, "loaded");
+                }
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_text_command("load   /tmp/rules.yml  ", &tx)
+            .await
+            .unwrap();
+
+        assert_eq!(response, "OK loaded");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_text_listen_stop_maps_to_stop_listener() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::StopListener { respond_to } => send_ok(respond_to, "stopped"),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_text_command("listen stop", &tx).await.unwrap();
+
+        assert_eq!(response, "OK stopped");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_text_shutdown_maps_to_shutdown() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::Shutdown { respond_to } => send_ok(respond_to, "bye"),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_text_command("shutdown", &tx).await.unwrap();
+
+        assert_eq!(response, "OK bye");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_json_status_maps_to_status_command() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::Status { respond_to } => send_ok(respond_to, "json-ready"),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_control_command(r#"{"command":"status"}"#, &tx)
+            .await
+            .unwrap();
+
+        assert_eq!(response, "OK json-ready");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_json_load_rules_maps_path() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::LoadRules { path, respond_to } => {
+                    assert_eq!(path, "rules.yml");
+                    send_ok(respond_to, "loaded");
+                }
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response =
+            dispatch_control_command(r#"{"command":"load_rules","path":"rules.yml"}"#, &tx)
+                .await
+                .unwrap();
+
+        assert_eq!(response, "OK loaded");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_json_listen_maps_options() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::Listen {
+                    options,
+                    respond_to,
+                } => {
+                    assert_eq!(options.filter.as_deref(), Some("icmp"));
+                    assert_eq!(options.promiscuous, Some(true));
+                    assert_eq!(options.timeout, Some(5));
+                    send_ok(respond_to, "listening");
+                }
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_control_command(
+            r#"{"command":"listen","options":{"filter":"icmp","promiscuous":true,"timeout":5}}"#,
+            &tx,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response, "OK listening");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_json_shutdown_maps_to_shutdown() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::Shutdown { respond_to } => send_ok(respond_to, "shutting down"),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_control_command(r#"{"command":"shutdown"}"#, &tx)
+            .await
+            .unwrap();
+
+        assert_eq!(response, "OK shutting down");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_text_invalid_commands_return_errors() {
+        let (tx, _rx) = mpsc::channel(1);
+
+        assert!(dispatch_text_command("bogus", &tx)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("unknown command"));
+        assert!(dispatch_text_command("load", &tx)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("requires a path"));
+        assert!(dispatch_text_command("listen start", &tx)
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("requires subcommand"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_reports_closed_daemon_channel() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+
+        let err = dispatch_text_command("status", &tx).await.unwrap_err();
+
+        assert!(err.to_string().contains("daemon channel closed"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_reports_dropped_response_channel() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::Status { respond_to } => drop(respond_to),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let err = dispatch_text_command("status", &tx).await.unwrap_err();
+
+        assert!(err.to_string().contains("command response channel closed"));
+        task.await.unwrap();
+    }
+
+    #[test]
+    fn sanitize_log_fragment_removes_control_characters() {
+        assert_eq!(
+            sanitize_log_fragment("accept\nfailed\t\u{7f}"),
+            "acceptfailed"
+        );
+    }
+}

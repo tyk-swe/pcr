@@ -519,3 +519,211 @@ impl<'a> IcmpScanRx for RealIcmpv6Rx<'a> {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    struct MockIcmpTx {
+        sent: Vec<(SocketAddr, u16, u16)>,
+        fail_on_seq: Option<u16>,
+    }
+
+    impl IcmpScanTx for MockIcmpTx {
+        fn send_echo_request(&mut self, dest: SocketAddr, id: u16, seq: u16) -> Result<()> {
+            if self.fail_on_seq == Some(seq) {
+                return Err(anyhow!("send failed for seq {seq}"));
+            }
+            self.sent.push((dest, id, seq));
+            Ok(())
+        }
+    }
+
+    struct MockIcmpRx {
+        replies: VecDeque<Result<Option<(IpAddr, u16, u16)>>>,
+    }
+
+    impl IcmpScanRx for MockIcmpRx {
+        fn next_reply(&mut self, _timeout: Duration) -> Result<Option<(IpAddr, u16, u16)>> {
+            self.replies.pop_front().unwrap_or(Ok(None))
+        }
+    }
+
+    #[test]
+    fn parse_icmp_targets_accepts_single_ipv4_literal() {
+        assert_eq!(
+            parse_icmp_targets("192.0.2.10").unwrap(),
+            [SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0)]
+        );
+    }
+
+    #[test]
+    fn parse_icmp_targets_accepts_ipv6_cidr() {
+        assert_eq!(
+            parse_icmp_targets("2001:db8::/127").unwrap(),
+            [
+                SocketAddr::new(IpAddr::V6("2001:db8::".parse().unwrap()), 0),
+                SocketAddr::new(IpAddr::V6("2001:db8::1".parse().unwrap()), 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_icmp_targets_rejects_oversized_expansion() {
+        assert!(parse_icmp_targets("10.0.0.0/19")
+            .unwrap_err()
+            .to_string()
+            .contains("scan target expansion exceeds limit"));
+    }
+
+    #[test]
+    fn scan_hosts_concurrent_returns_sorted_verified_replies() {
+        let targets = vec![
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)), 0),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0),
+        ];
+        let mut tx = MockIcmpTx {
+            sent: Vec::new(),
+            fail_on_seq: None,
+        };
+        let mut rx = MockIcmpRx {
+            replies: VecDeque::from([
+                Ok(Some((IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11)), 7, 0))),
+                Ok(Some((IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 7, 1))),
+            ]),
+        };
+
+        let results = scan_hosts_concurrent_with_delay(
+            targets.clone(),
+            7,
+            Duration::from_millis(1),
+            None,
+            &mut tx,
+            &mut rx,
+        )
+        .unwrap();
+
+        assert_eq!(tx.sent, [(targets[0], 7, 0), (targets[1], 7, 1)]);
+        assert_eq!(
+            results,
+            [
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+                IpAddr::V4(Ipv4Addr::new(192, 0, 2, 11))
+            ]
+        );
+    }
+
+    #[test]
+    fn scan_hosts_concurrent_ignores_wrong_identifier() {
+        let targets = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0)];
+        let mut tx = MockIcmpTx {
+            sent: Vec::new(),
+            fail_on_seq: None,
+        };
+        let mut rx = MockIcmpRx {
+            replies: VecDeque::from([Ok(Some((IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 8, 0)))]),
+        };
+
+        let results = scan_hosts_concurrent_with_delay(
+            targets,
+            7,
+            Duration::from_millis(1),
+            None,
+            &mut tx,
+            &mut rx,
+        )
+        .unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn scan_hosts_concurrent_filters_non_target_replies() {
+        let targets = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0)];
+        let mut tx = MockIcmpTx {
+            sent: Vec::new(),
+            fail_on_seq: None,
+        };
+        let mut rx = MockIcmpRx {
+            replies: VecDeque::from([Ok(Some((IpAddr::V4(Ipv4Addr::new(192, 0, 2, 99)), 7, 0)))]),
+        };
+
+        let results = scan_hosts_concurrent_with_delay(
+            targets,
+            7,
+            Duration::from_millis(1),
+            None,
+            &mut tx,
+            &mut rx,
+        )
+        .unwrap();
+
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn scan_hosts_concurrent_returns_send_and_receive_errors() {
+        let targets = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0)];
+        let mut failing_tx = MockIcmpTx {
+            sent: Vec::new(),
+            fail_on_seq: Some(0),
+        };
+        let mut empty_rx = MockIcmpRx {
+            replies: VecDeque::new(),
+        };
+        let send_err = scan_hosts_concurrent_with_delay(
+            targets.clone(),
+            7,
+            Duration::from_millis(1),
+            None,
+            &mut failing_tx,
+            &mut empty_rx,
+        )
+        .unwrap_err();
+
+        let mut ok_tx = MockIcmpTx {
+            sent: Vec::new(),
+            fail_on_seq: None,
+        };
+        let mut failing_rx = MockIcmpRx {
+            replies: VecDeque::from([Err(anyhow!("receive failed"))]),
+        };
+        let receive_err = scan_hosts_concurrent_with_delay(
+            targets,
+            7,
+            Duration::from_millis(1),
+            None,
+            &mut ok_tx,
+            &mut failing_rx,
+        )
+        .unwrap_err();
+
+        assert!(send_err.to_string().contains("send failed"));
+        assert!(receive_err.to_string().contains("receive failed"));
+    }
+
+    #[test]
+    fn dual_stack_sender_reports_missing_family_sender_errors() {
+        let mut tx = DualStackIcmpTx { v4: None, v6: None };
+
+        assert!(tx
+            .send_echo_request(
+                SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0),
+                7,
+                0,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("IPv4 sender not available"));
+        assert!(tx
+            .send_echo_request(
+                SocketAddr::new(IpAddr::V6("2001:db8::10".parse().unwrap()), 0),
+                7,
+                0,
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("IPv6 sender not available"));
+    }
+}

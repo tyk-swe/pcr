@@ -189,3 +189,137 @@ pub(super) fn parse_arp_targets(spec: &str) -> Result<Vec<Ipv4Addr>> {
         Ok(vec![ip])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::datalink::MacAddr;
+
+    struct MockArpResolver {
+        replies: Vec<(Ipv4Addr, MacAddr)>,
+        seen: Vec<Ipv4Addr>,
+    }
+
+    impl ArpResolver for MockArpResolver {
+        fn resolve(&mut self, target: Ipv4Addr, _timeout: Duration) -> Result<MacAddr> {
+            self.seen.push(target);
+            self.replies
+                .iter()
+                .find_map(|(ip, mac)| (*ip == target).then_some(*mac))
+                .ok_or_else(|| anyhow!("not found"))
+        }
+    }
+
+    fn iface(ips: &[&str]) -> NetworkInterface {
+        NetworkInterface {
+            name: "eth-test".to_string(),
+            description: String::new(),
+            index: 1,
+            mac: Some(MacAddr::new(0x02, 0, 0, 0, 0, 1)),
+            ips: ips.iter().map(|value| value.parse().unwrap()).collect(),
+            flags: libc::IFF_UP as u32,
+        }
+    }
+
+    #[test]
+    fn parse_arp_targets_accepts_single_ipv4() {
+        assert_eq!(
+            parse_arp_targets("192.0.2.10").unwrap(),
+            [Ipv4Addr::new(192, 0, 2, 10)]
+        );
+    }
+
+    #[test]
+    fn parse_arp_targets_skips_cidr_network_and_broadcast_boundaries() {
+        assert_eq!(
+            parse_arp_targets("192.0.2.0/30").unwrap(),
+            [Ipv4Addr::new(192, 0, 2, 1), Ipv4Addr::new(192, 0, 2, 2)]
+        );
+    }
+
+    #[test]
+    fn parse_arp_targets_keeps_point_to_point_cidr_boundaries() {
+        assert_eq!(
+            parse_arp_targets("192.0.2.0/31").unwrap(),
+            [Ipv4Addr::new(192, 0, 2, 0), Ipv4Addr::new(192, 0, 2, 1)]
+        );
+    }
+
+    #[test]
+    fn parse_arp_targets_rejects_ipv6_networks() {
+        assert!(parse_arp_targets("2001:db8::/126")
+            .unwrap_err()
+            .to_string()
+            .contains("IPv4 networks only"));
+    }
+
+    #[test]
+    fn parse_arp_targets_rejects_oversized_expansion() {
+        assert!(parse_arp_targets("10.0.0.0/19")
+            .unwrap_err()
+            .to_string()
+            .contains("scan target expansion exceeds limit"));
+    }
+
+    #[test]
+    fn resolve_arp_source_ip_prefers_explicit_source_override() {
+        let source = resolve_arp_source_ip(
+            &iface(&["192.0.2.5/24"]),
+            &None,
+            &Some("198.51.100.5".to_string()),
+            Ipv4Addr::new(198, 51, 100, 10),
+        )
+        .unwrap();
+
+        assert_eq!(source, Ipv4Addr::new(198, 51, 100, 5));
+    }
+
+    #[test]
+    fn resolve_arp_source_ip_errors_when_interface_has_no_ipv4() {
+        let err = resolve_arp_source_ip(
+            &iface(&["2001:db8::5/64"]),
+            &None,
+            &None,
+            Ipv4Addr::new(192, 0, 2, 10),
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("does not have an IPv4 address"));
+    }
+
+    #[test]
+    fn perform_arp_scan_with_mocked_resolver_skips_source_and_collects_hits() {
+        let targets = vec![
+            Ipv4Addr::new(192, 0, 2, 5),
+            Ipv4Addr::new(192, 0, 2, 10),
+            Ipv4Addr::new(192, 0, 2, 11),
+        ];
+        let mut resolver = MockArpResolver {
+            replies: vec![(
+                Ipv4Addr::new(192, 0, 2, 10),
+                MacAddr::new(0x02, 0, 0, 0, 0, 10),
+            )],
+            seen: Vec::new(),
+        };
+
+        let hits = perform_arp_scan_with_scanner(
+            ArpScanConfig {
+                interface: iface(&["192.0.2.5/24"]),
+                source_ip: Ipv4Addr::new(192, 0, 2, 5),
+                targets,
+                timeout: Duration::from_millis(1),
+                send_delay: None,
+            },
+            &mut resolver,
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolver.seen,
+            [Ipv4Addr::new(192, 0, 2, 10), Ipv4Addr::new(192, 0, 2, 11)]
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].ip, Ipv4Addr::new(192, 0, 2, 10));
+        assert_eq!(hits[0].mac, MacAddr::new(0x02, 0, 0, 0, 0, 10));
+    }
+}

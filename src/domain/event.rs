@@ -45,3 +45,18 @@ pub(crate) struct ListenerEvent {
     pub show_payload: bool,
     pub truncated: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn protocol_label_as_str_covers_all_variants() {
+        assert_eq!(ProtocolLabel::Tcp.as_str(), "tcp");
+        assert_eq!(ProtocolLabel::Udp.as_str(), "udp");
+        assert_eq!(ProtocolLabel::Icmp.as_str(), "icmp");
+        assert_eq!(ProtocolLabel::Sctp.as_str(), "sctp");
+        assert_eq!(ProtocolLabel::Gre.as_str(), "gre");
+        assert_eq!(ProtocolLabel::Unknown.as_str(), "unknown");
+    }
+}

@@ -479,3 +479,67 @@ fn resolve_pcap_device(name: &str) -> ListenerResult<Device> {
         })
         .map_err(ListenerError::from)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn capture_within_timeout_allows_sessions_without_timeout() {
+        assert!(capture_within_timeout(Instant::now(), None));
+    }
+
+    #[test]
+    fn capture_within_timeout_stops_after_timeout_elapsed() {
+        let start = Instant::now() - Duration::from_millis(10);
+
+        assert!(!capture_within_timeout(
+            start,
+            Some(Duration::from_millis(1))
+        ));
+    }
+
+    #[test]
+    fn capture_session_active_requires_running_flag_and_timeout_window() {
+        let running = Arc::new(AtomicBool::new(true));
+        assert!(capture_session_active(
+            &running,
+            Instant::now(),
+            Some(Duration::from_secs(1))
+        ));
+
+        running.store(false, Ordering::SeqCst);
+        assert!(!capture_session_active(&running, Instant::now(), None));
+    }
+
+    #[tokio::test]
+    async fn notify_startup_ready_sends_success_and_consumes_signal() {
+        let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
+        let mut startup = Some(startup_tx);
+
+        notify_startup_ready(&mut startup);
+
+        assert!(startup.is_none());
+        assert_eq!(startup_rx.await.unwrap(), Ok(()));
+    }
+
+    #[tokio::test]
+    async fn notify_startup_failure_on_error_sends_error_and_preserves_result() {
+        let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
+        let mut startup = Some(startup_tx);
+        let err = PcapListenerError::UnsupportedChannel {
+            interface: "eth-test".to_string(),
+        };
+
+        let result = notify_startup_failure_on_error(&mut startup, Err(err.into()));
+
+        assert!(result.is_err());
+        assert!(startup.is_none());
+        assert!(startup_rx
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("does not support Ethernet"));
+    }
+}

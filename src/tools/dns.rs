@@ -15,8 +15,8 @@ use crate::domain::command::{
 use crate::domain::policy::{classify_ip, TrafficMode, TrafficPlan, TrafficPolicy};
 use crate::network::protocols::dns::{
     build_dns_query, query_tcp_with_retries, query_udp_for_auto_with_retries,
-    query_udp_with_retries, resolve_dns_server_address, AutoUdpResponse, DnsQueryPlan,
-    DnsRateLimiter,
+    query_udp_with_retries, resolve_dns_server_address, AutoUdpResponse, DnsProtocolError,
+    DnsQueryPlan, DnsRateLimiter,
 };
 use trust_dns_proto::op::Message;
 
@@ -86,8 +86,11 @@ pub(crate) async fn resolve_prepared(
         &options.record_type,
         options.transaction_id,
     )?;
-    let record_type = RecordType::from_str(&options.record_type.to_uppercase())
-        .map_err(|_| anyhow::anyhow!("Unsupported DNS type: {}", options.record_type))?;
+    let record_type = RecordType::from_str(&options.record_type.to_uppercase()).map_err(|_| {
+        DnsProtocolError::UnsupportedRecordType {
+            record_type: options.record_type.clone(),
+        }
+    })?;
 
     let timeout = Duration::from_millis(options.timeout);
     let plan = DnsQueryPlan {

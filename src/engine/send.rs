@@ -58,6 +58,7 @@ impl SendUseCase {
             .privilege_checker
             .check_packet_send(spec)
             .await
+            .map_err(|source| EngineError::InsufficientPrivileges(source).into())
     }
 
     pub(crate) async fn prepare(
@@ -119,7 +120,8 @@ impl SendUseCase {
             Ok::<_, anyhow::Error>(spec)
         })
         .await
-        .context("packet spec task failed")??;
+        .context("packet spec task failed")
+        .map_err(EngineError::PacketSpecBuild)??;
 
         Ok(Arc::new(spec))
     }
@@ -152,7 +154,8 @@ impl SendUseCase {
             .dependencies
             .packet_planner
             .plan_packet(spec, mode, self.policy)
-            .await?;
+            .await
+            .map_err(|source| anyhow::Error::from(EngineError::TransmissionPlan(source)))?;
 
         debug!(
             "Transmission plan: transport={} payload={} bytes frames={} largest_frame={} bytes",
@@ -208,7 +211,11 @@ impl SendUseCase {
             return Ok(());
         }
 
-        self.dependencies.packet_transmitter.transmit(plan).await?;
+        self.dependencies
+            .packet_transmitter
+            .transmit(plan)
+            .await
+            .map_err(|source| anyhow::Error::from(EngineError::TransmissionExecution(source)))?;
         Ok(())
     }
 

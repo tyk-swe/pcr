@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
+use std::io::{self, ErrorKind};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -317,7 +318,12 @@ where
     }
 
     super::common::send_with_enobufs_retry("send UDP probe", destination, || {
-        let packet = UdpPacket::new(packet_bytes).expect("UDP packet bytes validated before retry");
+        let packet = UdpPacket::new(packet_bytes).ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid UDP retry packet bytes: destination={destination}"),
+            )
+        })?;
         send_fn(packet, destination)
     })
 }

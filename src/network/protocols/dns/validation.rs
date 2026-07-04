@@ -3,9 +3,10 @@
 
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result};
 use trust_dns_proto::op::{Message, MessageType, ResponseCode};
 use trust_dns_proto::rr::{Name, RecordType};
+
+use super::{DnsProtocolError, DnsProtocolResult};
 
 pub(super) const DNS_HEADER_BYTES: usize = 12;
 const DNS_FLAG_RESPONSE: u16 = 0x8000;
@@ -19,35 +20,35 @@ pub(super) struct DnsHeaderSummary {
 pub(super) fn inspect_dns_response_header(
     response: &[u8],
     expected_id: u16,
-) -> Result<DnsHeaderSummary> {
+) -> DnsProtocolResult<DnsHeaderSummary> {
     if response.len() < DNS_HEADER_BYTES {
-        return Err(anyhow!(
-            "DNS response too short: {} bytes, expected at least {} byte header",
-            response.len(),
-            DNS_HEADER_BYTES
-        ));
+        return Err(DnsProtocolError::ResponseTooShort {
+            actual: response.len(),
+            minimum: DNS_HEADER_BYTES,
+        });
     }
 
     let id = u16::from_be_bytes([response[0], response[1]]);
     let flags = u16::from_be_bytes([response[2], response[3]]);
 
     if flags & DNS_FLAG_RESPONSE == 0 {
-        return Err(anyhow!(
-            "Message type mismatch: expected Response, got Query"
-        ));
+        return Err(DnsProtocolError::MessageTypeMismatch {
+            actual: "Query".to_string(),
+        });
     }
 
     let response_code = ResponseCode::from_low((flags & DNS_RCODE_MASK) as u8);
     if response_code != ResponseCode::NoError {
-        return Err(anyhow!("DNS server returned error: {}", response_code));
+        return Err(DnsProtocolError::ServerResponseCode {
+            code: response_code.to_string(),
+        });
     }
 
     if id != expected_id {
-        return Err(anyhow!(
-            "Transaction ID mismatch: expected {}, got {}",
-            expected_id,
-            id
-        ));
+        return Err(DnsProtocolError::TransactionIdMismatch {
+            expected: expected_id,
+            actual: id,
+        });
     }
 
     Ok(DnsHeaderSummary {
@@ -60,33 +61,31 @@ pub(super) fn validate_dns_response(
     expected_id: u16,
     expected_domain: &str,
     expected_type: RecordType,
-) -> Result<Message> {
-    let message = Message::from_vec(response)?;
+) -> DnsProtocolResult<Message> {
+    let message = Message::from_vec(response)
+        .map_err(|source| DnsProtocolError::ResponseDecode { source })?;
 
     if message.message_type() != MessageType::Response {
-        return Err(anyhow::anyhow!(
-            "Message type mismatch: expected Response, got {:?}",
-            message.message_type()
-        ));
+        return Err(DnsProtocolError::MessageTypeMismatch {
+            actual: format!("{:?}", message.message_type()),
+        });
     }
 
     if message.response_code() != ResponseCode::NoError {
-        return Err(anyhow::anyhow!(
-            "DNS server returned error: {}",
-            message.response_code()
-        ));
+        return Err(DnsProtocolError::ServerResponseCode {
+            code: message.response_code().to_string(),
+        });
     }
 
     if message.id() != expected_id {
-        return Err(anyhow::anyhow!(
-            "Transaction ID mismatch: expected {}, got {}",
-            expected_id,
-            message.id()
-        ));
+        return Err(DnsProtocolError::TransactionIdMismatch {
+            expected: expected_id,
+            actual: message.id(),
+        });
     }
 
     if message.queries().is_empty() {
-        return Err(anyhow::anyhow!("Response contains no queries"));
+        return Err(DnsProtocolError::MissingQuery);
     }
 
     let query = &message.queries()[0];
@@ -95,22 +94,24 @@ pub(super) fn validate_dns_response(
     } else {
         format!("{}.", expected_domain)
     };
-    let expected_name = Name::from_str(&normalized_domain).context("Invalid domain name")?;
+    let expected_name =
+        Name::from_str(&normalized_domain).map_err(|source| DnsProtocolError::InvalidDomain {
+            domain: normalized_domain,
+            source,
+        })?;
 
     if *query.name() != expected_name {
-        return Err(anyhow::anyhow!(
-            "Query name mismatch: expected {}, got {}",
-            expected_name,
-            query.name()
-        ));
+        return Err(DnsProtocolError::QueryNameMismatch {
+            expected: expected_name.to_string(),
+            actual: query.name().to_string(),
+        });
     }
 
     if query.query_type() != expected_type {
-        return Err(anyhow::anyhow!(
-            "Query type mismatch: expected {}, got {}",
-            expected_type,
-            query.query_type()
-        ));
+        return Err(DnsProtocolError::QueryTypeMismatch {
+            expected: expected_type.to_string(),
+            actual: query.query_type().to_string(),
+        });
     }
 
     Ok(message)
@@ -180,5 +181,35 @@ mod tests {
         let bytes = message.to_vec().unwrap();
 
         assert!(validate_dns_response(&bytes, 1, "example.test", RecordType::A).is_err());
+    }
+
+    #[test]
+    fn response_validation_errors_are_typed() {
+        assert!(matches!(
+            inspect_dns_response_header(&[0; 2], 1),
+            Err(DnsProtocolError::ResponseTooShort { .. })
+        ));
+        assert!(matches!(
+            inspect_dns_response_header(&[0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 1),
+            Err(DnsProtocolError::MessageTypeMismatch { .. })
+        ));
+
+        let bytes = response_bytes(7, "example.test.", RecordType::A);
+        assert!(matches!(
+            validate_dns_response(&bytes, 8, "example.test", RecordType::A),
+            Err(DnsProtocolError::TransactionIdMismatch { .. })
+        ));
+        assert!(matches!(
+            validate_dns_response(&bytes, 7, "other.test", RecordType::A),
+            Err(DnsProtocolError::QueryNameMismatch { .. })
+        ));
+        assert!(matches!(
+            validate_dns_response(&bytes, 7, "example.test", RecordType::AAAA),
+            Err(DnsProtocolError::QueryTypeMismatch { .. })
+        ));
+        assert!(matches!(
+            validate_dns_response(&[0], 7, "example.test", RecordType::A),
+            Err(DnsProtocolError::ResponseDecode { .. })
+        ));
     }
 }

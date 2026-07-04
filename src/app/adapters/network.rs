@@ -11,6 +11,7 @@ use std::sync::Arc;
 #[cfg(feature = "daemon")]
 use std::task::{Context, Poll};
 
+use anyhow::Context as _;
 use pnet::packet::ip::IpNextHeaderProtocol;
 
 #[cfg(feature = "pcap")]
@@ -56,7 +57,8 @@ impl PacketPlanner for NetworkPacketPlanner {
                 .map_err(|e| EngineError::TransmissionPlan(e.into()))
             })
             .await
-            .map_err(|source| anyhow::anyhow!("transmission planning task failed: {source}"))??;
+            .context("transmission planning task failed")
+            .map_err(EngineError::TransmissionPlan)??;
 
             Ok(network_plan_to_domain_plan(plan))
         })

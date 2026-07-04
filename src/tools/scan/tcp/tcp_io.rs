@@ -3,6 +3,7 @@
 
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
+use std::{io, io::ErrorKind};
 
 use anyhow::{anyhow, Result};
 use pnet::packet::ip::IpNextHeaderProtocols;
@@ -63,7 +64,12 @@ where
     }
 
     send_with_enobufs_retry("send TCP probe", destination, || {
-        let packet = TcpPacket::new(packet_bytes).expect("TCP packet bytes validated before retry");
+        let packet = TcpPacket::new(packet_bytes).ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid TCP retry packet bytes: destination={destination}"),
+            )
+        })?;
         send_fn(packet, destination)
     })
 }
@@ -143,5 +149,26 @@ impl<'a> TcpScanRx for RealTcpRxV6<'a> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use super::*;
+
+    #[test]
+    fn send_tcp_with_retry_rejects_invalid_packet_bytes_before_send() {
+        let err = send_tcp_with_retry(
+            &[0; 4],
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9),
+            |_, _| {
+                panic!("send closure should not be called for invalid packet");
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("rebuild TCP packet failed"));
     }
 }

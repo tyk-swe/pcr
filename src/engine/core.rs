@@ -132,6 +132,13 @@ impl Engine {
             );
             return Ok(());
         }
+        self.run_daemon_inner(opts)
+            .await
+            .map_err(|source| EngineError::Daemon(source).into())
+    }
+
+    #[cfg(feature = "daemon")]
+    async fn run_daemon_inner(&mut self, opts: &DaemonRequest) -> Result<()> {
         info!("Launching daemon mode");
         if !self.daemon_rules_preloaded {
             self.init_daemon_rules(opts.rules_file.as_ref())?;
@@ -187,6 +194,7 @@ impl Engine {
             .listener_runner
             .run_command(opts.clone(), self.listener_handler())
             .await
+            .map_err(|source| EngineError::Listener(source).into())
     }
 
     #[cfg(feature = "traceroute")]
@@ -196,7 +204,8 @@ impl Engine {
             .dependencies
             .traceroute_runner
             .prepare(opts.clone(), policy)
-            .await?;
+            .await
+            .map_err(EngineError::Traceroute)?;
         self.run_prepared_traffic(policy, prepared, EngineError::Traceroute, || {
             info!(
                 "Running traceroute to {} max_ttl={} probes={}",
@@ -212,18 +221,28 @@ impl Engine {
             .dependencies
             .dns_client
             .prepare(options.clone(), policy)
-            .await?;
-        policy.authorize(prepared.traffic_plan())?;
+            .await
+            .map_err(EngineError::Dns)?;
+        policy
+            .authorize(prepared.traffic_plan())
+            .map_err(|source| EngineError::Dns(source.into()))?;
 
         if self.config.dry_run {
             info!(
                 "Dry-run: DNS query for {} {} via {}",
                 options.domain, options.record_type, options.server
             );
-            return self.dependencies.output.format_dns_dry_run(options);
+            return self
+                .dependencies
+                .output
+                .format_dns_dry_run(options)
+                .map_err(|source| EngineError::Dns(source).into());
         }
-        let result = prepared.resolve().await?;
-        self.dependencies.output.format_dns_response(&result)
+        let result = prepared.resolve().await.map_err(EngineError::Dns)?;
+        self.dependencies
+            .output
+            .format_dns_response(&result)
+            .map_err(|source| EngineError::Dns(source).into())
     }
 
     #[cfg(feature = "scan")]
@@ -233,7 +252,8 @@ impl Engine {
             .dependencies
             .scan_runner
             .prepare(command.clone(), policy)
-            .await?;
+            .await
+            .map_err(EngineError::Scan)?;
         self.run_prepared_traffic(policy, prepared, EngineError::Scan, || {})
             .await
     }
@@ -250,8 +270,9 @@ impl Engine {
             .dependencies
             .fuzz_runner
             .prepare(options.clone(), policy, sender)
-            .await?;
-        self.run_prepared_traffic(policy, prepared, EngineError::TransmissionPlan, || {})
+            .await
+            .map_err(EngineError::Fuzz)?;
+        self.run_prepared_traffic(policy, prepared, EngineError::Fuzz, || {})
             .await
     }
 
@@ -278,7 +299,7 @@ impl Engine {
         &self,
         policy: TrafficPolicy,
         prepared: PreparedTrafficRun,
-        map_authorization_error: impl FnOnce(anyhow::Error) -> EngineError,
+        map_authorization_error: fn(anyhow::Error) -> EngineError,
         log_live_run: impl FnOnce(),
     ) -> Result<()> {
         policy
@@ -288,12 +309,16 @@ impl Engine {
         if self.config.dry_run {
             self.dependencies
                 .output
-                .emit_traffic_plan_summary(prepared.traffic_plan())?;
+                .emit_traffic_plan_summary(prepared.traffic_plan())
+                .map_err(map_authorization_error)?;
             return Ok(());
         }
 
         log_live_run();
-        prepared.run().await
+        prepared
+            .run()
+            .await
+            .map_err(|source| map_authorization_error(source).into())
     }
 
     pub(crate) fn listener_handler(&self) -> crate::engine::ports::ListenerEventHandler {
@@ -324,7 +349,7 @@ mod prepared_traffic_tests {
     use super::*;
     #[cfg(feature = "pcap")]
     use crate::domain::command::ListenRequest;
-    use crate::domain::command::{DnsQueryResult, DnsRequest};
+    use crate::domain::command::{DnsQueryResult, DnsRequest, DnsTransportMode};
     #[cfg(feature = "fuzz")]
     use crate::domain::command::{FuzzProtocol, FuzzRequest, FuzzStrategy};
     #[cfg(feature = "scan")]
@@ -335,8 +360,12 @@ mod prepared_traffic_tests {
     use crate::domain::policy::{TargetScope, TrafficMode, TrafficPlan};
     #[cfg(feature = "daemon")]
     use crate::domain::request::ListenerRequest;
-    use crate::domain::spec::{ListenerSpec, PacketSpec};
-    use crate::domain::transmission::{PlanningMode, TransmissionPlan};
+    use crate::domain::spec::{ListenerSpec, LoggingSpec, PacketSpec, TransmissionSpec};
+    use crate::domain::transmission::{
+        DestinationSelectionReason, InterfaceSelectionReason, PlanningMode, SourceSelectionReason,
+        TransmissionLinkType, TransmissionPlan, TransmissionProtocol, TransmissionSelection,
+        TransmissionSummary, TransmissionTarget,
+    };
     #[cfg(feature = "daemon")]
     use crate::engine::ports::DaemonListenerRuntime;
     #[cfg(feature = "fuzz")]
@@ -622,6 +651,52 @@ mod prepared_traffic_tests {
         assert_eq!(state.execution_count(), executions);
     }
 
+    fn engine_error_kind(err: &anyhow::Error) -> Option<&'static str> {
+        err.chain()
+            .find_map(|source| source.downcast_ref::<EngineError>())
+            .map(EngineError::kind)
+    }
+
+    fn dns_request() -> DnsRequest {
+        DnsRequest {
+            domain: "example.test".to_string(),
+            record_type: "A".to_string(),
+            server: "192.0.2.53".to_string(),
+            timeout: 100,
+            transaction_id: Some(7),
+            transport: DnsTransportMode::Udp,
+            retries: 0,
+        }
+    }
+
+    fn transmission_plan() -> TransmissionPlan {
+        TransmissionPlan {
+            frames: vec![vec![0; 4]],
+            link_type: TransmissionLinkType::Ipv4,
+            transmit: TransmissionSpec::default(),
+            destination: TransmissionTarget::Ipv4("192.0.2.10".parse().unwrap()),
+            interface_name: "eth-test".to_string(),
+            selection: TransmissionSelection {
+                selected_interface: "eth-test".to_string(),
+                interface_reason: InterfaceSelectionReason::ExplicitInterface,
+                source_ip: "192.0.2.5".parse().unwrap(),
+                source_reason: SourceSelectionReason::ExplicitSourceIp,
+                destination_ip: "192.0.2.10".parse().unwrap(),
+                destination_reason: DestinationSelectionReason::TargetLiteral,
+            },
+            protocol: TransmissionProtocol(17),
+            summary: TransmissionSummary {
+                payload_len: 0,
+                largest_frame_len: 4,
+                frame_count: 1,
+                transport: "udp",
+            },
+            logging: LoggingSpec::default(),
+            mode: PlanningMode::Live,
+            policy: crate::domain::policy::TransmissionPolicy::default(),
+        }
+    }
+
     #[cfg(feature = "traceroute")]
     fn traceroute_request() -> TracerouteRequest {
         TracerouteRequest {
@@ -665,6 +740,41 @@ mod prepared_traffic_tests {
         engine.run_traceroute(&traceroute_request()).await.unwrap();
 
         assert_counts(&state, 1, 0);
+    }
+
+    #[tokio::test]
+    async fn dns_prepare_failure_is_classified() {
+        let (mut engine, _state) = engine_with_plan(TrafficMode::Send, TargetScope::Private, false);
+
+        let err = engine.run_dns_query(&dns_request()).await.unwrap_err();
+
+        assert_eq!(engine_error_kind(&err), Some("dns"));
+    }
+
+    #[tokio::test]
+    async fn transmission_failure_is_classified() {
+        let (engine, _state) = engine_with_plan(TrafficMode::Send, TargetScope::Private, false);
+
+        let err = engine
+            .send
+            .execute_plan(transmission_plan())
+            .await
+            .unwrap_err();
+
+        assert_eq!(engine_error_kind(&err), Some("transmission_execution"));
+    }
+
+    #[cfg(feature = "pcap")]
+    #[tokio::test]
+    async fn listener_command_failure_is_classified() {
+        let (mut engine, _state) = engine_with_plan(TrafficMode::Send, TargetScope::Private, false);
+
+        let err = engine
+            .run_listener(&ListenRequest::default())
+            .await
+            .unwrap_err();
+
+        assert_eq!(engine_error_kind(&err), Some("listener"));
     }
 
     #[cfg(feature = "traceroute")]

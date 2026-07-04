@@ -13,4 +13,4 @@ mod rules;
 mod tools;
 mod util;
 
-pub use app::run_cli;
+pub use app::{run_cli, run_cli_entrypoint};

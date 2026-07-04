@@ -2,14 +2,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::path::Path;
+use std::process::ExitCode;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use log::warn;
+use serde::Serialize;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::cli::PacketcraftArgs;
 use crate::domain::command::EngineCommand;
+use crate::domain::policy::PolicyRejection;
+use crate::engine::error::EngineError;
 use crate::{engine, util};
 
 mod adapters;
@@ -23,6 +27,26 @@ mod telemetry;
 
 pub fn run_cli() -> Result<()> {
     let args = PacketcraftArgs::parse();
+    run_args(args)
+}
+
+pub fn run_cli_entrypoint() -> ExitCode {
+    let args = match PacketcraftArgs::try_parse() {
+        Ok(args) => args,
+        Err(err) => err.exit(),
+    };
+    let output_format = args.output_format;
+
+    match run_args(args) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            ErrorReport::from_error(&err).emit(output_format);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_args(args: PacketcraftArgs) -> Result<()> {
     let app = PacketcraftApp::bootstrap(args)?;
     app.run()
 }
@@ -119,5 +143,107 @@ impl PacketcraftApp {
             .enable_all()
             .build()
             .context("initialise tokio runtime failed: builder construction error")
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorEnvelope<'a> {
+    status: &'static str,
+    error: &'a ErrorReport,
+}
+
+#[derive(Debug, Serialize)]
+struct ErrorReport {
+    kind: &'static str,
+    message: String,
+    causes: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    policy_code: Option<String>,
+}
+
+impl ErrorReport {
+    fn from_error(err: &anyhow::Error) -> Self {
+        let message = err.to_string();
+        let kind = err
+            .chain()
+            .find_map(|source| source.downcast_ref::<EngineError>())
+            .map(EngineError::kind)
+            .unwrap_or("runtime");
+        let policy_code = err
+            .chain()
+            .find_map(|source| source.downcast_ref::<PolicyRejection>())
+            .map(|source| source.code.to_string());
+
+        let mut causes = Vec::new();
+        for cause in err.chain().skip(1).map(ToString::to_string) {
+            if cause != message && !causes.contains(&cause) {
+                causes.push(cause);
+            }
+        }
+
+        Self {
+            kind,
+            message,
+            causes,
+            policy_code,
+        }
+    }
+
+    fn emit(&self, output_format: Option<crate::cli::enums::OutputFormat>) {
+        if matches!(output_format, Some(crate::cli::enums::OutputFormat::Json)) {
+            let envelope = ErrorEnvelope {
+                status: "error",
+                error: self,
+            };
+            match serde_json::to_string_pretty(&envelope) {
+                Ok(json) => println!("{json}"),
+                Err(err) => {
+                    eprintln!("failed to serialize error report: {err}");
+                    eprintln!("error: {}", self.message);
+                }
+            }
+        } else {
+            eprintln!("error: {}", self.message);
+            for cause in &self.causes {
+                eprintln!("caused by: {cause}");
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::policy::{PolicyRejection, PolicyRejectionCode};
+
+    #[test]
+    fn error_report_deduplicates_causes_and_keeps_engine_kind() {
+        let source = anyhow::anyhow!("duplicate");
+        let err = anyhow::Error::from(EngineError::PacketSpecBuild(source.context("duplicate")));
+
+        let report = ErrorReport::from_error(&err);
+
+        assert_eq!(report.kind, "packet_spec_build");
+        assert_eq!(report.message, "failed to build packet specification");
+        assert_eq!(report.causes, ["duplicate"]);
+        assert_eq!(report.policy_code, None);
+    }
+
+    #[test]
+    fn error_report_json_envelope_includes_policy_code() {
+        let rejection = PolicyRejection::new(PolicyRejectionCode::PublicTarget, "public target");
+        let err = anyhow::Error::from(EngineError::TransmissionPlan(rejection.into()));
+        let report = ErrorReport::from_error(&err);
+        let json = serde_json::to_value(ErrorEnvelope {
+            status: "error",
+            error: &report,
+        })
+        .unwrap();
+
+        assert_eq!(json["status"], "error");
+        assert_eq!(json["error"]["kind"], "transmission_plan");
+        assert_eq!(json["error"]["message"], "failed to plan transmission");
+        assert_eq!(json["error"]["policy_code"], "public_target");
+        assert_eq!(json["error"]["causes"][0], "public_target: public target");
     }
 }

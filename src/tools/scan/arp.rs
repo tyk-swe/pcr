@@ -93,12 +93,13 @@ trait ArpResolver {
 
 impl ArpResolver for arp::ArpScanner {
     fn resolve(&mut self, target: Ipv4Addr, timeout: Duration) -> Result<MacAddr> {
-        self.resolve(target, timeout)
+        self.resolve(target, timeout).map_err(anyhow::Error::from)
     }
 }
 
 fn perform_arp_scan(config: ArpScanConfig) -> Result<Vec<ArpHit>> {
-    let mut scanner = arp::ArpScanner::new(&config.interface, config.source_ip, config.timeout)?;
+    let mut scanner = arp::ArpScanner::new(&config.interface, config.source_ip, config.timeout)
+        .map_err(anyhow::Error::from)?;
     perform_arp_scan_with_scanner(config, &mut scanner)
 }
 

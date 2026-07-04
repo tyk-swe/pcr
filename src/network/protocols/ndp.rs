@@ -62,6 +62,8 @@ pub(crate) enum NeighborDiscoveryError {
         #[source]
         source: io::Error,
     },
+    #[error("NDP timeout duration is too large: {timeout:?}")]
+    TimeoutConfiguration { timeout: Duration },
     #[error("failed to resolve IPv6 target {target} via {interface} after {attempts} attempt(s)")]
     ResolutionTimeout {
         target: Ipv6Addr,
@@ -91,6 +93,9 @@ pub(crate) fn resolve_mac(
     } else {
         source_ip
     };
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or(NeighborDiscoveryError::TimeoutConfiguration { timeout })?;
 
     let solicited_multicast = solicited_node_multicast(target_ip);
     let destination_mac = solicited_node_mac(target_ip);
@@ -132,7 +137,6 @@ pub(crate) fn resolve_mac(
         target_ip,
     )?;
 
-    let deadline = Instant::now() + timeout;
     let mut attempts = 0u32;
 
     while Instant::now() < deadline {
@@ -360,6 +364,17 @@ mod tests {
         frame
     }
 
+    fn interface(mac: Option<MacAddr>) -> NetworkInterface {
+        NetworkInterface {
+            name: "eth-test".to_string(),
+            description: String::new(),
+            index: 1,
+            mac,
+            ips: Vec::new(),
+            flags: libc::IFF_UP as u32,
+        }
+    }
+
     #[test]
     fn solicited_node_multicast_uses_low_24_bits_of_target() {
         assert_eq!(
@@ -514,5 +529,21 @@ mod tests {
             ),
             None
         );
+    }
+
+    #[test]
+    fn ndp_huge_timeout_deadline_overflow_returns_error() {
+        let err = resolve_mac(
+            &interface(Some(source_mac())),
+            "fe80::1".parse().unwrap(),
+            target_ip(),
+            Duration::MAX,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            NeighborDiscoveryError::TimeoutConfiguration { .. }
+        ));
     }
 }

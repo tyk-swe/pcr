@@ -4,13 +4,13 @@
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 
-use anyhow::{anyhow, Result};
+use super::{DnsProtocolError, DnsProtocolResult};
 
-pub(crate) fn resolve_dns_server_address(server: &str) -> Result<String> {
+pub(crate) fn resolve_dns_server_address(server: &str) -> DnsProtocolResult<String> {
     let server = server.trim();
 
     if server.is_empty() {
-        return Err(anyhow!("DNS server address cannot be empty"));
+        return Err(DnsProtocolError::EmptyServerAddress);
     }
 
     // Check if it parses as SocketAddr (e.g., "1.2.3.4:53") or IpAddr (e.g., "1.2.3.4")
@@ -39,7 +39,9 @@ pub(crate) fn resolve_dns_server_address(server: &str) -> Result<String> {
                 return Ok(format!("[{}]:{}", ip_part, port_part));
             }
         }
-        return Err(anyhow!("Invalid DNS server address format: {}", server));
+        return Err(DnsProtocolError::InvalidServerAddressFormat {
+            server: server.to_string(),
+        });
     }
 
     // Fallback for hostnames or other formats
@@ -47,7 +49,9 @@ pub(crate) fn resolve_dns_server_address(server: &str) -> Result<String> {
         // Validate port if present
         if let Some((_, port_str)) = server.rsplit_once(':') {
             if port_str.parse::<u16>().is_err() {
-                return Err(anyhow!("Invalid port number in address: {}", server));
+                return Err(DnsProtocolError::InvalidServerAddressPort {
+                    server: server.to_string(),
+                });
             }
         }
         // Assume it has a port if it contains a colon
@@ -105,5 +109,21 @@ mod tests {
     #[test]
     fn resolve_dns_server_address_rejects_malformed_ipv6_like_input() {
         assert!(resolve_dns_server_address("2001:db8::1:99999").is_err());
+    }
+
+    #[test]
+    fn resolve_dns_server_address_errors_are_typed() {
+        assert!(matches!(
+            resolve_dns_server_address(" "),
+            Err(DnsProtocolError::EmptyServerAddress)
+        ));
+        assert!(matches!(
+            resolve_dns_server_address("dns.example:notaport"),
+            Err(DnsProtocolError::InvalidServerAddressPort { .. })
+        ));
+        assert!(matches!(
+            resolve_dns_server_address("2001:db8::1:99999"),
+            Err(DnsProtocolError::InvalidServerAddressFormat { .. })
+        ));
     }
 }

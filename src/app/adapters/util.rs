@@ -3,6 +3,8 @@
 
 use std::sync::Arc;
 
+use anyhow::Context;
+
 use crate::domain::spec::{PacketSpec, TransportSpec};
 use crate::engine::error::EngineError;
 use crate::engine::ports::{PortFuture, PrivilegeChecker, TargetResolver};
@@ -18,12 +20,11 @@ impl TargetResolver for SystemTargetResolverAdapter {
     ) -> PortFuture<std::net::IpAddr> {
         Box::pin(async move {
             tokio::task::spawn_blocking(move || {
-                crate::util::net::resolve_target_ip(&target, prefer_ipv6).map_err(|source| {
-                    anyhow::anyhow!("resolve hostname failed: host='{target}': {source}")
-                })
+                crate::util::net::resolve_target_ip(&target, prefer_ipv6)
+                    .with_context(|| format!("resolve hostname failed: host='{target}'"))
             })
             .await
-            .map_err(|source| anyhow::anyhow!("target resolution task failed: {source}"))?
+            .context("target resolution task failed")?
         })
     }
 }
@@ -36,7 +37,7 @@ impl PrivilegeChecker for RawSocketPrivilegeChecker {
         Box::pin(async move {
             tokio::task::spawn_blocking(move || check_privileges(spec.as_ref()))
                 .await
-                .map_err(|source| anyhow::anyhow!("privilege check task failed: {source}"))?
+                .context("privilege check task failed")?
                 .map_err(anyhow::Error::from)
         })
     }
@@ -59,4 +60,26 @@ fn check_privileges(spec: &PacketSpec) -> Result<(), EngineError> {
             .map_err(|e| EngineError::InsufficientPrivileges(e.into()))?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::net::ResolveHostnameError;
+
+    #[tokio::test]
+    async fn target_resolver_preserves_hostname_resolution_source_chain() {
+        let err = SystemTargetResolverAdapter
+            .resolve_target_ip(" ".to_string(), None)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            err.chain().next().unwrap().to_string(),
+            "resolve hostname failed: host=' '"
+        );
+        assert!(err
+            .chain()
+            .any(|source| source.downcast_ref::<ResolveHostnameError>().is_some()));
+    }
 }

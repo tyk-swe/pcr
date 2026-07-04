@@ -3,27 +3,38 @@
 
 use std::str::FromStr;
 
-use anyhow::{anyhow, Context, Result};
 use trust_dns_proto::op::{Message, MessageType, OpCode, Query};
 use trust_dns_proto::rr::{DNSClass, Name, RecordType};
+
+use super::{DnsProtocolError, DnsProtocolResult};
 
 pub(crate) fn build_dns_query(
     domain: &str,
     record_type: &str,
     transaction_id: Option<u16>,
-) -> Result<(Vec<u8>, u16)> {
+) -> DnsProtocolResult<(Vec<u8>, u16)> {
     let domain = domain.trim();
     if domain.is_empty() {
-        return Err(anyhow!("domain name must not be empty"));
+        return Err(DnsProtocolError::EmptyDomain);
     }
-    let mut name = Name::from_str(domain).context("Invalid domain name")?;
+    let mut name = Name::from_str(domain).map_err(|source| DnsProtocolError::InvalidDomain {
+        domain: domain.to_string(),
+        source,
+    })?;
     // Ensure fully qualified domain name
     if !domain.ends_with('.') {
-        name = Name::from_str(&format!("{}.", domain)).context("Invalid domain name")?;
+        let normalized = format!("{}.", domain);
+        name = Name::from_str(&normalized).map_err(|source| DnsProtocolError::InvalidDomain {
+            domain: normalized,
+            source,
+        })?;
     }
 
-    let record_type_enum = RecordType::from_str(&record_type.to_uppercase())
-        .map_err(|_| anyhow::anyhow!("Unsupported DNS type: {}", record_type))?;
+    let record_type_enum = RecordType::from_str(&record_type.to_uppercase()).map_err(|_| {
+        DnsProtocolError::UnsupportedRecordType {
+            record_type: record_type.to_string(),
+        }
+    })?;
 
     let mut message = Message::new();
     // trust-dns-proto Message::new() initializes with a random ID if we don't set it,
@@ -41,7 +52,9 @@ pub(crate) fn build_dns_query(
 
     message.add_query(query);
 
-    let bytes = message.to_vec()?;
+    let bytes = message
+        .to_vec()
+        .map_err(|source| DnsProtocolError::QueryEncode { source })?;
     Ok((bytes, id))
 }
 
@@ -76,5 +89,21 @@ mod tests {
     fn build_dns_query_rejects_empty_domain_and_unknown_type() {
         assert!(build_dns_query(" ", "A", Some(1)).is_err());
         assert!(build_dns_query("example.test", "NOPE", Some(1)).is_err());
+    }
+
+    #[test]
+    fn build_dns_query_errors_are_typed() {
+        assert!(matches!(
+            build_dns_query(" ", "A", Some(1)),
+            Err(DnsProtocolError::EmptyDomain)
+        ));
+        assert!(matches!(
+            build_dns_query("example.test", "NOPE", Some(1)),
+            Err(DnsProtocolError::UnsupportedRecordType { .. })
+        ));
+        assert!(matches!(
+            build_dns_query("bad name", "A", Some(1)),
+            Err(DnsProtocolError::InvalidDomain { .. })
+        ));
     }
 }

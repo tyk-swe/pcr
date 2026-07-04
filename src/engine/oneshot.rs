@@ -46,13 +46,17 @@ impl<'engine> OneShotFlow<'engine> {
     pub(crate) async fn with_rules(self) -> Result<Self> {
         if let Some(rules_file) = self.spec()?.rules_file.clone() {
             let path = rules_file.clone();
+            let load_path = path.clone();
             let rules = tokio::task::spawn_blocking(move || {
-                crate::rules::RuleEngine::load_rules_from_path(&path).map_err(|e| {
-                    EngineError::rule_load(path.to_string_lossy().into_owned(), e.into())
+                crate::rules::RuleEngine::load_rules_from_path(&load_path).map_err(|e| {
+                    EngineError::rule_load(load_path.to_string_lossy().into_owned(), e.into())
                 })
             })
             .await
-            .context("rule loading task failed")??;
+            .context("rule loading task failed")
+            .map_err(|source| {
+                EngineError::rule_load(path.to_string_lossy().into_owned(), source)
+            })??;
 
             self.engine.rules.replace_rules(rules);
         }
@@ -201,7 +205,8 @@ impl<'engine> OneShotFlow<'engine> {
                     plan.target.interface.clone(),
                     self.engine.listener_handler(),
                 )
-                .await?;
+                .await
+                .map_err(|source| anyhow::Error::from(EngineError::Listener(source)))?;
         }
         Ok(())
     }

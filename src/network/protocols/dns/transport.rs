@@ -4,7 +4,6 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
 use log::debug;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, UdpSocket};
@@ -13,6 +12,7 @@ use trust_dns_proto::op::Message;
 use trust_dns_proto::rr::RecordType;
 
 use super::validation::{inspect_dns_response_header, validate_dns_response};
+use super::{DnsProtocolError, DnsProtocolResult};
 
 const UDP_RESPONSE_BUFFER_BYTES: usize = 4096;
 const MAX_DNS_TCP_FRAME_BYTES: usize = u16::MAX as usize;
@@ -66,12 +66,12 @@ impl DnsRateLimiter {
 }
 
 enum DnsAttemptError {
-    Retryable(anyhow::Error),
-    Fatal(anyhow::Error),
+    Retryable(DnsProtocolError),
+    Fatal(DnsProtocolError),
 }
 
 impl DnsAttemptError {
-    fn into_error(self) -> anyhow::Error {
+    fn into_error(self) -> DnsProtocolError {
         match self {
             Self::Retryable(err) | Self::Fatal(err) => err,
         }
@@ -83,7 +83,7 @@ pub(crate) async fn query_udp_with_retries(
     retries: u8,
     attempts: &mut u32,
     rate_limiter: &mut DnsRateLimiter,
-) -> Result<DnsTransportResponse> {
+) -> DnsProtocolResult<DnsTransportResponse> {
     query_with_retries(retries, attempts, rate_limiter, || async {
         query_udp_once(plan).await
     })
@@ -95,7 +95,7 @@ pub(crate) async fn query_udp_for_auto_with_retries(
     retries: u8,
     attempts: &mut u32,
     rate_limiter: &mut DnsRateLimiter,
-) -> Result<AutoUdpResponse> {
+) -> DnsProtocolResult<AutoUdpResponse> {
     query_with_retries(retries, attempts, rate_limiter, || async {
         query_udp_for_auto_once(plan).await
     })
@@ -107,7 +107,7 @@ pub(crate) async fn query_tcp_with_retries(
     retries: u8,
     attempts: &mut u32,
     rate_limiter: &mut DnsRateLimiter,
-) -> Result<DnsTransportResponse> {
+) -> DnsProtocolResult<DnsTransportResponse> {
     query_with_retries(retries, attempts, rate_limiter, || async {
         query_tcp_once(plan).await
     })
@@ -119,7 +119,7 @@ async fn query_with_retries<F, Fut, T>(
     attempts: &mut u32,
     rate_limiter: &mut DnsRateLimiter,
     mut attempt: F,
-) -> Result<T>
+) -> DnsProtocolResult<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = std::result::Result<T, DnsAttemptError>>,
@@ -140,7 +140,7 @@ where
         }
     }
 
-    unreachable!("retry loop always returns from the final attempt")
+    Err(DnsProtocolError::RetryExhausted)
 }
 
 async fn query_udp_once(
@@ -194,30 +194,30 @@ async fn send_udp_query_once(
 
     let socket = UdpSocket::bind(bind_addr)
         .await
-        .with_context(|| format!("failed to bind UDP socket to {}", bind_addr))
+        .map_err(|source| DnsProtocolError::UdpBind { bind_addr, source })
         .map_err(DnsAttemptError::Fatal)?;
 
     socket
         .connect(target)
         .await
-        .with_context(|| format!("failed to connect to {}", target))
+        .map_err(|source| DnsProtocolError::UdpConnect { target, source })
         .map_err(DnsAttemptError::Fatal)?;
 
     socket
         .send(query)
         .await
-        .context("failed to send query")
+        .map(|_| ())
+        .map_err(|source| DnsProtocolError::UdpSend { source })
         .map_err(DnsAttemptError::Fatal)?;
 
     let mut buf = [0u8; UDP_RESPONSE_BUFFER_BYTES];
     match tokio::time::timeout(timeout, socket.recv(&mut buf)).await {
         Ok(Ok(len)) => Ok(buf[..len].to_vec()),
-        Ok(Err(err)) => Err(DnsAttemptError::Retryable(
-            anyhow::Error::new(err).context("socket receive error"),
-        )),
-        Err(_) => Err(DnsAttemptError::Retryable(anyhow::anyhow!(
-            "request timed out after {}ms",
-            timeout.as_millis()
+        Ok(Err(source)) => Err(DnsAttemptError::Retryable(DnsProtocolError::UdpReceive {
+            source,
+        })),
+        Err(_) => Err(DnsAttemptError::Retryable(DnsProtocolError::timeout(
+            timeout,
         ))),
     }
 }
@@ -234,9 +234,8 @@ async fn query_tcp_once(
         Ok(Ok(response)) => response,
         Ok(Err(err)) => return Err(err),
         Err(_) => {
-            return Err(DnsAttemptError::Retryable(anyhow::anyhow!(
-                "request timed out after {}ms",
-                plan.timeout.as_millis()
+            return Err(DnsAttemptError::Retryable(DnsProtocolError::timeout(
+                plan.timeout,
             )));
         }
     };
@@ -258,13 +257,13 @@ async fn send_tcp_query_once(
     let frame = encode_tcp_frame(query).map_err(DnsAttemptError::Fatal)?;
     let mut stream = TcpStream::connect(target)
         .await
-        .with_context(|| format!("failed to connect to {}", target))
+        .map_err(|source| DnsProtocolError::TcpConnect { target, source })
         .map_err(DnsAttemptError::Retryable)?;
 
     stream
         .write_all(&frame)
         .await
-        .context("failed to write DNS TCP query")
+        .map_err(|source| DnsProtocolError::TcpWrite { source })
         .map_err(DnsAttemptError::Retryable)?;
 
     read_tcp_response(&mut stream).await
@@ -277,29 +276,30 @@ async fn read_tcp_response(
     stream
         .read_exact(&mut length_prefix)
         .await
-        .context("failed to read DNS TCP response length")
+        .map(|_| ())
+        .map_err(|source| DnsProtocolError::TcpReadLength { source })
         .map_err(DnsAttemptError::Retryable)?;
     let response_len = decode_tcp_frame_length(length_prefix).map_err(DnsAttemptError::Fatal)?;
     let mut response = vec![0u8; response_len];
     stream
         .read_exact(&mut response)
         .await
-        .context("failed to read DNS TCP response body")
+        .map(|_| ())
+        .map_err(|source| DnsProtocolError::TcpReadBody { source })
         .map_err(DnsAttemptError::Retryable)?;
 
     Ok(response)
 }
 
-pub(super) fn encode_tcp_frame(query: &[u8]) -> Result<Vec<u8>> {
+pub(super) fn encode_tcp_frame(query: &[u8]) -> DnsProtocolResult<Vec<u8>> {
     if query.is_empty() {
-        return Err(anyhow!("DNS TCP query frame cannot be empty"));
+        return Err(DnsProtocolError::TcpQueryFrameEmpty);
     }
     if query.len() > u16::MAX as usize {
-        return Err(anyhow!(
-            "DNS TCP query too large: {} bytes exceeds {} byte frame limit",
-            query.len(),
-            u16::MAX
-        ));
+        return Err(DnsProtocolError::TcpQueryFrameTooLarge {
+            actual: query.len(),
+            maximum: u16::MAX as usize,
+        });
     }
 
     let mut frame = Vec::with_capacity(query.len() + 2);
@@ -308,17 +308,16 @@ pub(super) fn encode_tcp_frame(query: &[u8]) -> Result<Vec<u8>> {
     Ok(frame)
 }
 
-pub(super) fn decode_tcp_frame_length(length_prefix: [u8; 2]) -> Result<usize> {
+pub(super) fn decode_tcp_frame_length(length_prefix: [u8; 2]) -> DnsProtocolResult<usize> {
     let response_len = u16::from_be_bytes(length_prefix) as usize;
     if response_len == 0 {
-        return Err(anyhow!("DNS TCP response frame length cannot be zero"));
+        return Err(DnsProtocolError::TcpResponseFrameLengthZero);
     }
     if response_len > MAX_DNS_TCP_FRAME_BYTES {
-        return Err(anyhow!(
-            "DNS TCP response frame length {} exceeds {} byte limit",
-            response_len,
-            MAX_DNS_TCP_FRAME_BYTES
-        ));
+        return Err(DnsProtocolError::TcpResponseFrameTooLarge {
+            actual: response_len,
+            maximum: MAX_DNS_TCP_FRAME_BYTES,
+        });
     }
     Ok(response_len)
 }
@@ -339,6 +338,7 @@ mod tests {
         let err = encode_tcp_frame(&[]).unwrap_err();
 
         assert!(err.to_string().contains("cannot be empty"));
+        assert!(matches!(err, DnsProtocolError::TcpQueryFrameEmpty));
     }
 
     #[test]
@@ -348,6 +348,10 @@ mod tests {
 
         assert!(err.to_string().contains("too large"));
         assert!(err.to_string().contains("exceeds 65535 byte frame limit"));
+        assert!(matches!(
+            err,
+            DnsProtocolError::TcpQueryFrameTooLarge { .. }
+        ));
     }
 
     #[test]
@@ -364,5 +368,6 @@ mod tests {
         let err = decode_tcp_frame_length([0, 0]).unwrap_err();
 
         assert!(err.to_string().contains("cannot be zero"));
+        assert!(matches!(err, DnsProtocolError::TcpResponseFrameLengthZero));
     }
 }

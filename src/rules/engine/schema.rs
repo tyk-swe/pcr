@@ -518,6 +518,30 @@ mod tests {
     }
 
     #[test]
+    fn collect_unknown_rule_schema_fields_reports_fallback_action_unknowns() {
+        let diagnostics = diagnostics_for(
+            r#"
+- name: fallback-actions
+  actions:
+    - message: missing type
+      extra_missing_type: true
+    - type: webhook
+      url: https://example.test/hook
+"#,
+            RuleDiagnosticSeverity::Warning,
+        );
+
+        assert_eq!(
+            paths(&diagnostics),
+            BTreeSet::from([
+                "rules[0].actions[0].message".to_string(),
+                "rules[0].actions[0].extra_missing_type".to_string(),
+                "rules[0].actions[1].url".to_string(),
+            ])
+        );
+    }
+
+    #[test]
     fn collect_unknown_rule_schema_fields_preserves_requested_severity() {
         let diagnostics = diagnostics_for(
             r#"

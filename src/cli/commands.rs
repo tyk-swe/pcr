@@ -397,4 +397,108 @@ mod tests {
         assert_eq!(parsed.options.probes, 3);
         assert_eq!(parsed.options.timeout, 3000);
     }
+
+    #[cfg(feature = "fuzz")]
+    #[derive(Debug, Parser)]
+    struct FuzzHarness {
+        #[command(flatten)]
+        options: FuzzOptions,
+    }
+
+    #[cfg(feature = "fuzz")]
+    #[test]
+    fn fuzz_strategy_parser_accepts_documented_aliases() {
+        let random = FuzzHarness::try_parse_from([
+            "test",
+            "--target",
+            "192.0.2.1",
+            "--protocol",
+            "icmp",
+            "--strategy",
+            "random",
+        ])
+        .unwrap();
+        let byte_overflow = FuzzHarness::try_parse_from([
+            "test",
+            "--target",
+            "192.0.2.1",
+            "--protocol",
+            "icmp",
+            "--strategy",
+            "byte-overflow",
+        ])
+        .unwrap();
+
+        assert_eq!(random.options.strategy, FuzzStrategy::RandomPayload);
+        assert_eq!(byte_overflow.options.strategy, FuzzStrategy::Boundary);
+    }
+
+    #[cfg(feature = "scan")]
+    #[derive(Debug, Parser)]
+    struct ScanHarness {
+        #[command(subcommand)]
+        command: ScanCommand,
+    }
+
+    #[cfg(feature = "scan")]
+    fn parse_scan(args: &[&str]) -> ScanCommand {
+        ScanHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+            .unwrap()
+            .command
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn scan_parser_selects_each_subcommand_variant() {
+        assert!(matches!(
+            parse_scan(&["tcp-syn", "--target", "192.0.2.1", "--ports", "80"]),
+            ScanCommand::TcpSyn(options)
+                if options.target == "192.0.2.1" && options.ports == "80"
+        ));
+        assert!(matches!(
+            parse_scan(&["tcp-fin", "--target", "192.0.2.1", "--ports", "80"]),
+            ScanCommand::TcpFin(options)
+                if options.target == "192.0.2.1" && options.ports == "80"
+        ));
+        assert!(matches!(
+            parse_scan(&["tcp-null", "--target", "192.0.2.1", "--ports", "80"]),
+            ScanCommand::TcpNull(options)
+                if options.target == "192.0.2.1" && options.ports == "80"
+        ));
+        assert!(matches!(
+            parse_scan(&["tcp-xmas", "--target", "192.0.2.1", "--ports", "80"]),
+            ScanCommand::TcpXmas(options)
+                if options.target == "192.0.2.1" && options.ports == "80"
+        ));
+        assert!(matches!(
+            parse_scan(&["tcp-ack", "--target", "192.0.2.1", "--ports", "80"]),
+            ScanCommand::TcpAck(options)
+                if options.target == "192.0.2.1" && options.ports == "80"
+        ));
+        assert!(matches!(
+            parse_scan(&["sctp-init", "--target", "192.0.2.1", "--ports", "9899"]),
+            ScanCommand::SctpInit(options)
+                if options.target == "192.0.2.1" && options.ports == "9899"
+        ));
+        assert!(matches!(
+            parse_scan(&["icmp", "--target", "192.0.2.0/30", "--timeout", "250"]),
+            ScanCommand::Icmp(options)
+                if options.target == "192.0.2.0/30" && options.timeout == 250
+        ));
+        assert!(matches!(
+            parse_scan(&["udp", "--target", "192.0.2.1", "--ports", "53"]),
+            ScanCommand::Udp(options)
+                if options.target == "192.0.2.1" && options.ports == "53"
+        ));
+        assert!(matches!(
+            parse_scan(&["arp", "--target", "192.0.2.0/30", "--timeout", "250"]),
+            ScanCommand::Arp(options)
+                if options.target == "192.0.2.0/30" && options.timeout == 250
+        ));
+        assert!(matches!(
+            parse_scan(&["ndp", "--target", "2001:db8::/126", "--timeout", "250"]),
+            ScanCommand::Ndp(options)
+                if options.target == "2001:db8::/126" && options.timeout == 250
+        ));
+    }
 }

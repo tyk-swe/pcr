@@ -86,3 +86,63 @@ impl PacketBuilder for Ipv6PacketBuilder {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::Ipv4Packet;
+    use pnet::packet::ipv6::Ipv6Packet;
+
+    fn transport() -> TransportBuild {
+        TransportBuild {
+            bytes: b"udp".to_vec(),
+            protocol: IpNextHeaderProtocols::Udp,
+            label: "UDP",
+        }
+    }
+
+    #[test]
+    fn ipv4_packet_builder_uses_destination_as_network_target() {
+        let destination = Ipv4Addr::new(198, 51, 100, 10);
+        let result = Ipv4PacketBuilder {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination,
+        }
+        .build(&PacketSpec::default(), &transport(), None)
+        .unwrap();
+
+        assert!(matches!(result.link_type, LinkType::Ipv4));
+        assert!(matches!(result.target, NetworkTarget::Ipv4(target) if target == destination));
+        assert_eq!(result.frames.len(), 1);
+        assert_eq!(
+            Ipv4Packet::new(&result.frames[0])
+                .unwrap()
+                .get_destination(),
+            destination
+        );
+    }
+
+    #[test]
+    fn ipv6_packet_builder_uses_first_hop_as_network_target() {
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 1, 0, 0, 0, 0, 10);
+        let first_hop = Ipv6Addr::new(0x2001, 0xdb8, 2, 0, 0, 0, 0, 1);
+        let result = Ipv6PacketBuilder {
+            source: Ipv6Addr::LOCALHOST,
+            destination,
+            first_hop,
+        }
+        .build(&PacketSpec::default(), &transport(), None)
+        .unwrap();
+
+        assert!(matches!(result.link_type, LinkType::Ipv6));
+        assert!(matches!(result.target, NetworkTarget::Ipv6(target) if target == first_hop));
+        assert_eq!(result.frames.len(), 1);
+        assert_eq!(
+            Ipv6Packet::new(&result.frames[0])
+                .unwrap()
+                .get_destination(),
+            destination
+        );
+    }
+}

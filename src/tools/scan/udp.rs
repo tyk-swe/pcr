@@ -437,7 +437,40 @@ fn build_udp_packet(
 
 #[cfg(test)]
 mod tests {
+    use pnet::packet::icmp;
+
     use super::*;
+
+    struct MockUdpTx {
+        sends: Vec<(u16, SocketAddr, IpAddr, u16)>,
+    }
+
+    impl UdpScanTx for MockUdpTx {
+        fn send_probe(
+            &mut self,
+            port: u16,
+            destination: SocketAddr,
+            source_ip: IpAddr,
+            source_port: u16,
+        ) -> Result<()> {
+            self.sends.push((port, destination, source_ip, source_port));
+            Ok(())
+        }
+    }
+
+    struct MockUdpRx {
+        events: Vec<ScanEvent>,
+    }
+
+    impl UdpScanRx for MockUdpRx {
+        fn next_event(&mut self, _timeout: Duration) -> Result<Option<ScanEvent>> {
+            Ok(if self.events.is_empty() {
+                None
+            } else {
+                Some(self.events.remove(0))
+            })
+        }
+    }
 
     #[test]
     fn build_udp_packet_sets_ports_length_and_ipv4_checksum() {
@@ -495,5 +528,72 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("rebuild UDP packet failed"));
+    }
+
+    #[test]
+    fn scan_udp_classifies_packet_icmp_and_timeout_states_with_fake_paths() {
+        let source_ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5));
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0);
+        let ports = [53, 54, 55, 56];
+        let mut tx = MockUdpTx { sends: Vec::new() };
+        let mut rx = MockUdpRx {
+            events: vec![
+                ScanEvent::PacketResponse {
+                    source_port: 53,
+                    dest_port: 40_000,
+                    src_addr: destination.ip(),
+                    flags: None,
+                },
+                ScanEvent::IcmpResponse {
+                    source_port: 40_001,
+                    dest_port: 54,
+                    src_addr: source_ip,
+                    dst_addr: destination.ip(),
+                    icmp_type: icmp::IcmpTypes::DestinationUnreachable.0,
+                    icmp_code: icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable
+                        .0,
+                },
+                ScanEvent::IcmpResponse {
+                    source_port: 40_002,
+                    dest_port: 55,
+                    src_addr: source_ip,
+                    dst_addr: destination.ip(),
+                    icmp_type: icmp::IcmpTypes::DestinationUnreachable.0,
+                    icmp_code: icmp::destination_unreachable::IcmpCodes::DestinationHostUnreachable
+                        .0,
+                },
+            ],
+        };
+
+        let results = scan_ports_concurrent_with_config(
+            ConcurrentScanConfig {
+                destination,
+                source_ip,
+                timeout: Duration::from_millis(1),
+                batch_size: ports.len(),
+                send_delay: None,
+                base_port_offset: SOURCE_PORT_OFFSET,
+                base_port_override: Some(40_000),
+                initial_port_state: PortState::OpenOrFiltered,
+            },
+            &ports,
+            &mut tx,
+            &mut rx,
+        )
+        .unwrap();
+
+        assert_eq!(results.get(&53), Some(&PortState::Open));
+        assert_eq!(results.get(&54), Some(&PortState::Closed));
+        assert_eq!(results.get(&55), Some(&PortState::Filtered));
+        assert_eq!(results.get(&56), Some(&PortState::OpenOrFiltered));
+        assert_eq!(
+            tx.sends,
+            vec![
+                (53, destination, source_ip, 40_000),
+                (54, destination, source_ip, 40_001),
+                (55, destination, source_ip, 40_002),
+                (56, destination, source_ip, 40_003),
+            ]
+        );
     }
 }

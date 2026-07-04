@@ -313,16 +313,21 @@ mod tests {
 
     struct MockArpChannel {
         receives: Vec<std::result::Result<Option<Vec<u8>>, io::Error>>,
+        sent_frames: Vec<(Ipv4Addr, Vec<u8>)>,
     }
 
     impl MockArpChannel {
         fn new(receives: Vec<std::result::Result<Option<Vec<u8>>, io::Error>>) -> Self {
-            Self { receives }
+            Self {
+                receives,
+                sent_frames: Vec::new(),
+            }
         }
     }
 
     impl ArpChannel for MockArpChannel {
-        fn send(&mut self, _target: Ipv4Addr, _frame: &[u8]) -> ArpResult<()> {
+        fn send(&mut self, target: Ipv4Addr, frame: &[u8]) -> ArpResult<()> {
+            self.sent_frames.push((target, frame.to_vec()));
             Ok(())
         }
 
@@ -476,6 +481,44 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, ArpResolutionError::Receive { .. }));
+    }
+
+    #[test]
+    fn arp_resolve_sends_broadcast_request_frame() {
+        let source_mac = MacAddr::new(0x02, 0, 0, 0, 0, 2);
+        let source_ip = Ipv4Addr::new(192, 0, 2, 1);
+        let mut channel = MockArpChannel::new(vec![Ok(Some(arp_frame(ArpOperations::Reply)))]);
+
+        let resolved = resolve_with_channel_with_retry(
+            &mut channel,
+            "eth-test",
+            source_mac,
+            source_ip,
+            TARGET_IP,
+            Duration::from_millis(10),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+
+        assert_eq!(resolved, MacAddr::new(0x02, 0, 0, 0, 0, 1));
+        assert_eq!(channel.sent_frames.len(), 1);
+        assert_eq!(channel.sent_frames[0].0, TARGET_IP);
+
+        let ethernet = EthernetPacket::new(&channel.sent_frames[0].1).unwrap();
+        assert_eq!(ethernet.get_destination(), MacAddr::broadcast());
+        assert_eq!(ethernet.get_source(), source_mac);
+        assert_eq!(ethernet.get_ethertype(), EtherTypes::Arp);
+
+        let arp = ArpPacket::new(ethernet.payload()).unwrap();
+        assert_eq!(arp.get_hardware_type(), ArpHardwareTypes::Ethernet);
+        assert_eq!(arp.get_protocol_type(), EtherTypes::Ipv4);
+        assert_eq!(arp.get_hw_addr_len(), 6);
+        assert_eq!(arp.get_proto_addr_len(), 4);
+        assert_eq!(arp.get_operation(), ArpOperations::Request);
+        assert_eq!(arp.get_sender_hw_addr(), source_mac);
+        assert_eq!(arp.get_sender_proto_addr(), source_ip);
+        assert_eq!(arp.get_target_hw_addr(), MacAddr::zero());
+        assert_eq!(arp.get_target_proto_addr(), TARGET_IP);
     }
 
     #[test]

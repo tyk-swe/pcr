@@ -168,9 +168,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_vlan_tag_rejects_dei_without_id() {
+        let err = parse_vlan_tag(&VlanRequest {
+            drop_eligible_indicator: Some(true),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, SpecError::VlanDeiRequiresId));
+    }
+
+    #[test]
     fn parse_vlan_tag_rejects_reserved_id_and_bad_priority() {
         let id_err = parse_vlan_tag(&VlanRequest {
             id: Some(0),
+            ..Default::default()
+        })
+        .unwrap_err();
+        let reserved_err = parse_vlan_tag(&VlanRequest {
+            id: Some(4095),
             ..Default::default()
         })
         .unwrap_err();
@@ -182,6 +198,10 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(id_err, SpecError::VlanIdInvalid { value: 0 }));
+        assert!(matches!(
+            reserved_err,
+            SpecError::VlanIdInvalid { value: 4095 }
+        ));
         assert!(matches!(
             prio_err,
             SpecError::VlanPriorityInvalid { value: 8 }
@@ -196,11 +216,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_mac_option_rejects_empty_trimmed_input() {
+        let err = parse_mac_option(Some("   ")).unwrap_err();
+
+        assert!(matches!(
+            err,
+            SpecError::MacAddressParse { ref value, .. } if value == "   "
+        ));
+    }
+
+    #[test]
     fn parse_ethertype_accepts_names_decimal_and_hex() {
         assert_eq!(parse_ethertype("ipv4").unwrap(), EtherType::IPV4.0);
         assert_eq!(parse_ethertype(" IPV6 ").unwrap(), EtherType::IPV6.0);
         assert_eq!(parse_ethertype("34525").unwrap(), EtherType::IPV6.0);
         assert_eq!(parse_ethertype("0x0806").unwrap(), EtherType::ARP.0);
+        assert_eq!(parse_ethertype("0Xffff").unwrap(), u16::MAX);
     }
 
     #[test]

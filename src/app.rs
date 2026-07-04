@@ -246,4 +246,26 @@ mod tests {
         assert_eq!(json["error"]["policy_code"], "public_target");
         assert_eq!(json["error"]["causes"][0], "public_target: public target");
     }
+
+    #[test]
+    fn json_error_output_selection_uses_error_envelope_shape() {
+        let err = anyhow::anyhow!("runtime failure");
+        let report = ErrorReport::from_error(&err);
+        let output_format = Some(crate::cli::enums::OutputFormat::Json);
+
+        let json = if matches!(output_format, Some(crate::cli::enums::OutputFormat::Json)) {
+            serde_json::to_value(ErrorEnvelope {
+                status: "error",
+                error: &report,
+            })
+            .unwrap()
+        } else {
+            serde_json::json!({ "error": report.message.clone() })
+        };
+
+        assert_eq!(json["status"], "error");
+        assert_eq!(json["error"]["kind"], "runtime");
+        assert_eq!(json["error"]["message"], "runtime failure");
+        assert!(json["error"]["policy_code"].is_null());
+    }
 }

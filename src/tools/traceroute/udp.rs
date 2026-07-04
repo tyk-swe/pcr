@@ -194,3 +194,136 @@ pub(super) fn run_udp_traceroute_v6(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    use crate::domain::command::TracerouteProtocol;
+
+    use super::super::common::DEFAULT_PORT;
+    use super::*;
+
+    type UdpSendV4 = (Vec<u8>, (Ipv4Addr, u16));
+    type UdpSendV6 = (Vec<u8>, (Ipv6Addr, u16));
+
+    struct EmptyReceiver;
+
+    impl PacketReceiver for EmptyReceiver {
+        fn next_packet(&mut self, _timeout: Duration) -> Result<Option<(Vec<u8>, IpAddr)>> {
+            Ok(None)
+        }
+    }
+
+    struct MockUdpSocketV4 {
+        ttls: RefCell<Vec<u32>>,
+        sends: RefCell<Vec<UdpSendV4>>,
+    }
+
+    impl MockUdpSocketV4 {
+        fn new() -> Self {
+            Self {
+                ttls: RefCell::new(Vec::new()),
+                sends: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl UdpSocketV4 for MockUdpSocketV4 {
+        fn set_ttl(&self, ttl: u32) -> Result<()> {
+            self.ttls.borrow_mut().push(ttl);
+            Ok(())
+        }
+
+        fn send_to(&self, buf: &[u8], addr: (Ipv4Addr, u16)) -> Result<usize> {
+            self.sends.borrow_mut().push((buf.to_vec(), addr));
+            Ok(buf.len())
+        }
+    }
+
+    struct MockUdpSocketV6 {
+        hops: RefCell<Vec<u32>>,
+        sends: RefCell<Vec<UdpSendV6>>,
+    }
+
+    impl MockUdpSocketV6 {
+        fn new() -> Self {
+            Self {
+                hops: RefCell::new(Vec::new()),
+                sends: RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl UdpSocketV6 for MockUdpSocketV6 {
+        fn set_unicast_hops_v6(&self, ttl: u32) -> Result<()> {
+            self.hops.borrow_mut().push(ttl);
+            Ok(())
+        }
+
+        fn send_to(&self, buf: &[u8], addr: (Ipv6Addr, u16)) -> Result<usize> {
+            self.sends.borrow_mut().push((buf.to_vec(), addr));
+            Ok(buf.len())
+        }
+    }
+
+    fn request(max_ttl: u8, probes: u8) -> TracerouteRequest {
+        TracerouteRequest {
+            destination: "example.test".to_string(),
+            max_ttl,
+            probes,
+            protocol: TracerouteProtocol::Udp,
+            no_dns: Some(true),
+            timeout: 0,
+        }
+    }
+
+    #[test]
+    fn udp_v4_executor_sets_ttl_and_sends_probe_ports() {
+        let destination = Ipv4Addr::new(192, 0, 2, 10);
+        let socket = MockUdpSocketV4::new();
+        let mut receiver = EmptyReceiver;
+
+        run_udp_traceroute_v4_loop_with_delay(
+            destination,
+            &request(2, 1),
+            None,
+            &socket,
+            &mut receiver,
+        )
+        .unwrap();
+
+        assert_eq!(*socket.ttls.borrow(), vec![1, 2]);
+        let sends = socket.sends.borrow();
+        assert_eq!(sends.len(), 2);
+        assert_eq!(sends[0].1, (destination, DEFAULT_PORT));
+        assert_eq!(sends[1].1, (destination, DEFAULT_PORT + 1));
+        assert_eq!(sends[0].0.len(), 8);
+        assert_eq!(sends[1].0.len(), 8);
+    }
+
+    #[test]
+    fn udp_v6_executor_sets_hops_and_sends_probe_ports() {
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
+        let socket = MockUdpSocketV6::new();
+        let mut receiver = EmptyReceiver;
+
+        run_udp_traceroute_v6_loop_with_delay(
+            destination,
+            &request(2, 1),
+            None,
+            &socket,
+            &mut receiver,
+        )
+        .unwrap();
+
+        assert_eq!(*socket.hops.borrow(), vec![1, 2]);
+        let sends = socket.sends.borrow();
+        assert_eq!(sends.len(), 2);
+        assert_eq!(sends[0].1, (destination, DEFAULT_PORT));
+        assert_eq!(sends[1].1, (destination, DEFAULT_PORT + 1));
+        assert_eq!(sends[0].0.len(), 8);
+        assert_eq!(sends[1].0.len(), 8);
+    }
+}

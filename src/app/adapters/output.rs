@@ -53,3 +53,75 @@ impl EngineOutput for OutputEventSink {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::command::{DnsQuestion, DnsTransport, DnsTransportMode};
+    use crate::engine::ports::EngineOutput;
+
+    fn request() -> DnsRequest {
+        DnsRequest {
+            domain: "example.test".to_string(),
+            record_type: "A".to_string(),
+            server: "1.1.1.1:53".to_string(),
+            timeout: 500,
+            transaction_id: Some(0x1234),
+            transport: DnsTransportMode::Udp,
+            retries: 1,
+        }
+    }
+
+    fn result() -> DnsQueryResult {
+        DnsQueryResult {
+            id: 0x1234,
+            opcode: "Query".to_string(),
+            response_code: "NoError".to_string(),
+            flags: vec!["RD".to_string()],
+            questions: vec![DnsQuestion {
+                name: "example.test.".to_string(),
+                record_type: "A".to_string(),
+                class: "IN".to_string(),
+            }],
+            answers: vec!["example.test. 300 IN A 192.0.2.1".to_string()],
+            authority: vec![],
+            additional: vec![],
+            transport_used: DnsTransport::Udp,
+            attempts: 1,
+            server: "1.1.1.1:53".to_string(),
+            response_bytes: 64,
+            udp_truncated: false,
+            tcp_fallback_used: false,
+        }
+    }
+
+    #[test]
+    fn dns_dry_run_formatter_defaults_to_text_and_selects_json() {
+        let text = OutputEventSink::new(None)
+            .format_dns_dry_run(&request())
+            .unwrap();
+        let json = OutputEventSink::new(Some(OutputFormat::Json))
+            .format_dns_dry_run(&request())
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(text.starts_with("Dry-run DNS query:"));
+        assert_eq!(value["mode"], "dry_run");
+        assert_eq!(value["query"]["domain"], "example.test");
+    }
+
+    #[test]
+    fn dns_response_formatter_defaults_to_text_and_selects_json() {
+        let text = OutputEventSink::new(None)
+            .format_dns_response(&result())
+            .unwrap();
+        let json = OutputEventSink::new(Some(OutputFormat::Json))
+            .format_dns_response(&result())
+            .unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(text.contains("Metadata: transport=udp attempts=1"));
+        assert_eq!(value["mode"], "response");
+        assert_eq!(value["metadata"]["transport_used"], "udp");
+    }
+}

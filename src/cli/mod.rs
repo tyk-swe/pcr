@@ -72,6 +72,7 @@ impl PacketcraftArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
 
     fn args(command: commands::PacketcraftCommand, dry_run: bool) -> PacketcraftArgs {
         PacketcraftArgs {
@@ -149,5 +150,45 @@ mod tests {
         assert!(global.effective_dry_run());
         assert!(subcommand.effective_dry_run());
         assert!(!live.effective_dry_run());
+    }
+
+    #[test]
+    fn parser_accepts_json_output_format_before_command() {
+        let parsed = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "--output-format",
+            "json",
+            "dns-query",
+            "--domain",
+            "example.test",
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.output_format, Some(enums::OutputFormat::Json));
+        assert!(matches!(
+            parsed.command,
+            commands::PacketcraftCommand::DnsQuery(options)
+                if options.domain == "example.test"
+        ));
+    }
+
+    #[test]
+    fn parser_accepts_global_dry_run_before_subcommand() {
+        let parsed = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "--dry-run",
+            "send",
+            "--dest",
+            "127.0.0.1",
+        ])
+        .unwrap();
+
+        assert!(parsed.dry_run);
+        assert!(parsed.effective_dry_run());
+        assert!(matches!(
+            parsed.command,
+            commands::PacketcraftCommand::Send(options)
+                if options.oneshot.destination.as_deref() == Some("127.0.0.1")
+        ));
     }
 }

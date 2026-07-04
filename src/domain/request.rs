@@ -325,10 +325,58 @@ mod tests {
     }
 
     #[test]
+    fn prefer_ipv6_hint_explicit_flag_overrides_ip_hints() {
+        let request = PacketRequest {
+            ip: IpRequest {
+                prefer_ipv6: Some(false),
+                destination_ip: Some("2001:db8::1".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(infer_prefer_ipv6_hint(&request), Some(false));
+    }
+
+    #[test]
+    fn prefer_ipv6_hint_ignores_invalid_ip_hints_and_uses_command() {
+        let request = PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("not-an-ip".to_string()),
+                source_ip: Some("also-not-an-ip".to_string()),
+                ..Default::default()
+            },
+            transport: TransportRequest {
+                command: Some(TransportProtocolRequest::Icmp(IcmpRequest::default())),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(infer_prefer_ipv6_hint(&request), Some(false));
+    }
+
+    #[test]
     fn prefer_ipv6_hint_detects_ipv6_extensions() {
         let request = PacketRequest {
             ipv6: Ipv6Request {
                 extensions: vec!["dest".to_string()],
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(infer_prefer_ipv6_hint(&request), Some(true));
+    }
+
+    #[test]
+    fn prefer_ipv6_hint_detects_ipv6_fragment_id() {
+        let request = PacketRequest {
+            ip: IpRequest {
+                fragment: FragmentRequest {
+                    fragment_id: Some(1),
+                    ..Default::default()
+                },
+                ..Default::default()
             },
             ..Default::default()
         };

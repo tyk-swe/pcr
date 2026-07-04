@@ -161,8 +161,17 @@ mod tests {
     use super::*;
 
     fn config(protocol: FuzzProtocol, target_port: Option<u16>, count: u64) -> FuzzConfig {
+        config_for_target("192.0.2.10", protocol, target_port, count)
+    }
+
+    fn config_for_target(
+        target_ip: &str,
+        protocol: FuzzProtocol,
+        target_port: Option<u16>,
+        count: u64,
+    ) -> FuzzConfig {
         FuzzConfig {
-            target_ip: "192.0.2.10".to_string(),
+            target_ip: target_ip.to_string(),
             target_port,
             protocol,
             strategy: FuzzStrategy::RandomPayload,
@@ -233,5 +242,60 @@ mod tests {
 
         assert_eq!(specs.len(), 1);
         assert!(matches!(specs[0].transport, TransportSpec::Icmp(_)));
+    }
+
+    #[tokio::test]
+    async fn run_fuzz_with_executor_errors_when_all_iterations_fail() {
+        let calls = Arc::new(Mutex::new(0u64));
+        let captured = Arc::clone(&calls);
+
+        let err = run_fuzz_with_executor(config(FuzzProtocol::Udp, Some(53), 3), move |_| {
+            let captured = Arc::clone(&captured);
+            async move {
+                *captured.lock().expect("test fuzz call count lock") += 1;
+                anyhow::bail!("send failed")
+            }
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("All fuzz iterations failed"));
+        assert_eq!(*calls.lock().expect("test fuzz call count lock"), 3);
+    }
+
+    #[tokio::test]
+    async fn run_fuzz_with_executor_allows_partial_failures() {
+        let calls = Arc::new(Mutex::new(0u64));
+        let captured = Arc::clone(&calls);
+
+        run_fuzz_with_executor(config(FuzzProtocol::Tcp, Some(80), 3), move |_| {
+            let captured = Arc::clone(&captured);
+            async move {
+                let mut calls = captured.lock().expect("test fuzz call count lock");
+                *calls += 1;
+                if *calls == 1 {
+                    anyhow::bail!("first send failed");
+                }
+                Ok(())
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(*calls.lock().expect("test fuzz call count lock"), 3);
+    }
+
+    #[tokio::test]
+    async fn run_fuzz_with_executor_generates_icmpv6_for_ipv6_targets() {
+        let specs = collect_generated_specs(config_for_target(
+            "2001:db8::10",
+            FuzzProtocol::Icmp,
+            None,
+            1,
+        ))
+        .await;
+
+        assert_eq!(specs.len(), 1);
+        assert!(matches!(specs[0].transport, TransportSpec::Icmpv6(_)));
     }
 }

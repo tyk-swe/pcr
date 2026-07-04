@@ -269,3 +269,103 @@ fn populate_gre(event: &mut ListenerEvent) {
     event.protocol_label = ProtocolLabel::Gre;
     event.transport = Some("GRE".to_string());
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pnet::datalink::MacAddr;
+    use pnet::packet::ethernet::MutableEthernetPacket;
+    use pnet::packet::ip::IpNextHeaderProtocols;
+    use pnet::packet::ipv4::MutableIpv4Packet;
+    use pnet::packet::tcp::{MutableTcpPacket, TcpFlags};
+    use pnet::packet::vlan::MutableVlanPacket;
+    use pnet::packet::MutablePacket;
+    use std::net::{IpAddr, Ipv4Addr};
+
+    const ETHERNET_HEADER_LEN: usize = 14;
+    const VLAN_HEADER_LEN: usize = 4;
+    const IPV4_HEADER_LEN: usize = 20;
+    const TCP_HEADER_LEN: usize = 20;
+
+    #[test]
+    fn build_event_truncates_payload_preview_when_reply_payload_hidden() {
+        let data = vec![0xab; PREVIEW_BYTES + 1];
+
+        let event = build_event(&data, false);
+
+        assert_eq!(event.length, data.len());
+        assert_eq!(event.data, data[..PREVIEW_BYTES]);
+        assert!(!event.show_payload);
+        assert!(event.truncated);
+    }
+
+    #[test]
+    fn build_event_parses_vlan_ipv4_tcp_details() {
+        let frame = vlan_ipv4_tcp_frame();
+
+        let event = build_event(&frame, true);
+
+        assert_eq!(
+            event.layer2_source,
+            Some(MacAddress::new([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]))
+        );
+        assert_eq!(
+            event.layer2_destination,
+            Some(MacAddress::new([0x10, 0x20, 0x30, 0x40, 0x50, 0x60]))
+        );
+        assert_eq!(
+            event.network_source,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))
+        );
+        assert_eq!(
+            event.network_destination,
+            Some(IpAddr::V4(Ipv4Addr::new(198, 51, 100, 7)))
+        );
+        assert_eq!(
+            event.network_protocol,
+            Some(format!("IPv4 {:?}", IpNextHeaderProtocols::Tcp))
+        );
+        assert_eq!(
+            event.detail,
+            Some("vlan id=42 ether type 0x0800".to_string())
+        );
+        assert_eq!(
+            event.transport,
+            Some(format!("TCP 12345 -> 443 flags=0x{:02x}", TcpFlags::SYN))
+        );
+        assert_eq!(event.protocol_label, ProtocolLabel::Tcp);
+        assert_eq!(event.data, frame);
+        assert!(event.show_payload);
+        assert!(!event.truncated);
+    }
+
+    fn vlan_ipv4_tcp_frame() -> Vec<u8> {
+        let mut frame =
+            vec![0u8; ETHERNET_HEADER_LEN + VLAN_HEADER_LEN + IPV4_HEADER_LEN + TCP_HEADER_LEN];
+        let mut ethernet = MutableEthernetPacket::new(&mut frame).unwrap();
+        ethernet.set_destination(MacAddr::new(0x10, 0x20, 0x30, 0x40, 0x50, 0x60));
+        ethernet.set_source(MacAddr::new(0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff));
+        ethernet.set_ethertype(EtherTypes::Vlan);
+
+        let mut vlan = MutableVlanPacket::new(ethernet.payload_mut()).unwrap();
+        vlan.set_vlan_identifier(42);
+        vlan.set_ethertype(EtherTypes::Ipv4);
+
+        let mut ipv4 = MutableIpv4Packet::new(vlan.payload_mut()).unwrap();
+        ipv4.set_version(4);
+        ipv4.set_header_length(5);
+        ipv4.set_total_length((IPV4_HEADER_LEN + TCP_HEADER_LEN) as u16);
+        ipv4.set_ttl(64);
+        ipv4.set_next_level_protocol(IpNextHeaderProtocols::Tcp);
+        ipv4.set_source(Ipv4Addr::new(192, 0, 2, 1));
+        ipv4.set_destination(Ipv4Addr::new(198, 51, 100, 7));
+
+        let mut tcp = MutableTcpPacket::new(ipv4.payload_mut()).unwrap();
+        tcp.set_source(12345);
+        tcp.set_destination(443);
+        tcp.set_data_offset(5);
+        tcp.set_flags(TcpFlags::SYN);
+
+        frame
+    }
+}

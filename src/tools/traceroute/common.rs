@@ -4,6 +4,7 @@
 use pnet::packet::icmp::IcmpPacket;
 use pnet::packet::icmpv6::Icmpv6Packet;
 use pnet::packet::ip::IpNextHeaderProtocol;
+use pnet::packet::tcp::TcpPacket;
 use pnet::transport::{TransportChannelType, TransportProtocol};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -67,6 +68,7 @@ pub(super) trait TransportSender {
     fn set_ttl(&mut self, ttl: u8) -> Result<()>;
     fn send_icmp_v4(&mut self, packet: IcmpPacket, destination: IpAddr) -> Result<usize>;
     fn send_icmp_v6(&mut self, packet: Icmpv6Packet, destination: IpAddr) -> Result<usize>;
+    fn send_tcp(&mut self, packet: TcpPacket<'_>, destination: IpAddr) -> Result<usize>;
 }
 
 impl TransportSender for pnet::transport::TransportSender {
@@ -80,6 +82,11 @@ impl TransportSender for pnet::transport::TransportSender {
     }
 
     fn send_icmp_v6(&mut self, packet: Icmpv6Packet, destination: IpAddr) -> Result<usize> {
+        self.send_to(packet, destination)
+            .map_err(anyhow::Error::new)
+    }
+
+    fn send_tcp(&mut self, packet: TcpPacket<'_>, destination: IpAddr) -> Result<usize> {
         self.send_to(packet, destination)
             .map_err(anyhow::Error::new)
     }

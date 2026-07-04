@@ -760,6 +760,26 @@ mod tests {
     }
 
     #[test]
+    fn classify_ip_covers_ipv4_private_range_boundaries() {
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(172, 15, 255, 255))),
+            TargetScope::Public
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(172, 16, 0, 0))),
+            TargetScope::Private
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(172, 31, 255, 255))),
+            TargetScope::Private
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V4(Ipv4Addr::new(172, 32, 0, 0))),
+            TargetScope::Public
+        );
+    }
+
+    #[test]
     fn classify_ip_covers_ipv6_scopes() {
         assert_eq!(
             classify_ip(IpAddr::V6(Ipv6Addr::LOCALHOST)),
@@ -780,7 +800,35 @@ mod tests {
     }
 
     #[test]
+    fn classify_ip_covers_ipv6_private_and_link_local_boundaries() {
+        assert_eq!(
+            classify_ip(IpAddr::V6("fc00::1".parse().unwrap())),
+            TargetScope::Private
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V6("fdff::1".parse().unwrap())),
+            TargetScope::Private
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V6("fe80::1".parse().unwrap())),
+            TargetScope::Local
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V6("febf::1".parse().unwrap())),
+            TargetScope::Local
+        );
+        assert_eq!(
+            classify_ip(IpAddr::V6("fec0::1".parse().unwrap())),
+            TargetScope::Public
+        );
+    }
+
+    #[test]
     fn combine_target_scopes_returns_highest_risk_scope() {
+        assert_eq!(
+            combine_target_scopes(std::iter::empty::<TargetScope>()),
+            TargetScope::Unspecified
+        );
         assert_eq!(
             combine_target_scopes([TargetScope::Local, TargetScope::Documentation]),
             TargetScope::Documentation
@@ -864,6 +912,87 @@ mod tests {
         assert_eq!(
             packet_spec_privileges(&raw),
             vec![TrafficPrivilege::RawSocket]
+        );
+    }
+
+    #[test]
+    fn traffic_plan_from_packet_request_prefers_resolved_destination_scope() {
+        let request = PacketRequest {
+            destination: crate::domain::request::DestinationRequest {
+                destination: Some("203.0.113.10".to_string()),
+                destination_ip: Some("198.51.100.10".to_string()),
+                resolved_destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
+                ..Default::default()
+            },
+            ip: IpRequest {
+                destination_ip: Some("8.8.8.8".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let plan = TrafficPlan::from_packet_request(
+            &request,
+            TrafficMode::Send,
+            &TrafficPolicy::default(),
+        );
+
+        assert_eq!(plan.target_scope, TargetScope::Private);
+    }
+
+    #[test]
+    fn traffic_plan_from_packet_request_falls_back_through_target_fields() {
+        let destination_ip = PacketRequest {
+            destination: crate::domain::request::DestinationRequest {
+                destination_ip: Some("203.0.113.10".to_string()),
+                ..Default::default()
+            },
+            ip: IpRequest {
+                destination_ip: Some("8.8.8.8".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let ip_destination = PacketRequest {
+            ip: IpRequest {
+                destination_ip: Some("8.8.8.8".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let destination = PacketRequest {
+            destination: crate::domain::request::DestinationRequest {
+                destination: Some("192.168.1.10".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            TrafficPlan::from_packet_request(
+                &destination_ip,
+                TrafficMode::Send,
+                &TrafficPolicy::default()
+            )
+            .target_scope,
+            TargetScope::Documentation
+        );
+        assert_eq!(
+            TrafficPlan::from_packet_request(
+                &ip_destination,
+                TrafficMode::Send,
+                &TrafficPolicy::default()
+            )
+            .target_scope,
+            TargetScope::Public
+        );
+        assert_eq!(
+            TrafficPlan::from_packet_request(
+                &destination,
+                TrafficMode::Send,
+                &TrafficPolicy::default()
+            )
+            .target_scope,
+            TargetScope::Private
         );
     }
 }

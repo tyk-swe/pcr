@@ -195,6 +195,19 @@ mod tests {
     }
 
     #[test]
+    fn format_dns_dry_run_renders_random_transaction_id_when_absent() {
+        let mut request = request();
+        request.transaction_id = None;
+
+        let text = format_dns_dry_run(&request);
+        let json = format_dns_dry_run_json(&request).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert!(text.contains("transaction_id=random"));
+        assert!(value["query"]["transaction_id"].is_null());
+    }
+
+    #[test]
     fn format_dns_message_includes_metadata_flags_and_answers() {
         let output = format_dns_message(&result());
 
@@ -213,5 +226,26 @@ mod tests {
         assert_eq!(value["counts"]["questions"], 1);
         assert_eq!(value["metadata"]["transport_used"], "udp");
         assert_eq!(value["questions"][0]["name"], "example.test.");
+    }
+
+    #[test]
+    fn format_dns_message_json_serializes_authority_and_additional_counts() {
+        let mut result = result();
+        result.authority = vec!["example.test. 300 IN NS ns.example.test.".to_string()];
+        result.additional = vec!["ns.example.test. 300 IN A 192.0.2.53".to_string()];
+
+        let json = format_dns_message_json(&result).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(value["counts"]["authority"], 1);
+        assert_eq!(value["counts"]["additional"], 1);
+        assert_eq!(
+            value["authority"][0],
+            "example.test. 300 IN NS ns.example.test."
+        );
+        assert_eq!(
+            value["additional"][0],
+            "ns.example.test. 300 IN A 192.0.2.53"
+        );
     }
 }

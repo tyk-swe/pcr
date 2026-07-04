@@ -400,6 +400,20 @@ mod tests {
     }
 
     #[test]
+    fn preflight_report_serializes_output_ready_json_shape() {
+        let spec = packet_spec();
+        let report = preflight_report(&spec, &preflight_view(spec.transmit.clone()));
+        let value = serde_json::to_value(&report).unwrap();
+
+        assert_eq!(value["destination"], "198.51.100.1");
+        assert_eq!(value["protocol"], "TCP");
+        assert_eq!(value["mode"], "L3");
+        assert_eq!(value["selection"]["destination"]["ip"], "198.51.100.1");
+        assert_eq!(value["target"]["interface_reason"], "explicit_interface");
+        assert_eq!(value["policy"]["status"], "allowed");
+    }
+
+    #[test]
     fn payload_json_formats_each_payload_source() {
         let cases = [
             (PayloadSource::Empty, serde_json::json!({"type": "empty"})),

@@ -97,6 +97,42 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "pcap")]
+    #[test]
+    fn logging_spec_with_pcap_maps_pcap_write() {
+        let spec = LoggingSpec::from_request(&LoggingRequest {
+            pcap_write: Some("out.pcap".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            spec.pcap_write
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            Some("out.pcap".to_string())
+        );
+    }
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn logging_spec_with_metrics_maps_metrics_json() {
+        let spec = LoggingSpec::from_request(&LoggingRequest {
+            metrics_json: Some("metrics.json".to_string()),
+            prometheus_bind: Some("127.0.0.1:9090".to_string()),
+            allow_public_metrics: Some(true),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            spec.metrics_json
+                .as_ref()
+                .map(|path| path.display().to_string()),
+            Some("metrics.json".to_string())
+        );
+    }
+
     #[cfg(not(feature = "pcap"))]
     #[test]
     fn logging_spec_without_pcap_rejects_pcap_write() {

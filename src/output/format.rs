@@ -132,6 +132,23 @@ mod tests {
     }
 
     #[test]
+    fn format_preview_does_not_truncate_at_preview_limit() {
+        let preview = format_preview(&(0u8..48).collect::<Vec<_>>());
+
+        assert!(!preview.ends_with(" …"));
+        assert!(preview.ends_with("2f"));
+    }
+
+    #[test]
+    fn output_format_json_serializes_as_snake_case_value() {
+        let json = serde_json::to_string(&OutputFormat::Json).unwrap();
+        let parsed: OutputFormat = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(json, "\"json\"");
+        assert_eq!(parsed, OutputFormat::Json);
+    }
+
+    #[test]
     fn render_listener_hex_handles_empty_data() {
         let (body, trailer) = render_listener_hex(&event(vec![], false));
 

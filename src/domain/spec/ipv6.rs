@@ -403,6 +403,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_ipv6_ext_header_accepts_keyed_routing_segments_split_across_tokens() {
+        let header =
+            parse_ipv6_ext_header("routing:segments=2001:db8::1,2001:db8::2;data=16;type=4")
+                .unwrap();
+
+        assert_eq!(
+            header,
+            Ipv6ExtHeader::Routing {
+                routing_type: 4,
+                segments: vec![
+                    "2001:db8::1".parse().unwrap(),
+                    "2001:db8::2".parse().unwrap()
+                ],
+                data: Some(16),
+            }
+        );
+    }
+
+    #[test]
     fn parse_ipv6_ext_header_rejects_empty_and_unknown_headers() {
         assert!(matches!(
             parse_ipv6_ext_header(" ").unwrap_err(),
@@ -432,6 +451,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_ipv6_ext_header_rejects_bad_routing_parameters() {
+        assert!(matches!(
+            parse_ipv6_ext_header("routing:type=bogus,segments=2001:db8::1").unwrap_err(),
+            SpecError::Ipv6RoutingTypeParse { .. }
+        ));
+        assert!(matches!(
+            parse_ipv6_ext_header("routing:2001:db8::1,type=4").unwrap_err(),
+            SpecError::UnknownIpv6RoutingParameter { .. }
+        ));
+        assert!(matches!(
+            parse_ipv6_ext_header("routing:type=4").unwrap_err(),
+            SpecError::MissingIpv6RoutingSegments
+        ));
+    }
+
+    #[test]
     fn parse_routing_segments_rejects_empty_special_and_too_many() {
         assert!(matches!(
             parse_routing_segments("").unwrap_err(),
@@ -452,6 +487,19 @@ mod tests {
                 max_segments: MAX_ROUTING_SEGMENTS
             }
         ));
+    }
+
+    #[test]
+    fn parse_routing_segments_accepts_maximum_segment_count() {
+        let exact = (0..MAX_ROUTING_SEGMENTS)
+            .map(|idx| format!("2001:db8::{idx:x}"))
+            .collect::<Vec<_>>()
+            .join(";");
+
+        assert_eq!(
+            parse_routing_segments(&exact).unwrap().len(),
+            MAX_ROUTING_SEGMENTS
+        );
     }
 
     #[test]

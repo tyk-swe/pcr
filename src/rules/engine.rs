@@ -223,6 +223,7 @@ impl RuleEngine {
 mod tests {
     use super::*;
     use crate::rules::error::RuleActionError;
+    use std::sync::{Arc, Mutex};
 
     const VALID_RULE: &str = r#"
 - name: log-tcp
@@ -250,6 +251,51 @@ mod tests {
 
     fn load_rules_with_options(input: &str, options: RuleLoadOptions) -> Result<RuleLoadReport> {
         RuleEngine::load_rules_from_str_with_source(input, "<test-rules>".to_string(), options)
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct DispatchRecord {
+        rule_name: String,
+        packet_present: bool,
+        rendered_destination: Option<String>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct RecordingDispatcher {
+        records: Arc<Mutex<Vec<DispatchRecord>>>,
+    }
+
+    impl RecordingDispatcher {
+        fn records(&self) -> Vec<DispatchRecord> {
+            self.records.lock().unwrap().clone()
+        }
+    }
+
+    impl RuleSendDispatcher for RecordingDispatcher {
+        fn dispatch(
+            &self,
+            rule_name: &str,
+            template: &crate::rules::send::RuleSendTemplate,
+            packet: Option<&PacketContext>,
+        ) -> std::result::Result<(), RuleError> {
+            let rendered = template.render(packet);
+            self.records.lock().unwrap().push(DispatchRecord {
+                rule_name: rule_name.to_string(),
+                packet_present: packet.is_some(),
+                rendered_destination: rendered.destination.destination,
+            });
+            Ok(())
+        }
+    }
+
+    fn packet(description: &str) -> PacketContext {
+        PacketContext {
+            description: description.to_string(),
+            source: Some("192.0.2.10".to_string()),
+            destination: Some("198.51.100.20".to_string()),
+            length: 40,
+            timestamp: std::time::SystemTime::UNIX_EPOCH,
+        }
     }
 
     #[test]
@@ -415,5 +461,99 @@ mod tests {
         assert!(!engine.has_receive_triggers());
         assert!(engine.has_timer_triggers());
         assert!(engine.has_startup_triggers());
+    }
+
+    #[test]
+    fn notify_receive_executes_only_matching_receive_rules() {
+        let rules = load_rules(
+            r#"
+- name: receive-match
+  trigger: receive
+  condition:
+    description:
+      contains: TCP
+  actions:
+    - type: send
+      destination:
+        destination: "{source}"
+- name: receive-miss
+  trigger: receive
+  condition:
+    description:
+      contains: UDP
+  actions:
+    - type: send
+      destination:
+        destination: miss
+- name: startup-only
+  trigger: startup
+  actions:
+    - type: send
+      destination:
+        destination: startup
+"#,
+        )
+        .unwrap()
+        .into_rules();
+        let dispatcher = RecordingDispatcher::default();
+        let mut engine = RuleEngine::new_configured(RuleExecutorConfig {
+            workers: 1,
+            queue_capacity: 1,
+        })
+        .unwrap();
+        engine.configure_sender(dispatcher.clone());
+        engine.replace_rules(rules);
+
+        engine.notify_receive(&packet("TCP SYN"));
+
+        assert_eq!(
+            dispatcher.records(),
+            vec![DispatchRecord {
+                rule_name: "receive-match".to_string(),
+                packet_present: true,
+                rendered_destination: Some("192.0.2.10".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn run_startup_actions_executes_only_startup_rules_without_packet_context() {
+        let rules = load_rules(
+            r#"
+- name: receive-only
+  trigger: receive
+  actions:
+    - type: send
+      destination:
+        destination: receive
+- name: startup-only
+  trigger: startup
+  actions:
+    - type: send
+      destination:
+        destination: "{source}"
+"#,
+        )
+        .unwrap()
+        .into_rules();
+        let dispatcher = RecordingDispatcher::default();
+        let mut engine = RuleEngine::new_configured(RuleExecutorConfig {
+            workers: 1,
+            queue_capacity: 1,
+        })
+        .unwrap();
+        engine.configure_sender(dispatcher.clone());
+        engine.replace_rules(rules);
+
+        engine.run_startup_actions();
+
+        assert_eq!(
+            dispatcher.records(),
+            vec![DispatchRecord {
+                rule_name: "startup-only".to_string(),
+                packet_present: false,
+                rendered_destination: Some("<unknown>".to_string()),
+            }]
+        );
     }
 }

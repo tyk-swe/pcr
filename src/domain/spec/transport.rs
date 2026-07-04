@@ -497,6 +497,35 @@ mod tests {
     }
 
     #[test]
+    fn build_tcp_options_rejects_bad_timestamp_numbers() {
+        assert!(matches!(
+            build_tcp_options_from_flags(&TcpRequest {
+                timestamps: Some("bad:10".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::TcpTimestampValueParse { ref value, .. } if value == "bad"
+        ));
+        assert!(matches!(
+            build_tcp_options_from_flags(&TcpRequest {
+                timestamps: Some("10:bad".to_string()),
+                ..Default::default()
+            })
+            .unwrap_err(),
+            SpecError::TcpTimestampEchoParse { ref value, .. } if value == "bad"
+        ));
+    }
+
+    #[test]
+    fn parse_tcp_options_hex_accepts_empty_and_rejects_odd_length() {
+        assert_eq!(parse_tcp_options_hex("0x").unwrap(), Vec::<u8>::new());
+        assert!(matches!(
+            parse_tcp_options_hex("abc").unwrap_err(),
+            SpecError::HexStringOddLength
+        ));
+    }
+
+    #[test]
     fn build_tcp_options_rejects_too_long_header() {
         let err = build_tcp_options_from_flags(&TcpRequest {
             options_hex: Some("00".repeat(44)),
@@ -587,6 +616,13 @@ mod tests {
         let spec = TransportSpec::from_request(&TransportRequest::default(), None, true).unwrap();
 
         assert!(matches!(spec, TransportSpec::Icmpv6(_)));
+    }
+
+    #[test]
+    fn transport_spec_infers_icmp_without_destination_or_ipv6_preference() {
+        let spec = TransportSpec::from_request(&TransportRequest::default(), None, false).unwrap();
+
+        assert!(matches!(spec, TransportSpec::Icmp(_)));
     }
 
     #[test]

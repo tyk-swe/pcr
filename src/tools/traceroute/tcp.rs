@@ -21,7 +21,7 @@ use super::common::{
     open_ipv4_channel, open_ipv6_channel, remaining_probe_time, request_timeout,
     resolve_source_ipv4, resolve_source_ipv6, run_traceroute_loop_with_delay, tcp_base_source_port,
     validate_request, PacketReceiver, ProbeIdentity, ProbeResult, TracerouteExecutor,
-    TCP_RESPONSE_POLL_INTERVAL,
+    TransportSender, TCP_RESPONSE_POLL_INTERVAL,
 };
 use super::utils::{
     poll_icmp_event_v4_with_source, poll_icmp_event_v6_with_source, IcmpEventKind,
@@ -58,19 +58,21 @@ impl<'a> TcpProbeReceiver for TcpTransportChannelIterator<'a> {
     }
 }
 
-struct TcpV4Executor<'a, R: ?Sized> {
+struct TcpV4Executor<'a, S: ?Sized, T: ?Sized, R: ?Sized> {
     destination: Ipv4Addr,
     source_ip: Ipv4Addr,
     timeout: std::time::Duration,
-    tcp_sender: &'a mut pnet::transport::TransportSender,
-    tcp_iter: &'a mut pnet::transport::TcpTransportChannelIterator<'a>,
+    tcp_sender: &'a mut S,
+    tcp_iter: &'a mut T,
     icmp_adapter: &'a mut R,
     base_source_port: u16,
     probes_per_hop: u8,
 }
 
-impl<'a, R: ?Sized> TracerouteExecutor for TcpV4Executor<'a, R>
+impl<'a, S: ?Sized, T: ?Sized, R: ?Sized> TracerouteExecutor for TcpV4Executor<'a, S, T, R>
 where
+    S: TransportSender,
+    T: TcpProbeReceiver,
     R: PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
@@ -92,7 +94,7 @@ where
         ))?;
         self.tcp_sender.set_ttl(ttl)?;
         self.tcp_sender
-            .send_to(packet, IpAddr::V4(self.destination))
+            .send_tcp(packet, IpAddr::V4(self.destination))
             .context(operation_failed(
                 "send TCP probe",
                 format!(
@@ -155,19 +157,21 @@ pub(super) fn run_tcp_traceroute_v4(
     Ok(())
 }
 
-struct TcpV6Executor<'a, R: ?Sized> {
+struct TcpV6Executor<'a, S: ?Sized, T: ?Sized, R: ?Sized> {
     destination: Ipv6Addr,
     source_ip: Ipv6Addr,
     timeout: std::time::Duration,
-    tcp_sender: &'a mut pnet::transport::TransportSender,
-    tcp_iter: &'a mut pnet::transport::TcpTransportChannelIterator<'a>,
+    tcp_sender: &'a mut S,
+    tcp_iter: &'a mut T,
     icmp_adapter: &'a mut R,
     base_source_port: u16,
     probes_per_hop: u8,
 }
 
-impl<'a, R: ?Sized> TracerouteExecutor for TcpV6Executor<'a, R>
+impl<'a, S: ?Sized, T: ?Sized, R: ?Sized> TracerouteExecutor for TcpV6Executor<'a, S, T, R>
 where
+    S: TransportSender,
+    T: TcpProbeReceiver,
     R: PacketReceiver,
 {
     fn execute_probe(&mut self, ttl: u8, probe: u8) -> Result<ProbeResult> {
@@ -189,7 +193,7 @@ where
         ))?;
         self.tcp_sender.set_ttl(ttl)?;
         self.tcp_sender
-            .send_to(packet, IpAddr::V6(self.destination))
+            .send_tcp(packet, IpAddr::V6(self.destination))
             .context(operation_failed(
                 "send TCPv6 probe",
                 format!(
@@ -404,7 +408,10 @@ fn split_tcp_poll_window(remaining: Duration) -> (Duration, Duration) {
 
 #[cfg(test)]
 mod tests {
+    use super::super::common::DEFAULT_PORT;
     use super::*;
+    use pnet::packet::tcp::TcpFlags;
+    use pnet::packet::Packet;
     use std::collections::VecDeque;
 
     struct SleepingIcmpReceiver {
@@ -422,6 +429,71 @@ mod tests {
             self.calls.push(timeout);
             std::thread::sleep(timeout);
             Ok(None)
+        }
+    }
+
+    struct EmptyIcmpReceiver;
+
+    impl PacketReceiver for EmptyIcmpReceiver {
+        fn next_packet(&mut self, _timeout: Duration) -> Result<Option<(Vec<u8>, IpAddr)>> {
+            Ok(None)
+        }
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct TcpSend {
+        ttl: u8,
+        destination: IpAddr,
+        source_port: u16,
+        destination_port: u16,
+        flags: u8,
+    }
+
+    struct MockTcpSender {
+        current_ttl: u8,
+        sends: Vec<TcpSend>,
+    }
+
+    impl MockTcpSender {
+        fn new() -> Self {
+            Self {
+                current_ttl: 0,
+                sends: Vec::new(),
+            }
+        }
+    }
+
+    impl TransportSender for MockTcpSender {
+        fn set_ttl(&mut self, ttl: u8) -> Result<()> {
+            self.current_ttl = ttl;
+            Ok(())
+        }
+
+        fn send_icmp_v4(
+            &mut self,
+            _packet: pnet::packet::icmp::IcmpPacket,
+            _destination: IpAddr,
+        ) -> Result<usize> {
+            unreachable!("TCP traceroute tests do not send ICMPv4 packets")
+        }
+
+        fn send_icmp_v6(
+            &mut self,
+            _packet: pnet::packet::icmpv6::Icmpv6Packet,
+            _destination: IpAddr,
+        ) -> Result<usize> {
+            unreachable!("TCP traceroute tests do not send ICMPv6 packets")
+        }
+
+        fn send_tcp(&mut self, packet: TcpPacket<'_>, destination: IpAddr) -> Result<usize> {
+            self.sends.push(TcpSend {
+                ttl: self.current_ttl,
+                destination,
+                source_port: packet.get_source(),
+                destination_port: packet.get_destination(),
+                flags: packet.get_flags(),
+            });
+            Ok(packet.packet().len())
         }
     }
 
@@ -447,6 +519,94 @@ mod tests {
             self.calls.push(timeout);
             Ok(self.responses.pop_front().flatten())
         }
+    }
+
+    #[test]
+    fn tcp_v4_executor_sets_ttl_sends_syn_and_waits_for_tcp_response() {
+        let source_ip = Ipv4Addr::new(192, 0, 2, 5);
+        let destination = Ipv4Addr::new(192, 0, 2, 10);
+        let base_source_port = 45_000;
+        let mut sender = MockTcpSender::new();
+        let mut icmp = EmptyIcmpReceiver;
+        let mut tcp = FakeTcpReceiver::new([Some((
+            TcpProbeResponse {
+                source_port: DEFAULT_PORT + 3,
+                destination_port: base_source_port + 3,
+            },
+            IpAddr::V4(destination),
+        ))]);
+        let mut executor = TcpV4Executor {
+            destination,
+            source_ip,
+            timeout: Duration::from_millis(50),
+            tcp_sender: &mut sender,
+            tcp_iter: &mut tcp,
+            icmp_adapter: &mut icmp,
+            base_source_port,
+            probes_per_hop: 2,
+        };
+
+        let result = executor.execute_probe(2, 1).unwrap();
+
+        assert!(matches!(
+            result,
+            ProbeResult::Destination(IpAddr::V4(addr), _) if addr == destination
+        ));
+        assert_eq!(
+            executor.tcp_sender.sends,
+            vec![TcpSend {
+                ttl: 2,
+                destination: IpAddr::V4(destination),
+                source_port: base_source_port + 3,
+                destination_port: DEFAULT_PORT + 3,
+                flags: TcpFlags::SYN,
+            }]
+        );
+        assert_eq!(executor.tcp_iter.calls.len(), 1);
+    }
+
+    #[test]
+    fn tcp_v6_executor_sets_ttl_sends_syn_and_waits_for_tcp_response() {
+        let source_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 5);
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
+        let base_source_port = 46_000;
+        let mut sender = MockTcpSender::new();
+        let mut icmp = EmptyIcmpReceiver;
+        let mut tcp = FakeTcpReceiver::new([Some((
+            TcpProbeResponse {
+                source_port: DEFAULT_PORT,
+                destination_port: base_source_port,
+            },
+            IpAddr::V6(destination),
+        ))]);
+        let mut executor = TcpV6Executor {
+            destination,
+            source_ip,
+            timeout: Duration::from_millis(50),
+            tcp_sender: &mut sender,
+            tcp_iter: &mut tcp,
+            icmp_adapter: &mut icmp,
+            base_source_port,
+            probes_per_hop: 2,
+        };
+
+        let result = executor.execute_probe(1, 0).unwrap();
+
+        assert!(matches!(
+            result,
+            ProbeResult::Destination(IpAddr::V6(addr), _) if addr == destination
+        ));
+        assert_eq!(
+            executor.tcp_sender.sends,
+            vec![TcpSend {
+                ttl: 1,
+                destination: IpAddr::V6(destination),
+                source_port: base_source_port,
+                destination_port: DEFAULT_PORT,
+                flags: TcpFlags::SYN,
+            }]
+        );
+        assert_eq!(executor.tcp_iter.calls.len(), 1);
     }
 
     #[test]

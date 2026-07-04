@@ -272,6 +272,40 @@ mod tests {
     }
 
     #[test]
+    fn payload_spec_accepts_dns_root_and_maximum_hostname_length() {
+        let root = PayloadSpec::from_request(&PayloadRequest {
+            dns_query: Some(".".to_string()),
+            dns_type: Some("NS".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+        let max_name = [
+            "a".repeat(63),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(61),
+        ]
+        .join(".");
+        let max = PayloadSpec::from_request(&PayloadRequest {
+            dns_query: Some(max_name.clone()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(matches!(
+            root.source,
+            PayloadSource::Dns {
+                query,
+                record_type
+            } if query == "." && record_type == "NS"
+        ));
+        assert!(matches!(
+            max.source,
+            PayloadSource::Dns { query, .. } if query == max_name
+        ));
+    }
+
+    #[test]
     fn payload_spec_rejects_invalid_dns_hostname() {
         let err = PayloadSpec::from_request(&PayloadRequest {
             dns_query: Some("bad name".to_string()),
@@ -281,6 +315,37 @@ mod tests {
 
         assert!(matches!(
             err,
+            SpecError::InvalidDnsHostname { field: "DNS query" }
+        ));
+    }
+
+    #[test]
+    fn payload_spec_rejects_dns_label_and_name_length_overflow() {
+        let long_label = PayloadSpec::from_request(&PayloadRequest {
+            dns_query: Some(format!("{}.test", "a".repeat(64))),
+            ..Default::default()
+        })
+        .unwrap_err();
+        let long_name = PayloadSpec::from_request(&PayloadRequest {
+            dns_query: Some(
+                [
+                    "a".repeat(63),
+                    "b".repeat(63),
+                    "c".repeat(63),
+                    "d".repeat(62),
+                ]
+                .join("."),
+            ),
+            ..Default::default()
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            long_label,
+            SpecError::InvalidDnsHostname { field: "DNS query" }
+        ));
+        assert!(matches!(
+            long_name,
             SpecError::InvalidDnsHostname { field: "DNS query" }
         ));
     }
@@ -301,6 +366,22 @@ mod tests {
                 path,
                 host: Some(host)
             } if method == "GET" && path == "/" && host == "example.test"
+        ));
+    }
+
+    #[test]
+    fn payload_spec_accepts_http_token_punctuation_and_absolute_path() {
+        let spec = PayloadSpec::from_request(&PayloadRequest {
+            http_method: Some("PATCH+JSON".to_string()),
+            http_path: Some("/nested/resource?x=1".to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert!(matches!(
+            spec.source,
+            PayloadSource::Http { method, path, host: None }
+                if method == "PATCH+JSON" && path == "/nested/resource?x=1"
         ));
     }
 

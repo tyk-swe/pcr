@@ -634,22 +634,110 @@ mod tests {
 
     #[test]
     fn enum_mappings_preserve_cli_variants() {
-        assert_eq!(
-            req::FragmentProfile::from(enums::FragmentProfile::TinyOverlap),
-            req::FragmentProfile::TinyOverlap
-        );
-        assert_eq!(
-            req::LogLevel::from(enums::LogLevel::Warn),
-            req::LogLevel::Warn
-        );
-        assert_eq!(
-            req::Icmpv6ErrorKind::from(enums::Icmpv6ErrorKind::ParameterProblem),
-            req::Icmpv6ErrorKind::ParameterProblem
-        );
-        assert_eq!(
-            req::Icmpv6ErrorCode::from(enums::Icmpv6ErrorCode::TimeExceededReassembly),
-            req::Icmpv6ErrorCode::TimeExceededReassembly
-        );
+        for (cli, domain) in [
+            (
+                enums::FragmentProfile::Overlap,
+                req::FragmentProfile::Overlap,
+            ),
+            (
+                enums::FragmentProfile::Teardrop,
+                req::FragmentProfile::Teardrop,
+            ),
+            (
+                enums::FragmentProfile::TinyOverlap,
+                req::FragmentProfile::TinyOverlap,
+            ),
+        ] {
+            assert_eq!(req::FragmentProfile::from(cli), domain);
+        }
+
+        for (cli, domain) in [
+            (enums::LogLevel::Trace, req::LogLevel::Trace),
+            (enums::LogLevel::Debug, req::LogLevel::Debug),
+            (enums::LogLevel::Info, req::LogLevel::Info),
+            (enums::LogLevel::Warn, req::LogLevel::Warn),
+            (enums::LogLevel::Error, req::LogLevel::Error),
+        ] {
+            assert_eq!(req::LogLevel::from(cli), domain);
+        }
+
+        for (cli, domain) in [
+            (
+                enums::Icmpv6ErrorKind::DestinationUnreachable,
+                req::Icmpv6ErrorKind::DestinationUnreachable,
+            ),
+            (
+                enums::Icmpv6ErrorKind::PacketTooBig,
+                req::Icmpv6ErrorKind::PacketTooBig,
+            ),
+            (
+                enums::Icmpv6ErrorKind::TimeExceeded,
+                req::Icmpv6ErrorKind::TimeExceeded,
+            ),
+            (
+                enums::Icmpv6ErrorKind::ParameterProblem,
+                req::Icmpv6ErrorKind::ParameterProblem,
+            ),
+        ] {
+            assert_eq!(req::Icmpv6ErrorKind::from(cli), domain);
+        }
+
+        for (cli, domain) in [
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachableNoRoute,
+                req::Icmpv6ErrorCode::DestinationUnreachableNoRoute,
+            ),
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachableAdminProhibited,
+                req::Icmpv6ErrorCode::DestinationUnreachableAdminProhibited,
+            ),
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachableBeyondScope,
+                req::Icmpv6ErrorCode::DestinationUnreachableBeyondScope,
+            ),
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachableAddressUnreachable,
+                req::Icmpv6ErrorCode::DestinationUnreachableAddressUnreachable,
+            ),
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachablePortUnreachable,
+                req::Icmpv6ErrorCode::DestinationUnreachablePortUnreachable,
+            ),
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachableSourcePolicy,
+                req::Icmpv6ErrorCode::DestinationUnreachableSourcePolicy,
+            ),
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachableRejectRoute,
+                req::Icmpv6ErrorCode::DestinationUnreachableRejectRoute,
+            ),
+            (
+                enums::Icmpv6ErrorCode::DestinationUnreachableSourceRoutingError,
+                req::Icmpv6ErrorCode::DestinationUnreachableSourceRoutingError,
+            ),
+            (
+                enums::Icmpv6ErrorCode::TimeExceededHopLimit,
+                req::Icmpv6ErrorCode::TimeExceededHopLimit,
+            ),
+            (
+                enums::Icmpv6ErrorCode::TimeExceededReassembly,
+                req::Icmpv6ErrorCode::TimeExceededReassembly,
+            ),
+            (
+                enums::Icmpv6ErrorCode::ParameterProblemErroneousHeader,
+                req::Icmpv6ErrorCode::ParameterProblemErroneousHeader,
+            ),
+            (
+                enums::Icmpv6ErrorCode::ParameterProblemUnrecognizedNextHeader,
+                req::Icmpv6ErrorCode::ParameterProblemUnrecognizedNextHeader,
+            ),
+            (
+                enums::Icmpv6ErrorCode::ParameterProblemUnrecognizedOption,
+                req::Icmpv6ErrorCode::ParameterProblemUnrecognizedOption,
+            ),
+        ] {
+            assert_eq!(req::Icmpv6ErrorCode::from(cli), domain);
+        }
     }
 
     #[test]
@@ -722,6 +810,47 @@ mod tests {
                     && request.source_ip.as_deref() == Some("192.0.2.11")
                     && request.timeout == 500
         ));
+
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::TcpFin(port.clone())),
+            cmd::ScanRequest::TcpFin(request)
+                if request.target == "192.0.2.1" && request.ports == "80,443"
+        ));
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::TcpNull(port.clone())),
+            cmd::ScanRequest::TcpNull(request)
+                if request.target == "192.0.2.1" && request.ports == "80,443"
+        ));
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::TcpXmas(port.clone())),
+            cmd::ScanRequest::TcpXmas(request)
+                if request.target == "192.0.2.1" && request.ports == "80,443"
+        ));
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::TcpAck(port.clone())),
+            cmd::ScanRequest::TcpAck(request)
+                if request.target == "192.0.2.1" && request.ports == "80,443"
+        ));
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::SctpInit(port.clone())),
+            cmd::ScanRequest::SctpInit(request)
+                if request.target == "192.0.2.1" && request.ports == "80,443"
+        ));
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::Udp(port)),
+            cmd::ScanRequest::Udp(request)
+                if request.target == "192.0.2.1" && request.ports == "80,443"
+        ));
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::Icmp(timed.clone())),
+            cmd::ScanRequest::Icmp(request)
+                if request.target == "192.0.2.0/30" && request.timeout == 500
+        ));
+        assert!(matches!(
+            cmd::ScanRequest::from(&commands::ScanCommand::Ndp(timed)),
+            cmd::ScanRequest::Ndp(request)
+                if request.target == "192.0.2.0/30" && request.timeout == 500
+        ));
     }
 
     #[cfg(feature = "traceroute")]
@@ -744,6 +873,27 @@ mod tests {
         assert_eq!(request.timeout, 2000);
     }
 
+    #[cfg(feature = "traceroute")]
+    #[test]
+    fn traceroute_protocol_mapping_preserves_all_variants() {
+        for (cli, domain) in [
+            (
+                commands::TracerouteProtocol::Udp,
+                cmd::TracerouteProtocol::Udp,
+            ),
+            (
+                commands::TracerouteProtocol::Tcp,
+                cmd::TracerouteProtocol::Tcp,
+            ),
+            (
+                commands::TracerouteProtocol::Icmp,
+                cmd::TracerouteProtocol::Icmp,
+            ),
+        ] {
+            assert_eq!(cmd::TracerouteProtocol::from(cli), domain);
+        }
+    }
+
     #[cfg(feature = "fuzz")]
     #[test]
     fn fuzz_options_map_protocol_strategy_and_limits() {
@@ -762,5 +912,35 @@ mod tests {
         assert_eq!(request.strategy, cmd::FuzzStrategy::Boundary);
         assert_eq!(request.count, 10);
         assert_eq!(request.delay, 20);
+    }
+
+    #[cfg(feature = "fuzz")]
+    #[test]
+    fn fuzz_enum_mapping_preserves_all_variants() {
+        for (cli, domain) in [
+            (commands::FuzzProtocol::Tcp, cmd::FuzzProtocol::Tcp),
+            (commands::FuzzProtocol::Udp, cmd::FuzzProtocol::Udp),
+            (commands::FuzzProtocol::Icmp, cmd::FuzzProtocol::Icmp),
+        ] {
+            assert_eq!(cmd::FuzzProtocol::from(cli), domain);
+        }
+
+        for (cli, domain) in [
+            (commands::FuzzStrategy::BitFlip, cmd::FuzzStrategy::BitFlip),
+            (
+                commands::FuzzStrategy::ByteSwap,
+                cmd::FuzzStrategy::ByteSwap,
+            ),
+            (
+                commands::FuzzStrategy::RandomPayload,
+                cmd::FuzzStrategy::RandomPayload,
+            ),
+            (
+                commands::FuzzStrategy::Boundary,
+                cmd::FuzzStrategy::Boundary,
+            ),
+        ] {
+            assert_eq!(cmd::FuzzStrategy::from(cli), domain);
+        }
     }
 }

@@ -235,3 +235,147 @@ where
 
     run_traceroute_loop_with_delay(opts, &mut executor, send_delay)
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use pnet::packet::icmp::echo_request::EchoRequestPacket;
+    use pnet::packet::Packet;
+
+    use crate::domain::command::TracerouteProtocol;
+
+    use super::*;
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct EchoSend {
+        ttl: u8,
+        destination: IpAddr,
+        identifier: u16,
+        sequence: u16,
+    }
+
+    struct MockTransportSender {
+        current_ttl: u8,
+        v4_sends: Vec<EchoSend>,
+        v6_sends: Vec<EchoSend>,
+    }
+
+    impl MockTransportSender {
+        fn new() -> Self {
+            Self {
+                current_ttl: 0,
+                v4_sends: Vec::new(),
+                v6_sends: Vec::new(),
+            }
+        }
+    }
+
+    impl TransportSender for MockTransportSender {
+        fn set_ttl(&mut self, ttl: u8) -> Result<()> {
+            self.current_ttl = ttl;
+            Ok(())
+        }
+
+        fn send_icmp_v4(&mut self, packet: IcmpPacket, destination: IpAddr) -> Result<usize> {
+            let echo = EchoRequestPacket::new(packet.packet()).expect("test echo request packet");
+            self.v4_sends.push(EchoSend {
+                ttl: self.current_ttl,
+                destination,
+                identifier: echo.get_identifier(),
+                sequence: echo.get_sequence_number(),
+            });
+            Ok(packet.packet().len())
+        }
+
+        fn send_icmp_v6(&mut self, packet: Icmpv6Packet, destination: IpAddr) -> Result<usize> {
+            let bytes = packet.packet();
+            self.v6_sends.push(EchoSend {
+                ttl: self.current_ttl,
+                destination,
+                identifier: u16::from_be_bytes([bytes[4], bytes[5]]),
+                sequence: u16::from_be_bytes([bytes[6], bytes[7]]),
+            });
+            Ok(bytes.len())
+        }
+
+        fn send_tcp(
+            &mut self,
+            _packet: pnet::packet::tcp::TcpPacket<'_>,
+            _destination: IpAddr,
+        ) -> Result<usize> {
+            unreachable!("ICMP traceroute tests do not send TCP packets")
+        }
+    }
+
+    struct EmptyReceiver;
+
+    impl PacketReceiver for EmptyReceiver {
+        fn next_packet(&mut self, _timeout: Duration) -> Result<Option<(Vec<u8>, IpAddr)>> {
+            Ok(None)
+        }
+    }
+
+    fn request(max_ttl: u8, probes: u8) -> TracerouteRequest {
+        TracerouteRequest {
+            destination: "example.test".to_string(),
+            max_ttl,
+            probes,
+            protocol: TracerouteProtocol::Icmp,
+            no_dns: Some(true),
+            timeout: 0,
+        }
+    }
+
+    #[test]
+    fn icmp_v4_executor_sets_ttl_and_sequences_echo_requests() {
+        let destination = Ipv4Addr::new(192, 0, 2, 10);
+        let mut sender = MockTransportSender::new();
+        let mut receiver = EmptyReceiver;
+
+        run_icmp_traceroute_v4_loop_with_delay(
+            destination,
+            &request(1, 2),
+            None,
+            &mut sender,
+            &mut receiver,
+        )
+        .unwrap();
+
+        assert_eq!(sender.v4_sends.len(), 2);
+        assert_eq!(sender.v4_sends[0].ttl, 1);
+        assert_eq!(sender.v4_sends[0].destination, IpAddr::V4(destination));
+        assert_eq!(sender.v4_sends[0].sequence, 0);
+        assert_eq!(sender.v4_sends[1].ttl, 1);
+        assert_eq!(sender.v4_sends[1].destination, IpAddr::V4(destination));
+        assert_eq!(sender.v4_sends[1].sequence, 1);
+        assert_eq!(sender.v4_sends[0].identifier, sender.v4_sends[1].identifier);
+    }
+
+    #[test]
+    fn icmp_v6_executor_sets_ttl_and_sequences_echo_requests() {
+        let destination = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 10);
+        let source_ip = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 5);
+        let mut sender = MockTransportSender::new();
+        let mut receiver = EmptyReceiver;
+
+        run_icmp_traceroute_v6_loop_with_delay(
+            destination,
+            source_ip,
+            &request(1, 2),
+            None,
+            &mut sender,
+            &mut receiver,
+        )
+        .unwrap();
+
+        assert_eq!(sender.v6_sends.len(), 2);
+        assert_eq!(sender.v6_sends[0].ttl, 1);
+        assert_eq!(sender.v6_sends[0].destination, IpAddr::V6(destination));
+        assert_eq!(sender.v6_sends[0].sequence, 0);
+        assert_eq!(sender.v6_sends[1].ttl, 1);
+        assert_eq!(sender.v6_sends[1].destination, IpAddr::V6(destination));
+        assert_eq!(sender.v6_sends[1].sequence, 1);
+        assert_eq!(sender.v6_sends[0].identifier, sender.v6_sends[1].identifier);
+    }
+}

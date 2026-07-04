@@ -527,7 +527,38 @@ fn calculate_crc32c(data: &[u8]) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use pnet::packet::icmp;
+
     use super::*;
+
+    struct MockSctpTx {
+        sends: Vec<(u16, u16, SocketAddr)>,
+    }
+
+    impl SctpScanTx for MockSctpTx {
+        fn send_sctp(&mut self, packet: &[u8], destination: SocketAddr) -> Result<()> {
+            self.sends.push((
+                u16::from_be_bytes([packet[0], packet[1]]),
+                u16::from_be_bytes([packet[2], packet[3]]),
+                destination,
+            ));
+            Ok(())
+        }
+    }
+
+    struct MockSctpRx {
+        events: Vec<ScanEvent>,
+    }
+
+    impl SctpScanRx for MockSctpRx {
+        fn next_event(&mut self, _timeout: Duration) -> Result<Option<ScanEvent>> {
+            Ok(if self.events.is_empty() {
+                None
+            } else {
+                Some(self.events.remove(0))
+            })
+        }
+    }
 
     fn sctp_packet_with_chunk(source: u16, destination: u16, chunk_type: u8) -> Vec<u8> {
         let mut packet = Vec::new();
@@ -631,5 +662,69 @@ mod tests {
 
         assert_eq!(attempts, 1);
         assert!(err.to_string().contains("send SCTP probe failed"));
+    }
+
+    #[test]
+    fn scan_sctp_classifies_sctp_icmp_and_timeout_states_with_fake_paths() {
+        let source_ip = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5));
+        let destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0);
+        let ports = [80, 81, 82, 83];
+        let mut tx = MockSctpTx { sends: Vec::new() };
+        let mut rx = MockSctpRx {
+            events: vec![
+                ScanEvent::PacketResponse {
+                    source_port: 80,
+                    dest_port: 40_000,
+                    src_addr: destination.ip(),
+                    flags: Some(SCTP_INIT_ACK_CHUNK_TYPE),
+                },
+                ScanEvent::PacketResponse {
+                    source_port: 81,
+                    dest_port: 40_001,
+                    src_addr: destination.ip(),
+                    flags: Some(SCTP_ABORT_CHUNK_TYPE),
+                },
+                ScanEvent::IcmpResponse {
+                    source_port: 40_002,
+                    dest_port: 82,
+                    src_addr: source_ip,
+                    dst_addr: destination.ip(),
+                    icmp_type: icmp::IcmpTypes::DestinationUnreachable.0,
+                    icmp_code: icmp::destination_unreachable::IcmpCodes::DestinationPortUnreachable
+                        .0,
+                },
+            ],
+        };
+
+        let results = scan_ports_concurrent_with_config(
+            ConcurrentScanConfig {
+                destination,
+                source_ip,
+                timeout: Duration::from_millis(1),
+                batch_size: ports.len(),
+                send_delay: None,
+                base_port_offset: SOURCE_PORT_OFFSET,
+                base_port_override: Some(40_000),
+                initial_port_state: PortState::Filtered,
+            },
+            &ports,
+            &mut tx,
+            &mut rx,
+        )
+        .unwrap();
+
+        assert_eq!(results.get(&80), Some(&PortState::Open));
+        assert_eq!(results.get(&81), Some(&PortState::Closed));
+        assert_eq!(results.get(&82), Some(&PortState::Closed));
+        assert_eq!(results.get(&83), Some(&PortState::Filtered));
+        assert_eq!(
+            tx.sends,
+            vec![
+                (40_000, 80, destination),
+                (40_001, 81, destination),
+                (40_002, 82, destination),
+                (40_003, 83, destination),
+            ]
+        );
     }
 }

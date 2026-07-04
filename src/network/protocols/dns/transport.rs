@@ -325,6 +325,7 @@ pub(super) fn decode_tcp_frame_length(length_prefix: [u8; 2]) -> DnsProtocolResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::VecDeque;
 
     #[test]
     fn encode_tcp_frame_prefixes_query_with_big_endian_length() {
@@ -369,5 +370,86 @@ mod tests {
 
         assert!(err.to_string().contains("cannot be zero"));
         assert!(matches!(err, DnsProtocolError::TcpResponseFrameLengthZero));
+    }
+
+    #[tokio::test]
+    async fn query_with_retries_retries_retryable_errors_until_success() {
+        let mut outcomes: VecDeque<std::result::Result<&'static str, DnsAttemptError>> =
+            VecDeque::from([
+                Err(DnsAttemptError::Retryable(DnsProtocolError::timeout(
+                    Duration::from_millis(5),
+                ))),
+                Ok("response"),
+            ]);
+        let mut attempts = 0;
+        let mut rate_limiter = DnsRateLimiter::new(None);
+
+        let result = query_with_retries(1, &mut attempts, &mut rate_limiter, || {
+            let outcome = outcomes.pop_front().unwrap();
+            async move { outcome }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result, "response");
+        assert_eq!(attempts, 2);
+        assert!(outcomes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn query_with_retries_stops_on_fatal_error() {
+        let mut outcomes: VecDeque<std::result::Result<&'static str, DnsAttemptError>> =
+            VecDeque::from([
+                Err(DnsAttemptError::Fatal(DnsProtocolError::EmptyDomain)),
+                Ok("unexpected"),
+            ]);
+        let mut attempts = 0;
+        let mut rate_limiter = DnsRateLimiter::new(None);
+
+        let err = query_with_retries(2, &mut attempts, &mut rate_limiter, || {
+            let outcome = outcomes.pop_front().unwrap();
+            async move { outcome }
+        })
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, DnsProtocolError::EmptyDomain));
+        assert_eq!(attempts, 1);
+        assert_eq!(outcomes.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn query_with_retries_returns_last_retryable_error_when_retries_exhausted() {
+        let mut outcomes: VecDeque<std::result::Result<&'static str, DnsAttemptError>> =
+            VecDeque::from([
+                Err(DnsAttemptError::Retryable(DnsProtocolError::timeout(
+                    Duration::from_millis(5),
+                ))),
+                Err(DnsAttemptError::Retryable(
+                    DnsProtocolError::ResponseTooShort {
+                        actual: 4,
+                        minimum: 12,
+                    },
+                )),
+            ]);
+        let mut attempts = 0;
+        let mut rate_limiter = DnsRateLimiter::new(None);
+
+        let err = query_with_retries(1, &mut attempts, &mut rate_limiter, || {
+            let outcome = outcomes.pop_front().unwrap();
+            async move { outcome }
+        })
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            DnsProtocolError::ResponseTooShort {
+                actual: 4,
+                minimum: 12
+            }
+        ));
+        assert_eq!(attempts, 2);
+        assert!(outcomes.is_empty());
     }
 }

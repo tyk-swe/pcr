@@ -47,9 +47,3 @@ one change, and use the same format for PR titles. PR descriptions should explai
 the behavior change, list commands run, mention affected feature flags, link
 related issues, and include terminal output or screenshots only when CLI behavior
 changes.
-
-## Security & Configuration Tips
-
-Packet sending, capture, daemon, and pcap flows may require elevated privileges or
-platform-specific capabilities. Do not commit local interface names, packet
-captures, generated secrets, or environment-specific daemon paths.

@@ -46,31 +46,31 @@ pub(crate) async fn run(engine: &mut Engine, command: EngineCommand) -> Result<(
 
 #[cfg(test)]
 mod tests {
-    use std::net::IpAddr;
     use std::sync::{Arc, Mutex};
 
-    use anyhow::anyhow;
     use tokio::runtime::Handle;
 
     use super::*;
     use crate::domain::command::{DnsQueryResult, DnsRequest, DnsTransport, DnsTransportMode};
     use crate::domain::event::ListenerEvent;
     use crate::domain::policy::{TargetScope, TrafficMode, TrafficPlan, TrafficPolicy};
-    use crate::domain::spec::{ListenerSpec, PacketSpec};
-    use crate::domain::transmission::{PlanningMode, TransmissionPlan};
-    #[cfg(feature = "daemon")]
-    use crate::engine::ports::DaemonListenerRuntime;
+    use crate::domain::spec::PacketSpec;
+    use crate::domain::transmission::TransmissionPlan;
     use crate::engine::ports::{
-        DnsClient, EngineDependencies, EngineOutput, ListenerEventHandler, ListenerRunner,
-        PacketPlanner, PacketTransmitter, PortFuture, PreparedDnsQuery, PrivilegeChecker,
-        RuleActionTelemetry, TargetResolver,
+        DnsClient, EngineDependencies, EngineOutput, PortFuture, PreparedDnsQuery,
     };
+    #[cfg(feature = "daemon")]
+    use crate::engine::test_support::RejectDaemonListenerRuntime;
     #[cfg(feature = "fuzz")]
-    use crate::engine::ports::{FuzzRunner, GeneratedPacketSender, PreparedFuzzRun};
+    use crate::engine::test_support::RejectFuzzRunner;
     #[cfg(feature = "scan")]
-    use crate::engine::ports::{PreparedScanRun, ScanRunner};
+    use crate::engine::test_support::RejectScanRunner;
     #[cfg(feature = "traceroute")]
-    use crate::engine::ports::{PreparedTracerouteRun, TracerouteRunner};
+    use crate::engine::test_support::RejectTracerouteRunner;
+    use crate::engine::test_support::{
+        NoOpRuleActionTelemetry, RejectListenerRunner, RejectPacketPlanner,
+        RejectPacketTransmitter, RejectPrivilegeChecker, RejectTargetResolver,
+    };
 
     #[derive(Default)]
     struct DnsOutputState {
@@ -149,137 +149,6 @@ mod tests {
         }
     }
 
-    struct UnusedPorts;
-
-    impl TargetResolver for UnusedPorts {
-        fn resolve_target_ip(
-            &self,
-            _target: String,
-            _prefer_ipv6: Option<bool>,
-        ) -> PortFuture<IpAddr> {
-            Box::pin(async { Err(anyhow!("target resolver should not be used")) })
-        }
-    }
-
-    impl PrivilegeChecker for UnusedPorts {
-        fn check_packet_send(&self, _spec: Arc<PacketSpec>) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("privilege checker should not be used")) })
-        }
-    }
-
-    impl PacketPlanner for UnusedPorts {
-        fn plan_packet(
-            &self,
-            _spec: Arc<PacketSpec>,
-            _mode: PlanningMode,
-            _policy: crate::domain::policy::TransmissionPolicy,
-        ) -> PortFuture<TransmissionPlan> {
-            Box::pin(async { Err(anyhow!("packet planner should not be used")) })
-        }
-    }
-
-    impl PacketTransmitter for UnusedPorts {
-        fn transmit(&self, _plan: TransmissionPlan) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("packet transmitter should not be used")) })
-        }
-    }
-
-    impl ListenerRunner for UnusedPorts {
-        #[cfg(not(feature = "pcap"))]
-        fn run_for_packet(
-            &self,
-            _spec: ListenerSpec,
-            _interface_hint: Option<String>,
-            _handler: ListenerEventHandler,
-        ) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("listener runner should not be used")) })
-        }
-
-        #[cfg(feature = "pcap")]
-        fn run_for_packet_with_lifecycle(
-            &self,
-            _spec: ListenerSpec,
-            _interface_hint: Option<String>,
-            _handler: ListenerEventHandler,
-            _shutdown: Arc<std::sync::atomic::AtomicBool>,
-            _startup: Option<crate::engine::ports::ListenerStartupSignal>,
-        ) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("listener lifecycle runner should not be used")) })
-        }
-
-        #[cfg(feature = "pcap")]
-        fn run_command(
-            &self,
-            _request: crate::domain::command::ListenRequest,
-            _handler: ListenerEventHandler,
-        ) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("listener command should not be used")) })
-        }
-    }
-
-    #[cfg(feature = "traceroute")]
-    impl TracerouteRunner for UnusedPorts {
-        fn prepare(
-            &self,
-            _request: crate::domain::command::TracerouteRequest,
-            _policy: TrafficPolicy,
-        ) -> PortFuture<PreparedTracerouteRun> {
-            Box::pin(async { Err(anyhow!("traceroute runner should not be used")) })
-        }
-    }
-
-    #[cfg(feature = "scan")]
-    impl ScanRunner for UnusedPorts {
-        fn prepare(
-            &self,
-            _request: crate::domain::command::ScanRequest,
-            _policy: TrafficPolicy,
-        ) -> PortFuture<PreparedScanRun> {
-            Box::pin(async { Err(anyhow!("scan runner should not be used")) })
-        }
-    }
-
-    #[cfg(feature = "fuzz")]
-    impl FuzzRunner for UnusedPorts {
-        fn prepare(
-            &self,
-            _request: crate::domain::command::FuzzRequest,
-            _policy: TrafficPolicy,
-            _sender: GeneratedPacketSender,
-        ) -> PortFuture<PreparedFuzzRun> {
-            Box::pin(async { Err(anyhow!("fuzz runner should not be used")) })
-        }
-    }
-
-    #[cfg(feature = "daemon")]
-    impl DaemonListenerRuntime for UnusedPorts {
-        fn validate_options(
-            &self,
-            _options: &crate::domain::request::ListenerRequest,
-        ) -> crate::engine::ports::PortResult<()> {
-            Err(anyhow!("daemon listener runtime should not be used"))
-        }
-
-        fn spawn_background(
-            &self,
-            _options: crate::domain::request::ListenerRequest,
-            _interface_hint: Option<String>,
-            _handler: ListenerEventHandler,
-            _shutdown: Arc<std::sync::atomic::AtomicBool>,
-            _startup: Option<crate::engine::ports::ListenerStartupSignal>,
-        ) -> crate::engine::ports::PortResult<
-            tokio::task::JoinHandle<crate::engine::ports::PortResult<()>>,
-        > {
-            Err(anyhow!("daemon listener runtime should not be used"))
-        }
-    }
-
-    impl RuleActionTelemetry for UnusedPorts {
-        fn record_rule_action(&self, _action: &'static str, _status: &'static str) {}
-
-        fn record_rule_executor_drop(&self, _action: &'static str, _reason: &'static str) {}
-    }
-
     fn dns_result() -> DnsQueryResult {
         DnsQueryResult {
             id: 7,
@@ -312,24 +181,23 @@ mod tests {
     }
 
     fn engine(state: Arc<DnsOutputState>) -> Engine {
-        let unused = Arc::new(UnusedPorts);
         let dependencies = EngineDependencies {
-            target_resolver: unused.clone(),
-            privilege_checker: unused.clone(),
-            packet_planner: unused.clone(),
-            packet_transmitter: unused.clone(),
-            listener_runner: unused.clone(),
+            target_resolver: Arc::new(RejectTargetResolver),
+            privilege_checker: Arc::new(RejectPrivilegeChecker),
+            packet_planner: Arc::new(RejectPacketPlanner),
+            packet_transmitter: Arc::new(RejectPacketTransmitter),
+            listener_runner: Arc::new(RejectListenerRunner),
             #[cfg(feature = "daemon")]
-            daemon_listener_runtime: unused.clone(),
+            daemon_listener_runtime: Arc::new(RejectDaemonListenerRuntime),
             dns_client: Arc::new(FakeDnsClient),
             #[cfg(feature = "traceroute")]
-            traceroute_runner: unused.clone(),
+            traceroute_runner: Arc::new(RejectTracerouteRunner),
             #[cfg(feature = "scan")]
-            scan_runner: unused.clone(),
+            scan_runner: Arc::new(RejectScanRunner),
             #[cfg(feature = "fuzz")]
-            fuzz_runner: unused.clone(),
+            fuzz_runner: Arc::new(RejectFuzzRunner),
             output: Arc::new(FakeOutput { state }),
-            rule_action_telemetry: unused,
+            rule_action_telemetry: Arc::new(NoOpRuleActionTelemetry),
         };
         let config = crate::engine::config::EngineConfig {
             prometheus_bind: None,

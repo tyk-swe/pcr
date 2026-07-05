@@ -340,11 +340,8 @@ impl Engine {
 
 #[cfg(all(test, any(feature = "scan", feature = "traceroute", feature = "fuzz")))]
 mod prepared_traffic_tests {
-    use std::net::IpAddr;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
-
-    use anyhow::anyhow;
 
     use super::*;
     #[cfg(feature = "pcap")]
@@ -358,26 +355,20 @@ mod prepared_traffic_tests {
     use crate::domain::command::{TracerouteProtocol, TracerouteRequest};
     use crate::domain::event::ListenerEvent;
     use crate::domain::policy::{TargetScope, TrafficMode, TrafficPlan};
-    #[cfg(feature = "daemon")]
-    use crate::domain::request::ListenerRequest;
-    use crate::domain::spec::{ListenerSpec, LoggingSpec, PacketSpec, TransmissionSpec};
-    use crate::domain::transmission::{
-        DestinationSelectionReason, InterfaceSelectionReason, PlanningMode, SourceSelectionReason,
-        TransmissionLinkType, TransmissionPlan, TransmissionProtocol, TransmissionSelection,
-        TransmissionSummary, TransmissionTarget,
-    };
-    #[cfg(feature = "daemon")]
-    use crate::engine::ports::DaemonListenerRuntime;
+    use crate::domain::spec::PacketSpec;
+    use crate::domain::transmission::{PlanningMode, TransmissionPlan};
     #[cfg(feature = "fuzz")]
     use crate::engine::ports::FuzzRunner;
     #[cfg(feature = "scan")]
     use crate::engine::ports::ScanRunner;
     #[cfg(feature = "traceroute")]
     use crate::engine::ports::TracerouteRunner;
-    use crate::engine::ports::{
-        DnsClient, EngineDependencies, EngineOutput, ListenerEventHandler, ListenerRunner,
-        PacketPlanner, PacketTransmitter, PortFuture, PreparedDnsQuery, PreparedTrafficRun,
-        PrivilegeChecker, RuleActionTelemetry, TargetResolver,
+    use crate::engine::ports::{EngineDependencies, EngineOutput, PortFuture, PreparedTrafficRun};
+    #[cfg(feature = "daemon")]
+    use crate::engine::test_support::RejectDaemonListenerRuntime;
+    use crate::engine::test_support::{
+        ipv4_udp_transmission_plan, NoOpRuleActionTelemetry, RejectDnsClient, RejectListenerRunner,
+        RejectPacketPlanner, RejectPacketTransmitter, RejectPrivilegeChecker, RejectTargetResolver,
     };
 
     #[derive(Debug)]
@@ -510,114 +501,6 @@ mod prepared_traffic_tests {
         }
     }
 
-    #[derive(Debug)]
-    struct UnusedPorts;
-
-    impl TargetResolver for UnusedPorts {
-        fn resolve_target_ip(
-            &self,
-            _target: String,
-            _prefer_ipv6: Option<bool>,
-        ) -> PortFuture<IpAddr> {
-            Box::pin(async { Err(anyhow!("target resolver should not be used")) })
-        }
-    }
-
-    impl PrivilegeChecker for UnusedPorts {
-        fn check_packet_send(&self, _spec: Arc<PacketSpec>) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("privilege checker should not be used")) })
-        }
-    }
-
-    impl PacketPlanner for UnusedPorts {
-        fn plan_packet(
-            &self,
-            _spec: Arc<PacketSpec>,
-            _mode: PlanningMode,
-            _policy: crate::domain::policy::TransmissionPolicy,
-        ) -> PortFuture<TransmissionPlan> {
-            Box::pin(async { Err(anyhow!("packet planner should not be used")) })
-        }
-    }
-
-    impl PacketTransmitter for UnusedPorts {
-        fn transmit(&self, _plan: TransmissionPlan) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("packet transmitter should not be used")) })
-        }
-    }
-
-    impl ListenerRunner for UnusedPorts {
-        #[cfg(not(feature = "pcap"))]
-        fn run_for_packet(
-            &self,
-            _spec: ListenerSpec,
-            _interface_hint: Option<String>,
-            _handler: ListenerEventHandler,
-        ) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("listener runner should not be used")) })
-        }
-
-        #[cfg(feature = "pcap")]
-        fn run_for_packet_with_lifecycle(
-            &self,
-            _spec: ListenerSpec,
-            _interface_hint: Option<String>,
-            _handler: ListenerEventHandler,
-            _shutdown: Arc<std::sync::atomic::AtomicBool>,
-            _startup: Option<crate::engine::ports::ListenerStartupSignal>,
-        ) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("listener lifecycle runner should not be used")) })
-        }
-
-        #[cfg(feature = "pcap")]
-        fn run_command(
-            &self,
-            _request: ListenRequest,
-            _handler: ListenerEventHandler,
-        ) -> PortFuture<()> {
-            Box::pin(async { Err(anyhow!("listener command should not be used")) })
-        }
-    }
-
-    #[cfg(feature = "daemon")]
-    impl DaemonListenerRuntime for UnusedPorts {
-        fn validate_options(
-            &self,
-            _options: &ListenerRequest,
-        ) -> crate::engine::ports::PortResult<()> {
-            Err(anyhow!("daemon listener validation should not be used"))
-        }
-
-        fn spawn_background(
-            &self,
-            _options: ListenerRequest,
-            _interface_hint: Option<String>,
-            _handler: ListenerEventHandler,
-            _shutdown: Arc<std::sync::atomic::AtomicBool>,
-            _startup: Option<crate::engine::ports::ListenerStartupSignal>,
-        ) -> crate::engine::ports::PortResult<
-            tokio::task::JoinHandle<crate::engine::ports::PortResult<()>>,
-        > {
-            Err(anyhow!("daemon listener runtime should not be used"))
-        }
-    }
-
-    impl DnsClient for UnusedPorts {
-        fn prepare(
-            &self,
-            _request: DnsRequest,
-            _policy: TrafficPolicy,
-        ) -> PortFuture<PreparedDnsQuery> {
-            Box::pin(async { Err(anyhow!("dns client should not be used")) })
-        }
-    }
-
-    impl RuleActionTelemetry for UnusedPorts {
-        fn record_rule_action(&self, _action: &'static str, _status: &'static str) {}
-
-        fn record_rule_executor_drop(&self, _action: &'static str, _reason: &'static str) {}
-    }
-
     fn engine_with_plan(
         mode: TrafficMode,
         scope: TargetScope,
@@ -632,18 +515,17 @@ mod prepared_traffic_tests {
             1,
             None,
         ));
-        let unused = Arc::new(UnusedPorts);
         let runner = Arc::new(FakePreparedTrafficRunner::new(Arc::clone(&state)));
 
         let dependencies = EngineDependencies {
-            target_resolver: unused.clone(),
-            privilege_checker: unused.clone(),
-            packet_planner: unused.clone(),
-            packet_transmitter: unused.clone(),
-            listener_runner: unused.clone(),
+            target_resolver: Arc::new(RejectTargetResolver),
+            privilege_checker: Arc::new(RejectPrivilegeChecker),
+            packet_planner: Arc::new(RejectPacketPlanner),
+            packet_transmitter: Arc::new(RejectPacketTransmitter),
+            listener_runner: Arc::new(RejectListenerRunner),
             #[cfg(feature = "daemon")]
-            daemon_listener_runtime: unused.clone(),
-            dns_client: unused.clone(),
+            daemon_listener_runtime: Arc::new(RejectDaemonListenerRuntime),
+            dns_client: Arc::new(RejectDnsClient),
             #[cfg(feature = "traceroute")]
             traceroute_runner: runner.clone(),
             #[cfg(feature = "scan")]
@@ -653,7 +535,7 @@ mod prepared_traffic_tests {
             output: Arc::new(FakeOutput {
                 state: Arc::clone(&state),
             }),
-            rule_action_telemetry: unused,
+            rule_action_telemetry: Arc::new(NoOpRuleActionTelemetry),
         };
         let config = EngineConfig {
             prometheus_bind: None,
@@ -691,34 +573,6 @@ mod prepared_traffic_tests {
             transaction_id: Some(7),
             transport: DnsTransportMode::Udp,
             retries: 0,
-        }
-    }
-
-    fn transmission_plan() -> TransmissionPlan {
-        TransmissionPlan {
-            frames: vec![vec![0; 4]],
-            link_type: TransmissionLinkType::Ipv4,
-            transmit: TransmissionSpec::default(),
-            destination: TransmissionTarget::Ipv4("192.0.2.10".parse().unwrap()),
-            interface_name: "eth-test".to_string(),
-            selection: TransmissionSelection {
-                selected_interface: "eth-test".to_string(),
-                interface_reason: InterfaceSelectionReason::ExplicitInterface,
-                source_ip: "192.0.2.5".parse().unwrap(),
-                source_reason: SourceSelectionReason::ExplicitSourceIp,
-                destination_ip: "192.0.2.10".parse().unwrap(),
-                destination_reason: DestinationSelectionReason::TargetLiteral,
-            },
-            protocol: TransmissionProtocol(17),
-            summary: TransmissionSummary {
-                payload_len: 0,
-                largest_frame_len: 4,
-                frame_count: 1,
-                transport: "udp",
-            },
-            logging: LoggingSpec::default(),
-            mode: PlanningMode::Live,
-            policy: crate::domain::policy::TransmissionPolicy::default(),
         }
     }
 
@@ -782,7 +636,7 @@ mod prepared_traffic_tests {
 
         let err = engine
             .send
-            .execute_plan(transmission_plan())
+            .execute_plan(ipv4_udp_transmission_plan(PlanningMode::Live))
             .await
             .unwrap_err();
 

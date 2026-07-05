@@ -10,3 +10,5 @@ pub(crate) mod oneshot;
 pub(crate) mod ports;
 pub(crate) mod rule_send;
 pub(crate) mod send;
+#[cfg(test)]
+pub(crate) mod test_support;

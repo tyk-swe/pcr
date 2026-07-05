@@ -270,3 +270,211 @@ impl SendUseCase {
         Ok(traffic_plan)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::domain::request::{DestinationRequest, PacketRequest};
+    use crate::engine::ports::{
+        EngineDependencies, PacketPlanner, PacketTransmitter, PortFuture, PrivilegeChecker,
+    };
+    #[cfg(feature = "daemon")]
+    use crate::engine::test_support::RejectDaemonListenerRuntime;
+    #[cfg(feature = "fuzz")]
+    use crate::engine::test_support::RejectFuzzRunner;
+    #[cfg(feature = "scan")]
+    use crate::engine::test_support::RejectScanRunner;
+    #[cfg(feature = "traceroute")]
+    use crate::engine::test_support::RejectTracerouteRunner;
+    use crate::engine::test_support::{
+        ipv4_udp_transmission_plan, NoOpOutput, NoOpRuleActionTelemetry, RejectDnsClient,
+        RejectListenerRunner, RejectPacketPlanner, RejectTargetResolver,
+    };
+
+    #[derive(Default)]
+    struct SharedState {
+        events: Mutex<Vec<&'static str>>,
+        planned_modes: Mutex<Vec<PlanningMode>>,
+        transmit_calls: AtomicUsize,
+    }
+
+    impl SharedState {
+        fn record(&self, event: &'static str) {
+            self.events.lock().expect("test events lock").push(event);
+        }
+
+        fn events(&self) -> Vec<&'static str> {
+            self.events.lock().expect("test events lock").clone()
+        }
+
+        fn record_mode(&self, mode: PlanningMode) {
+            self.planned_modes
+                .lock()
+                .expect("test modes lock")
+                .push(mode);
+        }
+
+        fn planned_modes(&self) -> Vec<PlanningMode> {
+            self.planned_modes.lock().expect("test modes lock").clone()
+        }
+    }
+
+    struct RecordingPrivilegeChecker {
+        state: Arc<SharedState>,
+    }
+
+    impl PrivilegeChecker for RecordingPrivilegeChecker {
+        fn check_packet_send(&self, _spec: Arc<PacketSpec>) -> PortFuture<()> {
+            let state = Arc::clone(&self.state);
+            Box::pin(async move {
+                state.record("privilege");
+                Ok(())
+            })
+        }
+    }
+
+    struct RecordingPacketPlanner {
+        state: Arc<SharedState>,
+    }
+
+    impl PacketPlanner for RecordingPacketPlanner {
+        fn plan_packet(
+            &self,
+            _spec: Arc<PacketSpec>,
+            mode: PlanningMode,
+            _policy: crate::domain::policy::TransmissionPolicy,
+        ) -> PortFuture<TransmissionPlan> {
+            let state = Arc::clone(&self.state);
+            Box::pin(async move {
+                state.record("plan");
+                state.record_mode(mode);
+                Ok(ipv4_udp_transmission_plan(mode))
+            })
+        }
+    }
+
+    struct RecordingPacketTransmitter {
+        state: Arc<SharedState>,
+    }
+
+    impl PacketTransmitter for RecordingPacketTransmitter {
+        fn transmit(&self, _plan: TransmissionPlan) -> PortFuture<()> {
+            let state = Arc::clone(&self.state);
+            Box::pin(async move {
+                state.transmit_calls.fetch_add(1, Ordering::SeqCst);
+                state.record("transmit");
+                Ok(())
+            })
+        }
+    }
+
+    fn request() -> PacketRequest {
+        PacketRequest {
+            destination: DestinationRequest {
+                destination_ip: Some("192.0.2.10".to_string()),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn send_use_case(
+        dry_run: bool,
+        privilege_checker: Arc<dyn PrivilegeChecker>,
+        packet_planner: Arc<dyn PacketPlanner>,
+        packet_transmitter: Arc<dyn PacketTransmitter>,
+    ) -> SendUseCase {
+        SendUseCase::new(
+            crate::domain::policy::TrafficPolicy::default().with_dry_run(dry_run),
+            EngineDependencies {
+                target_resolver: Arc::new(RejectTargetResolver),
+                privilege_checker,
+                packet_planner,
+                packet_transmitter,
+                listener_runner: Arc::new(RejectListenerRunner),
+                #[cfg(feature = "daemon")]
+                daemon_listener_runtime: Arc::new(RejectDaemonListenerRuntime),
+                dns_client: Arc::new(RejectDnsClient),
+                #[cfg(feature = "traceroute")]
+                traceroute_runner: Arc::new(RejectTracerouteRunner),
+                #[cfg(feature = "scan")]
+                scan_runner: Arc::new(RejectScanRunner),
+                #[cfg(feature = "fuzz")]
+                fuzz_runner: Arc::new(RejectFuzzRunner),
+                output: Arc::new(NoOpOutput),
+                rule_action_telemetry: Arc::new(NoOpRuleActionTelemetry),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn prepare_dry_run_uses_dry_run_planning_and_skips_privilege_checks() {
+        let state = Arc::new(SharedState::default());
+        let send = send_use_case(
+            true,
+            Arc::new(RecordingPrivilegeChecker {
+                state: Arc::clone(&state),
+            }),
+            Arc::new(RecordingPacketPlanner {
+                state: Arc::clone(&state),
+            }),
+            Arc::new(RecordingPacketTransmitter {
+                state: Arc::clone(&state),
+            }),
+        );
+
+        let prepared = send.prepare(request(), true).await.unwrap();
+
+        assert_eq!(state.planned_modes(), vec![PlanningMode::DryRun]);
+        assert_eq!(state.events(), vec!["plan"]);
+        assert_eq!(prepared.plan.mode, PlanningMode::DryRun);
+    }
+
+    #[tokio::test]
+    async fn prepare_live_uses_live_planning_and_checks_privileges_before_planning() {
+        let state = Arc::new(SharedState::default());
+        let send = send_use_case(
+            false,
+            Arc::new(RecordingPrivilegeChecker {
+                state: Arc::clone(&state),
+            }),
+            Arc::new(RecordingPacketPlanner {
+                state: Arc::clone(&state),
+            }),
+            Arc::new(RecordingPacketTransmitter {
+                state: Arc::clone(&state),
+            }),
+        );
+
+        let prepared = send.prepare(request(), true).await.unwrap();
+
+        assert_eq!(state.planned_modes(), vec![PlanningMode::Live]);
+        assert_eq!(state.events(), vec!["privilege", "plan"]);
+        assert_eq!(prepared.plan.mode, PlanningMode::Live);
+    }
+
+    #[tokio::test]
+    async fn execute_plan_dry_run_returns_without_calling_packet_transmitter() {
+        let state = Arc::new(SharedState::default());
+        let send = send_use_case(
+            true,
+            Arc::new(RecordingPrivilegeChecker {
+                state: Arc::clone(&state),
+            }),
+            Arc::new(RejectPacketPlanner),
+            Arc::new(RecordingPacketTransmitter {
+                state: Arc::clone(&state),
+            }),
+        );
+
+        send.execute_plan(ipv4_udp_transmission_plan(PlanningMode::DryRun))
+            .await
+            .unwrap();
+
+        assert_eq!(state.transmit_calls.load(Ordering::SeqCst), 0);
+        assert!(state.events().is_empty());
+    }
+}

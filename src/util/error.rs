@@ -1,6 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#[cfg(any(feature = "scan", feature = "traceroute", test))]
 use std::fmt;
 use thiserror::Error;
 
@@ -8,6 +9,7 @@ use thiserror::Error;
 ///
 /// Keeping this helper centralises the wording and makes it harder to regress on the
 /// agreed format when we add new error contexts across the codebase.
+#[cfg(any(feature = "scan", feature = "traceroute", test))]
 pub(crate) fn operation_failed(operation: &str, details: impl fmt::Display) -> String {
     format!("{operation} failed: {details}")
 }

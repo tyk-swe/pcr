@@ -181,8 +181,8 @@ impl<'engine> OneShotFlow<'engine> {
         );
     }
 
-    fn announce_listener(&self, plan: &PacketSpec) {
-        if plan.listener.enabled && plan.listener.implicit {
+    fn announce_listener(&self, spec: &PacketSpec) {
+        if spec.listener.enabled && spec.listener.implicit {
             info!("Listener auto-enabled to honor reply previews or capture output");
         }
     }
@@ -200,14 +200,14 @@ impl<'engine> OneShotFlow<'engine> {
     }
 
     #[cfg(not(feature = "pcap"))]
-    async fn maybe_run_listener(&mut self, plan: &PacketSpec) -> Result<()> {
-        if plan.listener.enabled {
+    async fn maybe_run_listener(&mut self, spec: &PacketSpec) -> Result<()> {
+        if spec.listener.enabled {
             self.engine
                 .dependencies
                 .listener_runner
                 .run_for_packet(
-                    plan.listener.clone(),
-                    plan.target.interface.clone(),
+                    spec.listener.clone(),
+                    spec.target.interface.clone(),
                     self.engine.listener_handler(),
                 )
                 .await
@@ -217,16 +217,16 @@ impl<'engine> OneShotFlow<'engine> {
     }
 
     #[cfg(feature = "pcap")]
-    async fn maybe_run_listener(&mut self, plan: &PacketSpec) -> Result<()> {
-        if let Some(listener) = self.start_listener(plan).await? {
+    async fn maybe_run_listener(&mut self, spec: &PacketSpec) -> Result<()> {
+        if let Some(listener) = self.start_listener(spec).await? {
             self.wait_for_listener(listener).await?;
         }
         Ok(())
     }
 
     #[cfg(feature = "pcap")]
-    async fn start_listener(&self, plan: &PacketSpec) -> Result<Option<ArmedListener>> {
-        if !plan.listener.enabled {
+    async fn start_listener(&self, spec: &PacketSpec) -> Result<Option<ArmedListener>> {
+        if !spec.listener.enabled {
             return Ok(None);
         }
 
@@ -240,8 +240,8 @@ impl<'engine> OneShotFlow<'engine> {
                     .dependencies
                     .listener_runner
                     .run_for_packet_with_lifecycle(
-                        plan.listener.clone(),
-                        plan.target.interface.clone(),
+                        spec.listener.clone(),
+                        spec.target.interface.clone(),
                         self.engine.listener_handler(),
                         listener_shutdown,
                         Some(startup_tx),

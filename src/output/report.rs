@@ -144,8 +144,8 @@ pub(crate) fn preflight_report(spec: &PacketSpec, view: &PreflightView) -> Prefl
     }
 }
 
-fn payload_json(plan: &PacketSpec) -> serde_json::Value {
-    match &plan.payload.source {
+fn payload_json(spec: &PacketSpec) -> serde_json::Value {
+    match &spec.payload.source {
         PayloadSource::Empty => serde_json::json!({"type": "empty"}),
         PayloadSource::Inline(data) => {
             serde_json::json!({"type": "inline", "value": data})
@@ -183,8 +183,8 @@ fn payload_json(plan: &PacketSpec) -> serde_json::Value {
     }
 }
 
-fn transport_json(plan: &PacketSpec) -> serde_json::Value {
-    match &plan.transport {
+fn transport_json(spec: &PacketSpec) -> serde_json::Value {
+    match &spec.transport {
         TransportSpec::Auto => serde_json::json!({"mode": "auto"}),
         TransportSpec::Tcp(spec) => serde_json::json!({
             "mode": "tcp",

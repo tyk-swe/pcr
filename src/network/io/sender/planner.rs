@@ -141,8 +141,8 @@ fn plan_transmission_with_interface_and_reason(
     Ok(plan)
 }
 
-fn warn_if_unbounded(plan: &PacketSpec) {
-    if plan.transmit.count.is_none() && !plan.transmit.loop_send {
+fn warn_if_unbounded(spec: &PacketSpec) {
+    if spec.transmit.count.is_none() && !spec.transmit.loop_send {
         warn!("--flood enabled without explicit count; be cautious with raw socket permissions");
     }
 }

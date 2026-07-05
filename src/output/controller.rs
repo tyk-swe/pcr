@@ -136,8 +136,8 @@ impl OutputController {
         println!("Rules: {:?}", spec.rules_file);
     }
 
-    fn print_hex_preview(&self, plan: &PacketSpec) {
-        match &plan.payload.source {
+    fn print_hex_preview(&self, spec: &PacketSpec) {
+        match &spec.payload.source {
             PayloadSource::Hex(data) => println!("hex payload: {data}"),
             PayloadSource::Inline(data) => {
                 println!("hex view (from string): {:02x?}", data.as_bytes())

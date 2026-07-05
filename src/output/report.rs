@@ -196,7 +196,9 @@ fn transport_json(plan: &PacketSpec) -> serde_json::Value {
                 "fin": spec.flags.fin,
                 "rst": spec.flags.rst,
                 "psh": spec.flags.psh,
-                "urg": spec.flags.urg
+                "urg": spec.flags.urg,
+                "ece": spec.flags.ece,
+                "cwr": spec.flags.cwr
             },
             "seq": spec.sequence,
             "ack": spec.acknowledgement,
@@ -223,7 +225,8 @@ fn transport_json(plan: &PacketSpec) -> serde_json::Value {
             "type": spec.kind,
             "code": spec.code,
             "id": spec.identifier,
-            "seq": spec.sequence
+            "seq": spec.sequence,
+            "parameter": spec.parameter
         }),
     }
 }
@@ -378,7 +381,11 @@ mod tests {
 
     #[test]
     fn preflight_report_formats_layer_ip_transport_and_bytes_payload() {
-        let spec = packet_spec();
+        let mut spec = packet_spec();
+        if let TransportSpec::Tcp(transport) = &mut spec.transport {
+            transport.flags.ece = true;
+            transport.flags.cwr = true;
+        }
         let report = preflight_report(&spec, &preflight_view(spec.transmit.clone()));
 
         assert_eq!(report.layer2["smac"], "aa:bb:cc:dd:ee:ff");
@@ -393,6 +400,8 @@ mod tests {
         assert_eq!(report.transport["sport"], 1234);
         assert_eq!(report.transport["flags"]["syn"], true);
         assert_eq!(report.transport["flags"]["ack"], true);
+        assert_eq!(report.transport["flags"]["ece"], true);
+        assert_eq!(report.transport["flags"]["cwr"], true);
         assert_eq!(report.transport["options"], "020405b4");
         assert_eq!(report.payload["type"], "bytes");
         assert_eq!(report.payload["size"], 4);
@@ -516,7 +525,14 @@ mod tests {
         });
         assert_eq!(
             transport_json(&spec),
-            serde_json::json!({"mode": "icmpv6", "type": 128, "code": 0, "id": 3, "seq": 4})
+            serde_json::json!({
+                "mode": "icmpv6",
+                "type": 128,
+                "code": 0,
+                "id": 3,
+                "seq": 4,
+                "parameter": 5
+            })
         );
     }
 }

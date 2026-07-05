@@ -21,13 +21,11 @@ use crate::network::sender::{build_tcp_segment_optimized, tcp_flags_value};
 use crate::tools::TrafficRuntimeConfig;
 use crate::util::error::operation_failed;
 
-use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
-
 use super::common::{
     clamp_batch_size, join_blocking_scan, report_results, require_ipv6_destination,
-    resolve_port_scan_run, ConcurrentScanConfig, PortScanRunConfig, PortState, ScanEvent,
-    CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET,
-    TRANSPORT_CHANNEL_BUFFER_SIZE,
+    resolve_port_scan_run, split_port_scan_target, ConcurrentScanConfig, PortScanRunConfig,
+    PortScanTarget, PortState, ScanEvent, CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT,
+    SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
 
@@ -327,31 +325,31 @@ struct TcpScanConfig<S> {
 fn perform_tcp_scan<S: TcpScanStrategy>(
     config: TcpScanConfig<S>,
 ) -> Result<BTreeMap<u16, PortState>> {
-    match config.run.address {
-        SocketAddr::V4(dest) => {
-            let override_v4 = source_override_ipv4(config.run.source_override)?;
-            scan_tcp_v4_with_controls(
-                *dest.ip(),
-                &config.run.ports,
-                config.run.timeout,
-                override_v4,
-                config.run.batch_size,
-                config.run.send_delay,
-                &config.scan_strategy,
-            )
-        }
-        SocketAddr::V6(_dest) => {
-            let override_v6 = source_override_ipv6(config.run.source_override)?;
-            scan_tcp_v6_with_controls(
-                config.run.address,
-                &config.run.ports,
-                config.run.timeout,
-                override_v6,
-                config.run.batch_size,
-                config.run.send_delay,
-                &config.scan_strategy,
-            )
-        }
+    match split_port_scan_target(config.run.address, config.run.source_override)? {
+        PortScanTarget::V4 {
+            destination,
+            source_override,
+        } => scan_tcp_v4_with_controls(
+            destination,
+            &config.run.ports,
+            config.run.timeout,
+            source_override,
+            config.run.batch_size,
+            config.run.send_delay,
+            &config.scan_strategy,
+        ),
+        PortScanTarget::V6 {
+            destination,
+            source_override,
+        } => scan_tcp_v6_with_controls(
+            destination,
+            &config.run.ports,
+            config.run.timeout,
+            source_override,
+            config.run.batch_size,
+            config.run.send_delay,
+            &config.scan_strategy,
+        ),
     }
 }
 

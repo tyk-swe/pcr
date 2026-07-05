@@ -22,6 +22,7 @@ use crate::util::error::operation_failed;
 use crate::util::net::resolve_target_socket_addr;
 use crate::util::source_ip::{
     discover_source_ipv4, discover_source_ipv6, resolve_interface_or_ip_override,
+    source_override_ipv4, source_override_ipv6,
 };
 use crate::util::sync::LockResultExt;
 
@@ -154,6 +155,18 @@ pub(super) struct PortScanRunConfig {
     pub(super) send_delay: Option<Duration>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum PortScanTarget {
+    V4 {
+        destination: Ipv4Addr,
+        source_override: Option<Ipv4Addr>,
+    },
+    V6 {
+        destination: SocketAddr,
+        source_override: Option<Ipv6Addr>,
+    },
+}
+
 pub(super) fn resolve_port_scan(
     target: &str,
     ports: &str,
@@ -189,6 +202,22 @@ pub(super) fn resolve_port_scan_run(
         batch_size: runtime.batch_size,
         send_delay: runtime.send_delay,
     })
+}
+
+pub(super) fn split_port_scan_target(
+    address: SocketAddr,
+    source_override: Option<IpAddr>,
+) -> Result<PortScanTarget> {
+    match address {
+        SocketAddr::V4(destination) => Ok(PortScanTarget::V4 {
+            destination: *destination.ip(),
+            source_override: source_override_ipv4(source_override)?,
+        }),
+        SocketAddr::V6(_) => Ok(PortScanTarget::V6 {
+            destination: address,
+            source_override: source_override_ipv6(source_override)?,
+        }),
+    }
 }
 
 pub(super) fn require_ipv6_destination(destination: SocketAddr, caller: &str) -> Result<Ipv6Addr> {
@@ -862,6 +891,45 @@ mod tests {
             .unwrap(),
             Some(IpAddr::V6("2001:db8::5".parse().unwrap()))
         );
+    }
+
+    #[test]
+    fn split_port_scan_target_handles_ipv4_and_ipv6_destinations() {
+        let ipv4_destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0);
+        let ipv6_destination = SocketAddr::new(IpAddr::V6("2001:db8::10".parse().unwrap()), 443);
+        let ipv6_override = "2001:db8::5".parse().unwrap();
+
+        assert!(matches!(
+            split_port_scan_target(ipv4_destination, None).unwrap(),
+            PortScanTarget::V4 {
+                destination,
+                source_override: None,
+            } if destination == Ipv4Addr::new(192, 0, 2, 10)
+        ));
+        assert!(matches!(
+            split_port_scan_target(ipv6_destination, Some(IpAddr::V6(ipv6_override))).unwrap(),
+            PortScanTarget::V6 {
+                destination,
+                source_override: Some(source_override),
+            } if destination == ipv6_destination && source_override == ipv6_override
+        ));
+    }
+
+    #[test]
+    fn split_port_scan_target_rejects_mismatched_source_override_family() {
+        let ipv4_destination = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)), 0);
+        let ipv6_destination = SocketAddr::new(IpAddr::V6("2001:db8::10".parse().unwrap()), 0);
+
+        assert!(split_port_scan_target(
+            ipv4_destination,
+            Some(IpAddr::V6("2001:db8::5".parse().unwrap()))
+        )
+        .is_err());
+        assert!(split_port_scan_target(
+            ipv6_destination,
+            Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5)))
+        )
+        .is_err());
     }
 
     #[test]

@@ -25,13 +25,12 @@ use crate::network::protocol_validation::{
 use crate::tools::TrafficRuntimeConfig;
 use crate::util::error::operation_failed;
 
-use crate::util::source_ip::{source_override_ipv4, source_override_ipv6};
-
 use super::common::{
     clamp_batch_size, classify_icmp_port_unreachable, join_blocking_scan, report_results,
-    require_ipv6_destination, resolve_port_scan_run, send_with_enobufs_retry, ConcurrentScanConfig,
-    PortScanRunConfig, PortState, ScanEvent, CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT,
-    PACKET_POLL_INTERVAL, SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
+    require_ipv6_destination, resolve_port_scan_run, send_with_enobufs_retry,
+    split_port_scan_target, ConcurrentScanConfig, PortScanRunConfig, PortScanTarget, PortState,
+    ScanEvent, CONCURRENT_PORT_SCAN_BATCH_LIMIT, DEFAULT_TIMEOUT, PACKET_POLL_INTERVAL,
+    SOURCE_DISCOVERY_PORT, SOURCE_PORT_OFFSET, TRANSPORT_CHANNEL_BUFFER_SIZE,
 };
 use crate::network::pnet_utils::open_transport_channel;
 
@@ -74,29 +73,29 @@ pub(crate) async fn run_sctp_init(
 }
 
 fn perform_sctp_scan(config: PortScanRunConfig) -> Result<BTreeMap<u16, PortState>> {
-    match config.address {
-        SocketAddr::V4(dest) => {
-            let override_v4 = source_override_ipv4(config.source_override)?;
-            scan_sctp_v4(
-                *dest.ip(),
-                &config.ports,
-                config.timeout,
-                override_v4,
-                config.batch_size,
-                config.send_delay,
-            )
-        }
-        SocketAddr::V6(_dest) => {
-            let override_v6 = source_override_ipv6(config.source_override)?;
-            scan_sctp_v6(
-                config.address,
-                &config.ports,
-                config.timeout,
-                override_v6,
-                config.batch_size,
-                config.send_delay,
-            )
-        }
+    match split_port_scan_target(config.address, config.source_override)? {
+        PortScanTarget::V4 {
+            destination,
+            source_override,
+        } => scan_sctp_v4(
+            destination,
+            &config.ports,
+            config.timeout,
+            source_override,
+            config.batch_size,
+            config.send_delay,
+        ),
+        PortScanTarget::V6 {
+            destination,
+            source_override,
+        } => scan_sctp_v6(
+            destination,
+            &config.ports,
+            config.timeout,
+            source_override,
+            config.batch_size,
+            config.send_delay,
+        ),
     }
 }
 

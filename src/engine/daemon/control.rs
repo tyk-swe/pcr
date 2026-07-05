@@ -261,11 +261,22 @@ pub(super) async fn dispatch_control_command(
     line: &str,
     tx: &mpsc::Sender<DaemonCommand>,
 ) -> Result<String> {
-    if let Ok(json_cmd) = serde_json::from_str::<JsonCommand>(line) {
-        return dispatch_json_command(json_cmd, tx).await;
+    let trimmed = line.trim();
+    if trimmed.starts_with('{') {
+        let command = parse_json_command(trimmed)?;
+        return dispatch_parsed_command(command, tx).await;
     }
 
-    dispatch_text_command(line, tx).await
+    dispatch_text_command(trimmed, tx).await
+}
+
+#[derive(Debug)]
+enum ControlCommand {
+    Status,
+    LoadRules { path: String },
+    Listen { options: ListenerRequest },
+    StopListener,
+    Shutdown,
 }
 
 #[derive(Debug, Deserialize)]
@@ -278,36 +289,88 @@ pub(super) enum JsonCommand {
     Shutdown,
 }
 
-pub(super) async fn dispatch_json_command(
-    cmd: JsonCommand,
+impl From<JsonCommand> for ControlCommand {
+    fn from(value: JsonCommand) -> Self {
+        match value {
+            JsonCommand::Status => Self::Status,
+            JsonCommand::LoadRules { path } => Self::LoadRules { path },
+            JsonCommand::Listen { options } => Self::Listen { options },
+            JsonCommand::StopListener => Self::StopListener,
+            JsonCommand::Shutdown => Self::Shutdown,
+        }
+    }
+}
+
+fn parse_json_command(line: &str) -> Result<ControlCommand> {
+    serde_json::from_str::<JsonCommand>(line)
+        .map(ControlCommand::from)
+        .with_context(|| operation_failed("parse JSON control command", "invalid control payload"))
+}
+
+fn parse_text_command(line: &str) -> Result<ControlCommand> {
+    let trimmed = line.trim();
+    let mut command_parts = trimmed.splitn(2, char::is_whitespace);
+    let command = command_parts
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .ok_or_else(|| anyhow!("empty command"))?;
+    let remainder = command_parts.next().map(str::trim).unwrap_or_default();
+
+    match command {
+        "status" => Ok(ControlCommand::Status),
+        "load" => {
+            if remainder.is_empty() {
+                anyhow::bail!("load command requires a path");
+            }
+
+            Ok(ControlCommand::LoadRules {
+                path: remainder.to_string(),
+            })
+        }
+        "listen" => {
+            if remainder == "stop" {
+                Ok(ControlCommand::StopListener)
+            } else {
+                anyhow::bail!(
+                    "listen command requires subcommand 'stop' or JSON format for options"
+                )
+            }
+        }
+        "shutdown" => Ok(ControlCommand::Shutdown),
+        other => Err(anyhow!("unknown command: {other}")),
+    }
+}
+
+async fn dispatch_parsed_command(
+    cmd: ControlCommand,
     tx: &mpsc::Sender<DaemonCommand>,
 ) -> Result<String> {
     match cmd {
-        JsonCommand::Status => {
+        ControlCommand::Status => {
             request_response_with_builder(tx, |respond_to| DaemonCommand::Status { respond_to })
                 .await
         }
-        JsonCommand::LoadRules { path } => {
+        ControlCommand::LoadRules { path } => {
             request_response_with_builder(tx, move |respond_to| DaemonCommand::LoadRules {
                 path,
                 respond_to,
             })
             .await
         }
-        JsonCommand::Listen { options } => {
+        ControlCommand::Listen { options } => {
             request_response_with_builder(tx, move |respond_to| DaemonCommand::Listen {
                 options,
                 respond_to,
             })
             .await
         }
-        JsonCommand::StopListener => {
+        ControlCommand::StopListener => {
             request_response_with_builder(tx, |respond_to| DaemonCommand::StopListener {
                 respond_to,
             })
             .await
         }
-        JsonCommand::Shutdown => {
+        ControlCommand::Shutdown => {
             request_response_with_builder(tx, |respond_to| DaemonCommand::Shutdown { respond_to })
                 .await
         }
@@ -318,49 +381,8 @@ pub(super) async fn dispatch_text_command(
     line: &str,
     tx: &mpsc::Sender<DaemonCommand>,
 ) -> Result<String> {
-    let trimmed = line.trim();
-    let mut command_parts = trimmed.splitn(2, char::is_whitespace);
-    let command = command_parts
-        .next()
-        .filter(|segment| !segment.is_empty())
-        .ok_or_else(|| anyhow!("empty command"))?;
-    let remainder = command_parts.next().map(str::trim).unwrap_or_default();
-
-    match command {
-        "status" => {
-            request_response_with_builder(tx, |respond_to| DaemonCommand::Status { respond_to })
-                .await
-        }
-        "load" => {
-            if remainder.is_empty() {
-                anyhow::bail!("load command requires a path");
-            }
-
-            let path = remainder.to_string();
-            request_response_with_builder(tx, move |respond_to| DaemonCommand::LoadRules {
-                path,
-                respond_to,
-            })
-            .await
-        }
-        "listen" => {
-            if remainder == "stop" {
-                request_response_with_builder(tx, |respond_to| DaemonCommand::StopListener {
-                    respond_to,
-                })
-                .await
-            } else {
-                anyhow::bail!(
-                    "listen command requires subcommand 'stop' or JSON format for options"
-                )
-            }
-        }
-        "shutdown" => {
-            request_response_with_builder(tx, |respond_to| DaemonCommand::Shutdown { respond_to })
-                .await
-        }
-        other => Err(anyhow!("unknown command: {other}")),
-    }
+    let command = parse_text_command(line)?;
+    dispatch_parsed_command(command, tx).await
 }
 
 async fn request_response_with_builder<F>(
@@ -547,6 +569,53 @@ mod tests {
             .unwrap();
 
         assert_eq!(response, "OK shutting down");
+        task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_control_command_rejects_malformed_json_without_text_fallback() {
+        let (tx, _rx) = mpsc::channel(1);
+
+        let err = dispatch_control_command(r#"{"command":"status""#, &tx)
+            .await
+            .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("parse JSON control command failed"));
+        assert!(!err.to_string().contains("unknown command"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_control_command_rejects_schema_invalid_json_without_text_fallback() {
+        let (tx, _rx) = mpsc::channel(1);
+
+        let err = dispatch_control_command(r#"{"command":"load_rules"}"#, &tx)
+            .await
+            .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("parse JSON control command failed"));
+        assert!(format!("{err:#}").contains("missing field `path`"));
+        assert!(!err.to_string().contains("unknown command"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_control_command_trims_wrapped_json_before_parsing() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            match rx.recv().await.unwrap() {
+                DaemonCommand::Status { respond_to } => send_ok(respond_to, "wrapped"),
+                other => panic!("unexpected command: {other:?}"),
+            }
+        });
+
+        let response = dispatch_control_command("  {\"command\":\"status\"}  ", &tx)
+            .await
+            .unwrap();
+
+        assert_eq!(response, "OK wrapped");
         task.await.unwrap();
     }
 

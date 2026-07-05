@@ -23,7 +23,5 @@ pub(crate) use listener::ListenerSpec;
 pub(crate) use logging::LoggingSpec;
 pub(crate) use packet::PacketSpec;
 pub(crate) use payload::PayloadSource;
-#[cfg(feature = "fuzz")]
-pub(crate) use payload::PayloadSpec;
 pub(crate) use transmission::TransmissionSpec;
 pub(crate) use transport::{IcmpSpec, Icmpv6Spec, TcpFlagSet, TcpSpec, TransportSpec, UdpSpec};

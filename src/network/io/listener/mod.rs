@@ -1,7 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-#[cfg(feature = "daemon")]
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -44,12 +44,24 @@ pub(crate) async fn run_command(
 }
 
 /// Run the listener when requested from a one-shot transmission plan.
+#[cfg(not(feature = "pcap"))]
 pub(crate) async fn run_from_spec(
     spec: &ListenerSpec,
     interface_hint: Option<&str>,
     handler: ListenerEventHandler,
 ) -> ListenerResult<()> {
     runtime::run_from_spec(spec, interface_hint, handler).await
+}
+
+#[cfg(feature = "pcap")]
+pub(crate) async fn run_from_spec_with_lifecycle(
+    spec: &ListenerSpec,
+    interface_hint: Option<&str>,
+    handler: ListenerEventHandler,
+    shutdown: Arc<AtomicBool>,
+    startup: Option<ListenerStartupSignal>,
+) -> ListenerResult<()> {
+    runtime::run_from_spec_with_lifecycle(spec, interface_hint, handler, shutdown, startup).await
 }
 
 #[cfg(feature = "daemon")]

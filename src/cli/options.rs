@@ -2,11 +2,57 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use clap::builder::BoolishValueParser;
+#[cfg(any(not(feature = "pcap"), not(feature = "metrics")))]
+use clap::builder::TypedValueParser;
 use clap::{value_parser, Args, Subcommand};
 use serde::{Deserialize, Serialize};
 
 use super::enums::{FragmentProfile, Icmpv6ErrorCode, Icmpv6ErrorKind, LogLevel};
-use super::validators::{dns_record_type_validator, mac_address_validator, socket_addr_validator};
+#[cfg(feature = "metrics")]
+use super::validators::socket_addr_validator;
+use super::validators::{dns_record_type_validator, mac_address_validator};
+
+#[cfg(not(feature = "pcap"))]
+fn unsupported_pcap_bool(value: &str) -> Result<bool, String> {
+    unsupported_feature_bool(value, "pcap")
+}
+
+#[cfg(not(feature = "pcap"))]
+fn unsupported_pcap_string(_: &str) -> Result<String, String> {
+    Err("this flag requires packetcraftr to be built with the 'pcap' feature".to_string())
+}
+
+#[cfg(not(feature = "pcap"))]
+fn unsupported_pcap_u64(_: &str) -> Result<u64, String> {
+    Err("this flag requires packetcraftr to be built with the 'pcap' feature".to_string())
+}
+
+#[cfg(not(feature = "pcap"))]
+fn unsupported_pcap_usize(_: &str) -> Result<usize, String> {
+    Err("this flag requires packetcraftr to be built with the 'pcap' feature".to_string())
+}
+
+#[cfg(not(feature = "metrics"))]
+fn unsupported_metrics_bool(value: &str) -> Result<bool, String> {
+    unsupported_feature_bool(value, "metrics")
+}
+
+#[cfg(not(feature = "metrics"))]
+fn unsupported_metrics_string(_: &str) -> Result<String, String> {
+    Err("this flag requires packetcraftr to be built with the 'metrics' feature".to_string())
+}
+
+#[cfg(any(not(feature = "pcap"), not(feature = "metrics")))]
+fn unsupported_feature_bool(value: &str, feature: &str) -> Result<bool, String> {
+    let cmd = clap::Command::new("packetcraftr");
+
+    match BoolishValueParser::new().parse_ref(&cmd, None, std::ffi::OsStr::new(value)) {
+        Ok(false) => Ok(false),
+        _ => Err(format!(
+            "this flag requires packetcraftr to be built with the '{feature}' feature"
+        )),
+    }
+}
 
 /// Default one-shot packet crafting configuration.
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
@@ -380,54 +426,111 @@ pub(crate) struct TransmitOptions {
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
 pub(crate) struct ListenOptions {
     /// Listen for replies after sending.
-    #[arg(
-        long = "listen-reply",
-        action = clap::ArgAction::Set,
-        value_parser = BoolishValueParser::new(),
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "true"
+    #[cfg_attr(
+        feature = "pcap",
+        arg(
+            long = "listen-reply",
+            action = clap::ArgAction::Set,
+            value_parser = BoolishValueParser::new(),
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true"
+        )
     )]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(
+            long = "listen-reply",
+            action = clap::ArgAction::Set,
+            value_parser = unsupported_pcap_bool,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            hide = true
+        )
+    )]
     pub listen: Option<bool>,
     /// BPF filter expression (e.g., "tcp port 80", "icmp", "host 10.0.0.1 and udp").
     /// Uses tcpdump/libpcap syntax. See <https://www.tcpdump.org/manpages/pcap-filter.7.html>
-    #[arg(long = "filter")]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(feature = "pcap", arg(long = "filter"))]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(long = "filter", value_parser = unsupported_pcap_string, hide = true)
+    )]
     pub filter: Option<String>,
     /// Enable promiscuous mode.
-    #[arg(
-        long = "promisc",
-        action = clap::ArgAction::Set,
-        value_parser = BoolishValueParser::new(),
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "true"
+    #[cfg_attr(
+        feature = "pcap",
+        arg(
+            long = "promisc",
+            action = clap::ArgAction::Set,
+            value_parser = BoolishValueParser::new(),
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true"
+        )
     )]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(
+            long = "promisc",
+            action = clap::ArgAction::Set,
+            value_parser = unsupported_pcap_bool,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            hide = true
+        )
+    )]
     pub promiscuous: Option<bool>,
     /// Show reply packets in output.
-    #[arg(
-        long = "show-reply",
-        action = clap::ArgAction::Set,
-        value_parser = BoolishValueParser::new(),
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "true"
+    #[cfg_attr(
+        feature = "pcap",
+        arg(
+            long = "show-reply",
+            action = clap::ArgAction::Set,
+            value_parser = BoolishValueParser::new(),
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true"
+        )
     )]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(
+            long = "show-reply",
+            action = clap::ArgAction::Set,
+            value_parser = unsupported_pcap_bool,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            hide = true
+        )
+    )]
     pub show_reply: Option<bool>,
     /// Listen timeout (in seconds).
-    #[arg(long = "timeout", value_parser = value_parser!(u64))]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(feature = "pcap", arg(long = "timeout", value_parser = value_parser!(u64)))]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(long = "timeout", value_parser = unsupported_pcap_u64, hide = true)
+    )]
     pub timeout: Option<u64>,
     /// Save captured packets to a pcap file.
-    #[arg(long = "pcap-save")]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(feature = "pcap", arg(long = "pcap-save"))]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(long = "pcap-save", value_parser = unsupported_pcap_string, hide = true)
+    )]
     pub capture_file: Option<String>,
     /// Internal queue capacity.
-    #[arg(long = "queue-capacity", value_parser = clap::value_parser!(usize))]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(
+        feature = "pcap",
+        arg(long = "queue-capacity", value_parser = clap::value_parser!(usize))
+    )]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(long = "queue-capacity", value_parser = unsupported_pcap_usize, hide = true)
+    )]
     pub queue_capacity: Option<usize>,
 }
 
@@ -500,27 +603,53 @@ pub(crate) struct LoggingOptions {
     )]
     pub structured: Option<bool>,
     /// Write sent packets to a pcap file.
-    #[arg(long = "pcap-write")]
-    #[cfg_attr(not(feature = "pcap"), arg(hide = true))]
+    #[cfg_attr(feature = "pcap", arg(long = "pcap-write"))]
+    #[cfg_attr(
+        not(feature = "pcap"),
+        arg(long = "pcap-write", value_parser = unsupported_pcap_string, hide = true)
+    )]
     pub pcap_write: Option<String>,
     /// Save a metrics snapshot to a JSON file.
-    #[arg(long = "metrics-json")]
-    #[cfg_attr(not(feature = "metrics"), arg(hide = true))]
+    #[cfg_attr(feature = "metrics", arg(long = "metrics-json"))]
+    #[cfg_attr(
+        not(feature = "metrics"),
+        arg(long = "metrics-json", value_parser = unsupported_metrics_string, hide = true)
+    )]
     pub metrics_json: Option<String>,
     /// Prometheus bind address.
-    #[arg(long = "prometheus-bind", value_parser = socket_addr_validator)]
-    #[cfg_attr(not(feature = "metrics"), arg(hide = true))]
+    #[cfg_attr(
+        feature = "metrics",
+        arg(long = "prometheus-bind", value_parser = socket_addr_validator)
+    )]
+    #[cfg_attr(
+        not(feature = "metrics"),
+        arg(long = "prometheus-bind", value_parser = unsupported_metrics_string, hide = true)
+    )]
     pub prometheus_bind: Option<String>,
     /// Allow public access to metrics.
-    #[arg(
-        long = "allow-public-metrics",
-        action = clap::ArgAction::Set,
-        value_parser = BoolishValueParser::new(),
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "true"
+    #[cfg_attr(
+        feature = "metrics",
+        arg(
+            long = "allow-public-metrics",
+            action = clap::ArgAction::Set,
+            value_parser = BoolishValueParser::new(),
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true"
+        )
     )]
-    #[cfg_attr(not(feature = "metrics"), arg(hide = true))]
+    #[cfg_attr(
+        not(feature = "metrics"),
+        arg(
+            long = "allow-public-metrics",
+            action = clap::ArgAction::Set,
+            value_parser = unsupported_metrics_bool,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            hide = true
+        )
+    )]
     pub allow_public_metrics: Option<bool>,
 }
 
@@ -695,6 +824,7 @@ mod tests {
         assert_eq!(parsed.options.traffic_rate, Some(5));
     }
 
+    #[cfg(feature = "metrics")]
     #[test]
     fn prometheus_bind_uses_socket_address_validator() {
         let parsed = parse_logging(&["--prometheus-bind", "127.0.0.1:9898"]).unwrap();
@@ -710,9 +840,80 @@ mod tests {
     #[test]
     fn logging_boolish_flags_accept_missing_and_explicit_values() {
         let structured = parse_logging(&["--log-structured"]).unwrap();
-        let public_metrics = parse_logging(&["--allow-public-metrics=false"]).unwrap();
 
         assert_eq!(structured.options.structured, Some(true));
+    }
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn metrics_boolish_flags_accept_missing_and_explicit_values() {
+        let public_metrics = parse_logging(&["--allow-public-metrics=false"]).unwrap();
+
         assert_eq!(public_metrics.options.allow_public_metrics, Some(false));
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn oneshot_parser_accepts_explicit_false_for_pcap_only_bool_flags() {
+        let parsed = parse_oneshot(&[
+            "--listen-reply=false",
+            "--promisc=false",
+            "--show-reply=false",
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.options.listen.listen, Some(false));
+        assert_eq!(parsed.options.listen.promiscuous, Some(false));
+        assert_eq!(parsed.options.listen.show_reply, Some(false));
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn oneshot_parser_rejects_pcap_only_flags_before_request_mapping() {
+        for args in [
+            ["--listen-reply"].as_slice(),
+            ["--filter", "icmp"].as_slice(),
+            ["--promisc"].as_slice(),
+            ["--show-reply"].as_slice(),
+            ["--pcap-save", "reply.pcap"].as_slice(),
+            ["--queue-capacity", "64"].as_slice(),
+        ] {
+            let err = parse_oneshot(args).unwrap_err();
+
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+            assert!(err.to_string().contains("'pcap' feature"));
+        }
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn logging_parser_rejects_pcap_write_before_request_mapping() {
+        let err = parse_logging(&["--pcap-write", "sent.pcap"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("'pcap' feature"));
+    }
+
+    #[cfg(not(feature = "metrics"))]
+    #[test]
+    fn logging_parser_accepts_explicit_false_for_metrics_only_bool_flags() {
+        let parsed = parse_logging(&["--allow-public-metrics=false"]).unwrap();
+
+        assert_eq!(parsed.options.allow_public_metrics, Some(false));
+    }
+
+    #[cfg(not(feature = "metrics"))]
+    #[test]
+    fn logging_parser_rejects_metrics_flags_before_request_mapping() {
+        for args in [
+            ["--metrics-json", "metrics.json"].as_slice(),
+            ["--prometheus-bind", "127.0.0.1:9898"].as_slice(),
+            ["--allow-public-metrics"].as_slice(),
+        ] {
+            let err = parse_logging(args).unwrap_err();
+
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+            assert!(err.to_string().contains("'metrics' feature"));
+        }
     }
 }

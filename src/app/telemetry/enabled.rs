@@ -85,6 +85,7 @@ fn allow_public_metrics(args: &PacketcraftArgs) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::sync::oneshot;
 
     #[test]
     fn prometheus_bind_validation_accepts_loopback() {
@@ -112,5 +113,27 @@ mod tests {
         let addr = validate_prometheus_bind("0.0.0.0:9090", true).unwrap();
 
         assert!(!addr.ip().is_loopback());
+    }
+
+    #[tokio::test]
+    async fn shutdown_waits_for_exporter_task_completion() {
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let (done_tx, done_rx) = oneshot::channel();
+        let join_handle = tokio::spawn(async move {
+            let _ = shutdown_rx.await;
+            let _ = done_tx.send(());
+        });
+
+        AppTelemetry {
+            prometheus_handle: Some(util::telemetry::PrometheusExporterHandle {
+                addr: "127.0.0.1:0".parse().unwrap(),
+                shutdown_tx,
+                join_handle,
+            }),
+        }
+        .shutdown()
+        .await;
+
+        done_rx.await.unwrap();
     }
 }

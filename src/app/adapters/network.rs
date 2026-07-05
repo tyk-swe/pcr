@@ -5,7 +5,7 @@
 use std::future::Future;
 #[cfg(feature = "daemon")]
 use std::pin::Pin;
-#[cfg(feature = "daemon")]
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 #[cfg(feature = "daemon")]
@@ -134,6 +134,7 @@ impl<T> Drop for AbortOnDropJoinHandle<T> {
 pub(crate) struct NetworkListenerRunner;
 
 impl ListenerRunner for NetworkListenerRunner {
+    #[cfg(not(feature = "pcap"))]
     fn run_for_packet(
         &self,
         spec: ListenerSpec,
@@ -144,6 +145,28 @@ impl ListenerRunner for NetworkListenerRunner {
             crate::network::io::listener::run_from_spec(&spec, interface_hint.as_deref(), handler)
                 .await
                 .map_err(anyhow::Error::from)
+        })
+    }
+
+    #[cfg(feature = "pcap")]
+    fn run_for_packet_with_lifecycle(
+        &self,
+        spec: ListenerSpec,
+        interface_hint: Option<String>,
+        handler: ListenerEventHandler,
+        shutdown: Arc<AtomicBool>,
+        startup: Option<crate::engine::ports::ListenerStartupSignal>,
+    ) -> PortFuture<()> {
+        Box::pin(async move {
+            crate::network::io::listener::run_from_spec_with_lifecycle(
+                &spec,
+                interface_hint.as_deref(),
+                handler,
+                shutdown,
+                startup,
+            )
+            .await
+            .map_err(anyhow::Error::from)
         })
     }
 

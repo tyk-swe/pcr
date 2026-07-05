@@ -17,7 +17,7 @@ impl AppTelemetry {
     ) -> Result<()> {
         if config.prometheus_bind.is_some() || one_shot_metrics_options_requested(args) {
             return Err(anyhow::anyhow!(
-                "metrics options require PacketcraftR to be built with the 'metrics' feature"
+                "metrics options require packetcraftr to be built with the 'metrics' feature"
             ));
         }
         Ok(())

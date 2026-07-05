@@ -4,7 +4,7 @@
 use std::future::Future;
 use std::net::IpAddr;
 use std::pin::Pin;
-#[cfg(feature = "daemon")]
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
@@ -115,6 +115,7 @@ pub(crate) trait PacketTransmitter: Send + Sync {
 }
 
 pub(crate) trait ListenerRunner: Send + Sync {
+    #[cfg(not(feature = "pcap"))]
     fn run_for_packet(
         &self,
         spec: ListenerSpec,
@@ -123,12 +124,22 @@ pub(crate) trait ListenerRunner: Send + Sync {
     ) -> PortFuture<()>;
 
     #[cfg(feature = "pcap")]
+    fn run_for_packet_with_lifecycle(
+        &self,
+        spec: ListenerSpec,
+        interface_hint: Option<String>,
+        handler: ListenerEventHandler,
+        shutdown: Arc<AtomicBool>,
+        startup: Option<ListenerStartupSignal>,
+    ) -> PortFuture<()>;
+
+    #[cfg(feature = "pcap")]
     fn run_command(&self, request: ListenRequest, handler: ListenerEventHandler) -> PortFuture<()>;
 }
 
 pub(crate) type ListenerEventHandler = Arc<dyn Fn(ListenerEvent) + Send + Sync>;
 
-#[cfg(feature = "daemon")]
+#[cfg(any(feature = "daemon", feature = "pcap"))]
 pub(crate) type ListenerStartupSignal = tokio::sync::oneshot::Sender<Result<(), String>>;
 
 #[cfg(feature = "daemon")]
@@ -177,6 +188,7 @@ pub(crate) trait EngineOutput: Send + Sync {
     #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
     fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> PortResult<()>;
     fn emit_listener_event(&self, event: &ListenerEvent);
+    fn emit_text_output(&self, rendered: &str) -> PortResult<()>;
     fn format_dns_dry_run(&self, request: &DnsRequest) -> PortResult<String>;
     fn format_dns_response(&self, result: &DnsQueryResult) -> PortResult<String>;
 }

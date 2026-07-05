@@ -255,3 +255,96 @@ fn normalise_label(value: &str) -> &str {
         value
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn metrics_request(path: &str) -> Request<Body> {
+        Request::builder()
+            .method(Method::GET)
+            .uri(path)
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    async fn body_text(response: Response<Body>) -> String {
+        String::from_utf8(
+            hyper::body::to_bytes(response.into_body())
+                .await
+                .unwrap()
+                .to_vec(),
+        )
+        .unwrap()
+    }
+
+    fn cache() -> Arc<Mutex<MetricsCache>> {
+        Arc::new(Mutex::new(MetricsCache {
+            last_update: Instant::now() - Duration::from_secs(10),
+            data: Vec::new(),
+        }))
+    }
+
+    fn metric_value(body: &str, action: &str, outcome: &str) -> Option<u64> {
+        let prefix = format!(
+            "packetcraftr_rule_actions_total{{action=\"{}\",outcome=\"{}\"}} ",
+            action, outcome
+        );
+        body.lines()
+            .find_map(|line| line.strip_prefix(&prefix))
+            .and_then(|value| value.parse::<u64>().ok())
+    }
+
+    #[tokio::test]
+    async fn handle_metrics_request_rejects_non_metrics_paths() {
+        let response = handle_metrics_request(metrics_request("/not-found"), cache())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_eq!(body_text(response).await, "not found");
+    }
+
+    #[tokio::test]
+    async fn handle_metrics_request_reuses_cache_until_expired() {
+        let cache = cache();
+        record_rule_action("cache_test_action", "cache_test_outcome");
+        let first = handle_metrics_request(metrics_request("/metrics"), Arc::clone(&cache))
+            .await
+            .unwrap();
+        let first_body = body_text(first).await;
+        let first_value =
+            metric_value(&first_body, "cache_test_action", "cache_test_outcome").unwrap();
+
+        record_rule_action("cache_test_action", "cache_test_outcome");
+        let second = handle_metrics_request(metrics_request("/metrics"), Arc::clone(&cache))
+            .await
+            .unwrap();
+        let second_body = body_text(second).await;
+        let second_value =
+            metric_value(&second_body, "cache_test_action", "cache_test_outcome").unwrap();
+
+        assert_eq!(first_value, second_value);
+
+        cache.lock().ignore_poison().last_update = Instant::now() - Duration::from_secs(2);
+        let third = handle_metrics_request(metrics_request("/metrics"), cache)
+            .await
+            .unwrap();
+        let third_body = body_text(third).await;
+        let third_value =
+            metric_value(&third_body, "cache_test_action", "cache_test_outcome").unwrap();
+
+        assert!(third_value > second_value);
+    }
+
+    #[tokio::test]
+    async fn spawn_prometheus_exporter_shuts_down_cleanly() {
+        let handle = spawn_prometheus_exporter(&Handle::current(), "127.0.0.1:0").unwrap();
+
+        assert!(handle.addr.ip().is_loopback());
+        assert_ne!(handle.addr.port(), 0);
+
+        handle.shutdown_tx.send(()).unwrap();
+        handle.join_handle.await.unwrap();
+    }
+}

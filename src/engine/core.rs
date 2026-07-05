@@ -491,6 +491,10 @@ mod prepared_traffic_tests {
 
         fn emit_listener_event(&self, _event: &ListenerEvent) {}
 
+        fn emit_text_output(&self, _rendered: &str) -> crate::engine::ports::PortResult<()> {
+            Ok(())
+        }
+
         fn format_dns_dry_run(
             &self,
             _request: &DnsRequest,
@@ -543,6 +547,7 @@ mod prepared_traffic_tests {
     }
 
     impl ListenerRunner for UnusedPorts {
+        #[cfg(not(feature = "pcap"))]
         fn run_for_packet(
             &self,
             _spec: ListenerSpec,
@@ -550,6 +555,18 @@ mod prepared_traffic_tests {
             _handler: ListenerEventHandler,
         ) -> PortFuture<()> {
             Box::pin(async { Err(anyhow!("listener runner should not be used")) })
+        }
+
+        #[cfg(feature = "pcap")]
+        fn run_for_packet_with_lifecycle(
+            &self,
+            _spec: ListenerSpec,
+            _interface_hint: Option<String>,
+            _handler: ListenerEventHandler,
+            _shutdown: Arc<std::sync::atomic::AtomicBool>,
+            _startup: Option<crate::engine::ports::ListenerStartupSignal>,
+        ) -> PortFuture<()> {
+            Box::pin(async { Err(anyhow!("listener lifecycle runner should not be used")) })
         }
 
         #[cfg(feature = "pcap")]
@@ -606,7 +623,15 @@ mod prepared_traffic_tests {
         scope: TargetScope,
         dry_run: bool,
     ) -> (Engine, Arc<FakePreparedTrafficState>) {
-        let state = FakePreparedTrafficState::new(TrafficPlan::new(mode, scope));
+        let state = FakePreparedTrafficState::new(TrafficPlan::with_shape(
+            mode,
+            scope,
+            1,
+            1,
+            Some(1),
+            1,
+            None,
+        ));
         let unused = Arc::new(UnusedPorts);
         let runner = Arc::new(FakePreparedTrafficRunner::new(Arc::clone(&state)));
 

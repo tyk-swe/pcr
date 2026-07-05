@@ -62,6 +62,10 @@ impl OutputController {
         }
     }
 
+    pub(crate) fn emit_text_output(&self, rendered: &str) {
+        println!("{rendered}");
+    }
+
     #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
     pub(crate) fn emit_traffic_plan_summary(&self, plan: &TrafficPlan) -> Result<()> {
         match self.default_format.unwrap_or(OutputFormat::Summary) {

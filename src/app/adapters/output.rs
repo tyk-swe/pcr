@@ -39,6 +39,11 @@ impl EngineOutput for OutputEventSink {
         self.controller.emit_listener_event(event);
     }
 
+    fn emit_text_output(&self, rendered: &str) -> PortResult<()> {
+        self.controller.emit_text_output(rendered);
+        Ok(())
+    }
+
     fn format_dns_dry_run(&self, request: &DnsRequest) -> PortResult<String> {
         match self.format {
             Some(OutputFormat::Json) => output::format_dns_dry_run_json(request),

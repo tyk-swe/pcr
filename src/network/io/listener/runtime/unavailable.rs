@@ -45,3 +45,32 @@ pub(crate) fn spawn_background(
 pub(crate) fn validate_options(options: &ListenerRequest) -> ListenerResult<()> {
     config::validate_request_options(options)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn run_from_spec_allows_disabled_listener_without_pcap() {
+        let result =
+            run_from_spec(&ListenerSpec::default(), None, std::sync::Arc::new(|_| {})).await;
+
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn run_from_spec_rejects_enabled_listener_without_pcap() {
+        let err = run_from_spec(
+            &ListenerSpec {
+                enabled: true,
+                ..Default::default()
+            },
+            None,
+            std::sync::Arc::new(|_| {}),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, ListenerError::ListenerRequiresPcap));
+    }
+}

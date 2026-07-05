@@ -12,7 +12,9 @@ use trust_dns_proto::rr::RecordType;
 use crate::domain::command::{
     DnsQueryResult, DnsQuestion, DnsRequest, DnsTransport, DnsTransportMode,
 };
-use crate::domain::policy::{classify_ip, TrafficMode, TrafficPlan, TrafficPolicy};
+use crate::domain::policy::{
+    classify_ip, combine_target_scopes, TrafficMode, TrafficPlan, TrafficPolicy,
+};
 use crate::network::protocols::dns::{
     build_dns_query, query_tcp_with_retries, query_udp_for_auto_with_retries,
     query_udp_with_retries, resolve_dns_server_address, AutoUdpResponse, DnsProtocolError,
@@ -24,7 +26,7 @@ use trust_dns_proto::op::Message;
 pub(crate) struct PreparedDnsQuery {
     pub traffic_plan: TrafficPlan,
     server_addr: String,
-    target: SocketAddr,
+    targets: Vec<SocketAddr>,
     send_delay: Option<Duration>,
 }
 
@@ -33,43 +35,62 @@ pub(crate) async fn prepare(
     policy: TrafficPolicy,
 ) -> Result<PreparedDnsQuery> {
     let server_addr = resolve_dns_server_address(&options.server)?;
-    let target = resolve_dns_target(&server_addr).await?;
-    let traffic_plan = traffic_plan_for_target(options, policy, target);
+    let targets = resolve_dns_targets(&server_addr).await?;
+    let traffic_plan = traffic_plan_for_targets(options, policy, &targets);
 
     Ok(PreparedDnsQuery {
         traffic_plan,
         server_addr,
-        target,
+        targets,
         send_delay: policy.rate_delay(),
     })
 }
 
-async fn resolve_dns_target(server_addr: &str) -> Result<SocketAddr> {
-    tokio::net::lookup_host(server_addr)
+async fn resolve_dns_targets(server_addr: &str) -> Result<Vec<SocketAddr>> {
+    let mut targets = Vec::new();
+    for target in tokio::net::lookup_host(server_addr)
         .await
         .with_context(|| format!("failed to resolve DNS server {}", server_addr))?
-        .next()
-        .ok_or_else(|| anyhow::anyhow!("could not resolve DNS server address"))
+    {
+        if !targets.contains(&target) {
+            targets.push(target);
+        }
+    }
+
+    if targets.is_empty() {
+        Err(anyhow::anyhow!("could not resolve DNS server address"))
+    } else {
+        Ok(targets)
+    }
 }
 
-fn traffic_plan_for_target(
+fn traffic_plan_for_targets(
     options: &DnsRequest,
     policy: TrafficPolicy,
-    target: SocketAddr,
+    targets: &[SocketAddr],
 ) -> TrafficPlan {
     let attempts_per_transport = u64::from(options.retries) + 1;
-    let estimated_packets = match options.transport {
+    let estimated_packets_per_target = match options.transport {
         DnsTransportMode::Auto => attempts_per_transport * 2,
         DnsTransportMode::Udp | DnsTransportMode::Tcp => attempts_per_transport,
     };
+    let estimated_packets = Some(estimated_packets_per_target.saturating_mul(targets.len() as u64));
+    let target_scope = combine_target_scopes(
+        targets
+            .iter()
+            .copied()
+            .map(|target| classify_ip(target.ip())),
+    );
 
-    let mut plan = TrafficPlan::new(TrafficMode::Send, classify_ip(target.ip()));
-    plan.target_count = 1;
-    plan.port_count = 1;
-    plan.estimated_packets = Some(estimated_packets);
-    plan.batch_size = 1;
-    plan.rate_per_sec = Some(policy.budget.max_rate_per_sec);
-    plan
+    TrafficPlan::with_shape(
+        TrafficMode::Send,
+        target_scope,
+        targets.len(),
+        1,
+        estimated_packets,
+        1,
+        Some(policy.budget.max_rate_per_sec),
+    )
 }
 
 pub(crate) async fn resolve_prepared(
@@ -93,44 +114,95 @@ pub(crate) async fn resolve_prepared(
     })?;
 
     let timeout = Duration::from_millis(options.timeout);
-    let plan = DnsQueryPlan {
-        target: prepared.target,
-        query: &query,
-        query_id,
-        domain: &options.domain,
-        record_type,
-        timeout,
-    };
     let mut attempts = 0;
     let mut rate_limiter = DnsRateLimiter::new(prepared.send_delay);
 
-    match options.transport {
+    let mut last_error = None;
+
+    for target in prepared.targets {
+        match resolve_target(
+            target,
+            DnsExecutionContext {
+                options,
+                query: &query,
+                query_id,
+                record_type,
+                timeout,
+                attempts: &mut attempts,
+                rate_limiter: &mut rate_limiter,
+            },
+        )
+        .await
+        {
+            Ok(result) => return Ok(result),
+            Err(err) => {
+                debug!("DNS query to {} failed: {err}", target);
+                last_error = Some(err);
+            }
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("could not resolve DNS server address")))
+}
+
+struct DnsExecutionContext<'a> {
+    options: &'a DnsRequest,
+    query: &'a [u8],
+    query_id: u16,
+    record_type: RecordType,
+    timeout: Duration,
+    attempts: &'a mut u32,
+    rate_limiter: &'a mut DnsRateLimiter,
+}
+
+async fn resolve_target(
+    target: SocketAddr,
+    context: DnsExecutionContext<'_>,
+) -> Result<DnsQueryResult> {
+    let plan = DnsQueryPlan {
+        target,
+        query: context.query,
+        query_id: context.query_id,
+        domain: &context.options.domain,
+        record_type: context.record_type,
+        timeout: context.timeout,
+    };
+
+    match context.options.transport {
         DnsTransportMode::Udp => {
-            let response =
-                query_udp_with_retries(&plan, options.retries, &mut attempts, &mut rate_limiter)
-                    .await?;
+            let response = query_udp_with_retries(
+                &plan,
+                context.options.retries,
+                context.attempts,
+                context.rate_limiter,
+            )
+            .await?;
             let udp_truncated = response.message.header().truncated();
 
             Ok(dns_query_result(
                 response.message,
                 DnsTransport::Udp,
-                attempts,
-                prepared.server_addr,
+                *context.attempts,
+                target.to_string(),
                 response.response_bytes,
                 udp_truncated,
                 false,
             ))
         }
         DnsTransportMode::Tcp => {
-            let response =
-                query_tcp_with_retries(&plan, options.retries, &mut attempts, &mut rate_limiter)
-                    .await?;
+            let response = query_tcp_with_retries(
+                &plan,
+                context.options.retries,
+                context.attempts,
+                context.rate_limiter,
+            )
+            .await?;
 
             Ok(dns_query_result(
                 response.message,
                 DnsTransport::Tcp,
-                attempts,
-                prepared.server_addr,
+                *context.attempts,
+                target.to_string(),
                 response.response_bytes,
                 false,
                 false,
@@ -139,9 +211,9 @@ pub(crate) async fn resolve_prepared(
         DnsTransportMode::Auto => {
             let udp_response = query_udp_for_auto_with_retries(
                 &plan,
-                options.retries,
-                &mut attempts,
-                &mut rate_limiter,
+                context.options.retries,
+                context.attempts,
+                context.rate_limiter,
             )
             .await?;
 
@@ -150,8 +222,8 @@ pub(crate) async fn resolve_prepared(
                     return Ok(dns_query_result(
                         udp_response.message,
                         DnsTransport::Udp,
-                        attempts,
-                        prepared.server_addr,
+                        *context.attempts,
+                        target.to_string(),
                         udp_response.response_bytes,
                         false,
                         false,
@@ -160,18 +232,22 @@ pub(crate) async fn resolve_prepared(
                 AutoUdpResponse::Truncated { response_bytes } => response_bytes,
             };
             debug!(
-                "UDP response was truncated after {} bytes; retrying query over TCP",
-                udp_response_bytes
+                "UDP response was truncated after {} bytes from {}; retrying query over TCP",
+                udp_response_bytes, target
             );
-            let tcp_response =
-                query_tcp_with_retries(&plan, options.retries, &mut attempts, &mut rate_limiter)
-                    .await?;
+            let tcp_response = query_tcp_with_retries(
+                &plan,
+                context.options.retries,
+                context.attempts,
+                context.rate_limiter,
+            )
+            .await?;
 
             Ok(dns_query_result(
                 tcp_response.message,
                 DnsTransport::Tcp,
-                attempts,
-                prepared.server_addr,
+                *context.attempts,
+                target.to_string(),
                 tcp_response.response_bytes,
                 true,
                 true,
@@ -244,10 +320,31 @@ fn dns_flags(message: &Message) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::domain::policy::{TargetScope, TrafficBudget};
+    use std::future::Future;
     use std::net::{IpAddr, Ipv4Addr};
     use trust_dns_proto::op::{MessageType, OpCode, Query, ResponseCode};
     use trust_dns_proto::rr::rdata::A;
     use trust_dns_proto::rr::{DNSClass, Name, RData, Record};
+
+    async fn resolve_targets_in_order_for_test<T, F, Fut>(
+        targets: &[SocketAddr],
+        mut resolve_target: F,
+    ) -> Result<T>
+    where
+        F: FnMut(SocketAddr) -> Fut,
+        Fut: Future<Output = Result<T>>,
+    {
+        let mut last_error = None;
+
+        for target in targets {
+            match resolve_target(*target).await {
+                Ok(result) => return Ok(result),
+                Err(err) => last_error = Some(err),
+            }
+        }
+
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("could not resolve DNS server address")))
+    }
 
     fn dns_request(transport: DnsTransportMode, retries: u8) -> DnsRequest {
         DnsRequest {
@@ -264,8 +361,11 @@ mod tests {
     #[test]
     fn traffic_plan_for_udp_counts_initial_attempt_plus_retries() {
         let options = dns_request(DnsTransportMode::Udp, 2);
-        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 53);
-        let plan = traffic_plan_for_target(&options, TrafficPolicy::default(), target);
+        let targets = [SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
+            53,
+        )];
+        let plan = traffic_plan_for_targets(&options, TrafficPolicy::default(), &targets);
 
         assert_eq!(plan.estimated_packets, Some(3));
     }
@@ -273,8 +373,11 @@ mod tests {
     #[test]
     fn traffic_plan_for_auto_counts_udp_and_tcp_retry_budgets() {
         let options = dns_request(DnsTransportMode::Auto, 2);
-        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 53);
-        let plan = traffic_plan_for_target(&options, TrafficPolicy::default(), target);
+        let targets = [SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
+            53,
+        )];
+        let plan = traffic_plan_for_targets(&options, TrafficPolicy::default(), &targets);
 
         assert_eq!(plan.estimated_packets, Some(6));
     }
@@ -289,8 +392,8 @@ mod tests {
             },
             ..Default::default()
         };
-        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53);
-        let plan = traffic_plan_for_target(&options, policy, target);
+        let targets = [SocketAddr::new(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)), 53)];
+        let plan = traffic_plan_for_targets(&options, policy, &targets);
 
         assert_eq!(plan.target_scope, TargetScope::Public);
         assert_eq!(plan.rate_per_sec, Some(7));
@@ -299,12 +402,71 @@ mod tests {
     #[test]
     fn traffic_plan_sets_single_target_port_and_batch_metadata() {
         let options = dns_request(DnsTransportMode::Tcp, 1);
-        let target = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 5353);
-        let plan = traffic_plan_for_target(&options, TrafficPolicy::default(), target);
+        let targets = [SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
+            5353,
+        )];
+        let plan = traffic_plan_for_targets(&options, TrafficPolicy::default(), &targets);
 
         assert_eq!(plan.target_count, 1);
         assert_eq!(plan.port_count, 1);
         assert_eq!(plan.batch_size, 1);
+    }
+
+    #[test]
+    fn traffic_plan_for_multiple_targets_counts_worst_case_fallback_budget() {
+        let options = dns_request(DnsTransportMode::Udp, 1);
+        let targets = [
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 53),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 54)), 53),
+        ];
+        let plan = traffic_plan_for_targets(&options, TrafficPolicy::default(), &targets);
+
+        assert_eq!(plan.target_count, 2);
+        assert_eq!(plan.estimated_packets, Some(4));
+    }
+
+    #[tokio::test]
+    async fn resolve_targets_in_order_returns_first_success_after_failure() {
+        let targets = [
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 53),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 54)), 53),
+        ];
+        let attempted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let recorded = std::sync::Arc::clone(&attempted);
+
+        let result = resolve_targets_in_order_for_test(&targets, move |target| {
+            let recorded = std::sync::Arc::clone(&recorded);
+            async move {
+                recorded.lock().unwrap().push(target);
+                if target.ip() == IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)) {
+                    Err(anyhow::anyhow!("first target failed"))
+                } else {
+                    Ok(target)
+                }
+            }
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(result, targets[1]);
+        assert_eq!(*attempted.lock().unwrap(), targets.to_vec());
+    }
+
+    #[tokio::test]
+    async fn resolve_targets_in_order_returns_last_error_when_all_targets_fail() {
+        let targets = [
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)), 53),
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 54)), 53),
+        ];
+
+        let err = resolve_targets_in_order_for_test(&targets, |target| async move {
+            Err::<SocketAddr, anyhow::Error>(anyhow::anyhow!("{} failed", target))
+        })
+        .await
+        .unwrap_err();
+
+        assert!(err.to_string().contains("192.0.2.54:53 failed"));
     }
 
     #[test]

@@ -223,12 +223,15 @@ pub(crate) fn prepare(command: &ScanRequest, policy: TrafficPolicy) -> Result<Pr
         };
 
     let estimated_for_batch = estimated_packets.unwrap_or(1).min(usize::MAX as u64) as usize;
-    let mut plan = TrafficPlan::new(TrafficMode::Scan, target_scope);
-    plan.target_count = target_count;
-    plan.port_count = port_count;
-    plan.estimated_packets = estimated_packets;
-    plan.batch_size = policy.budget.max_batch_size.min(estimated_for_batch).max(1);
-    plan.rate_per_sec = Some(policy.budget.max_rate_per_sec);
+    let mut plan = TrafficPlan::with_shape(
+        TrafficMode::Scan,
+        target_scope,
+        target_count,
+        port_count,
+        estimated_packets,
+        policy.budget.max_batch_size.min(estimated_for_batch),
+        Some(policy.budget.max_rate_per_sec),
+    );
     plan.required_privileges = vec![TrafficPrivilege::RawSocket];
     Ok(PreparedScan {
         traffic_plan: plan,

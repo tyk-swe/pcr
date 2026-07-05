@@ -74,11 +74,11 @@ pub(crate) struct FuzzOptions {
     pub strategy: FuzzStrategy,
 
     /// Number of packets to send.
-    #[arg(long = "count", default_value_t = 100)]
+    #[arg(long = "count", value_parser = value_parser!(u64).range(1..), default_value_t = 100)]
     pub count: u64,
 
     /// Delay between packets (in ms).
-    #[arg(long = "delay", default_value_t = 10)]
+    #[arg(long = "delay", value_parser = value_parser!(u64).range(0..), default_value_t = 10)]
     pub delay: u64,
 }
 
@@ -120,7 +120,7 @@ pub(crate) struct DnsQueryOptions {
     #[arg(long = "server", default_value = "8.8.8.8")]
     pub server: String,
     /// Query timeout (in ms).
-    #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 1000)]
+    #[arg(long = "timeout", value_parser = value_parser!(u64).range(1..), default_value_t = 1000)]
     pub timeout: u64,
     /// DNS Transaction ID.
     #[arg(long = "tid")]
@@ -261,7 +261,7 @@ pub(crate) struct TimedScanOptions {
     #[arg(long = "source-ip")]
     pub source_ip: Option<String>,
     /// Timeout (in ms).
-    #[arg(long = "timeout", value_parser = value_parser!(u64), default_value_t = 1_000)]
+    #[arg(long = "timeout", value_parser = value_parser!(u64).range(1..), default_value_t = 1_000)]
     pub timeout: u64,
 }
 
@@ -354,6 +354,13 @@ mod tests {
         assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
     }
 
+    #[test]
+    fn dns_query_timeout_rejects_zero() {
+        let err = parse_dns(&["--domain", "example.test", "--timeout", "0"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
     #[cfg(feature = "traceroute")]
     #[derive(Debug, Parser)]
     struct TracerouteHarness {
@@ -433,6 +440,36 @@ mod tests {
         assert_eq!(byte_overflow.options.strategy, FuzzStrategy::Boundary);
     }
 
+    #[cfg(feature = "fuzz")]
+    #[test]
+    fn fuzz_count_rejects_zero_and_delay_allows_zero() {
+        let err = FuzzHarness::try_parse_from([
+            "test",
+            "--target",
+            "192.0.2.1",
+            "--protocol",
+            "icmp",
+            "--count",
+            "0",
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+
+        let parsed = FuzzHarness::try_parse_from([
+            "test",
+            "--target",
+            "192.0.2.1",
+            "--protocol",
+            "icmp",
+            "--delay",
+            "0",
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.options.delay, 0);
+    }
+
     #[cfg(feature = "scan")]
     #[derive(Debug, Parser)]
     struct ScanHarness {
@@ -500,5 +537,21 @@ mod tests {
             ScanCommand::Ndp(options)
                 if options.target == "2001:db8::/126" && options.timeout == 250
         ));
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn timed_scan_timeout_rejects_zero() {
+        for args in [
+            ["icmp", "--target", "192.0.2.0/30", "--timeout", "0"].as_slice(),
+            ["arp", "--target", "192.0.2.0/30", "--timeout", "0"].as_slice(),
+            ["ndp", "--target", "2001:db8::/126", "--timeout", "0"].as_slice(),
+        ] {
+            let err =
+                ScanHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+                    .unwrap_err();
+
+            assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        }
     }
 }

@@ -37,12 +37,15 @@ pub(crate) fn prepare(
     let validated = validate_request(opts)?;
     let resolved_destination = resolve_destination_with_reason(&opts.destination)?;
     let destination = resolved_destination.address;
-    let mut plan = TrafficPlan::new(TrafficMode::Traceroute, classify_ip(destination));
-    plan.target_count = 1;
-    plan.port_count = 1;
-    plan.estimated_packets = Some(validated.estimated_packets);
-    plan.batch_size = 1;
-    plan.rate_per_sec = Some(policy.budget.max_rate_per_sec);
+    let mut plan = TrafficPlan::with_shape(
+        TrafficMode::Traceroute,
+        classify_ip(destination),
+        1,
+        1,
+        Some(validated.estimated_packets),
+        1,
+        Some(policy.budget.max_rate_per_sec),
+    );
     plan.required_privileges = vec![TrafficPrivilege::RawSocket];
     plan.selection = Some(traceroute_selection(
         destination,

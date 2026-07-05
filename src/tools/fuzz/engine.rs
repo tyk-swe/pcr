@@ -1,10 +1,13 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::domain::spec::{
-    DestinationSpec, IcmpSpec, Icmpv6Spec, PacketSpec, PayloadSource, PayloadSpec, TargetAddress,
-    TcpSpec, TransmissionSpec, TransportSpec, UdpSpec,
+use crate::domain::request::{
+    DestinationRequest, IcmpRequest, Icmpv6Request, PacketRequest, PayloadRequest, TcpRequest,
+    TransmissionRequest, TransportProtocolRequest, TransportRequest,
 };
+use crate::domain::spec::{PacketSpec, PayloadSource};
+#[cfg(test)]
+use crate::domain::spec::{TargetAddress, TransportSpec};
 use crate::tools::fuzz::config::{FuzzConfig, FuzzProtocol, FuzzStrategy};
 use log::info;
 use rand::{Rng, RngExt};
@@ -43,43 +46,7 @@ where
         }
 
         let payload_bytes = generate_payload(&config.strategy);
-
-        let mut spec = PacketSpec {
-            // Construct a PacketSpec based on the config and generated payload
-            target: DestinationSpec {
-                address: Some(TargetAddress::Ip(target_ip)),
-                interface: None,
-            },
-            payload: PayloadSpec {
-                source: PayloadSource::Bytes(payload_bytes),
-            },
-            ..Default::default()
-        };
-
-        match config.protocol {
-            FuzzProtocol::Tcp => {
-                let mut tcp = TcpSpec::default();
-                if let Some(port) = config.target_port {
-                    tcp.destination_port = Some(port);
-                }
-                spec.transport = TransportSpec::Tcp(tcp);
-            }
-            FuzzProtocol::Udp => {
-                let mut udp = UdpSpec::default();
-                if let Some(port) = config.target_port {
-                    udp.destination_port = Some(port);
-                }
-                spec.transport = TransportSpec::Udp(udp);
-            }
-            FuzzProtocol::Icmp => {
-                spec.transport = match target_ip {
-                    IpAddr::V4(_) => TransportSpec::Icmp(IcmpSpec::default()),
-                    IpAddr::V6(_) => TransportSpec::Icmpv6(Icmpv6Spec::default()),
-                };
-            }
-        }
-
-        spec.transmit = TransmissionSpec::default();
+        let spec = build_packet_spec(&config, target_ip, payload_bytes)?;
 
         if let Err(e) = executor(spec).await {
             failures += 1;
@@ -99,6 +66,40 @@ where
     }
 
     Ok(())
+}
+
+fn build_packet_spec(
+    config: &FuzzConfig,
+    target_ip: IpAddr,
+    payload_bytes: Vec<u8>,
+) -> anyhow::Result<PacketSpec> {
+    let transport_command = match (config.protocol, target_ip) {
+        (FuzzProtocol::Tcp, _) => TransportProtocolRequest::Tcp(TcpRequest::default()),
+        (FuzzProtocol::Udp, _) => TransportProtocolRequest::Udp,
+        (FuzzProtocol::Icmp, IpAddr::V4(_)) => {
+            TransportProtocolRequest::Icmp(IcmpRequest::default())
+        }
+        (FuzzProtocol::Icmp, IpAddr::V6(_)) => {
+            TransportProtocolRequest::Icmpv6(Icmpv6Request::default())
+        }
+    };
+    let request = PacketRequest {
+        destination: DestinationRequest {
+            destination_ip: Some(config.target_ip.clone()),
+            ..Default::default()
+        },
+        transport: TransportRequest {
+            command: Some(transport_command),
+            destination_port: config.target_port,
+            ..Default::default()
+        },
+        payload: PayloadRequest::default(),
+        transmit: TransmissionRequest::default(),
+        ..Default::default()
+    };
+    let mut spec = PacketSpec::from_request(&request)?;
+    spec.payload.source = PayloadSource::Bytes(payload_bytes);
+    Ok(spec)
 }
 
 fn rate_delay(rate_per_sec: u64) -> Duration {
@@ -297,5 +298,20 @@ mod tests {
 
         assert_eq!(specs.len(), 1);
         assert!(matches!(specs[0].transport, TransportSpec::Icmpv6(_)));
+    }
+
+    #[tokio::test]
+    async fn run_fuzz_with_executor_reuses_shared_ipv6_transmission_defaults() {
+        let specs = collect_generated_specs(config_for_target(
+            "2001:db8::10",
+            FuzzProtocol::Tcp,
+            Some(443),
+            1,
+        ))
+        .await;
+
+        assert_eq!(specs.len(), 1);
+        assert!(specs[0].transmit.auto_layer3);
+        assert!(matches!(specs[0].transport, TransportSpec::Tcp(_)));
     }
 }

@@ -1,6 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::future::Future;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -105,10 +106,7 @@ impl PacketcraftApp {
         let telemetry = self.telemetry;
 
         self.runtime.block_on(async {
-            dispatch::run(&mut engine, command).await?;
-            telemetry.shutdown().await;
-
-            Ok::<(), anyhow::Error>(())
+            await_with_shutdown(dispatch::run(&mut engine, command), telemetry.shutdown()).await
         })?;
 
         Ok(())
@@ -144,6 +142,19 @@ impl PacketcraftApp {
             .build()
             .context("initialise tokio runtime failed: builder construction error")
     }
+}
+
+async fn await_with_shutdown<T, E, Fut, Shutdown>(
+    future: Fut,
+    shutdown: Shutdown,
+) -> std::result::Result<T, E>
+where
+    Fut: Future<Output = std::result::Result<T, E>>,
+    Shutdown: Future<Output = ()>,
+{
+    let result = future.await;
+    shutdown.await;
+    result
 }
 
 #[derive(Debug, Serialize)]
@@ -213,6 +224,8 @@ impl ErrorReport {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use super::*;
     use crate::domain::policy::{PolicyRejection, PolicyRejectionCode};
 
@@ -267,5 +280,47 @@ mod tests {
         assert_eq!(json["error"]["kind"], "runtime");
         assert_eq!(json["error"]["message"], "runtime failure");
         assert!(json["error"]["policy_code"].is_null());
+    }
+
+    #[tokio::test]
+    async fn await_with_shutdown_preserves_success_and_runs_shutdown_afterwards() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let run_events = Arc::clone(&events);
+        let shutdown_events = Arc::clone(&events);
+
+        let result: std::result::Result<&'static str, &'static str> = await_with_shutdown(
+            async move {
+                run_events.lock().unwrap().push("run");
+                Ok("done")
+            },
+            async move {
+                shutdown_events.lock().unwrap().push("shutdown");
+            },
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), "done");
+        assert_eq!(*events.lock().unwrap(), ["run", "shutdown"]);
+    }
+
+    #[tokio::test]
+    async fn await_with_shutdown_preserves_failure_and_runs_shutdown_afterwards() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let run_events = Arc::clone(&events);
+        let shutdown_events = Arc::clone(&events);
+
+        let result: std::result::Result<(), &'static str> = await_with_shutdown(
+            async move {
+                run_events.lock().unwrap().push("run");
+                Err("dispatch failed")
+            },
+            async move {
+                shutdown_events.lock().unwrap().push("shutdown");
+            },
+        )
+        .await;
+
+        assert_eq!(result.unwrap_err(), "dispatch failed");
+        assert_eq!(*events.lock().unwrap(), ["run", "shutdown"]);
     }
 }

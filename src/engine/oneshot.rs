@@ -3,6 +3,8 @@
 
 use anyhow::{Context, Result};
 use log::{debug, info};
+#[cfg(feature = "pcap")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::domain::policy::TrafficMode;
@@ -135,9 +137,11 @@ impl<'engine> OneShotFlow<'engine> {
         let spec = self.take_spec()?;
         let plan = self.take_plan()?;
         self.engine.send.execute_plan(plan).await?;
+
         if !self.engine.config.dry_run {
             self.maybe_run_listener(spec.as_ref()).await?;
         }
+
         Ok(())
     }
 
@@ -195,6 +199,7 @@ impl<'engine> OneShotFlow<'engine> {
             .map_err(EngineError::PreflightSummary)
     }
 
+    #[cfg(not(feature = "pcap"))]
     async fn maybe_run_listener(&mut self, plan: &PacketSpec) -> Result<()> {
         if plan.listener.enabled {
             self.engine
@@ -209,5 +214,585 @@ impl<'engine> OneShotFlow<'engine> {
                 .map_err(|source| anyhow::Error::from(EngineError::Listener(source)))?;
         }
         Ok(())
+    }
+
+    #[cfg(feature = "pcap")]
+    async fn maybe_run_listener(&mut self, plan: &PacketSpec) -> Result<()> {
+        if let Some(listener) = self.start_listener(plan).await? {
+            self.wait_for_listener(listener).await?;
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "pcap")]
+    async fn start_listener(&self, plan: &PacketSpec) -> Result<Option<ArmedListener>> {
+        if !plan.listener.enabled {
+            return Ok(None);
+        }
+
+        let shutdown = Arc::new(AtomicBool::new(true));
+        let listener_shutdown = Arc::clone(&shutdown);
+        let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
+        let listener = ArmedListener {
+            shutdown,
+            task: tokio::spawn(
+                self.engine
+                    .dependencies
+                    .listener_runner
+                    .run_for_packet_with_lifecycle(
+                        plan.listener.clone(),
+                        plan.target.interface.clone(),
+                        self.engine.listener_handler(),
+                        listener_shutdown,
+                        Some(startup_tx),
+                    ),
+            ),
+        };
+
+        match startup_rx.await {
+            Ok(Ok(())) => Ok(Some(listener)),
+            Ok(Err(message)) => {
+                listener.shutdown.store(false, Ordering::SeqCst);
+                match self.wait_for_listener(listener).await {
+                    Ok(()) => Err(anyhow::Error::from(EngineError::Listener(anyhow::anyhow!(
+                        message,
+                    )))),
+                    Err(err) => Err(err),
+                }
+            }
+            Err(_) => {
+                listener.shutdown.store(false, Ordering::SeqCst);
+                match self.wait_for_listener(listener).await {
+                    Ok(()) => Err(anyhow::Error::from(EngineError::Listener(anyhow::anyhow!(
+                        "listener task exited before reporting readiness"
+                    )))),
+                    Err(err) => Err(err),
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "pcap")]
+    async fn wait_for_listener(&self, listener: ArmedListener) -> Result<()> {
+        match listener.task.await {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(source)) => Err(anyhow::Error::from(EngineError::Listener(source))),
+            Err(source) => Err(anyhow::Error::from(EngineError::Listener(
+                anyhow::Error::new(source),
+            ))),
+        }
+    }
+}
+
+#[cfg(feature = "pcap")]
+struct ArmedListener {
+    shutdown: Arc<AtomicBool>,
+    task: tokio::task::JoinHandle<crate::engine::ports::PortResult<()>>,
+}
+
+#[cfg(all(test, feature = "pcap"))]
+mod tests {
+    use std::net::IpAddr;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    use anyhow::anyhow;
+    use tokio::runtime::Handle;
+    use tokio::sync::Notify;
+
+    use super::*;
+    #[cfg(feature = "fuzz")]
+    use crate::domain::command::FuzzRequest;
+    #[cfg(feature = "scan")]
+    use crate::domain::command::ScanRequest;
+    #[cfg(feature = "traceroute")]
+    use crate::domain::command::TracerouteRequest;
+    use crate::domain::command::{DnsQueryResult, DnsRequest};
+    use crate::domain::event::ListenerEvent;
+    use crate::domain::policy::TrafficPolicy;
+    use crate::domain::request::{DestinationRequest, ListenerRequest};
+    use crate::domain::spec::{ListenerSpec, LoggingSpec, PacketSpec, TransmissionSpec};
+    use crate::domain::transmission::{
+        DestinationSelectionReason, InterfaceSelectionReason, PlanningMode, SourceSelectionReason,
+        TransmissionLinkType, TransmissionPlan, TransmissionProtocol, TransmissionSelection,
+        TransmissionSummary, TransmissionTarget,
+    };
+    #[cfg(feature = "daemon")]
+    use crate::engine::ports::DaemonListenerRuntime;
+    use crate::engine::ports::{
+        DnsClient, EngineDependencies, EngineOutput, ListenerEventHandler, ListenerRunner,
+        PacketPlanner, PacketTransmitter, PortFuture, PreparedDnsQuery, PrivilegeChecker,
+        RuleActionTelemetry, TargetResolver,
+    };
+    #[cfg(feature = "fuzz")]
+    use crate::engine::ports::{FuzzRunner, GeneratedPacketSender, PreparedFuzzRun};
+    #[cfg(feature = "scan")]
+    use crate::engine::ports::{PreparedScanRun, ScanRunner};
+    #[cfg(feature = "traceroute")]
+    use crate::engine::ports::{PreparedTracerouteRun, TracerouteRunner};
+    use crate::engine::{config::EngineConfig, core::Engine};
+
+    #[derive(Clone, Copy)]
+    enum ListenerMode {
+        ReadyUntilSend,
+        FailStartup,
+        ReadyUntilShutdown,
+    }
+
+    #[derive(Clone, Copy)]
+    enum TransmitMode {
+        Succeed,
+        Fail,
+    }
+
+    #[derive(Default)]
+    struct SharedState {
+        events: Mutex<Vec<&'static str>>,
+        send_calls: AtomicUsize,
+        send_finished: AtomicBool,
+        send_signal: Notify,
+    }
+
+    impl SharedState {
+        fn record(&self, event: &'static str) {
+            self.events.lock().unwrap().push(event);
+        }
+
+        fn events(&self) -> Vec<&'static str> {
+            self.events.lock().unwrap().clone()
+        }
+    }
+
+    struct FakePacketPlanner;
+
+    impl PacketPlanner for FakePacketPlanner {
+        fn plan_packet(
+            &self,
+            _spec: Arc<PacketSpec>,
+            _mode: PlanningMode,
+            _policy: crate::domain::policy::TransmissionPolicy,
+        ) -> PortFuture<TransmissionPlan> {
+            Box::pin(async { Ok(transmission_plan()) })
+        }
+    }
+
+    struct FakePacketTransmitter {
+        state: Arc<SharedState>,
+        mode: TransmitMode,
+    }
+
+    impl PacketTransmitter for FakePacketTransmitter {
+        fn transmit(&self, _plan: TransmissionPlan) -> PortFuture<()> {
+            let state = Arc::clone(&self.state);
+            let mode = self.mode;
+            Box::pin(async move {
+                state.send_calls.fetch_add(1, Ordering::SeqCst);
+                state.record("send");
+                state.send_finished.store(true, Ordering::SeqCst);
+                state.send_signal.notify_waiters();
+                match mode {
+                    TransmitMode::Succeed => Ok(()),
+                    TransmitMode::Fail => Err(anyhow!("send failed")),
+                }
+            })
+        }
+    }
+
+    struct FakeListenerRunner {
+        state: Arc<SharedState>,
+        mode: ListenerMode,
+    }
+
+    impl ListenerRunner for FakeListenerRunner {
+        #[cfg(not(feature = "pcap"))]
+        fn run_for_packet(
+            &self,
+            _spec: ListenerSpec,
+            _interface_hint: Option<String>,
+            _handler: ListenerEventHandler,
+        ) -> PortFuture<()> {
+            Box::pin(async { Err(anyhow!("unexpected non-lifecycle listener path")) })
+        }
+
+        fn run_for_packet_with_lifecycle(
+            &self,
+            _spec: ListenerSpec,
+            _interface_hint: Option<String>,
+            _handler: ListenerEventHandler,
+            shutdown: Arc<AtomicBool>,
+            startup: Option<crate::engine::ports::ListenerStartupSignal>,
+        ) -> PortFuture<()> {
+            let state = Arc::clone(&self.state);
+            let mode = self.mode;
+            Box::pin(async move {
+                state.record("listener_start");
+                match mode {
+                    ListenerMode::FailStartup => {
+                        if let Some(startup) = startup {
+                            let _ = startup.send(Err("listener startup failed".to_string()));
+                        }
+                        Err(anyhow!("listener startup failed"))
+                    }
+                    ListenerMode::ReadyUntilSend => {
+                        if let Some(startup) = startup {
+                            let _ = startup.send(Ok(()));
+                        }
+                        while !state.send_finished.load(Ordering::SeqCst) {
+                            state.send_signal.notified().await;
+                        }
+                        state.record("listener_finish");
+                        Ok(())
+                    }
+                    ListenerMode::ReadyUntilShutdown => {
+                        if let Some(startup) = startup {
+                            let _ = startup.send(Ok(()));
+                        }
+                        while shutdown.load(Ordering::SeqCst) {
+                            tokio::time::sleep(Duration::from_millis(1)).await;
+                        }
+                        state.record("listener_finish");
+                        Ok(())
+                    }
+                }
+            })
+        }
+
+        fn run_command(
+            &self,
+            _request: crate::domain::command::ListenRequest,
+            _handler: ListenerEventHandler,
+        ) -> PortFuture<()> {
+            Box::pin(async { Err(anyhow!("unexpected listener command path")) })
+        }
+    }
+
+    struct NoOpOutput;
+
+    impl EngineOutput for NoOpOutput {
+        fn emit_preflight_summary(
+            &self,
+            _spec: &PacketSpec,
+            _plan: &TransmissionPlan,
+        ) -> crate::engine::ports::PortResult<()> {
+            Ok(())
+        }
+
+        #[cfg(any(feature = "scan", feature = "traceroute", feature = "fuzz"))]
+        fn emit_traffic_plan_summary(
+            &self,
+            _plan: &crate::domain::policy::TrafficPlan,
+        ) -> crate::engine::ports::PortResult<()> {
+            Ok(())
+        }
+
+        fn emit_listener_event(&self, _event: &ListenerEvent) {}
+
+        fn emit_text_output(&self, _rendered: &str) -> crate::engine::ports::PortResult<()> {
+            Ok(())
+        }
+
+        fn format_dns_dry_run(
+            &self,
+            _request: &DnsRequest,
+        ) -> crate::engine::ports::PortResult<String> {
+            Ok(String::new())
+        }
+
+        fn format_dns_response(
+            &self,
+            _result: &DnsQueryResult,
+        ) -> crate::engine::ports::PortResult<String> {
+            Ok(String::new())
+        }
+    }
+
+    struct UnusedPorts;
+
+    impl TargetResolver for UnusedPorts {
+        fn resolve_target_ip(
+            &self,
+            _target: String,
+            _prefer_ipv6: Option<bool>,
+        ) -> PortFuture<IpAddr> {
+            Box::pin(async { Err(anyhow!("target resolver should not be used")) })
+        }
+    }
+
+    impl PrivilegeChecker for UnusedPorts {
+        fn check_packet_send(&self, _spec: Arc<PacketSpec>) -> PortFuture<()> {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    impl DnsClient for UnusedPorts {
+        fn prepare(
+            &self,
+            _request: DnsRequest,
+            _policy: TrafficPolicy,
+        ) -> PortFuture<PreparedDnsQuery> {
+            Box::pin(async { Err(anyhow!("dns client should not be used")) })
+        }
+    }
+
+    #[cfg(feature = "traceroute")]
+    impl TracerouteRunner for UnusedPorts {
+        fn prepare(
+            &self,
+            _request: TracerouteRequest,
+            _policy: TrafficPolicy,
+        ) -> PortFuture<PreparedTracerouteRun> {
+            Box::pin(async { Err(anyhow!("traceroute runner should not be used")) })
+        }
+    }
+
+    #[cfg(feature = "scan")]
+    impl ScanRunner for UnusedPorts {
+        fn prepare(
+            &self,
+            _request: ScanRequest,
+            _policy: TrafficPolicy,
+        ) -> PortFuture<PreparedScanRun> {
+            Box::pin(async { Err(anyhow!("scan runner should not be used")) })
+        }
+    }
+
+    #[cfg(feature = "fuzz")]
+    impl FuzzRunner for UnusedPorts {
+        fn prepare(
+            &self,
+            _request: FuzzRequest,
+            _policy: TrafficPolicy,
+            _sender: GeneratedPacketSender,
+        ) -> PortFuture<PreparedFuzzRun> {
+            Box::pin(async { Err(anyhow!("fuzz runner should not be used")) })
+        }
+    }
+
+    #[cfg(feature = "daemon")]
+    impl DaemonListenerRuntime for UnusedPorts {
+        fn validate_options(
+            &self,
+            _options: &crate::domain::request::ListenerRequest,
+        ) -> crate::engine::ports::PortResult<()> {
+            Err(anyhow!("daemon listener runtime should not be used"))
+        }
+
+        fn spawn_background(
+            &self,
+            _options: crate::domain::request::ListenerRequest,
+            _interface_hint: Option<String>,
+            _handler: ListenerEventHandler,
+            _shutdown: Arc<AtomicBool>,
+            _startup: Option<crate::engine::ports::ListenerStartupSignal>,
+        ) -> crate::engine::ports::PortResult<
+            tokio::task::JoinHandle<crate::engine::ports::PortResult<()>>,
+        > {
+            Err(anyhow!("daemon listener runtime should not be used"))
+        }
+    }
+
+    impl RuleActionTelemetry for UnusedPorts {
+        fn record_rule_action(&self, _action: &'static str, _status: &'static str) {}
+
+        fn record_rule_executor_drop(&self, _action: &'static str, _reason: &'static str) {}
+    }
+
+    fn request() -> PacketRequest {
+        PacketRequest {
+            destination: DestinationRequest {
+                destination_ip: Some("192.0.2.10".to_string()),
+                ..Default::default()
+            },
+            listener: ListenerRequest {
+                listen: Some(true),
+                timeout: Some(1),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    fn transmission_plan() -> TransmissionPlan {
+        TransmissionPlan {
+            frames: vec![vec![0; 4]],
+            link_type: TransmissionLinkType::Ipv4,
+            transmit: TransmissionSpec::default(),
+            destination: TransmissionTarget::Ipv4("192.0.2.10".parse().unwrap()),
+            interface_name: "eth-test".to_string(),
+            selection: TransmissionSelection {
+                selected_interface: "eth-test".to_string(),
+                interface_reason: InterfaceSelectionReason::ExplicitInterface,
+                source_ip: "192.0.2.5".parse().unwrap(),
+                source_reason: SourceSelectionReason::ExplicitSourceIp,
+                destination_ip: "192.0.2.10".parse().unwrap(),
+                destination_reason: DestinationSelectionReason::TargetLiteral,
+            },
+            protocol: TransmissionProtocol(17),
+            summary: TransmissionSummary {
+                payload_len: 0,
+                largest_frame_len: 4,
+                frame_count: 1,
+                transport: "udp",
+            },
+            logging: LoggingSpec::default(),
+            mode: PlanningMode::Live,
+            policy: crate::domain::policy::TransmissionPolicy::default(),
+        }
+    }
+
+    fn engine(
+        listener_mode: ListenerMode,
+        transmit_mode: TransmitMode,
+        state: Arc<SharedState>,
+    ) -> Engine {
+        let transmitter_state = Arc::clone(&state);
+        let listener_state = Arc::clone(&state);
+        let unused = Arc::new(UnusedPorts);
+        let dependencies = EngineDependencies {
+            target_resolver: unused.clone(),
+            privilege_checker: unused.clone(),
+            packet_planner: Arc::new(FakePacketPlanner),
+            packet_transmitter: Arc::new(FakePacketTransmitter {
+                state: transmitter_state,
+                mode: transmit_mode,
+            }),
+            listener_runner: Arc::new(FakeListenerRunner {
+                state: listener_state,
+                mode: listener_mode,
+            }),
+            #[cfg(feature = "daemon")]
+            daemon_listener_runtime: unused.clone(),
+            dns_client: unused.clone(),
+            #[cfg(feature = "traceroute")]
+            traceroute_runner: unused.clone(),
+            #[cfg(feature = "scan")]
+            scan_runner: unused.clone(),
+            #[cfg(feature = "fuzz")]
+            fuzz_runner: unused.clone(),
+            output: Arc::new(NoOpOutput),
+            rule_action_telemetry: unused,
+        };
+        let config = EngineConfig {
+            prometheus_bind: None,
+            rule_workers: None,
+            rule_queue: None,
+            send_workers: None,
+            send_queue: None,
+            traffic_policy: TrafficPolicy::default(),
+            dry_run: false,
+        };
+
+        Engine::new_with_runtime_handle(config, dependencies, Handle::current()).unwrap()
+    }
+
+    fn error_chain_contains(err: &anyhow::Error, needle: &str) -> bool {
+        err.chain().any(|cause| cause.to_string().contains(needle))
+    }
+
+    #[tokio::test]
+    async fn execute_starts_listener_after_send() {
+        let state = Arc::new(SharedState::default());
+        let mut engine = engine(
+            ListenerMode::ReadyUntilSend,
+            TransmitMode::Succeed,
+            Arc::clone(&state),
+        );
+
+        OneShotFlow::new(&mut engine, request())
+            .with_policy_validation()
+            .unwrap()
+            .with_spec()
+            .await
+            .unwrap()
+            .with_authorized_preflight_traffic()
+            .await
+            .unwrap()
+            .with_preflight()
+            .await
+            .unwrap()
+            .with_plan()
+            .await
+            .unwrap()
+            .with_preflight_output()
+            .unwrap()
+            .execute()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            state.events(),
+            ["send", "listener_start", "listener_finish"]
+        );
+    }
+
+    #[tokio::test]
+    async fn execute_reports_listener_startup_failure_after_send() {
+        let state = Arc::new(SharedState::default());
+        let mut engine = engine(
+            ListenerMode::FailStartup,
+            TransmitMode::Succeed,
+            Arc::clone(&state),
+        );
+
+        let err = OneShotFlow::new(&mut engine, request())
+            .with_policy_validation()
+            .unwrap()
+            .with_spec()
+            .await
+            .unwrap()
+            .with_authorized_preflight_traffic()
+            .await
+            .unwrap()
+            .with_preflight()
+            .await
+            .unwrap()
+            .with_plan()
+            .await
+            .unwrap()
+            .with_preflight_output()
+            .unwrap()
+            .execute()
+            .await
+            .unwrap_err();
+
+        assert!(error_chain_contains(&err, "listener startup failed"));
+        assert_eq!(state.send_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(state.events(), ["send", "listener_start"]);
+    }
+
+    #[tokio::test]
+    async fn execute_does_not_start_listener_when_send_fails() {
+        let state = Arc::new(SharedState::default());
+        let mut engine = engine(
+            ListenerMode::ReadyUntilShutdown,
+            TransmitMode::Fail,
+            Arc::clone(&state),
+        );
+
+        let err = OneShotFlow::new(&mut engine, request())
+            .with_policy_validation()
+            .unwrap()
+            .with_spec()
+            .await
+            .unwrap()
+            .with_authorized_preflight_traffic()
+            .await
+            .unwrap()
+            .with_preflight()
+            .await
+            .unwrap()
+            .with_plan()
+            .await
+            .unwrap()
+            .with_preflight_output()
+            .unwrap()
+            .execute()
+            .await
+            .unwrap_err();
+
+        assert!(error_chain_contains(&err, "send failed"));
+        assert_eq!(state.send_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(state.events(), ["send"]);
     }
 }

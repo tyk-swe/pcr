@@ -52,17 +52,19 @@ pub(crate) async fn run_command(
     }
 }
 
-pub(crate) async fn run_from_spec(
+pub(crate) async fn run_from_spec_with_lifecycle(
     spec: &ListenerSpec,
     interface_hint: Option<&str>,
     handler: ListenerEventHandler,
+    shutdown: Arc<AtomicBool>,
+    startup: Option<ListenerStartupSignal>,
 ) -> ListenerResult<()> {
     if !spec.enabled {
         return Ok(());
     }
 
     let runtime = ListenerRuntimeConfig::from_spec(spec)?;
-    run_internal(runtime, interface_hint, handler, None, None)
+    run_internal(runtime, interface_hint, handler, Some(shutdown), startup)
         .await
         .map(|_| ())
 }
@@ -204,4 +206,62 @@ async fn run_internal(
 
 fn should_rearm_listener(runtime: &ListenerRuntimeConfig, outcome: ListenerRunOutcome) -> bool {
     runtime.timeout.is_some() && matches!(outcome, ListenerRunOutcome::Completed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    fn runtime(timeout: Option<Duration>) -> ListenerRuntimeConfig {
+        ListenerRuntimeConfig {
+            filter: None,
+            promiscuous: false,
+            timeout,
+            show_reply: false,
+            capture_file: None,
+            queue_capacity: 64,
+        }
+    }
+
+    #[test]
+    fn should_rearm_listener_requires_timeout_and_completed_outcome() {
+        assert!(should_rearm_listener(
+            &runtime(Some(Duration::from_secs(1))),
+            ListenerRunOutcome::Completed
+        ));
+        assert!(!should_rearm_listener(
+            &runtime(Some(Duration::from_secs(1))),
+            ListenerRunOutcome::ShutdownRequested
+        ));
+        assert!(!should_rearm_listener(
+            &runtime(None),
+            ListenerRunOutcome::Completed
+        ));
+    }
+
+    #[tokio::test]
+    async fn run_internal_sends_startup_error_for_interface_lookup_failure() {
+        let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
+
+        let err = run_internal(
+            runtime(Some(Duration::from_millis(1))),
+            Some("definitely-not-a-real-interface"),
+            Arc::new(|_| {}),
+            Some(Arc::new(AtomicBool::new(true))),
+            Some(startup_tx),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("failed to determine capture interface"));
+        assert!(startup_rx
+            .await
+            .unwrap()
+            .unwrap_err()
+            .contains("failed to determine capture interface"));
+    }
 }

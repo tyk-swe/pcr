@@ -196,17 +196,25 @@ pub(crate) struct TrafficPlan {
 }
 
 impl TrafficPlan {
-    pub(crate) fn new(mode: TrafficMode, target_scope: TargetScope) -> Self {
+    pub(crate) fn with_shape(
+        mode: TrafficMode,
+        target_scope: TargetScope,
+        target_count: usize,
+        port_count: usize,
+        estimated_packets: Option<u64>,
+        batch_size: usize,
+        rate_per_sec: Option<u64>,
+    ) -> Self {
         Self {
             mode,
             target_scope,
-            target_count: 1,
-            port_count: 1,
-            estimated_packets: Some(1),
+            target_count,
+            port_count,
+            estimated_packets,
             malformed: false,
             unbounded: false,
-            batch_size: 1,
-            rate_per_sec: None,
+            batch_size: batch_size.max(1),
+            rate_per_sec,
             required_privileges: Vec::new(),
             selection: None,
         }
@@ -563,7 +571,7 @@ mod tests {
     };
 
     fn plan_with(scope: TargetScope) -> TrafficPlan {
-        TrafficPlan::new(TrafficMode::Send, scope)
+        TrafficPlan::with_shape(TrafficMode::Send, scope, 1, 1, Some(1), 1, None)
     }
 
     fn rejection_code(plan: TrafficPlan) -> PolicyRejectionCode {
@@ -737,6 +745,27 @@ mod tests {
             .rate_delay(),
             None
         );
+    }
+
+    #[test]
+    fn traffic_plan_with_shape_preserves_counts_and_rate_metadata() {
+        let plan = TrafficPlan::with_shape(
+            TrafficMode::Scan,
+            TargetScope::Documentation,
+            4,
+            8,
+            Some(16),
+            0,
+            Some(32),
+        );
+
+        assert_eq!(plan.mode, TrafficMode::Scan);
+        assert_eq!(plan.target_scope, TargetScope::Documentation);
+        assert_eq!(plan.target_count, 4);
+        assert_eq!(plan.port_count, 8);
+        assert_eq!(plan.estimated_packets, Some(16));
+        assert_eq!(plan.batch_size, 1);
+        assert_eq!(plan.rate_per_sec, Some(32));
     }
 
     #[test]

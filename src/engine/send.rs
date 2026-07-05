@@ -255,15 +255,17 @@ impl SendUseCase {
         let unbounded = accounting.attempts.is_none();
         let estimated_packets = accounting.total_emitted_units;
 
-        let mut traffic_plan = TrafficPlan::new(mode, target_scope);
-        traffic_plan.target_count = 1;
-        traffic_plan.port_count = 1;
-        traffic_plan.estimated_packets = estimated_packets;
+        let mut traffic_plan = TrafficPlan::with_shape(
+            mode,
+            target_scope,
+            1,
+            1,
+            estimated_packets,
+            units_per_attempt.min(usize::MAX as u64) as usize,
+            Some(self.policy.budget.max_rate_per_sec),
+        );
         traffic_plan.malformed = packet_spec_uses_malformed_options(spec);
         traffic_plan.unbounded = unbounded;
-        traffic_plan.batch_size = units_per_attempt.min(usize::MAX as u64) as usize;
-        traffic_plan.batch_size = traffic_plan.batch_size.max(1);
-        traffic_plan.rate_per_sec = Some(self.policy.budget.max_rate_per_sec);
         traffic_plan.required_privileges = packet_spec_privileges(spec);
         Ok(traffic_plan)
     }

@@ -273,6 +273,7 @@ fn prepare_timed_target_scan(
 fn prepare_port_scan(
     request: &PortScanRequest,
 ) -> Result<(PortScanRequest, TargetScope, usize, Option<u64>)> {
+    common::reject_port_scan_cidr_target(&request.target)?;
     let address = common::resolve_target(&request.target)?;
     common::validate_source_override(&request.interface, &request.source_ip, address.ip())?;
     let ports = common::parse_ports(&request.ports)?;
@@ -392,6 +393,21 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("invalid port range"));
+    }
+
+    #[test]
+    fn prepare_rejects_cidr_targets_for_port_scans() {
+        for request in [
+            ScanRequest::TcpSyn(port_request("127.0.0.0/30", "80")),
+            ScanRequest::Udp(port_request("127.0.0.0/30", "53")),
+            ScanRequest::SctpInit(port_request("127.0.0.0/30", "9899")),
+        ] {
+            let err = prepare(&request, TrafficPolicy::default()).unwrap_err();
+
+            assert!(err
+                .to_string()
+                .contains("CIDR targets are not supported for port scans"));
+        }
     }
 
     #[test]

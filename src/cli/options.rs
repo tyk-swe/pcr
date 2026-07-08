@@ -373,7 +373,7 @@ pub(crate) struct PayloadOptions {
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
 pub(crate) struct TransmitOptions {
     /// Number of packets to send; must be greater than zero [default: 1].
-    #[arg(long = "count", value_parser = value_parser!(u64))]
+    #[arg(long = "count", value_parser = value_parser!(u64).range(1..))]
     pub count: Option<u64>,
     /// Send interval (e.g., 1s, 500ms, 100us).
     #[arg(long = "interval")]
@@ -509,7 +509,10 @@ pub(crate) struct ListenOptions {
     )]
     pub show_reply: Option<bool>,
     /// Listen timeout (in seconds).
-    #[cfg_attr(feature = "pcap", arg(long = "timeout", value_parser = value_parser!(u64)))]
+    #[cfg_attr(
+        feature = "pcap",
+        arg(long = "timeout", value_parser = value_parser!(u64).range(1..))
+    )]
     #[cfg_attr(
         not(feature = "pcap"),
         arg(long = "timeout", value_parser = unsupported_pcap_u64, hide = true)
@@ -785,6 +788,25 @@ mod tests {
         let err = parse_oneshot(&["--dns-type", "AAAA"]).unwrap_err();
 
         assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn transmit_count_rejects_zero_and_accepts_positive_values() {
+        let err = parse_oneshot(&["--count", "0"]).unwrap_err();
+        let parsed = parse_oneshot(&["--count", "2"]).unwrap();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        assert_eq!(parsed.options.transmit.count, Some(2));
+    }
+
+    #[cfg(feature = "pcap")]
+    #[test]
+    fn listener_timeout_rejects_zero_and_accepts_positive_values() {
+        let err = parse_oneshot(&["--timeout", "0"]).unwrap_err();
+        let parsed = parse_oneshot(&["--timeout", "3"]).unwrap();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        assert_eq!(parsed.options.listen.timeout, Some(3));
     }
 
     #[test]

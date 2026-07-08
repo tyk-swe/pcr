@@ -399,6 +399,34 @@ mod tests {
         assert_eq!(plan.rate_per_sec, Some(7));
     }
 
+    #[tokio::test]
+    async fn prepare_loopback_server_builds_local_plan_under_default_policy() {
+        let mut options = dns_request(DnsTransportMode::Auto, 0);
+        options.server = "127.0.0.1".to_string();
+
+        let prepared = prepare(&options, TrafficPolicy::default()).await.unwrap();
+
+        assert_eq!(prepared.traffic_plan.target_scope, TargetScope::Local);
+        assert!(TrafficPolicy::default()
+            .authorize(&prepared.traffic_plan)
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn prepare_public_server_is_authorized_when_policy_allows_public_targets() {
+        let mut options = dns_request(DnsTransportMode::Udp, 0);
+        options.server = "8.8.8.8".to_string();
+        let policy = TrafficPolicy {
+            allow_public_targets: true,
+            ..Default::default()
+        };
+
+        let prepared = prepare(&options, policy).await.unwrap();
+
+        assert_eq!(prepared.traffic_plan.target_scope, TargetScope::Public);
+        assert!(policy.authorize(&prepared.traffic_plan).is_ok());
+    }
+
     #[test]
     fn traffic_plan_sets_single_target_port_and_batch_metadata() {
         let options = dns_request(DnsTransportMode::Tcp, 1);

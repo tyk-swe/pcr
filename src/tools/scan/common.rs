@@ -140,6 +140,14 @@ pub(super) fn resolve_target(target: &str) -> Result<SocketAddr> {
         .with_context(|| operation_failed("resolve scan target", format!("target={target}")))
 }
 
+pub(super) fn reject_port_scan_cidr_target(target: &str) -> Result<()> {
+    if target.trim().contains('/') {
+        return Err(anyhow!("CIDR targets are not supported for port scans"));
+    }
+
+    Ok(())
+}
+
 pub(super) struct ResolvedPortScan {
     pub(super) address: SocketAddr,
     pub(super) source_override: Option<IpAddr>,
@@ -173,6 +181,7 @@ pub(super) fn resolve_port_scan(
     interface: &Option<String>,
     source_ip: &Option<String>,
 ) -> Result<ResolvedPortScan> {
+    reject_port_scan_cidr_target(target)?;
     let address = resolve_target(target)?;
     let source_override = resolve_source_override(interface, source_ip, address.ip())?;
     let ports = parse_ports(ports)?;
@@ -834,6 +843,18 @@ mod tests {
         assert!(parse_ports(" , ").is_err());
         assert!(parse_ports("abc").is_err());
         assert!(parse_ports("10-9").is_err());
+    }
+
+    #[test]
+    fn resolve_port_scan_rejects_cidr_target_explicitly() {
+        let err = match resolve_port_scan("127.0.0.0/30", "80", &None, &None) {
+            Ok(_) => panic!("CIDR port scan target should be rejected"),
+            Err(err) => err,
+        };
+
+        assert!(err
+            .to_string()
+            .contains("CIDR targets are not supported for port scans"));
     }
 
     #[test]

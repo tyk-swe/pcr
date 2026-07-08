@@ -117,7 +117,7 @@ pub(crate) struct DnsQueryOptions {
     #[arg(long = "type", default_value = "A", value_parser = dns_record_type_validator)]
     pub record_type: String,
     /// DNS server IP.
-    #[arg(long = "server", default_value = "8.8.8.8")]
+    #[arg(long = "server", default_value = "127.0.0.1")]
     pub server: String,
     /// Query timeout (in ms).
     #[arg(long = "timeout", value_parser = value_parser!(u64).range(1..), default_value_t = 1000)]
@@ -234,7 +234,7 @@ pub(crate) enum TracerouteProtocol {
 #[cfg(feature = "scan")]
 #[derive(Debug, Args, Clone)]
 pub(crate) struct PortScanOptions {
-    /// Target IP or CIDR (e.g., 192.168.1.0/24).
+    /// Target IP address or hostname.
     #[arg(long = "target")]
     pub target: String,
     /// Ports to scan (e.g., "80,443", "1-100").
@@ -299,6 +299,8 @@ pub(crate) enum ScanCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "scan")]
+    use clap::CommandFactory;
     use clap::Parser;
 
     #[derive(Debug, Parser)]
@@ -317,7 +319,7 @@ mod tests {
 
         assert_eq!(parsed.options.domain, "example.test");
         assert_eq!(parsed.options.record_type, "A");
-        assert_eq!(parsed.options.server, "8.8.8.8");
+        assert_eq!(parsed.options.server, "127.0.0.1");
         assert_eq!(parsed.options.timeout, 1000);
         assert_eq!(parsed.options.transaction_id, None);
         assert_eq!(parsed.options.transport, DnsTransportMode::Auto);
@@ -478,10 +480,27 @@ mod tests {
     }
 
     #[cfg(feature = "scan")]
+    #[allow(dead_code)]
+    #[derive(Debug, Parser)]
+    struct PortScanHarness {
+        #[command(flatten)]
+        options: PortScanOptions,
+    }
+
+    #[cfg(feature = "scan")]
     fn parse_scan(args: &[&str]) -> ScanCommand {
         ScanHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
             .unwrap()
             .command
+    }
+
+    #[cfg(feature = "scan")]
+    #[test]
+    fn port_scan_target_help_does_not_advertise_cidr() {
+        let help = PortScanHarness::command().render_long_help().to_string();
+
+        assert!(help.contains("Target IP address or hostname"));
+        assert!(!help.contains("CIDR"));
     }
 
     #[cfg(feature = "scan")]

@@ -206,34 +206,18 @@ fn build_tls_client_hello_payload(server_name: &str) -> Result<Vec<u8>> {
 }
 
 fn decode_hex_payload(hex: &str) -> Result<Vec<u8>> {
-    // Decode in single pass to avoid allocation; heuristic: start with half length (upper bound)
-    let mut bytes = Vec::with_capacity(hex.len() / 2);
+    let decoded_len = validate_hex_payload_len(hex)?;
+    let mut bytes = Vec::with_capacity(decoded_len);
     let mut high_nibble: Option<u8> = None;
-    let mut current_size: u64 = 0;
 
     for &byte in hex.as_bytes() {
         if byte.is_ascii_whitespace() {
             continue;
         }
 
-        let nibble = match byte {
-            b'0'..=b'9' => byte - b'0',
-            b'a'..=b'f' => byte - b'a' + 10,
-            b'A'..=b'F' => byte - b'A' + 10,
-            _ => return Err(PayloadError::InvalidHexByte { byte }.into()),
-        };
+        let nibble = hex_nibble(byte)?;
 
         if let Some(h) = high_nibble {
-            current_size += 1;
-            // Check size limit incrementally
-            if current_size > MAX_PAYLOAD_SIZE {
-                return Err(PayloadError::PayloadTooLarge {
-                    size: current_size,
-                    limit: MAX_PAYLOAD_SIZE,
-                }
-                .into());
-            }
-
             bytes.push((h << 4) | nibble);
             high_nibble = None;
         } else {
@@ -241,11 +225,45 @@ fn decode_hex_payload(hex: &str) -> Result<Vec<u8>> {
         }
     }
 
-    if high_nibble.is_some() {
+    debug_assert!(high_nibble.is_none());
+    debug_assert_eq!(bytes.len(), decoded_len);
+    Ok(bytes)
+}
+
+fn validate_hex_payload_len(hex: &str) -> Result<usize> {
+    let mut digit_count = 0u64;
+
+    for &byte in hex.as_bytes() {
+        if byte.is_ascii_whitespace() {
+            continue;
+        }
+
+        let _ = hex_nibble(byte)?;
+        digit_count += 1;
+
+        if digit_count > MAX_PAYLOAD_SIZE.saturating_mul(2) {
+            return Err(PayloadError::PayloadTooLarge {
+                size: digit_count.div_ceil(2),
+                limit: MAX_PAYLOAD_SIZE,
+            }
+            .into());
+        }
+    }
+
+    if !digit_count.is_multiple_of(2) {
         return Err(PayloadError::HexLength.into());
     }
 
-    Ok(bytes)
+    Ok((digit_count / 2) as usize)
+}
+
+fn hex_nibble(byte: u8) -> Result<u8> {
+    match byte {
+        b'0'..=b'9' => Ok(byte - b'0'),
+        b'a'..=b'f' => Ok(byte - b'a' + 10),
+        b'A'..=b'F' => Ok(byte - b'A' + 10),
+        _ => Err(PayloadError::InvalidHexByte { byte }.into()),
+    }
 }
 
 #[cfg(test)]
@@ -276,6 +294,25 @@ mod tests {
             err,
             SenderError::Payload(PayloadError::InvalidHexByte { byte: b'x' })
         ));
+    }
+
+    #[test]
+    fn prepare_payload_rejects_oversized_hex_before_allocating_payload() {
+        let hex = "00".repeat(MAX_PAYLOAD_SIZE as usize + 1);
+        let err = prepare_payload(&PayloadSource::Hex(hex)).unwrap_err();
+
+        assert!(matches!(
+            err,
+            SenderError::Payload(PayloadError::PayloadTooLarge { size, limit })
+                if size == MAX_PAYLOAD_SIZE + 1 && limit == MAX_PAYLOAD_SIZE
+        ));
+    }
+
+    #[test]
+    fn validate_hex_payload_len_ignores_large_whitespace_without_payload_allocation() {
+        let whitespace = " \n\t".repeat(1024 * 1024);
+
+        assert_eq!(validate_hex_payload_len(&whitespace).unwrap(), 0);
     }
 
     #[test]

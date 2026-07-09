@@ -77,9 +77,7 @@ pub(crate) fn validate_prometheus_bind(
 }
 
 fn allow_public_metrics(args: &PacketcraftArgs) -> bool {
-    args.one_shot_options()
-        .and_then(|options| options.logging.allow_public_metrics)
-        .unwrap_or(false)
+    args.observability.allow_public_metrics.unwrap_or(false)
 }
 
 #[cfg(test)]

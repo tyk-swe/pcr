@@ -58,11 +58,10 @@ struct PacketcraftApp {
     command: EngineCommand,
     runtime: Runtime,
     engine: engine::core::Engine,
-    telemetry: telemetry::AppTelemetry,
 }
 
 impl PacketcraftApp {
-    /// Build the application with its runtime, engine, and telemetry wiring in place.
+    /// Build the application with its runtime and engine wiring in place.
     fn bootstrap(args: PacketcraftArgs) -> Result<Self> {
         Self::init_logging(&args)?;
 
@@ -86,26 +85,30 @@ impl PacketcraftApp {
         )?;
         daemon_bootstrap.apply_to(&mut engine);
 
-        let telemetry =
-            telemetry::AppTelemetry::start_if_configured(&args, engine.config(), runtime.handle())?;
-
         Ok(Self {
             args,
             command,
             runtime,
             engine,
-            telemetry,
         })
     }
 
     /// Execute the command requested by the CLI arguments.
     fn run(self) -> Result<()> {
-        let _args = self.args;
-        let command = self.command;
-        let mut engine = self.engine;
-        let telemetry = self.telemetry;
+        let PacketcraftApp {
+            args,
+            command,
+            runtime,
+            mut engine,
+        } = self;
+        let runtime_handle = runtime.handle().clone();
 
-        self.runtime.block_on(async {
+        runtime.block_on(async move {
+            let telemetry = telemetry::AppTelemetry::start_if_configured(
+                &args,
+                engine.config(),
+                &runtime_handle,
+            )?;
             await_with_shutdown(dispatch::run(&mut engine, command), telemetry.shutdown()).await
         })?;
 
@@ -113,19 +116,13 @@ impl PacketcraftApp {
     }
 
     fn init_logging(args: &PacketcraftArgs) -> Result<()> {
-        let logging = args.one_shot_options().map(|options| &options.logging);
-        let level_override = logging
-            .and_then(|options| options.log_level)
-            .map(|level| level.to_level_filter());
+        let observability = &args.observability;
+        let level_override = observability.log_level.map(|level| level.to_level_filter());
         match util::logging::init(
             args.verbose,
             level_override,
-            logging
-                .and_then(|options| options.structured)
-                .unwrap_or(false),
-            logging
-                .and_then(|options| options.log_file.as_deref())
-                .map(Path::new),
+            observability.structured.unwrap_or(false),
+            observability.log_file.as_deref().map(Path::new),
         ) {
             Ok(()) => Ok(()),
             Err(util::logging::LoggingInitError::LoggerInit(_)) => {
@@ -226,6 +223,9 @@ impl ErrorReport {
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    #[cfg(feature = "metrics")]
+    use clap::Parser;
+
     use super::*;
     use crate::domain::policy::{PolicyRejection, PolicyRejectionCode};
 
@@ -280,6 +280,23 @@ mod tests {
         assert_eq!(json["error"]["kind"], "runtime");
         assert_eq!(json["error"]["message"], "runtime failure");
         assert!(json["error"]["policy_code"].is_null());
+    }
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn run_starts_prometheus_exporter_inside_runtime_for_dns_dry_run() {
+        let args = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "dns-query",
+            "--domain",
+            "example.test",
+            "--prometheus-bind",
+            "127.0.0.1:0",
+            "--dry-run",
+        ])
+        .unwrap();
+
+        run_args(args).unwrap();
     }
 
     #[tokio::test]

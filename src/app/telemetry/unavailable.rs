@@ -15,7 +15,10 @@ impl AppTelemetry {
         args: &PacketcraftArgs,
         config: &EngineConfig,
     ) -> Result<()> {
-        if config.prometheus_bind.is_some() || one_shot_metrics_options_requested(args) {
+        if config.prometheus_bind.is_some()
+            || args.observability.allow_public_metrics.unwrap_or(false)
+            || one_shot_metrics_options_requested(args)
+        {
             return Err(anyhow::anyhow!(
                 "metrics options require packetcraftr to be built with the 'metrics' feature"
             ));
@@ -36,9 +39,6 @@ impl AppTelemetry {
 
 fn one_shot_metrics_options_requested(args: &PacketcraftArgs) -> bool {
     args.one_shot_options()
-        .map(|oneshot| {
-            oneshot.logging.metrics_json.is_some()
-                || oneshot.logging.allow_public_metrics.unwrap_or(false)
-        })
+        .map(|oneshot| oneshot.logging.metrics_json.is_some())
         .unwrap_or(false)
 }

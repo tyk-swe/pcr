@@ -12,6 +12,7 @@ pub(crate) fn mac_address_validator(s: &str) -> Result<String, String> {
         .map_err(|_| format!("invalid MAC address: {s} (expected format xx:xx:xx:xx:xx:xx)"))
 }
 
+#[cfg_attr(not(feature = "metrics"), allow(dead_code))]
 pub(crate) fn socket_addr_validator(s: &str) -> Result<String, String> {
     std::net::SocketAddr::from_str(s)
         .map(|_| s.to_string())

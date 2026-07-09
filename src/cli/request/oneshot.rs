@@ -190,12 +190,26 @@ impl From<&options::ListenOptions> for req::ListenerRequest {
     }
 }
 
-impl From<&options::LoggingOptions> for req::LoggingRequest {
-    fn from(options: &options::LoggingOptions) -> Self {
+impl From<&options::PacketLoggingOptions> for req::LoggingRequest {
+    fn from(options: &options::PacketLoggingOptions) -> Self {
         Self {
-            log_file: options.log_file.clone(),
+            log_file: None,
             pcap_write: options.pcap_write.clone(),
             metrics_json: options.metrics_json.clone(),
+            log_level: None,
+            structured: None,
+            prometheus_bind: None,
+            allow_public_metrics: None,
+        }
+    }
+}
+
+impl From<&options::ObservabilityOptions> for req::LoggingRequest {
+    fn from(options: &options::ObservabilityOptions) -> Self {
+        Self {
+            log_file: options.log_file.clone(),
+            pcap_write: None,
+            metrics_json: None,
             log_level: options.log_level.map(req::LogLevel::from),
             structured: options.structured,
             prometheus_bind: options.prometheus_bind.clone(),
@@ -257,14 +271,9 @@ mod tests {
                 rules_file: Some("rules.yml".to_string()),
                 ..Default::default()
             },
-            logging: options::LoggingOptions {
-                log_file: Some("app.log".to_string()),
+            logging: options::PacketLoggingOptions {
                 pcap_write: Some("sent.pcap".to_string()),
                 metrics_json: Some("metrics.json".to_string()),
-                log_level: Some(cli_enums::LogLevel::Debug),
-                structured: Some(true),
-                prometheus_bind: Some("127.0.0.1:9090".to_string()),
-                allow_public_metrics: Some(true),
             },
             ..Default::default()
         };
@@ -293,11 +302,32 @@ mod tests {
         assert_eq!(request.transmit.count, Some(3));
         assert_eq!(request.listener.filter.as_deref(), Some("icmp"));
         assert_eq!(request.rules_file.as_deref(), Some("rules.yml"));
-        assert_eq!(request.logging.log_level, Some(req::LogLevel::Debug));
+        assert_eq!(request.logging.pcap_write.as_deref(), Some("sent.pcap"));
         assert_eq!(
-            request.logging.prometheus_bind.as_deref(),
-            Some("127.0.0.1:9090")
+            request.logging.metrics_json.as_deref(),
+            Some("metrics.json")
         );
+        assert_eq!(request.logging.log_file, None);
+        assert_eq!(request.logging.log_level, None);
+    }
+
+    #[test]
+    fn observability_options_map_to_logging_request() {
+        let request = req::LoggingRequest::from(&options::ObservabilityOptions {
+            log_file: Some("app.log".to_string()),
+            log_level: Some(cli_enums::LogLevel::Debug),
+            structured: Some(true),
+            prometheus_bind: Some("127.0.0.1:9090".to_string()),
+            allow_public_metrics: Some(true),
+        });
+
+        assert_eq!(request.log_file.as_deref(), Some("app.log"));
+        assert_eq!(request.log_level, Some(req::LogLevel::Debug));
+        assert_eq!(request.structured, Some(true));
+        assert_eq!(request.prometheus_bind.as_deref(), Some("127.0.0.1:9090"));
+        assert_eq!(request.allow_public_metrics, Some(true));
+        assert_eq!(request.pcap_write, None);
+        assert_eq!(request.metrics_json, None);
     }
 
     #[test]

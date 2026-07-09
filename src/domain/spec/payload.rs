@@ -1,6 +1,7 @@
 // Copyright (C) 2026 rkdxodud-tyk
 // SPDX-License-Identifier: AGPL-3.0-only
 
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::PathBuf;
 
 use super::error::{SpecError, SpecResult};
@@ -119,10 +120,123 @@ fn validate_http_path(path: &str) -> SpecResult<()> {
 }
 
 fn validate_http_host(host: &str) -> SpecResult<()> {
-    if host.is_empty() || host.chars().any(|ch| ch.is_control() || ch.is_whitespace()) {
+    if host.is_empty()
+        || host.chars().any(|ch| ch.is_control() || ch.is_whitespace())
+        || host.contains(['/', '?', '#'])
+    {
+        return Err(SpecError::InvalidHttpHost);
+    }
+
+    if let Some(rest) = host.strip_prefix('[') {
+        return validate_bracketed_ipv6_authority(rest);
+    }
+
+    if host.contains(['[', ']']) {
+        return Err(SpecError::InvalidHttpHost);
+    }
+
+    let colon_count = host.bytes().filter(|byte| *byte == b':').count();
+    if colon_count > 1 {
+        return Err(SpecError::InvalidHttpHost);
+    }
+
+    let host_part = if colon_count == 1 {
+        let (host_part, port) = host.rsplit_once(':').ok_or(SpecError::InvalidHttpHost)?;
+        validate_http_authority_port(port)?;
+        host_part
+    } else {
+        host
+    };
+
+    validate_http_authority_host(host_part)
+}
+
+fn validate_bracketed_ipv6_authority(rest: &str) -> SpecResult<()> {
+    let (addr, suffix) = rest.split_once(']').ok_or(SpecError::InvalidHttpHost)?;
+    if addr.parse::<Ipv6Addr>().is_err() {
+        return Err(SpecError::InvalidHttpHost);
+    }
+
+    if suffix.is_empty() {
+        return Ok(());
+    }
+
+    let port = suffix.strip_prefix(':').ok_or(SpecError::InvalidHttpHost)?;
+    validate_http_authority_port(port)
+}
+
+fn validate_http_authority_host(host: &str) -> SpecResult<()> {
+    if host.is_empty() {
+        return Err(SpecError::InvalidHttpHost);
+    }
+
+    if host.parse::<Ipv4Addr>().is_ok() || is_valid_reg_name(host) {
+        Ok(())
+    } else {
+        Err(SpecError::InvalidHttpHost)
+    }
+}
+
+fn validate_http_authority_port(port: &str) -> SpecResult<()> {
+    if port.is_empty()
+        || !port.bytes().all(|byte| byte.is_ascii_digit())
+        || port.parse::<u16>().is_err()
+    {
         return Err(SpecError::InvalidHttpHost);
     }
     Ok(())
+}
+
+fn is_valid_reg_name(host: &str) -> bool {
+    if host.is_empty() || !host.is_ascii() {
+        return false;
+    }
+
+    let bytes = host.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'%' => {
+                let Some(encoded) = bytes.get(index + 1..index + 3) else {
+                    return false;
+                };
+                if !encoded.iter().all(|byte| byte.is_ascii_hexdigit()) {
+                    return false;
+                }
+                index += 3;
+            }
+            byte if is_reg_name_unescaped_byte(byte) => {
+                index += 1;
+            }
+            _ => return false,
+        }
+    }
+
+    true
+}
+
+fn is_reg_name_unescaped_byte(byte: u8) -> bool {
+    matches!(
+        byte,
+        b'A'..=b'Z'
+            | b'a'..=b'z'
+            | b'0'..=b'9'
+            | b'-'
+            | b'.'
+            | b'_'
+            | b'~'
+            | b'!'
+            | b'$'
+            | b'&'
+            | b'\''
+            | b'('
+            | b')'
+            | b'*'
+            | b'+'
+            | b','
+            | b';'
+            | b'='
+    )
 }
 
 fn validate_dns_query_name(value: &str) -> SpecResult<()> {
@@ -367,6 +481,69 @@ mod tests {
                 host: Some(host)
             } if method == "GET" && path == "/" && host == "example.test"
         ));
+    }
+
+    #[test]
+    fn payload_spec_accepts_valid_http_host_authorities() {
+        for host in [
+            "example.test",
+            "example.test:8080",
+            "localhost",
+            "127.0.0.1",
+            "127.0.0.1:80",
+            "[2001:db8::1]",
+            "[2001:db8::1]:443",
+            "xn--bcher-kva.example",
+            "service_name.example",
+            "name%2Dencoded.example",
+        ] {
+            let spec = PayloadSpec::from_request(&PayloadRequest {
+                http_method: Some("GET".to_string()),
+                http_host: Some(host.to_string()),
+                ..Default::default()
+            })
+            .unwrap();
+
+            assert!(matches!(
+                spec.source,
+                PayloadSource::Http { host: Some(ref actual), .. } if actual == host
+            ));
+        }
+    }
+
+    #[test]
+    fn payload_spec_rejects_invalid_http_host_authorities() {
+        for host in [
+            "",
+            "bad host",
+            "bad\thost",
+            "example.test/path",
+            "example.test?x=1",
+            "example.test#frag",
+            "example.test:",
+            "example.test:http",
+            "example.test:65536",
+            ":443",
+            "2001:db8::1",
+            "[2001:db8::1",
+            "[2001:db8::1]extra",
+            "[2001:db8::1]:",
+            "[2001:db8::1]:notaport",
+            "[2001:db8::1]:65536",
+            "[not::ip]",
+            "[127.0.0.1]",
+            "name%zz.example",
+            "user@example.test",
+        ] {
+            let err = PayloadSpec::from_request(&PayloadRequest {
+                http_method: Some("GET".to_string()),
+                http_host: Some(host.to_string()),
+                ..Default::default()
+            })
+            .unwrap_err();
+
+            assert!(matches!(err, SpecError::InvalidHttpHost), "host={host}");
+        }
     }
 
     #[test]

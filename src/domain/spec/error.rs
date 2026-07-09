@@ -150,7 +150,7 @@ pub(crate) enum SpecError {
     InvalidHttpMethod,
     #[error("HTTP path must start with '/' and contain no control characters")]
     InvalidHttpPath,
-    #[error("HTTP host must not be empty or contain whitespace/control characters")]
+    #[error("HTTP host must be a valid authority without whitespace, control characters, path, query, or fragment")]
     InvalidHttpHost,
     #[error("{field} must be a non-empty ASCII DNS hostname within DNS length limits")]
     InvalidDnsHostname { field: &'static str },

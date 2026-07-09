@@ -219,7 +219,7 @@ async fn handle_metrics_request(
         ));
     }
 
-    cache_guard.data = buffer.clone();
+    cache_guard.data.clone_from(&buffer);
     cache_guard.last_update = Instant::now();
 
     Ok(Response::builder()

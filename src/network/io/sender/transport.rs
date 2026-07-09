@@ -240,7 +240,10 @@ fn build_icmp_segment(spec: &IcmpSpec, payload: &[u8]) -> Result<Vec<u8>> {
         .kind
         .map(IcmpType::new)
         .unwrap_or(IcmpTypes::EchoRequest);
-    let icmp_code = spec.code.map(IcmpCode::new).unwrap_or(IcmpCode::new(0));
+    let icmp_code = spec
+        .code
+        .map(IcmpCode::new)
+        .unwrap_or_else(|| IcmpCode::new(0));
 
     {
         let mut packet = MutableIcmpPacket::new(&mut buffer)

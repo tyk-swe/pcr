@@ -114,13 +114,10 @@ pub(crate) fn resolve_mac(
         }
     })?;
 
-    let (mut tx, mut rx) = match channel {
-        Channel::Ethernet(tx, rx) => (tx, rx),
-        _ => {
-            return Err(NeighborDiscoveryError::ChannelUnsupported {
-                interface: interface.name.clone(),
-            });
-        }
+    let Channel::Ethernet(mut tx, mut rx) = channel else {
+        return Err(NeighborDiscoveryError::ChannelUnsupported {
+            interface: interface.name.clone(),
+        });
     };
 
     let mut frame =

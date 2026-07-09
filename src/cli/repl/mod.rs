@@ -247,7 +247,8 @@ async fn run_interactive_session(
         // Handle !N history replay
         let mut command_text = trimmed.to_string();
         if trimmed.starts_with('!') {
-            let history_vec: Vec<String> = editor.history().iter().map(|s| s.to_string()).collect();
+            let history_vec: Vec<String> =
+                editor.history().iter().map(ToString::to_string).collect();
             match recall_from_history(trimmed, &history_vec) {
                 Some((index, recalled)) => {
                     println!("!{} -> {}", index, recalled);

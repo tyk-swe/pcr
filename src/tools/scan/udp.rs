@@ -412,7 +412,7 @@ fn build_udp_packet(
 ) -> Result<Vec<u8>> {
     let mut vec = vec![0u8; 8];
     let mut packet =
-        MutableUdpPacket::new(&mut vec).ok_or(anyhow!("failed to create UDP packet"))?;
+        MutableUdpPacket::new(&mut vec).ok_or_else(|| anyhow!("failed to create UDP packet"))?;
 
     packet.set_source(source_port);
     packet.set_destination(destination_port);

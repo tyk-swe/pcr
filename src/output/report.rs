@@ -78,8 +78,8 @@ pub(crate) fn preflight_report(spec: &PacketSpec, view: &PreflightView) -> Prefl
             "interface_reason": view.interface_reason
         }),
         layer2: serde_json::json!({
-            "smac": spec.layer2.source.as_ref().map(|mac| mac.to_string()),
-            "dmac": spec.layer2.destination.as_ref().map(|mac| mac.to_string()),
+            "smac": spec.layer2.source.as_ref().map(ToString::to_string),
+            "dmac": spec.layer2.destination.as_ref().map(ToString::to_string),
             "ethertype": spec.layer2.ethertype
         }),
         ip: spec.ip.as_ref().map(|ip| {

@@ -200,7 +200,7 @@ fn is_valid_reg_name(host: &str) -> bool {
                 let Some(encoded) = bytes.get(index + 1..index + 3) else {
                     return false;
                 };
-                if !encoded.iter().all(|byte| byte.is_ascii_hexdigit()) {
+                if !encoded.iter().all(u8::is_ascii_hexdigit) {
                     return false;
                 }
                 index += 3;

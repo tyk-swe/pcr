@@ -281,7 +281,7 @@ fn build_summary(
     frames: &[Vec<u8>],
     transport_label: &'static str,
 ) -> TransmissionSummary {
-    let largest_frame_len = frames.iter().map(|frame| frame.len()).max().unwrap_or(0);
+    let largest_frame_len = frames.iter().map(Vec::len).max().unwrap_or(0);
     TransmissionSummary {
         payload_len: context.payload.len(),
         largest_frame_len,

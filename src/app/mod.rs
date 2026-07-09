@@ -117,7 +117,9 @@ impl PacketcraftApp {
 
     fn init_logging(args: &PacketcraftArgs) -> Result<()> {
         let observability = &args.observability;
-        let level_override = observability.log_level.map(|level| level.to_level_filter());
+        let level_override = observability
+            .log_level
+            .map(crate::cli::enums::LogLevel::to_level_filter);
         match util::logging::init(
             args.verbose,
             level_override,
@@ -273,7 +275,7 @@ mod tests {
             })
             .unwrap()
         } else {
-            serde_json::json!({ "error": report.message.clone() })
+            serde_json::json!({ "error": report.message })
         };
 
         assert_eq!(json["status"], "error");

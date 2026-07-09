@@ -70,9 +70,8 @@ pub(crate) fn resolve_layer2_ipv4(
         }
     };
 
-    let destination = match destination {
-        Some(mac) => mac,
-        None => return Ok(None),
+    let Some(destination) = destination else {
+        return Ok(None);
     };
 
     let source = if let Some(mac) = spec.layer2.source {
@@ -142,9 +141,8 @@ pub(crate) fn resolve_layer2_ipv6(
         spec.layer2.destination.map(to_pnet_mac)
     };
 
-    let destination = match destination {
-        Some(mac) => mac,
-        None => return Ok(None),
+    let Some(destination) = destination else {
+        return Ok(None);
     };
 
     let source = if let Some(mac) = spec.layer2.source {

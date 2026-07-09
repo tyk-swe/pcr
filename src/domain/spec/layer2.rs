@@ -41,17 +41,14 @@ pub(crate) struct VlanTag {
 }
 
 pub(crate) fn parse_vlan_tag(request: &VlanRequest) -> SpecResult<Option<VlanTag>> {
-    let id = match request.id {
-        Some(value) => value,
-        None => {
-            if request.priority.is_some() {
-                return Err(SpecError::VlanPriorityRequiresId);
-            }
-            if request.drop_eligible_indicator.unwrap_or(false) {
-                return Err(SpecError::VlanDeiRequiresId);
-            }
-            return Ok(None);
+    let Some(id) = request.id else {
+        if request.priority.is_some() {
+            return Err(SpecError::VlanPriorityRequiresId);
         }
+        if request.drop_eligible_indicator.unwrap_or(false) {
+            return Err(SpecError::VlanDeiRequiresId);
+        }
+        return Ok(None);
     };
 
     if !(1..=4094).contains(&id) {

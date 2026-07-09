@@ -113,8 +113,9 @@ fn measure_single_extension_header(
     final_destination: Ipv6Addr,
 ) -> Ipv6Result<usize> {
     match header {
-        Ipv6ExtHeader::HopByHop { options } => measure_options_header(options),
-        Ipv6ExtHeader::DestinationOptions { options } => measure_options_header(options),
+        Ipv6ExtHeader::HopByHop { options } | Ipv6ExtHeader::DestinationOptions { options } => {
+            measure_options_header(options)
+        }
         Ipv6ExtHeader::Routing { segments, .. } => {
             measure_routing_header(segments, final_destination)
         }

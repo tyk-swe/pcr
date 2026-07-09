@@ -200,7 +200,7 @@ fn capture_loop(
         Ok(channel) => channel,
         Err(err) => {
             return Err(PcapListenerError::CaptureChannel {
-                interface: interface.name.clone(),
+                interface: interface.name,
                 source: err,
             }
             .into());
@@ -211,7 +211,7 @@ fn capture_loop(
         Channel::Ethernet(_, rx) => ((), rx),
         _ => {
             return Err(PcapListenerError::UnsupportedChannel {
-                interface: interface.name.clone(),
+                interface: interface.name,
             }
             .into());
         }
@@ -239,7 +239,7 @@ fn capture_loop(
                         if let Err(err) = writer.record(frame) {
                             // Continue streaming even if capture persistence fails
                             if let Some(label) = capture_label.as_ref() {
-                                warn!("failed to record packet to {}: {err}", label);
+                                warn!("failed to record packet to {label}: {err}");
                             } else {
                                 warn!("failed to record packet to capture file: {err}");
                             }
@@ -276,7 +276,7 @@ fn capture_loop(
             Err(err) => {
                 warn!("error reading packet from {}: {err}", interface.name);
                 return Err(PcapListenerError::CaptureRead {
-                    interface: interface.name.clone(),
+                    interface: interface.name,
                     source: err,
                 }
                 .into());
@@ -339,7 +339,7 @@ fn capture_loop_with_pcap(
         Ok(cap) => cap,
         Err(source) => {
             return Err(PcapListenerError::PcapOpen {
-                interface: interface.name.clone(),
+                interface: interface.name,
                 source,
             }
             .into());
@@ -432,7 +432,7 @@ fn capture_loop_from_pcap(
                     interface.name
                 );
                 return Err(PcapListenerError::CaptureReadPcap {
-                    interface: interface.name.clone(),
+                    interface: interface.name,
                     source: err,
                 }
                 .into());

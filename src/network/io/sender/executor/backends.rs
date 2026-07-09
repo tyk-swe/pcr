@@ -54,7 +54,7 @@ where
 
     let (mut tx, drain) = match channel {
         Channel::Ethernet(tx, rx) => {
-            let drain = DatalinkDrain::spawn(interface_name.clone(), rx);
+            let drain = DatalinkDrain::spawn(interface_name, rx);
             (tx, drain)
         }
         _ => {

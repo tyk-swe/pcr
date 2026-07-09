@@ -74,7 +74,7 @@ pub(crate) fn apply_template(template: &str, packet: Option<&PacketContext>) -> 
 fn sanitize_input(input: &str) -> Cow<'_, str> {
     // Retain only non-control characters to prevent log injection (e.g. newlines)
     // and argument confusion.
-    if input.chars().any(|c| c.is_control()) {
+    if input.chars().any(char::is_control) {
         Cow::Owned(input.chars().filter(|c| !c.is_control()).collect())
     } else {
         Cow::Borrowed(input)

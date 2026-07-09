@@ -183,12 +183,14 @@ impl RuleEngine {
 
     #[cfg(any(test, feature = "daemon", feature = "repl"))]
     pub(crate) fn has_receive_triggers(&self) -> bool {
-        self.rules.iter().any(|rule| rule.triggers_on_receive())
+        self.rules
+            .iter()
+            .any(super::rule::Rule::triggers_on_receive)
     }
 
     #[cfg(any(test, feature = "daemon"))]
     pub(crate) fn has_timer_triggers(&self) -> bool {
-        self.rules.iter().any(|rule| rule.triggers_on_timer())
+        self.rules.iter().any(super::rule::Rule::triggers_on_timer)
     }
 
     pub(crate) fn has_startup_triggers(&self) -> bool {

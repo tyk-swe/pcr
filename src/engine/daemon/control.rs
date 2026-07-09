@@ -226,14 +226,11 @@ pub(super) async fn handle_control_stream(
             break;
         }
 
-        let line_str = match String::from_utf8(buf.clone()) {
-            Ok(s) => s,
-            Err(_) => {
-                let message = "ERR invalid utf8";
-                writer.write_all(message.as_bytes()).await?;
-                writer.write_all(b"\n").await?;
-                continue;
-            }
+        let Ok(line_str) = std::str::from_utf8(&buf) else {
+            let message = "ERR invalid utf8";
+            writer.write_all(message.as_bytes()).await?;
+            writer.write_all(b"\n").await?;
+            continue;
         };
 
         let line = line_str.trim();

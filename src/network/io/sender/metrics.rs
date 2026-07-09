@@ -24,7 +24,7 @@ pub(crate) fn emit_metrics_snapshot(plan: &NetworkTransmissionPlan) -> Result<()
     }
 
     let frames_per_iteration = plan.frames.len();
-    let frame_sizes: Vec<usize> = plan.frames.iter().map(|frame| frame.len()).collect();
+    let frame_sizes: Vec<usize> = plan.frames.iter().map(Vec::len).collect();
     let bytes_per_iteration: usize = frame_sizes.iter().sum();
     let largest_frame = plan.summary.largest_frame_len;
 

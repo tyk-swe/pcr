@@ -54,12 +54,12 @@ pub(crate) async fn run_icmp(
 
     // Validate source override compatibility against the target address family.
     if let Some(src) = source_override {
-        if src.is_ipv4() && targets.iter().any(|t| t.is_ipv6()) {
+        if src.is_ipv4() && targets.iter().any(SocketAddr::is_ipv6) {
             return Err(anyhow!(
                 "IPv4 interface override cannot be used for IPv6 targets"
             ));
         }
-        if src.is_ipv6() && targets.iter().any(|t| t.is_ipv4()) {
+        if src.is_ipv6() && targets.iter().any(SocketAddr::is_ipv4) {
             return Err(anyhow!(
                 "IPv6 interface override cannot be used for IPv4 targets"
             ));
@@ -131,8 +131,8 @@ fn perform_icmp_scan(
     source_override: Option<IpAddr>,
     send_delay: Option<Duration>,
 ) -> Result<Vec<IpAddr>> {
-    let has_v4 = targets.iter().any(|t| t.is_ipv4());
-    let has_v6 = targets.iter().any(|t| t.is_ipv6());
+    let has_v4 = targets.iter().any(SocketAddr::is_ipv4);
+    let has_v6 = targets.iter().any(SocketAddr::is_ipv6);
 
     let mut tx_v4: Option<RealIcmpTx> = None;
     let mut rx_v4: Option<RealIcmpRx> = None;
@@ -403,7 +403,7 @@ impl<'a> IcmpScanTx for RealIcmpTx<'a> {
     fn send_echo_request(&mut self, dest: SocketAddr, id: u16, seq: u16) -> Result<()> {
         let mut vec = vec![0u8; 8]; // Echo request minimal
         let mut packet =
-            MutableEchoRequestPacketV4::new(&mut vec).ok_or(anyhow!("create packet"))?;
+            MutableEchoRequestPacketV4::new(&mut vec).ok_or_else(|| anyhow!("create packet"))?;
         packet.set_icmp_type(IcmpTypes::EchoRequest);
         packet.set_icmp_code(echo_request::IcmpCodes::NoCode);
         packet.set_identifier(id);
@@ -441,7 +441,7 @@ impl IcmpScanTx for BoundIcmpTx {
     fn send_echo_request(&mut self, dest: SocketAddr, id: u16, seq: u16) -> Result<()> {
         let mut vec = vec![0u8; 8];
         let mut packet =
-            MutableEchoRequestPacketV4::new(&mut vec).ok_or(anyhow!("create packet"))?;
+            MutableEchoRequestPacketV4::new(&mut vec).ok_or_else(|| anyhow!("create packet"))?;
         packet.set_icmp_type(IcmpTypes::EchoRequest);
         packet.set_icmp_code(echo_request::IcmpCodes::NoCode);
         packet.set_identifier(id);
@@ -487,7 +487,7 @@ impl IcmpScanTx for BoundIcmpTxV6 {
     fn send_echo_request(&mut self, dest: SocketAddr, id: u16, seq: u16) -> Result<()> {
         let mut vec = vec![0u8; 8];
         let mut packet =
-            MutableEchoRequestPacketV6::new(&mut vec).ok_or(anyhow!("create packet"))?;
+            MutableEchoRequestPacketV6::new(&mut vec).ok_or_else(|| anyhow!("create packet"))?;
         packet.set_icmpv6_type(Icmpv6Types::EchoRequest);
         packet.set_icmpv6_code(Icmpv6Code(0));
         packet.set_identifier(id);
@@ -515,7 +515,7 @@ impl<'a> IcmpScanRx for RealIcmpRx<'a> {
         if let Some((packet, addr)) = self.iter.next_with_timeout(timeout)? {
             if packet.get_icmp_type() == IcmpTypes::EchoReply {
                 let echo = echo_reply::EchoReplyPacket::new(packet.packet())
-                    .ok_or(anyhow!("parse echo"))?;
+                    .ok_or_else(|| anyhow!("parse echo"))?;
                 return Ok(Some((
                     addr,
                     echo.get_identifier(),
@@ -535,7 +535,7 @@ impl<'a> IcmpScanRx for RealIcmpv6Rx<'a> {
         if let Some((packet, addr)) = self.iter.next_with_timeout(timeout)? {
             if packet.get_icmpv6_type() == Icmpv6Types::EchoReply {
                 let echo = echo_reply_v6::EchoReplyPacket::new(packet.packet())
-                    .ok_or(anyhow!("parse echo v6"))?;
+                    .ok_or_else(|| anyhow!("parse echo v6"))?;
                 return Ok(Some((
                     addr,
                     echo.get_identifier(),

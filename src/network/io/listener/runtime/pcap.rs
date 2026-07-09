@@ -78,7 +78,7 @@ pub(crate) fn spawn_background(
     startup: Option<ListenerStartupSignal>,
 ) -> ListenerResult<JoinHandle<ListenerResult<()>>> {
     let runtime = ListenerRuntimeConfig::from_request(options)?;
-    let interface_hint = interface_hint.map(|s| s.to_string());
+    let interface_hint = interface_hint.map(str::to_string);
 
     Ok(tokio::spawn(async move {
         run_internal(
@@ -109,7 +109,7 @@ async fn run_internal(
         Ok(interface) => interface,
         Err(source) => {
             let err = PcapListenerError::InterfaceLookup {
-                hint: interface_hint.map(|s| s.to_string()),
+                hint: interface_hint.map(str::to_string),
                 source,
             };
             if let Some(startup) = startup {

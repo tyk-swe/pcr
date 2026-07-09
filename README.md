@@ -180,6 +180,6 @@ v0.2 targets Rust developers and network engineers who need packet-laboratory pr
 
 ## License
 
-Copyright (C) 2026 rkdxodud-tyk.
+Copyright (C) 2026 tyk-swe.
 
 PacketcraftR is distributed under the [AGPL-3.0-only](LICENSE) license. There is no warranty; see the license for details.

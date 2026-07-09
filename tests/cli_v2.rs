@@ -1,4 +1,4 @@
-// Copyright (C) 2026 rkdxodud-tyk
+// Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::Write;

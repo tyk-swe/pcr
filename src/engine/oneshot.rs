@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use anyhow::{Context, Result};
+#[cfg(feature = "pcap")]
+use log::warn;
 use log::{debug, info};
 #[cfg(feature = "pcap")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(feature = "pcap")]
+use std::time::Duration;
 
 use crate::domain::policy::TrafficMode;
 use crate::domain::request::PacketRequest;
@@ -13,6 +17,9 @@ use crate::domain::spec::PacketSpec;
 use crate::domain::transmission::TransmissionPlan;
 use crate::engine::core::Engine;
 use crate::engine::error::{EngineError, EngineResult};
+
+#[cfg(feature = "pcap")]
+const LISTENER_STARTUP_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) struct OneShotFlow<'engine> {
     engine: &'engine mut Engine,
@@ -136,13 +143,14 @@ impl<'engine> OneShotFlow<'engine> {
     pub(crate) async fn execute(mut self) -> Result<()> {
         let spec = self.take_spec()?;
         let plan = self.take_plan()?;
-        self.engine.send.execute_plan(plan).await?;
 
-        if !self.engine.config.dry_run {
-            self.maybe_run_listener(spec.as_ref()).await?;
+        if self.engine.config.dry_run {
+            self.engine.send.execute_plan(plan).await?;
+            return Ok(());
         }
 
-        Ok(())
+        self.execute_live_plan_with_optional_listener(spec.as_ref(), plan)
+            .await
     }
 
     fn spec(&self) -> Result<&PacketSpec> {
@@ -200,28 +208,35 @@ impl<'engine> OneShotFlow<'engine> {
     }
 
     #[cfg(not(feature = "pcap"))]
-    async fn maybe_run_listener(&mut self, spec: &PacketSpec) -> Result<()> {
-        if spec.listener.enabled {
-            self.engine
-                .dependencies
-                .listener_runner
-                .run_for_packet(
-                    spec.listener.clone(),
-                    spec.target.interface.clone(),
-                    self.engine.listener_handler(),
-                )
-                .await
-                .map_err(|source| anyhow::Error::from(EngineError::Listener(source)))?;
-        }
-        Ok(())
+    async fn execute_live_plan_with_optional_listener(
+        &mut self,
+        _spec: &PacketSpec,
+        plan: TransmissionPlan,
+    ) -> Result<()> {
+        self.engine.send.execute_plan(plan).await
     }
 
     #[cfg(feature = "pcap")]
-    async fn maybe_run_listener(&mut self, spec: &PacketSpec) -> Result<()> {
-        if let Some(listener) = self.start_listener(spec).await? {
-            self.wait_for_listener(listener).await?;
+    async fn execute_live_plan_with_optional_listener(
+        &mut self,
+        spec: &PacketSpec,
+        plan: TransmissionPlan,
+    ) -> Result<()> {
+        let listener = self.start_listener(spec).await?;
+        let send_result = self.engine.send.execute_plan(plan).await;
+
+        if let Some(listener) = listener {
+            listener.shutdown.store(false, Ordering::SeqCst);
+            if let Err(listener_err) = self.wait_for_listener(listener).await {
+                if send_result.is_err() {
+                    warn!("listener shutdown failed after send error: {listener_err:#}");
+                } else {
+                    return Err(listener_err);
+                }
+            }
         }
-        Ok(())
+
+        send_result
     }
 
     #[cfg(feature = "pcap")]
@@ -249,9 +264,9 @@ impl<'engine> OneShotFlow<'engine> {
             ),
         };
 
-        match startup_rx.await {
-            Ok(Ok(())) => Ok(Some(listener)),
-            Ok(Err(message)) => {
+        match tokio::time::timeout(LISTENER_STARTUP_TIMEOUT, startup_rx).await {
+            Ok(Ok(Ok(()))) => Ok(Some(listener)),
+            Ok(Ok(Err(message))) => {
                 listener.shutdown.store(false, Ordering::SeqCst);
                 match self.wait_for_listener(listener).await {
                     Ok(()) => Err(anyhow::Error::from(EngineError::Listener(anyhow::anyhow!(
@@ -260,11 +275,20 @@ impl<'engine> OneShotFlow<'engine> {
                     Err(err) => Err(err),
                 }
             }
-            Err(_) => {
+            Ok(Err(_)) => {
                 listener.shutdown.store(false, Ordering::SeqCst);
                 match self.wait_for_listener(listener).await {
                     Ok(()) => Err(anyhow::Error::from(EngineError::Listener(anyhow::anyhow!(
                         "listener task exited before reporting readiness"
+                    )))),
+                    Err(err) => Err(err),
+                }
+            }
+            Err(_) => {
+                listener.shutdown.store(false, Ordering::SeqCst);
+                match self.wait_for_listener(listener).await {
+                    Ok(()) => Err(anyhow::Error::from(EngineError::Listener(anyhow::anyhow!(
+                        "listener startup acknowledgement timed out"
                     )))),
                     Err(err) => Err(err),
                 }
@@ -521,7 +545,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn execute_starts_listener_after_send() {
+    async fn one_shot_listener_starts_before_send() {
         let state = Arc::new(SharedState::default());
         let mut engine = engine(
             ListenerMode::ReadyUntilSend,
@@ -552,12 +576,12 @@ mod tests {
 
         assert_eq!(
             state.events(),
-            ["send", "listener_start", "listener_finish"]
+            ["listener_start", "send", "listener_finish"]
         );
     }
 
     #[tokio::test]
-    async fn execute_reports_listener_startup_failure_after_send() {
+    async fn one_shot_listener_startup_failure_prevents_send() {
         let state = Arc::new(SharedState::default());
         let mut engine = engine(
             ListenerMode::FailStartup,
@@ -587,12 +611,12 @@ mod tests {
             .unwrap_err();
 
         assert!(error_chain_contains(&err, "listener startup failed"));
-        assert_eq!(state.send_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(state.events(), ["send", "listener_start"]);
+        assert_eq!(state.send_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(state.events(), ["listener_start"]);
     }
 
     #[tokio::test]
-    async fn execute_does_not_start_listener_when_send_fails() {
+    async fn execute_stops_listener_when_send_fails() {
         let state = Arc::new(SharedState::default());
         let mut engine = engine(
             ListenerMode::ReadyUntilShutdown,
@@ -623,6 +647,9 @@ mod tests {
 
         assert!(error_chain_contains(&err, "send failed"));
         assert_eq!(state.send_calls.load(Ordering::SeqCst), 1);
-        assert_eq!(state.events(), ["send"]);
+        assert_eq!(
+            state.events(),
+            ["listener_start", "send", "listener_finish"]
+        );
     }
 }

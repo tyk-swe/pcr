@@ -6,6 +6,8 @@ use std::time::Duration;
 
 use crate::domain::request::ListenerRequest;
 
+pub(crate) const DEFAULT_ONE_SHOT_LISTENER_TIMEOUT: Duration = Duration::from_secs(3);
+
 #[cfg(any(feature = "daemon", feature = "pcap"))]
 pub(crate) const DEFAULT_QUEUE_CAPACITY: usize = 256;
 #[cfg(any(feature = "daemon", feature = "pcap"))]
@@ -37,7 +39,10 @@ impl NormalizedListenerRequest {
             filter: request.filter.clone(),
             promiscuous: request.promiscuous.unwrap_or(false),
             show_reply,
-            timeout: request.timeout.map(Duration::from_secs),
+            timeout: request
+                .timeout
+                .map(Duration::from_secs)
+                .or_else(|| enabled.then_some(DEFAULT_ONE_SHOT_LISTENER_TIMEOUT)),
             capture_file,
             implicit,
             queue_capacity: request.queue_capacity,
@@ -158,7 +163,19 @@ mod tests {
 
             assert!(normalized.enabled);
             assert!(normalized.implicit);
+            assert_eq!(normalized.timeout, Some(DEFAULT_ONE_SHOT_LISTENER_TIMEOUT));
         }
+    }
+
+    #[test]
+    fn normalized_listener_request_defaults_explicit_listener_timeout() {
+        let normalized = NormalizedListenerRequest::from_request(&ListenerRequest {
+            listen: Some(true),
+            ..Default::default()
+        });
+
+        assert!(normalized.enabled);
+        assert_eq!(normalized.timeout, Some(DEFAULT_ONE_SHOT_LISTENER_TIMEOUT));
     }
 
     #[test]

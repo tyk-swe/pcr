@@ -1,0 +1,12 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "build",
+  "status": "error",
+  "error": {
+    "code": "packet.3",
+    "kind": "packet",
+    "message": "layer ethernet cannot contain adjacent layer udp",
+    "causes": []
+  },
+  "diagnostics": []
+}

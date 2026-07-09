@@ -1,0 +1,93 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "destination": {
+          "type": "mac",
+          "value": [2, 0, 0, 0, 0, 2]
+        },
+        "source": {
+          "type": "mac",
+          "value": [2, 0, 0, 0, 0, 1]
+        },
+        "ether_type": {
+          "type": "text",
+          "value": "auto"
+        }
+      }
+    },
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "total_length": {
+          "type": "text",
+          "value": "auto"
+        },
+        "identification": {
+          "type": "unsigned",
+          "value": 4660
+        },
+        "dont_fragment": {
+          "type": "bool",
+          "value": true
+        },
+        "ttl": {
+          "type": "unsigned",
+          "value": 64
+        },
+        "protocol": {
+          "type": "text",
+          "value": "auto"
+        },
+        "checksum": {
+          "type": "text",
+          "value": "auto"
+        },
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "192.0.2.2"
+        },
+        "options": {
+          "type": "bytes",
+          "value": []
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "source_port": {
+          "type": "unsigned",
+          "value": 49152
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 9
+        },
+        "length": {
+          "type": "text",
+          "value": "auto"
+        },
+        "checksum": {
+          "type": "text",
+          "value": "auto"
+        }
+      }
+    },
+    {
+      "protocol": "raw",
+      "fields": {
+        "bytes": {
+          "type": "bytes",
+          "value": [104, 101, 108, 108, 111]
+        }
+      }
+    }
+  ]
+}

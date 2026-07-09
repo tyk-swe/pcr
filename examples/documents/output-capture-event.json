@@ -1,0 +1,36 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "capture",
+  "status": "success",
+  "sequence": 0,
+  "result": {
+    "frame": {
+      "timestamp": {
+        "secs_since_epoch": 1783555200,
+        "nanos_since_epoch": 125000000
+      },
+      "captured_length": 4,
+      "original_length": 4,
+      "link_type": 147,
+      "interface": 0,
+      "direction": "inbound",
+      "bytes": [222, 173, 190, 239]
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "decode.unsupported_link_type",
+      "severity": "warning",
+      "message": "no root binding for link type 147"
+    }
+  ],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 4,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 250000
+    }
+  }
+}

@@ -1,0 +1,262 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.packet.v1.schema.json",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
+  "title": "PacketcraftR packet document v1",
+  "description": "A runtime-neutral ordered packet stack. Protocol-specific field names and semantic constraints are supplied by the selected ProtocolRegistry; this schema validates the stable PacketDocument and tagged FieldValue representation.",
+  "type": "object",
+  "required": [
+    "schema",
+    "layers"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.packet/v1",
+      "description": "Packet document schema identifier."
+    },
+    "layers": {
+      "type": "array",
+      "description": "Layers in outermost-to-innermost wire order.",
+      "items": {
+        "$ref": "#/$defs/layer"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "layer": {
+      "type": "object",
+      "required": [
+        "protocol"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Protocol identifier or registered codec alias."
+        },
+        "fields": {
+          "type": "object",
+          "description": "Registry-defined field names mapped to explicitly tagged reflective values.",
+          "propertyNames": {
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/fieldValue"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "fieldValue": {
+      "description": "Canonical JSON representation of packetcraftr::FieldValue.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/boolValue"
+        },
+        {
+          "$ref": "#/$defs/unsignedValue"
+        },
+        {
+          "$ref": "#/$defs/signedValue"
+        },
+        {
+          "$ref": "#/$defs/textValue"
+        },
+        {
+          "$ref": "#/$defs/bytesValue"
+        },
+        {
+          "$ref": "#/$defs/ipv4Value"
+        },
+        {
+          "$ref": "#/$defs/ipv6Value"
+        },
+        {
+          "$ref": "#/$defs/macValue"
+        },
+        {
+          "$ref": "#/$defs/listValue"
+        }
+      ]
+    },
+    "boolValue": {
+      "title": "Boolean field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "bool"
+        },
+        "value": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "unsignedValue": {
+      "title": "Unsigned integer field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "unsigned"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        }
+      },
+      "additionalProperties": false
+    },
+    "signedValue": {
+      "title": "Signed integer field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "signed"
+        },
+        "value": {
+          "type": "integer",
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807
+        }
+      },
+      "additionalProperties": false
+    },
+    "textValue": {
+      "title": "Text field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "bytesValue": {
+      "title": "Byte-string field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "bytes"
+        },
+        "value": {
+          "$ref": "#/$defs/byteArray"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipv4Value": {
+      "title": "IPv4-address field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "ipv4"
+        },
+        "value": {
+          "type": "string",
+          "format": "ipv4"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ipv6Value": {
+      "title": "IPv6-address field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "ipv6"
+        },
+        "value": {
+          "type": "string",
+          "format": "ipv6"
+        }
+      },
+      "additionalProperties": false
+    },
+    "macValue": {
+      "title": "MAC-address field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "mac"
+        },
+        "value": {
+          "type": "array",
+          "minItems": 6,
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/byte"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "listValue": {
+      "title": "List field value",
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "list"
+        },
+        "value": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldValue"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "byte": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 255
+    },
+    "byteArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/byte"
+      }
+    }
+  }
+}

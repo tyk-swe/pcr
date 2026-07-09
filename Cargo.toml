@@ -1,11 +1,15 @@
 [package]
 name = "packetcraftr"
-version = "0.1.0"
+version = "0.2.0-alpha.1"
 edition = "2021"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
 authors = ["rkdxodud-tyk"]
 description = "Modular packet crafting, transmission, and automation toolkit"
+readme = "README.md"
+repository = "https://github.com/tyk-swe/pcr"
+homepage = "https://github.com/tyk-swe/pcr"
+documentation = "https://docs.rs/packetcraftr"
 keywords = ["packet", "network", "cli", "testing"]
 categories = ["command-line-utilities", "network-programming"]
 
@@ -14,41 +18,14 @@ name = "packetcraftr"
 path = "src/main.rs"
 
 [features]
-default = ["traceroute"]
-pcap = ["dep:pcap"]
-experimental = ["scan", "fuzz", "daemon", "repl", "metrics"]
-scan = []
-traceroute = []
-fuzz = []
-daemon = ["dep:daemonize"]
-repl = ["dep:rustyline", "pcap", "scan", "traceroute"]
-metrics = ["dep:hyper", "dep:prometheus"]
+default = ["live"]
+live = ["dep:pnet"]
 
 [dependencies]
-anyhow = "1"
+bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-log = "0.4"
-env_logger = "0.11"
-hyper = { version = "0.14", features = ["server", "http1", "tcp"], optional = true }
-pnet = { version = "0.35", default-features = false, features = ["std"] }
-prometheus = { version = "0.14", optional = true }
-rand = "0.10"
-regex = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-rule_yaml = { package = "yaml_serde", version = "0.10.4" }
 thiserror = "2"
-tokio = { version = "1", features = ["full"] }
-libc = "0.2"
-shlex = "2"
-humantime = "2"
-rustyline = { version = "14", optional = true }
-pcap = { version = "2", optional = true }
-socket2 = "0.6"
-dns-lookup = "3.0.1"
-trust-dns-proto = { version = "0.23.2", features = ["dnssec"] }
-crc = "3.4.0"
-
-[target.'cfg(unix)'.dependencies]
-daemonize = { version = "0.5", optional = true }
-nix = { version = "0.31", features = ["signal", "process", "user"] }
+noyalib = { version = "0.0.5", features = ["compat-serde-yaml"] }
+pnet = { version = "0.35", default-features = false, features = ["std"], optional = true }

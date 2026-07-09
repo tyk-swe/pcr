@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v1.schema.json",
+  "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
+  "title": "PacketcraftR CLI output envelope v1",
+  "description": "One complete aggregate JSON result or one independently valid NDJSON stream record. Command-specific result objects have their own contracts; this schema fixes the common version, status, diagnostic, error, sequence, and operation-statistics envelope.",
+  "type": "object",
+  "required": [
+    "schema",
+    "command",
+    "status",
+    "diagnostics"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.output/v1",
+      "description": "CLI output schema identifier."
+    },
+    "command": {
+      "description": "Command that produced the record. Null is reserved for failures that occur before a command can be identified.",
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        null,
+        "build",
+        "dissect",
+        "plan",
+        "send",
+        "exchange",
+        "capture",
+        "read",
+        "replay",
+        "scan",
+        "traceroute",
+        "dns",
+        "fuzz",
+        "interfaces",
+        "routes"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "error"
+      ]
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615,
+      "description": "Zero-based record sequence for NDJSON streams. Omitted for ordinary aggregate output."
+    },
+    "result": {
+      "description": "Complete command-specific structured result. Aggregate results may be objects or arrays.",
+      "oneOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "array"
+        }
+      ]
+    },
+    "error": {
+      "$ref": "#/$defs/error"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/diagnostic"
+      }
+    },
+    "stats": {
+      "$ref": "#/$defs/operationStats"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "const": "success"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "required": [
+          "result"
+        ],
+        "not": {
+          "required": [
+            "error"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "error"
+        ],
+        "not": {
+          "required": [
+            "result"
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "error": {
+      "type": "object",
+      "required": [
+        "code",
+        "kind",
+        "message",
+        "causes"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable machine-readable error code."
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Broad error category such as cli, document, build, capability, policy, or io."
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "causes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "policy_code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "details": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "layer": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "range": {
+          "$ref": "#/$defs/byteRange"
+        }
+      },
+      "additionalProperties": false
+    },
+    "byteRange": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "operationStats": {
+      "type": "object",
+      "required": [
+        "packets_attempted",
+        "packets_completed",
+        "bytes",
+        "elapsed"
+      ],
+      "properties": {
+        "packets_attempted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "packets_completed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "elapsed": {
+          "$ref": "#/$defs/duration"
+        }
+      },
+      "additionalProperties": false
+    },
+    "duration": {
+      "description": "Canonical serde representation of std::time::Duration.",
+      "type": "object",
+      "required": [
+        "secs",
+        "nanos"
+      ],
+      "properties": {
+        "secs": {
+          "$ref": "#/$defs/uint64"
+        },
+        "nanos": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999999999
+        }
+      },
+      "additionalProperties": false
+    },
+    "uint64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    }
+  }
+}

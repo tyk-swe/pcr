@@ -1,0 +1,178 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  format:
+    name: Rustfmt
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  linux-feature-matrix:
+    name: Linux / ${{ matrix.profile.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - name: default features
+            flags: ""
+          - name: no default features
+            flags: --no-default-features
+          - name: all features
+            flags: --all-features
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --component clippy
+      - name: Clippy
+        run: cargo clippy --locked --all-targets ${{ matrix.profile.flags }} -- -D warnings
+      - name: Test
+        run: cargo test --locked --all-targets ${{ matrix.profile.flags }}
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps ${{ matrix.profile.flags }}
+
+  package:
+    name: Package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Verify the publishable crate
+        run: cargo package --locked
+      - name: Verify a clean CLI install
+        run: |
+          cargo install --locked --path . --root "${RUNNER_TEMP}/packetcraftr-install"
+          "${RUNNER_TEMP}/packetcraftr-install/bin/packetcraftr" --version
+
+  schemas:
+    name: JSON schemas and examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install schema validator
+        run: python -m pip install --disable-pip-version-check check-jsonschema
+      - name: Validate packet documents
+        run: >-
+          check-jsonschema
+          --schemafile schemas/packetcraftr.packet.v1.schema.json
+          examples/documents/packet-*.json
+      - name: Validate output documents
+        run: >-
+          check-jsonschema
+          --schemafile schemas/packetcraftr.output.v1.schema.json
+          examples/documents/output-*.json
+
+  dependency-policy:
+    name: Dependency, license, and source policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          rust-version: "1.96.0"
+          command: check advisories bans licenses sources
+          arguments: --all-features
+
+  rustsec:
+    name: RustSec advisory audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rustsec/audit-check@v2.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  fixtures:
+    name: Fixture provenance changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require reviewed provenance sidecars
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/check-fixture-changes.sh
+
+  portable-platforms:
+    name: ${{ matrix.os }} / ${{ matrix.profile.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-14
+          - windows-2022
+        profile:
+          - name: default features
+            flags: ""
+          - name: no default features
+            flags: --no-default-features
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Compile portable targets
+        run: cargo check --locked --all-targets ${{ matrix.profile.flags }}
+      - name: Test portable targets
+        run: cargo test --locked --all-targets ${{ matrix.profile.flags }}
+
+  required:
+    name: Required checks
+    if: always()
+    needs:
+      - format
+      - linux-feature-matrix
+      - package
+      - portable-platforms
+      - schemas
+      - dependency-policy
+      - rustsec
+      - fixtures
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Confirm all required jobs passed
+        run: |
+          test "${{ needs.format.result }}" = "success"
+          test "${{ needs.linux-feature-matrix.result }}" = "success"
+          test "${{ needs.package.result }}" = "success"
+          test "${{ needs.portable-platforms.result }}" = "success"
+          test "${{ needs.schemas.result }}" = "success"
+          test "${{ needs.dependency-policy.result }}" = "success"
+          test "${{ needs.rustsec.result }}" = "success"
+          test "${{ needs.fixtures.result }}" = "success"

@@ -1,0 +1,46 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "build",
+  "status": "success",
+  "result": {
+    "bytes_hex": "deadbeef",
+    "length": 4,
+    "packet": {
+      "schema": "packetcraftr.packet/v1",
+      "layers": [
+        {
+          "protocol": "raw",
+          "fields": {
+            "bytes": {
+              "type": "bytes",
+              "value": [222, 173, 190, 239]
+            }
+          }
+        }
+      ]
+    },
+    "layout": {
+      "layers": [
+        {
+          "index": 0,
+          "protocol": "raw",
+          "range": {
+            "start": 0,
+            "end": 4
+          },
+          "fields": [
+            {
+              "name": "bytes",
+              "range": {
+                "start": 0,
+                "end": 4
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "requires_live_opt_in": false
+  },
+  "diagnostics": []
+}

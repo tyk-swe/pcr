@@ -109,6 +109,12 @@ pub(crate) enum PcapListenerError {
         #[source]
         source: pcap::Error,
     },
+    #[error("open pcap capture on {interface} failed")]
+    PcapOpen {
+        interface: String,
+        #[source]
+        source: pcap::Error,
+    },
     #[error("failed to open datalink channel on {interface}")]
     CaptureChannel {
         interface: String,

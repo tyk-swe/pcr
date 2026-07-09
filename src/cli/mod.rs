@@ -50,6 +50,8 @@ pub(crate) struct PacketcraftArgs {
     pub dry_run: bool,
     #[command(flatten, next_help_heading = "Safety")]
     pub safety: options::SafetyOptions,
+    #[command(flatten, next_help_heading = "Observability")]
+    pub observability: options::ObservabilityOptions,
     /// Select an operation mode.
     #[command(subcommand)]
     pub command: commands::PacketcraftCommand,
@@ -80,6 +82,7 @@ mod tests {
             output_format: None,
             dry_run,
             safety: options::SafetyOptions::default(),
+            observability: options::ObservabilityOptions::default(),
             command,
         }
     }
@@ -190,5 +193,123 @@ mod tests {
             commands::PacketcraftCommand::Send(options)
                 if options.oneshot.destination.as_deref() == Some("127.0.0.1")
         ));
+    }
+
+    #[test]
+    fn parser_accepts_global_observability_before_dns_query() {
+        let parsed = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "--log-file",
+            "packet.log",
+            "--log-level",
+            "debug",
+            "--log-structured",
+            "dns-query",
+            "--domain",
+            "example.test",
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.observability.log_file.as_deref(), Some("packet.log"));
+        assert_eq!(parsed.observability.log_level, Some(enums::LogLevel::Debug));
+        assert_eq!(parsed.observability.structured, Some(true));
+        assert!(matches!(
+            parsed.command,
+            commands::PacketcraftCommand::DnsQuery(options)
+                if options.domain == "example.test"
+        ));
+    }
+
+    #[test]
+    fn parser_accepts_global_observability_after_dns_query() {
+        let parsed = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "dns-query",
+            "--domain",
+            "example.test",
+            "--log-level",
+            "warn",
+        ])
+        .unwrap();
+
+        assert_eq!(parsed.observability.log_level, Some(enums::LogLevel::Warn));
+        assert!(matches!(
+            parsed.command,
+            commands::PacketcraftCommand::DnsQuery(options)
+                if options.domain == "example.test"
+        ));
+    }
+
+    #[cfg(feature = "metrics")]
+    #[test]
+    fn parser_accepts_prometheus_observability_after_dns_query() {
+        let parsed = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "dns-query",
+            "--domain",
+            "example.test",
+            "--prometheus-bind",
+            "127.0.0.1:9090",
+            "--allow-public-metrics=false",
+        ])
+        .unwrap();
+
+        assert_eq!(
+            parsed.observability.prometheus_bind.as_deref(),
+            Some("127.0.0.1:9090")
+        );
+        assert_eq!(parsed.observability.allow_public_metrics, Some(false));
+        assert!(matches!(
+            parsed.command,
+            commands::PacketcraftCommand::DnsQuery(options)
+                if options.domain == "example.test"
+        ));
+    }
+
+    #[cfg(not(feature = "pcap"))]
+    #[test]
+    fn parser_rejects_pcap_write_on_dns_query() {
+        let err = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "dns-query",
+            "--domain",
+            "example.test",
+            "--pcap-write",
+            "sent.pcap",
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[cfg(feature = "pcap")]
+    #[test]
+    fn parser_rejects_pcap_write_on_dns_query() {
+        let err = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "dns-query",
+            "--domain",
+            "example.test",
+            "--pcap-write",
+            "sent.pcap",
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
+    }
+
+    #[test]
+    fn parser_rejects_metrics_json_on_dns_query() {
+        let err = PacketcraftArgs::try_parse_from([
+            "packetcraftr",
+            "dns-query",
+            "--domain",
+            "example.test",
+            "--metrics-json",
+            "metrics.json",
+        ])
+        .unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::UnknownArgument);
     }
 }

@@ -3,6 +3,7 @@
 
 use crate::cli::commands::PacketcraftCommand;
 use crate::cli::enums::OutputFormat as CliOutputFormat;
+use crate::cli::options::OneShotOptions;
 use crate::cli::PacketcraftArgs;
 #[cfg(feature = "daemon")]
 use crate::domain::command::DaemonRequest;
@@ -18,7 +19,7 @@ use crate::domain::command::ScanRequest;
 use crate::domain::command::TracerouteRequest;
 use crate::domain::command::{DnsRequest, EngineCommand};
 use crate::domain::policy::{TrafficBudget, TrafficPolicy};
-use crate::domain::request::PacketRequest;
+use crate::domain::request::{LoggingRequest, PacketRequest};
 use crate::engine::config::EngineConfig;
 
 impl PacketcraftArgs {
@@ -28,7 +29,6 @@ impl PacketcraftArgs {
             PacketcraftCommand::Daemon(opts) => Some(&opts.rule_options),
             _ => self.one_shot_options().map(|options| &options.rule),
         };
-        let logging_options = self.one_shot_options().map(|options| &options.logging);
 
         let mut budget = TrafficBudget::default();
         if let Some(value) = self.safety.traffic_max_targets {
@@ -59,7 +59,7 @@ impl PacketcraftArgs {
         };
 
         EngineConfig {
-            prometheus_bind: logging_options.and_then(|options| options.prometheus_bind.clone()),
+            prometheus_bind: self.observability.prometheus_bind.clone(),
             rule_workers: rule_options.and_then(|options| options.rule_workers),
             rule_queue: rule_options.and_then(|options| options.rule_queue),
             send_workers: rule_options.and_then(|options| options.send_workers),
@@ -72,10 +72,10 @@ impl PacketcraftArgs {
     pub(crate) fn engine_command(&self) -> EngineCommand {
         match &self.command {
             PacketcraftCommand::Send(options) => {
-                EngineCommand::Send(PacketRequest::from(&options.oneshot))
+                EngineCommand::Send(self.packet_request(&options.oneshot))
             }
             PacketcraftCommand::DryRun(options) => {
-                EngineCommand::DryRun(PacketRequest::from(&options.oneshot))
+                EngineCommand::DryRun(self.packet_request(&options.oneshot))
             }
             #[cfg(feature = "repl")]
             PacketcraftCommand::Interactive(options) => {
@@ -101,6 +101,17 @@ impl PacketcraftArgs {
             #[cfg(feature = "fuzz")]
             PacketcraftCommand::Fuzz(options) => EngineCommand::Fuzz(FuzzRequest::from(options)),
         }
+    }
+
+    fn packet_request(&self, options: &OneShotOptions) -> PacketRequest {
+        let mut request = PacketRequest::from(options);
+        let observability = LoggingRequest::from(&self.observability);
+        request.logging.log_file = observability.log_file;
+        request.logging.log_level = observability.log_level;
+        request.logging.structured = observability.structured;
+        request.logging.prometheus_bind = observability.prometheus_bind;
+        request.logging.allow_public_metrics = observability.allow_public_metrics;
+        request
     }
 }
 
@@ -128,6 +139,7 @@ mod tests {
             output_format: None,
             dry_run,
             safety: options::SafetyOptions::default(),
+            observability: options::ObservabilityOptions::default(),
             command,
         }
     }
@@ -145,15 +157,12 @@ mod tests {
                         allow_unbounded_sends: true,
                         ..Default::default()
                     },
-                    logging: options::LoggingOptions {
-                        prometheus_bind: Some("127.0.0.1:9090".to_string()),
-                        ..Default::default()
-                    },
                     ..Default::default()
                 },
             }),
             false,
         );
+        args.observability.prometheus_bind = Some("127.0.0.1:9090".to_string());
         args.safety.allow_public_targets = true;
         args.safety.allow_malformed = true;
         args.safety.allow_high_volume = true;
@@ -203,16 +212,27 @@ mod tests {
 
     #[test]
     fn engine_command_maps_send_and_dry_run_requests() {
-        let send = args(
+        let mut send_args = args(
             PacketcraftCommand::Send(options::SendOptions {
                 oneshot: options::OneShotOptions {
                     destination: Some("127.0.0.1".to_string()),
+                    logging: options::PacketLoggingOptions {
+                        pcap_write: Some("sent.pcap".to_string()),
+                        metrics_json: Some("metrics.json".to_string()),
+                    },
                     ..Default::default()
                 },
             }),
             false,
-        )
-        .engine_command();
+        );
+        send_args.observability = options::ObservabilityOptions {
+            log_file: Some("packet.log".to_string()),
+            log_level: Some(crate::cli::enums::LogLevel::Debug),
+            structured: Some(true),
+            prometheus_bind: Some("127.0.0.1:9090".to_string()),
+            allow_public_metrics: Some(true),
+        };
+        let send = send_args.engine_command();
         let dry_run = args(
             PacketcraftCommand::DryRun(options::SendOptions {
                 oneshot: options::OneShotOptions {
@@ -228,6 +248,13 @@ mod tests {
             send,
             EngineCommand::Send(request)
                 if request.destination.destination.as_deref() == Some("127.0.0.1")
+                    && request.logging.log_file.as_deref() == Some("packet.log")
+                    && request.logging.pcap_write.as_deref() == Some("sent.pcap")
+                    && request.logging.metrics_json.as_deref() == Some("metrics.json")
+                    && request.logging.log_level == Some(crate::domain::request::LogLevel::Debug)
+                    && request.logging.structured == Some(true)
+                    && request.logging.prometheus_bind.as_deref() == Some("127.0.0.1:9090")
+                    && request.logging.allow_public_metrics == Some(true)
         ));
         assert!(matches!(
             dry_run,

@@ -74,8 +74,8 @@ pub(crate) struct OneShotOptions {
     pub listen: ListenOptions,
     #[command(flatten, next_help_heading = "Automation")]
     pub rule: RuleOptions,
-    #[command(flatten, next_help_heading = "Logging")]
-    pub logging: LoggingOptions,
+    #[command(flatten, next_help_heading = "Packet logging artifacts")]
+    pub logging: PacketLoggingOptions,
 }
 
 /// Stable packet send command options.
@@ -588,16 +588,17 @@ pub(crate) struct SafetyOptions {
 }
 
 #[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
-pub(crate) struct LoggingOptions {
+pub(crate) struct ObservabilityOptions {
     /// Log output to a file.
-    #[arg(long = "log-file")]
+    #[arg(long = "log-file", global = true)]
     pub log_file: Option<String>,
     /// Override the log level.
-    #[arg(long = "log-level", value_enum)]
+    #[arg(long = "log-level", value_enum, global = true)]
     pub log_level: Option<LogLevel>,
     /// Enable structured JSON logging.
     #[arg(
         long = "log-structured",
+        global = true,
         action = clap::ArgAction::Set,
         value_parser = BoolishValueParser::new(),
         num_args = 0..=1,
@@ -605,6 +606,52 @@ pub(crate) struct LoggingOptions {
         default_missing_value = "true"
     )]
     pub structured: Option<bool>,
+    /// Prometheus bind address.
+    #[cfg_attr(
+        feature = "metrics",
+        arg(long = "prometheus-bind", value_parser = socket_addr_validator, global = true)
+    )]
+    #[cfg_attr(
+        not(feature = "metrics"),
+        arg(
+            long = "prometheus-bind",
+            value_parser = unsupported_metrics_string,
+            global = true,
+            hide = true
+        )
+    )]
+    pub prometheus_bind: Option<String>,
+    /// Allow public access to metrics.
+    #[cfg_attr(
+        feature = "metrics",
+        arg(
+            long = "allow-public-metrics",
+            global = true,
+            action = clap::ArgAction::Set,
+            value_parser = BoolishValueParser::new(),
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true"
+        )
+    )]
+    #[cfg_attr(
+        not(feature = "metrics"),
+        arg(
+            long = "allow-public-metrics",
+            global = true,
+            action = clap::ArgAction::Set,
+            value_parser = unsupported_metrics_bool,
+            num_args = 0..=1,
+            require_equals = true,
+            default_missing_value = "true",
+            hide = true
+        )
+    )]
+    pub allow_public_metrics: Option<bool>,
+}
+
+#[derive(Debug, Default, Clone, Args, Serialize, Deserialize)]
+pub(crate) struct PacketLoggingOptions {
     /// Write sent packets to a pcap file.
     #[cfg_attr(feature = "pcap", arg(long = "pcap-write"))]
     #[cfg_attr(
@@ -619,41 +666,6 @@ pub(crate) struct LoggingOptions {
         arg(long = "metrics-json", value_parser = unsupported_metrics_string, hide = true)
     )]
     pub metrics_json: Option<String>,
-    /// Prometheus bind address.
-    #[cfg_attr(
-        feature = "metrics",
-        arg(long = "prometheus-bind", value_parser = socket_addr_validator)
-    )]
-    #[cfg_attr(
-        not(feature = "metrics"),
-        arg(long = "prometheus-bind", value_parser = unsupported_metrics_string, hide = true)
-    )]
-    pub prometheus_bind: Option<String>,
-    /// Allow public access to metrics.
-    #[cfg_attr(
-        feature = "metrics",
-        arg(
-            long = "allow-public-metrics",
-            action = clap::ArgAction::Set,
-            value_parser = BoolishValueParser::new(),
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "true"
-        )
-    )]
-    #[cfg_attr(
-        not(feature = "metrics"),
-        arg(
-            long = "allow-public-metrics",
-            action = clap::ArgAction::Set,
-            value_parser = unsupported_metrics_bool,
-            num_args = 0..=1,
-            require_equals = true,
-            default_missing_value = "true",
-            hide = true
-        )
-    )]
-    pub allow_public_metrics: Option<bool>,
 }
 
 #[cfg(test)]
@@ -674,9 +686,16 @@ mod tests {
     }
 
     #[derive(Debug, Parser)]
-    struct LoggingHarness {
+    struct ObservabilityHarness {
         #[command(flatten)]
-        options: LoggingOptions,
+        options: ObservabilityOptions,
+    }
+
+    #[cfg(any(not(feature = "pcap"), not(feature = "metrics")))]
+    #[derive(Debug, Parser)]
+    struct PacketLoggingHarness {
+        #[command(flatten)]
+        options: PacketLoggingOptions,
     }
 
     fn parse_oneshot(args: &[&str]) -> Result<OneShotHarness, clap::Error> {
@@ -687,8 +706,13 @@ mod tests {
         SafetyHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
     }
 
-    fn parse_logging(args: &[&str]) -> Result<LoggingHarness, clap::Error> {
-        LoggingHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+    fn parse_observability(args: &[&str]) -> Result<ObservabilityHarness, clap::Error> {
+        ObservabilityHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
+    }
+
+    #[cfg(any(not(feature = "pcap"), not(feature = "metrics")))]
+    fn parse_packet_logging(args: &[&str]) -> Result<PacketLoggingHarness, clap::Error> {
+        PacketLoggingHarness::try_parse_from(std::iter::once("test").chain(args.iter().copied()))
     }
 
     #[test]
@@ -849,8 +873,8 @@ mod tests {
     #[cfg(feature = "metrics")]
     #[test]
     fn prometheus_bind_uses_socket_address_validator() {
-        let parsed = parse_logging(&["--prometheus-bind", "127.0.0.1:9898"]).unwrap();
-        let err = parse_logging(&["--prometheus-bind", "127.0.0.1"]).unwrap_err();
+        let parsed = parse_observability(&["--prometheus-bind", "127.0.0.1:9898"]).unwrap();
+        let err = parse_observability(&["--prometheus-bind", "127.0.0.1"]).unwrap_err();
 
         assert_eq!(
             parsed.options.prometheus_bind.as_deref(),
@@ -861,7 +885,7 @@ mod tests {
 
     #[test]
     fn logging_boolish_flags_accept_missing_and_explicit_values() {
-        let structured = parse_logging(&["--log-structured"]).unwrap();
+        let structured = parse_observability(&["--log-structured"]).unwrap();
 
         assert_eq!(structured.options.structured, Some(true));
     }
@@ -869,7 +893,7 @@ mod tests {
     #[cfg(feature = "metrics")]
     #[test]
     fn metrics_boolish_flags_accept_missing_and_explicit_values() {
-        let public_metrics = parse_logging(&["--allow-public-metrics=false"]).unwrap();
+        let public_metrics = parse_observability(&["--allow-public-metrics=false"]).unwrap();
 
         assert_eq!(public_metrics.options.allow_public_metrics, Some(false));
     }
@@ -910,7 +934,7 @@ mod tests {
     #[cfg(not(feature = "pcap"))]
     #[test]
     fn logging_parser_rejects_pcap_write_before_request_mapping() {
-        let err = parse_logging(&["--pcap-write", "sent.pcap"]).unwrap_err();
+        let err = parse_packet_logging(&["--pcap-write", "sent.pcap"]).unwrap_err();
 
         assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
         assert!(err.to_string().contains("'pcap' feature"));
@@ -919,7 +943,7 @@ mod tests {
     #[cfg(not(feature = "metrics"))]
     #[test]
     fn logging_parser_accepts_explicit_false_for_metrics_only_bool_flags() {
-        let parsed = parse_logging(&["--allow-public-metrics=false"]).unwrap();
+        let parsed = parse_observability(&["--allow-public-metrics=false"]).unwrap();
 
         assert_eq!(parsed.options.allow_public_metrics, Some(false));
     }
@@ -928,14 +952,18 @@ mod tests {
     #[test]
     fn logging_parser_rejects_metrics_flags_before_request_mapping() {
         for args in [
-            ["--metrics-json", "metrics.json"].as_slice(),
             ["--prometheus-bind", "127.0.0.1:9898"].as_slice(),
             ["--allow-public-metrics"].as_slice(),
         ] {
-            let err = parse_logging(args).unwrap_err();
+            let err = parse_observability(args).unwrap_err();
 
             assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
             assert!(err.to_string().contains("'metrics' feature"));
         }
+
+        let err = parse_packet_logging(&["--metrics-json", "metrics.json"]).unwrap_err();
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        assert!(err.to_string().contains("'metrics' feature"));
     }
 }

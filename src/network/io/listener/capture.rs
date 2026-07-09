@@ -326,16 +326,7 @@ fn capture_loop_with_pcap(
     running: Arc<AtomicBool>,
     startup: &mut Option<ListenerStartupSignal>,
 ) -> ListenerResult<()> {
-    let device = match resolve_pcap_device(&interface.name) {
-        Ok(device) => device,
-        Err(err) => {
-            warn!(
-                "failed to resolve pcap device for {}: {err}; falling back to datalink capture",
-                interface.name
-            );
-            return capture_loop(runtime, interface, packet_tx, running, startup);
-        }
-    };
+    let device = resolve_pcap_device(&interface.name)?;
 
     let timeout_ms = CHANNEL_TIMEOUT.as_millis() as i32;
     let mut capture = match Capture::from_device(device).and_then(|builder| {
@@ -346,12 +337,12 @@ fn capture_loop_with_pcap(
             .open()
     }) {
         Ok(cap) => cap,
-        Err(err) => {
-            warn!(
-                "failed to open pcap capture on {}: {err}; falling back to datalink capture",
-                interface.name
-            );
-            return capture_loop(runtime, interface, packet_tx, running, startup);
+        Err(source) => {
+            return Err(PcapListenerError::PcapOpen {
+                interface: interface.name.clone(),
+                source,
+            }
+            .into());
         }
     };
 
@@ -541,5 +532,37 @@ mod tests {
             .unwrap()
             .unwrap_err()
             .contains("does not support Ethernet"));
+    }
+
+    #[test]
+    fn filtered_pcap_device_resolution_failure_does_not_fallback_to_datalink() {
+        let (packet_tx, _packet_rx) = mpsc::channel(1);
+        let running = Arc::new(AtomicBool::new(false));
+        let mut startup = None;
+        let interface = datalink::NetworkInterface {
+            name: "packetcraftr-missing-pcap-device-for-filter-test".to_string(),
+            description: "missing pcap device regression test".to_string(),
+            index: 0,
+            mac: None,
+            ips: Vec::new(),
+            flags: 0,
+        };
+        let runtime = ListenerRuntimeConfig {
+            filter: Some("icmp".to_string()),
+            promiscuous: false,
+            timeout: Some(Duration::from_millis(1)),
+            show_reply: false,
+            capture_file: None,
+            queue_capacity: 1,
+        };
+
+        let err = capture_loop_with_pcap(runtime, interface, packet_tx, running, &mut startup)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ListenerError::Pcap(PcapListenerError::PcapDeviceNotFound { name })
+                if name == "packetcraftr-missing-pcap-device-for-filter-test"
+        ));
     }
 }

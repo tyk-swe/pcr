@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use log::{error, info, trace, warn};
+use tokio::process::Child;
 
 use crate::rules::config::{
     RULE_COMMAND_MAX_ARGS, RULE_COMMAND_MAX_ARG_LENGTH, RULE_COMMAND_MAX_PROGRAM_LENGTH,
@@ -20,6 +21,8 @@ use crate::rules::template::apply_template;
 use crate::util::telemetry;
 
 type ActionResult<T> = std::result::Result<T, RuleActionError>;
+
+const COMMAND_REAP_GRACE: Duration = Duration::from_millis(500);
 
 struct RenderedCommand {
     program: String,
@@ -384,6 +387,11 @@ fn submit_command(
     match spawn_result {
         Ok(()) => {
             telemetry::record_rule_action("command", "queued");
+            info!(
+                "rule '{}' command action queued for asynchronous execution ({})",
+                rule_name_arc.as_ref(),
+                error_label
+            );
             Ok(())
         }
         Err(ExecutorError::QueueFull) => {
@@ -487,7 +495,7 @@ async fn run_spawned_command(
                     "rule '{}' command timed out after {:?}: {}",
                     rule_name, timeout_duration, rendered.summary
                 );
-                // Child is killed on drop.
+                kill_and_reap_timed_out_child(rule_name, &rendered.summary, &mut child).await;
                 CommandRunOutcome::Timeout
             }
         },
@@ -498,6 +506,52 @@ async fn run_spawned_command(
                 rule_name, rendered.summary, err
             );
             CommandRunOutcome::SpawnError
+        }
+    }
+}
+
+async fn kill_and_reap_timed_out_child(rule_name: &str, summary: &str, child: &mut Child) {
+    match child.start_kill() {
+        Ok(()) => {
+            telemetry::record_rule_action("command", "timeout_kill_sent");
+            trace!(
+                "rule '{}' sent kill to timed-out command: {}",
+                rule_name,
+                summary
+            );
+        }
+        Err(err) => {
+            telemetry::record_rule_action("command", "timeout_kill_error");
+            warn!(
+                "rule '{}' failed to kill timed-out command {}: {}",
+                rule_name, summary, err
+            );
+        }
+    }
+
+    match tokio::time::timeout(COMMAND_REAP_GRACE, child.wait()).await {
+        Ok(Ok(status)) => {
+            telemetry::record_rule_action("command", "timeout_reaped");
+            trace!(
+                "rule '{}' reaped timed-out command with status {}: {}",
+                rule_name,
+                status,
+                summary
+            );
+        }
+        Ok(Err(err)) => {
+            telemetry::record_rule_action("command", "timeout_reap_error");
+            warn!(
+                "rule '{}' failed to reap timed-out command {}: {}",
+                rule_name, summary, err
+            );
+        }
+        Err(_) => {
+            telemetry::record_rule_action("command", "timeout_reap_timeout");
+            warn!(
+                "rule '{}' timed-out command did not exit within {:?}: {}",
+                rule_name, COMMAND_REAP_GRACE, summary
+            );
         }
     }
 }
@@ -514,7 +568,9 @@ enum CommandRunOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
     use std::time::SystemTime;
+    use tokio::runtime::Handle;
 
     fn packet_with_source(source: &str) -> PacketContext {
         PacketContext {
@@ -693,5 +749,46 @@ mod tests {
         .unwrap();
 
         assert_eq!(rendered.args, vec!["--value=danger"]);
+    }
+
+    #[tokio::test]
+    async fn command_action_execute_returns_after_queueing_before_child_completion() {
+        let executor = BoundedExecutor::new_with_handle(Handle::current(), 1, 2).unwrap();
+        let action = CommandAction::from_document(
+            "/bin/sh".to_string(),
+            vec!["-c".to_string(), "sleep 1".to_string()],
+            Some(1),
+            true,
+            vec!["/bin/sh".to_string()],
+            None,
+        )
+        .unwrap();
+
+        let started = Instant::now();
+        action.execute("queued-command", None, &executor).unwrap();
+
+        assert!(
+            started.elapsed() < Duration::from_millis(250),
+            "command action should return after queueing, not after child completion"
+        );
+    }
+
+    #[tokio::test]
+    async fn timed_out_command_is_explicitly_killed_and_reaped() {
+        let rendered = RenderedCommand {
+            program: "/bin/sh".to_string(),
+            args: vec!["-c".to_string(), "sleep 5".to_string()],
+            working_dir: "/".to_string(),
+            summary: "test timed-out command".to_string(),
+        };
+
+        let outcome = run_spawned_command(
+            Arc::<str>::from("timeout-command"),
+            rendered,
+            Duration::from_millis(10),
+        )
+        .await;
+
+        assert_eq!(outcome, CommandRunOutcome::Timeout);
     }
 }

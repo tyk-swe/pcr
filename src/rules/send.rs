@@ -62,6 +62,10 @@ fn render_vec(fields: &mut [String], packet: Option<&PacketContext>) {
 }
 
 pub(crate) trait RuleSendDispatcher: std::fmt::Debug + Send + Sync {
+    /// Queues a rule send action after rendering and validation.
+    ///
+    /// `Ok(())` means the send was accepted by the bounded rule executor. Live transmission
+    /// completion, failure, and timeout states are reported later through rule-action telemetry.
     fn dispatch(
         &self,
         rule_name: &str,

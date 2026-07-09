@@ -108,6 +108,8 @@ impl RuleAction {
         sender: Option<&dyn RuleSendDispatcher>,
         task_executor: &BoundedExecutor,
     ) -> Result<()> {
+        // Command and live send actions are asynchronous: success means accepted/queued by the
+        // rule executor, while later completion or failure is reported through action telemetry.
         match self {
             RuleAction::Log { level, message } => {
                 logging::execute(rule_name, packet, *level, message);

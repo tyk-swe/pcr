@@ -25,6 +25,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added `native-layer3` and `SystemLayer3Io` raw IPv4/IPv6 transmission on Linux, macOS, and Windows with route-selected path binding, exact-frame validation, typed platform/privilege failures, and complete-write reporting.
 - Added a stable `ClassifiedError` taxonomy for live capability, dependency, privilege, policy, timeout/runtime I/O, partial-send, and invariant failures, including CLI exit classes and remediation.
 - Added policy-gated, bounded, injectable hostname resolution through `LiveTarget`, `HostnameResolver`, and opaque `ResolvedTarget` values.
+- Added public typed aggregate/stream output envelopes, typed result contracts for every v0.2 command, an explicit command/format capability matrix, and command-specific JSON Schema validation with negative fixtures.
 
 ### Changed
 
@@ -43,6 +44,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Raw Layer 3 sends reject route/destination/MTU mismatches and IPv4 values that a target kernel would rewrite. macOS converts only its private submission copy's length/fragment fields to host order while retaining the final built bytes as wire evidence.
 - Exchange validates timeout and capture/retention limits before route or live side effects, and all retained evidence classes share one aggregate frame ceiling.
 - Human CLI output escapes terminal and bidi controls while JSON preserves structured strings through JSON escaping.
+- Aggregate JSON and streaming NDJSON are now distinct formats. Every NDJSON success or terminal-error record carries a frozen zero-based sequence, while aggregate envelopes cannot carry one; `build`, `dissect`, `read`, and `interfaces` now render exclusively from typed results.
 
 ### Fixed
 

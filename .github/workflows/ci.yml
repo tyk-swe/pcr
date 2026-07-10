@@ -92,6 +92,16 @@ jobs:
           check-jsonschema
           --schemafile schemas/packetcraftr.output.v1.schema.json
           examples/documents/output-*.json
+      - name: Reject invalid output documents
+        run: |
+          for fixture in tests/fixtures/invalid-output/*.json; do
+            if check-jsonschema \
+              --schemafile schemas/packetcraftr.output.v1.schema.json \
+              "${fixture}"; then
+              echo "invalid output fixture unexpectedly passed: ${fixture}" >&2
+              exit 1
+            fi
+          done
 
   dependency-policy:
     name: Dependency, license, and source policy

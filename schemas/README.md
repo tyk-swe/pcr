@@ -11,7 +11,42 @@ The value of a document's `schema` property is the PacketcraftR format identifie
 
 Packet documents deliberately do not enumerate protocols or field names. A `ProtocolRegistry` is extensible, so it performs protocol-specific field, range, layer-binding, and required-field checks after structural schema validation. Parser byte/layer/depth limits are runtime policy and are not relaxed by a document passing JSON Schema validation.
 
-An output success envelope contains `result` and no `error`; an error envelope contains `error` and no `result`. Each line emitted by an NDJSON command is a complete `packetcraftr.output/v1` object and uses `sequence` to preserve stream order. `diagnostics` is always an array, including when empty. When `stats` is present, its required `capture` object reports received and dropped frames/bytes plus queue-overflow events; non-zero loss is also represented by a diagnostic or a typed error according to the selected overflow policy.
+An aggregate success envelope contains `result` and no `error` or `sequence`;
+an aggregate error contains `error` and no `result` or `sequence`. Both carry
+`"mode": "aggregate"`. Each NDJSON line is a complete
+`packetcraftr.output/v1` object with `"mode": "stream"` and a zero-based
+`sequence`. Terminal stream errors use the next unused sequence, including
+sequence zero when the stream fails before its first result. `diagnostics` is
+always an array. When `stats` is present, its required `capture` object reports
+received and dropped frames/bytes plus queue-overflow events; non-zero loss is
+also represented by a diagnostic or typed error according to the selected
+overflow policy.
+
+Success schemas correlate `command` with a command-specific `result`; a
+well-formed frame result is therefore invalid for `build`, for example. The
+Rust equivalents are the public `AggregateOutput<T>`, `StreamRecord<T>`,
+`OutputError`, and per-command result types in `packetcraftr::output`. CLI
+operations construct these types once, and text, JSON, NDJSON, hex, and raw
+renderers consume the same result rather than recreating a wire shape. Commands
+that support both JSON and NDJSON have separate aggregate and per-item result
+types, so a stream never repeats an aggregate summary as an event.
+
+## Command/format matrix
+
+The matrix is also published as `COMMAND_OUTPUT_CONTRACTS`. Unsupported
+combinations fail with `cli.output_format` before file, provider, resolver,
+route, capture, or send side effects. Capability-gated commands still return a
+capability error until their implementation issue lands.
+
+| Command | Formats |
+| --- | --- |
+| `build`, `dissect` | text, JSON, whole-frame hex, raw |
+| `plan`, `interfaces`, `routes` | text, JSON |
+| `send` | text, JSON, whole-frame hex, raw, PCAP, PCAPNG |
+| `exchange` | text, JSON, NDJSON, PCAP, PCAPNG |
+| `capture` | text, NDJSON, whole-frame hex, PCAP, PCAPNG |
+| `read` | text, NDJSON, whole-frame hex |
+| `replay`, `scan`, `traceroute`, `dns`, `fuzz` | text, JSON, NDJSON |
 
 Error objects use stable machine `code` and broad `kind` values matching the
 documented exit classes. A classified live failure may add a non-empty
@@ -27,5 +62,10 @@ jsonschema schemas/packetcraftr.packet.v1.schema.json \
 jsonschema schemas/packetcraftr.output.v1.schema.json \
   --instance examples/documents/output-build-success.json \
   --instance examples/documents/output-build-error.json \
-  --instance examples/documents/output-capture-event.json
+  --instance examples/documents/output-capture-event.json \
+  --instance examples/documents/output-exchange-event.json
 ```
+
+CI also requires every document in `tests/fixtures/invalid-output` to fail
+validation. Those fixtures freeze aggregate/stream separation, mandatory
+stream sequencing, and command-specific result shapes.

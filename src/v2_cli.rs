@@ -12,7 +12,6 @@ use std::time::SystemTime;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
-use serde_json::json;
 
 use crate::core::{
     parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,
@@ -21,8 +20,11 @@ use crate::core::{
 };
 use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 use crate::io::{CaptureReader, CapturedFrame, LinkType};
-
-pub(crate) const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
+use crate::output::{
+    AggregateErrorOutput, AggregateOutput, BuildCommandResult, CommandName, DissectCommandResult,
+    InterfacesCommandResult, OutputContractError, OutputError, OutputFormat,
+    ReadFrameCommandResult, StreamErrorRecord, StreamRecord,
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -36,15 +38,6 @@ struct Cli {
     output: OutputFormat,
     #[command(subcommand)]
     command: Command,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
-enum OutputFormat {
-    #[default]
-    Text,
-    Json,
-    Hex,
-    Raw,
 }
 
 #[derive(Debug, Subcommand)]
@@ -161,17 +154,30 @@ pub(crate) fn run_entrypoint() -> ExitCode {
         Ok(cli) => cli,
         Err(error) => {
             let code = if error.use_stderr() { 2 } else { 0 };
-            if code != 0 && env_requests_json() {
-                let message = error.to_string();
-                let error = CliError::new(code, message);
-                let envelope = error_envelope(command_from_env(), &error);
-                return match emit_json(&envelope) {
-                    Ok(()) => exit_code(code),
-                    Err(write_error) => {
-                        let _ = emit_stderr_error(&write_error.message);
-                        exit_code(write_error.code)
-                    }
-                };
+            if code != 0 {
+                if let Some(output) = machine_format_from_env() {
+                    let message = error.to_string();
+                    let error = CliError::new(code, message);
+                    let emitted = match output {
+                        OutputFormat::Json => emit_json(&AggregateErrorOutput::error(
+                            command_from_env(),
+                            error.output_error(),
+                        )),
+                        OutputFormat::Ndjson => emit_json_compact(&StreamErrorRecord::error(
+                            command_from_env(),
+                            0,
+                            error.output_error(),
+                        )),
+                        _ => unreachable!("machine_format_from_env returns structured formats"),
+                    };
+                    return match emitted {
+                        Ok(()) => exit_code(code),
+                        Err(write_error) => {
+                            let _ = emit_stderr_error(&write_error.message);
+                            exit_code(write_error.code)
+                        }
+                    };
+                }
             }
             return if code == 0 {
                 if error.print().is_ok() {
@@ -189,22 +195,25 @@ pub(crate) fn run_entrypoint() -> ExitCode {
     };
     let output = cli.output;
     let command = cli.command.name();
-    let streaming = matches!(&cli.command, Command::Read(_) | Command::Capture(_));
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            if output == OutputFormat::Json {
-                let envelope = error_envelope(Some(command), &error);
-                let emitted = if streaming {
-                    emit_json_compact(&envelope)
-                } else {
-                    emit_json(&envelope)
-                };
-                if let Err(write_error) = emitted {
+            let emitted = match output {
+                OutputFormat::Json => emit_json(&AggregateErrorOutput::error(
+                    Some(command),
+                    error.output_error(),
+                )),
+                OutputFormat::Ndjson => emit_json_compact(&StreamErrorRecord::error(
+                    Some(command),
+                    error.sequence.unwrap_or(0),
+                    error.output_error(),
+                )),
+                _ => emit_stderr_error(&error.message),
+            };
+            if let Err(write_error) = emitted {
+                if matches!(output, OutputFormat::Json | OutputFormat::Ndjson) {
                     let _ = emit_stderr_error(&write_error.message);
-                    return exit_code(write_error.code);
-                }
-            } else if let Err(write_error) = emit_stderr_error(&error.message) {
+                };
                 return exit_code(write_error.code);
             }
             exit_code(error.code)
@@ -213,27 +222,31 @@ pub(crate) fn run_entrypoint() -> ExitCode {
 }
 
 impl Command {
-    fn name(&self) -> &'static str {
+    fn name(&self) -> CommandName {
         match self {
-            Self::Build(_) => "build",
-            Self::Dissect(_) => "dissect",
-            Self::Read(_) => "read",
-            Self::Interfaces => "interfaces",
-            Self::Plan(_) => "plan",
-            Self::Send(_) => "send",
-            Self::Exchange(_) => "exchange",
-            Self::Capture(_) => "capture",
-            Self::Replay(_) => "replay",
-            Self::Scan(_) => "scan",
-            Self::Traceroute(_) => "traceroute",
-            Self::Dns(_) => "dns",
-            Self::Fuzz(_) => "fuzz",
-            Self::Routes => "routes",
+            Self::Build(_) => CommandName::Build,
+            Self::Dissect(_) => CommandName::Dissect,
+            Self::Read(_) => CommandName::Read,
+            Self::Interfaces => CommandName::Interfaces,
+            Self::Plan(_) => CommandName::Plan,
+            Self::Send(_) => CommandName::Send,
+            Self::Exchange(_) => CommandName::Exchange,
+            Self::Capture(_) => CommandName::Capture,
+            Self::Replay(_) => CommandName::Replay,
+            Self::Scan(_) => CommandName::Scan,
+            Self::Traceroute(_) => CommandName::Traceroute,
+            Self::Dns(_) => CommandName::Dns,
+            Self::Fuzz(_) => CommandName::Fuzz,
+            Self::Routes => CommandName::Routes,
         }
     }
 }
 
 fn run(cli: Cli) -> Result<(), CliError> {
+    cli.command
+        .name()
+        .require_format(cli.output)
+        .map_err(CliError::classified)?;
     match cli.command {
         Command::Build(arguments) => run_build(arguments, cli.output),
         Command::Dissect(arguments) => run_dissect(arguments, cli.output),
@@ -290,11 +303,12 @@ fn run_build(arguments: BuildArgs, output: OutputFormat) -> Result<(), CliError>
             },
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
+    let (result, diagnostics) = BuildCommandResult::from_built(built);
     match output {
         OutputFormat::Text => {
-            write_stdout_line(format_args!("built {} bytes", built.bytes.len()))?;
-            write_stdout_line(format_args!("{}", spaced_hex(&built.bytes)))?;
-            for diagnostic in &built.diagnostics {
+            write_stdout_line(format_args!("built {} bytes", result.length))?;
+            write_stdout_line(format_args!("{}", spaced_hex(result.bytes())))?;
+            for diagnostic in &diagnostics {
                 write_stdout_line(format_args!(
                     "{:?} {}: {}",
                     diagnostic.severity, diagnostic.code, diagnostic.message
@@ -302,21 +316,19 @@ fn run_build(arguments: BuildArgs, output: OutputFormat) -> Result<(), CliError>
             }
             Ok(())
         }
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", compact_hex(&built.bytes))),
-        OutputFormat::Raw => write_raw(&built.bytes),
-        OutputFormat::Json => emit_json(&json!({
-            "schema": OUTPUT_SCHEMA_V1,
-            "command": "build",
-            "status": "success",
-            "diagnostics": built.diagnostics,
-            "result": {
-                "bytes_hex": compact_hex(&built.bytes),
-                "length": built.bytes.len(),
-                "packet": PacketDocument::from_packet(&built.packet),
-                "layout": built.layout,
-                "requires_live_opt_in": built.requires_live_opt_in,
-            }
-        })),
+        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        OutputFormat::Raw => write_raw(result.bytes()),
+        OutputFormat::Json => emit_json(&AggregateOutput::success(
+            CommandName::Build,
+            result,
+            diagnostics,
+        )),
+        _ => Err(CliError::classified(
+            OutputContractError::UnsupportedFormat {
+                command: CommandName::Build,
+                format: output,
+            },
+        )),
     }
 }
 
@@ -339,17 +351,18 @@ fn run_dissect(arguments: DissectArgs, output: OutputFormat) -> Result<(), CliEr
             DecodeOptions::default(),
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
+    let (result, diagnostics) = DissectCommandResult::from_decoded(decoded);
     match output {
         OutputFormat::Text => {
             write_stdout_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
-                decoded.original.len(),
-                decoded.packet.len()
+                result.length,
+                result.packet.layers.len()
             ))?;
-            for (index, layer) in decoded.packet.iter().enumerate() {
-                write_stdout_line(format_args!("{index}: {}", layer.protocol_id()))?;
+            for (index, layer) in result.packet.layers.iter().enumerate() {
+                write_stdout_line(format_args!("{index}: {}", layer.protocol))?;
             }
-            for diagnostic in &decoded.diagnostics {
+            for diagnostic in &diagnostics {
                 write_stdout_line(format_args!(
                     "{:?} {}: {}",
                     diagnostic.severity, diagnostic.code, diagnostic.message
@@ -357,31 +370,23 @@ fn run_dissect(arguments: DissectArgs, output: OutputFormat) -> Result<(), CliEr
             }
             Ok(())
         }
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", compact_hex(&decoded.original))),
-        OutputFormat::Raw => write_raw(&decoded.original),
-        OutputFormat::Json => emit_json(&json!({
-            "schema": OUTPUT_SCHEMA_V1,
-            "command": "dissect",
-            "status": "success",
-            "diagnostics": decoded.diagnostics,
-            "result": {
-                "bytes_hex": compact_hex(&decoded.original),
-                "length": decoded.original.len(),
-                "link_type": decoded.frame.link_type.0,
-                "packet": PacketDocument::from_packet(&decoded.packet),
-                "layout": decoded.layout,
-            }
-        })),
+        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        OutputFormat::Raw => write_raw(result.bytes()),
+        OutputFormat::Json => emit_json(&AggregateOutput::success(
+            CommandName::Dissect,
+            result,
+            diagnostics,
+        )),
+        _ => Err(CliError::classified(
+            OutputContractError::UnsupportedFormat {
+                command: CommandName::Dissect,
+                format: output,
+            },
+        )),
     }
 }
 
 fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
-    if output == OutputFormat::Raw {
-        return Err(CliError::new(
-            2,
-            "raw output is ambiguous for a multi-frame capture; use hex, JSON, or a capture writer",
-        ));
-    }
     let file = File::open(&arguments.path).map_err(|source| {
         CliError::new(
             5,
@@ -390,89 +395,75 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
     })?;
     let mut reader =
         CaptureReader::new(file).map_err(|source| CliError::new(3, source.to_string()))?;
-    let mut index = 0usize;
-    while let Some(frame) = reader
-        .next_frame()
-        .map_err(|source| CliError::new(3, source.to_string()))?
-    {
+    let mut sequence = 0_u64;
+    loop {
+        let Some(frame) = reader
+            .next_frame()
+            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?
+        else {
+            return Ok(());
+        };
+        let result = ReadFrameCommandResult::try_from_frame(frame)
+            .map_err(|source| CliError::classified(source).at_sequence(sequence))?;
         match output {
             OutputFormat::Text => write_stdout_line(format_args!(
-                "{index}: dlt={} caplen={} wirelen={} {}",
-                frame.link_type.0,
-                frame.captured_length,
-                frame.original_length,
-                spaced_hex(&frame.bytes)
+                "{sequence}: dlt={} caplen={} wirelen={} {}",
+                result.frame.link_type,
+                result.frame.captured_length,
+                result.frame.original_length,
+                spaced_hex(result.frame.bytes())
             ))?,
-            OutputFormat::Hex => write_stdout_line(format_args!("{}", compact_hex(&frame.bytes)))?,
-            OutputFormat::Json => emit_json_compact(&json!({
-                "schema": OUTPUT_SCHEMA_V1,
-                "command": "read",
-                "status": "success",
-                "diagnostics": [],
-                "sequence": index,
-                "result": {
-                    "timestamp": frame.timestamp,
-                    "captured_length": frame.captured_length,
-                    "original_length": frame.original_length,
-                    "link_type": frame.link_type.0,
-                    "interface": frame.interface,
-                    "direction": frame.direction,
-                    "bytes_hex": compact_hex(&frame.bytes),
-                }
-            }))?,
-            OutputFormat::Raw => unreachable!(),
+            OutputFormat::Hex => write_stdout_line(format_args!("{}", result.frame.bytes_hex))?,
+            OutputFormat::Ndjson => emit_json_compact(&StreamRecord::success(
+                CommandName::Read,
+                sequence,
+                result,
+                Vec::new(),
+            ))
+            .map_err(|error| error.at_sequence(sequence))?,
+            _ => {
+                return Err(CliError::classified(
+                    OutputContractError::UnsupportedFormat {
+                        command: CommandName::Read,
+                        format: output,
+                    },
+                ))
+            }
         }
-        index += 1;
+        sequence = sequence.checked_add(1).ok_or_else(|| {
+            CliError::classified(OutputContractError::SequenceOverflow).at_sequence(sequence)
+        })?;
     }
-    Ok(())
 }
 
 fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
-    if matches!(output, OutputFormat::Raw | OutputFormat::Hex) {
-        return Err(CliError::new(2, "interfaces supports text or JSON output"));
-    }
     let interfaces = crate::io::InterfaceProvider::interfaces(&crate::io::SystemInterfaceProvider)
         .map_err(CliError::classified)?;
-    if output == OutputFormat::Json {
-        let values = interfaces
-            .iter()
-            .map(|interface| {
-                json!({
-                    "name": interface.id.name,
-                    "index": interface.id.index,
-                    "description": interface.description,
-                    "mac": interface.mac_address.map(|value| value.to_string()),
-                    "addresses": interface.addresses.iter().map(|value| {
-                        format!("{}/{}", value.address, value.prefix_length)
-                    }).collect::<Vec<_>>(),
-                    "flags": interface.flags,
-                    "mtu": interface.mtu,
-                    "capability": interface.capability,
-                    "link_type": interface.link_type.0,
-                })
-            })
-            .collect::<Vec<_>>();
-        return emit_json(&json!({
-            "schema": OUTPUT_SCHEMA_V1,
-            "command": "interfaces",
-            "status": "success",
-            "diagnostics": [],
-            "result": values,
-        }));
+    let result = InterfacesCommandResult::new(interfaces);
+    match output {
+        OutputFormat::Text => {
+            for interface in result.interfaces {
+                write_stdout_line(format_args!(
+                    "{} (index {}): {}",
+                    interface.name,
+                    interface.index,
+                    interface.addresses.join(", ")
+                ))?;
+            }
+            Ok(())
+        }
+        OutputFormat::Json => emit_json(&AggregateOutput::success(
+            CommandName::Interfaces,
+            result,
+            Vec::new(),
+        )),
+        _ => Err(CliError::classified(
+            OutputContractError::UnsupportedFormat {
+                command: CommandName::Interfaces,
+                format: output,
+            },
+        )),
     }
-    for interface in interfaces {
-        let addresses = interface
-            .addresses
-            .iter()
-            .map(|value| format!("{}/{}", value.address, value.prefix_length))
-            .collect::<Vec<_>>()
-            .join(", ");
-        write_stdout_line(format_args!(
-            "{} (index {}): {}",
-            interface.id.name, interface.id.index, addresses
-        ))?;
-    }
-    Ok(())
 }
 
 fn read_recipe(
@@ -589,15 +580,6 @@ fn read_bounded_allow_empty(reader: impl Read, maximum: usize) -> Result<Vec<u8>
     Ok(bytes)
 }
 
-fn compact_hex(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len().saturating_mul(2));
-    for byte in bytes {
-        use std::fmt::Write as _;
-        let _ = write!(output, "{byte:02x}");
-    }
-    output
-}
-
 fn spaced_hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len().saturating_mul(3));
     for (index, byte) in bytes.iter().enumerate() {
@@ -691,6 +673,7 @@ struct CliError {
     message: String,
     classification: ErrorClassification,
     causes: Vec<String>,
+    sequence: Option<u64>,
 }
 
 impl CliError {
@@ -719,6 +702,7 @@ impl CliError {
                 None,
             ),
             causes: Vec::new(),
+            sequence: None,
         }
     }
 
@@ -730,59 +714,61 @@ impl CliError {
             message: error.to_string(),
             classification,
             causes,
+            sequence: None,
         }
+    }
+
+    fn at_sequence(mut self, sequence: u64) -> Self {
+        self.sequence = Some(sequence);
+        self
+    }
+
+    fn output_error(&self) -> OutputError {
+        OutputError::new(
+            self.classification,
+            self.message.clone(),
+            self.causes.clone(),
+        )
     }
 }
 
-fn error_envelope(command: Option<&str>, error: &CliError) -> serde_json::Value {
-    let mut error_value = json!({
-        "code": error.classification.code,
-        "kind": error.classification.kind.as_str(),
-        "message": error.message,
-        "causes": error.causes,
-    });
-    if let Some(remediation) = error.classification.remediation {
-        error_value["remediation"] = json!(remediation);
-    }
-    json!({
-        "schema": OUTPUT_SCHEMA_V1,
-        "command": command,
-        "status": "error",
-        "diagnostics": [],
-        "error": error_value,
+fn machine_format_from_env() -> Option<OutputFormat> {
+    let arguments = std::env::args().collect::<Vec<_>>();
+    arguments.iter().enumerate().find_map(|(index, argument)| {
+        let value = if argument == "--output" {
+            arguments.get(index + 1).map(String::as_str)
+        } else {
+            argument.strip_prefix("--output=")
+        }?;
+        match value {
+            "json" => Some(OutputFormat::Json),
+            "ndjson" => Some(OutputFormat::Ndjson),
+            _ => None,
+        }
     })
 }
 
-fn env_requests_json() -> bool {
-    let arguments = std::env::args().collect::<Vec<_>>();
-    arguments
-        .windows(2)
-        .any(|pair| pair == ["--output", "json"])
-        || arguments.iter().any(|argument| argument == "--output=json")
-}
-
-fn command_from_env() -> Option<&'static str> {
-    const COMMANDS: &[&str] = &[
-        "build",
-        "dissect",
-        "plan",
-        "send",
-        "exchange",
-        "capture",
-        "read",
-        "replay",
-        "scan",
-        "traceroute",
-        "dns",
-        "fuzz",
-        "interfaces",
-        "routes",
+fn command_from_env() -> Option<CommandName> {
+    const COMMANDS: &[(&str, CommandName)] = &[
+        ("build", CommandName::Build),
+        ("dissect", CommandName::Dissect),
+        ("plan", CommandName::Plan),
+        ("send", CommandName::Send),
+        ("exchange", CommandName::Exchange),
+        ("capture", CommandName::Capture),
+        ("read", CommandName::Read),
+        ("replay", CommandName::Replay),
+        ("scan", CommandName::Scan),
+        ("traceroute", CommandName::Traceroute),
+        ("dns", CommandName::Dns),
+        ("fuzz", CommandName::Fuzz),
+        ("interfaces", CommandName::Interfaces),
+        ("routes", CommandName::Routes),
     ];
     std::env::args().find_map(|argument| {
         COMMANDS
             .iter()
-            .copied()
-            .find(|command| *command == argument)
+            .find_map(|(name, command)| (*name == argument).then_some(*command))
     })
 }
 
@@ -810,7 +796,10 @@ mod tests {
     #[test]
     fn whole_frame_hex_is_not_truncated() {
         let bytes = (0u8..=255).collect::<Vec<_>>();
-        assert_eq!(compact_hex(&bytes).len(), 512);
+        assert_eq!(
+            crate::output::WireFrameOutput::new(bytes).bytes_hex.len(),
+            512
+        );
     }
 
     #[test]
@@ -844,7 +833,9 @@ mod tests {
             },
         });
         assert_eq!(dual.causes.len(), 2);
-        let envelope = error_envelope(Some("exchange"), &dual);
+        let envelope =
+            AggregateErrorOutput::error(Some(CommandName::Exchange), dual.output_error());
+        let envelope = serde_json::to_value(envelope).unwrap();
         assert_eq!(envelope["error"]["causes"].as_array().unwrap().len(), 2);
     }
 }

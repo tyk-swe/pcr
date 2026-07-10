@@ -27,6 +27,7 @@ pub mod client;
 pub mod core;
 pub mod error;
 pub mod io;
+pub mod output;
 pub mod protocols;
 pub mod session;
 pub mod tools;
@@ -69,6 +70,20 @@ pub use io::{
     DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT,
     DEFAULT_PCAPNG_INTERFACE_LIMIT, DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT, MAX_CAPTURE_TIMEOUT,
     MAX_NEIGHBOR_VLAN_TAGS,
+};
+pub use output::{
+    AggregateErrorOutput, AggregateOutput, BuildCommandResult, CaptureFrameCommandResult,
+    CommandName, CommandOutputContract, DissectCommandResult, DnsCommandResult,
+    DnsRecordCommandResult, DnsRecordData, DnsRecordOutput, DnsSection, ExchangeCommandResult,
+    ExchangeResponseOutput, ExchangeStreamCommandResult, FrameOutput, FuzzCaseCommandResult,
+    FuzzCaseOutcome, FuzzCaseOutput, FuzzCommandResult, InterfaceOutput, InterfacesCommandResult,
+    MaterializedRouteOutput, NeighborEvidenceOutput, OutputContractError, OutputError,
+    OutputFormat, OutputMode, OutputTimestamp, PlanCommandResult, ProbeEvidenceOutput,
+    ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult, RoutesCommandResult,
+    ScanClassification, ScanCommandResult, ScanPortCommandResult, ScanPortOutput,
+    SendCommandResult, StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceHopOutput,
+    TraceProbeOutput, TraceProbeStatus, TracerouteCommandResult, TracerouteHopCommandResult,
+    WireFrameOutput, COMMAND_OUTPUT_CONTRACTS, OUTPUT_SCHEMA_V1,
 };
 pub use protocols::{
     default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, DestinationOptions, Ethernet,

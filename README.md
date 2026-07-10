@@ -120,7 +120,7 @@ packetcraftr build --packet 'ether()/ipv4(dst="192.0.2.10")/tcp(dport=443)/raw(h
 
 Versioned JSON or YAML documents are intended for generated, complex, or reviewable packets. Workflow settings such as interface, timeout, output format, replay timing, or traffic policy never belong inside a packet document. The versioned [packet and output JSON Schemas](schemas/README.md) and [example documents](examples/documents) are included in the repository.
 
-Machine-readable aggregate output uses the `packetcraftr.output/v1` envelope. Streaming commands use NDJSON. Raw and hexadecimal formats always refer to the complete captured or built frame, never payload-only bytes.
+Machine-readable aggregate output uses one typed `packetcraftr.output/v1` JSON envelope. Streaming commands use independently valid NDJSON records; every success and terminal error has a zero-based `sequence`, with terminal errors taking the next unused value. JSON and NDJSON are distinct `--output` values rather than command-dependent meanings of `json`. Raw and hexadecimal formats always refer to the complete captured or built frame, never payload-only bytes. The complete command/format matrix is part of the [output schema contract](schemas/README.md#commandformat-matrix).
 
 The [v0.1 to v0.2 migration guide](docs/migration-v0.1-to-v0.2.md) maps common legacy commands and explains removed subsystems.
 

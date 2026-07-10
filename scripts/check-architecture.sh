@@ -54,6 +54,7 @@ portable_modules=(
     src/session/mod.rs
     src/tools/mod.rs
     src/error.rs
+    src/output.rs
     src/client.rs
     src/v2_cli.rs
 )

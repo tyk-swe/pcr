@@ -66,3 +66,20 @@ fn published_build_error_output_matches_the_cli() {
     let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(actual, json_file("output-build-error.json"));
 }
+
+#[test]
+fn published_exchange_stream_event_matches_the_typed_contract() {
+    let event = packetcraftr::StreamRecord::success(
+        packetcraftr::CommandName::Exchange,
+        3,
+        packetcraftr::ExchangeStreamCommandResult::Complete {
+            unanswered: vec![1, 2],
+        },
+        Vec::new(),
+    );
+
+    assert_eq!(
+        serde_json::to_value(event).unwrap(),
+        json_file("output-exchange-event.json")
+    );
+}

@@ -3,10 +3,11 @@
   "command": "build",
   "mode": "aggregate",
   "status": "error",
+  "sequence": 0,
   "error": {
-    "code": "packet.error",
-    "kind": "packet",
-    "message": "layer ethernet cannot contain adjacent layer udp",
+    "code": "cli.error",
+    "kind": "cli",
+    "message": "invalid",
     "causes": []
   },
   "diagnostics": []

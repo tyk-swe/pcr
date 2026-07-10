@@ -1,6 +1,7 @@
 {
   "schema": "packetcraftr.output/v1",
   "command": "build",
+  "mode": "aggregate",
   "status": "success",
   "result": {
     "bytes_hex": "deadbeef",

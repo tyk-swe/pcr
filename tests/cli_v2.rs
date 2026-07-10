@@ -2,12 +2,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
-#[cfg(unix)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+}
+
+fn temp_path(label: &str) -> PathBuf {
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "packetcraftr-{label}-{}-{suffix}.bin",
+        std::process::id()
+    ))
+}
+
+fn write_capture(frames: &[&[u8]], malformed_tail: bool) -> PathBuf {
+    let mut writer =
+        packetcraftr::CaptureWriter::pcap(Vec::new(), packetcraftr::LinkType::ETHERNET).unwrap();
+    for (index, bytes) in frames.iter().enumerate() {
+        let frame = packetcraftr::CapturedFrame::new(
+            UNIX_EPOCH + std::time::Duration::from_secs(index as u64),
+            packetcraftr::LinkType::ETHERNET,
+            bytes.to_vec(),
+        )
+        .unwrap();
+        writer.write_frame(&frame).unwrap();
+    }
+    let mut bytes = writer.into_inner();
+    if malformed_tail {
+        bytes.extend_from_slice(&[0_u8; 8]);
+    }
+    let path = temp_path("typed-output");
+    std::fs::write(&path, bytes).unwrap();
+    path
 }
 
 #[test]
@@ -44,6 +76,7 @@ fn json_build_uses_versioned_success_envelope() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["schema"], "packetcraftr.output/v1");
     assert_eq!(value["command"], "build");
+    assert_eq!(value["mode"], "aggregate");
     assert_eq!(value["status"], "success");
     assert_eq!(value["result"]["bytes_hex"], "deadbeef");
     assert!(value["diagnostics"].is_array());
@@ -59,6 +92,7 @@ fn unavailable_live_command_uses_capability_exit_code_and_json_error() {
     assert_eq!(output.status.code(), Some(4));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["status"], "error");
+    assert_eq!(value["mode"], "aggregate");
     assert_eq!(value["error"]["kind"], "capability");
     assert_eq!(value["command"], "send");
 }
@@ -121,7 +155,7 @@ fn native_windows_interfaces_uses_ip_helper() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["status"], "success");
     assert_eq!(value["command"], "interfaces");
-    let interfaces = value["result"].as_array().unwrap();
+    let interfaces = value["result"]["interfaces"].as_array().unwrap();
     assert!(!interfaces.is_empty());
     assert!(interfaces.iter().all(|interface| {
         interface["index"].as_u64().is_some_and(|index| index != 0)
@@ -164,17 +198,100 @@ fn piped_stdin_cannot_be_silently_ignored_by_an_explicit_recipe() {
         .contains("exactly one"));
 }
 
+#[test]
+fn cli_parse_errors_requested_as_ndjson_are_sequence_zero_records() {
+    let output = binary()
+        .args(["--output", "ndjson", "build", "--unknown-option"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "build");
+    assert_eq!(value["mode"], "stream");
+    assert_eq!(value["sequence"], 0);
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["error"]["kind"], "cli");
+}
+
+#[test]
+fn read_ndjson_success_records_have_frozen_sequences() {
+    let path = write_capture(&[&[0, 1], &[2, 3, 4]], false);
+    let output = binary()
+        .args(["--output", "ndjson", "read"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records = output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    for (sequence, record) in records.iter().enumerate() {
+        assert_eq!(record["command"], "read");
+        assert_eq!(record["mode"], "stream");
+        assert_eq!(record["sequence"], sequence as u64);
+        assert_eq!(record["status"], "success");
+    }
+    assert_eq!(records[0]["result"]["frame"]["bytes_hex"], "0001");
+    assert_eq!(records[1]["result"]["frame"]["bytes_hex"], "020304");
+}
+
+#[test]
+fn read_ndjson_terminal_errors_use_the_next_unused_sequence() {
+    let path = write_capture(&[&[0xaa]], true);
+    let output = binary()
+        .args(["--output", "ndjson", "read"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    std::fs::remove_file(path).unwrap();
+
+    assert_eq!(output.status.code(), Some(3));
+    let records = output
+        .stdout
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["status"], "success");
+    assert_eq!(records[0]["sequence"], 0);
+    assert_eq!(records[1]["status"], "error");
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["error"]["kind"], "packet");
+}
+
+#[test]
+fn unsupported_json_for_read_is_typed_before_opening_the_input() {
+    let output = binary()
+        .args(["--output", "json", "read", "definitely-missing.pcap"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["mode"], "aggregate");
+    assert_eq!(value["error"]["code"], "cli.output_format");
+    assert!(value["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("text, ndjson, hex"));
+}
+
 #[cfg(unix)]
 #[test]
 fn closed_stdout_is_a_runtime_io_error_without_a_panic() {
-    let suffix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!(
-        "packetcraftr-closed-stdout-{}-{suffix}.bin",
-        std::process::id()
-    ));
+    let path = temp_path("closed-stdout");
     std::fs::write(&path, vec![0u8; 1024 * 1024]).unwrap();
 
     let mut child = binary()

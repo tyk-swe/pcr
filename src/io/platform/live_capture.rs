@@ -712,10 +712,18 @@ mod tests {
             },
         )
         .unwrap();
-        assert!(matches!(
-            session.wait_ready(),
-            Err(LiveIoError::Capture { .. })
-        ));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let error = match session.wait_ready() {
+            Err(error) => error,
+            Ok(()) => loop {
+                match session.next_frame(Duration::from_millis(50)) {
+                    Err(error) => break error,
+                    Ok(_) if Instant::now() < deadline => thread::yield_now(),
+                    Ok(_) => panic!("capture did not propagate its injected source failure"),
+                }
+            },
+        };
+        assert!(matches!(error, LiveIoError::Capture { .. }));
         session.shutdown().unwrap();
         assert_eq!(interrupts.load(Ordering::SeqCst), 1);
     }

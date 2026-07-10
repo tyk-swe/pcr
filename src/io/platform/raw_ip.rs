@@ -14,8 +14,8 @@ use bytes::Bytes;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 #[cfg(windows)]
 use windows::Win32::Networking::WinSock::{
-    setsockopt, WSAGetLastError, IPPROTO_IP, IPPROTO_IPV6, IPV6_UNICAST_IF, IP_UNICAST_IF, SOCKET,
-    SOCKET_ERROR,
+    setsockopt, WSAGetLastError, IPPROTO_IP, IPPROTO_IPV6, IPV6_MULTICAST_IF, IPV6_UNICAST_IF,
+    IP_MULTICAST_IF, IP_UNICAST_IF, SOCKET, SOCKET_ERROR,
 };
 
 use super::super::{IoSendReport, Layer3Frame, LiveIoError};
@@ -112,12 +112,20 @@ fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSock
     let (level, option, index) = match packet.family {
         IpFamily::V4 => (
             IPPROTO_IP.0,
-            IP_UNICAST_IF,
+            if packet.destination.is_multicast() {
+                IP_MULTICAST_IF
+            } else {
+                IP_UNICAST_IF
+            },
             packet.interface.index.to_be_bytes(),
         ),
         IpFamily::V6 => (
             IPPROTO_IPV6.0,
-            IPV6_UNICAST_IF,
+            if packet.destination.is_multicast() {
+                IPV6_MULTICAST_IF
+            } else {
+                IPV6_UNICAST_IF
+            },
             packet.interface.index.to_ne_bytes(),
         ),
     };

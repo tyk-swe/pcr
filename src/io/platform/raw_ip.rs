@@ -64,12 +64,7 @@ impl RawIpBackend for SystemRawIpBackend {
         }
 
         bind_interface(&socket, packet)?;
-        socket
-            .bind(&socket_address(
-                packet.interface_source,
-                packet.interface.index,
-            ))
-            .map_err(|source| raw_error("binding the route-selected source address", source))?;
+        bind_route_source(&socket, packet)?;
         if packet.destination == IpAddr::V4(Ipv4Addr::BROADCAST) {
             socket
                 .set_broadcast(true)
@@ -111,6 +106,25 @@ fn bind_interface(_socket: &Socket, _packet: &PreparedRawIp) -> Result<(), RawSo
     // Binding the route-selected source address below constrains Winsock to
     // that address and its owning interface without exposing a socket handle.
     Ok(())
+}
+
+#[cfg(not(windows))]
+fn bind_route_source(_socket: &Socket, _packet: &PreparedRawIp) -> Result<(), RawSocketError> {
+    // Linux SO_BINDTODEVICE and macOS IP_BOUND_IF constrain the route without
+    // making a crafted source address fail local-address validation.
+    Ok(())
+}
+
+#[cfg(windows)]
+fn bind_route_source(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSocketError> {
+    // Winsock has no socket2 interface-index binding. The route-selected
+    // source is assigned to exactly one adapter by the native route provider.
+    socket
+        .bind(&socket_address(
+            packet.interface_source,
+            packet.interface.index,
+        ))
+        .map_err(|source| raw_error("binding the route-selected source address", source))
 }
 
 fn socket_address(address: IpAddr, interface_index: u32) -> SockAddr {

@@ -22,7 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added passive native route, interface, source-address, next-hop, and MTU providers behind `native-route`: route netlink on Linux, routing sockets plus native interface APIs on macOS, and IP Helper on Windows. Selection reasons and unsupported preferences use platform-neutral typed values/errors.
 - Added native Layer 2 capture and injection behind `native-layer2`: libpcap on Linux/macOS and a securely runtime-loaded, pinned Npcap ABI on Windows x86_64 MSVC. Capture sessions own their worker and handle, expose an explicit readiness barrier, enforce frame/byte queue bounds, preserve native timestamps/link types/interface metadata and complete captured bytes, report native/queue loss, and join every shutdown path.
 - Added injectable and system-composed active neighbor resolution with gateway-aware IPv4 ARP and IPv6 NDP, exact VLAN/interface correlation, finite attempts and timeouts, bounded captured evidence, joined capture cleanup, and a bounded finite-lifetime cache.
-- Added `native-layer3` and `SystemLayer3Io` raw IPv4/IPv6 transmission on Linux, macOS, and Windows with route-selected interface/source binding, exact-frame validation, typed platform/privilege failures, and complete-write reporting.
+- Added `native-layer3` and `SystemLayer3Io` raw IPv4/IPv6 transmission on Linux, macOS, and Windows with route-selected path binding, exact-frame validation, typed platform/privilege failures, and complete-write reporting.
 
 ### Changed
 

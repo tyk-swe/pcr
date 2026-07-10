@@ -378,7 +378,7 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
     Ok(())
 }
 
-#[cfg(feature = "live")]
+#[cfg(all(feature = "live", not(windows)))]
 fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
     if matches!(output, OutputFormat::Raw | OutputFormat::Hex) {
         return Err(CliError::new(2, "interfaces supports text or JSON output"));
@@ -418,6 +418,14 @@ fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
         ))?;
     }
     Ok(())
+}
+
+#[cfg(all(feature = "live", windows))]
+fn run_interfaces(_output: OutputFormat) -> Result<(), CliError> {
+    Err(CliError::new(
+        4,
+        "Windows interface enumeration is unavailable in the portable profile; use a PacketcraftR build with the Windows native adapter when available (Npcap is required only for native Layer 2 capture and injection)",
+    ))
 }
 
 #[cfg(not(feature = "live"))]

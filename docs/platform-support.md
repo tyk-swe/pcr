@@ -62,9 +62,10 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 
 ### Windows
 
-- Portable and offline use: no Npcap requirement.
+- Default and `--no-default-features` builds are portable profiles. Neither resolves `pnet`, links `Packet.lib`, nor requires an Npcap installation or SDK.
+- The default feature set does not imply a Windows native adapter. Until that adapter is implemented, commands such as `interfaces` return an actionable capability error instead of falling through to another link mode or failing at link time.
 - Future Layer 2 capture/injection requires a supported Npcap installation. Building native integration can require the matching Npcap SDK.
-- Install Npcap in WinPcap API-compatible mode only when required by the selected Rust/native dependency and organizational policy; PacketcraftR should report a missing/incompatible dependency rather than silently changing link mode.
+- A future explicit native-adapter profile must pin and provision its supported Npcap SDK/runtime contract. Missing or incompatible native dependencies must remain capability errors and must never silently change link mode.
 - Route/source selection uses Windows IP Helper APIs such as `GetBestRoute2` in the v0.2 target.
 
 ## Link-mode contract
@@ -83,7 +84,7 @@ For an off-link destination, neighbor resolution targets the selected route gate
 
 ## Continuous-integration coverage
 
-Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default and no-default portable profiles compile and test on macOS and Windows. These unprivileged hosted jobs do not qualify live I/O.
+Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default and no-default profiles compile and test on macOS. Windows runs separately named portable default and portable no-default jobs, and CI rejects either dependency graph if it contains `pnet` (and therefore the `Packet.lib` link boundary). These unprivileged hosted jobs do not qualify live I/O.
 
 Stable release qualification additionally requires:
 

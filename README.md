@@ -82,7 +82,7 @@ cargo build --no-default-features
 cargo test --no-default-features
 ```
 
-The portable packet kernel and offline capture path do not require libpcap. The default `live` feature currently enables cross-platform interface enumeration; native capture and injection adapters are not part of this alpha checkpoint. Those later adapters will require libpcap on Linux/macOS and Npcap on Windows, plus the relevant operating-system privileges.
+The portable packet kernel and offline capture path do not require libpcap. On Linux and macOS, the default `live` feature currently enables interface enumeration without enabling capture or injection. Windows default and `--no-default-features` builds are deliberately portable: they do not resolve `pnet`, link `Packet.lib`, or require Npcap. The Windows `interfaces` command reports a capability error until the dedicated native adapter is available. Later capture and injection adapters will require libpcap on Linux/macOS and Npcap on Windows, plus the relevant operating-system privileges.
 
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
@@ -156,7 +156,7 @@ All parsers and queues must use checked arithmetic, honor configurable bounds, a
 
 ## Development
 
-The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux. Portable profiles also compile and test on macOS and Windows.
+The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux. Default and no-default profiles also compile and test on macOS. Windows CI names and tests both profiles as portable and verifies that neither dependency graph contains `pnet` or its `Packet.lib` link requirement.
 
 ```console
 cargo fmt --all -- --check

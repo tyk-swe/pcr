@@ -63,6 +63,25 @@ fn unavailable_live_command_uses_capability_exit_code_and_json_error() {
     assert_eq!(value["command"], "send");
 }
 
+#[cfg(all(windows, feature = "live"))]
+#[test]
+fn portable_windows_interfaces_reports_the_native_capability_boundary() {
+    let output = binary()
+        .args(["--output", "json", "interfaces"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(4));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["error"]["kind"], "capability");
+    assert_eq!(value["command"], "interfaces");
+    let message = value["error"]["message"].as_str().unwrap();
+    assert!(message.contains("portable profile"));
+    assert!(message.contains("Windows native adapter"));
+    assert!(message.contains("Npcap"));
+}
+
 #[test]
 fn conflicting_recipe_sources_use_cli_exit_code() {
     let output = binary()

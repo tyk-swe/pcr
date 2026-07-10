@@ -129,28 +129,43 @@ jobs:
         run: bash scripts/check-fixture-changes.sh
 
   portable-platforms:
-    name: ${{ matrix.os }} / ${{ matrix.profile.name }}
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - macos-14
-          - windows-2022
-        profile:
-          - name: default features
+        include:
+          - name: macOS / default features
+            os: macos-14
             flags: ""
-          - name: no default features
+          - name: macOS / no default features
+            os: macos-14
+            flags: --no-default-features
+          - name: Windows / portable default features
+            os: windows-2022
+            flags: ""
+          - name: Windows / portable no default features
+            os: windows-2022
             flags: --no-default-features
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal
       - name: Compile portable targets
-        run: cargo check --locked --all-targets ${{ matrix.profile.flags }}
+        run: cargo check --locked --all-targets ${{ matrix.flags }}
       - name: Test portable targets
-        run: cargo test --locked --all-targets ${{ matrix.profile.flags }}
+        run: cargo test --locked --all-targets ${{ matrix.flags }}
+      - name: Assert the portable Windows dependency boundary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tree = cargo tree --color never --locked --target x86_64-pc-windows-msvc --edges normal ${{ matrix.flags }} --prefix none --format '{p}'
+          $nativeDependencies = $tree | Select-String -Pattern '^pnet(?:_| )'
+          if ($nativeDependencies) {
+            $nativeDependencies | ForEach-Object { Write-Error $_ }
+            throw 'portable Windows profiles must not resolve pnet or its Packet.lib link boundary'
+          }
 
   required:
     name: Required checks

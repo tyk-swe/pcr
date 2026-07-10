@@ -508,10 +508,12 @@ where
         validate_mtu(&preliminary, plan.route.mtu)?;
         self.authorize_built(&preliminary, options.allow_permissive_live)?;
         self.authorize_byte_count(preliminary.bytes.len() as u64)?;
+        let preliminary_len = preliminary.bytes.len();
         let route = self.planner.materialize(plan, &self.neighbors)?;
         let link_changed = materialize_link_fields(&mut packet, &route)?;
         let built = if link_changed {
             let built = builder.build(packet, context, options.build)?;
+            require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             self.authorize_built(&built, options.allow_permissive_live)?;
             self.authorize_byte_count(built.bytes.len() as u64)?;
             built
@@ -659,20 +661,7 @@ where
                 preliminary
             };
             self.authorize_built(&built, options.send.allow_permissive_live)?;
-            if built.bytes.len() != preliminary_len {
-                // Only fixed-width MAC fields may change after the preliminary
-                // build. Treat a custom codec violating that contract as a
-                // build/materialization error rather than mis-accounting it.
-                return Err(ClientError::PacketMaterialization {
-                    layer: 0,
-                    field: "ethernet",
-                    message: format!(
-                        "link materialization changed frame length from {} to {} bytes",
-                        preliminary_len,
-                        built.bytes.len()
-                    ),
-                });
-            }
+            require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             prepared.push((built, route));
         }
 
@@ -1097,6 +1086,25 @@ fn materialize_link_fields(
         changed = true;
     }
     Ok(changed)
+}
+
+fn require_fixed_width_link_materialization(
+    preliminary_len: usize,
+    materialized_len: usize,
+) -> Result<(), ClientError> {
+    if materialized_len != preliminary_len {
+        // Only fixed-width MAC fields may change after the preliminary build.
+        // Treat a custom codec violating that contract as a materialization
+        // error rather than authorizing or accounting for a different shape.
+        return Err(ClientError::PacketMaterialization {
+            layer: 0,
+            field: "ethernet",
+            message: format!(
+                "link materialization changed frame length from {preliminary_len} to {materialized_len} bytes"
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn is_public(address: IpAddr) -> bool {

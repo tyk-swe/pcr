@@ -183,9 +183,11 @@ v0.1 exposed a `run_cli`-oriented façade and private fixed builders. v0.2 appli
 
 Root `packetcraftr` reexports are the stable application import path even after internal component crates are extracted.
 
+Applications that need native Layer 2 route materialization can compose `SystemRouteProvider`, `SystemNeighborResolver`, and the typed native I/O providers. `RoutePlanner::plan` remains passive; `RoutePlanner::materialize` is the explicit boundary that may perform bounded ARP/NDP. Custom resolvers can continue implementing the legacy `NeighborResolver::resolve` method, while `resolve_request` receives interface-owned MAC/IP, next hop, VLAN, MTU, and link-type context and can return captured evidence.
+
 ## Feature migration
 
-The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate has three narrow capabilities in this checkpoint: default `live` for the temporary Unix interface enumerator, `native-route` for passive target-native route/interface discovery, and `native-layer2` for native capture/injection. Packet construction, dissection, documents, reassembly, offline capture, and injected providers remain portable without default features. `native-route` does not enable ARP/NDP, capture, or transmission. `native-layer2` explicitly opts into system libpcap on Linux/macOS or runtime-loaded Npcap 1.88 on Windows x86_64 MSVC.
+The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate has three narrow capabilities in this checkpoint: default `live` for the temporary Unix interface enumerator, `native-route` for passive target-native route/interface discovery, and `native-layer2` for native capture/injection. Packet construction, dissection, documents, reassembly, offline capture, neighbor protocol logic, and injected providers remain portable without default features. `native-route` alone does not emit ARP/NDP, capture, or transmission. `native-layer2` explicitly opts into system libpcap on Linux/macOS or runtime-loaded Npcap 1.88 on Windows x86_64 MSVC; selecting both features supplies the system route-to-neighbor path.
 
 If an application previously depended on an embedded subsystem, move orchestration outward:
 

@@ -3,12 +3,14 @@
 
 //! Runtime-neutral capture records and streaming offline capture I/O.
 
+mod neighbor;
 mod pcap;
 mod platform;
 mod provider;
 mod route;
 
 pub use crate::core::{CaptureDirection, CaptureRecordError, CapturedFrame, LinkType};
+pub use neighbor::{ActiveNeighborResolver, NeighborResolutionOptions, SystemNeighborResolver};
 pub use pcap::{
     CaptureError, CaptureFileFormat, CaptureReader, CaptureWriter, PcapEndianness, ReplayTiming,
     DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_PCAPNG_INTERFACE_LIMIT,
@@ -23,6 +25,7 @@ pub use provider::{
 };
 pub use route::{
     DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute,
-    NativeRouteError, NeighborError, NeighborResolver, PlanError, PlanOptions, PlannedRoute,
-    RouteDecision, RoutePlanner, RouteProvider, RouteSelectionReason, SystemRouteProvider,
+    NativeRouteError, NeighborError, NeighborRequest, NeighborResolution, NeighborResolver,
+    NeighborVlanKind, NeighborVlanTag, PlanError, PlanOptions, PlannedRoute, RouteDecision,
+    RoutePlanner, RouteProvider, RouteSelectionReason, SystemRouteProvider, MAX_NEIGHBOR_VLAN_TAGS,
 };

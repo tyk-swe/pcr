@@ -7,7 +7,12 @@ use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::core::{FieldValue, Packet, ProtocolId};
+use crate::core::{CapturedFrame, FieldValue, LinkType, Packet, ProtocolId};
+
+use super::provider::CaptureStatistics;
+
+/// Maximum explicit VLAN headers copied into a neighbor-discovery request.
+pub const MAX_NEIGHBOR_VLAN_TAGS: usize = 8;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InterfaceId {
@@ -219,6 +224,10 @@ pub struct PlannedRoute {
     pub neighbor_target: Option<IpAddr>,
     pub destination_mac: Option<MacAddress>,
     pub source_mac: Option<MacAddress>,
+    /// Exact VLAN stack from the planned packet. Active ARP/NDP requests use
+    /// the same tags so resolution cannot cross a logical link boundary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub neighbor_vlan_tags: Vec<NeighborVlanTag>,
     pub synthesized_ethernet: bool,
 }
 
@@ -245,6 +254,58 @@ impl fmt::Display for MacAddress {
             value[0], value[1], value[2], value[3], value[4], value[5]
         )
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NeighborVlanKind {
+    Ieee8021Q,
+    Ieee8021Ad,
+}
+
+impl NeighborVlanKind {
+    pub const fn ether_type(self) -> u16 {
+        match self {
+            Self::Ieee8021Q => 0x8100,
+            Self::Ieee8021Ad => 0x88a8,
+        }
+    }
+}
+
+/// One fixed-width tag copied from the packet's explicit VLAN stack for
+/// active neighbor discovery.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct NeighborVlanTag {
+    pub kind: NeighborVlanKind,
+    pub priority: u8,
+    pub drop_eligible: bool,
+    pub vlan_id: u16,
+}
+
+/// Complete, interface-owned context for one active ARP/NDP lookup. Packet
+/// source fields are intentionally absent so spoofed values cannot leak into
+/// discovery traffic.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NeighborRequest {
+    pub interface: InterfaceId,
+    pub interface_source: IpAddr,
+    pub interface_mac: MacAddress,
+    pub target: IpAddr,
+    pub vlan_tags: Vec<NeighborVlanTag>,
+    pub mtu: u32,
+    pub link_type: LinkType,
+}
+
+/// Bounded evidence returned by an active resolver and retained with the
+/// materialized route.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NeighborResolution {
+    pub mac_address: MacAddress,
+    pub attempts: u32,
+    pub cache_hit: bool,
+    pub captured: Vec<CapturedFrame>,
+    pub evidence_truncated: bool,
+    pub capture_statistics: CaptureStatistics,
 }
 
 #[derive(Debug, Error)]
@@ -300,6 +361,8 @@ pub enum PlanError {
     MissingPacketSource,
     #[error("invalid Segment Routing Header route state: {message}")]
     InvalidSegmentRouting { message: String },
+    #[error("packet carries an invalid neighbor-discovery VLAN stack: {message}")]
+    InvalidNeighborVlan { message: String },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -492,6 +555,7 @@ impl RoutePlanner {
             }
         }
         let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);
+        let neighbor_vlan_tags = neighbor_vlan_tags(packet)?;
         let visited_destinations = srh.map_or_else(
             || final_destination.into_iter().collect(),
             |route| route.segments[route.active_index..].to_vec(),
@@ -505,6 +569,7 @@ impl RoutePlanner {
                 .flatten(),
             destination_mac,
             source_mac,
+            neighbor_vlan_tags,
             synthesized_ethernet: mode == LinkMode::Layer2
                 && !packet
                     .iter()
@@ -524,6 +589,7 @@ impl RoutePlanner {
         mut plan: PlannedRoute,
         resolver: &N,
     ) -> Result<MaterializedRoute, NeighborError> {
+        let mut neighbor_resolution = None;
         if plan.needs_neighbor_resolution() {
             let target =
                 plan.neighbor_target
@@ -535,15 +601,33 @@ impl RoutePlanner {
                     .ok_or_else(|| NeighborError::MissingNeighborSource {
                         interface: plan.route.interface.name.clone(),
                     })?;
-            let mac = resolver.resolve(&plan.route.interface, source, target)?;
-            plan.destination_mac = Some(mac);
+            let interface_mac =
+                plan.route
+                    .source_mac
+                    .ok_or_else(|| NeighborError::MissingSourceMac {
+                        interface: plan.route.interface.name.clone(),
+                    })?;
+            let resolution = resolver.resolve_request(&NeighborRequest {
+                interface: plan.route.interface.clone(),
+                interface_source: source,
+                interface_mac,
+                target,
+                vlan_tags: plan.neighbor_vlan_tags.clone(),
+                mtu: plan.route.mtu,
+                link_type: plan.route.link_type,
+            })?;
+            plan.destination_mac = Some(resolution.mac_address);
+            neighbor_resolution = Some(resolution);
         }
         if plan.mode == LinkMode::Layer2 && plan.source_mac.is_none() {
             return Err(NeighborError::MissingSourceMac {
                 interface: plan.route.interface.name.clone(),
             });
         }
-        Ok(MaterializedRoute { plan })
+        Ok(MaterializedRoute {
+            plan,
+            neighbor_resolution,
+        })
     }
 }
 
@@ -574,6 +658,24 @@ pub trait NeighborResolver: Send + Sync {
         interface_source: IpAddr,
         target: IpAddr,
     ) -> Result<MacAddress, NeighborError>;
+
+    /// Resolve with exact route/link context. Existing injected resolvers keep
+    /// source compatibility through the legacy method and receive an empty
+    /// evidence record; active resolvers override this method.
+    fn resolve_request(
+        &self,
+        request: &NeighborRequest,
+    ) -> Result<NeighborResolution, NeighborError> {
+        self.resolve(&request.interface, request.interface_source, request.target)
+            .map(|mac_address| NeighborResolution {
+                mac_address,
+                attempts: 1,
+                cache_hit: false,
+                captured: Vec::new(),
+                evidence_truncated: false,
+                capture_statistics: CaptureStatistics::default(),
+            })
+    }
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -585,19 +687,105 @@ pub enum NeighborError {
         target: IpAddr,
         message: String,
     },
-    #[error("neighbor resolution returned no address for {target} on {interface}")]
-    NotFound { interface: String, target: IpAddr },
+    #[error(
+        "neighbor resolution returned no address for {target} on {interface} after {attempts} attempt(s)"
+    )]
+    NotFound {
+        interface: String,
+        target: IpAddr,
+        attempts: u32,
+        captured: Vec<CapturedFrame>,
+        evidence_truncated: bool,
+        capture_statistics: CaptureStatistics,
+    },
     #[error("interface {interface} has no source MAC for Layer 2 transmission")]
     MissingSourceMac { interface: String },
     #[error("Layer 2 plan on {interface} has no neighbor target")]
     MissingNeighborTarget { interface: String },
     #[error("Layer 2 plan on {interface} has no interface-owned neighbor source address")]
     MissingNeighborSource { interface: String },
+    #[error("neighbor request is invalid: {message}")]
+    InvalidRequest { message: String },
+    #[error("neighbor resolver configuration is invalid: {message}")]
+    InvalidConfiguration { message: String },
+    #[error("neighbor resolver state failed: {message}")]
+    State { message: String },
+    #[error(
+        "neighbor resolution for {target} on {interface} failed and capture cleanup also failed: operation={operation}; cleanup={cleanup}"
+    )]
+    OperationAndCleanup {
+        interface: String,
+        target: IpAddr,
+        operation: String,
+        cleanup: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MaterializedRoute {
     pub plan: PlannedRoute,
+    pub neighbor_resolution: Option<NeighborResolution>,
+}
+
+fn neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, PlanError> {
+    let mut tags = Vec::new();
+    for layer in packet
+        .iter()
+        .filter(|layer| matches!(layer.protocol_id().as_str(), "vlan" | "vlan8021ad"))
+    {
+        if tags.len() >= MAX_NEIGHBOR_VLAN_TAGS {
+            return Err(PlanError::InvalidNeighborVlan {
+                message: format!(
+                    "more than {MAX_NEIGHBOR_VLAN_TAGS} VLAN headers are not supported"
+                ),
+            });
+        }
+        let priority = match layer.field("priority") {
+            Some(FieldValue::Unsigned(value)) => u8::try_from(value)
+                .ok()
+                .filter(|value| *value <= 7)
+                .ok_or_else(|| PlanError::InvalidNeighborVlan {
+                    message: format!("priority {value} is outside 0..=7"),
+                })?,
+            _ => {
+                return Err(PlanError::InvalidNeighborVlan {
+                    message: "priority is missing or is not unsigned".to_owned(),
+                })
+            }
+        };
+        let drop_eligible = match layer.field("drop_eligible") {
+            Some(FieldValue::Bool(value)) => value,
+            _ => {
+                return Err(PlanError::InvalidNeighborVlan {
+                    message: "drop_eligible is missing or is not boolean".to_owned(),
+                })
+            }
+        };
+        let vlan_id = match layer.field("vlan_id") {
+            Some(FieldValue::Unsigned(value)) => u16::try_from(value)
+                .ok()
+                .filter(|value| *value <= 4095)
+                .ok_or_else(|| PlanError::InvalidNeighborVlan {
+                    message: format!("VLAN identifier {value} is outside 0..=4095"),
+                })?,
+            _ => {
+                return Err(PlanError::InvalidNeighborVlan {
+                    message: "vlan_id is missing or is not unsigned".to_owned(),
+                })
+            }
+        };
+        tags.push(NeighborVlanTag {
+            kind: if layer.protocol_id().as_str() == "vlan8021ad" {
+                NeighborVlanKind::Ieee8021Ad
+            } else {
+                NeighborVlanKind::Ieee8021Q
+            },
+            priority,
+            drop_eligible,
+            vlan_id,
+        });
+    }
+    Ok(tags)
 }
 
 fn packet_ip_field(packet: &Packet, field: &str) -> Option<IpAddr> {
@@ -723,6 +911,7 @@ mod tests {
     use std::convert::Infallible;
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
     use bytes::Bytes;
 
@@ -819,6 +1008,30 @@ mod tests {
             _target: IpAddr,
         ) -> Result<MacAddress, NeighborError> {
             unreachable!("invalid plan must fail before calling the resolver")
+        }
+    }
+
+    struct RecordingResolver {
+        request: Mutex<Option<NeighborRequest>>,
+        resolution: NeighborResolution,
+    }
+
+    impl NeighborResolver for RecordingResolver {
+        fn resolve(
+            &self,
+            _interface: &InterfaceId,
+            _interface_source: IpAddr,
+            _target: IpAddr,
+        ) -> Result<MacAddress, NeighborError> {
+            unreachable!("rich neighbor context must be used during materialization")
+        }
+
+        fn resolve_request(
+            &self,
+            request: &NeighborRequest,
+        ) -> Result<NeighborResolution, NeighborError> {
+            *self.request.lock().unwrap() = Some(request.clone());
+            Ok(self.resolution.clone())
         }
     }
 
@@ -1096,15 +1309,118 @@ mod tests {
     }
 
     #[test]
-    fn off_link_neighbor_targets_gateway_without_resolution_during_plan() {
+    fn on_link_and_gateway_neighbor_targets_are_family_independent() {
+        let cases = [
+            (
+                "IPv4 on-link",
+                "192.0.2.10".parse().unwrap(),
+                "192.0.2.20".parse().unwrap(),
+                None,
+            ),
+            (
+                "IPv4 gateway",
+                "192.0.2.10".parse().unwrap(),
+                "198.51.100.1".parse().unwrap(),
+                Some("192.0.2.1".parse().unwrap()),
+            ),
+            (
+                "IPv6 on-link",
+                "2001:db8::10".parse().unwrap(),
+                "2001:db8::20".parse().unwrap(),
+                None,
+            ),
+            (
+                "IPv6 gateway",
+                "2001:db8::10".parse().unwrap(),
+                "2001:db8:1::1".parse().unwrap(),
+                Some("fe80::1".parse().unwrap()),
+            ),
+        ];
+
+        for (case, source, destination, gateway) in cases {
+            let mut decision = route(gateway);
+            decision.selected_address = Some(source);
+            decision.preferred_source = Some(source);
+            let mut packet = Packet::new();
+            packet.push(Raw::new(Bytes::new()));
+            let plan = RoutePlanner
+                .plan(
+                    &packet,
+                    Some(destination),
+                    &PlanOptions {
+                        link_mode: LinkMode::Layer2,
+                        interface: None,
+                        preferred_source: None,
+                    },
+                    &FixedRoute(decision),
+                )
+                .unwrap();
+
+            assert_eq!(
+                plan.neighbor_target,
+                Some(gateway.unwrap_or(destination)),
+                "{case}"
+            );
+            assert!(plan.destination_mac.is_none(), "{case}");
+        }
+    }
+
+    #[test]
+    fn materialization_uses_interface_identity_and_retains_resolution_evidence() {
         let gateway = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
-        let destination = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1));
+        let destination = Ipv4Addr::new(198, 51, 100, 1);
+        let spoofed_ip = Ipv4Addr::new(203, 0, 113, 99);
+        let spoofed_mac = [0x02, 0xaa, 0xbb, 0xcc, 0xdd, 0xee];
+        let resolved_mac = MacAddress([0x02, 0, 0, 0, 0, 2]);
+        let captured = CapturedFrame::new(
+            std::time::SystemTime::UNIX_EPOCH,
+            LinkType::ETHERNET,
+            Bytes::from_static(&[0; 14]),
+        )
+        .unwrap();
+        let resolution = NeighborResolution {
+            mac_address: resolved_mac,
+            attempts: 2,
+            cache_hit: false,
+            captured: vec![captured],
+            evidence_truncated: true,
+            capture_statistics: CaptureStatistics {
+                received_frames: 2,
+                received_bytes: 120,
+                ..CaptureStatistics::default()
+            },
+        };
+        let resolver = RecordingResolver {
+            request: Mutex::new(None),
+            resolution: resolution.clone(),
+        };
         let mut packet = Packet::new();
-        packet.push(Raw::new(Bytes::new()));
+        packet
+            .push(Ethernet {
+                source: spoofed_mac,
+                ..Ethernet::default()
+            })
+            .push(Vlan8021ad {
+                priority: 5,
+                vlan_id: 100,
+                ..Vlan8021ad::default()
+            })
+            .push(Vlan {
+                priority: 1,
+                drop_eligible: true,
+                vlan_id: 200,
+                ..Vlan::default()
+            })
+            .push(Ipv4 {
+                source: spoofed_ip,
+                destination,
+                ..Ipv4::default()
+            });
+
         let plan = RoutePlanner
             .plan(
                 &packet,
-                Some(destination),
+                None,
                 &PlanOptions {
                     link_mode: LinkMode::Layer2,
                     interface: None,
@@ -1113,8 +1429,40 @@ mod tests {
                 &FixedRoute(route(Some(gateway))),
             )
             .unwrap();
-        assert_eq!(plan.neighbor_target, Some(gateway));
-        assert!(plan.destination_mac.is_none());
+        assert_eq!(plan.packet_source, Some(IpAddr::V4(spoofed_ip)));
+        assert_eq!(plan.source_mac, Some(MacAddress(spoofed_mac)));
+
+        let materialized = RoutePlanner.materialize(plan, &resolver).unwrap();
+        assert_eq!(materialized.plan.destination_mac, Some(resolved_mac));
+        assert_eq!(materialized.neighbor_resolution, Some(resolution));
+        assert_eq!(
+            *resolver.request.lock().unwrap(),
+            Some(NeighborRequest {
+                interface: InterfaceId {
+                    name: "test0".to_owned(),
+                    index: 7,
+                },
+                interface_source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10)),
+                interface_mac: MacAddress([2, 0, 0, 0, 0, 1]),
+                target: gateway,
+                vlan_tags: vec![
+                    NeighborVlanTag {
+                        kind: NeighborVlanKind::Ieee8021Ad,
+                        priority: 5,
+                        drop_eligible: false,
+                        vlan_id: 100,
+                    },
+                    NeighborVlanTag {
+                        kind: NeighborVlanKind::Ieee8021Q,
+                        priority: 1,
+                        drop_eligible: true,
+                        vlan_id: 200,
+                    },
+                ],
+                mtu: 1500,
+                link_type: LinkType::ETHERNET,
+            })
+        );
     }
 
     #[test]

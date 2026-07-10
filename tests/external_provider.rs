@@ -139,8 +139,10 @@ fn route(mode: LinkMode) -> MaterializedRoute {
             neighbor_target: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
             destination_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 10])),
             source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 9])),
+            neighbor_vlan_tags: Vec::new(),
             synthesized_ethernet: mode == LinkMode::Layer2,
         },
+        neighbor_resolution: None,
     }
 }
 

@@ -21,6 +21,7 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | Packet-expression/document CLI | Alpha, CI | Alpha, CI | Alpha, CI | `packetcraftr.packet/v1`; `build` and `dissect` are wired |
 | Route/source planning | Native alpha, CI | Native alpha, CI | Native alpha, CI | `native-route` uses netlink, routing sockets/native interfaces, or IP Helper; planning remains passive |
 | Live Layer 2 capture/injection | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `native-layer2` uses libpcap or runtime-loaded Npcap; hosted CI covers ABI/lifecycle, while privileged qualification requires dedicated runners |
+| Gateway-aware ARP/NDP | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
 | Raw Layer 3 transmission | Planned | Planned | Planned | Cross-platform adapters are a later alpha milestone |
 | Coordinated exchange | Native alpha | Native alpha | Native alpha | Injectable and native capture share the readiness barrier, bounded retention, loss reporting, and joined shutdown contract |
 | Defragmentation and TCP reassembly | Alpha, CI | Alpha, CI | Alpha, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
@@ -39,6 +40,8 @@ Consult the exact release notes and `packetcraftr --help` for the checkout in us
 `--features native-route` may also be selected without the default `live` feature. It returns platform-neutral `RouteDecision`, `InterfaceInfo`, `RouteSelectionReason`, and `NativeRouteError` values. Route lookup can constrain an exact interface and an interface-owned preferred source, rejects family/assignment/mismatch failures, reports the next hop and effective MTU, and never invokes ARP/NDP, capture, or transmission.
 
 `--features native-layer2` selects `SystemLayer2Io` and `SystemCaptureProvider`. Capture activation completes before the session reports ready; the owned worker preserves native timestamps, open numeric link types, interface metadata, complete snap-length-bounded bytes, native loss counters, and bounded frame/byte queue accounting. Stop interrupts the native read and joins its worker. Missing dependencies, permissions, devices, and unsupported targets return typed errors; the adapter never changes the selected link mode.
+
+`SystemNeighborResolver` composes the system interface, Layer 2, and capture providers. Its rich route-planner path uses the interface-owned source IP and MAC, selected next hop, MTU, link type, and exact VLAN stack. ARP and NDP use finite attempts and timeouts, protocol validation, bounded captured evidence, joined shutdown, and a bounded finite-lifetime cache. Selecting both `native-route` and `native-layer2` supplies the complete native planning and resolution path; either provider family remains independently injectable.
 
 Every profile exposes the platform-neutral provider traits. An application can implement interface, route, neighbor, typed Layer 2/Layer 3 transmission, and capture providers without importing a native wrapper. `Layer2Frame` and `Layer3Frame` reject a materialized route for the other mode, and `DispatchPacketIo` cannot cross those provider boundaries.
 
@@ -103,6 +106,8 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 | Neighbor resolution failure | Error; never a link-mode fallback |
 
 For an off-link destination, neighbor resolution targets the selected route gateway. An explicit spoofed source remains in the crafted packet, while ARP/NDP uses an interface-owned source. For IPv6 SRH, route selection targets the first visited segment and transport checksums use the final destination.
+
+Active neighbor discovery preserves the planned VLAN stack and interface identity. A response from another interface or VLAN, an invalid ARP/NDP message, an NDP advertisement with a bad checksum or hop limit, or an uncorrelated pre-request frame remains evidence but cannot satisfy the lookup. Exhaustion returns a typed error with attempts, bounded frames, truncation state, and capture statistics; it never falls back to another route or link mode.
 
 ## Continuous-integration coverage
 

@@ -21,7 +21,7 @@ This checkout contains the new portable v0.2 kernel, passive native route provid
 | Runtime-neutral captured-frame records and offline capture I/O | Available as a streaming, pure-Rust alpha API and through `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
 | v0.2 `build`, `dissect`, `read`, and `interfaces` commands | Available; all final command names are reserved in `--help` |
-| Routing, neighbor discovery, live send/capture, and exchange | Injectable planning/client/session APIs and passive Linux/macOS/Windows route providers are available; neighbor and live-I/O adapters plus CLI workflows are later alphas |
+| Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs, passive Linux/macOS/Windows routes, native Layer 2 I/O, and bounded gateway-aware ARP/NDP are available; live CLI workflows are later alphas |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages and templates are available; tool workflows are later alphas |
 | Broad built-in protocol catalog and extracted component crates | Beta milestone |
 
@@ -96,7 +96,7 @@ cargo test --features native-layer2
 cargo test --all-features
 ```
 
-`native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. Live use still requires the native runtime and relevant operating-system privileges; missing dependencies, devices, permissions, and unsupported modes are typed errors rather than fallbacks.
+`native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. `SystemNeighborResolver` composes those providers with interface metadata to perform bounded ARP or NDP; pair it with `native-route` for target-native route, gateway, source, and MTU selection. Live use still requires the native runtime and relevant operating-system privileges; missing dependencies, devices, permissions, and unsupported modes are typed errors rather than fallbacks.
 
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
@@ -133,6 +133,8 @@ The v0.2 contracts are:
 - Off-link neighbor resolution targets the route gateway, not the final destination.
 - Complete non-IP Layer 2 packets use passive, explicit-interface selection; they do not invent an IP route or trigger neighbor resolution.
 - A spoofed packet source is kept distinct from the interface-owned source used for ARP or NDP.
+- Active ARP/NDP arms an owned capture before sending, uses the selected interface and exact VLAN stack, accepts only correlated protocol-valid replies, retains bounded evidence, and always stops and joins capture work.
+- Neighbor failure is explicit after finite attempts and never changes the selected route or link mode. Successful mappings use a finite, bounded cache keyed by the complete logical-link identity.
 - Strict builds validate dependent fields and layer bindings.
 - Permissive builds retain requested inconsistencies and emit diagnostics. Sending their bytes requires a second, explicit live-transmission opt-in.
 - A known discriminator (for example, IPv4 EtherType) cannot label a `Raw` child in strict mode when the registry requires a typed child. Unknown discriminators can still preserve opaque bytes; permissive mode reports the known-discriminator mismatch and requires the live opt-in.
@@ -158,6 +160,9 @@ Default resource ceilings are intentionally finite:
 | Concrete packets per template expansion | 10,000 |
 | Backend capture queue frames (aggregate) | 4,096 |
 | Retained captured bytes per exchange | 256 MiB |
+| Active neighbor attempts / timeout per attempt | 3 / 1 second |
+| Active neighbor evidence frames / bytes | 256 / 1 MiB |
+| Active neighbor cache entries / lifetime | 4,096 / 30 seconds |
 | Reassembly flows | 8,192 |
 | Buffered/history bytes per reassembly flow | 1 MiB |
 | Aggregate reassembly bytes | 256 MiB |

@@ -21,6 +21,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added an enforceable component/native-adapter architecture, platform-neutral interface/capture/L2/L3 provider seams, checked transmission-frame dispatch, and external-provider compile coverage.
 - Added passive native route, interface, source-address, next-hop, and MTU providers behind `native-route`: route netlink on Linux, routing sockets plus native interface APIs on macOS, and IP Helper on Windows. Selection reasons and unsupported preferences use platform-neutral typed values/errors.
 - Added native Layer 2 capture and injection behind `native-layer2`: libpcap on Linux/macOS and a securely runtime-loaded, pinned Npcap ABI on Windows x86_64 MSVC. Capture sessions own their worker and handle, expose an explicit readiness barrier, enforce frame/byte queue bounds, preserve native timestamps/link types/interface metadata and complete captured bytes, report native/queue loss, and join every shutdown path.
+- Added injectable and system-composed active neighbor resolution with gateway-aware IPv4 ARP and IPv6 NDP, exact VLAN/interface correlation, finite attempts and timeouts, bounded captured evidence, joined capture cleanup, and a bounded finite-lifetime cache.
 
 ### Changed
 
@@ -29,6 +30,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Listener events retain complete captured bytes; display truncation is presentation metadata only.
 - Coordinated exchange arms and awaits its owned capture session before sending, and shuts it down on readiness, send, capture, decode, timeout, and success paths.
 - Route-selected IP sources and resolved/interface-owned MAC addresses are materialized into the exact transmitted frame while spoofed packet sources remain distinct from neighbor-resolution sources.
+- Neighbor materialization now carries the complete interface-owned source/MAC, next hop, VLAN stack, MTU, and link type to rich resolvers, and retains resolution attempts, capture records, truncation state, cache state, and backend statistics with the materialized route.
 - Route planning can pass an interface-owned source preference through compatible providers; legacy injected providers retain source compatibility and fail explicitly if they cannot honor the preference.
 - Synthesized Ethernet envelopes are built and included in traffic-policy byte accounting before neighbor discovery; post-resolution edits must remain fixed-width.
 - Route MTU enforcement now measures the actual built network-layer byte span instead of trusting permissive length fields, and rejects oversized packets before neighbor discovery or live I/O.

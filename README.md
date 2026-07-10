@@ -10,7 +10,7 @@ PacketcraftR is licensed under the [GNU Affero General Public License v3.0 only]
 
 ## Project status
 
-This checkout contains the new portable v0.2 kernel and CLI only. The table describes the alpha checkpoint, not the final v0.2 promise.
+This checkout contains the new portable v0.2 kernel, passive native route providers, and CLI foundation. The table describes the alpha checkpoint, not the final v0.2 promise.
 
 | Area | Alpha status |
 | --- | --- |
@@ -21,7 +21,7 @@ This checkout contains the new portable v0.2 kernel and CLI only. The table desc
 | Runtime-neutral captured-frame records and offline capture I/O | Available as a streaming, pure-Rust alpha API and through `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
 | v0.2 `build`, `dissect`, `read`, and `interfaces` commands | Available; all final command names are reserved in `--help` |
-| Routing, neighbor discovery, live send/capture, and exchange | Injectable planning/client/session APIs are available; native adapters and CLI workflows are later alphas |
+| Routing, neighbor discovery, live send/capture, and exchange | Injectable planning/client/session APIs and passive Linux/macOS/Windows route providers are available; neighbor and live-I/O adapters plus CLI workflows are later alphas |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages and templates are available; tool workflows are later alphas |
 | Broad built-in protocol catalog and extracted component crates | Beta milestone |
 
@@ -84,7 +84,17 @@ cargo build --no-default-features
 cargo test --no-default-features
 ```
 
-The portable packet kernel and offline capture path do not require libpcap. On Linux and macOS, the default `live` feature currently enables interface enumeration through the private platform adapter without enabling capture or injection. Windows default and `--no-default-features` builds are deliberately portable: they do not resolve `pnet`, link `Packet.lib`, or require Npcap. The Windows `interfaces` command reports a capability error until the dedicated native adapter is available. Later capture and injection adapters will require libpcap on Linux/macOS and Npcap on Windows, plus the relevant operating-system privileges.
+The portable packet kernel and offline capture path do not require libpcap. On Linux and macOS, the default `live` feature enables temporary interface enumeration without capture or injection. Windows default and every target's `--no-default-features` build remain portable. The explicit `native-route` feature selects passive native route, source, MTU, and interface discovery through Linux route netlink, macOS routing sockets/`getifaddrs`, or Windows IP Helper. It does not require libpcap, Npcap, raw-socket privileges, ARP/NDP, capture, or transmission.
+
+Build and test the current target's passive native provider with:
+
+```console
+cargo test --features native-route
+# Equivalent to the CI native-provider profile today:
+cargo test --all-features
+```
+
+Later capture and injection adapters will require libpcap on Linux/macOS and Npcap on Windows, plus the relevant operating-system privileges.
 
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
@@ -165,7 +175,7 @@ structured diagnostics and operation statistics.
 
 ## Development
 
-The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux and macOS. Windows CI names and tests all three profiles as portable and verifies that none of their dependency graphs contains `pnet` or its `Packet.lib` link requirement.
+The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable. All-feature jobs execute the target's passive native route/interface provider tests and continue to reject `pnet` or its `Packet.lib` link requirement on Windows.
 
 ```console
 cargo fmt --all -- --check

@@ -2,7 +2,11 @@
 all-features = true
 
 [advisories]
-ignore = []
+# rtnetlink 0.21.0 -> netlink-packet-core 0.8.1 uses the archived `paste`
+# procedural macro. RUSTSEC-2024-0436 is an unmaintained notice rather than a
+# vulnerability, and the advisory currently offers no safe upgrade. Keep this
+# exception pinned to the advisory while continuing to deny vulnerabilities.
+ignore = ["RUSTSEC-2024-0436"]
 
 [licenses]
 allow = [

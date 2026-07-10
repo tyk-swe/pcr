@@ -67,19 +67,19 @@ Target adapters use the following wrapper families:
 | Windows routes/interfaces/raw L3 | [`windows`](https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/NetworkManagement/IpHelper/index.html) IP Helper and Winsock bindings | Request only required Win32 feature namespaces; map status codes immediately |
 | Windows L2 capture/injection | `pcap` over a pinned Npcap SDK/runtime contract | Explicit Windows-native feature; portable default never links `Packet.lib` |
 
-Native packages are optional, target-specific, use `default-features = false` where supported, and are locked in `Cargo.lock`. Adding or updating one requires its platform ticket to record the tested wrapper version, native SDK/runtime version, license, minimum host version, and privileged qualification evidence. The temporary Unix `pnet` interface enumeration remains isolated in `io::platform` until XOD-30/XOD-31 replace it; it is not the selected stable route or capture abstraction.
+Native packages are optional, target-specific, use `default-features = false` where supported, and are locked in `Cargo.lock`. Adding or updating one requires its platform ticket to record the tested wrapper version, native SDK/runtime version, license, minimum host version, and privileged qualification evidence. The temporary Unix `pnet` interface enumeration remains isolated in `io::platform` for default builds until later capture adapters replace it; `native-route` selects the platform-neutral route/interface contracts instead.
 
 ### Features, builds, and publication
 
-`--no-default-features` is the portable contract on every target: packet construction/dissection, documents, offline capture, injected providers, and external provider implementations compile without native adapter packages. During the alpha, the default/all-feature `live` feature enables the isolated Unix enumeration adapter; Windows default/all-feature builds remain portable until the explicit Windows-native feature lands. Target adapter tickets must add named, target-specific native behavior and capability errors rather than change these semantics implicitly.
+`--no-default-features` is the portable contract on every target: packet construction/dissection, documents, offline capture, injected providers, and external provider implementations compile without native adapter packages. During the alpha, the default `live` feature enables the isolated Unix enumeration adapter while Windows default remains portable. The explicit `native-route` feature enables passive target-native route, source, MTU, and interface selection; it does not imply neighbor discovery, capture, or transmission. `--all-features` therefore exercises native route providers on each stable target while preserving the portable no-default boundary.
 
-CI covers Linux default/no-default/all-feature tests, lints, and docs; macOS default/no-default compile and tests; Windows portable default/no-default compile and tests; and target-resolved no-default dependency-tree checks for all three operating-system families. Privileged live qualification is separate and remains mandatory before advertising a stable native capability.
+CI covers Linux default/no-default/all-feature tests, lints, and docs; macOS default/no-default/all-feature compile and tests; Windows portable default/no-default plus native-route all-feature compile and tests; and target-resolved no-default dependency-tree checks for all three operating-system families. Privileged live qualification is separate and remains mandatory before advertising capture or transmission capability.
 
 All extracted crates take one version from `[workspace.package]` and release together. Their publish order is `packetcraftr-core`, `packetcraftr-protocols`, `packetcraftr-io`, `packetcraftr-session`, `packetcraftr-tools`, then `packetcraftr`. Workspace metadata records that order and the native/unsafe owner. Component crates use exact synchronized internal dependency versions for a stable release; root reexports remain the ordinary public surface. This graph has no cycle.
 
 ## Consequences
 
-- XOD-30, XOD-31, and XOD-32 have dedicated private modules and common interface, route, L2, L3, capture, and exchange seams to implement incrementally.
+- Route/interface adapters share dedicated private Linux, macOS, and Windows modules; later platform tickets extend those same ownership boundaries with L2, L3, capture, and exchange implementations.
 - External providers can compile on any target without importing an OS wrapper type.
 - A provider cannot accidentally receive the other link mode through `DispatchPacketIo`.
 - Portable builds remain useful for offline work, tests, and custom injected providers.

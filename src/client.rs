@@ -1437,6 +1437,7 @@ mod tests {
             selected_address: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
             preferred_source: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))),
             next_hop: None,
+            selection_reason: crate::io::RouteSelectionReason::OnLink,
             destination_scope: DestinationScope::Private,
             mtu: 1500,
             capability: mode,
@@ -1559,6 +1560,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer3,
                         interface: None,
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -1701,6 +1703,7 @@ mod tests {
                         plan: PlanOptions {
                             link_mode: LinkMode::Layer3,
                             interface: None,
+                            preferred_source: None,
                         },
                         ..SendOptions::default()
                     },
@@ -1741,6 +1744,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer2,
                         interface: None,
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -1777,6 +1781,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Layer2,
                     interface: None,
+                    preferred_source: None,
                 },
             )
             .unwrap();
@@ -1836,6 +1841,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Auto,
                         interface: Some(interface),
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -1904,6 +1910,7 @@ mod tests {
                         plan: PlanOptions {
                             link_mode: LinkMode::Layer3,
                             interface: None,
+                            preferred_source: None,
                         },
                         ..SendOptions::default()
                     },
@@ -1974,6 +1981,7 @@ mod tests {
                         plan: PlanOptions {
                             link_mode: LinkMode::Layer3,
                             interface: None,
+                            preferred_source: None,
                         },
                         ..SendOptions::default()
                     },
@@ -2026,6 +2034,7 @@ mod tests {
                         plan: PlanOptions {
                             link_mode: LinkMode::Layer3,
                             interface: None,
+                            preferred_source: None,
                         },
                         ..SendOptions::default()
                     },
@@ -2064,6 +2073,7 @@ mod tests {
                         plan: PlanOptions {
                             link_mode: LinkMode::Layer3,
                             interface: None,
+                            preferred_source: None,
                         },
                         ..SendOptions::default()
                     },
@@ -2123,6 +2133,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer3,
                         interface: None,
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -2150,6 +2161,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer3,
                         interface: None,
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -2185,6 +2197,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer2,
                         interface: None,
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -2217,6 +2230,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer3,
                         interface: None,
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -2257,6 +2271,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer2,
                         interface: None,
+                        preferred_source: None,
                     },
                     ..SendOptions::default()
                 },
@@ -2299,6 +2314,7 @@ mod tests {
                     plan: PlanOptions {
                         link_mode: LinkMode::Layer3,
                         interface: None,
+                        preferred_source: None,
                     },
                     build: BuildOptions {
                         mode: crate::core::BuildMode::Permissive,
@@ -2354,6 +2370,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Layer3,
                     interface: None,
+                    preferred_source: None,
                 },
             )
             .unwrap_err();
@@ -2412,6 +2429,7 @@ mod tests {
                         plan: PlanOptions {
                             link_mode: LinkMode::Layer3,
                             interface: None,
+                            preferred_source: None,
                         },
                         ..SendOptions::default()
                     },

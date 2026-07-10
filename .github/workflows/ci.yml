@@ -156,32 +156,46 @@ jobs:
           - name: macOS / all features
             os: macos-14
             flags: --all-features
-          - name: Windows / portable default features
+          - name: Windows / default features (portable)
             os: windows-2022
             flags: ""
-          - name: Windows / portable no default features
+          - name: Windows / no default features (portable)
             os: windows-2022
             flags: --no-default-features
-          - name: Windows / portable all features
+          - name: Windows / all features (native route)
             os: windows-2022
             flags: --all-features
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal
-      - name: Compile portable targets
+      - name: Compile target profile
         run: cargo check --locked --all-targets ${{ matrix.flags }}
-      - name: Test portable targets
+      - name: Test target profile
         run: cargo test --locked --all-targets ${{ matrix.flags }}
       - name: Assert the portable Windows dependency boundary
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.flags != '--all-features'
         shell: pwsh
         run: |
           $tree = cargo tree --color never --locked --target x86_64-pc-windows-msvc --edges normal ${{ matrix.flags }} --prefix none --format '{p}'
-          $nativeDependencies = $tree | Select-String -Pattern '^pnet(?:_| )'
+          $nativeDependencies = $tree | Select-String -Pattern '^(?:pnet(?:_| )|windows )'
           if ($nativeDependencies) {
             $nativeDependencies | ForEach-Object { Write-Error $_ }
-            throw 'portable Windows profiles must not resolve pnet or its Packet.lib link boundary'
+            throw 'portable Windows profiles must not resolve pnet, Packet.lib, or the Windows native adapter'
+          }
+      - name: Assert the native-route Windows dependency boundary
+        if: runner.os == 'Windows' && matrix.flags == '--all-features'
+        shell: pwsh
+        run: |
+          $tree = cargo tree --color never --locked --target x86_64-pc-windows-msvc --edges normal --all-features --prefix none --format '{p}'
+          $packetLibraryBoundary = $tree | Select-String -Pattern '^pnet(?:_| )'
+          if ($packetLibraryBoundary) {
+            $packetLibraryBoundary | ForEach-Object { Write-Error $_ }
+            throw 'native-route must not resolve pnet or its Packet.lib link boundary'
+          }
+          $windowsBindings = $tree | Select-String -Pattern '^windows '
+          if (-not $windowsBindings) {
+            throw 'the Windows all-feature profile must resolve the native IP Helper bindings'
           }
 
   required:

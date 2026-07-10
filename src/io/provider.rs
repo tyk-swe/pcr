@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    CapturedFrame, InterfaceId, LinkMode, MacAddress, MaterializedRoute, PlannedRoute,
-    DEFAULT_CAPTURE_SIZE_LIMIT,
+    CapturedFrame, InterfaceId, LinkCapability, LinkMode, LinkType, MacAddress, MaterializedRoute,
+    PlannedRoute, DEFAULT_CAPTURE_SIZE_LIMIT,
 };
 
 /// Aggregate backend capture-queue capacity used by default.
@@ -48,6 +48,12 @@ pub struct InterfaceInfo {
     pub mac_address: Option<MacAddress>,
     pub addresses: Vec<InterfaceAddress>,
     pub flags: InterfaceFlags,
+    /// Native interface MTU. Temporary portable enumeration adapters may not
+    /// expose it and return `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mtu: Option<u32>,
+    pub capability: LinkCapability,
+    pub link_type: LinkType,
 }
 
 /// Enumerates interfaces without exposing a native handle or wrapper type.
@@ -354,6 +360,8 @@ impl<T> ExchangeIo for T where T: PacketIo + CaptureProvider {}
 pub enum LiveIoError {
     #[error("live packet I/O is unavailable: {message}")]
     Unsupported { message: String },
+    #[error("interface discovery failed: {message}")]
+    InterfaceDiscovery { message: String },
     #[error("live packet I/O requires additional privileges: {message}")]
     Privilege { message: String },
     #[error("packet transmission failed: {message}")]

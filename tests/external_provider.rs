@@ -12,7 +12,7 @@ use packetcraftr::{
     DestinationScope, DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceId,
     InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io,
     LinkCapability, LinkMode, LinkType, LiveIoError, MacAddress, MaterializedRoute, PacketIo,
-    PlannedRoute, RouteDecision, TransmissionFrame,
+    PlannedRoute, RouteDecision, RouteSelectionReason, TransmissionFrame,
 };
 
 #[derive(Clone, Copy)]
@@ -36,6 +36,9 @@ impl InterfaceProvider for ExternalInterfaces {
                 multicast: true,
                 ..InterfaceFlags::default()
             },
+            mtu: Some(1_500),
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
         }])
     }
 }
@@ -121,6 +124,7 @@ fn route(mode: LinkMode) -> MaterializedRoute {
                 selected_address: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9))),
                 preferred_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9))),
                 next_hop: None,
+                selection_reason: RouteSelectionReason::OnLink,
                 destination_scope: DestinationScope::Private,
                 mtu: 1_500,
                 capability: LinkCapability::Layer2And3,

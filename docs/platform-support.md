@@ -19,7 +19,7 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | Generic registry, build, and dissection APIs | Alpha, CI | Alpha, CI | Alpha, CI | Built-in protocol slice remains incomplete |
 | Offline classic PCAP/PCAPNG | Alpha, CI | Alpha, CI | Alpha, CI | Pure Rust, streaming, bounded, multi-interface PCAPNG |
 | Packet-expression/document CLI | Alpha, CI | Alpha, CI | Alpha, CI | `packetcraftr.packet/v1`; `build` and `dissect` are wired |
-| Route/source planning | Portable alpha | Portable alpha | Portable alpha | Injectable planner is implemented; native OS providers are later alpha work |
+| Route/source planning | Native alpha, CI | Native alpha, CI | Native alpha, CI | `native-route` uses netlink, routing sockets/native interfaces, or IP Helper; planning remains passive |
 | Live Layer 2 capture/injection | Planned | Planned | Planned | New native adapters will use libpcap/Npcap; no fallback is present |
 | Raw Layer 3 transmission | Planned | Planned | Planned | Cross-platform adapters are a later alpha milestone |
 | Coordinated exchange | Portable alpha | Portable alpha | Portable alpha | Injectable endpoint has a readiness barrier, bounded retention, and core matchers; native I/O remains planned |
@@ -34,7 +34,9 @@ Consult the exact release notes and `packetcraftr --help` for the checkout in us
 | --- | --- | --- | --- | --- |
 | `--no-default-features` | Portable | Portable | Portable | No `pnet`, `pcap`, `rtnetlink`, `socket2`, or `windows` adapter package |
 | Default features | Portable core plus isolated alpha interface enumeration | Portable core plus isolated alpha interface enumeration | Portable | Current `live` enables only the temporary Unix enumeration adapter |
-| `--all-features` | Same target behavior as default in this checkpoint | Same target behavior as default in this checkpoint | Portable | Explicit target-native features arrive in XOD-30/XOD-31/XOD-32 |
+| `--all-features` | Passive native routes/interfaces | Passive native routes/interfaces | Passive native routes/interfaces | Activates the target-specific dependencies owned by `native-route`; no capture SDK/runtime |
+
+`--features native-route` may also be selected without the default `live` feature. It returns platform-neutral `RouteDecision`, `InterfaceInfo`, `RouteSelectionReason`, and `NativeRouteError` values. Route lookup can constrain an exact interface and an interface-owned preferred source, rejects family/assignment/mismatch failures, reports the next hop and effective MTU, and never invokes ARP/NDP, capture, or transmission.
 
 Every profile exposes the platform-neutral provider traits. An application can implement interface, route, neighbor, typed Layer 2/Layer 3 transmission, and capture providers without importing a native wrapper. `Layer2Frame` and `Layer3Frame` reject a materialized route for the other mode, and `DispatchPacketIo` cannot cross those provider boundaries.
 
@@ -64,24 +66,27 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 - Portable and offline use: no libpcap requirement.
 - Future native capture/injection adapters will require libpcap development/runtime packages (`libpcap-dev` on Debian/Ubuntu); the current alpha does not link libpcap.
 - Live operations commonly need root or narrowly granted `CAP_NET_RAW`; capture configuration can also need `CAP_NET_ADMIN` depending on the operation.
-- Route and interface discovery uses netlink in the v0.2 target.
-- The selected safe route wrapper is `rtnetlink`; libpcap integration uses the `pcap` crate. Both remain optional and target-specific.
+- `native-route` route and interface discovery uses route netlink and is exercised in unprivileged CI.
+- The selected safe route wrapper is `rtnetlink` 0.21; libpcap integration will use the `pcap` crate. Both are optional and target-specific.
+- CI currently qualifies this provider on Ubuntu 24.04. `rtnetlink` and its netlink dependencies are MIT-licensed; the repository records a narrow policy exception for the non-vulnerable, unmaintained `paste` transitive macro advisory until that dependency path is removed upstream.
 
 ### macOS
 
 - Portable and offline use: no external packet-capture package.
 - Future live capture/injection uses the system libpcap/BPF facilities and can require elevated privileges or an administrator-managed device policy.
-- Route selection uses routing sockets and native interface APIs in the v0.2 target.
-- Routing/raw-socket setup is isolated behind `socket2` plus the private native ABI adapter; libpcap/BPF integration uses the `pcap` crate.
+- `native-route` route selection uses routing sockets and `getifaddrs`; it is exercised on hosted macOS CI for IPv4/IPv6 loopback selection and interface enumeration.
+- Routing-socket setup is isolated behind `socket2` 0.6 plus the private native ABI adapter; libpcap/BPF integration will use the `pcap` crate.
+- CI currently qualifies passive discovery on macOS 14 arm64; both `socket2` and `libc` are MIT OR Apache-2.0 licensed.
 
 ### Windows
 
-- Default and `--no-default-features` builds are portable profiles. Neither resolves `pnet`, links `Packet.lib`, nor requires an Npcap installation or SDK.
-- The default feature set does not imply a Windows native adapter. Until that adapter is implemented, commands such as `interfaces` return an actionable capability error instead of falling through to another link mode or failing at link time.
+- Default and `--no-default-features` builds are portable profiles. Neither resolves `pnet` or `windows`, links `Packet.lib`, nor requires an Npcap installation or SDK.
+- The default feature set does not imply a Windows native adapter. `native-route` or `--all-features` explicitly enables Windows route/interface discovery without Npcap.
 - Future Layer 2 capture/injection requires a supported Npcap installation. Building native integration can require the matching Npcap SDK.
-- A future explicit native-adapter profile must pin and provision its supported Npcap SDK/runtime contract. Missing or incompatible native dependencies must remain capability errors and must never silently change link mode.
-- Route/source selection uses Windows IP Helper APIs such as `GetBestRoute2` in the v0.2 target.
-- IP Helper/Winsock calls use narrowly enabled `windows` crate bindings; Npcap integration uses the `pcap` crate behind the future explicit native feature.
+- A future capture/injection profile must pin and provision its supported Npcap SDK/runtime contract. Missing or incompatible native dependencies must remain capability errors and must never silently change link mode.
+- `native-route` route/source selection uses `GetBestRoute2` and adapter enumeration uses `GetAdaptersAddresses`; both IPv4 and IPv6 paths are exercised on hosted Windows CI.
+- IP Helper/Winsock calls use narrowly enabled `windows` 0.62 bindings; future Npcap integration uses the `pcap` crate behind a separate explicit native capability.
+- CI currently qualifies passive discovery on Windows Server 2022 x86_64 MSVC; `windows` is MIT OR Apache-2.0 licensed and uses the operating system's built-in IP Helper runtime.
 
 ## Link-mode contract
 
@@ -99,7 +104,7 @@ For an off-link destination, neighbor resolution targets the selected route gate
 
 ## Continuous-integration coverage
 
-Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default, no-default, and all-feature profiles compile and test on macOS. Windows runs separately named portable default, portable no-default, and portable all-feature jobs, and CI rejects every profile's dependency graph if it contains `pnet` (and therefore the `Packet.lib` link boundary). A separate architecture check resolves no-default dependency trees for Linux, macOS, and Windows targets and rejects native adapter packages, native references outside the platform subtree, or unsafe/FFI outside its single owner. These unprivileged hosted jobs do not qualify live I/O.
+Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default, no-default, and all-feature profiles compile and test on macOS. Windows runs portable default/no-default jobs and a native-route all-feature job; every Windows profile rejects `pnet` (and therefore the `Packet.lib` link boundary), while portable profiles also reject the `windows` adapter package. A separate architecture check resolves no-default dependency trees for Linux, macOS, and Windows targets and rejects native adapter packages, native references outside the platform subtree, or unsafe/FFI outside its single owner. These unprivileged hosted jobs qualify passive route/interface behavior, not live packet I/O.
 
 Stable release qualification additionally requires:
 

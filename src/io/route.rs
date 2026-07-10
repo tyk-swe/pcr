@@ -34,6 +34,17 @@ pub enum LinkCapability {
     Layer2And3,
 }
 
+/// Why the operating system selected a route. The concrete next hop remains
+/// in `RouteDecision::next_hop`; this enum is stable across native APIs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RouteSelectionReason {
+    Local,
+    OnLink,
+    Gateway,
+    InterfaceOnly,
+}
+
 impl LinkCapability {
     fn supports_layer2(self) -> bool {
         matches!(self, Self::Layer2 | Self::Layer2And3)
@@ -53,6 +64,7 @@ pub struct RouteDecision {
     pub selected_address: Option<IpAddr>,
     pub preferred_source: Option<IpAddr>,
     pub next_hop: Option<IpAddr>,
+    pub selection_reason: RouteSelectionReason,
     pub destination_scope: DestinationScope,
     pub mtu: u32,
     pub capability: LinkCapability,
@@ -68,6 +80,20 @@ pub trait RouteProvider: Send + Sync {
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
     ) -> Result<RouteDecision, Self::Error>;
+
+    /// Passive lookup with an interface-owned source preference. This source
+    /// is distinct from an explicitly spoofed source encoded in a packet.
+    /// Existing injected providers retain source compatibility through the
+    /// default implementation and receive a typed planner rejection if they
+    /// do not honor a requested source.
+    fn lookup_with_preferences(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
+    ) -> Result<RouteDecision, Self::Error> {
+        self.lookup(destination, interface_hint)
+    }
 
     /// Select a concrete interface for a packet that has no network-layer
     /// destination. Implementations must perform passive interface discovery
@@ -98,6 +124,80 @@ pub enum LinkMode {
 pub struct PlanOptions {
     pub link_mode: LinkMode,
     pub interface: Option<InterfaceId>,
+    /// Interface-owned source used to constrain native route selection. This
+    /// does not rewrite an explicit source already present in the packet.
+    pub preferred_source: Option<IpAddr>,
+}
+
+/// Errors emitted by the current target's passive route/interface adapter.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum NativeRouteError {
+    #[error("native route selection is unavailable: {message}")]
+    Unsupported { message: String },
+    #[error("no route to {destination} was found")]
+    RouteNotFound { destination: IpAddr },
+    #[error("interface {name} (index {index}) was not found")]
+    InterfaceNotFound { name: String, index: u32 },
+    #[error(
+        "interface preference {requested} (index {requested_index}) resolved to {actual} (index {actual_index})"
+    )]
+    InterfaceMismatch {
+        requested: String,
+        requested_index: u32,
+        actual: String,
+        actual_index: u32,
+    },
+    #[error("preferred source {preferred_source} has a different address family than destination {destination}")]
+    SourceFamilyMismatch {
+        preferred_source: IpAddr,
+        destination: IpAddr,
+    },
+    #[error("preferred source {preferred_source} is not assigned to interface {interface}")]
+    SourceUnavailable {
+        preferred_source: IpAddr,
+        interface: String,
+    },
+    #[error("native route response was invalid: {message}")]
+    InvalidResponse { message: String },
+    #[error("native operation {operation} failed: {message}")]
+    OperatingSystem {
+        operation: &'static str,
+        message: String,
+    },
+}
+
+/// Route provider backed by the adapter selected for the current target and
+/// the explicit `native-route` feature.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemRouteProvider;
+
+impl RouteProvider for SystemRouteProvider {
+    type Error = NativeRouteError;
+
+    fn lookup(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+    ) -> Result<RouteDecision, Self::Error> {
+        super::platform::system_route(destination, interface_hint, None)
+    }
+
+    fn lookup_with_preferences(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+        preferred_source: Option<IpAddr>,
+    ) -> Result<RouteDecision, Self::Error> {
+        super::platform::system_route(destination, interface_hint, preferred_source)
+    }
+
+    fn lookup_interface(
+        &self,
+        interface: &InterfaceId,
+    ) -> Result<Option<RouteDecision>, Self::Error> {
+        super::platform::system_interface_route(interface).map(Some)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +286,16 @@ pub enum PlanError {
     MissingNeighborSource,
     #[error("route source address family does not match destination {destination}")]
     SourceFamilyMismatch { destination: IpAddr },
+    #[error("preferred route source {preferred_source} has a different address family than destination {destination}")]
+    PreferredSourceFamilyMismatch {
+        preferred_source: IpAddr,
+        destination: IpAddr,
+    },
+    #[error("route provider did not select preferred source {requested}; selected {selected:?}")]
+    PreferredSourceNotSelected {
+        requested: IpAddr,
+        selected: Option<IpAddr>,
+    },
     #[error("route did not select a source address for the packet")]
     MissingPacketSource,
     #[error("invalid Segment Routing Header route state: {message}")]
@@ -248,13 +358,28 @@ impl RoutePlanner {
             .or(packet_destination)
             .or(final_destination);
 
+        if let (Some(preferred_source), Some(lookup_destination)) =
+            (options.preferred_source, lookup_destination)
+        {
+            if preferred_source.is_ipv4() != lookup_destination.is_ipv4() {
+                return Err(PlanError::PreferredSourceFamilyMismatch {
+                    preferred_source,
+                    destination: lookup_destination,
+                });
+            }
+        }
+
         if final_destination.is_none() && (has_ip || options.link_mode == LinkMode::Layer3) {
             return Err(PlanError::MissingDestination);
         }
 
         let route = match lookup_destination {
             Some(lookup_destination) => provider
-                .lookup(lookup_destination, options.interface.as_ref())
+                .lookup_with_preferences(
+                    lookup_destination,
+                    options.interface.as_ref(),
+                    options.preferred_source,
+                )
                 .map_err(|source| PlanError::RouteLookup {
                     destination: lookup_destination,
                     message: source.to_string(),
@@ -282,6 +407,16 @@ impl RoutePlanner {
                     requested_index: requested.index,
                     selected: route.interface.name.clone(),
                     selected_index: route.interface.index,
+                });
+            }
+        }
+        if let Some(requested) = options.preferred_source {
+            if route.selected_address != Some(requested)
+                && route.preferred_source != Some(requested)
+            {
+                return Err(PlanError::PreferredSourceNotSelected {
+                    requested,
+                    selected: route.selected_address.or(route.preferred_source),
                 });
             }
         }
@@ -409,6 +544,26 @@ impl RoutePlanner {
             });
         }
         Ok(MaterializedRoute { plan })
+    }
+}
+
+#[cfg(feature = "native-route")]
+pub(super) fn classify_destination(address: IpAddr) -> DestinationScope {
+    if address.is_unspecified() {
+        return DestinationScope::Unspecified;
+    }
+    if address.is_multicast() {
+        return DestinationScope::Multicast;
+    }
+    if address.is_loopback() {
+        return DestinationScope::Host;
+    }
+    match address {
+        IpAddr::V4(address) if address.is_link_local() => DestinationScope::Link,
+        IpAddr::V6(address) if address.is_unicast_link_local() => DestinationScope::Link,
+        IpAddr::V4(address) if address.is_private() => DestinationScope::Private,
+        IpAddr::V6(address) if address.is_unique_local() => DestinationScope::Private,
+        _ => DestinationScope::Global,
     }
 }
 
@@ -566,7 +721,7 @@ fn multicast_mac(destination: IpAddr) -> Option<MacAddress> {
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use bytes::Bytes;
@@ -586,6 +741,34 @@ mod tests {
             _interface_hint: Option<&InterfaceId>,
         ) -> Result<RouteDecision, Self::Error> {
             Ok(self.0.clone())
+        }
+    }
+
+    struct PreferenceAwareRoute;
+
+    impl RouteProvider for PreferenceAwareRoute {
+        type Error = Infallible;
+
+        fn lookup(
+            &self,
+            _destination: IpAddr,
+            _interface_hint: Option<&InterfaceId>,
+        ) -> Result<RouteDecision, Self::Error> {
+            Ok(route(None))
+        }
+
+        fn lookup_with_preferences(
+            &self,
+            _destination: IpAddr,
+            _interface_hint: Option<&InterfaceId>,
+            preferred_source: Option<IpAddr>,
+        ) -> Result<RouteDecision, Self::Error> {
+            let mut decision = route(None);
+            if let Some(preferred_source) = preferred_source {
+                decision.selected_address = Some(preferred_source);
+                decision.preferred_source = Some(preferred_source);
+            }
+            Ok(decision)
         }
     }
 
@@ -649,6 +832,11 @@ mod tests {
             selected_address: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
             preferred_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))),
             next_hop,
+            selection_reason: if next_hop.is_some() {
+                RouteSelectionReason::Gateway
+            } else {
+                RouteSelectionReason::OnLink
+            },
             destination_scope: DestinationScope::Global,
             mtu: 1500,
             capability: LinkCapability::Layer2And3,
@@ -729,6 +917,7 @@ mod tests {
                     &PlanOptions {
                         link_mode: LinkMode::Layer3,
                         interface: None,
+                        preferred_source: None,
                     },
                     &provider,
                 )
@@ -772,6 +961,108 @@ mod tests {
     }
 
     #[test]
+    fn injected_provider_can_honor_a_source_preference() {
+        let preferred_source = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 99));
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 99),
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        });
+
+        let plan = RoutePlanner
+            .plan(
+                &packet,
+                None,
+                &PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    interface: None,
+                    preferred_source: Some(preferred_source),
+                },
+                &PreferenceAwareRoute,
+            )
+            .unwrap();
+
+        assert_eq!(plan.route.selected_address, Some(preferred_source));
+        assert_eq!(plan.route.preferred_source, Some(preferred_source));
+    }
+
+    #[test]
+    fn legacy_injected_provider_rejects_an_unhonored_source_preference() {
+        let preferred_source = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 99));
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 99),
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        });
+
+        let error = RoutePlanner
+            .plan(
+                &packet,
+                None,
+                &PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    interface: None,
+                    preferred_source: Some(preferred_source),
+                },
+                &FixedRoute(route(None)),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            PlanError::PreferredSourceNotSelected {
+                requested,
+                selected: Some(selected),
+            } if requested == preferred_source
+                && selected == IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))
+        ));
+    }
+
+    #[test]
+    fn preferred_source_family_is_rejected_before_provider_lookup() {
+        let provider = InterfaceOnlyRoute::new(route(None));
+        let mut packet = Packet::new();
+        packet.push(Ipv4 {
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        });
+        let preferred_source = IpAddr::V6(Ipv6Addr::LOCALHOST);
+
+        let error = RoutePlanner
+            .plan(
+                &packet,
+                None,
+                &PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    interface: None,
+                    preferred_source: Some(preferred_source),
+                },
+                &provider,
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            PlanError::PreferredSourceFamilyMismatch {
+                preferred_source: actual,
+                destination,
+            } if actual == preferred_source
+                && destination == IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1))
+        ));
+        assert_eq!(provider.ip_lookups.load(Ordering::SeqCst), 0);
+    }
+
+    #[cfg(not(feature = "native-route"))]
+    #[test]
+    fn system_route_provider_reports_the_feature_boundary() {
+        assert!(matches!(
+            SystemRouteProvider.lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None),
+            Err(NativeRouteError::Unsupported { message })
+                if message.contains("native-route")
+        ));
+    }
+
+    #[test]
     fn auto_link_intent_does_not_fall_back_when_layer2_is_unsupported() {
         let packet = canonical_link_intent_packets()
             .into_iter()
@@ -791,6 +1082,7 @@ mod tests {
                     &PlanOptions {
                         link_mode,
                         interface: None,
+                        preferred_source: None,
                     },
                     &FixedRoute(decision.clone()),
                 )
@@ -816,6 +1108,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Layer2,
                     interface: None,
+                    preferred_source: None,
                 },
                 &FixedRoute(route(Some(gateway))),
             )
@@ -849,6 +1142,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Layer2,
                     interface: None,
+                    preferred_source: None,
                 },
                 &FixedRoute(route),
             )
@@ -885,6 +1179,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Auto,
                     interface: Some(interface),
+                    preferred_source: None,
                 },
                 &provider,
             )
@@ -945,6 +1240,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Layer2,
                     interface: Some(interface),
+                    preferred_source: None,
                 },
                 &provider,
             )
@@ -970,6 +1266,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Layer2,
                     interface: None,
+                    preferred_source: None,
                 },
                 &FixedRoute(route(None)),
             )
@@ -1017,6 +1314,7 @@ mod tests {
                 &PlanOptions {
                     link_mode: LinkMode::Layer3,
                     interface: None,
+                    preferred_source: None,
                 },
                 &FixedRoute(decision),
             )

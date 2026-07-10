@@ -437,6 +437,9 @@ fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
                         format!("{}/{}", value.address, value.prefix_length)
                     }).collect::<Vec<_>>(),
                     "flags": interface.flags,
+                    "mtu": interface.mtu,
+                    "capability": interface.capability,
+                    "link_type": interface.link_type.0,
                 })
             })
             .collect::<Vec<_>>();

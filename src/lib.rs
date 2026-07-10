@@ -53,11 +53,11 @@ pub use io::{
     CaptureWriter, CapturedFrame, DestinationScope, DispatchPacketIo, ExchangeIo, InterfaceAddress,
     InterfaceFlags, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
     Layer2Io, Layer3Frame, Layer3Io, LinkCapability, LinkMode, LinkType, LiveIoError, MacAddress,
-    MaterializedRoute, NeighborError, NeighborResolver, PacketIo, PcapEndianness, PlanError,
-    PlanOptions, PlannedRoute, ReplayTiming, RouteDecision, RoutePlanner, RouteProvider,
-    SystemInterfaceProvider, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES,
-    DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_PCAPNG_INTERFACE_LIMIT,
-    DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT,
+    MaterializedRoute, NativeRouteError, NeighborError, NeighborResolver, PacketIo, PcapEndianness,
+    PlanError, PlanOptions, PlannedRoute, ReplayTiming, RouteDecision, RoutePlanner, RouteProvider,
+    RouteSelectionReason, SystemInterfaceProvider, SystemRouteProvider, TransmissionFrame,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT,
+    DEFAULT_PCAPNG_INTERFACE_LIMIT, DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT,
 };
 pub use protocols::{
     default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, DestinationOptions, Ethernet,

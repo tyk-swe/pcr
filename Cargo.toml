@@ -45,6 +45,14 @@ path = "src/main.rs"
 [features]
 default = ["live"]
 live = ["dep:pnet"]
+native-route = [
+    "dep:futures-util",
+    "dep:libc",
+    "dep:rtnetlink",
+    "dep:socket2",
+    "dep:tokio",
+    "dep:windows",
+]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
@@ -56,3 +64,21 @@ noyalib = { version = "0.0.5", features = ["compat-serde-yaml"] }
 
 [target.'cfg(not(windows))'.dependencies]
 pnet = { version = "0.35", default-features = false, features = ["std"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }
+rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"], optional = true }
+tokio = { version = "1", default-features = false, features = ["net", "rt"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { version = "0.2", optional = true }
+socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", default-features = false, features = [
+    "std",
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+], optional = true }

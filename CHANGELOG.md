@@ -19,6 +19,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added typed RFC 8754 Segment Routing Header handling for IPv6 routing type 4.
 - Added deterministic lifecycle coverage requiring reply capture to report readiness before the first send.
 - Added an enforceable component/native-adapter architecture, platform-neutral interface/capture/L2/L3 provider seams, checked transmission-frame dispatch, and external-provider compile coverage.
+- Added passive native route, interface, source-address, next-hop, and MTU providers behind `native-route`: route netlink on Linux, routing sockets plus native interface APIs on macOS, and IP Helper on Windows. Selection reasons and unsupported preferences use platform-neutral typed values/errors.
 
 ### Changed
 
@@ -27,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Listener events retain complete captured bytes; display truncation is presentation metadata only.
 - Coordinated exchange arms and awaits its owned capture session before sending, and shuts it down on readiness, send, capture, decode, timeout, and success paths.
 - Route-selected IP sources and resolved/interface-owned MAC addresses are materialized into the exact transmitted frame while spoofed packet sources remain distinct from neighbor-resolution sources.
+- Route planning can pass an interface-owned source preference through compatible providers; legacy injected providers retain source compatibility and fail explicitly if they cannot honor the preference.
 - Synthesized Ethernet envelopes are built and included in traffic-policy byte accounting before neighbor discovery; post-resolution edits must remain fixed-width.
 - Route MTU enforcement now measures the actual built network-layer byte span instead of trusting permissive length fields, and rejects oversized packets before neighbor discovery or live I/O.
 - Destination-free Ethernet/custom-EtherType and complete ARP packets now use explicit passive interface selection without fake IP lookups or neighbor traffic.

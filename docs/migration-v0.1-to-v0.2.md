@@ -185,7 +185,7 @@ Root `packetcraftr` reexports are the stable application import path even after 
 
 ## Feature migration
 
-The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate's only optional capability is `live`; packet construction, dissection, documents, reassembly, and offline capture remain portable without default features.
+The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate has two narrow optional capabilities in this checkpoint: `live` for the temporary Unix interface enumerator and `native-route` for passive target-native route/interface discovery. Packet construction, dissection, documents, reassembly, offline capture, and injected providers remain portable without default features. `native-route` does not enable ARP/NDP, capture, or transmission.
 
 If an application previously depended on an embedded subsystem, move orchestration outward:
 

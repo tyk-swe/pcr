@@ -23,6 +23,6 @@ pub use provider::{
 };
 pub use route::{
     DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute,
-    NeighborError, NeighborResolver, PlanError, PlanOptions, PlannedRoute, RouteDecision,
-    RoutePlanner, RouteProvider,
+    NativeRouteError, NeighborError, NeighborResolver, PlanError, PlanOptions, PlannedRoute,
+    RouteDecision, RoutePlanner, RouteProvider, RouteSelectionReason, SystemRouteProvider,
 };

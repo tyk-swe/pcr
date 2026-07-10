@@ -4,7 +4,7 @@
 //! Temporary Unix interface-enumeration adapter retained during v0.2 alpha.
 
 use super::super::provider::{InterfaceAddress, InterfaceFlags, InterfaceInfo};
-use super::super::{InterfaceId, MacAddress};
+use super::super::{InterfaceId, LinkCapability, LinkType, MacAddress};
 
 pub(super) fn interfaces() -> Vec<InterfaceInfo> {
     pnet::datalink::interfaces()
@@ -18,6 +18,8 @@ pub(super) fn interfaces() -> Vec<InterfaceInfo> {
                 multicast: interface.is_multicast(),
             };
             let mac_address = interface.mac.map(|address| MacAddress(address.octets()));
+            let loopback = interface.is_loopback();
+            let ethernet = !loopback && mac_address.is_some();
             let addresses = interface
                 .ips
                 .into_iter()
@@ -35,6 +37,17 @@ pub(super) fn interfaces() -> Vec<InterfaceInfo> {
                 mac_address,
                 addresses,
                 flags,
+                mtu: None,
+                capability: if ethernet {
+                    LinkCapability::Layer2And3
+                } else {
+                    LinkCapability::Layer3
+                },
+                link_type: if ethernet {
+                    LinkType::ETHERNET
+                } else {
+                    LinkType::RAW
+                },
             }
         })
         .collect()

@@ -2573,7 +2573,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             writer.write_frame(&frame(
-                UNIX_EPOCH + Duration::from_nanos(1),
+                UNIX_EPOCH + Duration::from_nanos(100),
                 LinkType::ETHERNET,
                 &[1],
             )),
@@ -2873,7 +2873,7 @@ mod tests {
         ));
         assert!(matches!(
             timestamp_to_ticks(
-                UNIX_EPOCH + Duration::from_nanos(1),
+                UNIX_EPOCH + Duration::from_nanos(100),
                 TimestampResolution::Binary(10),
                 0,
             ),

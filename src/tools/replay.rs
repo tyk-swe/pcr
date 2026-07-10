@@ -900,7 +900,7 @@ mod tests {
             LinkType::ETHERNET,
             &[
                 (Duration::ZERO, &[1]),
-                (MAX_REPLAY_DURATION + Duration::from_nanos(1), &[2]),
+                (MAX_REPLAY_DURATION + Duration::from_millis(1), &[2]),
             ],
         );
         let mut authorizer = Allow::default();

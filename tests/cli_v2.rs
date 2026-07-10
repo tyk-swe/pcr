@@ -46,6 +46,45 @@ fn write_capture(frames: &[&[u8]], malformed_tail: bool) -> PathBuf {
     path
 }
 
+fn write_link_capture(link_type: packetcraftr::LinkType, frames: &[&[u8]]) -> PathBuf {
+    let mut writer = packetcraftr::CaptureWriter::pcap(Vec::new(), link_type).unwrap();
+    for (index, bytes) in frames.iter().enumerate() {
+        writer
+            .write_frame(
+                &packetcraftr::CapturedFrame::new(
+                    UNIX_EPOCH + std::time::Duration::from_millis(index as u64 * 10),
+                    link_type,
+                    bytes.to_vec(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    let path = temp_path("link-capture");
+    std::fs::write(&path, writer.into_inner()).unwrap();
+    path
+}
+
+fn write_public_raw_capture() -> PathBuf {
+    use std::sync::Arc;
+
+    let registry = Arc::new(packetcraftr::default_registry().unwrap());
+    let packet = packetcraftr::core::parse_packet_expression(
+        "ipv4(src=192.0.2.1,dst=8.8.8.8,identification=1)/udp(sport=40000,dport=9)/raw(text=hi)",
+        &registry,
+        packetcraftr::ExpressionOptions::default(),
+    )
+    .unwrap();
+    let built = packetcraftr::Builder::new(registry)
+        .build(
+            packet,
+            packetcraftr::BuildContext::default(),
+            packetcraftr::BuildOptions::default(),
+        )
+        .unwrap();
+    write_link_capture(packetcraftr::LinkType::RAW, &[built.bytes.as_ref()])
+}
+
 #[test]
 fn build_expression_emits_complete_frame_hex() {
     let output = binary()
@@ -263,6 +302,109 @@ fn capture_commands_reserve_the_documented_queue_limit_contract() {
             );
         }
     }
+}
+
+#[test]
+fn read_exposes_bounded_capture_file_writers() {
+    let path = write_capture(&[b"one", b"two"], false);
+    let output = binary()
+        .args([
+            "--output",
+            "pcapng",
+            "read",
+            path.to_str().unwrap(),
+            "--max-frames",
+            "2",
+        ])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let mut reader = packetcraftr::CaptureReader::new(std::io::Cursor::new(output.stdout)).unwrap();
+    assert_eq!(reader.format(), packetcraftr::CaptureFileFormat::PcapNg);
+    assert_eq!(reader.next_frame().unwrap().unwrap().bytes.as_ref(), b"one");
+    assert_eq!(reader.next_frame().unwrap().unwrap().bytes.as_ref(), b"two");
+    assert!(reader.next_frame().unwrap().is_none());
+}
+
+#[test]
+fn empty_replay_is_a_typed_aggregate_without_live_side_effects() {
+    let path = write_capture(&[], false);
+    let output = binary()
+        .args([
+            "--output",
+            "json",
+            "replay",
+            path.to_str().unwrap(),
+            "--interface",
+            "definitely-missing-interface",
+            "--timing",
+            "immediate",
+        ])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "replay");
+    assert_eq!(value["result"]["frames_attempted"], 0);
+    assert_eq!(value["result"]["frames_completed"], 0);
+    assert_eq!(value["result"]["bytes_completed"], 0);
+    assert_eq!(
+        value["result"]["requested_interface"]["name"],
+        "definitely-missing-interface"
+    );
+    assert_eq!(value["result"]["frames"], serde_json::json!([]));
+}
+
+#[test]
+fn replay_rejects_unsupported_roots_and_public_targets_before_interface_io() {
+    let unsupported = write_link_capture(packetcraftr::LinkType::NULL, &[b"null"]);
+    let output = binary()
+        .args([
+            "--output",
+            "json",
+            "replay",
+            unsupported.to_str().unwrap(),
+            "--interface",
+            "definitely-missing-interface",
+            "--timing",
+            "immediate",
+        ])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&unsupported).unwrap();
+    assert_eq!(output.status.code(), Some(4));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "capability.replay_link_type");
+
+    let public = write_public_raw_capture();
+    let output = binary()
+        .args([
+            "--output",
+            "json",
+            "replay",
+            public.to_str().unwrap(),
+            "--interface",
+            "definitely-missing-interface",
+            "--timing",
+            "immediate",
+        ])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&public).unwrap();
+    assert_eq!(output.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.public_destination");
 }
 
 #[cfg(all(windows, feature = "live", not(feature = "native-route")))]

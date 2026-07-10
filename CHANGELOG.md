@@ -29,6 +29,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added passive `plan` and interface-bound `routes` CLI workflows plus policy-gated `send`, finite live `capture`, and capture-ready `exchange` workflows. They share exclusive packet inputs, explicit route/link constraints, traffic and capture budgets, typed JSON/NDJSON results, and exact hex/raw/PCAP/PCAPNG output where applicable.
 - Added a 21-file authoritative fixture corpus with strict `packetcraftr.fixture-provenance/v1` sidecars, hash-first read-only tests, schema/source/license/review validation, and full pull-request/push-range enforcement for binary, capture, JSON/YAML, expected-result, and malformed fixtures.
 - Published the versioned `packetcraftr.protocol-support/v1` manifest and stable documentation for all 22 built-in codecs, nine numeric capture roots, four matchers, and 14 CLI workflow obligations; extended the authoritative corpus to every root and both BSD NULL byte orders.
+- Added aggregate-bounded capture writers, public PCAP/PCAPNG interface timestamp metadata, streaming metadata-preserving `read` capture output, and a policy-gated `replay` workflow with injectable timing/transmission, exact wire evidence, finite speed/rate/resource limits, and typed unsupported-root/partial-send failures.
 
 ### Changed
 

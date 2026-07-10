@@ -31,11 +31,17 @@ presence out of caller control.
 Each implemented and planned v0.2 command has a deliberate result type.
 Commands that offer both JSON and NDJSON also have a separate per-item stream
 result type.
-`build`, `dissect`, `read`, and `interfaces` construct those results before
+`build`, `dissect`, `read`, `replay`, and `interfaces` construct those results before
 selecting a renderer. Complete bytes remain available to hex/raw renderers but
 serialize only through explicit hexadecimal fields. Capture timestamps use
 signed Unix seconds plus nanoseconds so PCAPNG records before the Unix epoch do
 not fail during JSON serialization.
+
+`read` may stream the same bounded records to PCAP/PCAPNG without constructing
+JSON. `replay` emits one exact transmitted-frame result per NDJSON success and
+a terminal replay result, while aggregate JSON retains a bounded collection of
+the same frame result. Its PCAP/PCAPNG renderers contain only backend-confirmed
+successful frames.
 
 `OutputFormat`, `CommandName`, and `COMMAND_OUTPUT_CONTRACTS` define one shared
 format matrix. The CLI rejects an unsupported combination with the classified
@@ -58,6 +64,8 @@ examples and intentionally invalid negative fixtures are both CI gates.
 - Interface output is an object containing an `interfaces` collection instead
   of a bare, weakly identified array.
 - `read --output json` is rejected; callers must choose `--output ndjson`.
+- `read` and `replay` capture-file output is an explicit matrix entry and
+  remains subject to the same operation limits as text/structured rendering.
 - Adding a new format to an existing command is an explicit contract change.
 
 ## Alternatives considered

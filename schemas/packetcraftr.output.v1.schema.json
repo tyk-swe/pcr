@@ -523,7 +523,7 @@
           "const": "replay"
         },
         "result": {
-          "$ref": "#/$defs/replayFrameResult"
+          "$ref": "#/$defs/replayStreamResult"
         }
       },
       "required": [
@@ -803,8 +803,13 @@
       "required": [
         "source_format",
         "timing",
+        "requested_interface",
+        "requested_link_mode",
         "frames_attempted",
-        "frames_completed"
+        "frames_completed",
+        "bytes_completed",
+        "scheduled_duration",
+        "frames"
       ],
       "properties": {
         "source_format": {
@@ -814,12 +819,32 @@
             "pcap_ng"
           ]
         },
-        "timing": {},
+        "timing": {
+          "$ref": "#/$defs/replayTiming"
+        },
+        "requested_interface": {
+          "$ref": "#/$defs/interfaceId"
+        },
+        "requested_link_mode": {
+          "$ref": "#/$defs/linkMode"
+        },
         "frames_attempted": {
           "$ref": "#/$defs/uint64"
         },
         "frames_completed": {
           "$ref": "#/$defs/uint64"
+        },
+        "bytes_completed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "scheduled_duration": {
+          "$ref": "#/$defs/duration"
+        },
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/replayFrameResult"
+          }
         }
       },
       "additionalProperties": false
@@ -1042,15 +1067,41 @@
         }
       ]
     },
+    "replayStreamResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/replayFrameResult"
+        },
+        {
+          "$ref": "#/$defs/replayResult"
+        }
+      ]
+    },
     "replayFrameResult": {
       "type": "object",
       "required": [
         "source_sequence",
+        "interface",
+        "link_mode",
+        "scheduled_delay",
+        "bytes_sent",
         "frame",
         "transmitted"
       ],
       "properties": {
         "source_sequence": {
+          "$ref": "#/$defs/uint64"
+        },
+        "interface": {
+          "$ref": "#/$defs/interfaceId"
+        },
+        "link_mode": {
+          "$ref": "#/$defs/linkMode"
+        },
+        "scheduled_delay": {
+          "$ref": "#/$defs/duration"
+        },
+        "bytes_sent": {
           "$ref": "#/$defs/uint64"
         },
         "frame": {
@@ -1311,6 +1362,69 @@
         }
       },
       "additionalProperties": false
+    },
+    "interfaceId": {
+      "type": "object",
+      "required": [
+        "name",
+        "index"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "additionalProperties": false
+    },
+    "linkMode": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "layer2",
+        "layer3"
+      ]
+    },
+    "replayTiming": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "original",
+            "immediate"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "scaled"
+          ],
+          "properties": {
+            "scaled": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "fixed_rate"
+          ],
+          "properties": {
+            "fixed_rate": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "interface": {
       "type": "object",

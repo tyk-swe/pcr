@@ -5,7 +5,7 @@
 
 use std::fs::File;
 use std::io::{self, IsTerminal, Read, Write};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -25,18 +25,24 @@ use crate::core::{
 };
 use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 use crate::io::{
-    CaptureFileFormat, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureReader,
-    CaptureSession, CaptureWriter, CapturedFrame, DispatchPacketIo, InterfaceId, InterfaceProvider,
-    LinkMode, LinkType, LiveIoError, PacketIo, RouteProvider, SystemCaptureProvider,
-    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemNeighborResolver,
-    SystemRouteProvider,
+    transcode_capture, CaptureFileFormat, CaptureOverflowPolicy, CaptureProvider,
+    CaptureQueueLimits, CaptureReader, CaptureSession, CaptureStreamLimits, CaptureWriter,
+    CapturedFrame, DestinationScope, DispatchPacketIo, InterfaceId, InterfaceInfo,
+    InterfaceProvider, LinkCapability, LinkMode, LinkType, LiveIoError, MaterializedRoute,
+    PacketIo, PlannedRoute, ReplayTiming, RouteDecision, RouteProvider, RouteSelectionReason,
+    SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io,
+    SystemNeighborResolver, SystemRouteProvider, TransmissionFrame,
 };
 use crate::output::{
     AggregateErrorOutput, AggregateOutput, BuildCommandResult, CaptureFrameCommandResult,
     CommandName, DissectCommandResult, ExchangeCommandResult, ExchangeStreamCommandResult,
     FrameOutput, InterfacesCommandResult, OutputContractError, OutputError, OutputFormat,
-    PlanCommandResult, ReadFrameCommandResult, RoutesCommandResult, SendCommandResult,
-    StreamErrorRecord, StreamRecord,
+    PlanCommandResult, ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult,
+    RoutesCommandResult, SendCommandResult, StreamErrorRecord, StreamRecord,
+};
+use crate::tools::{
+    replay_capture, ReplayAuthorizationError, ReplayAuthorizer, ReplayError, ReplayLimits,
+    ReplayOptions, ReplayTransmission, ReplayTransmitter, SystemReplayClock,
 };
 
 #[derive(Debug, Parser)]
@@ -72,7 +78,7 @@ enum Command {
     /// Stream live captured frames.
     Capture(CaptureArgs),
     /// Replay a PCAP/PCAPNG stream.
-    Replay(UnavailableArgs),
+    Replay(ReplayArgs),
     /// Run a structured network scan.
     Scan(UnavailableArgs),
     /// Run structured traceroute probes.
@@ -126,6 +132,60 @@ struct DissectArgs {
 #[derive(Debug, Args)]
 struct ReadArgs {
     path: PathBuf,
+    /// Maximum frames read or copied from the capture stream.
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_STREAM_FRAMES)]
+    max_frames: u64,
+    /// Maximum aggregate captured payload bytes read or copied.
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_STREAM_BYTES)]
+    max_bytes: u64,
+    /// Maximum bytes accepted from any one captured frame or PCAPNG block.
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_SIZE_LIMIT)]
+    max_frame_bytes: usize,
+    /// Maximum PCAPNG interfaces accepted from the input.
+    #[arg(long, default_value_t = crate::io::DEFAULT_PCAPNG_INTERFACE_LIMIT)]
+    max_interfaces: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliReplayTiming {
+    #[default]
+    Original,
+    Immediate,
+}
+
+#[derive(Debug, Args)]
+struct ReplayArgs {
+    /// Classic PCAP or PCAPNG input path.
+    path: PathBuf,
+    /// Exact interface name or numeric index used for every transmission.
+    #[arg(long, value_name = "NAME_OR_INDEX")]
+    interface: String,
+    /// Automatic, Layer 2, or raw Layer 3 replay intent.
+    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
+    link_mode: CliLinkMode,
+    /// Preserve captured intervals or send immediately.
+    #[arg(long, value_enum, default_value_t = CliReplayTiming::Original)]
+    timing: CliReplayTiming,
+    /// Positive multiplier for captured replay speed (2 means twice as fast).
+    #[arg(long, conflicts_with = "rate")]
+    speed: Option<f64>,
+    /// Positive fixed frame rate, overriding captured intervals.
+    #[arg(long, conflicts_with = "speed")]
+    rate: Option<f64>,
+    /// Maximum cumulative intentional replay delay in milliseconds.
+    #[arg(long, default_value_t = 3_600_000)]
+    max_duration_ms: u64,
+    /// Maximum bytes accepted from any one captured frame or PCAPNG block.
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_SIZE_LIMIT)]
+    max_frame_bytes: usize,
+    /// Maximum PCAPNG interfaces accepted from the input.
+    #[arg(long, default_value_t = crate::io::DEFAULT_PCAPNG_INTERFACE_LIMIT)]
+    max_interfaces: usize,
+    /// Per-operation opt-in required when dissection preserves malformed bytes.
+    #[arg(long)]
+    allow_malformed_live: bool,
+    #[command(flatten)]
+    policy: ReplayPolicyArgs,
 }
 
 #[derive(Debug, Args)]
@@ -218,6 +278,22 @@ struct TrafficPolicyArgs {
 }
 
 #[derive(Clone, Debug, Args)]
+struct ReplayPolicyArgs {
+    /// Deliberately authorize globally routable destinations.
+    #[arg(long)]
+    allow_public_destinations: bool,
+    /// Policy-level opt-in for malformed/permissive live bytes.
+    #[arg(long)]
+    allow_permissive_packets: bool,
+    /// Maximum packets authorized for one operation.
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_STREAM_FRAMES)]
+    max_packets: u64,
+    /// Maximum wire bytes authorized for one operation.
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_STREAM_BYTES)]
+    max_bytes: u64,
+}
+
+#[derive(Clone, Debug, Args)]
 struct CaptureLimitArgs {
     /// Aggregate backend capture-queue frame bound.
     #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_QUEUE_FRAMES)]
@@ -278,6 +354,18 @@ impl TrafficPolicyArgs {
             max_packets_per_operation: self.max_packets,
             max_bytes_per_operation: self.max_bytes,
             max_resolved_addresses: self.max_resolved_addresses,
+        }
+    }
+}
+
+impl ReplayPolicyArgs {
+    fn into_policy(self) -> TrafficPolicy {
+        TrafficPolicy {
+            allow_public_destinations: self.allow_public_destinations,
+            allow_permissive_packets: self.allow_permissive_packets,
+            max_packets_per_operation: self.max_packets,
+            max_bytes_per_operation: self.max_bytes,
+            ..TrafficPolicy::default()
         }
     }
 }
@@ -440,8 +528,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Send(arguments) => run_send(arguments, cli.output),
         Command::Capture(arguments) => run_capture(arguments, cli.output),
         Command::Exchange(arguments) => run_exchange(arguments, cli.output),
-        Command::Replay(arguments)
-        | Command::Scan(arguments)
+        Command::Replay(arguments) => run_replay(arguments, cli.output),
+        Command::Scan(arguments)
         | Command::Traceroute(arguments)
         | Command::Dns(arguments)
         | Command::Fuzz(arguments) => {
@@ -867,6 +955,13 @@ fn run_capture(arguments: CaptureArgs, output: OutputFormat) -> Result<(), CliEr
                     return Err(shutdown_after_error(&mut capture, error));
                 }
             };
+            if let Err(source) = writer.set_stream_limits(CaptureStreamLimits {
+                max_frames: budget.max_frames,
+                max_bytes: budget.max_bytes,
+            }) {
+                let error = CliError::classified(source);
+                return Err(shutdown_after_error(&mut capture, error));
+            }
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, _| {
                 writer
                     .write_frame(&capture_file_frame(frame, format))
@@ -1389,22 +1484,70 @@ fn run_dissect(arguments: DissectArgs, output: OutputFormat) -> Result<(), CliEr
 }
 
 fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
-    let file = File::open(&arguments.path).map_err(|source| {
-        CliError::new(
-            5,
-            format!("open {} failed: {source}", arguments.path.display()),
-        )
-    })?;
-    let mut reader =
-        CaptureReader::new(file).map_err(|source| CliError::new(3, source.to_string()))?;
+    let ReadArgs {
+        path,
+        max_frames,
+        max_bytes,
+        max_frame_bytes,
+        max_interfaces,
+    } = arguments;
+    validate_capture_stream_limits(max_frames, max_bytes, max_frame_bytes, max_interfaces)?;
+    let file = File::open(&path)
+        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
+    let mut reader = CaptureReader::with_limits(file, max_frame_bytes, max_interfaces)
+        .map_err(CliError::classified)?;
+    let stream_limits = CaptureStreamLimits {
+        max_frames,
+        max_bytes,
+    };
+    if matches!(output, OutputFormat::Pcap | OutputFormat::Pcapng) {
+        let format = capture_file_format(output)?;
+        let stdout = io::stdout();
+        let (_output, _report) =
+            transcode_capture(&mut reader, stdout.lock(), format, stream_limits)
+                .map_err(CliError::classified)?;
+        return Ok(());
+    }
+
     let mut sequence = 0_u64;
+    let mut captured_bytes = 0_u64;
     loop {
         let Some(frame) = reader
             .next_frame()
-            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?
+            .map_err(|source| CliError::classified(source).at_sequence(sequence))?
         else {
             return Ok(());
         };
+        let next_sequence = sequence.checked_add(1).ok_or_else(|| {
+            CliError::classified(OutputContractError::SequenceOverflow).at_sequence(sequence)
+        })?;
+        if next_sequence > max_frames {
+            return Err(
+                CliError::classified(crate::io::CaptureError::FrameLimitExceeded {
+                    actual: next_sequence,
+                    limit: max_frames,
+                })
+                .at_sequence(sequence),
+            );
+        }
+        let next_bytes = captured_bytes
+            .checked_add(u64::from(frame.captured_length))
+            .ok_or_else(|| {
+                CliError::classified(crate::io::CaptureError::StreamByteLimitExceeded {
+                    actual: u64::MAX,
+                    limit: max_bytes,
+                })
+                .at_sequence(sequence)
+            })?;
+        if next_bytes > max_bytes {
+            return Err(
+                CliError::classified(crate::io::CaptureError::StreamByteLimitExceeded {
+                    actual: next_bytes,
+                    limit: max_bytes,
+                })
+                .at_sequence(sequence),
+            );
+        }
         let result = ReadFrameCommandResult::try_from_frame(frame)
             .map_err(|source| CliError::classified(source).at_sequence(sequence))?;
         match output {
@@ -1432,10 +1575,861 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
                 ))
             }
         }
-        sequence = sequence.checked_add(1).ok_or_else(|| {
-            CliError::classified(OutputContractError::SequenceOverflow).at_sequence(sequence)
-        })?;
+        sequence = next_sequence;
+        captured_bytes = next_bytes;
     }
+}
+
+fn validate_capture_stream_limits(
+    max_frames: u64,
+    max_bytes: u64,
+    max_frame_bytes: usize,
+    max_interfaces: usize,
+) -> Result<(), CliError> {
+    if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
+        return Err(CliError::from_classification(
+            ErrorClassification::new(
+                "cli.capture_limit",
+                FailureKind::Cli,
+                Some("use finite non-zero capture frame, byte, packet, and interface limits"),
+            ),
+            "capture stream limits must be non-zero",
+            Vec::new(),
+        ));
+    }
+    if max_frame_bytes as u64 > max_bytes {
+        return Err(CliError::from_classification(
+            ErrorClassification::new(
+                "cli.capture_limit",
+                FailureKind::Cli,
+                Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
+            ),
+            format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
+            Vec::new(),
+        ));
+    }
+    Ok(())
+}
+
+struct CliReplayAuthorizer {
+    policy: TrafficPolicy,
+    registry: Arc<crate::core::ProtocolRegistry>,
+    allow_malformed_live: bool,
+}
+
+impl ReplayAuthorizer for CliReplayAuthorizer {
+    fn authorize(
+        &mut self,
+        frame: &CapturedFrame,
+        _mode: LinkMode,
+    ) -> Result<(), ReplayAuthorizationError> {
+        if frame.captured_length != frame.original_length {
+            return Err(ReplayAuthorizationError::new(
+                format!(
+                    "captured frame contains {} of {} original wire bytes",
+                    frame.captured_length, frame.original_length
+                ),
+                ErrorClassification::new(
+                    "packet.replay_truncated",
+                    FailureKind::Packet,
+                    Some("replay only complete captured frames whose captured and original lengths match"),
+                ),
+                Vec::new(),
+            ));
+        }
+        let (wire_destinations, unsupported_routing) = replay_wire_policy(frame);
+        for destination in wire_destinations {
+            self.policy
+                .authorize_destination(destination)
+                .map_err(|source| {
+                    ReplayAuthorizationError::new(
+                        source.to_string(),
+                        source.classification(),
+                        source.causes(),
+                    )
+                })?;
+        }
+        if unsupported_routing {
+            return Err(ReplayAuthorizationError::new(
+                "captured IPv6 packet uses an unsupported routing header",
+                ErrorClassification::new(
+                    "capability.replay_routing_header",
+                    FailureKind::Capability,
+                    Some("replay only typed RFC 8754 Segment Routing Headers; unsupported routing types cannot be policy-authorized safely"),
+                ),
+                Vec::new(),
+            ));
+        }
+        let decoded = Dissector::new(Arc::clone(&self.registry))
+            .decode(frame.clone(), DecodeOptions::default())
+            .map_err(|source| {
+                ReplayAuthorizationError::new(
+                    source.to_string(),
+                    ErrorClassification::new(
+                        "packet.decode",
+                        FailureKind::Packet,
+                        Some("repair the frame or link type before authorizing live replay"),
+                    ),
+                    Vec::new(),
+                )
+            })?;
+        let rebuilt = Builder::new(Arc::clone(&self.registry))
+            .build(
+                decoded.packet.clone(),
+                BuildContext::default(),
+                BuildOptions {
+                    mode: BuildMode::Permissive,
+                    ..BuildOptions::default()
+                },
+            )
+            .map_err(|source| {
+                ReplayAuthorizationError::new(
+                    format!("captured frame cannot be rebuilt exactly: {source}"),
+                    ErrorClassification::new(
+                        "packet.replay_rebuild",
+                        FailureKind::Packet,
+                        Some("repair the capture so its decoded layers rebuild the exact submitted bytes"),
+                    ),
+                    Vec::new(),
+                )
+            })?;
+        if rebuilt.bytes != frame.bytes {
+            return Err(ReplayAuthorizationError::new(
+                "captured frame did not reproduce the exact source bytes",
+                ErrorClassification::new(
+                    "internal.replay_rebuild",
+                    FailureKind::Internal,
+                    Some("do not replay bytes whose codec round trip changed the authoritative capture"),
+                ),
+                Vec::new(),
+            ));
+        }
+        if rebuilt.requires_live_opt_in && !self.allow_malformed_live {
+            return Err(ReplayAuthorizationError::new(
+                "permissive or malformed captured bytes require --allow-malformed-live",
+                ErrorClassification::new(
+                    "policy.permissive_live_opt_in",
+                    FailureKind::Policy,
+                    Some("set the per-operation malformed-live opt-in in addition to policy approval"),
+                ),
+                Vec::new(),
+            ));
+        }
+        if rebuilt.requires_live_opt_in && !self.policy.allow_permissive_packets {
+            let source = TrafficPolicyError::PermissivePacket;
+            return Err(ReplayAuthorizationError::new(
+                source.to_string(),
+                source.classification(),
+                source.causes(),
+            ));
+        }
+        self.policy
+            .authorize_packet_destinations(&decoded.packet)
+            .map_err(|source| {
+                ReplayAuthorizationError::new(
+                    source.to_string(),
+                    source.classification(),
+                    source.causes(),
+                )
+            })
+    }
+}
+
+struct SystemReplayTransmitter {
+    resolved: Option<InterfaceInfo>,
+    packets: SystemPackets,
+    routes: SystemRouteProvider,
+}
+
+impl SystemReplayTransmitter {
+    fn new() -> Self {
+        Self {
+            resolved: None,
+            packets: DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
+            routes: SystemRouteProvider,
+        }
+    }
+
+    fn resolve(
+        &mut self,
+        requested: &InterfaceId,
+        mode: LinkMode,
+        frame: &CapturedFrame,
+    ) -> Result<InterfaceId, LiveIoError> {
+        if self.resolved.is_none() {
+            let interfaces = SystemInterfaceProvider.interfaces()?;
+            let selected = interfaces
+                .into_iter()
+                .find(|interface| {
+                    if requested.index != 0 {
+                        interface.id.index == requested.index
+                    } else {
+                        interface.id.name == requested.name
+                    }
+                })
+                .ok_or_else(|| LiveIoError::Device {
+                    interface: requested.name.clone(),
+                    message: "no interface matches the requested name or index".to_owned(),
+                })?;
+            if !selected.flags.up {
+                return Err(LiveIoError::Device {
+                    interface: selected.id.name,
+                    message: "selected interface is not up".to_owned(),
+                });
+            }
+            self.resolved = Some(selected);
+        }
+        let selected = self.resolved.as_ref().expect("resolved above");
+        let supported = match mode {
+            LinkMode::Layer2 => matches!(
+                selected.capability,
+                LinkCapability::Layer2 | LinkCapability::Layer2And3
+            ),
+            LinkMode::Layer3 => matches!(
+                selected.capability,
+                LinkCapability::Layer3 | LinkCapability::Layer2And3
+            ),
+            LinkMode::Auto => false,
+        };
+        if !supported {
+            return Err(LiveIoError::Unsupported {
+                message: format!(
+                    "interface {} does not support requested {mode:?} replay",
+                    selected.id.name
+                ),
+            });
+        }
+        if mode == LinkMode::Layer2 && selected.link_type != frame.link_type {
+            return Err(LiveIoError::Device {
+                interface: selected.id.name.clone(),
+                message: format!(
+                    "interface link type {} differs from captured link type {}",
+                    selected.link_type.0, frame.link_type.0
+                ),
+            });
+        }
+        Ok(selected.id.clone())
+    }
+
+    fn materialized_route(
+        &self,
+        interface: &InterfaceInfo,
+        mode: LinkMode,
+        frame: &CapturedFrame,
+    ) -> Result<MaterializedRoute, LiveIoError> {
+        let plan = match mode {
+            LinkMode::Layer2 => PlannedRoute {
+                route: RouteDecision {
+                    interface: interface.id.clone(),
+                    source_mac: interface.mac_address,
+                    selected_address: interface.addresses.first().map(|value| value.address),
+                    preferred_source: None,
+                    next_hop: None,
+                    selection_reason: RouteSelectionReason::InterfaceOnly,
+                    destination_scope: DestinationScope::Link,
+                    mtu: interface.mtu.unwrap_or(u32::MAX),
+                    capability: interface.capability,
+                    link_type: interface.link_type,
+                },
+                mode,
+                lookup_destination: None,
+                final_destination: None,
+                visited_destinations: Vec::new(),
+                packet_source: None,
+                neighbor_source: None,
+                neighbor_target: None,
+                destination_mac: None,
+                source_mac: interface.mac_address,
+                neighbor_vlan_tags: Vec::new(),
+                synthesized_ethernet: false,
+            },
+            LinkMode::Layer3 => {
+                let (source, destination) = replay_ip_endpoints(&frame.bytes)?;
+                let route = self
+                    .routes
+                    .lookup_with_preferences(destination, Some(&interface.id), None)
+                    .map_err(|source| map_replay_route_error(&self.routes, source))?;
+                if route.interface != interface.id {
+                    return Err(LiveIoError::Device {
+                        interface: interface.id.name.clone(),
+                        message: format!(
+                            "route selected {} (index {})",
+                            route.interface.name, route.interface.index
+                        ),
+                    });
+                }
+                if !matches!(
+                    route.capability,
+                    LinkCapability::Layer3 | LinkCapability::Layer2And3
+                ) {
+                    return Err(LiveIoError::Unsupported {
+                        message: format!(
+                            "route through {} does not support raw Layer 3 transmission",
+                            route.interface.name
+                        ),
+                    });
+                }
+                let source_mac = route.source_mac;
+                PlannedRoute {
+                    route,
+                    mode,
+                    lookup_destination: Some(destination),
+                    final_destination: Some(destination),
+                    visited_destinations: vec![destination],
+                    packet_source: Some(source),
+                    neighbor_source: None,
+                    neighbor_target: None,
+                    destination_mac: None,
+                    source_mac,
+                    neighbor_vlan_tags: Vec::new(),
+                    synthesized_ethernet: false,
+                }
+            }
+            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode),
+        };
+        Ok(MaterializedRoute {
+            plan,
+            neighbor_resolution: None,
+        })
+    }
+}
+
+impl ReplayTransmitter for SystemReplayTransmitter {
+    fn validate_interface(
+        &mut self,
+        interface: &InterfaceId,
+        mode: LinkMode,
+        frame: &CapturedFrame,
+    ) -> Result<InterfaceId, LiveIoError> {
+        self.resolve(interface, mode, frame)
+    }
+
+    fn transmit(
+        &mut self,
+        interface: &InterfaceId,
+        mode: LinkMode,
+        frame: &CapturedFrame,
+    ) -> Result<ReplayTransmission, LiveIoError> {
+        let selected = self
+            .resolved
+            .as_ref()
+            .filter(|selected| selected.id == *interface)
+            .cloned()
+            .ok_or_else(|| LiveIoError::Device {
+                interface: interface.name.clone(),
+                message: "interface was not validated before replay transmission".to_owned(),
+            })?;
+        let route = self.materialized_route(&selected, mode, frame)?;
+        let report = self
+            .packets
+            .send(TransmissionFrame::try_new(&frame.bytes, &route)?)?;
+        Ok(ReplayTransmission {
+            interface: selected.id,
+            report,
+        })
+    }
+}
+
+fn map_replay_route_error(
+    provider: &SystemRouteProvider,
+    source: crate::io::NativeRouteError,
+) -> LiveIoError {
+    let classification = provider.classify_error(&source);
+    match classification.kind {
+        FailureKind::Capability => LiveIoError::Unsupported {
+            message: source.to_string(),
+        },
+        _ => LiveIoError::Send {
+            message: format!("replay route selection failed: {source}"),
+        },
+    }
+}
+
+fn replay_ip_endpoints(bytes: &[u8]) -> Result<(IpAddr, IpAddr), LiveIoError> {
+    let invalid = |message: String| LiveIoError::InvalidTransmissionFrame { message };
+    let Some(version) = bytes.first().map(|byte| byte >> 4) else {
+        return Err(invalid("replay frame is empty".to_owned()));
+    };
+    match version {
+        4 if bytes.len() >= 20 => {
+            let source = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]);
+            let destination = Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19]);
+            Ok((IpAddr::V4(source), IpAddr::V4(destination)))
+        }
+        6 if bytes.len() >= 40 => {
+            let mut source = [0_u8; 16];
+            let mut destination = [0_u8; 16];
+            source.copy_from_slice(&bytes[8..24]);
+            destination.copy_from_slice(&bytes[24..40]);
+            Ok((
+                IpAddr::V6(Ipv6Addr::from(source)),
+                IpAddr::V6(Ipv6Addr::from(destination)),
+            ))
+        }
+        4 => Err(invalid(
+            "replay frame has a truncated IPv4 header".to_owned(),
+        )),
+        6 => Err(invalid(
+            "replay frame has a truncated IPv6 header".to_owned(),
+        )),
+        value => Err(invalid(format!(
+            "replay frame has unsupported IP version {value}"
+        ))),
+    }
+}
+
+fn replay_wire_policy(frame: &CapturedFrame) -> (Vec<IpAddr>, bool) {
+    let bytes = frame.bytes.as_ref();
+    let (network_offset, protocol) = match frame.link_type.0 {
+        12 | 101 => (0, bytes.first().map(|byte| byte >> 4).unwrap_or(0)),
+        228 => (0, 4),
+        229 => (0, 6),
+        1 if bytes.len() >= 14 => {
+            let mut offset = 14_usize;
+            let mut ether_type = u16::from_be_bytes([bytes[12], bytes[13]]);
+            for _ in 0..DEFAULT_MAX_LAYERS {
+                if !matches!(ether_type, 0x8100 | 0x88a8) || bytes.len() < offset + 4 {
+                    break;
+                }
+                ether_type = u16::from_be_bytes([bytes[offset + 2], bytes[offset + 3]]);
+                offset += 4;
+            }
+            let protocol = match ether_type {
+                0x0800 => 4,
+                0x86dd => 6,
+                _ => 0,
+            };
+            (offset, protocol)
+        }
+        _ => (0, 0),
+    };
+    let mut destinations = Vec::new();
+    let unsupported_routing = match protocol {
+        4 => {
+            collect_ipv4_wire_destinations(bytes, network_offset, &mut destinations);
+            false
+        }
+        6 => collect_ipv6_wire_destinations(bytes, network_offset, &mut destinations),
+        _ => false,
+    };
+    (destinations, unsupported_routing)
+}
+
+#[cfg(test)]
+fn replay_wire_destinations(frame: &CapturedFrame) -> Vec<IpAddr> {
+    replay_wire_policy(frame).0
+}
+
+fn collect_ipv4_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<IpAddr>) {
+    let Some(header) = bytes.get(offset..offset.saturating_add(20)) else {
+        return;
+    };
+    output.push(IpAddr::V4(Ipv4Addr::new(
+        header[16], header[17], header[18], header[19],
+    )));
+    let header_length = usize::from(header[0] & 0x0f).saturating_mul(4);
+    if !(20..=60).contains(&header_length) {
+        return;
+    }
+    let Some(header) = bytes.get(offset..offset.saturating_add(header_length)) else {
+        return;
+    };
+    let mut cursor = 20_usize;
+    while cursor < header.len() {
+        match header[cursor] {
+            0 => break,
+            1 => cursor += 1,
+            option => {
+                let Some(length) = header.get(cursor + 1).copied().map(usize::from) else {
+                    break;
+                };
+                if length < 2 || cursor.saturating_add(length) > header.len() {
+                    break;
+                }
+                if matches!(option, 131 | 137) && length >= 7 {
+                    for address in header[cursor + 3..cursor + length].chunks_exact(4) {
+                        output.push(IpAddr::V4(Ipv4Addr::new(
+                            address[0], address[1], address[2], address[3],
+                        )));
+                    }
+                }
+                cursor += length;
+            }
+        }
+    }
+}
+
+fn collect_ipv6_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<IpAddr>) -> bool {
+    let Some(header) = bytes.get(offset..offset.saturating_add(40)) else {
+        return false;
+    };
+    let mut destination = [0_u8; 16];
+    destination.copy_from_slice(&header[24..40]);
+    output.push(IpAddr::V6(Ipv6Addr::from(destination)));
+    let mut next_header = header[6];
+    let mut cursor = offset.saturating_add(40);
+    let mut unsupported_routing = false;
+    for _ in 0..DEFAULT_MAX_LAYERS {
+        match next_header {
+            0 | 43 | 60 => {
+                let Some(extension) = bytes.get(cursor..cursor.saturating_add(8)) else {
+                    unsupported_routing |= next_header == 43;
+                    break;
+                };
+                let length = (usize::from(extension[1]) + 1).saturating_mul(8);
+                let Some(extension) = bytes.get(cursor..cursor.saturating_add(length)) else {
+                    unsupported_routing |= next_header == 43;
+                    break;
+                };
+                if next_header == 43 && extension[2] == 4 {
+                    let segment_count = usize::from(extension[4]).saturating_add(1);
+                    let available = extension.len().saturating_sub(8) / 16;
+                    for segment in extension[8..]
+                        .chunks_exact(16)
+                        .take(segment_count.min(available))
+                    {
+                        let mut address = [0_u8; 16];
+                        address.copy_from_slice(segment);
+                        output.push(IpAddr::V6(Ipv6Addr::from(address)));
+                    }
+                } else if next_header == 43 {
+                    unsupported_routing = true;
+                }
+                next_header = extension[0];
+                cursor = cursor.saturating_add(length);
+            }
+            44 => {
+                let Some(fragment) = bytes.get(cursor..cursor.saturating_add(8)) else {
+                    break;
+                };
+                next_header = fragment[0];
+                cursor = cursor.saturating_add(8);
+            }
+            51 => {
+                let Some(authentication) = bytes.get(cursor..cursor.saturating_add(2)) else {
+                    break;
+                };
+                let length = (usize::from(authentication[1]) + 2).saturating_mul(4);
+                if bytes.get(cursor..cursor.saturating_add(length)).is_none() {
+                    break;
+                }
+                next_header = authentication[0];
+                cursor = cursor.saturating_add(length);
+            }
+            _ => break,
+        }
+    }
+    unsupported_routing
+}
+
+fn replay_timing(arguments: &ReplayArgs) -> Result<ReplayTiming, CliError> {
+    let timing = if let Some(rate) = arguments.rate {
+        if matches!(arguments.timing, CliReplayTiming::Immediate) {
+            return Err(CliError::new(
+                2,
+                "--rate cannot be combined with --timing immediate",
+            ));
+        }
+        ReplayTiming::FixedRate(rate)
+    } else if let Some(speed) = arguments.speed {
+        if matches!(arguments.timing, CliReplayTiming::Immediate) {
+            return Err(CliError::new(
+                2,
+                "--speed cannot be combined with --timing immediate",
+            ));
+        }
+        ReplayTiming::Scaled(1.0 / speed)
+    } else {
+        match arguments.timing {
+            CliReplayTiming::Original => ReplayTiming::Original,
+            CliReplayTiming::Immediate => ReplayTiming::Immediate,
+        }
+    };
+    timing.validate().map_err(CliError::classified)
+}
+
+fn requested_replay_interface(selector: &str) -> Result<InterfaceId, CliError> {
+    if selector.is_empty() {
+        return Err(CliError::new(2, "replay interface cannot be empty"));
+    }
+    let index = selector.parse::<u32>().unwrap_or(0);
+    if selector.bytes().all(|byte| byte.is_ascii_digit()) && index == 0 {
+        return Err(CliError::new(2, "replay interface index must be non-zero"));
+    }
+    Ok(InterfaceId {
+        name: selector.to_owned(),
+        index,
+    })
+}
+
+fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliError> {
+    validate_capture_stream_limits(
+        arguments.policy.max_packets,
+        arguments.policy.max_bytes,
+        arguments.max_frame_bytes,
+        arguments.max_interfaces,
+    )?;
+    let timing = replay_timing(&arguments)?;
+    let requested_interface = requested_replay_interface(&arguments.interface)?;
+    let policy = arguments.policy.clone().into_policy();
+    policy.validate().map_err(CliError::classified)?;
+    let limits = ReplayLimits {
+        max_frames: policy.max_packets_per_operation,
+        max_bytes: policy.max_bytes_per_operation,
+        max_frame_bytes: arguments.max_frame_bytes,
+        max_duration: Duration::from_millis(arguments.max_duration_ms),
+    }
+    .validate()
+    .map_err(CliError::classified)?;
+    let file = File::open(&arguments.path).map_err(|source| {
+        CliError::new(
+            5,
+            format!("open {} failed: {source}", arguments.path.display()),
+        )
+    })?;
+    let mut reader =
+        CaptureReader::with_limits(file, arguments.max_frame_bytes, arguments.max_interfaces)
+            .map_err(CliError::classified)?;
+    let registry = default_registry_arc()?;
+    let mut authorizer = CliReplayAuthorizer {
+        policy,
+        registry,
+        allow_malformed_live: arguments.allow_malformed_live,
+    };
+    let options = ReplayOptions {
+        interface: requested_interface.clone(),
+        link_mode: arguments.link_mode.into(),
+        timing,
+        limits,
+    };
+    let mut transmitter = SystemReplayTransmitter::new();
+    let mut clock = SystemReplayClock;
+    let started = Instant::now();
+
+    match output {
+        OutputFormat::Text => {
+            let summary = replay_capture(
+                &mut reader,
+                &options,
+                &mut authorizer,
+                &mut transmitter,
+                &mut clock,
+                |evidence| {
+                    let sequence = evidence.source_sequence;
+                    let result = ReplayFrameCommandResult::try_from_evidence(evidence)
+                        .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
+                    write_stdout_line(format_args!(
+                        "{}: sent {} bytes via {} (index {}, {:?}) dlt={} {}",
+                        result.source_sequence,
+                        result.bytes_sent,
+                        result.interface.name,
+                        result.interface.index,
+                        result.link_mode,
+                        result.frame.link_type,
+                        spaced_hex(result.frame.bytes())
+                    ))
+                    .map_err(|source| ReplayError::output(result.source_sequence, source.message))
+                },
+            )
+            .map_err(replay_cli_error)?;
+            write_stdout_line(format_args!(
+                "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
+                summary.frames_completed, summary.bytes_completed, summary.scheduled_duration
+            ))
+        }
+        OutputFormat::Json => {
+            let mut frames = Vec::new();
+            let summary = replay_capture(
+                &mut reader,
+                &options,
+                &mut authorizer,
+                &mut transmitter,
+                &mut clock,
+                |evidence| {
+                    let sequence = evidence.source_sequence;
+                    let result = ReplayFrameCommandResult::try_from_evidence(evidence)
+                        .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
+                    frames.push(result);
+                    Ok(())
+                },
+            )
+            .map_err(replay_cli_error)?;
+            let stats = replay_stats(&summary, started.elapsed());
+            let result = ReplayCommandResult::from_summary(
+                summary,
+                requested_interface,
+                options.link_mode,
+                frames,
+            );
+            emit_json(
+                &AggregateOutput::success(CommandName::Replay, result, Vec::new())
+                    .with_stats(stats),
+            )
+        }
+        OutputFormat::Ndjson => {
+            let summary = replay_capture(
+                &mut reader,
+                &options,
+                &mut authorizer,
+                &mut transmitter,
+                &mut clock,
+                |evidence| {
+                    let sequence = evidence.source_sequence;
+                    let result = ReplayFrameCommandResult::try_from_evidence(evidence)
+                        .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
+                    emit_json_compact(&StreamRecord::success(
+                        CommandName::Replay,
+                        sequence,
+                        result,
+                        Vec::new(),
+                    ))
+                    .map_err(|source| ReplayError::output(sequence, source.message))
+                },
+            )
+            .map_err(replay_cli_error)?;
+            let sequence = summary.frames_completed;
+            let stats = replay_stats(&summary, started.elapsed());
+            let result = ReplayCommandResult::from_summary(
+                summary,
+                requested_interface,
+                options.link_mode,
+                Vec::new(),
+            );
+            emit_json_compact(
+                &StreamRecord::success(CommandName::Replay, sequence, result, Vec::new())
+                    .with_stats(stats),
+            )
+            .map_err(|error| error.at_sequence(sequence))
+        }
+        OutputFormat::Pcap | OutputFormat::Pcapng => {
+            let format = capture_file_format(output)?;
+            let stdout = io::stdout();
+            let mut writer = replay_capture_writer(
+                &reader,
+                stdout.lock(),
+                format,
+                limits,
+                arguments.max_interfaces,
+            )?;
+            let mut interfaces = Vec::<(Option<u32>, u32)>::new();
+            replay_capture(
+                &mut reader,
+                &options,
+                &mut authorizer,
+                &mut transmitter,
+                &mut clock,
+                |evidence| {
+                    write_replay_capture_evidence(&mut writer, format, &mut interfaces, evidence)
+                },
+            )
+            .map_err(replay_cli_error)?;
+            writer.flush().map_err(CliError::classified)
+        }
+        _ => Err(CliError::classified(
+            OutputContractError::UnsupportedFormat {
+                command: CommandName::Replay,
+                format: output,
+            },
+        )),
+    }
+}
+
+fn replay_capture_writer<W: Write>(
+    reader: &CaptureReader<File>,
+    output: W,
+    format: CaptureFileFormat,
+    limits: ReplayLimits,
+    max_interfaces: usize,
+) -> Result<CaptureWriter<W>, CliError> {
+    let mut writer = match format {
+        CaptureFileFormat::Pcap => {
+            if reader.format() != CaptureFileFormat::Pcap {
+                return Err(CliError::classified(
+                    crate::io::CaptureError::MetadataNotRepresentable {
+                        format,
+                        field: "pcapng replay evidence",
+                    },
+                ));
+            }
+            let interface = reader.interfaces()[0];
+            CaptureWriter::pcap_with_metadata(
+                output,
+                interface.link_type,
+                reader.endianness(),
+                interface.timestamp_resolution,
+                interface.snap_len as usize,
+                limits.max_frame_bytes,
+            )
+        }
+        CaptureFileFormat::PcapNg => CaptureWriter::pcapng_with_resource_limits(
+            output,
+            reader.endianness(),
+            limits.max_frame_bytes,
+            max_interfaces,
+        ),
+    }
+    .map_err(CliError::classified)?;
+    writer
+        .set_stream_limits(CaptureStreamLimits {
+            max_frames: limits.max_frames,
+            max_bytes: limits.max_bytes,
+        })
+        .map_err(CliError::classified)?;
+    Ok(writer)
+}
+
+fn write_replay_capture_evidence<W: Write>(
+    writer: &mut CaptureWriter<W>,
+    format: CaptureFileFormat,
+    interfaces: &mut Vec<(Option<u32>, u32)>,
+    evidence: crate::tools::ReplayFrameEvidence,
+) -> Result<(), ReplayError> {
+    let sequence = evidence.source_sequence;
+    let mut frame = evidence.frame;
+    frame.interface = match format {
+        CaptureFileFormat::Pcap => None,
+        CaptureFileFormat::PcapNg => {
+            let interface = match interfaces
+                .iter()
+                .find(|(source, _)| *source == evidence.source_interface_id)
+            {
+                Some((_, interface)) => *interface,
+                None => {
+                    let interface = writer
+                        .add_interface_description(evidence.capture_interface)
+                        .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
+                    interfaces.push((evidence.source_interface_id, interface));
+                    interface
+                }
+            };
+            Some(interface)
+        }
+    };
+    writer
+        .write_frame(&frame)
+        .map_err(|source| ReplayError::output(sequence, source.to_string()))
+}
+
+fn replay_stats(
+    summary: &crate::tools::ReplaySummary,
+    elapsed: Duration,
+) -> crate::client::OperationStats {
+    crate::client::OperationStats {
+        packets_attempted: summary.frames_attempted,
+        packets_completed: summary.frames_completed,
+        bytes: summary.bytes_completed,
+        elapsed,
+        capture: crate::io::CaptureStatistics::default(),
+    }
+}
+
+fn replay_cli_error(error: ReplayError) -> CliError {
+    let sequence = error.sequence();
+    let mut error = CliError::classified(error);
+    if let Some(sequence) = sequence {
+        error = error.at_sequence(sequence);
+    }
+    error
 }
 
 fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
@@ -2043,5 +3037,119 @@ mod tests {
         let error = encode_capture_file(OutputFormat::Pcap, [raw, ethernet]).unwrap_err();
         assert_eq!(error.code, 5);
         assert!(error.message.contains("link type"));
+    }
+
+    #[test]
+    fn replay_pcapng_evidence_preserves_source_timestamp_metadata() {
+        let timestamp = SystemTime::UNIX_EPOCH
+            .checked_sub(Duration::from_millis(500))
+            .unwrap();
+        let mut frame = CapturedFrame::new(timestamp, LinkType::RAW, vec![0x60; 40]).unwrap();
+        frame.interface = Some(7);
+        let evidence = crate::tools::ReplayFrameEvidence {
+            source_sequence: 0,
+            source_interface_id: Some(7),
+            capture_interface: crate::io::CaptureInterface {
+                link_type: LinkType::RAW,
+                snap_len: 128,
+                timestamp_resolution: crate::io::CaptureTimestampResolution::Binary(10),
+                timestamp_offset: -1,
+            },
+            interface: InterfaceId {
+                name: "test0".to_owned(),
+                index: 1,
+            },
+            link_mode: LinkMode::Layer3,
+            scheduled_delay: Duration::ZERO,
+            bytes_sent: 40,
+            frame: frame.clone(),
+        };
+        let mut writer = CaptureWriter::pcapng(Vec::new()).unwrap();
+        let mut interfaces = Vec::new();
+        write_replay_capture_evidence(
+            &mut writer,
+            CaptureFileFormat::PcapNg,
+            &mut interfaces,
+            evidence,
+        )
+        .unwrap();
+
+        let mut reader = CaptureReader::new(std::io::Cursor::new(writer.into_inner())).unwrap();
+        let decoded = reader.next_frame().unwrap().unwrap();
+        frame.interface = Some(0);
+        assert_eq!(decoded, frame);
+        assert_eq!(
+            reader.interfaces()[0],
+            crate::io::CaptureInterface {
+                link_type: LinkType::RAW,
+                snap_len: 128,
+                timestamp_resolution: crate::io::CaptureTimestampResolution::Binary(10),
+                timestamp_offset: -1,
+            }
+        );
+    }
+
+    #[test]
+    fn replay_policy_extracts_wire_destinations_even_from_malformed_network_layers() {
+        let mut ipv4 = vec![0_u8; 20];
+        ipv4[0] = 0x45;
+        ipv4[16..20].copy_from_slice(&[8, 8, 8, 8]);
+        let frame = CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, ipv4).unwrap();
+        assert_eq!(
+            replay_wire_destinations(&frame),
+            [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
+        );
+        let mut authorizer = CliReplayAuthorizer {
+            policy: TrafficPolicy::default(),
+            registry: default_registry_arc().unwrap(),
+            allow_malformed_live: true,
+        };
+        let error = authorizer.authorize(&frame, LinkMode::Layer3).unwrap_err();
+        assert_eq!(error.classification().code, "policy.public_destination");
+
+        let mut ethernet = vec![0_u8; 14 + 8 + 40 + 24];
+        ethernet[12..14].copy_from_slice(&0x88a8_u16.to_be_bytes());
+        ethernet[16..18].copy_from_slice(&0x8100_u16.to_be_bytes());
+        ethernet[20..22].copy_from_slice(&0x86dd_u16.to_be_bytes());
+        let ipv6 = 22;
+        ethernet[ipv6] = 0x60;
+        ethernet[ipv6 + 6] = 43;
+        ethernet[ipv6 + 24..ipv6 + 40].copy_from_slice(&Ipv6Addr::LOCALHOST.octets());
+        let srh = ipv6 + 40;
+        ethernet[srh] = 59;
+        ethernet[srh + 1] = 2;
+        ethernet[srh + 2] = 4;
+        ethernet[srh + 4] = 0;
+        let public: Ipv6Addr = "2001:4860:4860::8888".parse().unwrap();
+        ethernet[srh + 8..srh + 24].copy_from_slice(&public.octets());
+        let frame =
+            CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, ethernet).unwrap();
+        assert_eq!(
+            replay_wire_destinations(&frame),
+            [IpAddr::V6(Ipv6Addr::LOCALHOST), IpAddr::V6(public)]
+        );
+
+        for mut unsupported in [vec![0_u8; 48], vec![0_u8; 40]] {
+            unsupported[0] = 0x60;
+            unsupported[6] = 43;
+            unsupported[24..40].copy_from_slice(&Ipv6Addr::LOCALHOST.octets());
+            if unsupported.len() == 48 {
+                unsupported[40] = 59;
+                unsupported[42] = 0;
+            }
+            let frame =
+                CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, unsupported).unwrap();
+            assert!(replay_wire_policy(&frame).1);
+            let mut authorizer = CliReplayAuthorizer {
+                policy: TrafficPolicy::default(),
+                registry: default_registry_arc().unwrap(),
+                allow_malformed_live: true,
+            };
+            let error = authorizer.authorize(&frame, LinkMode::Layer3).unwrap_err();
+            assert_eq!(
+                error.classification().code,
+                "capability.replay_routing_header"
+            );
+        }
     }
 }

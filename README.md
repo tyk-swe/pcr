@@ -18,14 +18,14 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | Immutable `ProtocolRegistry`, external codecs and deterministic bindings | Available as an alpha API |
 | Strict/permissive generic building, layouts, and diagnostics | Stable built-in protocol matrix implemented and invariant-tested; API freeze remains pending |
 | Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
-| Runtime-neutral captured-frame records and offline capture I/O | Available as a streaming, pure-Rust alpha API and through `read` |
+| Runtime-neutral captured-frame records and offline capture I/O | Bounded streaming read/write and metadata-preserving PCAP/PCAPNG copy are available through the API and `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
-| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
+| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages and templates are available; tool workflows are later alphas |
 | Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; physical crate extraction remains a beta milestone |
 
-Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `replay`, `scan`, `traceroute`, `dns`, and `fuzz` names return the capability exit code instead of falling through to a legacy command.
+Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `scan`, `traceroute`, `dns`, and `fuzz` names return the capability exit code instead of falling through to a legacy command.
 
 The exact v0.2 packet-layer promise is published in the
 [stable built-in protocol matrix](docs/protocol-support.md) and through the
@@ -128,6 +128,25 @@ Versioned JSON or YAML documents are intended for generated, complex, or reviewa
 
 Machine-readable aggregate output uses one typed `packetcraftr.output/v1` JSON envelope. Streaming commands use independently valid NDJSON records; every success and terminal error has a zero-based `sequence`, with terminal errors taking the next unused value. JSON and NDJSON are distinct `--output` values rather than command-dependent meanings of `json`. Raw and hexadecimal formats always refer to the complete captured or built frame, never payload-only bytes. The complete command/format matrix is part of the [output schema contract](schemas/README.md#commandformat-matrix).
 
+### Offline capture and replay
+
+`read` applies explicit frame, byte, per-frame/block, and PCAPNG-interface
+ceilings. In addition to text, NDJSON, and whole-frame hex, it can stream a
+classic PCAP input back to PCAP or copy either format to PCAPNG. The copy keeps
+byte order, open link types, interface identities, snap lengths, timestamp
+resolution/offset, directions, captured/original lengths, and complete bytes;
+PCAPNG-to-PCAP metadata loss is rejected.
+
+`replay` streams complete Ethernet or raw IPv4/IPv6 frames through an exact
+interface and link mode. Original, scaled-speed, fixed-rate, and immediate
+timing use an injectable clock. Public destinations are denied by default,
+truncated records cannot be replayed, and malformed evidence requires both
+`--allow-malformed-live` and `--allow-permissive-packets`. Every successful
+frame has exact backend-confirmed wire evidence; missing evidence and partial
+sends fail closed. Text, aggregate JSON, NDJSON, PCAP, and PCAPNG renderers
+share the same bounded operation. See the
+[capture/replay contract](docs/capture-replay.md).
+
 The [v0.1 to v0.2 migration guide](docs/migration-v0.1-to-v0.2.md) maps common legacy commands and explains removed subsystems.
 
 ### Route-aware and live workflows
@@ -208,6 +227,7 @@ The v0.2 contracts are:
 - Padding records an explicit ownership boundary when its bytes sit outside an IPv4, IPv6, or UDP declared length or the fixed ARP body. Invalid or unsupported boundaries fail strict builds; preserved network/datagram trailers emit diagnostics and require the live opt-in.
 - Synthesized or resolved Layer 2 bytes are part of the exact built frame. Byte-policy checks include that envelope before neighbor traffic, and a backend-reported partial send is a typed failure.
 - Raw Layer 3 adapters accept only complete IPv4/IPv6 datagrams for the selected route and MTU. They reject header values the operating system would change, preserve spoofed packet sources separately from the bound interface source, and report partial native writes as typed failures.
+- Replay authorizes each fully captured frame before interface or route I/O, fixes its Layer 2/Layer 3 provider from the capture root, applies finite timing/frame/byte ceilings, and requires backend-confirmed bytes before emitting success evidence.
 - Route MTU checks measure the actual built network-layer byte span instead of trusting permissive wire length fields. Oversized packets fail before neighbor discovery or live I/O and require an explicit fragmentation transform.
 - Capture is ready before an exchange sends its first frame, and one owned receive stream routes every frame rather than silently draining traffic.
 - Exchange always attempts to stop and join its capture session after readiness, send, receive, or timeout failures. If the operation and cleanup both fail, both errors remain visible.
@@ -223,6 +243,7 @@ Default resource ceilings are intentionally finite:
 | --- | ---: |
 | Decoded layers | 64 |
 | Offline packet or PCAPNG block | 16 MiB |
+| Frames / captured bytes per offline write or replay | 10,000 / 256 MiB |
 | PCAPNG interfaces per section | 4,096 |
 | PCAPNG metadata blocks before the next packet | 4,096 |
 | Concrete packets per template expansion | 10,000 |
@@ -230,6 +251,7 @@ Default resource ceilings are intentionally finite:
 | Backend capture queue frames (aggregate) | 4,096 |
 | Retained captured bytes per exchange | 256 MiB |
 | Exchange reply timeout | 3 seconds (maximum 1 hour) |
+| Cumulative replay delay | 1 hour |
 | Active neighbor attempts / timeout per attempt | 3 / 1 second |
 | Active neighbor evidence frames / bytes | 256 / 1 MiB |
 | Active neighbor cache entries / lifetime | 4,096 / 30 seconds |

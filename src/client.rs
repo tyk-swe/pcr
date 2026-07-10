@@ -341,7 +341,8 @@ impl TrafficPolicy {
         Ok(())
     }
 
-    fn authorize_destination(&self, destination: IpAddr) -> Result<(), TrafficPolicyError> {
+    /// Authorizes one already-resolved or packet-declared destination.
+    pub fn authorize_destination(&self, destination: IpAddr) -> Result<(), TrafficPolicyError> {
         if !self.allow_public_destinations && is_public(destination) {
             return Err(TrafficPolicyError::PublicDestination { destination });
         }

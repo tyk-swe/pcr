@@ -17,9 +17,11 @@ use crate::client::{ExchangeResult, OperationStats, SendReport};
 use crate::core::{BuiltPacket, DecodedPacket, Diagnostic, PacketDocument, PacketLayout};
 use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 use crate::io::{
-    CaptureFileFormat, CaptureStatistics, CapturedFrame, InterfaceFlags, InterfaceInfo,
-    LinkCapability, MaterializedRoute, PlannedRoute, ReplayTiming, RouteDecision,
+    CaptureFileFormat, CaptureStatistics, CapturedFrame, InterfaceFlags, InterfaceId,
+    InterfaceInfo, LinkCapability, LinkMode, MaterializedRoute, PlannedRoute, ReplayTiming,
+    RouteDecision,
 };
+use crate::tools::{ReplayFrameEvidence, ReplaySummary};
 
 /// Version identifier emitted by every structured CLI record.
 pub const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
@@ -73,7 +75,8 @@ impl CommandName {
             Self::Exchange => EXCHANGE_FORMATS,
             Self::Capture => CAPTURE_FORMATS,
             Self::Read => READ_FORMATS,
-            Self::Replay | Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz => TOOL_FORMATS,
+            Self::Replay => REPLAY_FORMATS,
+            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz => TOOL_FORMATS,
         }
     }
 
@@ -182,8 +185,20 @@ const CAPTURE_FORMATS: &[OutputFormat] = &[
     OutputFormat::Pcap,
     OutputFormat::Pcapng,
 ];
-const READ_FORMATS: &[OutputFormat] =
-    &[OutputFormat::Text, OutputFormat::Ndjson, OutputFormat::Hex];
+const READ_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Ndjson,
+    OutputFormat::Hex,
+    OutputFormat::Pcap,
+    OutputFormat::Pcapng,
+];
+const REPLAY_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Ndjson,
+    OutputFormat::Pcap,
+    OutputFormat::Pcapng,
+];
 const TOOL_FORMATS: &[OutputFormat] =
     &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson];
 
@@ -219,7 +234,7 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     },
     CommandOutputContract {
         command: CommandName::Replay,
-        formats: TOOL_FORMATS,
+        formats: REPLAY_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Scan,
@@ -944,16 +959,60 @@ pub enum ExchangeStreamCommandResult {
 pub struct ReplayCommandResult {
     pub source_format: CaptureFileFormat,
     pub timing: ReplayTiming,
+    pub requested_interface: InterfaceId,
+    pub requested_link_mode: LinkMode,
     pub frames_attempted: u64,
     pub frames_completed: u64,
+    pub bytes_completed: u64,
+    pub scheduled_duration: Duration,
+    pub frames: Vec<ReplayFrameCommandResult>,
+}
+
+impl ReplayCommandResult {
+    pub fn from_summary(
+        summary: ReplaySummary,
+        requested_interface: InterfaceId,
+        requested_link_mode: LinkMode,
+        frames: Vec<ReplayFrameCommandResult>,
+    ) -> Self {
+        Self {
+            source_format: summary.source_format,
+            timing: summary.timing,
+            requested_interface,
+            requested_link_mode,
+            frames_attempted: summary.frames_attempted,
+            frames_completed: summary.frames_completed,
+            bytes_completed: summary.bytes_completed,
+            scheduled_duration: summary.scheduled_duration,
+            frames,
+        }
+    }
 }
 
 /// One frame record produced by streaming `replay` output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ReplayFrameCommandResult {
     pub source_sequence: u64,
+    pub interface: InterfaceId,
+    pub link_mode: LinkMode,
+    pub scheduled_delay: Duration,
+    pub bytes_sent: u64,
     pub frame: FrameOutput,
     pub transmitted: bool,
+}
+
+impl ReplayFrameCommandResult {
+    pub fn try_from_evidence(evidence: ReplayFrameEvidence) -> Result<Self, OutputContractError> {
+        Ok(Self {
+            source_sequence: evidence.source_sequence,
+            interface: evidence.interface,
+            link_mode: evidence.link_mode,
+            scheduled_delay: evidence.scheduled_delay,
+            bytes_sent: evidence.bytes_sent,
+            frame: FrameOutput::try_from_frame(evidence.frame)?,
+            transmitted: true,
+        })
+    }
 }
 
 /// Evidence common to scan and other active-probe tools.
@@ -1264,7 +1323,16 @@ mod tests {
         assert_eq!(error.classification().code, "cli.output_format");
         assert_eq!(
             error.to_string(),
-            "read does not support json output; choose text, ndjson, hex"
+            "read does not support json output; choose text, ndjson, hex, pcap, pcapng"
         );
+    }
+
+    #[test]
+    fn published_capture_and_replay_formats_match_the_matrix() {
+        assert_eq!(CommandName::Read.formats(), READ_FORMATS);
+        assert_eq!(CommandName::Replay.formats(), REPLAY_FORMATS);
+        let documentation = include_str!("../schemas/README.md");
+        assert!(documentation.contains("| `read` | text, NDJSON, whole-frame hex, PCAP, PCAPNG |"));
+        assert!(documentation.contains("| `replay` | text, JSON, NDJSON, PCAP, PCAPNG |"));
     }
 }

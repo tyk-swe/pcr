@@ -56,20 +56,22 @@ pub use error::{
     EXIT_IO, EXIT_PACKET, EXIT_POLICY,
 };
 pub use io::{
-    ActiveNeighborResolver, CaptureDirection, CaptureError, CaptureFileFormat,
-    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureReader, CaptureRecordError,
-    CaptureSession, CaptureStatistics, CaptureWriter, CapturedFrame, DestinationScope,
-    DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceId, InterfaceInfo,
-    InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LinkCapability,
-    LinkMode, LinkType, LiveIoError, MacAddress, MaterializedRoute, NativeRouteError,
-    NeighborError, NeighborRequest, NeighborResolution, NeighborResolutionOptions,
-    NeighborResolver, NeighborVlanKind, NeighborVlanTag, PacketIo, PcapEndianness, PlanError,
-    PlanOptions, PlannedRoute, ReplayTiming, RouteDecision, RoutePlanner, RouteProvider,
-    RouteSelectionReason, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider,
-    SystemLayer2Io, SystemLayer3Io, SystemNeighborResolver, SystemRouteProvider, TransmissionFrame,
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT,
-    DEFAULT_PCAPNG_INTERFACE_LIMIT, DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT, MAX_CAPTURE_TIMEOUT,
-    MAX_NEIGHBOR_VLAN_TAGS,
+    transcode_capture, ActiveNeighborResolver, CaptureDirection, CaptureError, CaptureFileFormat,
+    CaptureInterface, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureReader,
+    CaptureRecordError, CaptureSession, CaptureStatistics, CaptureStreamLimits,
+    CaptureTimestampResolution, CaptureTranscodeReport, CaptureWriter, CapturedFrame,
+    DestinationScope, DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceId,
+    InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io,
+    LinkCapability, LinkMode, LinkType, LiveIoError, MacAddress, MaterializedRoute,
+    NativeRouteError, NeighborError, NeighborRequest, NeighborResolution,
+    NeighborResolutionOptions, NeighborResolver, NeighborVlanKind, NeighborVlanTag, PacketIo,
+    PcapEndianness, PlanError, PlanOptions, PlannedRoute, ReplayTiming, RouteDecision,
+    RoutePlanner, RouteProvider, RouteSelectionReason, SystemCaptureProvider, SystemCaptureSession,
+    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemNeighborResolver,
+    SystemRouteProvider, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES,
+    DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_CAPTURE_STREAM_BYTES,
+    DEFAULT_CAPTURE_STREAM_FRAMES, DEFAULT_PCAPNG_INTERFACE_LIMIT,
+    DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT, MAX_CAPTURE_TIMEOUT, MAX_NEIGHBOR_VLAN_TAGS,
 };
 pub use output::{
     AggregateErrorOutput, AggregateOutput, BuildCommandResult, CaptureFrameCommandResult,
@@ -97,6 +99,11 @@ pub use session::{
     Fragment, FragmentError, FragmentKey, FragmentOverlapPolicy, FragmentReassembler,
     FragmentReassemblyEvent, ReassembledDatagram, ReassemblyLimits, TcpFlowKey, TcpReassembler,
     TcpReassemblyError, TcpReassemblyEvent, TcpSegment,
+};
+pub use tools::{
+    replay_capture, ReplayAuthorizationError, ReplayAuthorizer, ReplayClock, ReplayError,
+    ReplayFrameEvidence, ReplayLimits, ReplayOptions, ReplaySummary, ReplayTransmission,
+    ReplayTransmitter, SystemReplayClock, MAX_REPLAY_DURATION,
 };
 
 /// Run the intentionally breaking v0.2 command-line interface.

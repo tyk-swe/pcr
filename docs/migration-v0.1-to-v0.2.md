@@ -2,7 +2,7 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
+This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
 
 ## The central change
 
@@ -97,6 +97,23 @@ work. Standalone capture applies its packet/byte budgets to emitted frames and
 bytes. Exchange owns
 one capture session, crosses its readiness barrier before sending, and attempts
 shutdown on every success or error path.
+
+`read` also exposes bounded capture-file writing: PCAP can be copied to PCAP or
+PCAPNG, and PCAPNG can be copied to PCAPNG without losing interface,
+timestamp-resolution/offset, captured-length, original-length, or byte
+metadata. `replay` consumes the same bounded stream and requires an exact
+interface plus traffic authorization:
+
+```console
+packetcraftr --output ndjson replay evidence.pcapng \
+  --interface "$LAB_INTERFACE" --link-mode auto --speed 2 \
+  --max-packets 1000 --max-bytes 16777216
+```
+
+Only complete Ethernet and raw IPv4/IPv6 roots are live-replayable.
+Capture-only or unknown roots fail explicitly, public destinations remain
+denied by default, and malformed bytes require both replay- and policy-level
+opt-ins.
 
 ### Flag-heavy packets become expressions
 

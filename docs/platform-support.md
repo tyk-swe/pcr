@@ -17,13 +17,14 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | --- | --- | --- | --- | --- |
 | Portable packet/layer/field model | Alpha, CI | Alpha, CI | Alpha, CI | Runtime-neutral; no native capture dependency |
 | Generic registry, build, and dissection APIs | Alpha, CI | Alpha, CI | Alpha, CI | The [stable built-in protocol matrix](protocol-support.md) is complete and corpus-backed; API freeze remains pending |
-| Offline classic PCAP/PCAPNG | Alpha, CI | Alpha, CI | Alpha, CI | Pure Rust, streaming, bounded, multi-interface PCAPNG |
+| Offline classic PCAP/PCAPNG | Alpha, CI | Alpha, CI | Alpha, CI | Pure Rust bounded read/write; metadata-preserving multi-interface copy through `read` and the public API |
 | Packet-expression/document CLI | Alpha, CI | Alpha, CI | Alpha, CI | One exclusive recipe grammar is shared by `build`, `plan`, `send`, `capture`, and `exchange` |
 | Route/source planning and inventory CLI | Native alpha, CI | Native alpha, CI | Native alpha, CI | `plan` and interface-bound `routes` use `native-route`; both remain passive |
 | Live Layer 2 capture/injection CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `send`/`capture` use libpcap or runtime-loaded Npcap; hosted CI covers policy, ABI, and lifecycle seams, while privileged qualification requires dedicated runners |
 | Gateway-aware ARP/NDP | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
 | Raw Layer 3 transmission CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `send --link-mode layer3` uses target raw sockets; hosted CI covers validation and injected send seams, while privileged qualification requires dedicated runners |
 | Coordinated exchange CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `exchange` awaits capture readiness before send and shares bounded retention, loss reporting, and joined shutdown contracts |
+| Exact bounded replay CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable policy/timing/transmitter seams are deterministic in hosted CI; privileged Ethernet/raw-IP replay remains a dedicated-runner gate |
 | Defragmentation and TCP reassembly | Alpha, CI | Alpha, CI | Alpha, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
 | Scan, traceroute, DNS, and fuzz tools | Planned | Planned | Planned | v0.1 paths were removed; replacements will use shared APIs |
 
@@ -54,13 +55,17 @@ The native CLI feature requirements are explicit:
 | Layer 2 `send` | `native-route` + `native-layer2`; unresolved neighbors use the same Layer 2 capture provider |
 | `capture` | `native-route` + `native-layer2` |
 | `exchange` | `native-route` + `native-layer2` for capture, plus the selected Layer 2 or Layer 3 send path |
+| Ethernet `replay` | `native-route` + `native-layer2` |
+| Raw IPv4/IPv6 `replay` | `native-route` + `native-layer3` |
 
 An unavailable feature, native runtime, device, or privilege is returned as a
 typed capability failure; no command silently changes link mode or substitutes
 another provider. `plan` and `routes` may inspect only passive route/interface
 state. `capture` has a finite overall window. `exchange` arms and awaits its
 owned capture session before the first send, and both commands stop and join
-capture on success or failure.
+capture on success or failure. `replay` fixes its provider from the capture
+root, authorizes complete bytes before interface/route I/O, and requires exact
+backend wire evidence for every successful frame.
 
 Every profile exposes the platform-neutral provider traits. An application can implement interface, route, neighbor, typed Layer 2/Layer 3 transmission, and capture providers without importing a native wrapper. `Layer2Frame` and `Layer3Frame` reject a materialized route for the other mode, and `DispatchPacketIo` cannot cross those provider boundaries.
 

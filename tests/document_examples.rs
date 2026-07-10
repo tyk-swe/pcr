@@ -124,3 +124,33 @@ fn published_capture_stream_event_matches_the_typed_contract() {
         json_file("output-capture-event.json")
     );
 }
+
+#[test]
+fn published_replay_output_matches_the_typed_contract() {
+    let result = packetcraftr::ReplayCommandResult::from_summary(
+        packetcraftr::ReplaySummary {
+            source_format: packetcraftr::CaptureFileFormat::Pcap,
+            timing: packetcraftr::ReplayTiming::Immediate,
+            frames_attempted: 0,
+            frames_completed: 0,
+            bytes_completed: 0,
+            scheduled_duration: std::time::Duration::ZERO,
+        },
+        packetcraftr::InterfaceId {
+            name: "lab0".to_owned(),
+            index: 2,
+        },
+        packetcraftr::LinkMode::Auto,
+        Vec::new(),
+    );
+    let output = packetcraftr::AggregateOutput::success(
+        packetcraftr::CommandName::Replay,
+        result,
+        Vec::new(),
+    );
+
+    assert_eq!(
+        serde_json::to_value(output).unwrap(),
+        json_file("output-replay-success.json")
+    );
+}

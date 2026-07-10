@@ -12,8 +12,10 @@ mod route;
 pub use crate::core::{CaptureDirection, CaptureRecordError, CapturedFrame, LinkType};
 pub use neighbor::{ActiveNeighborResolver, NeighborResolutionOptions, SystemNeighborResolver};
 pub use pcap::{
-    CaptureError, CaptureFileFormat, CaptureReader, CaptureWriter, PcapEndianness, ReplayTiming,
-    DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_PCAPNG_INTERFACE_LIMIT,
+    transcode_capture, CaptureError, CaptureFileFormat, CaptureInterface, CaptureReader,
+    CaptureStreamLimits, CaptureTimestampResolution, CaptureTranscodeReport, CaptureWriter,
+    PcapEndianness, ReplayTiming, DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_CAPTURE_STREAM_BYTES,
+    DEFAULT_CAPTURE_STREAM_FRAMES, DEFAULT_PCAPNG_INTERFACE_LIMIT,
     DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT,
 };
 pub use provider::{

@@ -51,8 +51,9 @@ capability error until their implementation issue lands.
 | `send` | text, JSON, whole-frame hex, raw, PCAP, PCAPNG |
 | `exchange` | text, JSON, NDJSON, PCAP, PCAPNG |
 | `capture` | text, NDJSON, whole-frame hex, PCAP, PCAPNG |
-| `read` | text, NDJSON, whole-frame hex |
-| `replay`, `scan`, `traceroute`, `dns`, `fuzz` | text, JSON, NDJSON |
+| `read` | text, NDJSON, whole-frame hex, PCAP, PCAPNG |
+| `replay` | text, JSON, NDJSON, PCAP, PCAPNG |
+| `scan`, `traceroute`, `dns`, `fuzz` | text, JSON, NDJSON |
 
 Error objects use stable machine `code` and broad `kind` values matching the
 documented exit classes. A classified live failure may add a non-empty
@@ -69,7 +70,8 @@ jsonschema schemas/packetcraftr.output.v1.schema.json \
   --instance examples/documents/output-build-success.json \
   --instance examples/documents/output-build-error.json \
   --instance examples/documents/output-capture-event.json \
-  --instance examples/documents/output-exchange-event.json
+  --instance examples/documents/output-exchange-event.json \
+  --instance examples/documents/output-replay-success.json
 ```
 
 CI also requires every document in `tests/fixtures/invalid-output` to fail

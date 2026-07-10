@@ -15,6 +15,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
+
 use super::{CaptureDirection, CapturedFrame, LinkType};
 
 const PCAP_GLOBAL_HEADER_LEN: usize = 24;
@@ -39,6 +41,26 @@ pub const DEFAULT_CAPTURE_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 pub const DEFAULT_PCAPNG_INTERFACE_LIMIT: usize = 4_096;
 /// Default maximum metadata blocks consumed before one packet is returned.
 pub const DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT: usize = 4_096;
+/// Default maximum frames accepted by one streaming capture writer or copy.
+pub const DEFAULT_CAPTURE_STREAM_FRAMES: u64 = 10_000;
+/// Default maximum captured payload bytes accepted by one streaming writer or copy.
+pub const DEFAULT_CAPTURE_STREAM_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Aggregate frame and captured-byte ceilings for a streaming capture operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureStreamLimits {
+    pub max_frames: u64,
+    pub max_bytes: u64,
+}
+
+impl Default for CaptureStreamLimits {
+    fn default() -> Self {
+        Self {
+            max_frames: DEFAULT_CAPTURE_STREAM_FRAMES,
+            max_bytes: DEFAULT_CAPTURE_STREAM_BYTES,
+        }
+    }
+}
 
 /// Capture container format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +90,40 @@ pub enum PcapEndianness {
     Big,
 }
 
+/// Timestamp tick resolution declared by classic PCAP or one PCAPNG interface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureTimestampResolution {
+    Decimal(u8),
+    Binary(u8),
+}
+
+type TimestampResolution = CaptureTimestampResolution;
+
+/// Metadata associated with one capture interface.
+///
+/// The index in [`CaptureReader::interfaces`] is the global interface ID used
+/// by [`CapturedFrame::interface`]. Multiple PCAPNG sections are normalized to
+/// one monotonically increasing namespace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureInterface {
+    pub link_type: LinkType,
+    pub snap_len: u32,
+    pub timestamp_resolution: CaptureTimestampResolution,
+    pub timestamp_offset: i64,
+}
+
+/// Result of a bounded streaming capture copy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureTranscodeReport {
+    pub source_format: CaptureFileFormat,
+    pub target_format: CaptureFileFormat,
+    pub endianness: PcapEndianness,
+    pub frames: u64,
+    pub captured_bytes: u64,
+    pub interfaces: usize,
+}
+
 /// Timing policy used when replaying captured frames.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -84,6 +140,25 @@ pub enum ReplayTiming {
 }
 
 impl ReplayTiming {
+    /// Validates any numeric replay timing parameter before frames are read.
+    pub fn validate(self) -> Result<Self, CaptureError> {
+        match self {
+            Self::Scaled(value) if !value.is_finite() || value <= 0.0 => {
+                Err(CaptureError::InvalidReplayTiming {
+                    mode: "scaled",
+                    value,
+                })
+            }
+            Self::FixedRate(value) if !value.is_finite() || value <= 0.0 => {
+                Err(CaptureError::InvalidReplayTiming {
+                    mode: "fixed_rate",
+                    value,
+                })
+            }
+            timing => Ok(timing),
+        }
+    }
+
     /// Calculates the delay before a frame under this timing policy.
     ///
     /// Captures are allowed to contain non-monotonic timestamps.  Such a
@@ -93,6 +168,7 @@ impl ReplayTiming {
         previous: SystemTime,
         current: SystemTime,
     ) -> Result<Duration, CaptureError> {
+        self.validate()?;
         let original = current.duration_since(previous).unwrap_or(Duration::ZERO);
         match self {
             Self::Original => Ok(original),
@@ -200,6 +276,50 @@ pub enum CaptureError {
     },
     #[error("invalid replay {mode} value {value}")]
     InvalidReplayTiming { mode: &'static str, value: f64 },
+    #[error("capture stream frame count {actual} exceeds the configured limit of {limit}")]
+    FrameLimitExceeded { actual: u64, limit: u64 },
+    #[error("capture stream payload bytes {actual} exceed the configured limit of {limit}")]
+    StreamByteLimitExceeded { actual: u64, limit: u64 },
+    #[error("capture timestamp resolution {base}^{exponent} cannot be represented")]
+    InvalidTimestampResolution { base: u8, exponent: u8 },
+}
+
+impl ClassifiedError for CaptureError {
+    fn classification(&self) -> ErrorClassification {
+        match self {
+            Self::Io(_) => ErrorClassification::new(
+                "io.capture_file",
+                FailureKind::Io,
+                Some("inspect the capture input/output stream and retry from a known record boundary"),
+            ),
+            Self::InvalidReplayTiming { .. } | Self::InvalidTimestampResolution { .. } => {
+                ErrorClassification::new(
+                    "cli.capture_option",
+                    FailureKind::Cli,
+                    Some("use a supported finite capture timestamp or replay timing option"),
+                )
+            }
+            Self::FrameLimitExceeded { .. } | Self::StreamByteLimitExceeded { .. } => {
+                ErrorClassification::new(
+                    "policy.capture_stream_limit",
+                    FailureKind::Policy,
+                    Some("reduce the capture stream or deliberately raise its finite frame/byte budget"),
+                )
+            }
+            _ => ErrorClassification::new(
+                "packet.capture_file",
+                FailureKind::Packet,
+                Some("repair the malformed or unrepresentable capture record before processing it"),
+            ),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Io(source) => vec![source.to_string()],
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -208,19 +328,7 @@ enum PcapTimestampPrecision {
     Nanoseconds,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TimestampResolution {
-    Decimal(u8),
-    Binary(u8),
-}
-
-#[derive(Clone, Copy, Debug)]
-struct InterfaceDescription {
-    link_type: LinkType,
-    snap_len: u32,
-    timestamp_resolution: TimestampResolution,
-    timestamp_offset: i64,
-}
+type InterfaceDescription = CaptureInterface;
 
 enum ReaderState {
     Pcap {
@@ -244,6 +352,7 @@ enum ReaderState {
 pub struct CaptureReader<R> {
     inner: R,
     state: ReaderState,
+    interfaces: Vec<CaptureInterface>,
     max_size: usize,
     max_interfaces: usize,
     max_metadata_blocks_per_frame: usize,
@@ -318,9 +427,28 @@ impl<R: Read> CaptureReader<R> {
             magic => return Err(CaptureError::UnrecognizedFormat { magic }),
         };
 
+        let interfaces = match &state {
+            ReaderState::Pcap {
+                precision,
+                snap_len,
+                link_type,
+                ..
+            } => vec![CaptureInterface {
+                link_type: *link_type,
+                snap_len: *snap_len,
+                timestamp_resolution: match precision {
+                    PcapTimestampPrecision::Microseconds => CaptureTimestampResolution::Decimal(6),
+                    PcapTimestampPrecision::Nanoseconds => CaptureTimestampResolution::Decimal(9),
+                },
+                timestamp_offset: 0,
+            }],
+            ReaderState::PcapNg { .. } => Vec::new(),
+        };
+
         Ok(Self {
             inner,
             state,
+            interfaces,
             max_size,
             max_interfaces,
             max_metadata_blocks_per_frame,
@@ -348,6 +476,15 @@ impl<R: Read> CaptureReader<R> {
     /// Returns the configured packet/block limit.
     pub fn size_limit(&self) -> usize {
         self.max_size
+    }
+
+    /// Interface metadata parsed so far.
+    ///
+    /// Classic PCAP exposes its single global interface immediately. PCAPNG
+    /// descriptions are appended while [`next_frame`](Self::next_frame)
+    /// advances the stream, before any frame that references them is returned.
+    pub fn interfaces(&self) -> &[CaptureInterface] {
+        &self.interfaces
     }
 
     /// Reads the next frame, or `None` after a clean end of file.
@@ -493,6 +630,7 @@ impl<R: Read> CaptureReader<R> {
                                 });
                             }
                             interfaces.push(description);
+                            self.interfaces.push(description);
                         }
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     }
@@ -566,6 +704,7 @@ impl<R: Read> Iterator for CaptureReader<R> {
 enum WriterState {
     Pcap {
         endianness: PcapEndianness,
+        precision: PcapTimestampPrecision,
         snap_len: u32,
         link_type: LinkType,
     },
@@ -581,6 +720,9 @@ pub struct CaptureWriter<W> {
     state: WriterState,
     max_size: usize,
     max_interfaces: usize,
+    stream_limits: CaptureStreamLimits,
+    frames_written: u64,
+    captured_bytes_written: u64,
 }
 
 impl<W: Write> CaptureWriter<W> {
@@ -666,9 +808,29 @@ impl<W: Write> CaptureWriter<W> {
     /// Creates a classic PCAP writer with explicit byte order, snap length,
     /// and packet limit.
     pub fn pcap_with_options(
+        inner: W,
+        link_type: LinkType,
+        endianness: PcapEndianness,
+        snap_len: usize,
+        max_size: usize,
+    ) -> Result<Self, CaptureError> {
+        Self::pcap_with_metadata(
+            inner,
+            link_type,
+            endianness,
+            CaptureTimestampResolution::Decimal(9),
+            snap_len,
+            max_size,
+        )
+    }
+
+    /// Creates a classic PCAP writer with explicit byte order, timestamp
+    /// resolution, snap length, and packet limit.
+    pub fn pcap_with_metadata(
         mut inner: W,
         link_type: LinkType,
         endianness: PcapEndianness,
+        timestamp_resolution: CaptureTimestampResolution,
         snap_len: usize,
         max_size: usize,
     ) -> Result<Self, CaptureError> {
@@ -677,17 +839,31 @@ impl<W: Write> CaptureWriter<W> {
                 link_type: link_type.0,
             });
         }
+        let precision = match timestamp_resolution {
+            CaptureTimestampResolution::Decimal(6) => PcapTimestampPrecision::Microseconds,
+            CaptureTimestampResolution::Decimal(9) => PcapTimestampPrecision::Nanoseconds,
+            CaptureTimestampResolution::Decimal(exponent) => {
+                return Err(CaptureError::InvalidTimestampResolution { base: 10, exponent })
+            }
+            CaptureTimestampResolution::Binary(exponent) => {
+                return Err(CaptureError::InvalidTimestampResolution { base: 2, exponent })
+            }
+        };
         let snap_len = usize_to_u32_limit(snap_len)?;
-        write_pcap_header(&mut inner, endianness, snap_len, link_type)?;
+        write_pcap_header(&mut inner, endianness, precision, snap_len, link_type)?;
         Ok(Self {
             inner,
             state: WriterState::Pcap {
                 endianness,
+                precision,
                 snap_len,
                 link_type,
             },
             max_size,
             max_interfaces: DEFAULT_PCAPNG_INTERFACE_LIMIT,
+            stream_limits: CaptureStreamLimits::default(),
+            frames_written: 0,
+            captured_bytes_written: 0,
         })
     }
 
@@ -742,6 +918,9 @@ impl<W: Write> CaptureWriter<W> {
             },
             max_size,
             max_interfaces,
+            stream_limits: CaptureStreamLimits::default(),
+            frames_written: 0,
+            captured_bytes_written: 0,
         })
     }
 
@@ -767,6 +946,39 @@ impl<W: Write> CaptureWriter<W> {
     /// Returns the configured PCAPNG interface limit.
     pub fn interface_limit(&self) -> usize {
         self.max_interfaces
+    }
+
+    /// Applies aggregate frame and captured-payload limits to future writes.
+    ///
+    /// Lowering a limit below already committed output is rejected without
+    /// changing the writer configuration.
+    pub fn set_stream_limits(&mut self, limits: CaptureStreamLimits) -> Result<(), CaptureError> {
+        if self.frames_written > limits.max_frames {
+            return Err(CaptureError::FrameLimitExceeded {
+                actual: self.frames_written,
+                limit: limits.max_frames,
+            });
+        }
+        if self.captured_bytes_written > limits.max_bytes {
+            return Err(CaptureError::StreamByteLimitExceeded {
+                actual: self.captured_bytes_written,
+                limit: limits.max_bytes,
+            });
+        }
+        self.stream_limits = limits;
+        Ok(())
+    }
+
+    pub fn stream_limits(&self) -> CaptureStreamLimits {
+        self.stream_limits
+    }
+
+    pub fn frames_written(&self) -> u64 {
+        self.frames_written
+    }
+
+    pub fn captured_bytes_written(&self) -> u64 {
+        self.captured_bytes_written
     }
 
     /// Adds a PCAPNG interface using the writer's configured size limit as
@@ -809,7 +1021,25 @@ impl<W: Write> CaptureWriter<W> {
         snap_len: u32,
         timestamp_offset: i64,
     ) -> Result<u32, CaptureError> {
-        let block_length = if timestamp_offset == 0 { 32 } else { 44 };
+        self.add_interface_description(CaptureInterface {
+            link_type,
+            snap_len,
+            timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
+            timestamp_offset,
+        })
+    }
+
+    /// Adds one PCAPNG interface while retaining its timestamp metadata.
+    pub fn add_interface_description(
+        &mut self,
+        description: CaptureInterface,
+    ) -> Result<u32, CaptureError> {
+        validate_timestamp_resolution(description.timestamp_resolution)?;
+        let block_length = if description.timestamp_offset == 0 {
+            32
+        } else {
+            44
+        };
         if self.max_size < block_length {
             return Err(CaptureError::SizeLimitExceeded {
                 kind: "pcapng interface description",
@@ -849,15 +1079,15 @@ impl<W: Write> CaptureWriter<W> {
             }
         };
 
-        if link_type.0 > u16::MAX as u32 {
+        if description.link_type.0 > u16::MAX as u32 {
             return Err(CaptureError::LinkTypeOutOfRange {
-                link_type: link_type.0,
+                link_type: description.link_type.0,
             });
         }
-        if snap_len as usize > self.max_size {
+        if description.snap_len as usize > self.max_size {
             return Err(CaptureError::SizeLimitExceeded {
                 kind: "pcapng interface snap length",
-                declared: u64::from(snap_len),
+                declared: u64::from(description.snap_len),
                 limit: self.max_size,
             });
         }
@@ -865,18 +1095,14 @@ impl<W: Write> CaptureWriter<W> {
         write_interface_description(
             &mut self.inner,
             endianness,
-            link_type,
-            snap_len,
-            timestamp_offset,
+            description.link_type,
+            description.snap_len,
+            description.timestamp_resolution,
+            description.timestamp_offset,
         )?;
         match &mut self.state {
             WriterState::PcapNg { interfaces, .. } => {
-                interfaces.push(InterfaceDescription {
-                    link_type,
-                    snap_len,
-                    timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
-                    timestamp_offset,
-                });
+                interfaces.push(description);
             }
             WriterState::Pcap { .. } => unreachable!("format checked above"),
         }
@@ -888,19 +1114,51 @@ impl<W: Write> CaptureWriter<W> {
     pub fn write_frame(&mut self, frame: &CapturedFrame) -> Result<(), CaptureError> {
         validate_frame_lengths(frame, self.max_size)?;
 
+        let next_frames =
+            self.frames_written
+                .checked_add(1)
+                .ok_or(CaptureError::FrameLimitExceeded {
+                    actual: u64::MAX,
+                    limit: self.stream_limits.max_frames,
+                })?;
+        if next_frames > self.stream_limits.max_frames {
+            return Err(CaptureError::FrameLimitExceeded {
+                actual: next_frames,
+                limit: self.stream_limits.max_frames,
+            });
+        }
+        let next_bytes = self
+            .captured_bytes_written
+            .checked_add(u64::from(frame.captured_length))
+            .ok_or(CaptureError::StreamByteLimitExceeded {
+                actual: u64::MAX,
+                limit: self.stream_limits.max_bytes,
+            })?;
+        if next_bytes > self.stream_limits.max_bytes {
+            return Err(CaptureError::StreamByteLimitExceeded {
+                actual: next_bytes,
+                limit: self.stream_limits.max_bytes,
+            });
+        }
+
         match &self.state {
             WriterState::Pcap {
                 endianness,
+                precision,
                 snap_len,
                 link_type,
             } => {
                 let endianness = *endianness;
+                let precision = *precision;
                 let snap_len = *snap_len;
                 let link_type = *link_type;
-                self.write_pcap_frame(frame, endianness, snap_len, link_type)
+                self.write_pcap_frame(frame, endianness, precision, snap_len, link_type)
             }
             WriterState::PcapNg { .. } => self.write_pcapng_frame(frame),
-        }
+        }?;
+        self.frames_written = next_frames;
+        self.captured_bytes_written = next_bytes;
+        Ok(())
     }
 
     /// Alias for [`write_frame`](Self::write_frame).
@@ -912,6 +1170,7 @@ impl<W: Write> CaptureWriter<W> {
         &mut self,
         frame: &CapturedFrame,
         endianness: PcapEndianness,
+        precision: PcapTimestampPrecision,
         snap_len: u32,
         link_type: LinkType,
     ) -> Result<(), CaptureError> {
@@ -934,7 +1193,7 @@ impl<W: Write> CaptureWriter<W> {
                 actual: frame.link_type.0,
             });
         }
-        if frame.captured_length > snap_len {
+        if snap_len != 0 && frame.captured_length > snap_len {
             return Err(CaptureError::SizeLimitExceeded {
                 kind: "pcap captured packet",
                 declared: u64::from(frame.captured_length),
@@ -952,8 +1211,21 @@ impl<W: Write> CaptureWriter<W> {
                 format: CaptureFileFormat::Pcap,
             })?;
 
+        let fraction = match precision {
+            PcapTimestampPrecision::Microseconds
+                if !elapsed.subsec_nanos().is_multiple_of(1_000) =>
+            {
+                return Err(CaptureError::MetadataNotRepresentable {
+                    format: CaptureFileFormat::Pcap,
+                    field: "microsecond timestamp precision",
+                });
+            }
+            PcapTimestampPrecision::Microseconds => elapsed.subsec_micros(),
+            PcapTimestampPrecision::Nanoseconds => elapsed.subsec_nanos(),
+        };
+
         write_u32(&mut self.inner, endianness, seconds)?;
-        write_u32(&mut self.inner, endianness, elapsed.subsec_nanos())?;
+        write_u32(&mut self.inner, endianness, fraction)?;
         write_u32(&mut self.inner, endianness, frame.captured_length)?;
         write_u32(&mut self.inner, endianness, frame.original_length)?;
         self.inner.write_all(&frame.bytes)?;
@@ -1079,6 +1351,101 @@ impl<W: Write> CaptureWriter<W> {
 
     pub fn into_inner(self) -> W {
         self.inner
+    }
+}
+
+/// Copies one capture stream into a bounded writer without retaining packet
+/// payloads between records.
+///
+/// PCAPNG output normalizes multiple source sections into one section while
+/// preserving the open link type, snap length, timestamp resolution/offset,
+/// globalized interface identity, direction, captured length, original wire
+/// length, and complete captured bytes. Classic PCAP can only be copied from
+/// classic PCAP because its container cannot represent PCAPNG interfaces or
+/// packet directions.
+pub fn transcode_capture<R: Read, W: Write>(
+    reader: &mut CaptureReader<R>,
+    output: W,
+    target_format: CaptureFileFormat,
+    limits: CaptureStreamLimits,
+) -> Result<(W, CaptureTranscodeReport), CaptureError> {
+    let source_format = reader.format();
+    let endianness = reader.endianness();
+    let mut writer = match target_format {
+        CaptureFileFormat::Pcap => {
+            if source_format != CaptureFileFormat::Pcap {
+                return Err(CaptureError::MetadataNotRepresentable {
+                    format: CaptureFileFormat::Pcap,
+                    field: "pcapng interface metadata",
+                });
+            }
+            let interface =
+                reader
+                    .interfaces()
+                    .first()
+                    .copied()
+                    .ok_or(CaptureError::InvalidData {
+                        format: CaptureFileFormat::Pcap,
+                        reason: "classic capture has no global interface metadata",
+                    })?;
+            CaptureWriter::pcap_with_metadata(
+                output,
+                interface.link_type,
+                endianness,
+                interface.timestamp_resolution,
+                interface.snap_len as usize,
+                reader.size_limit(),
+            )?
+        }
+        CaptureFileFormat::PcapNg => CaptureWriter::pcapng_with_resource_limits(
+            output,
+            endianness,
+            reader.size_limit(),
+            reader.max_interfaces,
+        )?,
+    };
+    writer.set_stream_limits(limits)?;
+
+    while let Some(mut frame) = reader.next_frame()? {
+        if target_format == CaptureFileFormat::PcapNg {
+            copy_new_interfaces(reader, &mut writer)?;
+            if source_format == CaptureFileFormat::Pcap {
+                frame.interface = Some(0);
+            }
+        }
+        writer.write_frame(&frame)?;
+    }
+    if target_format == CaptureFileFormat::PcapNg {
+        copy_new_interfaces(reader, &mut writer)?;
+    }
+    writer.flush()?;
+
+    let report = CaptureTranscodeReport {
+        source_format,
+        target_format,
+        endianness,
+        frames: writer.frames_written(),
+        captured_bytes: writer.captured_bytes_written(),
+        interfaces: writer_interface_count(&writer),
+    };
+    Ok((writer.into_inner(), report))
+}
+
+fn copy_new_interfaces<R: Read, W: Write>(
+    reader: &CaptureReader<R>,
+    writer: &mut CaptureWriter<W>,
+) -> Result<(), CaptureError> {
+    while writer_interface_count(writer) < reader.interfaces().len() {
+        let next = reader.interfaces()[writer_interface_count(writer)];
+        writer.add_interface_description(next)?;
+    }
+    Ok(())
+}
+
+fn writer_interface_count<W>(writer: &CaptureWriter<W>) -> usize {
+    match &writer.state {
+        WriterState::Pcap { .. } => 1,
+        WriterState::PcapNg { interfaces, .. } => interfaces.len(),
     }
 }
 
@@ -1582,12 +1949,15 @@ where
 fn write_pcap_header<W: Write>(
     writer: &mut W,
     endianness: PcapEndianness,
+    precision: PcapTimestampPrecision,
     snap_len: u32,
     link_type: LinkType,
 ) -> Result<(), CaptureError> {
-    let magic = match endianness {
-        PcapEndianness::Little => [0x4d, 0x3c, 0xb2, 0xa1],
-        PcapEndianness::Big => [0xa1, 0xb2, 0x3c, 0x4d],
+    let magic = match (endianness, precision) {
+        (PcapEndianness::Little, PcapTimestampPrecision::Microseconds) => [0xd4, 0xc3, 0xb2, 0xa1],
+        (PcapEndianness::Big, PcapTimestampPrecision::Microseconds) => [0xa1, 0xb2, 0xc3, 0xd4],
+        (PcapEndianness::Little, PcapTimestampPrecision::Nanoseconds) => [0x4d, 0x3c, 0xb2, 0xa1],
+        (PcapEndianness::Big, PcapTimestampPrecision::Nanoseconds) => [0xa1, 0xb2, 0x3c, 0x4d],
     };
     writer.write_all(&magic)?;
     write_u16(writer, endianness, 2)?;
@@ -1618,6 +1988,7 @@ fn write_interface_description<W: Write>(
     endianness: PcapEndianness,
     link_type: LinkType,
     snap_len: u32,
+    timestamp_resolution: TimestampResolution,
     timestamp_offset: i64,
 ) -> Result<(), CaptureError> {
     let block_length = if timestamp_offset == 0 { 32 } else { 44 };
@@ -1628,7 +1999,17 @@ fn write_interface_description<W: Write>(
     write_u32(writer, endianness, snap_len)?;
     write_u16(writer, endianness, PCAPNG_OPTION_IF_TSRESOL)?;
     write_u16(writer, endianness, 1)?;
-    writer.write_all(&[9, 0, 0, 0])?;
+    let resolution = match timestamp_resolution {
+        TimestampResolution::Decimal(exponent) if exponent <= 0x7f => exponent,
+        TimestampResolution::Binary(exponent) if exponent <= 0x7f => exponent | 0x80,
+        TimestampResolution::Decimal(exponent) => {
+            return Err(CaptureError::InvalidTimestampResolution { base: 10, exponent })
+        }
+        TimestampResolution::Binary(exponent) => {
+            return Err(CaptureError::InvalidTimestampResolution { base: 2, exponent })
+        }
+    };
+    writer.write_all(&[resolution, 0, 0, 0])?;
     if timestamp_offset != 0 {
         write_u16(writer, endianness, PCAPNG_OPTION_IF_TSOFFSET)?;
         write_u16(writer, endianness, 8)?;
@@ -1638,6 +2019,19 @@ fn write_interface_description<W: Write>(
     write_u16(writer, endianness, 0)?;
     write_u32(writer, endianness, block_length)?;
     Ok(())
+}
+
+fn validate_timestamp_resolution(resolution: TimestampResolution) -> Result<(), CaptureError> {
+    match resolution {
+        TimestampResolution::Decimal(exponent) if exponent <= 0x7f => Ok(()),
+        TimestampResolution::Binary(exponent) if exponent <= 0x7f => Ok(()),
+        TimestampResolution::Decimal(exponent) => {
+            Err(CaptureError::InvalidTimestampResolution { base: 10, exponent })
+        }
+        TimestampResolution::Binary(exponent) => {
+            Err(CaptureError::InvalidTimestampResolution { base: 2, exponent })
+        }
+    }
 }
 
 fn validate_frame_lengths(frame: &CapturedFrame, max_size: usize) -> Result<(), CaptureError> {
@@ -1691,15 +2085,27 @@ fn timestamp_from_ticks(
             let ticks = u128::from(ticks);
             let seconds = ticks / denominator;
             let remainder = ticks % denominator;
-            let nanoseconds = remainder
+            let scaled = remainder
                 .checked_mul(1_000_000_000)
-                .expect("u64 ticks multiplied by one billion fit in u128")
-                / denominator;
+                .expect("u64 ticks multiplied by one billion fit in u128");
+            if !scaled.is_multiple_of(denominator) {
+                return Err(CaptureError::MetadataNotRepresentable {
+                    format: CaptureFileFormat::PcapNg,
+                    field: "sub-nanosecond timestamp",
+                });
+            }
+            let nanoseconds = scaled / denominator;
             (seconds, nanoseconds as u32)
         }
         None => {
             // Any denominator too large for u128 is also much larger than a
-            // u64 timestamp.  Its value is therefore less than one nanosecond.
+            // u64 timestamp. Only zero ticks are exactly representable.
+            if ticks != 0 {
+                return Err(CaptureError::MetadataNotRepresentable {
+                    format: CaptureFileFormat::PcapNg,
+                    field: "sub-nanosecond timestamp",
+                });
+            }
             (0, 0)
         }
     };
@@ -1751,11 +2157,18 @@ fn timestamp_to_ticks(
     let seconds = u128::try_from(seconds).map_err(|_| CaptureError::TimestampOutOfRange {
         format: CaptureFileFormat::PcapNg,
     })?;
-    let fractional = u128::from(nanoseconds).checked_mul(denominator).ok_or(
+    let fractional_numerator = u128::from(nanoseconds).checked_mul(denominator).ok_or(
         CaptureError::TimestampOutOfRange {
             format: CaptureFileFormat::PcapNg,
         },
-    )? / 1_000_000_000;
+    )?;
+    if !fractional_numerator.is_multiple_of(1_000_000_000) {
+        return Err(CaptureError::MetadataNotRepresentable {
+            format: CaptureFileFormat::PcapNg,
+            field: "timestamp resolution",
+        });
+    }
+    let fractional = fractional_numerator / 1_000_000_000;
     let ticks = seconds
         .checked_mul(denominator)
         .and_then(|ticks| ticks.checked_add(fractional))
@@ -2026,6 +2439,222 @@ mod tests {
     }
 
     #[test]
+    fn bounded_transcode_preserves_pcapng_interface_metadata_and_frames() {
+        let mut writer =
+            CaptureWriter::pcapng_with_endianness(Vec::new(), PcapEndianness::Big).unwrap();
+        let ethernet = writer
+            .add_interface_description(CaptureInterface {
+                link_type: LinkType::ETHERNET,
+                snap_len: 64,
+                timestamp_resolution: CaptureTimestampResolution::Decimal(6),
+                timestamp_offset: 0,
+            })
+            .unwrap();
+        let raw = writer
+            .add_interface_description(CaptureInterface {
+                link_type: LinkType::RAW,
+                snap_len: 128,
+                timestamp_resolution: CaptureTimestampResolution::Binary(10),
+                timestamp_offset: -1,
+            })
+            .unwrap();
+        let mut first = CapturedFrame::try_with_lengths(
+            UNIX_EPOCH + Duration::new(1, 123_456_000),
+            LinkType::ETHERNET,
+            3,
+            60,
+            vec![1, 2, 3],
+        )
+        .unwrap();
+        first.interface = Some(ethernet);
+        first.direction = Some(CaptureDirection::Inbound);
+        let mut second = CapturedFrame::new(
+            UNIX_EPOCH.checked_sub(Duration::from_millis(500)).unwrap(),
+            LinkType::RAW,
+            vec![4, 5],
+        )
+        .unwrap();
+        second.interface = Some(raw);
+        second.direction = Some(CaptureDirection::Outbound);
+        writer.write_frame(&first).unwrap();
+        writer.write_frame(&second).unwrap();
+
+        let mut source = CaptureReader::new(Cursor::new(writer.into_inner())).unwrap();
+        let (bytes, report) = transcode_capture(
+            &mut source,
+            Vec::new(),
+            CaptureFileFormat::PcapNg,
+            CaptureStreamLimits {
+                max_frames: 2,
+                max_bytes: 5,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            report,
+            CaptureTranscodeReport {
+                source_format: CaptureFileFormat::PcapNg,
+                target_format: CaptureFileFormat::PcapNg,
+                endianness: PcapEndianness::Big,
+                frames: 2,
+                captured_bytes: 5,
+                interfaces: 2,
+            }
+        );
+
+        let mut copied = CaptureReader::new(Cursor::new(bytes)).unwrap();
+        assert_eq!(copied.endianness(), PcapEndianness::Big);
+        assert_eq!(copied.next_frame().unwrap(), Some(first));
+        assert_eq!(copied.next_frame().unwrap(), Some(second));
+        assert_eq!(copied.next_frame().unwrap(), None);
+        assert_eq!(
+            copied.interfaces(),
+            &[
+                CaptureInterface {
+                    link_type: LinkType::ETHERNET,
+                    snap_len: 64,
+                    timestamp_resolution: CaptureTimestampResolution::Decimal(6),
+                    timestamp_offset: 0,
+                },
+                CaptureInterface {
+                    link_type: LinkType::RAW,
+                    snap_len: 128,
+                    timestamp_resolution: CaptureTimestampResolution::Binary(10),
+                    timestamp_offset: -1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn classic_transcode_preserves_endianness_and_microsecond_resolution() {
+        let original = frame(
+            UNIX_EPOCH + Duration::new(2, 345_678_000),
+            LinkType::ETHERNET,
+            &[1, 2, 3],
+        );
+        let mut writer = CaptureWriter::pcap_with_metadata(
+            Vec::new(),
+            LinkType::ETHERNET,
+            PcapEndianness::Big,
+            CaptureTimestampResolution::Decimal(6),
+            64,
+            64,
+        )
+        .unwrap();
+        writer.write_frame(&original).unwrap();
+
+        let mut source = CaptureReader::new(Cursor::new(writer.into_inner())).unwrap();
+        let (bytes, report) = transcode_capture(
+            &mut source,
+            Vec::new(),
+            CaptureFileFormat::Pcap,
+            CaptureStreamLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(report.endianness, PcapEndianness::Big);
+        assert_eq!(&bytes[..4], &[0xa1, 0xb2, 0xc3, 0xd4]);
+
+        let mut copied = CaptureReader::new(Cursor::new(bytes)).unwrap();
+        assert_eq!(copied.next_frame().unwrap(), Some(original));
+        assert_eq!(
+            copied.interfaces()[0].timestamp_resolution,
+            CaptureTimestampResolution::Decimal(6)
+        );
+
+        let mut writer = CaptureWriter::pcap_with_metadata(
+            Vec::new(),
+            LinkType::ETHERNET,
+            PcapEndianness::Little,
+            CaptureTimestampResolution::Decimal(6),
+            64,
+            64,
+        )
+        .unwrap();
+        assert!(matches!(
+            writer.write_frame(&frame(
+                UNIX_EPOCH + Duration::from_nanos(1),
+                LinkType::ETHERNET,
+                &[1],
+            )),
+            Err(CaptureError::MetadataNotRepresentable {
+                format: CaptureFileFormat::Pcap,
+                field: "microsecond timestamp precision"
+            })
+        ));
+        assert_eq!(writer.get_ref().len(), PCAP_GLOBAL_HEADER_LEN);
+    }
+
+    #[test]
+    fn writer_stream_limits_fail_before_emitting_the_excess_frame() {
+        let mut writer = CaptureWriter::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        writer
+            .set_stream_limits(CaptureStreamLimits {
+                max_frames: 1,
+                max_bytes: 3,
+            })
+            .unwrap();
+        writer
+            .write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]))
+            .unwrap();
+        let committed = writer.get_ref().len();
+        assert!(matches!(
+            writer.write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[4])),
+            Err(CaptureError::FrameLimitExceeded {
+                actual: 2,
+                limit: 1
+            })
+        ));
+        assert_eq!(writer.get_ref().len(), committed);
+        assert_eq!(writer.frames_written(), 1);
+        assert_eq!(writer.captured_bytes_written(), 3);
+
+        let mut byte_writer = CaptureWriter::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        byte_writer
+            .set_stream_limits(CaptureStreamLimits {
+                max_frames: 3,
+                max_bytes: 3,
+            })
+            .unwrap();
+        byte_writer
+            .write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2]))
+            .unwrap();
+        byte_writer
+            .write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[3]))
+            .unwrap();
+        let committed = byte_writer.get_ref().len();
+        assert!(matches!(
+            byte_writer.write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[4])),
+            Err(CaptureError::StreamByteLimitExceeded {
+                actual: 4,
+                limit: 3
+            })
+        ));
+        assert_eq!(byte_writer.get_ref().len(), committed);
+        assert_eq!(byte_writer.frames_written(), 2);
+        assert_eq!(byte_writer.captured_bytes_written(), 3);
+    }
+
+    #[test]
+    fn pcapng_to_classic_transcode_rejects_metadata_loss() {
+        let mut writer = CaptureWriter::pcapng(Vec::new()).unwrap();
+        writer.add_interface(LinkType::ETHERNET).unwrap();
+        let mut source = CaptureReader::new(Cursor::new(writer.into_inner())).unwrap();
+        assert!(matches!(
+            transcode_capture(
+                &mut source,
+                Vec::new(),
+                CaptureFileFormat::Pcap,
+                CaptureStreamLimits::default(),
+            ),
+            Err(CaptureError::MetadataNotRepresentable {
+                format: CaptureFileFormat::Pcap,
+                field: "pcapng interface metadata"
+            })
+        ));
+    }
+
+    #[test]
     fn pcapng_round_trip_preserves_pre_epoch_timestamps() {
         let whole_second = UNIX_EPOCH.checked_sub(Duration::from_secs(2)).unwrap();
         let fractional = UNIX_EPOCH
@@ -2233,6 +2862,24 @@ mod tests {
             system_time_from_signed_unix(i128::MIN, 0),
             Err(CaptureError::TimestampOutOfRange {
                 format: CaptureFileFormat::PcapNg
+            })
+        ));
+        assert!(matches!(
+            timestamp_from_ticks(1, TimestampResolution::Decimal(12), 0),
+            Err(CaptureError::MetadataNotRepresentable {
+                format: CaptureFileFormat::PcapNg,
+                field: "sub-nanosecond timestamp"
+            })
+        ));
+        assert!(matches!(
+            timestamp_to_ticks(
+                UNIX_EPOCH + Duration::from_nanos(1),
+                TimestampResolution::Binary(10),
+                0,
+            ),
+            Err(CaptureError::MetadataNotRepresentable {
+                format: CaptureFileFormat::PcapNg,
+                field: "timestamp resolution"
             })
         ));
     }

@@ -58,7 +58,7 @@ pub use io::{
     NeighborResolver, NeighborVlanKind, NeighborVlanTag, PacketIo, PcapEndianness, PlanError,
     PlanOptions, PlannedRoute, ReplayTiming, RouteDecision, RoutePlanner, RouteProvider,
     RouteSelectionReason, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider,
-    SystemLayer2Io, SystemNeighborResolver, SystemRouteProvider, TransmissionFrame,
+    SystemLayer2Io, SystemLayer3Io, SystemNeighborResolver, SystemRouteProvider, TransmissionFrame,
     DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT,
     DEFAULT_PCAPNG_INTERFACE_LIMIT, DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT, MAX_NEIGHBOR_VLAN_TAGS,
 };

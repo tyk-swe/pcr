@@ -198,6 +198,17 @@ pub trait Layer3Io: Send + Sync {
     fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError>;
 }
 
+/// Native raw-IP provider selected for the current target. Builds without
+/// `native-layer3` return an actionable capability error.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemLayer3Io;
+
+impl Layer3Io for SystemLayer3Io {
+    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+        super::platform::system_send_layer3(frame)
+    }
+}
+
 /// Composes independently owned Layer 2 and Layer 3 providers into `PacketIo`.
 #[derive(Clone, Copy, Debug)]
 pub struct DispatchPacketIo<L2, L3> {
@@ -453,6 +464,8 @@ pub enum LiveIoError {
     },
     #[error("Layer 2 envelope synthesis failed: {message}")]
     Encapsulation { message: String },
+    #[error("raw Layer 3 frame is invalid for native transmission: {message}")]
+    InvalidTransmissionFrame { message: String },
     #[error("capture failed: {message}")]
     Capture { message: String },
     #[error("capture did not become ready: {message}")]

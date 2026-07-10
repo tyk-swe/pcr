@@ -165,7 +165,7 @@ jobs:
           - name: Windows / no default features (portable)
             os: windows-2022
             flags: --no-default-features
-          - name: Windows / all features (native route + Npcap ABI)
+          - name: Windows / all features (native route + Npcap + raw IP)
             os: windows-2022
             flags: --all-features
     steps:
@@ -181,10 +181,10 @@ jobs:
         shell: pwsh
         run: |
           $tree = cargo tree --color never --locked --target x86_64-pc-windows-msvc --edges normal ${{ matrix.flags }} --prefix none --format '{p}'
-          $nativeDependencies = $tree | Select-String -Pattern '^(?:libloading |pnet(?:_| )|windows )'
+          $nativeDependencies = $tree | Select-String -Pattern '^(?:libloading |pnet(?:_| )|socket2 |windows )'
           if ($nativeDependencies) {
             $nativeDependencies | ForEach-Object { Write-Error $_ }
-            throw 'portable Windows profiles must not resolve pnet, libloading, or the Windows native adapter'
+            throw 'portable Windows profiles must not resolve pnet, libloading, socket2, or the Windows native adapter'
           }
       - name: Assert the native Windows dependency boundary
         if: runner.os == 'Windows' && matrix.flags == '--all-features'
@@ -203,6 +203,10 @@ jobs:
           $runtimeLoader = $tree | Select-String -Pattern '^libloading '
           if (-not $runtimeLoader) {
             throw 'the Windows all-feature profile must resolve the Npcap runtime loader'
+          }
+          $rawSocket = $tree | Select-String -Pattern '^socket2 '
+          if (-not $rawSocket) {
+            throw 'the Windows all-feature profile must resolve the raw IP socket adapter'
           }
 
   required:

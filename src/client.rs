@@ -29,7 +29,7 @@ pub use crate::io::{
     DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceInfo,
     InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LiveIoError,
     PacketIo, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider, SystemLayer2Io,
-    TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    SystemLayer3Io, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

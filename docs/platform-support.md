@@ -22,7 +22,7 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | Route/source planning | Native alpha, CI | Native alpha, CI | Native alpha, CI | `native-route` uses netlink, routing sockets/native interfaces, or IP Helper; planning remains passive |
 | Live Layer 2 capture/injection | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `native-layer2` uses libpcap or runtime-loaded Npcap; hosted CI covers ABI/lifecycle, while privileged qualification requires dedicated runners |
 | Gateway-aware ARP/NDP | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
-| Raw Layer 3 transmission | Planned | Planned | Planned | Cross-platform adapters are a later alpha milestone |
+| Raw Layer 3 transmission | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `native-layer3` uses target raw sockets; hosted CI covers validation and injected send seams, while privileged qualification requires dedicated runners |
 | Coordinated exchange | Native alpha | Native alpha | Native alpha | Injectable and native capture share the readiness barrier, bounded retention, loss reporting, and joined shutdown contract |
 | Defragmentation and TCP reassembly | Alpha, CI | Alpha, CI | Alpha, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
 | Scan, traceroute, DNS, and fuzz tools | Planned | Planned | Planned | v0.1 paths were removed; replacements will use shared APIs |
@@ -42,6 +42,8 @@ Consult the exact release notes and `packetcraftr --help` for the checkout in us
 `--features native-layer2` selects `SystemLayer2Io` and `SystemCaptureProvider`. Capture activation completes before the session reports ready; the owned worker preserves native timestamps, open numeric link types, interface metadata, complete snap-length-bounded bytes, native loss counters, and bounded frame/byte queue accounting. Stop interrupts the native read and joins its worker. Missing dependencies, permissions, devices, and unsupported targets return typed errors; the adapter never changes the selected link mode.
 
 `SystemNeighborResolver` composes the system interface, Layer 2, and capture providers. Its rich route-planner path uses the interface-owned source IP and MAC, selected next hop, MTU, link type, and exact VLAN stack. ARP and NDP use finite attempts and timeouts, protocol validation, bounded captured evidence, joined shutdown, and a bounded finite-lifetime cache. Selecting both `native-route` and `native-layer2` supplies the complete native planning and resolution path; either provider family remains independently injectable.
+
+`--features native-layer3` selects `SystemLayer3Io` on Linux, macOS, and Windows. It accepts only complete IPv4/IPv6 datagrams whose destination, family, and size match the materialized route, binds the route-selected interface/source independently of a crafted packet source, enables full-header raw transmission, and checks complete writes. Linux and Windows may fill selected zero or derived IPv4 fields; macOS additionally consumes total length and fragment fields in host order. The adapter validates values that the kernel would rewrite and uses a private macOS submission copy, so a success can report the original exact wire bytes. Spoofed raw UDP that Windows can silently discard is rejected before send; other platform restrictions remain typed socket errors.
 
 Every profile exposes the platform-neutral provider traits. An application can implement interface, route, neighbor, typed Layer 2/Layer 3 transmission, and capture providers without importing a native wrapper. `Layer2Frame` and `Layer3Frame` reject a materialized route for the other mode, and `DispatchPacketIo` cannot cross those provider boundaries.
 
@@ -70,6 +72,7 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 
 - Portable and offline use: no libpcap requirement.
 - `native-layer2` requires libpcap development/runtime packages (`libpcap-dev` on Debian/Ubuntu) and uses the optional `pcap` 2.4 wrapper.
+- `native-layer3` uses `socket2` 0.6 raw sockets and requires `CAP_NET_RAW` or equivalent privilege. It binds the selected device and interface-owned source before sending.
 - Live operations commonly need root or narrowly granted `CAP_NET_RAW`; capture configuration can also need `CAP_NET_ADMIN` depending on the operation.
 - `native-route` route and interface discovery uses route netlink and is exercised in unprivileged CI.
 - The selected safe route wrapper is `rtnetlink` 0.21; Layer 2 I/O uses `pcap` 2.4. Both are optional and target-specific.
@@ -79,6 +82,7 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 
 - Portable and offline use: no external packet-capture package.
 - `native-layer2` uses the system libpcap/BPF facilities and can require elevated privileges or an administrator-managed device policy.
+- `native-layer3` uses raw IPv4/IPv6 sockets, macOS interface-index binding, and a private host-order IPv4 submission copy; root-equivalent raw-socket privilege is normally required.
 - `native-route` route selection uses routing sockets and `getifaddrs`; it is exercised on hosted macOS CI for IPv4/IPv6 loopback selection and interface enumeration.
 - Routing-socket setup is isolated behind `socket2` 0.6 plus the private native ABI adapter; libpcap/BPF integration uses `pcap` 2.4.
 - CI currently qualifies passive discovery on macOS 14 arm64; both `socket2` and `libc` are MIT OR Apache-2.0 licensed.
@@ -88,6 +92,7 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 - Default and `--no-default-features` builds are portable profiles. Neither resolves `libloading`, `pnet`, or `windows`, links `Packet.lib`, nor requires an Npcap installation or SDK.
 - The default feature set does not imply a Windows native adapter. `native-route` alone enables Windows route/interface discovery without Npcap; `--all-features` still loads Npcap only when Layer 2 I/O is opened.
 - `native-layer2` supports x86_64 MSVC with the Npcap 1.88 runtime and the pinned SDK 1.16 ABI. PacketcraftR does not bundle Npcap or its SDK and does not link an import library.
+- `native-layer3` uses Winsock raw IPv4/IPv6 sockets. Windows client restrictions can prohibit raw TCP and discard raw UDP with a non-local source; PacketcraftR rejects the silent UDP case, while native TCP permission failures remain typed socket errors.
 - The adapter obtains the Windows directory from the operating system, loads `System32\\Npcap\\wpcap.dll` with restricted dependent-DLL search flags, validates every required symbol, and initializes UTF-8 mode once. A missing/incompatible runtime is a typed dependency error and never changes link mode.
 - `native-route` route/source selection uses `GetBestRoute2` and adapter enumeration uses `GetAdaptersAddresses`; both IPv4 and IPv6 paths are exercised on hosted Windows CI.
 - IP Helper calls use narrowly enabled `windows` 0.62 bindings. Npcap uses its C ABI through optional, ISC-licensed `libloading` 0.8 so ordinary Windows builds and hosted native tests have no `wpcap.lib`/`Packet.lib` link boundary.
@@ -111,7 +116,7 @@ Active neighbor discovery preserves the planned VLAN stack and interface identit
 
 ## Continuous-integration coverage
 
-Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default, no-default, and all-feature profiles compile and test on macOS. Windows runs portable default/no-default jobs and a native all-feature job; every Windows profile rejects static `pcap`, `pnet`, and `Packet.lib` linkage, while portable profiles also reject `libloading` and the `windows` adapter package. A separate architecture check resolves no-default dependency trees for Linux, macOS, and Windows targets and rejects native adapter packages, native references outside the platform subtree, or unsafe/FFI outside its single owner. These unprivileged hosted jobs qualify passive route/interface behavior and injected capture lifecycle/ABI logic, not live packet I/O.
+Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default, no-default, and all-feature profiles compile and test on macOS. Windows runs portable default/no-default jobs and a native all-feature job; every Windows profile rejects static `pcap`, `pnet`, and `Packet.lib` linkage, while portable profiles also reject `libloading`, `socket2`, and the `windows` adapter package. The native profile requires both the Npcap runtime loader and raw-socket wrapper. A separate architecture check resolves no-default dependency trees for Linux, macOS, and Windows targets and rejects native adapter packages, native references outside the platform subtree, or unsafe/FFI outside its single owner. These unprivileged hosted jobs qualify passive route/interface behavior and injected capture/send lifecycle logic, not live packet I/O.
 
 Stable release qualification additionally requires:
 

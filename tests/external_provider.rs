@@ -166,6 +166,7 @@ fn external_provider_uses_only_platform_neutral_contracts() {
     assert_exchange_provider(&provider);
     assert_compatibility_paths(&provider);
     let _: packetcraftr::client::CaptureQueueLimits = CaptureQueueLimits::default();
+    let _: packetcraftr::client::SystemLayer3Io = packetcraftr::SystemLayer3Io;
 
     let bytes = Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]);
     let layer2_route = route(LinkMode::Layer2);

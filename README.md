@@ -21,7 +21,7 @@ This checkout contains the new portable v0.2 kernel, passive native route provid
 | Runtime-neutral captured-frame records and offline capture I/O | Available as a streaming, pure-Rust alpha API and through `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
 | v0.2 `build`, `dissect`, `read`, and `interfaces` commands | Available; all final command names are reserved in `--help` |
-| Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs, passive Linux/macOS/Windows routes, native Layer 2 I/O, and bounded gateway-aware ARP/NDP are available; live CLI workflows are later alphas |
+| Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs, passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, and raw Layer 3 adapters are available; live CLI workflows are later alphas |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages and templates are available; tool workflows are later alphas |
 | Broad built-in protocol catalog and extracted component crates | Beta milestone |
 
@@ -92,11 +92,13 @@ Build and test the current target's native providers with:
 cargo test --features native-route
 # Linux/macOS: requires the system libpcap development/runtime files.
 cargo test --features native-layer2
+# Raw IPv4/IPv6 sockets on Linux, macOS, or Windows:
+cargo test --features native-layer3
 # Equivalent to the complete CI native-provider profile:
 cargo test --all-features
 ```
 
-`native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. `SystemNeighborResolver` composes those providers with interface metadata to perform bounded ARP or NDP; pair it with `native-route` for target-native route, gateway, source, and MTU selection. Live use still requires the native runtime and relevant operating-system privileges; missing dependencies, devices, permissions, and unsupported modes are typed errors rather than fallbacks.
+`native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. `SystemNeighborResolver` composes those providers with interface metadata to perform bounded ARP or NDP; pair it with `native-route` for target-native route, gateway, source, and MTU selection. `native-layer3` provides `SystemLayer3Io` through target raw sockets, binds the route-selected interface/source separately from crafted source fields, and validates that mandatory kernel header processing cannot change the intended wire bytes. Live use still requires the relevant native runtime and operating-system privileges; missing dependencies, devices, permissions, unsupported packet classes, and unsupported modes are typed errors rather than fallbacks.
 
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
@@ -141,6 +143,7 @@ The v0.2 contracts are:
 - Decode-only multiplexing roots must explicitly admit each concrete protocol they return. The raw-IP root therefore continues registry binding from the decoded IPv4 or IPv6 layer rather than misrepresenting it as a generic link layer.
 - Padding records an explicit ownership boundary when its bytes sit outside an IPv4, IPv6, or UDP declared length or the fixed ARP body. Invalid or unsupported boundaries fail strict builds; preserved network/datagram trailers emit diagnostics and require the live opt-in.
 - Synthesized or resolved Layer 2 bytes are part of the exact built frame. Byte-policy checks include that envelope before neighbor traffic, and a backend-reported partial send is a typed failure.
+- Raw Layer 3 adapters accept only complete IPv4/IPv6 datagrams for the selected route and MTU. They reject header values the operating system would change, preserve spoofed packet sources separately from the bound interface source, and report partial native writes as typed failures.
 - Route MTU checks measure the actual built network-layer byte span instead of trusting permissive wire length fields. Oversized packets fail before neighbor discovery or live I/O and require an explicit fragmentation transform.
 - Capture is ready before an exchange sends its first frame, and one owned receive stream routes every frame rather than silently draining traffic.
 - Exchange always attempts to stop and join its capture session after readiness, send, receive, or timeout failures. If the operation and cleanup both fail, both errors remain visible.
@@ -182,7 +185,7 @@ structured diagnostics and operation statistics.
 
 ## Development
 
-The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable. All-feature jobs compile the target's native route and Layer 2 adapters, exercise passive providers and mocked capture lifecycles, and continue to reject static `pcap`, `pnet`, or `Packet.lib` linkage on Windows. Privileged live-I/O qualification remains a separate release-candidate gate.
+The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable and excludes `socket2` along with the other native adapters. All-feature jobs compile the target's native route, Layer 2, and raw Layer 3 adapters, exercise passive providers and injected capture/send lifecycles, and continue to reject static `pcap`, `pnet`, or `Packet.lib` linkage on Windows. Privileged live-I/O qualification remains a separate release-candidate gate.
 
 ```console
 cargo fmt --all -- --check

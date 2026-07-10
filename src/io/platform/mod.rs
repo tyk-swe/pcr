@@ -25,6 +25,11 @@ mod npcap;
 mod pcap_backend;
 #[cfg(all(feature = "live", not(feature = "native-route"), not(windows)))]
 mod pnet_enumeration;
+#[cfg(all(
+    feature = "native-layer3",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+mod raw_ip;
 #[cfg(windows)]
 mod windows;
 
@@ -73,6 +78,30 @@ pub(super) fn system_send_layer2(
     frame: super::provider::Layer2Frame<'_>,
 ) -> Result<super::provider::IoSendReport, LiveIoError> {
     pcap_backend::send_layer2(frame)
+}
+
+#[cfg(all(
+    feature = "native-layer3",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub(super) fn system_send_layer3(
+    frame: super::provider::Layer3Frame<'_>,
+) -> Result<super::provider::IoSendReport, LiveIoError> {
+    raw_ip::send_layer3(frame)
+}
+
+#[cfg(not(all(
+    feature = "native-layer3",
+    any(target_os = "linux", target_os = "macos", windows)
+)))]
+pub(super) fn system_send_layer3(
+    _frame: super::provider::Layer3Frame<'_>,
+) -> Result<super::provider::IoSendReport, LiveIoError> {
+    Err(LiveIoError::Unsupported {
+        message:
+            "enable the native-layer3 feature on Linux, macOS, or Windows for raw IP transmission"
+                .to_owned(),
+    })
 }
 
 #[cfg(all(feature = "native-layer2", windows))]

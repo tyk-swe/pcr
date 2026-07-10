@@ -238,13 +238,15 @@ where
         interface_source: IpAddr,
         target: IpAddr,
     ) -> Result<NeighborRequest, NeighborError> {
-        let interfaces = self.interfaces.interfaces().map_err(|error| {
-            resolution_error(
-                interface,
+        let interfaces = self
+            .interfaces
+            .interfaces()
+            .map_err(|source| NeighborError::Io {
+                interface: interface.name.clone(),
                 target,
-                format!("interface discovery failed: {error}"),
-            )
-        })?;
+                operation: "discovering the selected interface",
+                source,
+            })?;
         let selected = interfaces
             .into_iter()
             .find(|candidate| candidate.id == *interface)
@@ -296,18 +298,18 @@ where
             (Ok(outcome), Ok(())) => outcome,
             (Err(error), Ok(())) => return Err(error),
             (Ok(_), Err(cleanup)) => {
-                return Err(resolution_error(
-                    &request.interface,
-                    request.target,
-                    format!("capture cleanup failed after resolution: {cleanup}"),
-                ))
+                return Err(NeighborError::Cleanup {
+                    interface: request.interface.name.clone(),
+                    target: request.target,
+                    source: cleanup,
+                })
             }
             (Err(operation), Err(cleanup)) => {
                 return Err(NeighborError::OperationAndCleanup {
                     interface: request.interface.name.clone(),
                     target: request.target,
-                    operation: operation.to_string(),
-                    cleanup: cleanup.to_string(),
+                    operation: Box::new(operation),
+                    cleanup,
                 })
             }
         };
@@ -1095,22 +1097,24 @@ fn validate_send_report(
     report: IoSendReport,
 ) -> Result<(), NeighborError> {
     if report.bytes_sent != expected.len() {
-        return Err(resolution_error(
-            &request.interface,
-            request.target,
-            format!(
-                "discovery send was partial: expected {} bytes, backend reported {}",
-                expected.len(),
-                report.bytes_sent
-            ),
+        return Err(map_io_error(
+            request,
+            "sending discovery request",
+            LiveIoError::PartialSend {
+                expected: expected.len(),
+                actual: report.bytes_sent,
+            },
         ));
     }
     if let Some(wire_bytes) = report.wire_bytes {
         if wire_bytes != *expected {
-            return Err(resolution_error(
-                &request.interface,
-                request.target,
-                "backend-reported discovery wire bytes differ from submitted bytes".to_owned(),
+            return Err(map_io_error(
+                request,
+                "validating discovery send evidence",
+                LiveIoError::InvalidSendEvidence {
+                    message: "discovery wire bytes differ from the exact submitted frame"
+                        .to_owned(),
+                },
             ));
         }
     }
@@ -1138,11 +1142,12 @@ fn map_io_error(
     operation: &'static str,
     error: LiveIoError,
 ) -> NeighborError {
-    resolution_error(
-        &request.interface,
-        request.target,
-        format!("{operation} failed: {error}"),
-    )
+    NeighborError::Io {
+        interface: request.interface.name.clone(),
+        target: request.target,
+        operation,
+        source: error,
+    }
 }
 
 #[cfg(test)]

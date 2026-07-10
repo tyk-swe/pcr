@@ -3,7 +3,8 @@
 
 #![forbid(unsafe_code)]
 
-use std::net::IpAddr;
+use std::net::{IpAddr, ToSocketAddrs};
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,7 @@ use crate::core::{
     Dissector, FieldValue, Packet, PacketTemplate, Padding, ProtocolRegistry,
     DEFAULT_MAX_TEMPLATE_PACKETS,
 };
+use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 use crate::io::{
     CapturedFrame, MaterializedRoute, NeighborError, NeighborResolver, PlanError, PlanOptions,
     PlannedRoute, RoutePlanner, RouteProvider,
@@ -30,6 +32,7 @@ pub use crate::io::{
     InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LiveIoError,
     PacketIo, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider, SystemLayer2Io,
     SystemLayer3Io, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    MAX_CAPTURE_TIMEOUT,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,18 +47,27 @@ pub struct OperationStats {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrafficPolicy {
     pub allow_public_destinations: bool,
+    /// Hostname resolution is a separate opt-in because a name has no stable
+    /// address scope until after a resolver side effect.
+    pub allow_hostname_resolution: bool,
     pub allow_permissive_packets: bool,
     pub max_packets_per_operation: u64,
     pub max_bytes_per_operation: u64,
+    pub max_resolved_addresses: usize,
 }
+
+pub const DEFAULT_MAX_RESOLVED_ADDRESSES: usize = 64;
+pub const MAX_RESOLVED_ADDRESSES: usize = 4_096;
 
 impl Default for TrafficPolicy {
     fn default() -> Self {
         Self {
             allow_public_destinations: false,
+            allow_hostname_resolution: false,
             allow_permissive_packets: false,
             max_packets_per_operation: 10_000,
             max_bytes_per_operation: 256 * 1024 * 1024,
+            max_resolved_addresses: DEFAULT_MAX_RESOLVED_ADDRESSES,
         }
     }
 }
@@ -65,6 +77,8 @@ impl Default for TrafficPolicy {
 pub enum TrafficPolicyError {
     #[error("traffic policy denies public destination {destination}")]
     PublicDestination { destination: IpAddr },
+    #[error("traffic policy denies hostname resolution for {hostname}")]
+    HostnameResolution { hostname: String },
     #[error("traffic policy denies permissively built packets")]
     PermissivePacket,
     #[error("operation packet count {actual} exceeds policy limit {limit}")]
@@ -73,12 +87,315 @@ pub enum TrafficPolicyError {
     ByteLimit { actual: u64, limit: u64 },
 }
 
+impl ClassifiedError for TrafficPolicyError {
+    fn classification(&self) -> ErrorClassification {
+        let (code, remediation) = match self {
+            Self::PublicDestination { .. } => (
+                "policy.public_destination",
+                "explicitly authorize public destinations only for networks you are permitted to test",
+            ),
+            Self::HostnameResolution { .. } => (
+                "policy.hostname_resolution",
+                "explicitly authorize hostname resolution, then independently authorize every resolved address",
+            ),
+            Self::PermissivePacket => (
+                "policy.permissive_packet",
+                "authorize permissive live traffic in both build options and traffic policy",
+            ),
+            Self::PacketLimit { .. } => (
+                "policy.packet_limit",
+                "reduce the operation packet count or deliberately raise the configured traffic budget",
+            ),
+            Self::ByteLimit { .. } => (
+                "policy.byte_limit",
+                "reduce the operation byte count or deliberately raise the configured traffic budget",
+            ),
+        };
+        ErrorClassification::new(code, FailureKind::Policy, Some(remediation))
+    }
+}
+
+/// Validated, canonical ASCII DNS hostname used by live target resolution.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct Hostname(String);
+
+impl Hostname {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for Hostname {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl FromStr for Hostname {
+    type Err = TargetResolutionError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let hostname = value.strip_suffix('.').unwrap_or(value);
+        let invalid = |reason| TargetResolutionError::InvalidHostname {
+            hostname: value.to_owned(),
+            reason,
+        };
+        if hostname.is_empty() {
+            return Err(invalid("must not be empty"));
+        }
+        if !hostname.is_ascii() {
+            return Err(invalid("must be an ASCII DNS hostname"));
+        }
+        if hostname.len() > 253 {
+            return Err(invalid("exceeds the 253-byte DNS hostname limit"));
+        }
+        for label in hostname.split('.') {
+            if label.is_empty() {
+                return Err(invalid("contains an empty DNS label"));
+            }
+            if label.len() > 63 {
+                return Err(invalid("contains a DNS label longer than 63 bytes"));
+            }
+            let bytes = label.as_bytes();
+            if !bytes.first().is_some_and(u8::is_ascii_alphanumeric)
+                || !bytes.last().is_some_and(u8::is_ascii_alphanumeric)
+                || !bytes
+                    .iter()
+                    .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'-')
+            {
+                return Err(invalid(
+                    "labels must contain letters, digits, or interior hyphens",
+                ));
+            }
+        }
+        Ok(Self(hostname.to_ascii_lowercase()))
+    }
+}
+
+/// Declared live destination before any hostname-resolution side effect.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum LiveTarget {
+    Address(IpAddr),
+    Hostname(Hostname),
+}
+
+impl FromStr for LiveTarget {
+    type Err = TargetResolutionError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.parse::<IpAddr>() {
+            Ok(address) => Ok(Self::Address(address)),
+            Err(_) => value.parse::<Hostname>().map(Self::Hostname),
+        }
+    }
+}
+
+/// A target whose declared hostname and every selected address have passed the
+/// current traffic policy. Fields stay private so callers cannot forge this
+/// authorization token.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ResolvedTarget {
+    declared: LiveTarget,
+    addresses: Vec<IpAddr>,
+}
+
+impl ResolvedTarget {
+    pub fn declared(&self) -> &LiveTarget {
+        &self.declared
+    }
+
+    pub fn addresses(&self) -> &[IpAddr] {
+        &self.addresses
+    }
+
+    pub fn selected_address(&self) -> IpAddr {
+        self.addresses[0]
+    }
+
+    pub fn address_for_family(&self, ipv4: bool) -> Option<IpAddr> {
+        self.addresses
+            .iter()
+            .copied()
+            .find(|address| address.is_ipv4() == ipv4)
+    }
+}
+
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TargetResolutionError {
+    #[error("invalid hostname {hostname:?}: {reason}")]
+    InvalidHostname {
+        hostname: String,
+        reason: &'static str,
+    },
+    #[error("resolved-address limit {value} is invalid; expected 1..={maximum}")]
+    InvalidAddressLimit { value: usize, maximum: usize },
+    #[error("hostname resolution for {hostname} failed: {message}")]
+    Resolver { hostname: String, message: String },
+    #[error("hostname {hostname} did not resolve to any addresses")]
+    NoAddresses { hostname: String },
+    #[error("hostname {hostname} resolved beyond the configured {limit}-address limit")]
+    AddressLimit { hostname: String, limit: usize },
+    #[error("resolved target has no {family} address compatible with the packet")]
+    AddressFamilyUnavailable { family: &'static str },
+    #[error(transparent)]
+    Policy(#[from] TrafficPolicyError),
+}
+
+impl ClassifiedError for TargetResolutionError {
+    fn classification(&self) -> ErrorClassification {
+        match self {
+            Self::InvalidHostname { .. } | Self::InvalidAddressLimit { .. } => {
+                ErrorClassification::new(
+                    "cli.live_target",
+                    FailureKind::Cli,
+                    Some("use a valid IP address or bounded ASCII DNS hostname"),
+                )
+            }
+            Self::Resolver { .. } | Self::NoAddresses { .. } => ErrorClassification::new(
+                "io.hostname_resolution",
+                FailureKind::Io,
+                Some("inspect resolver configuration and retry; no route lookup or transmission was attempted"),
+            ),
+            Self::AddressLimit { .. } => ErrorClassification::new(
+                "io.hostname_address_limit",
+                FailureKind::Io,
+                Some("reduce the resolver result set or deliberately raise the bounded address limit"),
+            ),
+            Self::AddressFamilyUnavailable { .. } => ErrorClassification::new(
+                "packet.target_address_family",
+                FailureKind::Packet,
+                Some("select a target address whose family matches the packet's IP layer"),
+            ),
+            Self::Policy(error) => error.classification(),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Policy(error) => error.causes(),
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Injectable hostname resolver. Implementations must stop once `limit`
+/// distinct addresses have been selected and report a typed overflow.
+pub trait HostnameResolver: Send + Sync {
+    fn resolve(
+        &self,
+        hostname: &Hostname,
+        limit: usize,
+    ) -> Result<Vec<IpAddr>, TargetResolutionError>;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemHostnameResolver;
+
+impl HostnameResolver for SystemHostnameResolver {
+    fn resolve(
+        &self,
+        hostname: &Hostname,
+        limit: usize,
+    ) -> Result<Vec<IpAddr>, TargetResolutionError> {
+        let resolved = (hostname.as_str(), 0).to_socket_addrs().map_err(|source| {
+            TargetResolutionError::Resolver {
+                hostname: hostname.to_string(),
+                message: source.to_string(),
+            }
+        })?;
+        let mut addresses = Vec::new();
+        for address in resolved.map(|address| address.ip()) {
+            if addresses.contains(&address) {
+                continue;
+            }
+            if addresses.len() >= limit {
+                return Err(TargetResolutionError::AddressLimit {
+                    hostname: hostname.to_string(),
+                    limit,
+                });
+            }
+            addresses.push(address);
+        }
+        if addresses.is_empty() {
+            return Err(TargetResolutionError::NoAddresses {
+                hostname: hostname.to_string(),
+            });
+        }
+        Ok(addresses)
+    }
+}
+
 impl TrafficPolicy {
     fn authorize_destination(&self, destination: IpAddr) -> Result<(), TrafficPolicyError> {
         if !self.allow_public_destinations && is_public(destination) {
             return Err(TrafficPolicyError::PublicDestination { destination });
         }
         Ok(())
+    }
+
+    fn authorize_hostname(&self, hostname: &Hostname) -> Result<(), TrafficPolicyError> {
+        if !self.allow_hostname_resolution {
+            return Err(TrafficPolicyError::HostnameResolution {
+                hostname: hostname.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Authorizes a declared target before resolution, invokes the resolver at
+    /// most once, then authorizes every selected address before returning any
+    /// address to route planning. Calling this method again for re-resolution
+    /// repeats both policy stages against the current policy.
+    pub fn resolve_target<R: HostnameResolver>(
+        &self,
+        target: &LiveTarget,
+        resolver: &R,
+    ) -> Result<ResolvedTarget, TargetResolutionError> {
+        if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
+            return Err(TargetResolutionError::InvalidAddressLimit {
+                value: self.max_resolved_addresses,
+                maximum: MAX_RESOLVED_ADDRESSES,
+            });
+        }
+        let addresses = match target {
+            LiveTarget::Address(address) => vec![*address],
+            LiveTarget::Hostname(hostname) => {
+                // This authorization must precede DNS, route lookup, capture,
+                // neighbor discovery, and transmission side effects.
+                self.authorize_hostname(hostname)?;
+                let resolved = resolver.resolve(hostname, self.max_resolved_addresses)?;
+                let mut addresses =
+                    Vec::with_capacity(resolved.len().min(self.max_resolved_addresses));
+                for address in resolved {
+                    if addresses.contains(&address) {
+                        continue;
+                    }
+                    if addresses.len() >= self.max_resolved_addresses {
+                        return Err(TargetResolutionError::AddressLimit {
+                            hostname: hostname.to_string(),
+                            limit: self.max_resolved_addresses,
+                        });
+                    }
+                    addresses.push(address);
+                }
+                if addresses.is_empty() {
+                    return Err(TargetResolutionError::NoAddresses {
+                        hostname: hostname.to_string(),
+                    });
+                }
+                addresses
+            }
+        };
+        for address in &addresses {
+            self.authorize_destination(*address)?;
+        }
+        Ok(ResolvedTarget {
+            declared: target.clone(),
+            addresses,
+        })
     }
 }
 
@@ -102,6 +419,8 @@ pub struct SendReport {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ClientError {
+    #[error(transparent)]
+    Target(#[from] TargetResolutionError),
     #[error(transparent)]
     Plan(#[from] PlanError),
     #[error(transparent)]
@@ -133,9 +452,83 @@ pub enum ClientError {
     },
     #[error("network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform")]
     PacketExceedsMtu { actual: usize, mtu: u32 },
+    #[error("invalid exchange option {field}: {message}")]
+    InvalidExchangeOption {
+        field: &'static str,
+        message: String,
+    },
+}
+
+impl ClassifiedError for ClientError {
+    fn classification(&self) -> ErrorClassification {
+        match self {
+            Self::Target(error) => error.classification(),
+            Self::Plan(error) => error.classification(),
+            Self::Neighbor(error) => error.classification(),
+            Self::Build(_) => ErrorClassification::new(
+                "packet.build",
+                FailureKind::Packet,
+                Some("correct the packet fields or select permissive mode with the required live opt-ins"),
+            ),
+            Self::Decode(_) => ErrorClassification::new(
+                "packet.decode",
+                FailureKind::Packet,
+                Some("inspect the capture link type, packet bytes, and configured decode limits"),
+            ),
+            Self::Policy(error) => error.classification(),
+            Self::PermissiveLiveOptInRequired => ErrorClassification::new(
+                "policy.permissive_live_opt_in",
+                FailureKind::Policy,
+                Some("set the explicit per-operation malformed-live opt-in in addition to policy approval"),
+            ),
+            Self::Io(error) => error.classification(),
+            Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
+            Self::HeterogeneousExchangeRoute => ErrorClassification::new(
+                "cli.heterogeneous_exchange_route",
+                FailureKind::Cli,
+                Some("split the exchange so every packet uses the same interface and link mode"),
+            ),
+            Self::Template { .. } => ErrorClassification::new(
+                "packet.template",
+                FailureKind::Packet,
+                Some("reduce or correct the bounded packet-template expansion"),
+            ),
+            Self::PacketMaterialization { .. } => ErrorClassification::new(
+                "packet.materialization",
+                FailureKind::Packet,
+                Some("correct the route-dependent packet fields; post-build shape changes are rejected"),
+            ),
+            Self::PacketExceedsMtu { .. } => ErrorClassification::new(
+                "packet.mtu",
+                FailureKind::Packet,
+                Some("reduce the network packet or apply an explicit fragmentation transform"),
+            ),
+            Self::InvalidExchangeOption { .. } => ErrorClassification::new(
+                "cli.exchange_limit",
+                FailureKind::Cli,
+                Some("use finite exchange timeout and retention limits no larger than the aggregate capture ceiling"),
+            ),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Target(error) => error.causes(),
+            Self::Plan(error) => error.causes(),
+            Self::Neighbor(error) => error.causes(),
+            Self::Policy(error) => error.causes(),
+            Self::Io(error) => error.causes(),
+            Self::OperationAndCaptureShutdown {
+                operation,
+                shutdown,
+            } => vec![operation.to_string(), shutdown.to_string()],
+            _ => Vec::new(),
+        }
+    }
 }
 
 pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
+pub const MAX_EXCHANGE_TIMEOUT: Duration = MAX_CAPTURE_TIMEOUT;
 
 struct CaptureGuard<C: CaptureSession> {
     inner: C,
@@ -235,6 +628,7 @@ struct ExchangeAccumulator {
     unsolicited: Vec<DecodedPacket>,
     undecoded: Vec<CapturedFrame>,
     diagnostics: Vec<crate::core::Diagnostic>,
+    retained_frames: usize,
     retained_bytes: usize,
     response_counts: Vec<usize>,
 }
@@ -255,6 +649,7 @@ impl ExchangeAccumulator {
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
+            retained_frames: 0,
             retained_bytes: 0,
             response_counts: vec![0; requests],
         }
@@ -343,9 +738,11 @@ impl ExchangeAccumulator {
                 );
                 return;
             }
-            if reserve_capture_bytes(
+            if reserve_capture_evidence(
+                &mut self.retained_frames,
                 &mut self.retained_bytes,
                 decoded.original.len(),
+                options.max_capture_queue_frames,
                 options.max_captured_bytes,
                 &mut self.diagnostics,
             ) {
@@ -384,9 +781,11 @@ impl ExchangeAccumulator {
             );
             return;
         }
-        if reserve_capture_bytes(
+        if reserve_capture_evidence(
+            &mut self.retained_frames,
             &mut self.retained_bytes,
             decoded.original.len(),
+            options.max_capture_queue_frames,
             options.max_captured_bytes,
             &mut self.diagnostics,
         ) {
@@ -408,9 +807,11 @@ impl ExchangeAccumulator {
             );
             return;
         }
-        if reserve_capture_bytes(
+        if reserve_capture_evidence(
+            &mut self.retained_frames,
             &mut self.retained_bytes,
             frame.bytes.len(),
+            options.max_capture_queue_frames,
             options.max_captured_bytes,
             &mut self.diagnostics,
         ) {
@@ -458,6 +859,36 @@ where
         &self.registry
     }
 
+    /// Resolve and authorize a declared destination before passive route
+    /// planning. A denied hostname never reaches `resolver`; if any resolved
+    /// address is denied, no route-provider method is called.
+    pub fn plan_target<H: HostnameResolver>(
+        &self,
+        packet: &Packet,
+        target: &LiveTarget,
+        resolver: &H,
+        options: &PlanOptions,
+    ) -> Result<(ResolvedTarget, PlannedRoute), ClientError> {
+        let resolved = self.policy.resolve_target(target, resolver)?;
+        let packet_family = packet
+            .iter()
+            .find_map(|layer| match layer.protocol_id().as_str() {
+                "ipv4" => Some(true),
+                "ipv6" => Some(false),
+                _ => None,
+            });
+        let selected = match packet_family {
+            Some(ipv4) => resolved.address_for_family(ipv4).ok_or(
+                TargetResolutionError::AddressFamilyUnavailable {
+                    family: if ipv4 { "IPv4" } else { "IPv6" },
+                },
+            )?,
+            None => resolved.selected_address(),
+        };
+        let plan = self.plan(packet, Some(selected), options)?;
+        Ok((resolved, plan))
+    }
+
     /// Passive dry planning: route/source/interface lookup only.
     pub fn plan(
         &self,
@@ -465,25 +896,35 @@ where
         destination: Option<IpAddr>,
         options: &PlanOptions,
     ) -> Result<PlannedRoute, ClientError> {
+        if let Some(destination) = destination {
+            self.policy.authorize_destination(destination)?;
+        }
+        // Authorize every declared outer and SRH destination before the route
+        // provider can observe one. The completed plan is checked again below
+        // so provider-derived selections cannot bypass policy either.
+        for layer in packet.iter() {
+            match layer.field("destination") {
+                Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => {
+                    self.policy.authorize_destination(IpAddr::V4(value))?;
+                }
+                Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => {
+                    self.policy.authorize_destination(IpAddr::V6(value))?;
+                }
+                _ => {}
+            }
+            if let Some(FieldValue::List(segments)) = layer.field("segments") {
+                for segment in segments {
+                    if let FieldValue::Ipv6(value) = segment {
+                        self.policy.authorize_destination(IpAddr::V6(value))?;
+                    }
+                }
+            }
+        }
         let plan = self
             .planner
             .plan(packet, destination, options, &self.routes)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
-        }
-        // Preserve policy visibility into explicitly supplied outer addresses
-        // even when SRH routing makes another segment the effective lookup or
-        // final destination. Permissive wire inconsistencies must not become a
-        // destination-policy bypass.
-        for layer in packet.iter() {
-            let destination = match layer.field("destination") {
-                Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => Some(IpAddr::V4(value)),
-                Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => Some(IpAddr::V6(value)),
-                _ => None,
-            };
-            if let Some(destination) = destination {
-                self.policy.authorize_destination(destination)?;
-            }
         }
         Ok(plan)
     }
@@ -525,7 +966,7 @@ where
         let io_report = self
             .io
             .send(TransmissionFrame::try_new(&built.bytes, &route)?)?;
-        validate_send_report(built.bytes.len(), &io_report)?;
+        validate_send_report(&built.bytes, &io_report)?;
         let bytes_sent = io_report.bytes_sent;
         let wire_bytes = io_report
             .wire_bytes
@@ -584,6 +1025,7 @@ where
         options: ExchangeOptions,
     ) -> Result<ExchangeResult, ClientError> {
         let started = Instant::now();
+        let capture_limits = validate_exchange_options(&options)?;
         let expansion_len = template
             .expansion_len()
             .map_err(|source| ClientError::Template {
@@ -670,13 +1112,6 @@ where
             .expect("non-empty prepared exchange")
             .1
             .plan;
-        let capture_limits = CaptureQueueLimits {
-            max_frames: options.max_capture_queue_frames,
-            max_bytes: options.max_captured_bytes,
-            snap_length: options.decode.max_packet_size,
-            overflow_policy: options.capture_overflow_policy,
-        }
-        .validate()?;
         let mut capture = CaptureGuard::new(self.io.arm_capture(first_route, capture_limits)?);
         if let Err(error) = capture.wait_ready() {
             return Err(error_after_shutdown(&mut capture, error));
@@ -716,7 +1151,7 @@ where
                 Ok(report) => report,
                 Err(error) => return Err(error_after_shutdown(&mut capture, error)),
             };
-            if let Err(error) = validate_send_report(built.bytes.len(), &sent) {
+            if let Err(error) = validate_send_report(&built.bytes, &sent) {
                 return Err(error_after_shutdown(&mut capture, error));
             }
             sent_at.push(send_started);
@@ -744,7 +1179,7 @@ where
 
         let deadline = Instant::now()
             .checked_add(options.timeout)
-            .unwrap_or_else(Instant::now);
+            .expect("validated bounded exchange timeout must fit Instant");
         loop {
             let now = Instant::now();
             let Some(remaining) = deadline.checked_duration_since(now) else {
@@ -823,10 +1258,53 @@ where
     }
 }
 
-fn validate_send_report(expected: usize, report: &IoSendReport) -> Result<(), LiveIoError> {
-    if report.bytes_sent != expected {
+fn validate_exchange_options(options: &ExchangeOptions) -> Result<CaptureQueueLimits, ClientError> {
+    if options.timeout > MAX_EXCHANGE_TIMEOUT {
+        return Err(ClientError::InvalidExchangeOption {
+            field: "timeout",
+            message: format!("must not exceed {MAX_EXCHANGE_TIMEOUT:?}"),
+        });
+    }
+    if options.max_template_packets == 0 {
+        return Err(ClientError::InvalidExchangeOption {
+            field: "max_template_packets",
+            message: "must be greater than zero".to_owned(),
+        });
+    }
+    for (field, value) in [
+        ("max_responses", options.max_responses),
+        ("max_unsolicited", options.max_unsolicited),
+    ] {
+        if value > options.max_capture_queue_frames {
+            return Err(ClientError::InvalidExchangeOption {
+                field,
+                message: format!(
+                    "{value} exceeds aggregate capture frame ceiling {}",
+                    options.max_capture_queue_frames
+                ),
+            });
+        }
+    }
+    Instant::now().checked_add(options.timeout).ok_or_else(|| {
+        ClientError::InvalidExchangeOption {
+            field: "timeout",
+            message: "cannot be represented by the platform monotonic clock".to_owned(),
+        }
+    })?;
+    CaptureQueueLimits {
+        max_frames: options.max_capture_queue_frames,
+        max_bytes: options.max_captured_bytes,
+        snap_length: options.decode.max_packet_size,
+        overflow_policy: options.capture_overflow_policy,
+    }
+    .validate()
+    .map_err(ClientError::from)
+}
+
+fn validate_send_report(expected: &Bytes, report: &IoSendReport) -> Result<(), LiveIoError> {
+    if report.bytes_sent != expected.len() {
         return Err(LiveIoError::PartialSend {
-            expected,
+            expected: expected.len(),
             actual: report.bytes_sent,
         });
     }
@@ -835,6 +1313,11 @@ fn validate_send_report(expected: usize, report: &IoSendReport) -> Result<(), Li
             return Err(LiveIoError::InvalidSendReport {
                 bytes_sent: report.bytes_sent,
                 wire_bytes: wire_bytes.len(),
+            });
+        }
+        if wire_bytes != expected {
+            return Err(LiveIoError::InvalidSendEvidence {
+                message: "wire_bytes differ from the exact submitted packet".to_owned(),
             });
         }
     }
@@ -897,13 +1380,37 @@ fn push_diagnostic_once(
     }
 }
 
-fn reserve_capture_bytes(
-    retained: &mut usize,
+fn reserve_capture_evidence(
+    retained_frames: &mut usize,
+    retained_bytes: &mut usize,
     additional: usize,
-    limit: usize,
+    frame_limit: usize,
+    byte_limit: usize,
     diagnostics: &mut Vec<crate::core::Diagnostic>,
 ) -> bool {
-    let Some(total) = retained.checked_add(additional) else {
+    let Some(frame_total) = retained_frames.checked_add(1) else {
+        push_diagnostic_once(
+            diagnostics,
+            crate::core::Diagnostic::warning(
+                "exchange.capture_frame_limit",
+                "retained capture frame accounting overflowed; frame was not retained",
+            ),
+        );
+        return false;
+    };
+    if frame_total > frame_limit {
+        push_diagnostic_once(
+            diagnostics,
+            crate::core::Diagnostic::warning(
+                "exchange.capture_frame_limit",
+                format!(
+                    "aggregate retained capture frame limit {frame_limit} reached; later frames were not retained"
+                ),
+            ),
+        );
+        return false;
+    }
+    let Some(byte_total) = retained_bytes.checked_add(additional) else {
         push_diagnostic_once(
             diagnostics,
             crate::core::Diagnostic::warning(
@@ -913,19 +1420,20 @@ fn reserve_capture_bytes(
         );
         return false;
     };
-    if total > limit {
+    if byte_total > byte_limit {
         push_diagnostic_once(
             diagnostics,
             crate::core::Diagnostic::warning(
                 "exchange.capture_byte_limit",
                 format!(
-                    "retained capture byte limit {limit} reached; later frames were not retained"
+                    "retained capture byte limit {byte_limit} reached; later frames were not retained"
                 ),
             ),
         );
         return false;
     }
-    *retained = total;
+    *retained_frames = frame_total;
+    *retained_bytes = byte_total;
     true
 }
 
@@ -1166,6 +1674,7 @@ impl NeighborResolver for UnsupportedNeighborResolver {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::convert::Infallible;
     use std::net::{IpAddr, Ipv4Addr};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1193,6 +1702,49 @@ mod tests {
             _interface_hint: Option<&InterfaceId>,
         ) -> Result<RouteDecision, Self::Error> {
             Ok(self.0.clone())
+        }
+    }
+
+    #[derive(Clone)]
+    struct CountingRoutes {
+        decision: RouteDecision,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl RouteProvider for CountingRoutes {
+        type Error = Infallible;
+
+        fn lookup(
+            &self,
+            _destination: IpAddr,
+            _interface_hint: Option<&InterfaceId>,
+        ) -> Result<RouteDecision, Self::Error> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(self.decision.clone())
+        }
+    }
+
+    #[derive(Clone)]
+    struct RecordingHostnameResolver {
+        calls: Arc<AtomicUsize>,
+        results: Arc<Mutex<VecDeque<Vec<IpAddr>>>>,
+    }
+
+    impl HostnameResolver for RecordingHostnameResolver {
+        fn resolve(
+            &self,
+            hostname: &Hostname,
+            limit: usize,
+        ) -> Result<Vec<IpAddr>, TargetResolutionError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let addresses = self.results.lock().unwrap().pop_front().unwrap_or_default();
+            if addresses.len() > limit {
+                return Err(TargetResolutionError::AddressLimit {
+                    hostname: hostname.to_string(),
+                    limit,
+                });
+            }
+            Ok(addresses)
         }
     }
 
@@ -1297,6 +1849,20 @@ mod tests {
             Ok(IoSendReport {
                 bytes_sent: frame.bytes().len().saturating_sub(1),
                 wire_bytes: None,
+            })
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct ChangedWireIo;
+
+    impl PacketIo for ChangedWireIo {
+        fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+            let mut changed = frame.bytes().to_vec();
+            changed[0] ^= 1;
+            Ok(IoSendReport {
+                bytes_sent: changed.len(),
+                wire_bytes: Some(Bytes::from(changed)),
             })
         }
     }
@@ -1579,7 +2145,189 @@ mod tests {
     }
 
     #[test]
-    fn capture_queue_limits_fail_closed_at_zero_and_arithmetic_overflow() {
+    fn hostname_policy_precedes_resolution_and_resolved_policy_precedes_routes() {
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let route_calls = Arc::new(AtomicUsize::new(0));
+        let resolver = RecordingHostnameResolver {
+            calls: Arc::clone(&resolver_calls),
+            results: Arc::new(Mutex::new(VecDeque::from([vec![IpAddr::V4(
+                Ipv4Addr::new(10, 0, 0, 2),
+            )]]))),
+        };
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            CountingRoutes {
+                decision: route(LinkCapability::Layer3),
+                calls: Arc::clone(&route_calls),
+            },
+            CountingNeighbors::default(),
+            UnsupportedPacketIo,
+            TrafficPolicy::default(),
+        );
+        let target = "private.example".parse::<LiveTarget>().unwrap();
+        let request = packet(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::UNSPECIFIED, 12_345, 9);
+
+        let error = client
+            .plan_target(
+                &request,
+                &target,
+                &resolver,
+                &PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    ..PlanOptions::default()
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClientError::Target(TargetResolutionError::Policy(
+                TrafficPolicyError::HostnameResolution { .. }
+            ))
+        ));
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn every_resolution_reauthorizes_all_addresses_before_route_use() {
+        let resolver_calls = Arc::new(AtomicUsize::new(0));
+        let route_calls = Arc::new(AtomicUsize::new(0));
+        let private = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let public = IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8));
+        let resolver = RecordingHostnameResolver {
+            calls: Arc::clone(&resolver_calls),
+            results: Arc::new(Mutex::new(VecDeque::from([
+                vec![private],
+                vec![private, public],
+            ]))),
+        };
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            CountingRoutes {
+                decision: route(LinkCapability::Layer3),
+                calls: Arc::clone(&route_calls),
+            },
+            CountingNeighbors::default(),
+            UnsupportedPacketIo,
+            TrafficPolicy {
+                allow_hostname_resolution: true,
+                ..TrafficPolicy::default()
+            },
+        );
+        let target = "changing.example".parse::<LiveTarget>().unwrap();
+        let request = packet(Ipv4Addr::new(10, 0, 0, 1), Ipv4Addr::UNSPECIFIED, 12_345, 9);
+        let options = PlanOptions {
+            link_mode: LinkMode::Layer3,
+            ..PlanOptions::default()
+        };
+
+        let (first, _) = client
+            .plan_target(&request, &target, &resolver, &options)
+            .unwrap();
+        assert_eq!(first.addresses(), &[private]);
+        let error = client
+            .plan_target(&request, &target, &resolver, &options)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClientError::Target(TargetResolutionError::Policy(
+                TrafficPolicyError::PublicDestination { destination }
+            )) if destination == public
+        ));
+        assert_eq!(resolver_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(route_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn hostname_and_live_error_classifications_are_stable() {
+        assert!("EXAMPLE.test.".parse::<Hostname>().is_ok());
+        for invalid in ["", "bad label.example", "-bad.example", "bad-.example"] {
+            assert!(matches!(
+                invalid.parse::<Hostname>(),
+                Err(TargetResolutionError::InvalidHostname { .. })
+            ));
+        }
+        assert_eq!(
+            LiveIoError::Privilege {
+                message: "denied".to_owned(),
+            }
+            .classification()
+            .exit_code(),
+            4
+        );
+        assert_eq!(
+            LiveIoError::PartialSend {
+                expected: 10,
+                actual: 9,
+            }
+            .classification()
+            .code,
+            "io.partial_send"
+        );
+        assert_eq!(
+            LiveIoError::InvalidSendReport {
+                bytes_sent: 1,
+                wire_bytes: 2,
+            }
+            .classification()
+            .exit_code(),
+            70
+        );
+        assert_eq!(
+            crate::io::NativeRouteError::Unsupported {
+                message: "disabled".to_owned(),
+            }
+            .classification()
+            .code,
+            "capability.route"
+        );
+        assert_eq!(
+            NeighborError::Io {
+                interface: "test0".to_owned(),
+                target: IpAddr::V4(Ipv4Addr::LOCALHOST),
+                operation: "opening capture",
+                source: LiveIoError::MissingDependency {
+                    dependency: "test backend",
+                    message: "missing".to_owned(),
+                },
+            }
+            .classification()
+            .exit_code(),
+            4
+        );
+    }
+
+    #[test]
+    fn aggregate_capture_retention_uses_one_frame_ceiling() {
+        let mut frames = 0;
+        let mut bytes = 0;
+        let mut diagnostics = Vec::new();
+        assert!(reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            10,
+            1,
+            100,
+            &mut diagnostics,
+        ));
+        assert!(!reserve_capture_evidence(
+            &mut frames,
+            &mut bytes,
+            10,
+            1,
+            100,
+            &mut diagnostics,
+        ));
+        assert_eq!((frames, bytes), (1, 10));
+        assert!(diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.capture_frame_limit"));
+    }
+
+    #[test]
+    fn capture_queue_limits_fail_closed_at_zero_and_stable_maxima() {
         assert_eq!(
             CaptureQueueLimits::default().validate().unwrap(),
             CaptureQueueLimits::default()
@@ -1617,6 +2365,38 @@ mod tests {
             ));
         }
 
+        for (field, limits) in [
+            (
+                "max_frames",
+                CaptureQueueLimits {
+                    max_frames: DEFAULT_CAPTURE_QUEUE_FRAMES + 1,
+                    ..CaptureQueueLimits::default()
+                },
+            ),
+            (
+                "max_bytes",
+                CaptureQueueLimits {
+                    max_bytes: DEFAULT_CAPTURE_QUEUE_BYTES + 1,
+                    ..CaptureQueueLimits::default()
+                },
+            ),
+            (
+                "snap_length",
+                CaptureQueueLimits {
+                    snap_length: crate::io::DEFAULT_CAPTURE_SIZE_LIMIT + 1,
+                    ..CaptureQueueLimits::default()
+                },
+            ),
+        ] {
+            assert!(matches!(
+                limits.validate(),
+                Err(LiveIoError::InvalidCaptureQueueLimit {
+                    field: actual,
+                    ..
+                }) if actual == field
+            ));
+        }
+
         assert!(matches!(
             CaptureQueueLimits {
                 max_frames: usize::MAX,
@@ -1626,7 +2406,7 @@ mod tests {
             }
             .validate(),
             Err(LiveIoError::InvalidCaptureQueueLimit {
-                field: "max_frames * snap_length",
+                field: "max_frames",
                 ..
             })
         ));
@@ -1642,6 +2422,56 @@ mod tests {
                 ..
             })
         ));
+    }
+
+    #[test]
+    fn invalid_exchange_limits_fail_before_route_or_live_side_effects() {
+        let route_calls = Arc::new(AtomicUsize::new(0));
+        let neighbors = CountingNeighbors::default();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let io = FakeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        };
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            CountingRoutes {
+                decision: route(LinkCapability::Layer3),
+                calls: Arc::clone(&route_calls),
+            },
+            neighbors.clone(),
+            io,
+            TrafficPolicy::default(),
+        );
+        let template = PacketTemplate::new(packet(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+            12_345,
+            9,
+        ));
+
+        for options in [
+            ExchangeOptions {
+                max_capture_queue_frames: 1,
+                max_responses: 2,
+                ..ExchangeOptions::default()
+            },
+            ExchangeOptions {
+                timeout: MAX_EXCHANGE_TIMEOUT + Duration::from_nanos(1),
+                ..ExchangeOptions::default()
+            },
+        ] {
+            assert!(matches!(
+                client.exchange(&template, options),
+                Err(ClientError::InvalidExchangeOption { .. })
+            ));
+        }
+        assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
+        assert!(events.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -2251,6 +3081,39 @@ mod tests {
     }
 
     #[test]
+    fn changed_post_build_wire_evidence_is_an_invariant_failure() {
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            FixedRoutes(route(LinkCapability::Layer3)),
+            CountingNeighbors::default(),
+            ChangedWireIo,
+            TrafficPolicy::default(),
+        );
+        let error = client
+            .send(
+                packet(
+                    Ipv4Addr::new(10, 0, 0, 1),
+                    Ipv4Addr::new(10, 0, 0, 2),
+                    12_345,
+                    9,
+                ),
+                SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            &error,
+            ClientError::Io(LiveIoError::InvalidSendEvidence { .. })
+        ));
+        assert_eq!(error.classification().exit_code(), 70);
+    }
+
+    #[test]
     fn synthesized_ethernet_is_authorized_before_neighbor_traffic() {
         let neighbors = CountingNeighbors::default();
         let client = Client::new(
@@ -2356,16 +3219,20 @@ mod tests {
                 ..SegmentRoutingHeader::default()
             })
             .push(Udp::default());
+        let route_calls = Arc::new(AtomicUsize::new(0));
         let client = Client::new(
             Arc::new(default_registry().unwrap()),
-            FixedRoutes(RouteDecision {
-                selected_address: Some(IpAddr::V6(source)),
-                preferred_source: Some(IpAddr::V6(source)),
-                next_hop: None,
-                capability: LinkCapability::Layer3,
-                link_type: LinkType::IPV6,
-                ..route(LinkCapability::Layer3)
-            }),
+            CountingRoutes {
+                decision: RouteDecision {
+                    selected_address: Some(IpAddr::V6(source)),
+                    preferred_source: Some(IpAddr::V6(source)),
+                    next_hop: None,
+                    capability: LinkCapability::Layer3,
+                    link_type: LinkType::IPV6,
+                    ..route(LinkCapability::Layer3)
+                },
+                calls: Arc::clone(&route_calls),
+            },
             CountingNeighbors::default(),
             UnsupportedPacketIo,
             TrafficPolicy::default(),
@@ -2388,6 +3255,7 @@ mod tests {
             ClientError::Policy(TrafficPolicyError::PublicDestination { destination })
                 if destination == IpAddr::V6(final_destination)
         ));
+        assert_eq!(route_calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

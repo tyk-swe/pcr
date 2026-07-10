@@ -171,6 +171,16 @@ Exit codes are stable at the v0.2 CLI freeze:
 | 6 | Traffic-policy denial |
 | 70 | Internal invariant failure |
 
+`ClassifiedError::classification()` maps live Rust errors to a stable
+`ErrorClassification` containing a machine code, one of these exit classes,
+and optional remediation. Unsupported capability, missing native dependency,
+privilege, runtime route/capture/send, partial send, policy denial, timeout,
+and provider-invariant failures therefore do not depend on log-string parsing.
+`ClassifiedError::causes()` retains separate operation and cleanup diagnostics
+for structured output when both fail.
+Human error output escapes terminal control and bidi-control characters;
+machine output remains a JSON value and uses normal JSON string escaping.
+
 ## Rust API migration
 
 v0.1 exposed a `run_cli`-oriented façade and private fixed builders. v0.2 applications should:
@@ -184,6 +194,13 @@ v0.1 exposed a `run_cli`-oriented façade and private fixed builders. v0.2 appli
 Root `packetcraftr` reexports are the stable application import path even after internal component crates are extracted.
 
 Applications that need native Layer 2 route materialization can compose `SystemRouteProvider`, `SystemNeighborResolver`, and the typed native I/O providers. `RoutePlanner::plan` remains passive; `RoutePlanner::materialize` is the explicit boundary that may perform bounded ARP/NDP. Custom resolvers can continue implementing the legacy `NeighborResolver::resolve` method, while `resolve_request` receives interface-owned MAC/IP, next hop, VLAN, MTU, and link-type context and can return captured evidence.
+
+Hostname-capable applications should parse `LiveTarget`, inject a
+`HostnameResolver` (or use `SystemHostnameResolver`), and call
+`TrafficPolicy::resolve_target` or `Client::plan_target`. Hostname resolution
+is a separate policy opt-in. The declared name is authorized before DNS, and
+every selected address is authorized after every resolution before route
+planning. A `ResolvedTarget` cannot be constructed with unchecked fields.
 
 ## Feature migration
 

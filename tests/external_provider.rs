@@ -9,10 +9,11 @@ use std::time::Duration;
 use bytes::Bytes;
 use packetcraftr::{
     CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
-    DestinationScope, DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceId,
-    InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io,
-    LinkCapability, LinkMode, LinkType, LiveIoError, MacAddress, MaterializedRoute, PacketIo,
-    PlannedRoute, RouteDecision, RouteSelectionReason, TransmissionFrame,
+    DestinationScope, DispatchPacketIo, ExchangeIo, Hostname, HostnameResolver, InterfaceAddress,
+    InterfaceFlags, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
+    Layer2Io, Layer3Frame, Layer3Io, LinkCapability, LinkMode, LinkType, LiveIoError, LiveTarget,
+    MacAddress, MaterializedRoute, PacketIo, PlannedRoute, RouteDecision, RouteSelectionReason,
+    TargetResolutionError, TrafficPolicy, TransmissionFrame,
 };
 
 #[derive(Clone, Copy)]
@@ -70,6 +71,18 @@ impl Layer3Io for ExternalLayer3 {
 }
 
 struct ExternalCapture;
+
+struct ExternalHostnameResolver;
+
+impl HostnameResolver for ExternalHostnameResolver {
+    fn resolve(
+        &self,
+        _hostname: &Hostname,
+        _limit: usize,
+    ) -> Result<Vec<IpAddr>, TargetResolutionError> {
+        Ok(vec![IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))])
+    }
+}
 
 impl CaptureSession for ExternalCapture {
     fn wait_ready(&mut self) -> Result<(), LiveIoError> {
@@ -167,6 +180,17 @@ fn external_provider_uses_only_platform_neutral_contracts() {
     assert_compatibility_paths(&provider);
     let _: packetcraftr::client::CaptureQueueLimits = CaptureQueueLimits::default();
     let _: packetcraftr::client::SystemLayer3Io = packetcraftr::SystemLayer3Io;
+    let target = "lab.example".parse::<LiveTarget>().unwrap();
+    let resolved = TrafficPolicy {
+        allow_hostname_resolution: true,
+        ..TrafficPolicy::default()
+    }
+    .resolve_target(&target, &ExternalHostnameResolver)
+    .unwrap();
+    assert_eq!(
+        resolved.addresses(),
+        &[IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))]
+    );
 
     let bytes = Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]);
     let layer2_route = route(LinkMode::Layer2);

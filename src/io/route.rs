@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::core::{CapturedFrame, FieldValue, LinkType, Packet, ProtocolId};
+use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 
-use super::provider::CaptureStatistics;
+use super::provider::{CaptureStatistics, LiveIoError};
 
 /// Maximum explicit VLAN headers copied into a neighbor-discovery request.
 pub const MAX_NEIGHBOR_VLAN_TAGS: usize = 8;
@@ -114,6 +115,18 @@ pub trait RouteProvider: Send + Sync {
     ) -> Result<Option<RouteDecision>, Self::Error> {
         Ok(None)
     }
+
+    /// Classifies a provider-specific failure without forcing injected
+    /// providers to expose native operating-system error types. The default is
+    /// a runtime route failure; native providers override it with their exact
+    /// capability or invariant class.
+    fn classify_error(&self, _error: &Self::Error) -> ErrorClassification {
+        ErrorClassification::new(
+            "io.route",
+            FailureKind::Io,
+            Some("inspect the route table, interface selection, and provider diagnostic before retrying"),
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +215,49 @@ impl RouteProvider for SystemRouteProvider {
         interface: &InterfaceId,
     ) -> Result<Option<RouteDecision>, Self::Error> {
         super::platform::system_interface_route(interface).map(Some)
+    }
+
+    fn classify_error(&self, error: &Self::Error) -> ErrorClassification {
+        error.classification()
+    }
+}
+
+impl ClassifiedError for NativeRouteError {
+    fn classification(&self) -> ErrorClassification {
+        match self {
+            Self::Unsupported { .. } => ErrorClassification::new(
+                "capability.route",
+                FailureKind::Capability,
+                Some("enable the native-route capability on a supported target or inject a route provider"),
+            ),
+            Self::RouteNotFound { .. } => ErrorClassification::new(
+                "io.route_not_found",
+                FailureKind::Io,
+                Some("add or select a route for the destination; PacketcraftR will not fall back to another link mode"),
+            ),
+            Self::InterfaceNotFound { .. } => ErrorClassification::new(
+                "io.interface_not_found",
+                FailureKind::Io,
+                Some("select an existing interface using its current name and index"),
+            ),
+            Self::InterfaceMismatch { .. }
+            | Self::SourceFamilyMismatch { .. }
+            | Self::SourceUnavailable { .. } => ErrorClassification::new(
+                "io.route_selection",
+                FailureKind::Io,
+                Some("choose an interface-owned source and interface compatible with the destination family"),
+            ),
+            Self::InvalidResponse { .. } => ErrorClassification::new(
+                "internal.route_response",
+                FailureKind::Internal,
+                Some("report the invalid native route response; do not use it for transmission"),
+            ),
+            Self::OperatingSystem { .. } => ErrorClassification::new(
+                "io.route",
+                FailureKind::Io,
+                Some("inspect the operating-system route diagnostic and current network configuration"),
+            ),
+        }
     }
 }
 
@@ -315,6 +371,7 @@ pub enum PlanError {
     RouteLookup {
         destination: IpAddr,
         message: String,
+        failure: ErrorClassification,
     },
     #[error("packet has no IP destination and none was supplied")]
     MissingDestination,
@@ -323,7 +380,11 @@ pub enum PlanError {
     #[error("route provider cannot select interface {interface} without an IP destination")]
     InterfaceLookupUnsupported { interface: String },
     #[error("interface lookup for {interface} failed: {message}")]
-    InterfaceLookup { interface: String, message: String },
+    InterfaceLookup {
+        interface: String,
+        message: String,
+        failure: ErrorClassification,
+    },
     #[error(
         "route provider selected {selected} (index {selected_index}) instead of requested {requested} (index {requested_index})"
     )]
@@ -363,6 +424,50 @@ pub enum PlanError {
     InvalidSegmentRouting { message: String },
     #[error("packet carries an invalid neighbor-discovery VLAN stack: {message}")]
     InvalidNeighborVlan { message: String },
+}
+
+impl ClassifiedError for PlanError {
+    fn classification(&self) -> ErrorClassification {
+        match self {
+            Self::RouteLookup { failure, .. } | Self::InterfaceLookup { failure, .. } => *failure,
+            Self::MissingLayer2Interface => ErrorClassification::new(
+                "cli.interface_required",
+                FailureKind::Cli,
+                Some("select an explicit interface for a destination-free Layer 2 packet"),
+            ),
+            Self::InterfaceLookupUnsupported { .. }
+            | Self::Layer2Unsupported
+            | Self::Layer3Unsupported => ErrorClassification::new(
+                "capability.link_mode",
+                FailureKind::Capability,
+                Some("select a provider and interface that support the explicitly requested link mode"),
+            ),
+            Self::OfflineOnlyLinkHeader { .. } => ErrorClassification::new(
+                "packet.offline_link_header",
+                FailureKind::Packet,
+                Some("replace the capture-only header with a live Ethernet or raw-IP packet root"),
+            ),
+            Self::MissingDestination
+            | Self::MissingLayer2DestinationMac
+            | Self::EthernetInLayer3
+            | Self::SourceFamilyMismatch { .. }
+            | Self::PreferredSourceFamilyMismatch { .. }
+            | Self::InvalidSegmentRouting { .. }
+            | Self::InvalidNeighborVlan { .. } => ErrorClassification::new(
+                "packet.plan",
+                FailureKind::Packet,
+                Some("correct the packet destination, address family, or link-layer intent before planning again"),
+            ),
+            Self::InterfaceMismatch { .. }
+            | Self::MissingNeighborSource
+            | Self::PreferredSourceNotSelected { .. }
+            | Self::MissingPacketSource => ErrorClassification::new(
+                "internal.route_contract",
+                FailureKind::Internal,
+                Some("do not transmit with the inconsistent route result; inspect or replace the route provider"),
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -445,6 +550,7 @@ impl RoutePlanner {
                 )
                 .map_err(|source| PlanError::RouteLookup {
                     destination: lookup_destination,
+                    failure: provider.classify_error(&source),
                     message: source.to_string(),
                 })?,
             None => {
@@ -456,6 +562,7 @@ impl RoutePlanner {
                     .lookup_interface(interface)
                     .map_err(|source| PlanError::InterfaceLookup {
                         interface: interface.name.clone(),
+                        failure: provider.classify_error(&source),
                         message: source.to_string(),
                     })?
                     .ok_or_else(|| PlanError::InterfaceLookupUnsupported {
@@ -710,15 +817,73 @@ pub enum NeighborError {
     InvalidConfiguration { message: String },
     #[error("neighbor resolver state failed: {message}")]
     State { message: String },
+    #[error("neighbor resolution for {target} on {interface} failed while {operation}: {source}")]
+    Io {
+        interface: String,
+        target: IpAddr,
+        operation: &'static str,
+        source: LiveIoError,
+    },
+    #[error("neighbor resolution for {target} on {interface} completed but capture cleanup failed: {source}")]
+    Cleanup {
+        interface: String,
+        target: IpAddr,
+        source: LiveIoError,
+    },
     #[error(
         "neighbor resolution for {target} on {interface} failed and capture cleanup also failed: operation={operation}; cleanup={cleanup}"
     )]
     OperationAndCleanup {
         interface: String,
         target: IpAddr,
-        operation: String,
-        cleanup: String,
+        operation: Box<NeighborError>,
+        cleanup: LiveIoError,
     },
+}
+
+impl ClassifiedError for NeighborError {
+    fn classification(&self) -> ErrorClassification {
+        match self {
+            Self::Io { source, .. } | Self::Cleanup { source, .. } => source.classification(),
+            Self::OperationAndCleanup { operation, .. } => operation.classification(),
+            Self::NotFound { .. } => ErrorClassification::new(
+                "io.neighbor_timeout",
+                FailureKind::Io,
+                Some("inspect the selected gateway, VLAN, and interface; the finite neighbor-resolution budget was exhausted"),
+            ),
+            Self::Resolution { .. } => ErrorClassification::new(
+                "io.neighbor",
+                FailureKind::Io,
+                Some("inspect the correlated ARP/NDP evidence and selected logical link before retrying"),
+            ),
+            Self::InvalidConfiguration { .. } => ErrorClassification::new(
+                "cli.neighbor_limit",
+                FailureKind::Cli,
+                Some("use finite non-zero neighbor attempts, timeouts, cache limits, and capture bounds"),
+            ),
+            Self::MissingSourceMac { .. }
+            | Self::MissingNeighborTarget { .. }
+            | Self::MissingNeighborSource { .. }
+            | Self::InvalidRequest { .. }
+            | Self::State { .. } => ErrorClassification::new(
+                "internal.neighbor_invariant",
+                FailureKind::Internal,
+                Some("do not transmit with the incomplete neighbor request or inconsistent resolver state"),
+            ),
+        }
+    }
+
+    fn causes(&self) -> Vec<String> {
+        match self {
+            Self::Io { source, .. } | Self::Cleanup { source, .. } => {
+                vec![source.to_string()]
+            }
+            Self::OperationAndCleanup {
+                operation, cleanup, ..
+            } => vec![operation.to_string(), cleanup.to_string()],
+            _ => Vec::new(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

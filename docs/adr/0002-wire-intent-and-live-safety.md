@@ -32,6 +32,13 @@ The builder has two modes:
 
 A permissively built packet is marked as requiring live opt-in. A live operation must receive a separate explicit authorization for malformed transmission; selecting permissive build mode does not satisfy that requirement. Traffic policy can still deny the operation.
 
+Names and addresses have separate authorization boundaries. A live hostname is
+validated against the label/name bounds from [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035) and the host syntax update in [RFC 1123](https://www.rfc-editor.org/rfc/rfc1123), then authorized before invoking DNS. Resolution is bounded, and every
+distinct selected address is authorized before route planning. Re-resolution
+repeats both stages against current policy. The opaque `ResolvedTarget` token
+can only be produced by that sequence, so a public address returned after an
+initially acceptable name cannot be used implicitly.
+
 The same principle applies to link intent. Explicit Ethernet or VLAN layers force Layer 2. Layer 3 mode with an Ethernet layer is an error. Neighbor-resolution failure cannot change the link mode. Unsupported combinations are typed errors or explicit raw layers, never relabeled payloads. When an IP-root packet explicitly requests Layer 2, the reported Ethernet envelope is inserted into the packet before the preliminary build. Traffic-policy byte accounting therefore covers the complete frame before neighbor discovery, and neighbor materialization may change only fixed-width address fields.
 
 ## Consequences
@@ -44,6 +51,7 @@ The same principle applies to link intent. Explicit Ethernet or VLAN layers forc
 - Opaque unknown protocol bytes remain round-trippable without letting a known typed discriminator evade its codec's validation.
 - Live clients must propagate build provenance and cannot accept a bare byte buffer as evidence that malformed transmission was authorized.
 - Live policy limits account for the exact Layer 2 frame rather than only its network-layer payload.
+- Hostname-capable workflows cannot use resolution or rebinding to move policy checks after route or network side effects.
 - Fuzzing can recalculate all automatic fields except fields selected as mutation targets.
 
 ## Alternatives considered

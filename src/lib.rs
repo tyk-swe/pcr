@@ -25,6 +25,7 @@
 
 pub mod client;
 pub mod core;
+pub mod error;
 pub mod io;
 pub mod protocols;
 pub mod session;
@@ -32,9 +33,11 @@ pub mod tools;
 mod v2_cli;
 
 pub use client::{
-    Client, ClientError, ExchangeOptions, ExchangeResult, MatchedResponse, OperationStats,
-    SendOptions, SendReport, TrafficPolicy, TrafficPolicyError, UnsupportedNeighborResolver,
-    UnsupportedPacketIo, DEFAULT_MAX_UNSOLICITED_FRAMES,
+    Client, ClientError, ExchangeOptions, ExchangeResult, Hostname, HostnameResolver, LiveTarget,
+    MatchedResponse, OperationStats, ResolvedTarget, SendOptions, SendReport,
+    SystemHostnameResolver, TargetResolutionError, TrafficPolicy, TrafficPolicyError,
+    UnsupportedNeighborResolver, UnsupportedPacketIo, DEFAULT_MAX_RESOLVED_ADDRESSES,
+    DEFAULT_MAX_UNSOLICITED_FRAMES, MAX_EXCHANGE_TIMEOUT, MAX_RESOLVED_ADDRESSES,
 };
 pub use core::{
     BuildContext, BuildError, BuildMode, BuildOptions, Builder, BuiltPacket, ByteRange, CodecError,
@@ -46,6 +49,10 @@ pub use core::{
     PacketLayout, PacketTemplate, PacketTemplateIter, PacketTransform, Padding, ProtocolId,
     ProtocolModule, ProtocolRegistry, Raw, RegistryBuilder, RegistryError, ResponseMatcher,
     TemplateError, TemplateValues, WireValue,
+};
+pub use error::{
+    ClassifiedError, ErrorClassification, FailureKind, EXIT_CAPABILITY, EXIT_CLI, EXIT_INTERNAL,
+    EXIT_IO, EXIT_PACKET, EXIT_POLICY,
 };
 pub use io::{
     ActiveNeighborResolver, CaptureDirection, CaptureError, CaptureFileFormat,
@@ -60,7 +67,8 @@ pub use io::{
     RouteSelectionReason, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider,
     SystemLayer2Io, SystemLayer3Io, SystemNeighborResolver, SystemRouteProvider, TransmissionFrame,
     DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT,
-    DEFAULT_PCAPNG_INTERFACE_LIMIT, DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT, MAX_NEIGHBOR_VLAN_TAGS,
+    DEFAULT_PCAPNG_INTERFACE_LIMIT, DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT, MAX_CAPTURE_TIMEOUT,
+    MAX_NEIGHBOR_VLAN_TAGS,
 };
 pub use protocols::{
     default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, DestinationOptions, Ethernet,

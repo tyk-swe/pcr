@@ -193,3 +193,26 @@ fn closed_stdout_is_a_runtime_io_error_without_a_panic() {
     assert!(stderr.contains("write stdout failed"), "{stderr}");
     assert!(!stderr.contains("panicked"), "{stderr}");
 }
+
+#[test]
+fn text_errors_escape_terminal_controls_while_json_stays_structured() {
+    let path = "missing-\u{1b}[31m-\n-packet.bin";
+    let text = binary().args(["dissect", "--file", path]).output().unwrap();
+    assert_eq!(text.status.code(), Some(2));
+    assert!(!text.stderr.contains(&0x1b));
+    let rendered = String::from_utf8(text.stderr).unwrap();
+    assert!(rendered.contains("\\u{1b}"), "{rendered:?}");
+    assert!(rendered.contains("\\n"), "{rendered:?}");
+
+    let machine = binary()
+        .args(["--output", "json", "dissect", "--file", path])
+        .output()
+        .unwrap();
+    assert_eq!(machine.status.code(), Some(2));
+    assert!(!machine.stdout.contains(&0x1b));
+    let value: serde_json::Value = serde_json::from_slice(&machine.stdout).unwrap();
+    let message = value["error"]["message"].as_str().unwrap();
+    assert!(message.contains('\u{1b}'));
+    assert!(message.contains('\n'));
+    assert_eq!(value["error"]["kind"], "cli");
+}

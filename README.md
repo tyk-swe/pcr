@@ -131,6 +131,7 @@ Packet construction and transmission can disrupt networks or violate policy. Onl
 The v0.2 contracts are:
 
 - Planning may inspect local route and interface state, but never performs ARP, NDP, capture, or transmission.
+- A hostname is policy-authorized before resolver or route side effects. Every distinct address selected by each resolution or re-resolution is then policy-authorized before route use; hostname resolution is disabled by default.
 - Ethernet/VLAN intent never silently falls back to Layer 3.
 - Off-link neighbor resolution targets the route gateway, not the final destination.
 - Complete non-IP Layer 2 packets use passive, explicit-interface selection; they do not invent an IP route or trigger neighbor resolution.
@@ -147,6 +148,7 @@ The v0.2 contracts are:
 - Route MTU checks measure the actual built network-layer byte span instead of trusting permissive wire length fields. Oversized packets fail before neighbor discovery or live I/O and require an explicit fragmentation transform.
 - Capture is ready before an exchange sends its first frame, and one owned receive stream routes every frame rather than silently draining traffic.
 - Exchange always attempts to stop and join its capture session after readiness, send, receive, or timeout failures. If the operation and cleanup both fail, both errors remain visible.
+- Public live errors carry a stable machine code, one of the documented CLI exit classes, and actionable remediation. Text rendering escapes terminal controls; JSON retains the structured value through JSON escaping.
 - Unsupported link types and unknown payloads remain explicit raw data; unsupported combinations produce typed errors.
 - Display truncation never truncates the captured bytes stored in a result.
 
@@ -161,8 +163,10 @@ Default resource ceilings are intentionally finite:
 | PCAPNG interfaces per section | 4,096 |
 | PCAPNG metadata blocks before the next packet | 4,096 |
 | Concrete packets per template expansion | 10,000 |
+| Distinct addresses per hostname resolution | 64 (configurable to 4,096) |
 | Backend capture queue frames (aggregate) | 4,096 |
 | Retained captured bytes per exchange | 256 MiB |
+| Exchange reply timeout | 3 seconds (maximum 1 hour) |
 | Active neighbor attempts / timeout per attempt | 3 / 1 second |
 | Active neighbor evidence frames / bytes | 256 / 1 MiB |
 | Active neighbor cache entries / lifetime | 4,096 / 30 seconds |
@@ -177,8 +181,10 @@ Default resource ceilings are intentionally finite:
 All parsers and queues must use checked arithmetic, honor configurable bounds, and fail closed.
 The `capture` and `exchange` command grammar reserves `--max-queue-frames`,
 `--max-captured-bytes`, `--snap-length`, and `--overflow-policy`. The queue
-frame bound is one aggregate backend limit; response and unsolicited retention
-classes do not add together to increase it. The default overflow policy fails
+frame bound is one aggregate backend and retained-evidence limit; response,
+unsolicited, and undecodable classes share it rather than adding together. The
+stable maxima are 4,096 frames, 256 MiB aggregate bytes, and 16 MiB per frame;
+invalid values fail before route or live-I/O side effects. The default overflow policy fails
 the operation. Explicit `drop-newest` and `drop-oldest` policies must report
 received, dropped, byte, and overflow counters, and any loss is surfaced in
 structured diagnostics and operation statistics.

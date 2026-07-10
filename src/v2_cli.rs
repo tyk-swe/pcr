@@ -19,6 +19,7 @@ use crate::core::{
     Dissector, DocumentFormat, ExpressionOptions, Packet, PacketDocument,
     DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_LAYERS,
 };
+use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 use crate::io::{CaptureReader, CapturedFrame, LinkType};
 
 pub(crate) const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
@@ -162,7 +163,8 @@ pub(crate) fn run_entrypoint() -> ExitCode {
             let code = if error.use_stderr() { 2 } else { 0 };
             if code != 0 && env_requests_json() {
                 let message = error.to_string();
-                let envelope = error_envelope(command_from_env(), code, &message);
+                let error = CliError::new(code, message);
+                let envelope = error_envelope(command_from_env(), &error);
                 return match emit_json(&envelope) {
                     Ok(()) => exit_code(code),
                     Err(write_error) => {
@@ -171,10 +173,17 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                     }
                 };
             }
-            return if error.print().is_ok() {
-                exit_code(code)
+            return if code == 0 {
+                if error.print().is_ok() {
+                    ExitCode::SUCCESS
+                } else {
+                    exit_code(5)
+                }
             } else {
-                exit_code(5)
+                match emit_stderr_message(&error.to_string()) {
+                    Ok(()) => exit_code(code),
+                    Err(_) => exit_code(5),
+                }
             };
         }
     };
@@ -185,7 +194,7 @@ pub(crate) fn run_entrypoint() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             if output == OutputFormat::Json {
-                let envelope = error_envelope(Some(command), error.code, &error.message);
+                let envelope = error_envelope(Some(command), &error);
                 let emitted = if streaming {
                     emit_json_compact(&envelope)
                 } else {
@@ -423,7 +432,7 @@ fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
         return Err(CliError::new(2, "interfaces supports text or JSON output"));
     }
     let interfaces = crate::io::InterfaceProvider::interfaces(&crate::io::SystemInterfaceProvider)
-        .map_err(|error| CliError::new(4, error.to_string()))?;
+        .map_err(CliError::classified)?;
     if output == OutputFormat::Json {
         let values = interfaces
             .iter()
@@ -604,19 +613,24 @@ fn spaced_hex(bytes: &[u8]) -> String {
 fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
     let rendered = serde_json::to_string_pretty(value)
         .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
-    write_stdout_line(format_args!("{rendered}"))
+    write_machine_line(&rendered)
 }
 
 fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> {
     let rendered = serde_json::to_string(value)
         .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
-    write_stdout_line(format_args!("{rendered}"))
+    write_machine_line(&rendered)
 }
 
 fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
+    let rendered = terminal_safe(&arguments.to_string());
+    write_machine_line(&rendered)
+}
+
+fn write_machine_line(rendered: &str) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
-        .write_fmt(arguments)
+        .write_all(rendered.as_bytes())
         .and_then(|()| stdout.write_all(b"\n"))
         .and_then(|()| stdout.flush())
         .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
@@ -624,9 +638,43 @@ fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError>
 
 fn emit_stderr_error(message: &str) -> Result<(), CliError> {
     let mut stderr = io::stderr().lock();
-    writeln!(stderr, "error: {message}")
+    writeln!(stderr, "error: {}", terminal_safe(message))
         .and_then(|()| stderr.flush())
         .map_err(|source| CliError::new(5, format!("write stderr failed: {source}")))
+}
+
+fn emit_stderr_message(message: &str) -> Result<(), CliError> {
+    let mut stderr = io::stderr().lock();
+    writeln!(stderr, "{}", terminal_safe(message))
+        .and_then(|()| stderr.flush())
+        .map_err(|source| CliError::new(5, format!("write stderr failed: {source}")))
+}
+
+fn terminal_safe(value: &str) -> String {
+    let mut safe = String::with_capacity(value.len());
+    for character in value.chars() {
+        match character {
+            '\n' => safe.push_str("\\n"),
+            '\r' => safe.push_str("\\r"),
+            '\t' => safe.push_str("\\t"),
+            character
+                if character.is_control()
+                    || matches!(
+                        character,
+                        '\u{061c}'
+                            | '\u{200b}'..='\u{200f}'
+                            | '\u{202a}'..='\u{202e}'
+                            | '\u{2060}'..='\u{206f}'
+                            | '\u{feff}'
+                    ) =>
+            {
+                use std::fmt::Write as _;
+                let _ = write!(safe, "\\u{{{:x}}}", character as u32);
+            }
+            character => safe.push(character),
+        }
+    }
+    safe
 }
 
 fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
@@ -641,37 +689,67 @@ fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
 struct CliError {
     code: u8,
     message: String,
+    classification: ErrorClassification,
+    causes: Vec<String>,
 }
 
 impl CliError {
     fn new(code: u8, message: impl Into<String>) -> Self {
+        let kind = match code {
+            2 => FailureKind::Cli,
+            3 => FailureKind::Packet,
+            4 => FailureKind::Capability,
+            5 => FailureKind::Io,
+            6 => FailureKind::Policy,
+            _ => FailureKind::Internal,
+        };
         Self {
             code,
             message: message.into(),
+            classification: ErrorClassification::new(
+                match kind {
+                    FailureKind::Cli => "cli.error",
+                    FailureKind::Packet => "packet.error",
+                    FailureKind::Capability => "capability.unavailable",
+                    FailureKind::Io => "io.runtime",
+                    FailureKind::Policy => "policy.denied",
+                    FailureKind::Internal => "internal.error",
+                },
+                kind,
+                None,
+            ),
+            causes: Vec::new(),
+        }
+    }
+
+    fn classified(error: impl ClassifiedError + std::fmt::Display) -> Self {
+        let classification = error.classification();
+        let causes = error.causes();
+        Self {
+            code: classification.exit_code(),
+            message: error.to_string(),
+            classification,
+            causes,
         }
     }
 }
 
-fn error_envelope(command: Option<&str>, code: u8, message: &str) -> serde_json::Value {
-    let kind = match code {
-        2 => "cli",
-        3 => "packet",
-        4 => "capability",
-        5 => "io",
-        6 => "policy",
-        _ => "internal",
-    };
+fn error_envelope(command: Option<&str>, error: &CliError) -> serde_json::Value {
+    let mut error_value = json!({
+        "code": error.classification.code,
+        "kind": error.classification.kind.as_str(),
+        "message": error.message,
+        "causes": error.causes,
+    });
+    if let Some(remediation) = error.classification.remediation {
+        error_value["remediation"] = json!(remediation);
+    }
     json!({
         "schema": OUTPUT_SCHEMA_V1,
         "command": command,
         "status": "error",
         "diagnostics": [],
-        "error": {
-            "code": format!("{kind}.{code}"),
-            "kind": kind,
-            "message": message,
-            "causes": [],
-        }
+        "error": error_value,
     })
 }
 
@@ -733,5 +811,40 @@ mod tests {
     fn whole_frame_hex_is_not_truncated() {
         let bytes = (0u8..=255).collect::<Vec<_>>();
         assert_eq!(compact_hex(&bytes).len(), 512);
+    }
+
+    #[test]
+    fn terminal_text_escapes_controls_and_directional_overrides() {
+        let safe = terminal_safe("line\n\u{1b}[31m\u{202e}tail");
+        assert_eq!(safe, "line\\n\\u{1b}[31m\\u{202e}tail");
+        assert!(!safe.chars().any(char::is_control));
+    }
+
+    #[test]
+    fn classified_live_errors_use_the_frozen_cli_exit_contract() {
+        let capability = CliError::classified(crate::io::LiveIoError::Privilege {
+            message: "permission denied".to_owned(),
+        });
+        assert_eq!(capability.code, 4);
+        assert_eq!(capability.classification.code, "capability.privilege");
+
+        let runtime = CliError::classified(crate::io::LiveIoError::PartialSend {
+            expected: 10,
+            actual: 9,
+        });
+        assert_eq!(runtime.code, 5);
+        assert_eq!(runtime.classification.code, "io.partial_send");
+
+        let dual = CliError::classified(crate::ClientError::OperationAndCaptureShutdown {
+            operation: crate::io::LiveIoError::Send {
+                message: "send failed".to_owned(),
+            },
+            shutdown: crate::io::LiveIoError::Capture {
+                message: "join failed".to_owned(),
+            },
+        });
+        assert_eq!(dual.causes.len(), 2);
+        let envelope = error_envelope(Some("exchange"), &dual);
+        assert_eq!(envelope["error"]["causes"].as_array().unwrap().len(), 2);
     }
 }

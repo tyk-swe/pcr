@@ -13,6 +13,11 @@ Packet documents deliberately do not enumerate protocols or field names. A `Prot
 
 An output success envelope contains `result` and no `error`; an error envelope contains `error` and no `result`. Each line emitted by an NDJSON command is a complete `packetcraftr.output/v1` object and uses `sequence` to preserve stream order. `diagnostics` is always an array, including when empty. When `stats` is present, its required `capture` object reports received and dropped frames/bytes plus queue-overflow events; non-zero loss is also represented by a diagnostic or a typed error according to the selected overflow policy.
 
+Error objects use stable machine `code` and broad `kind` values matching the
+documented exit classes. A classified live failure may add a non-empty
+`remediation` string. JSON escaping preserves control-bearing source values for
+machines; terminal-safe text rendering is a separate presentation rule.
+
 Examples are in [examples/documents](../examples/documents). Validate them with a draft 2020-12 implementation, for example:
 
 ```console

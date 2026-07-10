@@ -11,6 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 
+use super::super::provider::validate_capture_timeout;
 use crate::io::{
     CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
     InterfaceId, LinkType, LiveIoError,
@@ -118,7 +119,10 @@ impl CaptureSession for NativeCaptureSession {
     }
 
     fn next_frame(&mut self, timeout: Duration) -> Result<Option<CapturedFrame>, LiveIoError> {
-        let deadline = Instant::now().checked_add(timeout);
+        validate_capture_timeout(timeout)?;
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .expect("validated bounded capture timeout must fit Instant");
         let mut state = self.shared.lock()?;
         loop {
             if let Some(error) = state.error.clone() {
@@ -137,9 +141,6 @@ impl CaptureSession for NativeCaptureSession {
             if state.closed || timeout.is_zero() {
                 return Ok(None);
             }
-            let Some(deadline) = deadline else {
-                return Ok(None);
-            };
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
                 return Ok(None);
             };

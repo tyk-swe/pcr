@@ -23,6 +23,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added native Layer 2 capture and injection behind `native-layer2`: libpcap on Linux/macOS and a securely runtime-loaded, pinned Npcap ABI on Windows x86_64 MSVC. Capture sessions own their worker and handle, expose an explicit readiness barrier, enforce frame/byte queue bounds, preserve native timestamps/link types/interface metadata and complete captured bytes, report native/queue loss, and join every shutdown path.
 - Added injectable and system-composed active neighbor resolution with gateway-aware IPv4 ARP and IPv6 NDP, exact VLAN/interface correlation, finite attempts and timeouts, bounded captured evidence, joined capture cleanup, and a bounded finite-lifetime cache.
 - Added `native-layer3` and `SystemLayer3Io` raw IPv4/IPv6 transmission on Linux, macOS, and Windows with route-selected path binding, exact-frame validation, typed platform/privilege failures, and complete-write reporting.
+- Added a stable `ClassifiedError` taxonomy for live capability, dependency, privilege, policy, timeout/runtime I/O, partial-send, and invariant failures, including CLI exit classes and remediation.
+- Added policy-gated, bounded, injectable hostname resolution through `LiveTarget`, `HostnameResolver`, and opaque `ResolvedTarget` values.
 
 ### Changed
 
@@ -39,6 +41,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Exchange passes frame-count, aggregate-byte, and snap-length limits to capture backends and retains bounded decode failures as complete raw capture records for packet evidence.
 - Live backends must report a complete send and internally consistent optional wire bytes. Partial sends are typed failures, and exchange preserves both the operation and capture-shutdown errors when both occur.
 - Raw Layer 3 sends reject route/destination/MTU mismatches and IPv4 values that a target kernel would rewrite. macOS converts only its private submission copy's length/fragment fields to host order while retaining the final built bytes as wire evidence.
+- Exchange validates timeout and capture/retention limits before route or live side effects, and all retained evidence classes share one aggregate frame ceiling.
+- Human CLI output escapes terminal and bidi controls while JSON preserves structured strings through JSON escaping.
 
 ### Fixed
 
@@ -54,6 +58,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Rejected inconsistent capture-record lengths before dissection, prior fragments extending beyond a later final datagram length, and unbounded sparse TCP segment queues; TCP sequence tracking now remains bounded across the 32-bit wrap boundary.
 - Retained a bounded tail of emitted TCP bytes so contradictory retransmissions remain detectable without unbounded flow memory, with the history charged to per-flow and aggregate limits.
 - Added checked PCAPNG `if_tsoffset` writing so explicitly offset interfaces round-trip valid pre-Unix-epoch timestamps in either byte order.
+- Preserved typed native I/O causes through neighbor resolution and preserved both operation and cleanup errors without flattening either into incidental text.
 
 ### Removed
 

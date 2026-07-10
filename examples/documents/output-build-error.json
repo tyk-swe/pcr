@@ -3,7 +3,7 @@
   "command": "build",
   "status": "error",
   "error": {
-    "code": "packet.3",
+    "code": "packet.error",
     "kind": "packet",
     "message": "layer ethernet cannot contain adjacent layer udp",
     "causes": []

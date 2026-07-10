@@ -10,6 +10,8 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
+
 use super::{
     CapturedFrame, InterfaceId, LinkCapability, LinkMode, LinkType, MacAddress, MaterializedRoute,
     PlannedRoute, DEFAULT_CAPTURE_SIZE_LIMIT,
@@ -19,6 +21,8 @@ use super::{
 pub const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
 /// Aggregate backend capture-queue byte capacity used by default.
 pub const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
+/// Maximum blocking wait accepted by an owned capture session.
+pub const MAX_CAPTURE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// One address assigned to an interface, without any operating-system type in
 /// the public provider boundary.
@@ -343,6 +347,19 @@ impl CaptureQueueLimits {
                 });
             }
         }
+        for (field, value, maximum) in [
+            ("max_frames", self.max_frames, DEFAULT_CAPTURE_QUEUE_FRAMES),
+            ("max_bytes", self.max_bytes, DEFAULT_CAPTURE_QUEUE_BYTES),
+            ("snap_length", self.snap_length, DEFAULT_CAPTURE_SIZE_LIMIT),
+        ] {
+            if value > maximum {
+                return Err(LiveIoError::InvalidCaptureQueueLimit {
+                    field,
+                    value,
+                    reason: "exceeds the stable configured maximum",
+                });
+            }
+        }
         if self.snap_length > self.max_bytes {
             return Err(LiveIoError::InvalidCaptureQueueLimit {
                 field: "snap_length",
@@ -359,6 +376,22 @@ impl CaptureQueueLimits {
         )?;
         Ok(self)
     }
+}
+
+pub(crate) fn validate_capture_timeout(timeout: Duration) -> Result<(), LiveIoError> {
+    if timeout > MAX_CAPTURE_TIMEOUT {
+        return Err(LiveIoError::InvalidCaptureTimeout {
+            timeout,
+            maximum: MAX_CAPTURE_TIMEOUT,
+        });
+    }
+    std::time::Instant::now()
+        .checked_add(timeout)
+        .map(|_| ())
+        .ok_or(LiveIoError::InvalidCaptureTimeout {
+            timeout,
+            maximum: MAX_CAPTURE_TIMEOUT,
+        })
 }
 
 /// Starts an owned capture stream using platform-neutral route and limit data.
@@ -390,6 +423,7 @@ impl CaptureSession for SystemCaptureSession {
     }
 
     fn next_frame(&mut self, timeout: Duration) -> Result<Option<CapturedFrame>, LiveIoError> {
+        validate_capture_timeout(timeout)?;
         self.inner.next_frame(timeout)
     }
 
@@ -462,6 +496,8 @@ pub enum LiveIoError {
         bytes_sent: usize,
         wire_bytes: usize,
     },
+    #[error("packet transmission wire evidence is inconsistent: {message}")]
+    InvalidSendEvidence { message: String },
     #[error("Layer 2 envelope synthesis failed: {message}")]
     Encapsulation { message: String },
     #[error("raw Layer 3 frame is invalid for native transmission: {message}")]
@@ -470,6 +506,11 @@ pub enum LiveIoError {
     Capture { message: String },
     #[error("capture did not become ready: {message}")]
     CaptureReadiness { message: String },
+    #[error("capture timeout {timeout:?} is invalid; maximum is {maximum:?}")]
+    InvalidCaptureTimeout {
+        timeout: Duration,
+        maximum: Duration,
+    },
     #[error("invalid capture queue limit {field}={value}: {reason}")]
     InvalidCaptureQueueLimit {
         field: &'static str,
@@ -486,4 +527,109 @@ pub enum LiveIoError {
     },
     #[error("capture backend returned invalid statistics: {message}")]
     InvalidCaptureStatistics { message: String },
+}
+
+impl ClassifiedError for LiveIoError {
+    fn classification(&self) -> ErrorClassification {
+        match self {
+            Self::Unsupported { .. } => ErrorClassification::new(
+                "capability.unsupported",
+                FailureKind::Capability,
+                Some("enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically"),
+            ),
+            Self::MissingDependency { .. } => ErrorClassification::new(
+                "capability.missing_dependency",
+                FailureKind::Capability,
+                Some("install the named native dependency from its trusted platform source and retry"),
+            ),
+            Self::Privilege { .. } => ErrorClassification::new(
+                "capability.privilege",
+                FailureKind::Capability,
+                Some("grant the minimum raw-socket or capture permission required by the selected platform adapter"),
+            ),
+            Self::InterfaceDiscovery { .. } => ErrorClassification::new(
+                "io.interface_discovery",
+                FailureKind::Io,
+                Some("inspect the operating-system interface state and retry with an available interface"),
+            ),
+            Self::Device { .. } => ErrorClassification::new(
+                "io.device",
+                FailureKind::Io,
+                Some("select an existing, enabled interface that supports the requested link mode"),
+            ),
+            Self::Send { .. } => ErrorClassification::new(
+                "io.send",
+                FailureKind::Io,
+                Some("inspect the selected route, interface state, and platform socket restrictions before retrying"),
+            ),
+            Self::PartialSend { .. } => ErrorClassification::new(
+                "io.partial_send",
+                FailureKind::Io,
+                Some("treat the operation as incomplete; do not retry without accounting for the attempted transmission"),
+            ),
+            Self::Capture { .. } => ErrorClassification::new(
+                "io.capture",
+                FailureKind::Io,
+                Some("inspect the capture device state and native backend diagnostic before retrying"),
+            ),
+            Self::CaptureReadiness { .. } => ErrorClassification::new(
+                "io.capture_readiness",
+                FailureKind::Io,
+                Some("fix capture startup before transmitting; capture-before-send readiness cannot be bypassed"),
+            ),
+            Self::CaptureQueueOverflow { .. } => ErrorClassification::new(
+                "io.capture_overflow",
+                FailureKind::Io,
+                Some("treat the capture as incomplete or explicitly select a lossy overflow policy with visible statistics"),
+            ),
+            Self::InvalidCaptureQueueLimit { .. } => ErrorClassification::new(
+                "cli.capture_limit",
+                FailureKind::Cli,
+                Some("use non-zero capture limits whose snap length fits the aggregate byte ceiling"),
+            ),
+            Self::InvalidCaptureTimeout { .. } => ErrorClassification::new(
+                "cli.capture_timeout",
+                FailureKind::Cli,
+                Some("use a finite capture wait no longer than the documented one-hour maximum"),
+            ),
+            Self::InvalidTransmissionFrame { .. } => ErrorClassification::new(
+                "packet.transmission_frame",
+                FailureKind::Packet,
+                Some("rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite"),
+            ),
+            Self::Encapsulation { .. } => ErrorClassification::new(
+                "packet.encapsulation",
+                FailureKind::Packet,
+                Some("supply a complete link-layer envelope compatible with the materialized Layer 2 route"),
+            ),
+            Self::TransmissionModeMismatch { .. }
+            | Self::UnresolvedLinkMode
+            | Self::InvalidSendReport { .. }
+            | Self::InvalidSendEvidence { .. }
+            | Self::InvalidCaptureStatistics { .. } => ErrorClassification::new(
+                "internal.live_io_invariant",
+                FailureKind::Internal,
+                Some("report the inconsistent provider result; do not reinterpret it as a successful operation"),
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capture_timeout_is_bounded_before_a_backend_wait() {
+        assert!(validate_capture_timeout(MAX_CAPTURE_TIMEOUT).is_ok());
+        let error = validate_capture_timeout(Duration::MAX).unwrap_err();
+        assert!(matches!(
+            &error,
+            LiveIoError::InvalidCaptureTimeout {
+                maximum: MAX_CAPTURE_TIMEOUT,
+                ..
+            }
+        ));
+        assert_eq!(error.classification().code, "cli.capture_timeout");
+    }
 }

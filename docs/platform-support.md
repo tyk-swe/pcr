@@ -47,6 +47,34 @@ Consult the exact release notes and `packetcraftr --help` for the checkout in us
 
 Every profile exposes the platform-neutral provider traits. An application can implement interface, route, neighbor, typed Layer 2/Layer 3 transmission, and capture providers without importing a native wrapper. `Layer2Frame` and `Layer3Frame` reject a materialized route for the other mode, and `DispatchPacketIo` cannot cross those provider boundaries.
 
+Every live boundary also implements the shared error classification contract.
+Unsupported adapters, missing dependencies, and privileges map to exit class
+4; route, device, capture, timeout, send, partial-send, and cleanup failures map
+to class 5; policy denials map to class 6; and inconsistent provider reports map
+to class 70. Route providers can classify their own error type without exposing
+a native wrapper. Neighbor and exchange failures retain typed operation and
+cleanup errors when both occur. Classifications include remediation and never
+authorize a silent link-mode or provider fallback.
+
+| Rust failure family | Stable machine code | Exit |
+| --- | --- | ---: |
+| Unsupported route/link/live adapter | `capability.route`, `capability.link_mode`, `capability.unsupported` | 4 |
+| Missing native dependency | `capability.missing_dependency` | 4 |
+| Missing privilege | `capability.privilege` | 4 |
+| Traffic-policy denial | `policy.*` | 6 |
+| Route/device/runtime send or capture | `io.route*`, `io.device`, `io.send`, `io.capture*` | 5 |
+| Neighbor or resolver timeout/failure | `io.neighbor*`, `io.hostname_resolution` | 5 |
+| Incomplete send | `io.partial_send` | 5 |
+| Invalid CLI resource limit | `cli.capture_limit`, `cli.capture_timeout`, `cli.exchange_limit`, `cli.neighbor_limit` | 2 |
+| Packet/live-frame validation | `packet.*` | 3 |
+| Inconsistent provider report/state | `internal.*` | 70 |
+
+Hostname resolution is platform-neutral and independently injectable. The
+validated declared hostname must pass traffic policy before the resolver is
+called. Results are distinct-address bounded, and every address is checked
+against current policy before any route provider receives one. Re-resolution
+repeats both checks, preventing a changed DNS answer from bypassing policy.
+
 The component and native ownership rules are fixed by [ADR 0004](adr/0004-component-and-native-adapter-boundaries.md). Portable components forbid unsafe code. Direct native dependencies, FFI, and any reviewed unsafe implementation are confined to the private `io::platform` subtree and checked by CI.
 
 ## Stable v0.2 target

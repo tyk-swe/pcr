@@ -22,6 +22,7 @@ pub use provider::{
     InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LiveIoError,
     PacketIo, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider, SystemLayer2Io,
     SystemLayer3Io, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    MAX_CAPTURE_TIMEOUT,
 };
 pub use route::{
     DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute,

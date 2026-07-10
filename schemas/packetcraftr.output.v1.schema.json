@@ -143,6 +143,11 @@
             "minLength": 1
           }
         },
+        "remediation": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Actionable operator guidance when the failure has a known recovery path."
+        },
         "policy_code": {
           "type": "string",
           "minLength": 1

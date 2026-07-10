@@ -4,7 +4,10 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
@@ -15,8 +18,9 @@ fn temp_path(label: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
+    let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     std::env::temp_dir().join(format!(
-        "packetcraftr-{label}-{}-{suffix}.bin",
+        "packetcraftr-{label}-{}-{suffix}-{sequence}.bin",
         std::process::id()
     ))
 }

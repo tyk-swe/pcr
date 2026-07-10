@@ -4,9 +4,10 @@ PacketcraftR fixtures are security- and compatibility-sensitive evidence. Tests 
 
 This directory contains exact binary frames, PCAP/PCAPNG captures, packet documents, structured expected results, and deliberate parser/schema failures. `provenance.example.json` is documentation only; files ending in `.example.json` and this README are the only corpus-validation exclusions.
 
-The initial XOD-60 corpus has 21 hash-pinned fixtures:
+The XOD-60/XOD-36 corpus has 25 hash-pinned fixtures:
 
-- all registered capture roots: Ethernet, RAW, BSD NULL/LOOP, Linux SLL/SLL2, and an unknown DLT;
+- all nine registered capture roots: Ethernet, both RAW conventions, explicit IPv4/IPv6, BSD NULL/LOOP, and Linux SLL/SLL2, plus an unknown DLT;
+- little- and big-endian BSD NULL family headers plus network-order LOOP;
 - valid IPv4/IPv6 UDP/ICMP frames plus truncated/malformed preservation;
 - classic PCAP and multi-interface/multi-link PCAPNG plus truncated-record and oversized-block failures;
 - JSON/YAML packet documents, an independently checked semantic decode, and every negative CLI output-schema fixture.

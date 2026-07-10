@@ -9,13 +9,14 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr::{
-    default_registry, BuildContext, BuildOptions, Builder, CaptureReader, CapturedFrame,
-    DecodeOptions, Dissector, DocumentFormat, Ipv4, LinkType, PacketDocument, Raw, Udp,
+    default_registry, BsdNull, BuildContext, BuildOptions, Builder, CaptureByteOrder,
+    CaptureReader, CapturedFrame, DecodeOptions, Dissector, DocumentFormat, Ipv4, LinkType,
+    PacketDocument, Raw, Udp, BUILTIN_CAPTURE_ROOTS,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-const FIXTURE_COUNT: usize = 21;
+const FIXTURE_COUNT: usize = 25;
 
 #[derive(Debug, Deserialize)]
 struct Provenance {
@@ -126,7 +127,12 @@ fn every_authoritative_fixture_has_one_hash_verified_sidecar() {
             roots.insert(link_type);
         }
     }
-    assert_eq!(roots, BTreeSet::from([0, 1, 101, 108, 113, 147, 276]));
+    let expected_roots = BUILTIN_CAPTURE_ROOTS
+        .iter()
+        .map(|root| root.link_type)
+        .chain(std::iter::once(147))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(roots, expected_roots);
 }
 
 #[test]
@@ -137,7 +143,11 @@ fn frame_corpus_decodes_and_rebuilds_as_reviewed() {
         "frames/ethernet/ipv4-udp.bin",
         "frames/raw/ipv4-icmp.bin",
         "frames/raw/ipv6-udp.bin",
+        "frames/raw/dlt-12-ipv4-icmp.bin",
+        "frames/raw/linktype-ipv4-icmp.bin",
+        "frames/raw/linktype-ipv6-udp.bin",
         "frames/null/ipv4-icmp.bin",
+        "frames/null/ipv6-big-endian.bin",
         "frames/loop/ipv6-udp.bin",
         "frames/sll/ipv4-icmp.bin",
         "frames/sll2/ipv6-udp.bin",
@@ -179,6 +189,35 @@ fn frame_corpus_decodes_and_rebuilds_as_reviewed() {
                 .unwrap();
             assert_eq!(rebuilt.bytes.as_ref(), bytes, "{relative}");
         }
+    }
+}
+
+#[test]
+fn bsd_null_corpus_preserves_both_captured_host_byte_orders() {
+    let registry = Arc::new(default_registry().unwrap());
+    for (relative, expected_order) in [
+        ("frames/null/ipv4-icmp.bin", CaptureByteOrder::Little),
+        ("frames/null/ipv6-big-endian.bin", CaptureByteOrder::Big),
+    ] {
+        let (bytes, _) = verified(relative);
+        let decoded = Dissector::new(Arc::clone(&registry))
+            .decode(
+                CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::NULL, bytes.clone()).unwrap(),
+                DecodeOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            decoded.packet.get::<BsdNull>().unwrap().byte_order,
+            expected_order
+        );
+        let rebuilt = Builder::new(Arc::clone(&registry))
+            .build(
+                decoded.packet,
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(rebuilt.bytes.as_ref(), bytes, "{relative}");
     }
 }
 

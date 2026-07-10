@@ -13,6 +13,7 @@ mod ipv6_ext;
 mod link;
 mod matcher;
 mod raw;
+mod support;
 mod transport;
 
 pub use crate::core::{Padding, Raw};
@@ -30,6 +31,11 @@ pub use link::{
     Arp, ArpCodec, Ethernet, EthernetCodec, Vlan, Vlan8021ad, Vlan8021adCodec, VlanCodec,
 };
 pub use raw::{MalformedCodec, PaddingCodec, RawCodec};
+pub use support::{
+    CaptureRootByteOrder, CaptureRootSupport, ProtocolFallbackSupport, ProtocolSupport,
+    ProtocolSupportManifest, WorkflowProtocolSupport, BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS,
+    BUILTIN_PROTOCOL_SUPPORT, PROTOCOL_SUPPORT_SCHEMA_V1, STABLE_WORKFLOW_PROTOCOLS,
+};
 pub use transport::{Tcp, TcpCodec, Udp, UdpCodec};
 
 use crate::core::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError};

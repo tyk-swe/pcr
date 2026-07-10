@@ -16,7 +16,7 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | Capability | Linux | macOS | Windows | Notes |
 | --- | --- | --- | --- | --- |
 | Portable packet/layer/field model | Alpha, CI | Alpha, CI | Alpha, CI | Runtime-neutral; no native capture dependency |
-| Generic registry, build, and dissection APIs | Alpha, CI | Alpha, CI | Alpha, CI | Built-in protocol slice remains incomplete |
+| Generic registry, build, and dissection APIs | Alpha, CI | Alpha, CI | Alpha, CI | The [stable built-in protocol matrix](protocol-support.md) is complete and corpus-backed; API freeze remains pending |
 | Offline classic PCAP/PCAPNG | Alpha, CI | Alpha, CI | Alpha, CI | Pure Rust, streaming, bounded, multi-interface PCAPNG |
 | Packet-expression/document CLI | Alpha, CI | Alpha, CI | Alpha, CI | One exclusive recipe grammar is shared by `build`, `plan`, `send`, `capture`, and `exchange` |
 | Route/source planning and inventory CLI | Native alpha, CI | Native alpha, CI | Native alpha, CI | `plan` and interface-bound `routes` use `native-route`; both remain passive |

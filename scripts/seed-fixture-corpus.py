@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures"
 CREATED_UTC = "2026-07-10T00:00:00Z"
 REVIEW_EVIDENCE = "https://linear.app/xodud/issue/XOD-60"
+XOD36_REVIEW_EVIDENCE = "https://linear.app/xodud/issue/XOD-36"
 GENERATOR_INVOCATION = (
     "python3 scripts/seed-fixture-corpus.py --write --verify-tcpdump"
 )
@@ -178,6 +179,8 @@ def provenance(
     oracle: dict[str, str] | None = None,
     source_type: str | None = None,
     generator_tool: dict[str, str] | None = None,
+    reviewer: str = "Codex XOD-60 automated implementation review",
+    review_evidence: str = REVIEW_EVIDENCE,
 ) -> dict[str, Any]:
     generator_tool = generator_tool or tool(
         "Python standard library",
@@ -217,9 +220,9 @@ def provenance(
             "notes": notes,
         },
         "review": {
-            "reviewer": "Codex XOD-60 automated implementation review",
+            "reviewer": reviewer,
             "reviewed_utc": CREATED_UTC,
-            "evidence": REVIEW_EVIDENCE,
+            "evidence": review_evidence,
         },
     }
 
@@ -260,6 +263,7 @@ def main() -> int:
         + ip4_udp
     )
     null_ipv4 = struct.pack("<I", 2) + ip4_icmp
+    null_ipv6_big_endian = struct.pack("!I", 30) + ip6_udp
     loop_ipv6 = struct.pack("!I", 30) + ip6_udp
     sll_ipv4 = struct.pack("!HHH8sH", 0, 1, 6, bytes.fromhex("0200000000010000"), 0x0800) + ip4_icmp
     sll2_ipv6 = (
@@ -333,7 +337,11 @@ layers:
         "frames/ethernet/ipv4-udp.bin": ethernet,
         "frames/raw/ipv4-icmp.bin": ip4_icmp,
         "frames/raw/ipv6-udp.bin": ip6_udp,
+        "frames/raw/dlt-12-ipv4-icmp.bin": ip4_icmp,
+        "frames/raw/linktype-ipv4-icmp.bin": ip4_icmp,
+        "frames/raw/linktype-ipv6-udp.bin": ip6_udp,
         "frames/null/ipv4-icmp.bin": null_ipv4,
+        "frames/null/ipv6-big-endian.bin": null_ipv6_big_endian,
         "frames/loop/ipv6-udp.bin": loop_ipv6,
         "frames/sll/ipv4-icmp.bin": sll_ipv4,
         "frames/sll2/ipv6-udp.bin": sll2_ipv6,
@@ -387,11 +395,43 @@ layers:
             exact_rebuild=True, notes="DLT_RAW IPv6 UDP known-answer packet",
             reference="https://www.rfc-editor.org/rfc/rfc8200", oracle=tcpdump_oracle,
         ),
+        "frames/raw/dlt-12-ipv4-icmp.bin": dict(
+            kind="frame", authority="authoritative", protocols=["raw_ip", "ipv4", "icmpv4"],
+            link_type=12, layers=["ipv4", "icmpv4"], diagnostics=[], valid=True,
+            exact_rebuild=True, notes="BSD DLT_RAW IPv4 ICMP echo known-answer packet",
+            reference=link_reference, oracle=tcpdump_oracle,
+            reviewer="Codex XOD-36 automated implementation review",
+            review_evidence=XOD36_REVIEW_EVIDENCE,
+        ),
+        "frames/raw/linktype-ipv4-icmp.bin": dict(
+            kind="frame", authority="authoritative", protocols=["ipv4", "icmpv4"],
+            link_type=228, layers=["ipv4", "icmpv4"], diagnostics=[], valid=True,
+            exact_rebuild=True, notes="LINKTYPE_IPV4 ICMP echo known-answer packet",
+            reference=link_reference, oracle=tcpdump_oracle,
+            reviewer="Codex XOD-36 automated implementation review",
+            review_evidence=XOD36_REVIEW_EVIDENCE,
+        ),
+        "frames/raw/linktype-ipv6-udp.bin": dict(
+            kind="frame", authority="authoritative", protocols=["ipv6", "udp", "raw"],
+            link_type=229, layers=["ipv6", "udp", "raw"], diagnostics=[], valid=True,
+            exact_rebuild=True, notes="LINKTYPE_IPV6 UDP known-answer packet",
+            reference=link_reference, oracle=tcpdump_oracle,
+            reviewer="Codex XOD-36 automated implementation review",
+            review_evidence=XOD36_REVIEW_EVIDENCE,
+        ),
         "frames/null/ipv4-icmp.bin": dict(
             kind="frame", authority="authoritative", protocols=["bsd_null", "ipv4", "icmpv4"],
             link_type=0, layers=["bsd_null", "ipv4", "icmpv4"], diagnostics=[], valid=True,
             exact_rebuild=True, notes="Little-endian BSD NULL family header followed by IPv4 ICMP",
             reference=link_reference, oracle=tcpdump_oracle,
+        ),
+        "frames/null/ipv6-big-endian.bin": dict(
+            kind="frame", authority="authoritative", protocols=["bsd_null", "ipv6", "udp", "raw"],
+            link_type=0, layers=["bsd_null", "ipv6", "udp", "raw"], diagnostics=[], valid=True,
+            exact_rebuild=True, notes="Big-endian BSD NULL AF_INET6 header followed by IPv6 UDP",
+            reference=link_reference, oracle=None,
+            reviewer="Codex XOD-36 automated implementation review",
+            review_evidence=XOD36_REVIEW_EVIDENCE,
         ),
         "frames/loop/ipv6-udp.bin": dict(
             kind="frame", authority="authoritative", protocols=["bsd_loop", "ipv6", "udp", "raw"],
@@ -522,6 +562,9 @@ layers:
         "frames/ethernet/ipv4-udp.bin": 1,
         "frames/raw/ipv4-icmp.bin": 101,
         "frames/raw/ipv6-udp.bin": 101,
+        "frames/raw/dlt-12-ipv4-icmp.bin": 12,
+        "frames/raw/linktype-ipv4-icmp.bin": 228,
+        "frames/raw/linktype-ipv6-udp.bin": 229,
         "frames/null/ipv4-icmp.bin": 0,
         "frames/loop/ipv6-udp.bin": 108,
         "frames/sll/ipv4-icmp.bin": 113,
@@ -559,7 +602,7 @@ layers:
         and path.name != "README.md"
         and not path.name.endswith(".example.json")
     )
-    print(f"wrote and validated the {fixture_count}-fixture XOD-60 corpus")
+    print(f"wrote and validated the {fixture_count}-fixture reviewed corpus")
     return 0
 
 

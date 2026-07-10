@@ -16,16 +16,22 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | --- | --- |
 | Ordered `Packet`, object-safe `Layer`, reflective schemas and field values | Available as an alpha API |
 | Immutable `ProtocolRegistry`, external codecs and deterministic bindings | Available as an alpha API |
-| Strict/permissive generic building, layouts, and diagnostics | Available as an alpha API; built-in protocol coverage is incomplete |
-| Bounded dissection with raw/malformed preservation | Available as an alpha API; built-in protocol coverage is incomplete |
+| Strict/permissive generic building, layouts, and diagnostics | Stable built-in protocol matrix implemented and invariant-tested; API freeze remains pending |
+| Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
 | Runtime-neutral captured-frame records and offline capture I/O | Available as a streaming, pure-Rust alpha API and through `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
 | v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages and templates are available; tool workflows are later alphas |
-| Broad built-in protocol catalog and extracted component crates | Beta milestone |
+| Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; physical crate extraction remains a beta milestone |
 
 Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `replay`, `scan`, `traceroute`, `dns`, and `fuzz` names return the capability exit code instead of falling through to a legacy command.
+
+The exact v0.2 packet-layer promise is published in the
+[stable built-in protocol matrix](docs/protocol-support.md) and through the
+serializable `BUILTIN_PROTOCOL_SUPPORT` Rust manifest
+(`packetcraftr.protocol-support/v1`). It covers all 22 codecs, nine registered
+capture roots, four response matchers, and every stable CLI workflow.
 
 ## Design overview
 

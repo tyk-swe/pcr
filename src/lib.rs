@@ -86,9 +86,12 @@ pub use output::{
     WireFrameOutput, COMMAND_OUTPUT_CONTRACTS, OUTPUT_SCHEMA_V1,
 };
 pub use protocols::{
-    default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, DestinationOptions, Ethernet,
-    HopByHop, Icmpv4, Icmpv6, Ipv4, Ipv6, Ipv6Fragment, LinuxSll, LinuxSll2, SegmentRoutingHeader,
-    Tcp, Udp, Vlan, Vlan8021ad,
+    default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, CaptureByteOrder,
+    CaptureRootByteOrder, CaptureRootSupport, DestinationOptions, Ethernet, HopByHop, Icmpv4,
+    Icmpv6, Ipv4, Ipv6, Ipv6Fragment, LinuxSll, LinuxSll2, ProtocolFallbackSupport,
+    ProtocolSupport, ProtocolSupportManifest, SegmentRoutingHeader, Tcp, Udp, Vlan, Vlan8021ad,
+    WorkflowProtocolSupport, BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS, BUILTIN_PROTOCOL_SUPPORT,
+    PROTOCOL_SUPPORT_SCHEMA_V1, STABLE_WORKFLOW_PROTOCOLS,
 };
 pub use session::{
     Fragment, FragmentError, FragmentKey, FragmentOverlapPolicy, FragmentReassembler,

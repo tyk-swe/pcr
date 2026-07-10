@@ -268,6 +268,13 @@ impl ProtocolRegistry {
         self.roots.get(&link_type)
     }
 
+    /// All registered numeric capture roots. Iterator order is unspecified.
+    pub fn link_type_roots(&self) -> impl ExactSizeIterator<Item = (u32, &ProtocolId)> {
+        self.roots
+            .iter()
+            .map(|(link_type, protocol)| (*link_type, protocol))
+    }
+
     pub fn child_for(
         &self,
         parent: &ProtocolId,
@@ -292,6 +299,11 @@ impl ProtocolRegistry {
 
     pub fn matcher(&self, protocol: &ProtocolId) -> Option<&Arc<dyn ResponseMatcher>> {
         self.matchers.get(protocol)
+    }
+
+    /// Protocols with registered request/response matchers.
+    pub fn matcher_protocols(&self) -> impl ExactSizeIterator<Item = &ProtocolId> {
+        self.matchers.keys()
     }
 
     pub fn protocols(&self) -> impl ExactSizeIterator<Item = &ProtocolId> {

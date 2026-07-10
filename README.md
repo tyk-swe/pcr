@@ -10,7 +10,7 @@ PacketcraftR is licensed under the [GNU Affero General Public License v3.0 only]
 
 ## Project status
 
-This checkout contains the new portable v0.2 kernel, passive native route providers, and CLI foundation. The table describes the alpha checkpoint, not the final v0.2 promise.
+This checkout contains the portable v0.2 kernel, passive native route providers, and policy-gated live CLI workflows. The table describes the alpha checkpoint, not the final v0.2 promise.
 
 | Area | Alpha status |
 | --- | --- |
@@ -20,12 +20,12 @@ This checkout contains the new portable v0.2 kernel, passive native route provid
 | Bounded dissection with raw/malformed preservation | Available as an alpha API; built-in protocol coverage is incomplete |
 | Runtime-neutral captured-frame records and offline capture I/O | Available as a streaming, pure-Rust alpha API and through `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
-| v0.2 `build`, `dissect`, `read`, and `interfaces` commands | Available; all final command names are reserved in `--help` |
-| Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs, passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, and raw Layer 3 adapters are available; live CLI workflows are later alphas |
+| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
+| Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages and templates are available; tool workflows are later alphas |
 | Broad built-in protocol catalog and extracted component crates | Beta milestone |
 
-Run `packetcraftr --help` for the commands implemented in this checkpoint. Unavailable final command names return the capability exit code instead of falling through to a legacy command.
+Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `replay`, `scan`, `traceroute`, `dns`, and `fuzz` names return the capability exit code instead of falling through to a legacy command.
 
 ## Design overview
 
@@ -123,6 +123,63 @@ Versioned JSON or YAML documents are intended for generated, complex, or reviewa
 Machine-readable aggregate output uses one typed `packetcraftr.output/v1` JSON envelope. Streaming commands use independently valid NDJSON records; every success and terminal error has a zero-based `sequence`, with terminal errors taking the next unused value. JSON and NDJSON are distinct `--output` values rather than command-dependent meanings of `json`. Raw and hexadecimal formats always refer to the complete captured or built frame, never payload-only bytes. The complete command/format matrix is part of the [output schema contract](schemas/README.md#commandformat-matrix).
 
 The [v0.1 to v0.2 migration guide](docs/migration-v0.1-to-v0.2.md) maps common legacy commands and explains removed subsystems.
+
+### Route-aware and live workflows
+
+`plan` and `routes` are passive. `plan` selects the route, interface-owned
+source, MTU, next hop, and final link mode for one packet recipe; it never
+performs neighbor discovery, capture, or transmission. `routes` reports one
+interface-bound passive `RouteDecision` for each up interface. It is a provider-neutral
+provider inventory, not a verbatim dump of the operating system's route table.
+
+```console
+packetcraftr --output json plan \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)/raw(text="hello")' \
+  --interface "$LAB_INTERFACE" --link-mode layer3
+packetcraftr --output json routes
+```
+
+`send`, `capture`, and `exchange` reuse the same exclusive packet-expression,
+packet-document, or standard-input recipe and the same `--destination`,
+`--interface`, `--source`, and `--link-mode` constraints. Live commands require
+the matching native Cargo features, runtime dependencies, devices, and
+privileges described in the [platform matrix](docs/platform-support.md).
+
+```console
+# Transmit one authorized lab packet and preserve its exact sent bytes.
+packetcraftr --output pcapng send \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)/raw(text="hello")' \
+  --interface "$LAB_INTERFACE" --link-mode layer3 \
+  --max-packets 1 --max-bytes 1500 > sent.pcapng
+
+# Capture from the packet's planned interface for one finite second.
+packetcraftr --output ndjson capture \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)' \
+  --interface "$LAB_INTERFACE" --timeout-ms 1000 \
+  --max-queue-frames 64 --max-captured-bytes 1048576
+
+# Arm and await capture before sending, then retain at most one response.
+packetcraftr --output json exchange \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)' \
+  --interface "$LAB_INTERFACE" --timeout-ms 1000 \
+  --max-responses 1 --max-unsolicited 0 --max-queue-frames 64
+```
+
+Public destinations and hostname resolution are denied by default. They need
+the separate `--allow-public-destinations` and
+`--allow-hostname-resolution` acknowledgements. A permissive live build needs
+both `--allow-permissive-live` and `--allow-permissive-packets`. Packet and
+byte budgets are evaluated before active neighbor or transmission work and
+bound the frames/bytes emitted by standalone capture;
+capture/exchange timeouts, queue frames, retained bytes, snap length, and
+overflow behavior are finite and validated before route or live I/O. Use only
+on networks where you have explicit authorization.
+
+Exchange capture-file output includes timestamped exact sent frames and all
+retained response, unsolicited, and undecodable capture evidence. PCAPNG uses
+separate interface descriptions when a raw Layer 3 request and captured Layer
+2 response have different link types. Classic PCAP can represent only one link
+type and returns an explicit output error for such a mixed stream.
 
 ## Safety model
 

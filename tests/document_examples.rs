@@ -83,3 +83,44 @@ fn published_exchange_stream_event_matches_the_typed_contract() {
         json_file("output-exchange-event.json")
     );
 }
+
+#[test]
+fn published_capture_stream_event_matches_the_typed_contract() {
+    let mut frame = packetcraftr::CapturedFrame::new(
+        std::time::UNIX_EPOCH
+            + std::time::Duration::from_secs(1_783_555_200)
+            + std::time::Duration::from_millis(125),
+        packetcraftr::LinkType(147),
+        vec![0xde, 0xad, 0xbe, 0xef],
+    )
+    .unwrap();
+    frame.interface = Some(0);
+    frame.direction = Some(packetcraftr::CaptureDirection::Inbound);
+    let event = packetcraftr::StreamRecord::success(
+        packetcraftr::CommandName::Capture,
+        0,
+        packetcraftr::CaptureFrameCommandResult::Frame {
+            frame: packetcraftr::FrameOutput::try_from_frame(frame).unwrap(),
+        },
+        vec![packetcraftr::Diagnostic::warning(
+            "decode.unsupported_link_type",
+            "no root binding for link type 147",
+        )],
+    )
+    .with_stats(packetcraftr::OperationStats {
+        packets_attempted: 1,
+        packets_completed: 1,
+        bytes: 4,
+        elapsed: std::time::Duration::from_micros(250),
+        capture: packetcraftr::CaptureStatistics {
+            received_frames: 1,
+            received_bytes: 4,
+            ..packetcraftr::CaptureStatistics::default()
+        },
+    });
+
+    assert_eq!(
+        serde_json::to_value(event).unwrap(),
+        json_file("output-capture-event.json")
+    );
+}

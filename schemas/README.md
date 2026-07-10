@@ -30,6 +30,11 @@ operations construct these types once, and text, JSON, NDJSON, hex, and raw
 renderers consume the same result rather than recreating a wire shape. Commands
 that support both JSON and NDJSON have separate aggregate and per-item result
 types, so a stream never repeats an aggregate summary as an event.
+`capture` emits zero or more `frame` events followed by one `complete` event
+carrying the frame count and final statistics. `exchange` emits `sent`,
+`response`, `unanswered`, `unsolicited`, or `undecoded` evidence events before
+its final `complete` event. A runtime failure replaces the next event with a
+terminal error at the next unused sequence.
 
 ## Command/format matrix
 

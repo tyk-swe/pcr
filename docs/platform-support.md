@@ -18,12 +18,12 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | Portable packet/layer/field model | Alpha, CI | Alpha, CI | Alpha, CI | Runtime-neutral; no native capture dependency |
 | Generic registry, build, and dissection APIs | Alpha, CI | Alpha, CI | Alpha, CI | Built-in protocol slice remains incomplete |
 | Offline classic PCAP/PCAPNG | Alpha, CI | Alpha, CI | Alpha, CI | Pure Rust, streaming, bounded, multi-interface PCAPNG |
-| Packet-expression/document CLI | Alpha, CI | Alpha, CI | Alpha, CI | `packetcraftr.packet/v1`; `build` and `dissect` are wired |
-| Route/source planning | Native alpha, CI | Native alpha, CI | Native alpha, CI | `native-route` uses netlink, routing sockets/native interfaces, or IP Helper; planning remains passive |
-| Live Layer 2 capture/injection | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `native-layer2` uses libpcap or runtime-loaded Npcap; hosted CI covers ABI/lifecycle, while privileged qualification requires dedicated runners |
+| Packet-expression/document CLI | Alpha, CI | Alpha, CI | Alpha, CI | One exclusive recipe grammar is shared by `build`, `plan`, `send`, `capture`, and `exchange` |
+| Route/source planning and inventory CLI | Native alpha, CI | Native alpha, CI | Native alpha, CI | `plan` and interface-bound `routes` use `native-route`; both remain passive |
+| Live Layer 2 capture/injection CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `send`/`capture` use libpcap or runtime-loaded Npcap; hosted CI covers policy, ABI, and lifecycle seams, while privileged qualification requires dedicated runners |
 | Gateway-aware ARP/NDP | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
-| Raw Layer 3 transmission | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `native-layer3` uses target raw sockets; hosted CI covers validation and injected send seams, while privileged qualification requires dedicated runners |
-| Coordinated exchange | Native alpha | Native alpha | Native alpha | Injectable and native capture share the readiness barrier, bounded retention, loss reporting, and joined shutdown contract |
+| Raw Layer 3 transmission CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `send --link-mode layer3` uses target raw sockets; hosted CI covers validation and injected send seams, while privileged qualification requires dedicated runners |
+| Coordinated exchange CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `exchange` awaits capture readiness before send and shares bounded retention, loss reporting, and joined shutdown contracts |
 | Defragmentation and TCP reassembly | Alpha, CI | Alpha, CI | Alpha, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
 | Scan, traceroute, DNS, and fuzz tools | Planned | Planned | Planned | v0.1 paths were removed; replacements will use shared APIs |
 
@@ -44,6 +44,23 @@ Consult the exact release notes and `packetcraftr --help` for the checkout in us
 `SystemNeighborResolver` composes the system interface, Layer 2, and capture providers. Its rich route-planner path uses the interface-owned source IP and MAC, selected next hop, MTU, link type, and exact VLAN stack. ARP and NDP use finite attempts and timeouts, protocol validation, bounded captured evidence, joined shutdown, and a bounded finite-lifetime cache. Selecting both `native-route` and `native-layer2` supplies the complete native planning and resolution path; either provider family remains independently injectable.
 
 `--features native-layer3` selects `SystemLayer3Io` on Linux, macOS, and Windows. It accepts only complete IPv4/IPv6 datagrams whose destination, family, and size match the materialized route, constrains the route-selected interface independently of a crafted packet source, enables full-header raw transmission, and checks complete writes. Linux uses device binding, macOS uses interface-index binding, and Winsock uses its family-appropriate unicast or multicast interface option. Linux and Windows may fill selected zero or derived IPv4 fields; macOS additionally consumes total length and fragment fields in host order. The adapter validates values that the kernel would rewrite and uses a private macOS submission copy, so a success can report the original exact wire bytes. Spoofed raw UDP that Windows can silently discard is rejected before send; other platform restrictions remain typed socket errors.
+
+The native CLI feature requirements are explicit:
+
+| Workflow | Required native feature path |
+| --- | --- |
+| `plan`, `routes` | `native-route` |
+| Layer 3 `send` | `native-route` + `native-layer3` |
+| Layer 2 `send` | `native-route` + `native-layer2`; unresolved neighbors use the same Layer 2 capture provider |
+| `capture` | `native-route` + `native-layer2` |
+| `exchange` | `native-route` + `native-layer2` for capture, plus the selected Layer 2 or Layer 3 send path |
+
+An unavailable feature, native runtime, device, or privilege is returned as a
+typed capability failure; no command silently changes link mode or substitutes
+another provider. `plan` and `routes` may inspect only passive route/interface
+state. `capture` has a finite overall window. `exchange` arms and awaits its
+owned capture session before the first send, and both commands stop and join
+capture on success or failure.
 
 Every profile exposes the platform-neutral provider traits. An application can implement interface, route, neighbor, typed Layer 2/Layer 3 transmission, and capture providers without importing a native wrapper. `Layer2Frame` and `Layer3Frame` reject a materialized route for the other mode, and `DispatchPacketIo` cannot cross those provider boundaries.
 

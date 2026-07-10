@@ -343,7 +343,7 @@
           "const": "capture"
         },
         "result": {
-          "$ref": "#/$defs/frameResult"
+          "$ref": "#/$defs/captureStreamResult"
         }
       },
       "required": [
@@ -660,6 +660,42 @@
         }
       },
       "additionalProperties": false
+    },
+    "captureStreamResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "frame"
+          ],
+          "properties": {
+            "event": {
+              "const": "frame"
+            },
+            "frame": {
+              "$ref": "#/$defs/frame"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "frames"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "frames": {
+              "$ref": "#/$defs/uint64"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "interfacesResult": {
       "type": "object",
@@ -1374,8 +1410,9 @@
             "mac_address",
             "attempts",
             "cache_hit",
-            "captured_frames",
-            "evidence_truncated"
+            "captured",
+            "evidence_truncated",
+            "capture_statistics"
           ],
           "properties": {
             "mac_address": {
@@ -1389,11 +1426,17 @@
             "cache_hit": {
               "type": "boolean"
             },
-            "captured_frames": {
-              "$ref": "#/$defs/uint64"
+            "captured": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/frame"
+              }
             },
             "evidence_truncated": {
               "type": "boolean"
+            },
+            "capture_statistics": {
+              "$ref": "#/$defs/captureStatistics"
             }
           },
           "additionalProperties": false
@@ -1406,7 +1449,8 @@
       "required": [
         "frame",
         "packet",
-        "layout"
+        "layout",
+        "diagnostics"
       ],
       "properties": {
         "frame": {
@@ -1417,6 +1461,12 @@
         },
         "layout": {
           "$ref": "#/$defs/packetLayout"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/diagnostic"
+          }
         }
       },
       "additionalProperties": false

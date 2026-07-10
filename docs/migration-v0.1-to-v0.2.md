@@ -2,7 +2,7 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative: the final command names are present, but commands not yet implemented return exit code 4 with an explicit capability error.
+This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
 
 ## The central change
 
@@ -55,6 +55,48 @@ packetcraftr plan --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)/raw(text="hello"
 ```
 
 `plan` may query passive operating-system state. It must not perform ARP, NDP, capture, or transmission. Unresolved destination MAC addresses remain reported as unresolved.
+
+`routes` is passive too. In this checkpoint it reports one provider-neutral
+route decision for each up interface, not a verbatim operating-system route
+table dump:
+
+```console
+packetcraftr --output json routes
+```
+
+### Live workflows are explicit and bounded
+
+`send`, `capture`, and `exchange` accept the same exclusive packet recipe and
+route constraints as `plan`. Interface names or indices, interface-owned source
+preferences, and `auto`/`layer2`/`layer3` intent stay at the workflow boundary:
+
+```console
+packetcraftr send \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)/raw(text="hello")' \
+  --interface "$LAB_INTERFACE" --link-mode layer3 \
+  --max-packets 1 --max-bytes 1500
+
+packetcraftr --output ndjson capture \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)' \
+  --interface "$LAB_INTERFACE" --timeout-ms 1000 \
+  --max-queue-frames 64 --max-captured-bytes 1048576
+
+packetcraftr --output json exchange \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)' \
+  --interface "$LAB_INTERFACE" --timeout-ms 1000 \
+  --max-responses 1 --max-unsolicited 0 --max-queue-frames 64
+```
+
+The default traffic policy denies public destinations, hostname resolution,
+and permissively built live bytes. Public targets and hostnames have separate
+acknowledgement flags. A permissive live send needs both the operation-level
+`--allow-permissive-live` flag and policy-level
+`--allow-permissive-packets`. Invalid capture/exchange limits fail before route
+or live I/O, and traffic-policy checks precede active neighbor or transmission
+work. Standalone capture applies its packet/byte budgets to emitted frames and
+bytes. Exchange owns
+one capture session, crosses its readiness barrier before sending, and attempts
+shutdown on every success or error path.
 
 ### Flag-heavy packets become expressions
 

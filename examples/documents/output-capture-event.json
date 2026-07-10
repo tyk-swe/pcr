@@ -5,6 +5,7 @@
   "status": "success",
   "sequence": 0,
   "result": {
+    "event": "frame",
     "frame": {
       "timestamp": {
         "unix_seconds": 1783555200,

@@ -82,10 +82,19 @@ fn json_build_uses_versioned_success_envelope() {
     assert!(value["diagnostics"].is_array());
 }
 
+#[cfg(not(feature = "native-route"))]
 #[test]
 fn unavailable_live_command_uses_capability_exit_code_and_json_error() {
     let output = binary()
-        .args(["--output", "json", "send"])
+        .args([
+            "--output",
+            "json",
+            "send",
+            "--packet",
+            "ipv4(dst=127.0.0.1)/udp(dport=9)",
+            "--link-mode",
+            "layer3",
+        ])
         .output()
         .unwrap();
 
@@ -95,6 +104,138 @@ fn unavailable_live_command_uses_capability_exit_code_and_json_error() {
     assert_eq!(value["mode"], "aggregate");
     assert_eq!(value["error"]["kind"], "capability");
     assert_eq!(value["command"], "send");
+}
+
+#[test]
+fn send_policy_denial_precedes_route_or_live_io() {
+    let output = binary()
+        .args([
+            "--output",
+            "json",
+            "send",
+            "--packet",
+            "ipv4(dst=8.8.8.8)/udp(dport=9)",
+            "--link-mode",
+            "layer3",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "send");
+    assert_eq!(value["error"]["code"], "policy.public_destination");
+}
+
+#[test]
+fn send_budget_and_output_contracts_precede_route_or_live_io() {
+    let budget = binary()
+        .args([
+            "--output",
+            "json",
+            "send",
+            "--packet",
+            "ipv4(dst=127.0.0.1)/udp(dport=9)",
+            "--link-mode",
+            "layer3",
+            "--max-packets",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(budget.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&budget.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.packet_limit");
+
+    let format = binary()
+        .args([
+            "--output",
+            "ndjson",
+            "send",
+            "--packet",
+            "ipv4(dst=8.8.8.8)/udp(dport=9)",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(format.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&format.stdout).unwrap();
+    assert_eq!(value["sequence"], 0);
+    assert_eq!(value["error"]["code"], "cli.output_format");
+}
+
+#[test]
+fn invalid_capture_and_exchange_limits_precede_packet_policy() {
+    let capture = binary()
+        .args([
+            "--output",
+            "ndjson",
+            "capture",
+            "--packet",
+            "ipv4(dst=8.8.8.8)/udp(dport=9)",
+            "--max-queue-frames",
+            "0",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(capture.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&capture.stdout).unwrap();
+    assert_eq!(value["sequence"], 0);
+    assert_eq!(value["error"]["code"], "cli.capture_limit");
+
+    let exchange = binary()
+        .args([
+            "--output",
+            "json",
+            "exchange",
+            "--packet",
+            "ipv4(dst=8.8.8.8)/udp(dport=9)",
+            "--timeout-ms",
+            "3600001",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(exchange.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&exchange.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "cli.exchange_limit");
+}
+
+#[cfg(feature = "native-route")]
+#[test]
+fn native_plan_and_routes_are_passive_typed_workflows() {
+    let plan = binary()
+        .args([
+            "--output",
+            "json",
+            "plan",
+            "--packet",
+            "ipv4(dst=127.0.0.1)/udp(dport=9)",
+            "--link-mode",
+            "layer3",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        plan.status.success(),
+        "{}",
+        String::from_utf8_lossy(&plan.stderr)
+    );
+    let plan: serde_json::Value = serde_json::from_slice(&plan.stdout).unwrap();
+    assert_eq!(plan["result"]["route"]["mode"], "layer3");
+    assert!(plan["result"]["route"]["route"]["mtu"]
+        .as_u64()
+        .is_some_and(|mtu| mtu > 0));
+
+    let routes = binary()
+        .args(["--output", "json", "routes"])
+        .output()
+        .unwrap();
+    assert!(
+        routes.status.success(),
+        "{}",
+        String::from_utf8_lossy(&routes.stderr)
+    );
+    let routes: serde_json::Value = serde_json::from_slice(&routes.stdout).unwrap();
+    assert!(!routes["result"]["routes"].as_array().unwrap().is_empty());
 }
 
 #[test]

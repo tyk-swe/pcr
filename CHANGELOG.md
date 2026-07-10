@@ -26,6 +26,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added a stable `ClassifiedError` taxonomy for live capability, dependency, privilege, policy, timeout/runtime I/O, partial-send, and invariant failures, including CLI exit classes and remediation.
 - Added policy-gated, bounded, injectable hostname resolution through `LiveTarget`, `HostnameResolver`, and opaque `ResolvedTarget` values.
 - Added public typed aggregate/stream output envelopes, typed result contracts for every v0.2 command, an explicit command/format capability matrix, and command-specific JSON Schema validation with negative fixtures.
+- Added passive `plan` and interface-bound `routes` CLI workflows plus policy-gated `send`, finite live `capture`, and capture-ready `exchange` workflows. They share exclusive packet inputs, explicit route/link constraints, traffic and capture budgets, typed JSON/NDJSON results, and exact hex/raw/PCAP/PCAPNG output where applicable.
 
 ### Changed
 
@@ -45,6 +46,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Exchange validates timeout and capture/retention limits before route or live side effects, and all retained evidence classes share one aggregate frame ceiling.
 - Human CLI output escapes terminal and bidi controls while JSON preserves structured strings through JSON escaping.
 - Aggregate JSON and streaming NDJSON are now distinct formats. Every NDJSON success or terminal-error record carries a frozen zero-based sequence, while aggregate envelopes cannot carry one; `build`, `dissect`, `read`, and `interfaces` now render exclusively from typed results.
+- Live CLI policy and limit validation now precedes resolver, route, neighbor, capture, or transmission work as applicable; capture and exchange retain readiness, loss, timeout, and cleanup evidence through the shared classified-error contract.
+- Exchange results retain timestamped exact sent-frame evidence; PCAPNG output preserves mixed raw-send and captured-response link types as separate interfaces, while classic PCAP rejects an unrepresentable mixed stream.
 
 ### Fixed
 

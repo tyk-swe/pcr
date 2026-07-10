@@ -329,6 +329,18 @@ impl HostnameResolver for SystemHostnameResolver {
 }
 
 impl TrafficPolicy {
+    /// Validates policy configuration before resolver, route, capture, or
+    /// transmission providers are invoked.
+    pub fn validate(&self) -> Result<(), TargetResolutionError> {
+        if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
+            return Err(TargetResolutionError::InvalidAddressLimit {
+                value: self.max_resolved_addresses,
+                maximum: MAX_RESOLVED_ADDRESSES,
+            });
+        }
+        Ok(())
+    }
+
     fn authorize_destination(&self, destination: IpAddr) -> Result<(), TrafficPolicyError> {
         if !self.allow_public_destinations && is_public(destination) {
             return Err(TrafficPolicyError::PublicDestination { destination });
@@ -345,6 +357,31 @@ impl TrafficPolicy {
         Ok(())
     }
 
+    /// Authorizes every explicit IP destination and IPv6 segment declared by
+    /// a packet before route, capture, neighbor, or transmission providers are
+    /// allowed to observe it.
+    pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), TrafficPolicyError> {
+        for layer in packet.iter() {
+            match layer.field("destination") {
+                Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => {
+                    self.authorize_destination(IpAddr::V4(value))?;
+                }
+                Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => {
+                    self.authorize_destination(IpAddr::V6(value))?;
+                }
+                _ => {}
+            }
+            if let Some(FieldValue::List(segments)) = layer.field("segments") {
+                for segment in segments {
+                    if let FieldValue::Ipv6(value) = segment {
+                        self.authorize_destination(IpAddr::V6(value))?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Authorizes a declared target before resolution, invokes the resolver at
     /// most once, then authorizes every selected address before returning any
     /// address to route planning. Calling this method again for re-resolution
@@ -354,12 +391,7 @@ impl TrafficPolicy {
         target: &LiveTarget,
         resolver: &R,
     ) -> Result<ResolvedTarget, TargetResolutionError> {
-        if !(1..=MAX_RESOLVED_ADDRESSES).contains(&self.max_resolved_addresses) {
-            return Err(TargetResolutionError::InvalidAddressLimit {
-                value: self.max_resolved_addresses,
-                maximum: MAX_RESOLVED_ADDRESSES,
-            });
-        }
+        self.validate()?;
         let addresses = match target {
             LiveTarget::Address(address) => vec![*address],
             LiveTarget::Hostname(hostname) => {
@@ -613,6 +645,11 @@ pub struct MatchedResponse {
 #[derive(Clone, Debug)]
 pub struct ExchangeResult {
     pub sent: Vec<BuiltPacket>,
+    /// Timestamped exact frames accepted by the send provider. Layer 2 sends
+    /// retain the planned link type; raw Layer 3 sends use DLT_RAW so the
+    /// evidence can be written to a capture stream without inventing an
+    /// Ethernet envelope.
+    pub sent_evidence: Vec<CapturedFrame>,
     pub responses: Vec<MatchedResponse>,
     pub unanswered: Vec<usize>,
     pub unsolicited: Vec<DecodedPacket>,
@@ -902,24 +939,7 @@ where
         // Authorize every declared outer and SRH destination before the route
         // provider can observe one. The completed plan is checked again below
         // so provider-derived selections cannot bypass policy either.
-        for layer in packet.iter() {
-            match layer.field("destination") {
-                Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => {
-                    self.policy.authorize_destination(IpAddr::V4(value))?;
-                }
-                Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => {
-                    self.policy.authorize_destination(IpAddr::V6(value))?;
-                }
-                _ => {}
-            }
-            if let Some(FieldValue::List(segments)) = layer.field("segments") {
-                for segment in segments {
-                    if let FieldValue::Ipv6(value) = segment {
-                        self.policy.authorize_destination(IpAddr::V6(value))?;
-                    }
-                }
-            }
-        }
+        self.policy.authorize_packet_destinations(packet)?;
         let plan = self
             .planner
             .plan(packet, destination, options, &self.routes)?;
@@ -1025,7 +1045,7 @@ where
         options: ExchangeOptions,
     ) -> Result<ExchangeResult, ClientError> {
         let started = Instant::now();
-        let capture_limits = validate_exchange_options(&options)?;
+        let capture_limits = options.validate()?;
         let expansion_len = template
             .expansion_len()
             .map_err(|source| ClientError::Template {
@@ -1119,6 +1139,7 @@ where
 
         let mut sent_at = Vec::with_capacity(prepared.len());
         let mut sent_wall_time = Vec::with_capacity(prepared.len());
+        let mut sent_evidence = Vec::with_capacity(prepared.len());
         let mut completed_sends = 0u64;
         let dissector = Dissector::new(Arc::clone(&self.registry));
         let mut captured = ExchangeAccumulator::new(prepared.len());
@@ -1154,8 +1175,31 @@ where
             if let Err(error) = validate_send_report(&built.bytes, &sent) {
                 return Err(error_after_shutdown(&mut capture, error));
             }
+            let link_type = match route.plan.mode {
+                crate::io::LinkMode::Layer2 => route.plan.route.link_type,
+                crate::io::LinkMode::Layer3 => crate::io::LinkType::RAW,
+                crate::io::LinkMode::Auto => {
+                    return Err(error_after_shutdown(
+                        &mut capture,
+                        LiveIoError::UnresolvedLinkMode,
+                    ))
+                }
+            };
+            let evidence = match CapturedFrame::new(send_wall_time, link_type, built.bytes.clone())
+            {
+                Ok(evidence) => evidence,
+                Err(source) => {
+                    return Err(error_after_shutdown(
+                        &mut capture,
+                        LiveIoError::InvalidSendEvidence {
+                            message: source.to_string(),
+                        },
+                    ))
+                }
+            };
             sent_at.push(send_started);
             sent_wall_time.push(send_wall_time);
+            sent_evidence.push(evidence);
             completed_sends += 1;
             loop {
                 let frame = match capture.next_frame(Duration::ZERO) {
@@ -1242,6 +1286,7 @@ where
         let sent = prepared.into_iter().map(|(built, _)| built).collect();
         Ok(ExchangeResult {
             sent,
+            sent_evidence,
             responses: captured.responses,
             unanswered,
             unsolicited: captured.unsolicited,
@@ -1258,47 +1303,51 @@ where
     }
 }
 
-fn validate_exchange_options(options: &ExchangeOptions) -> Result<CaptureQueueLimits, ClientError> {
-    if options.timeout > MAX_EXCHANGE_TIMEOUT {
-        return Err(ClientError::InvalidExchangeOption {
-            field: "timeout",
-            message: format!("must not exceed {MAX_EXCHANGE_TIMEOUT:?}"),
-        });
-    }
-    if options.max_template_packets == 0 {
-        return Err(ClientError::InvalidExchangeOption {
-            field: "max_template_packets",
-            message: "must be greater than zero".to_owned(),
-        });
-    }
-    for (field, value) in [
-        ("max_responses", options.max_responses),
-        ("max_unsolicited", options.max_unsolicited),
-    ] {
-        if value > options.max_capture_queue_frames {
+impl ExchangeOptions {
+    /// Validates every finite timeout and aggregate retention bound before a
+    /// resolver, route, neighbor, capture, or transmission provider is used.
+    pub fn validate(&self) -> Result<CaptureQueueLimits, ClientError> {
+        if self.timeout > MAX_EXCHANGE_TIMEOUT {
             return Err(ClientError::InvalidExchangeOption {
-                field,
-                message: format!(
-                    "{value} exceeds aggregate capture frame ceiling {}",
-                    options.max_capture_queue_frames
-                ),
+                field: "timeout",
+                message: format!("must not exceed {MAX_EXCHANGE_TIMEOUT:?}"),
             });
         }
-    }
-    Instant::now().checked_add(options.timeout).ok_or_else(|| {
-        ClientError::InvalidExchangeOption {
-            field: "timeout",
-            message: "cannot be represented by the platform monotonic clock".to_owned(),
+        if self.max_template_packets == 0 {
+            return Err(ClientError::InvalidExchangeOption {
+                field: "max_template_packets",
+                message: "must be greater than zero".to_owned(),
+            });
         }
-    })?;
-    CaptureQueueLimits {
-        max_frames: options.max_capture_queue_frames,
-        max_bytes: options.max_captured_bytes,
-        snap_length: options.decode.max_packet_size,
-        overflow_policy: options.capture_overflow_policy,
+        for (field, value) in [
+            ("max_responses", self.max_responses),
+            ("max_unsolicited", self.max_unsolicited),
+        ] {
+            if value > self.max_capture_queue_frames {
+                return Err(ClientError::InvalidExchangeOption {
+                    field,
+                    message: format!(
+                        "{value} exceeds aggregate capture frame ceiling {}",
+                        self.max_capture_queue_frames
+                    ),
+                });
+            }
+        }
+        Instant::now().checked_add(self.timeout).ok_or_else(|| {
+            ClientError::InvalidExchangeOption {
+                field: "timeout",
+                message: "cannot be represented by the platform monotonic clock".to_owned(),
+            }
+        })?;
+        CaptureQueueLimits {
+            max_frames: self.max_capture_queue_frames,
+            max_bytes: self.max_captured_bytes,
+            snap_length: self.decode.max_packet_size,
+            overflow_policy: self.capture_overflow_policy,
+        }
+        .validate()
+        .map_err(ClientError::from)
     }
-    .validate()
-    .map_err(ClientError::from)
 }
 
 fn validate_send_report(expected: &Bytes, report: &IoSendReport) -> Result<(), LiveIoError> {
@@ -2766,6 +2815,9 @@ mod tests {
             &[CaptureQueueLimits::default()]
         );
         assert_eq!(result.responses.len(), 1);
+        assert_eq!(result.sent_evidence.len(), 1);
+        assert_eq!(result.sent_evidence[0].link_type, LinkType::RAW);
+        assert_eq!(result.sent_evidence[0].bytes, result.sent[0].bytes);
         assert!(result.unanswered.is_empty());
         assert!(result.unsolicited.is_empty());
     }

@@ -13,12 +13,12 @@ use bytes::Bytes;
 use clap::ValueEnum;
 use serde::Serialize;
 
-use crate::client::OperationStats;
+use crate::client::{ExchangeResult, OperationStats, SendReport};
 use crate::core::{BuiltPacket, DecodedPacket, Diagnostic, PacketDocument, PacketLayout};
 use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 use crate::io::{
-    CaptureFileFormat, CapturedFrame, InterfaceFlags, InterfaceInfo, LinkCapability, PlannedRoute,
-    ReplayTiming, RouteDecision,
+    CaptureFileFormat, CaptureStatistics, CapturedFrame, InterfaceFlags, InterfaceInfo,
+    LinkCapability, MaterializedRoute, PlannedRoute, ReplayTiming, RouteDecision,
 };
 
 /// Version identifier emitted by every structured CLI record.
@@ -746,8 +746,36 @@ pub struct NeighborEvidenceOutput {
     pub mac_address: String,
     pub attempts: u32,
     pub cache_hit: bool,
-    pub captured_frames: u64,
+    pub captured: Vec<FrameOutput>,
     pub evidence_truncated: bool,
+    pub capture_statistics: CaptureStatistics,
+}
+
+impl MaterializedRouteOutput {
+    pub fn try_from_route(route: MaterializedRoute) -> Result<Self, OutputContractError> {
+        let neighbor = route
+            .neighbor_resolution
+            .map(|resolution| {
+                let captured = resolution
+                    .captured
+                    .into_iter()
+                    .map(FrameOutput::try_from_frame)
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(NeighborEvidenceOutput {
+                    mac_address: resolution.mac_address.to_string(),
+                    attempts: resolution.attempts,
+                    cache_hit: resolution.cache_hit,
+                    captured,
+                    evidence_truncated: resolution.evidence_truncated,
+                    capture_statistics: resolution.capture_statistics,
+                })
+            })
+            .transpose()?;
+        Ok(Self {
+            plan: route.plan,
+            neighbor,
+        })
+    }
 }
 
 /// Aggregate result of `send`; operation statistics live in the envelope.
@@ -757,10 +785,34 @@ pub struct SendCommandResult {
     pub route: MaterializedRouteOutput,
 }
 
-/// One streamed capture record.
+impl SendCommandResult {
+    pub fn try_from_report(
+        report: SendReport,
+    ) -> Result<(Self, Vec<Diagnostic>, OperationStats), OutputContractError> {
+        let SendReport {
+            built,
+            route,
+            wire_bytes,
+            stats,
+        } = report;
+        let frame = WireFrameOutput::new(wire_bytes.unwrap_or_else(|| built.bytes.clone()));
+        Ok((
+            Self {
+                frame,
+                route: MaterializedRouteOutput::try_from_route(route)?,
+            },
+            built.diagnostics,
+            stats,
+        ))
+    }
+}
+
+/// One NDJSON event produced by `capture`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct CaptureFrameCommandResult {
-    pub frame: FrameOutput,
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum CaptureFrameCommandResult {
+    Frame { frame: FrameOutput },
+    Complete { frames: u64 },
 }
 
 /// A decoded frame retained by exchange-like tools.
@@ -769,6 +821,25 @@ pub struct DecodedFrameOutput {
     pub frame: FrameOutput,
     pub packet: PacketDocument,
     pub layout: PacketLayout,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl DecodedFrameOutput {
+    pub fn try_from_decoded(decoded: DecodedPacket) -> Result<Self, OutputContractError> {
+        let DecodedPacket {
+            packet,
+            original: _,
+            frame,
+            layout,
+            diagnostics,
+        } = decoded;
+        Ok(Self {
+            frame: FrameOutput::try_from_frame(frame)?,
+            packet: PacketDocument::from_packet(&packet),
+            layout,
+            diagnostics,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -786,6 +857,59 @@ pub struct ExchangeCommandResult {
     pub unanswered: Vec<u64>,
     pub unsolicited: Vec<DecodedFrameOutput>,
     pub undecoded: Vec<FrameOutput>,
+}
+
+impl ExchangeCommandResult {
+    pub fn try_from_exchange(
+        result: ExchangeResult,
+    ) -> Result<(Self, Vec<Diagnostic>, OperationStats), OutputContractError> {
+        let ExchangeResult {
+            sent,
+            sent_evidence: _,
+            responses,
+            unanswered,
+            unsolicited,
+            undecoded,
+            mut diagnostics,
+            stats,
+        } = result;
+        let sent = sent
+            .into_iter()
+            .map(|built| {
+                diagnostics.extend(built.diagnostics);
+                WireFrameOutput::new(built.bytes)
+            })
+            .collect();
+        let responses = responses
+            .into_iter()
+            .map(|response| {
+                Ok(ExchangeResponseOutput {
+                    request_index: response.request_index as u64,
+                    response: DecodedFrameOutput::try_from_decoded(response.response)?,
+                    latency: response.latency,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        let unsolicited = unsolicited
+            .into_iter()
+            .map(DecodedFrameOutput::try_from_decoded)
+            .collect::<Result<Vec<_>, _>>()?;
+        let undecoded = undecoded
+            .into_iter()
+            .map(FrameOutput::try_from_frame)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((
+            Self {
+                sent,
+                responses,
+                unanswered: unanswered.into_iter().map(|index| index as u64).collect(),
+                unsolicited,
+                undecoded,
+            },
+            diagnostics,
+            stats,
+        ))
+    }
 }
 
 /// One NDJSON event produced by `exchange`.

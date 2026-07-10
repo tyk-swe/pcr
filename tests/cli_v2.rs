@@ -171,6 +171,62 @@ fn send_policy_denial_precedes_route_or_live_io() {
 }
 
 #[test]
+fn scan_policy_and_request_errors_precede_resolver_route_and_live_io() {
+    let hostname = binary()
+        .args([
+            "--output",
+            "json",
+            "scan",
+            "lab.example",
+            "--ports",
+            "443",
+            "--interface",
+            "definitely-not-a-real-interface",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(hostname.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&hostname.stdout).unwrap();
+    assert_eq!(value["command"], "scan");
+    assert_eq!(value["error"]["code"], "policy.hostname_resolution");
+
+    let public = binary()
+        .args([
+            "--output",
+            "ndjson",
+            "scan",
+            "8.8.8.8",
+            "--transport",
+            "udp",
+            "--ports",
+            "53",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(public.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&public.stdout).unwrap();
+    assert_eq!(value["sequence"], 0);
+    assert_eq!(value["error"]["code"], "policy.public_destination");
+
+    let invalid = binary()
+        .args([
+            "--output",
+            "json",
+            "scan",
+            "192.168.56.10",
+            "--transport",
+            "icmp",
+            "--ports",
+            "80",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&invalid.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "cli.scan_limit");
+}
+
+#[test]
 fn send_budget_and_output_contracts_precede_route_or_live_io() {
     let budget = binary()
         .args([

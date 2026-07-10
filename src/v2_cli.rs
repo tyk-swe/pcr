@@ -15,8 +15,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
 use crate::client::{
-    Client, ExchangeOptions, LiveTarget, SendOptions, SystemHostnameResolver, TrafficPolicy,
-    TrafficPolicyError,
+    Client, ClientScanExecutor, ExchangeOptions, LiveTarget, SendOptions, SystemHostnameResolver,
+    TrafficPolicy, TrafficPolicyError, TrafficPolicyScanAuthorizer,
 };
 use crate::core::{
     parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,
@@ -38,11 +38,14 @@ use crate::output::{
     CommandName, DissectCommandResult, ExchangeCommandResult, ExchangeStreamCommandResult,
     FrameOutput, InterfacesCommandResult, OutputContractError, OutputError, OutputFormat,
     PlanCommandResult, ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult,
-    RoutesCommandResult, SendCommandResult, StreamErrorRecord, StreamRecord,
+    RoutesCommandResult, ScanCommandResult, ScanStreamCommandResult, SendCommandResult,
+    StreamErrorRecord, StreamRecord,
 };
 use crate::tools::{
-    replay_capture, ReplayAuthorizationError, ReplayAuthorizer, ReplayError, ReplayLimits,
-    ReplayOptions, ReplayTransmission, ReplayTransmitter, SystemReplayClock,
+    replay_capture, scan, ReplayAuthorizationError, ReplayAuthorizer, ReplayError, ReplayLimits,
+    ReplayOptions, ReplayTransmission, ReplayTransmitter, ScanAddressFamily, ScanBatch,
+    ScanBatchExecution, ScanError, ScanExecutionError, ScanExecutor, ScanLimits, ScanRequest,
+    ScanTarget, ScanTransport, SystemReplayClock, SystemScanClock,
 };
 
 #[derive(Debug, Parser)]
@@ -80,7 +83,7 @@ enum Command {
     /// Replay a PCAP/PCAPNG stream.
     Replay(ReplayArgs),
     /// Run a structured network scan.
-    Scan(UnavailableArgs),
+    Scan(ScanArgs),
     /// Run structured traceroute probes.
     Traceroute(UnavailableArgs),
     /// Run a structured DNS operation.
@@ -193,6 +196,95 @@ struct UnavailableArgs {
     /// Packet expression (accepted for forward-compatible scripts).
     #[arg(long)]
     packet: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliScanTransport {
+    #[default]
+    Tcp,
+    Udp,
+    Icmp,
+}
+
+impl From<CliScanTransport> for ScanTransport {
+    fn from(value: CliScanTransport) -> Self {
+        match value {
+            CliScanTransport::Tcp => Self::Tcp,
+            CliScanTransport::Udp => Self::Udp,
+            CliScanTransport::Icmp => Self::Icmp,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliScanAddressFamily {
+    #[default]
+    Any,
+    Ipv4,
+    Ipv6,
+}
+
+impl From<CliScanAddressFamily> for ScanAddressFamily {
+    fn from(value: CliScanAddressFamily) -> Self {
+        match value {
+            CliScanAddressFamily::Any => Self::Any,
+            CliScanAddressFamily::Ipv4 => Self::Ipv4,
+            CliScanAddressFamily::Ipv6 => Self::Ipv6,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct ScanArgs {
+    /// Explicit IP address or hostname to scan.
+    #[arg(value_name = "ADDRESS_OR_HOSTNAME")]
+    target: String,
+    /// TCP SYN, UDP, or ICMP echo probes.
+    #[arg(long, value_enum, default_value_t = CliScanTransport::Tcp)]
+    transport: CliScanTransport,
+    /// Select all authorized addresses or only one IP family.
+    #[arg(long, value_enum, default_value_t = CliScanAddressFamily::Any)]
+    family: CliScanAddressFamily,
+    /// Comma-separated TCP/UDP destination ports; omitted for ICMP.
+    #[arg(long, value_delimiter = ',', num_args = 1..)]
+    ports: Vec<u16>,
+    /// Number of bounded attempts per selected endpoint.
+    #[arg(long, default_value_t = 1)]
+    attempts: u32,
+    /// Response window for each capture-ready batch.
+    #[arg(long, default_value_t = 1_000)]
+    timeout_ms: u64,
+    /// Optional average probe-rate ceiling; batches remain deliberate bursts.
+    #[arg(long)]
+    rate: Option<u32>,
+    /// Maximum probes sent by one shared-capture exchange batch.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_SCAN_BATCH_SIZE)]
+    batch_size: usize,
+    /// Maximum distinct destination ports accepted by the request.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_SCAN_PORTS)]
+    max_ports: usize,
+    /// Maximum generated probes after target resolution and attempts.
+    #[arg(long, default_value_t = crate::core::DEFAULT_MAX_TEMPLATE_PACKETS)]
+    max_probes: usize,
+    /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
+    #[arg(long, default_value_t = 3_600_000)]
+    max_duration_ms: u64,
+    /// Maximum undecodable exact frames retained across the scan.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
+    max_undecoded: usize,
+    /// Interface name or numeric index used as an exact route constraint.
+    #[arg(long, value_name = "NAME_OR_INDEX")]
+    interface: Option<String>,
+    /// Interface-owned source preference used only for route selection.
+    #[arg(long)]
+    source: Option<IpAddr>,
+    /// Automatic, Layer 2, or raw Layer 3 transmission intent.
+    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
+    link_mode: CliLinkMode,
+    #[command(flatten)]
+    limits: CaptureLimitArgs,
+    #[command(flatten)]
+    policy: TrafficPolicyArgs,
 }
 
 #[derive(Debug, Args)]
@@ -529,10 +621,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Capture(arguments) => run_capture(arguments, cli.output),
         Command::Exchange(arguments) => run_exchange(arguments, cli.output),
         Command::Replay(arguments) => run_replay(arguments, cli.output),
-        Command::Scan(arguments)
-        | Command::Traceroute(arguments)
-        | Command::Dns(arguments)
-        | Command::Fuzz(arguments) => {
+        Command::Scan(arguments) => run_scan(arguments, cli.output),
+        Command::Traceroute(arguments) | Command::Dns(arguments) | Command::Fuzz(arguments) => {
             let _ = arguments.packet;
             Err(CliError::new(
                 4,
@@ -1289,6 +1379,328 @@ fn emit_exchange_record(
 ) -> Result<(), CliError> {
     emit_json_compact(&StreamRecord::success(
         CommandName::Exchange,
+        *sequence,
+        result,
+        Vec::new(),
+    ))
+    .map_err(|error| error.at_sequence(*sequence))?;
+    *sequence = sequence.checked_add(1).ok_or_else(|| {
+        CliError::classified(OutputContractError::SequenceOverflow).at_sequence(*sequence)
+    })?;
+    Ok(())
+}
+
+fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
+    let ScanArgs {
+        target,
+        transport,
+        family,
+        ports,
+        attempts,
+        timeout_ms,
+        rate,
+        batch_size,
+        max_ports,
+        max_probes,
+        max_duration_ms,
+        max_undecoded,
+        interface,
+        source,
+        link_mode,
+        limits,
+        policy,
+    } = arguments;
+    let target = match target.parse::<LiveTarget>().map_err(CliError::classified)? {
+        LiveTarget::Address(address) => ScanTarget::Address(address),
+        LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
+    };
+    let queue_limits = limits.into_limits();
+    let scan_limits = ScanLimits {
+        max_ports,
+        max_probes,
+        batch_size,
+        max_duration: Duration::from_millis(max_duration_ms),
+        max_evidence_frames: queue_limits.max_frames,
+        max_evidence_bytes: queue_limits.max_bytes,
+        max_undecoded,
+    };
+    scan_limits.validate().map_err(scan_cli_error)?;
+    let policy = policy.into_policy();
+    policy.validate().map_err(CliError::classified)?;
+    validate_scan_interface_selector(interface.as_deref())?;
+    let request = ScanRequest {
+        target,
+        transport: transport.into(),
+        address_family: family.into(),
+        ports,
+        attempts,
+        timeout: Duration::from_millis(timeout_ms),
+        probes_per_second: rate,
+        limits: scan_limits,
+    };
+    let registry = default_registry_arc()?;
+    let mut exchange = ExchangeOptions {
+        send: SendOptions {
+            destination: None,
+            plan: crate::io::PlanOptions {
+                link_mode: link_mode.into(),
+                interface: None,
+                preferred_source: source,
+            },
+            build: BuildOptions::default(),
+            allow_permissive_live: false,
+        },
+        timeout: request.timeout,
+        max_template_packets: batch_size,
+        max_unsolicited: queue_limits.max_frames,
+        max_responses: queue_limits.max_frames,
+        max_capture_queue_frames: queue_limits.max_frames,
+        max_captured_bytes: queue_limits.max_bytes,
+        capture_overflow_policy: queue_limits.overflow_policy,
+        decode: DecodeOptions::default(),
+    };
+    exchange.decode.max_packet_size = queue_limits.snap_length;
+    exchange.validate().map_err(CliError::classified)?;
+
+    let mut executor = CliScanExecutor {
+        registry: Arc::clone(&registry),
+        policy: policy.clone(),
+        exchange,
+        interface,
+        interface_resolved: false,
+    };
+    let resolver = SystemHostnameResolver;
+    let mut authorizer = TrafficPolicyScanAuthorizer::new(&policy, &resolver);
+    let mut clock = SystemScanClock;
+    let result = scan(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut clock,
+    )
+    .map_err(scan_cli_error)?;
+    let (result, diagnostics, stats) =
+        ScanCommandResult::try_from_scan(result).map_err(CliError::classified)?;
+
+    match output {
+        OutputFormat::Text => render_scan_text(result, diagnostics, stats),
+        OutputFormat::Json => emit_json(
+            &AggregateOutput::success(CommandName::Scan, result, diagnostics).with_stats(stats),
+        ),
+        OutputFormat::Ndjson => render_scan_stream(result, diagnostics, stats),
+        _ => Err(CliError::classified(
+            OutputContractError::UnsupportedFormat {
+                command: CommandName::Scan,
+                format: output,
+            },
+        )),
+    }
+}
+
+fn validate_scan_interface_selector(selector: Option<&str>) -> Result<(), CliError> {
+    let Some(selector) = selector else {
+        return Ok(());
+    };
+    if selector.is_empty() {
+        return Err(CliError::new(2, "scan interface cannot be empty"));
+    }
+    let numeric = selector.bytes().all(|byte| byte.is_ascii_digit());
+    let index = selector.parse::<u32>().unwrap_or(0);
+    if numeric && index == 0 {
+        return Err(CliError::new(2, "scan interface index must be non-zero"));
+    }
+    Ok(())
+}
+
+struct CliScanExecutor {
+    registry: Arc<crate::core::ProtocolRegistry>,
+    policy: TrafficPolicy,
+    exchange: ExchangeOptions,
+    interface: Option<String>,
+    interface_resolved: bool,
+}
+
+impl ScanExecutor for CliScanExecutor {
+    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+        if !self.interface_resolved {
+            self.exchange.send.plan.interface =
+                resolve_interface(self.interface.take(), &SystemInterfaceProvider)
+                    .map_err(scan_execution_error_from_cli)?;
+            self.interface_resolved = true;
+        }
+        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
+        ClientScanExecutor::new(&client, self.exchange.clone()).execute(batch)
+    }
+}
+
+fn scan_execution_error_from_cli(error: CliError) -> ScanExecutionError {
+    ScanExecutionError::new(error.message, error.classification, error.causes)
+}
+
+fn scan_cli_error(error: ScanError) -> CliError {
+    let sequence = error.sequence();
+    let mut error = CliError::classified(error);
+    if let Some(sequence) = sequence {
+        error = error.at_sequence(sequence);
+    }
+    error
+}
+
+fn render_scan_text(
+    result: ScanCommandResult,
+    diagnostics: Vec<crate::core::Diagnostic>,
+    stats: crate::client::OperationStats,
+) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "target={} resolved={}",
+        result.target,
+        result
+            .resolved_addresses
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    ))?;
+    for port in &result.ports {
+        let destination = port
+            .evidence
+            .first()
+            .map(|evidence| evidence.destination)
+            .ok_or_else(|| CliError::new(70, "scan endpoint has no attempt evidence"))?;
+        let endpoint = if port.transport == "icmp" {
+            "icmp".to_owned()
+        } else {
+            format!("{}/{}", port.transport, port.port)
+        };
+        write_stdout_line(format_args!(
+            "{} {} classification={}",
+            destination,
+            endpoint,
+            scan_classification_name(port.classification)
+        ))?;
+        for evidence in &port.evidence {
+            write_stdout_line(format_args!(
+                "  attempt={} status={} classification={} sent={} received={} responder={} latency={} reason={}",
+                evidence.attempt,
+                scan_probe_status_name(evidence.status),
+                scan_classification_name(evidence.classification),
+                output_timestamp_text(evidence.sent_at),
+                evidence
+                    .received_at
+                    .map(output_timestamp_text)
+                    .unwrap_or_else(|| "none".to_owned()),
+                evidence
+                    .responder
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "none".to_owned()),
+                evidence
+                    .latency
+                    .map(|value| format!("{value:?}"))
+                    .unwrap_or_else(|| "none".to_owned()),
+                evidence.reason,
+            ))?;
+            if let Some(frame) = &evidence.frame {
+                write_stdout_line(format_args!(
+                    "    frame dlt={} caplen={} wirelen={} {}",
+                    frame.link_type,
+                    frame.captured_length,
+                    frame.original_length,
+                    spaced_hex(frame.bytes())
+                ))?;
+            }
+        }
+    }
+    for frame in &result.undecoded {
+        write_stdout_line(format_args!(
+            "undecoded dlt={} caplen={} wirelen={} {}",
+            frame.link_type,
+            frame.captured_length,
+            frame.original_length,
+            spaced_hex(frame.bytes())
+        ))?;
+    }
+    write_stdout_line(format_args!(
+        "scanned {} endpoint(s) with {} completed probe(s), {} byte(s)",
+        result.ports.len(),
+        stats.packets_completed,
+        stats.bytes
+    ))?;
+    render_diagnostics_text(&diagnostics)
+}
+
+fn output_timestamp_text(timestamp: crate::output::OutputTimestamp) -> String {
+    format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds)
+}
+
+fn scan_classification_name(value: crate::output::ScanClassification) -> &'static str {
+    match value {
+        crate::output::ScanClassification::Open => "open",
+        crate::output::ScanClassification::Closed => "closed",
+        crate::output::ScanClassification::Filtered => "filtered",
+        crate::output::ScanClassification::Unreachable => "unreachable",
+        crate::output::ScanClassification::Unknown => "unknown",
+        crate::output::ScanClassification::Timeout => "timeout",
+    }
+}
+
+fn scan_probe_status_name(value: crate::output::ScanProbeStatus) -> &'static str {
+    match value {
+        crate::output::ScanProbeStatus::Response => "response",
+        crate::output::ScanProbeStatus::Timeout => "timeout",
+    }
+}
+
+fn render_scan_stream(
+    result: ScanCommandResult,
+    diagnostics: Vec<crate::core::Diagnostic>,
+    stats: crate::client::OperationStats,
+) -> Result<(), CliError> {
+    let ScanCommandResult {
+        target,
+        resolved_addresses,
+        ports,
+        undecoded,
+    } = result;
+    let mut sequence = 0_u64;
+    for port in ports {
+        let resolved_address = port
+            .evidence
+            .first()
+            .map(|evidence| evidence.destination)
+            .ok_or_else(|| {
+                CliError::new(70, "scan endpoint has no attempt evidence").at_sequence(sequence)
+            })?;
+        emit_scan_record(
+            &mut sequence,
+            ScanStreamCommandResult::Port {
+                target: target.clone(),
+                resolved_address,
+                port,
+            },
+        )?;
+    }
+    for frame in undecoded {
+        emit_scan_record(&mut sequence, ScanStreamCommandResult::Undecoded { frame })?;
+    }
+    emit_json_compact(
+        &StreamRecord::success(
+            CommandName::Scan,
+            sequence,
+            ScanStreamCommandResult::Complete {
+                target,
+                resolved_addresses,
+            },
+            diagnostics,
+        )
+        .with_stats(stats),
+    )
+    .map_err(|error| error.at_sequence(sequence))
+}
+
+fn emit_scan_record(sequence: &mut u64, result: ScanStreamCommandResult) -> Result<(), CliError> {
+    emit_json_compact(&StreamRecord::success(
+        CommandName::Scan,
         *sequence,
         result,
         Vec::new(),
@@ -2844,6 +3256,51 @@ mod tests {
             "packet.json",
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn scan_cli_parses_typed_transport_ports_and_finite_limits() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "scan",
+            "192.168.56.10",
+            "--transport",
+            "udp",
+            "--ports",
+            "53,161",
+            "--attempts",
+            "2",
+            "--batch-size",
+            "2",
+            "--rate",
+            "10",
+        ])
+        .unwrap();
+        let Command::Scan(arguments) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert!(matches!(arguments.transport, CliScanTransport::Udp));
+        assert_eq!(arguments.ports, [53, 161]);
+        assert_eq!(arguments.attempts, 2);
+        assert_eq!(arguments.batch_size, 2);
+        assert_eq!(arguments.rate, Some(10));
+    }
+
+    #[test]
+    fn scan_request_validation_fails_before_route_or_live_io() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "scan",
+            "192.168.56.10",
+            "--transport",
+            "icmp",
+            "--ports",
+            "80",
+        ])
+        .unwrap();
+        let error = run(cli).unwrap_err();
+        assert_eq!(error.classification.code, "cli.scan_limit");
+        assert!(error.message.contains("ICMP scans are portless"));
     }
 
     #[test]

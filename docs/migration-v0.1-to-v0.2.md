@@ -2,7 +2,7 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
+This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
 
 ## The central change
 
@@ -39,6 +39,13 @@ The expressions below show the intended shape. Field spellings can still change 
 | daemon/rules/external command actions | removed; compose the Rust API or CLI from an application or scheduler |
 | interactive REPL | removed; use shell history, packet documents, or a Rust application |
 | embedded Prometheus HTTP endpoint | removed; export typed `OperationStats` through the application's observability stack |
+
+The v0.2 scan grammar is intentionally workflow-specific rather than a bundle
+of legacy packet flags. Select `--transport tcp|udp|icmp`, provide `--ports`
+for TCP/UDP, and use finite attempt, timeout, rate, batch, packet, byte, and
+evidence limits. Each attempt reports response or timeout evidence; final
+classifications distinguish open, closed, filtered, unreachable, unknown, and
+timeout. See the [scan contract](scan.md).
 
 ### Dry run becomes two explicit operations
 

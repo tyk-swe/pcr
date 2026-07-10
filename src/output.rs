@@ -21,7 +21,8 @@ use crate::io::{
     InterfaceInfo, LinkCapability, LinkMode, MaterializedRoute, PlannedRoute, ReplayTiming,
     RouteDecision,
 };
-use crate::tools::{ReplayFrameEvidence, ReplaySummary};
+use crate::tools::{ReplayFrameEvidence, ReplaySummary, ScanResult};
+pub use crate::tools::{ScanClassification, ScanProbeStatus};
 
 /// Version identifier emitted by every structured CLI record.
 pub const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
@@ -1022,25 +1023,19 @@ pub struct ProbeEvidenceOutput {
     pub destination: IpAddr,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub destination_port: Option<u16>,
-    pub attempts: u32,
+    pub attempt: u32,
+    pub status: ScanProbeStatus,
+    pub classification: ScanClassification,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub sent_at: Option<OutputTimestamp>,
+    pub responder: Option<IpAddr>,
+    pub sent_at: OutputTimestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<OutputTimestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<FrameOutput>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ScanClassification {
-    Open,
-    Closed,
-    Filtered,
-    Unreachable,
-    Unknown,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1057,6 +1052,87 @@ pub struct ScanCommandResult {
     pub target: String,
     pub resolved_addresses: Vec<IpAddr>,
     pub ports: Vec<ScanPortOutput>,
+    pub undecoded: Vec<FrameOutput>,
+}
+
+impl ScanCommandResult {
+    pub fn try_from_scan(
+        result: ScanResult,
+    ) -> Result<(Self, Vec<Diagnostic>, OperationStats), OutputContractError> {
+        let ScanResult {
+            target,
+            resolved_addresses,
+            endpoints,
+            undecoded,
+            diagnostics,
+            stats,
+        } = result;
+        let ports = endpoints
+            .into_iter()
+            .map(|endpoint| {
+                let evidence = endpoint
+                    .evidence
+                    .into_iter()
+                    .map(|evidence| {
+                        let protocol = match (endpoint.transport, endpoint.address) {
+                            (crate::tools::ScanTransport::Icmp, IpAddr::V4(_)) => "icmpv4",
+                            (crate::tools::ScanTransport::Icmp, IpAddr::V6(_)) => "icmpv6",
+                            _ => endpoint.transport.as_str(),
+                        };
+                        Ok(ProbeEvidenceOutput {
+                            protocol: protocol.to_owned(),
+                            destination: endpoint.address,
+                            destination_port: endpoint.port,
+                            attempt: evidence.attempt,
+                            status: evidence.status,
+                            classification: evidence.classification,
+                            responder: evidence.responder,
+                            sent_at: evidence.sent_at.try_into()?,
+                            received_at: evidence
+                                .received_at
+                                .map(OutputTimestamp::try_from)
+                                .transpose()?,
+                            latency: evidence.latency,
+                            frame: evidence
+                                .response
+                                .map(FrameOutput::try_from_frame)
+                                .transpose()?,
+                            reason: evidence.reason,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, OutputContractError>>()?;
+                Ok(ScanPortOutput {
+                    // Port zero is the versioned sentinel for a portless ICMP
+                    // endpoint; destination_port remains absent in evidence.
+                    port: endpoint.port.unwrap_or(0),
+                    transport: endpoint.transport.to_string(),
+                    classification: endpoint.classification,
+                    evidence,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        let undecoded = undecoded
+            .into_iter()
+            .map(FrameOutput::try_from_frame)
+            .collect::<Result<Vec<_>, _>>()?;
+        let stats = OperationStats {
+            packets_attempted: stats.packets_attempted,
+            packets_completed: stats.packets_completed,
+            bytes: stats.bytes,
+            elapsed: stats.elapsed,
+            capture: stats.capture,
+        };
+        Ok((
+            Self {
+                target,
+                resolved_addresses,
+                ports,
+                undecoded,
+            },
+            diagnostics,
+            stats,
+        ))
+    }
 }
 
 /// One classified port record produced by streaming `scan` output.
@@ -1065,6 +1141,24 @@ pub struct ScanPortCommandResult {
     pub target: String,
     pub resolved_address: IpAddr,
     pub port: ScanPortOutput,
+}
+
+/// One independently useful event in structured scan streaming output.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum ScanStreamCommandResult {
+    Port {
+        target: String,
+        resolved_address: IpAddr,
+        port: ScanPortOutput,
+    },
+    Undecoded {
+        frame: FrameOutput,
+    },
+    Complete {
+        target: String,
+        resolved_addresses: Vec<IpAddr>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -1249,6 +1343,7 @@ fn compact_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::{ScanEndpointResult, ScanProbeEvidence, ScanProbeStatus, ScanTransport};
 
     #[test]
     fn command_matrix_is_complete_and_has_no_duplicate_formats() {
@@ -1334,5 +1429,56 @@ mod tests {
         let documentation = include_str!("../schemas/README.md");
         assert!(documentation.contains("| `read` | text, NDJSON, whole-frame hex, PCAP, PCAPNG |"));
         assert!(documentation.contains("| `replay` | text, JSON, NDJSON, PCAP, PCAPNG |"));
+    }
+
+    #[test]
+    fn scan_output_preserves_per_attempt_facts_and_timeout_classification() {
+        let address: IpAddr = "192.168.56.10".parse().unwrap();
+        let result = ScanResult {
+            target: address.to_string(),
+            resolved_addresses: vec![address],
+            endpoints: vec![ScanEndpointResult {
+                address,
+                transport: ScanTransport::Tcp,
+                port: Some(443),
+                classification: ScanClassification::Timeout,
+                evidence: vec![ScanProbeEvidence {
+                    attempt: 1,
+                    status: ScanProbeStatus::Timeout,
+                    classification: ScanClassification::Timeout,
+                    responder: None,
+                    sent_at: UNIX_EPOCH + Duration::from_secs(7),
+                    received_at: None,
+                    latency: None,
+                    response: None,
+                    reason: "bounded timeout".to_owned(),
+                }],
+            }],
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: crate::tools::ScanStats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes: 40,
+                elapsed: Duration::from_secs(1),
+                capture: CaptureStatistics::default(),
+            },
+        };
+
+        let (result, diagnostics, stats) = ScanCommandResult::try_from_scan(result).unwrap();
+        let value = serde_json::to_value(
+            AggregateOutput::success(CommandName::Scan, result, diagnostics).with_stats(stats),
+        )
+        .unwrap();
+        assert_eq!(value["result"]["ports"][0]["classification"], "timeout");
+        assert_eq!(value["result"]["ports"][0]["evidence"][0]["attempt"], 1);
+        assert_eq!(
+            value["result"]["ports"][0]["evidence"][0]["status"],
+            "timeout"
+        );
+        assert!(value["result"]["ports"][0]["evidence"][0]
+            .get("received_at")
+            .is_none());
+        assert_eq!(value["stats"]["packets_completed"], 1);
     }
 }

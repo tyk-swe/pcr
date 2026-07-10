@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::core::{
     BuildContext, BuildError, BuildOptions, Builder, BuiltPacket, DecodeOptions, DecodedPacket,
-    Dissector, FieldValue, Packet, PacketTemplate, Padding, ProtocolRegistry,
+    Dissector, FieldValue, Packet, PacketTemplate, Padding, ProtocolRegistry, TemplateValues,
     DEFAULT_MAX_TEMPLATE_PACKETS,
 };
 use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
@@ -23,6 +23,10 @@ use crate::io::{
     PlannedRoute, RoutePlanner, RouteProvider,
 };
 use crate::protocols::Ethernet;
+use crate::tools::{
+    AuthorizedScanTarget, ScanAuthorizer, ScanBatch, ScanBatchExecution, ScanExecutionError,
+    ScanExecutor, ScanMatchedResponse, ScanStats, ScanTarget, ScanTransport,
+};
 
 // Compatibility surface: provider implementations historically imported these
 // contracts through `packetcraftr::client`. Their ownership is now `io`.
@@ -429,6 +433,71 @@ impl TrafficPolicy {
             declared: target.clone(),
             addresses,
         })
+    }
+}
+
+/// Façade adapter that applies [`TrafficPolicy`] and a [`HostnameResolver`] to
+/// the component-neutral structured scan authorization seam.
+pub struct TrafficPolicyScanAuthorizer<'a, R> {
+    policy: &'a TrafficPolicy,
+    resolver: &'a R,
+}
+
+impl<'a, R> TrafficPolicyScanAuthorizer<'a, R> {
+    pub fn new(policy: &'a TrafficPolicy, resolver: &'a R) -> Self {
+        Self { policy, resolver }
+    }
+}
+
+impl<R: HostnameResolver> ScanAuthorizer for TrafficPolicyScanAuthorizer<'_, R> {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &ScanTarget,
+    ) -> Result<AuthorizedScanTarget, crate::tools::ScanAuthorizationError> {
+        let target = match target {
+            ScanTarget::Address(address) => LiveTarget::Address(*address),
+            ScanTarget::Hostname(hostname) => LiveTarget::Hostname(
+                hostname
+                    .parse::<Hostname>()
+                    .map_err(|error| crate::tools::ScanAuthorizationError::classified(&error))?,
+            ),
+        };
+        let resolved = self
+            .policy
+            .resolve_target(&target, self.resolver)
+            .map_err(|error| crate::tools::ScanAuthorizationError::classified(&error))?;
+        let declared = match resolved.declared() {
+            LiveTarget::Address(address) => address.to_string(),
+            LiveTarget::Hostname(hostname) => hostname.to_string(),
+        };
+        Ok(AuthorizedScanTarget {
+            declared,
+            addresses: resolved.addresses().to_vec(),
+        })
+    }
+
+    fn authorize_operation(
+        &mut self,
+        packets: u64,
+        maximum_wire_bytes: u64,
+    ) -> Result<(), crate::tools::ScanAuthorizationError> {
+        if packets > self.policy.max_packets_per_operation {
+            return Err(crate::tools::ScanAuthorizationError::classified(
+                &TrafficPolicyError::PacketLimit {
+                    actual: packets,
+                    limit: self.policy.max_packets_per_operation,
+                },
+            ));
+        }
+        if maximum_wire_bytes > self.policy.max_bytes_per_operation {
+            return Err(crate::tools::ScanAuthorizationError::classified(
+                &TrafficPolicyError::ByteLimit {
+                    actual: maximum_wire_bytes,
+                    limit: self.policy.max_bytes_per_operation,
+                },
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -1302,6 +1371,126 @@ where
             },
         })
     }
+}
+
+/// Façade adapter that executes component-neutral scan batches through the
+/// capture-ready [`Client::exchange`] lifecycle.
+pub struct ClientScanExecutor<'a, R, N, I> {
+    client: &'a Client<R, N, I>,
+    options: ExchangeOptions,
+}
+
+impl<'a, R, N, I> ClientScanExecutor<'a, R, N, I> {
+    pub fn new(client: &'a Client<R, N, I>, options: ExchangeOptions) -> Self {
+        Self { client, options }
+    }
+}
+
+impl<R, N, I> ScanExecutor for ClientScanExecutor<'_, R, N, I>
+where
+    R: RouteProvider,
+    N: NeighborResolver,
+    I: ExchangeIo,
+{
+    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+        let Some(first) = batch.probes.first() else {
+            return Err(invalid_scan_execution(
+                "scan executor received an empty batch",
+            ));
+        };
+        if batch.probes.iter().any(|probe| {
+            probe.address != first.address
+                || probe.transport != first.transport
+                || probe.attempt != first.attempt
+        }) {
+            return Err(invalid_scan_execution(
+                "scan executor batches must share address, transport, and attempt",
+            ));
+        }
+        if first.transport == ScanTransport::Icmp && batch.probes.len() != 1 {
+            return Err(invalid_scan_execution(
+                "ICMP batches must contain exactly one uniquely identified echo probe",
+            ));
+        }
+        if self.options.max_responses < batch.probes.len() {
+            return Err(invalid_scan_execution(format!(
+                "max_responses={} is smaller than scan batch size {}",
+                self.options.max_responses,
+                batch.probes.len()
+            )));
+        }
+
+        let mut template = PacketTemplate::new(first.packet());
+        if batch.probes.len() > 1 {
+            let ports = batch
+                .probes
+                .iter()
+                .map(|probe| {
+                    probe
+                        .port
+                        .map(|port| FieldValue::Unsigned(u64::from(port)))
+                        .ok_or_else(|| {
+                            invalid_scan_execution(
+                                "portless probes cannot form a multi-packet batch",
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            template = template.axis(1, "destination_port", TemplateValues::Values(ports));
+        }
+        let mut options = self.options.clone();
+        options.timeout = batch.timeout;
+        options.max_template_packets = batch.probes.len();
+        options.send.destination = Some(first.address);
+        let exchange = self
+            .client
+            .exchange(&template, options)
+            .map_err(|error| ScanExecutionError::classified(&error))?;
+        let ExchangeResult {
+            sent,
+            sent_evidence,
+            responses,
+            unanswered: _,
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats,
+        } = exchange;
+        Ok(ScanBatchExecution {
+            sent: sent.into_iter().map(|built| built.packet).collect(),
+            sent_evidence,
+            responses: responses
+                .into_iter()
+                .map(|response| ScanMatchedResponse {
+                    request_index: response.request_index,
+                    response: response.response,
+                    latency: response.latency,
+                })
+                .collect(),
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats: ScanStats {
+                packets_attempted: stats.packets_attempted,
+                packets_completed: stats.packets_completed,
+                bytes: stats.bytes,
+                elapsed: stats.elapsed,
+                capture: stats.capture,
+            },
+        })
+    }
+}
+
+fn invalid_scan_execution(message: impl Into<String>) -> ScanExecutionError {
+    ScanExecutionError::new(
+        message,
+        ErrorClassification::new(
+            "cli.scan_executor",
+            FailureKind::Cli,
+            Some("use homogeneous bounded scan batches and retain at least one response per probe"),
+        ),
+        Vec::new(),
+    )
 }
 
 impl ExchangeOptions {

@@ -211,7 +211,7 @@
               "$ref": "#/$defs/replayFrameSuccess"
             },
             {
-              "$ref": "#/$defs/scanPortSuccess"
+              "$ref": "#/$defs/scanStreamSuccess"
             },
             {
               "$ref": "#/$defs/tracerouteHopSuccess"
@@ -531,14 +531,14 @@
         "result"
       ]
     },
-    "scanPortSuccess": {
+    "scanStreamSuccess": {
       "type": "object",
       "properties": {
         "command": {
           "const": "scan"
         },
         "result": {
-          "$ref": "#/$defs/scanPortResult"
+          "$ref": "#/$defs/scanStreamResult"
         }
       },
       "required": [
@@ -854,7 +854,8 @@
       "required": [
         "target",
         "resolved_addresses",
-        "ports"
+        "ports",
+        "undecoded"
       ],
       "properties": {
         "target": {
@@ -870,6 +871,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/scanPort"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frame"
           }
         }
       },
@@ -1132,6 +1139,73 @@
         }
       },
       "additionalProperties": false
+    },
+    "scanStreamResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "target",
+            "resolved_address",
+            "port"
+          ],
+          "properties": {
+            "event": {
+              "const": "port"
+            },
+            "target": {
+              "type": "string"
+            },
+            "resolved_address": {
+              "type": "string"
+            },
+            "port": {
+              "$ref": "#/$defs/scanPort"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "frame"
+          ],
+          "properties": {
+            "event": {
+              "const": "undecoded"
+            },
+            "frame": {
+              "$ref": "#/$defs/frame"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "target",
+            "resolved_addresses"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "target": {
+              "type": "string"
+            },
+            "resolved_addresses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "tracerouteHopResult": {
       "type": "object",
@@ -1629,7 +1703,8 @@
             "closed",
             "filtered",
             "unreachable",
-            "unknown"
+            "unknown",
+            "timeout"
           ]
         },
         "evidence": {
@@ -1646,7 +1721,11 @@
       "required": [
         "protocol",
         "destination",
-        "attempts"
+        "attempt",
+        "status",
+        "classification",
+        "sent_at",
+        "reason"
       ],
       "properties": {
         "protocol": {
@@ -1660,10 +1739,31 @@
           "minimum": 0,
           "maximum": 65535
         },
-        "attempts": {
+        "attempt": {
           "type": "integer",
-          "minimum": 0,
+          "minimum": 1,
           "maximum": 4294967295
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "response",
+            "timeout"
+          ]
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed",
+            "filtered",
+            "unreachable",
+            "unknown",
+            "timeout"
+          ]
+        },
+        "responder": {
+          "type": "string"
         },
         "sent_at": {
           "$ref": "#/$defs/timestamp"
@@ -1676,6 +1776,10 @@
         },
         "frame": {
           "$ref": "#/$defs/frame"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false

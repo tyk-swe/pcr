@@ -20,12 +20,12 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
 | Runtime-neutral captured-frame records and offline capture I/O | Bounded streaming read/write and metadata-preserving PCAP/PCAPNG copy are available through the API and `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
-| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
+| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
-| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages and templates are available; tool workflows are later alphas |
+| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, and the structured scan workflow are available; remaining tool workflows are later alphas |
 | Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; physical crate extraction remains a beta milestone |
 
-Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `scan`, `traceroute`, `dns`, and `fuzz` names return the capability exit code instead of falling through to a legacy command.
+Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `traceroute`, `dns`, and `fuzz` names return the capability exit code instead of falling through to a legacy command.
 
 The exact v0.2 packet-layer promise is published in the
 [stable built-in protocol matrix](docs/protocol-support.md) and through the
@@ -149,6 +149,24 @@ share the same bounded operation. See the
 
 The [v0.1 to v0.2 migration guide](docs/migration-v0.1-to-v0.2.md) maps common legacy commands and explains removed subsystems.
 
+### Structured scans
+
+`scan` generates bounded TCP SYN, UDP, or ICMP echo probes for every authorized
+IPv4/IPv6 target selected by the request. Hostnames are authorized before DNS
+and every answer is authorized before probe construction. Homogeneous batches
+reuse capture-ready `exchange`; finite attempts, rate, batch, packet, byte,
+duration, queue, and evidence limits apply before or during the operation.
+
+```console
+packetcraftr --output json scan 192.168.56.10 \
+  --transport tcp --ports 22,443 --attempts 2 \
+  --timeout-ms 750 --batch-size 2 --rate 20
+```
+
+Results distinguish correlated response evidence, timeouts, closed,
+filtered, unreachable, and unknown endpoints. Policy denials and runtime
+failures remain typed errors. See the [structured scan contract](docs/scan.md).
+
 ### Route-aware and live workflows
 
 `plan` and `routes` are passive. `plan` selects the route, interface-owned
@@ -228,6 +246,7 @@ The v0.2 contracts are:
 - Synthesized or resolved Layer 2 bytes are part of the exact built frame. Byte-policy checks include that envelope before neighbor traffic, and a backend-reported partial send is a typed failure.
 - Raw Layer 3 adapters accept only complete IPv4/IPv6 datagrams for the selected route and MTU. They reject header values the operating system would change, preserve spoofed packet sources separately from the bound interface source, and report partial native writes as typed failures.
 - Replay authorizes each fully captured frame before interface or route I/O, fixes its Layer 2/Layer 3 provider from the capture root, applies finite timing/frame/byte ceilings, and requires backend-confirmed bytes before emitting success evidence.
+- Scan authorizes the declared hostname before DNS and every resolved address before probe construction, then uses bounded capture-ready exchanges and accepts only checksum-valid matcher- or quote-correlated responses.
 - Route MTU checks measure the actual built network-layer byte span instead of trusting permissive wire length fields. Oversized packets fail before neighbor discovery or live I/O and require an explicit fragmentation transform.
 - Capture is ready before an exchange sends its first frame, and one owned receive stream routes every frame rather than silently draining traffic.
 - Exchange always attempts to stop and join its capture session after readiness, send, receive, or timeout failures. If the operation and cleanup both fail, both errors remain visible.

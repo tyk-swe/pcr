@@ -34,11 +34,12 @@ pub mod tools;
 mod v2_cli;
 
 pub use client::{
-    Client, ClientError, ExchangeOptions, ExchangeResult, Hostname, HostnameResolver, LiveTarget,
-    MatchedResponse, OperationStats, ResolvedTarget, SendOptions, SendReport,
-    SystemHostnameResolver, TargetResolutionError, TrafficPolicy, TrafficPolicyError,
-    UnsupportedNeighborResolver, UnsupportedPacketIo, DEFAULT_MAX_RESOLVED_ADDRESSES,
-    DEFAULT_MAX_UNSOLICITED_FRAMES, MAX_EXCHANGE_TIMEOUT, MAX_RESOLVED_ADDRESSES,
+    Client, ClientError, ClientScanExecutor, ExchangeOptions, ExchangeResult, Hostname,
+    HostnameResolver, LiveTarget, MatchedResponse, OperationStats, ResolvedTarget, SendOptions,
+    SendReport, SystemHostnameResolver, TargetResolutionError, TrafficPolicy, TrafficPolicyError,
+    TrafficPolicyScanAuthorizer, UnsupportedNeighborResolver, UnsupportedPacketIo,
+    DEFAULT_MAX_RESOLVED_ADDRESSES, DEFAULT_MAX_UNSOLICITED_FRAMES, MAX_EXCHANGE_TIMEOUT,
+    MAX_RESOLVED_ADDRESSES,
 };
 pub use core::{
     BuildContext, BuildError, BuildMode, BuildOptions, Builder, BuiltPacket, ByteRange, CodecError,
@@ -82,10 +83,11 @@ pub use output::{
     MaterializedRouteOutput, NeighborEvidenceOutput, OutputContractError, OutputError,
     OutputFormat, OutputMode, OutputTimestamp, PlanCommandResult, ProbeEvidenceOutput,
     ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult, RoutesCommandResult,
-    ScanClassification, ScanCommandResult, ScanPortCommandResult, ScanPortOutput,
-    SendCommandResult, StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceHopOutput,
-    TraceProbeOutput, TraceProbeStatus, TracerouteCommandResult, TracerouteHopCommandResult,
-    WireFrameOutput, COMMAND_OUTPUT_CONTRACTS, OUTPUT_SCHEMA_V1,
+    ScanClassification, ScanCommandResult, ScanPortCommandResult, ScanPortOutput, ScanProbeStatus,
+    ScanStreamCommandResult, SendCommandResult, StreamErrorRecord, StreamRecord,
+    TraceCompletionReason, TraceHopOutput, TraceProbeOutput, TraceProbeStatus,
+    TracerouteCommandResult, TracerouteHopCommandResult, WireFrameOutput, COMMAND_OUTPUT_CONTRACTS,
+    OUTPUT_SCHEMA_V1,
 };
 pub use protocols::{
     default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, CaptureByteOrder,
@@ -101,9 +103,15 @@ pub use session::{
     TcpReassemblyError, TcpReassemblyEvent, TcpSegment,
 };
 pub use tools::{
-    replay_capture, ReplayAuthorizationError, ReplayAuthorizer, ReplayClock, ReplayError,
-    ReplayFrameEvidence, ReplayLimits, ReplayOptions, ReplaySummary, ReplayTransmission,
-    ReplayTransmitter, SystemReplayClock, MAX_REPLAY_DURATION,
+    classify_scan_response, replay_capture, scan, AuthorizedScanTarget, ReplayAuthorizationError,
+    ReplayAuthorizer, ReplayClock, ReplayError, ReplayFrameEvidence, ReplayLimits, ReplayOptions,
+    ReplaySummary, ReplayTransmission, ReplayTransmitter, ScanAddressFamily,
+    ScanAuthorizationError, ScanAuthorizer, ScanBatch, ScanBatchExecution, ScanClock,
+    ScanEndpointResult, ScanError, ScanExecutionError, ScanExecutor, ScanLimits,
+    ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanRequest, ScanResponseClassification,
+    ScanResult, ScanStats, ScanTarget, ScanTransport, SystemReplayClock, SystemScanClock,
+    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES, DEFAULT_SCAN_BATCH_SIZE,
+    MAX_REPLAY_DURATION, MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
 };
 
 /// Run the intentionally breaking v0.2 command-line interface.

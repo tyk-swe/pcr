@@ -1,0 +1,52 @@
+{
+  "authority": "malformed_seed",
+  "capture": {
+    "interfaces": [],
+    "link_types": [
+      1
+    ]
+  },
+  "created_utc": "2026-07-10T00:00:00Z",
+  "expected": {
+    "diagnostic_codes": [
+      "decode.malformed_layer"
+    ],
+    "exact_rebuild": false,
+    "layers": [
+      "ethernet",
+      "malformed"
+    ],
+    "link_type": 1,
+    "notes": "Ethernet selects IPv4 but only ten IPv4 header bytes remain",
+    "valid": false
+  },
+  "fixture": "frames/malformed/truncated-ipv4.bin",
+  "kind": "malformed_input",
+  "license": {
+    "evidence": "Synthetic fixture authored for the PacketcraftR XOD-60 corpus; no production capture, private data, or third-party payload is included",
+    "spdx": "CC0-1.0"
+  },
+  "protocols": [
+    "ethernet",
+    "malformed"
+  ],
+  "review": {
+    "evidence": "https://linear.app/xodud/issue/XOD-60",
+    "reviewed_utc": "2026-07-10T00:00:00Z",
+    "reviewer": "Codex XOD-60 automated implementation review"
+  },
+  "schema": "packetcraftr.fixture-provenance/v1",
+  "sha256": "1894f8843fcec8ec82f6b3bc4f5f4b57622384f305ef7f2e72875f5e58a2b728",
+  "source": {
+    "description": "Ethernet selects IPv4 but only ten IPv4 header bytes remain",
+    "generator": {
+      "invocation": "python3 scripts/seed-fixture-corpus.py --write --verify-tcpdump",
+      "name": "Python standard library",
+      "summary": "Deterministic network-byte-order construction with explicit checksums and lengths",
+      "version": "3.12.3"
+    },
+    "oracle": null,
+    "reference": "https://www.rfc-editor.org/rfc/rfc791",
+    "type": "generated"
+  }
+}

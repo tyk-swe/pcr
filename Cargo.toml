@@ -65,6 +65,9 @@ serde_json = "1"
 thiserror = "2"
 noyalib = { version = "0.0.5", features = ["compat-serde-yaml"] }
 
+[dev-dependencies]
+sha2 = "0.10"
+
 [target.'cfg(not(windows))'.dependencies]
 pnet = { version = "0.35", default-features = false, features = ["std"], optional = true }
 

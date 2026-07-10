@@ -12,7 +12,7 @@
   "source": {
     "type": "generated",
     "description": "Documentation-only example representing one zero octet",
-    "reference": null,
+    "reference": "https://example.invalid/source-reference",
     "generator": {
       "name": "printf",
       "version": "GNU coreutils 9.5",
@@ -31,10 +31,12 @@
     ],
     "diagnostic_codes": [],
     "exact_rebuild": true,
+    "valid": true,
     "notes": "The referenced binary is intentionally not committed; this .example.json file is a template only."
   },
   "review": {
-    "reviewer": null,
-    "reviewed_utc": null
+    "reviewer": "replace with reviewer identity",
+    "reviewed_utc": "2026-07-09T00:00:00Z",
+    "evidence": "https://example.invalid/review-evidence"
   }
 }

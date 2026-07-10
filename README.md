@@ -261,9 +261,15 @@ cargo test --all-features --all-targets
 RUSTDOCFLAGS='-D warnings' cargo doc --all-features --no-deps
 cargo package --locked
 bash scripts/check-architecture.sh
+python3 scripts/validate-fixture-corpus.py
+python3 scripts/test-fixture-policy.py
 ```
 
-Tests never rewrite authoritative packet fixtures. Read the [fixture and provenance policy](tests/fixtures/README.md) before adding or replacing capture data.
+Tests never rewrite authoritative packet fixtures. The read-only corpus covers
+every registered capture root, valid and malformed PCAP/PCAPNG, packet
+documents, expected decodes, and output-schema failures; every file is verified
+against its reviewed SHA-256 before parsing. Read the [fixture and provenance
+policy](tests/fixtures/README.md) before adding or replacing evidence.
 
 Security-sensitive findings should follow [SECURITY.md](SECURITY.md), not a public issue.
 

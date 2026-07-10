@@ -92,9 +92,18 @@ jobs:
           check-jsonschema
           --schemafile schemas/packetcraftr.output.v1.schema.json
           examples/documents/output-*.json
+      - name: Validate fixture provenance documents
+        run: |
+          find tests/fixtures -type f \
+            \( -name '*.provenance.json' -o -name 'provenance.example.json' \) \
+            -print0 | xargs -0 check-jsonschema \
+              --schemafile schemas/packetcraftr.fixture-provenance.v1.schema.json
+      - name: Verify fixture paths and hashes
+        run: python3 scripts/validate-fixture-corpus.py
       - name: Reject invalid output documents
         run: |
           for fixture in tests/fixtures/invalid-output/*.json; do
+            [[ "${fixture}" == *.provenance.json ]] && continue
             if check-jsonschema \
               --schemafile schemas/packetcraftr.output.v1.schema.json \
               "${fixture}"; then
@@ -150,7 +159,13 @@ jobs:
       - name: Require reviewed provenance sidecars
         env:
           GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
         run: bash scripts/check-fixture-changes.sh
+      - name: Exercise fixture policy regressions
+        run: python3 scripts/test-fixture-policy.py
 
   portable-platforms:
     name: ${{ matrix.name }}

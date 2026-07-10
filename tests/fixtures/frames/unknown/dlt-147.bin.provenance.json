@@ -1,0 +1,50 @@
+{
+  "authority": "malformed_seed",
+  "capture": {
+    "interfaces": [],
+    "link_types": [
+      147
+    ]
+  },
+  "created_utc": "2026-07-10T00:00:00Z",
+  "expected": {
+    "diagnostic_codes": [
+      "decode.unsupported_link_type"
+    ],
+    "exact_rebuild": true,
+    "layers": [
+      "raw"
+    ],
+    "link_type": 147,
+    "notes": "Unknown DLT bytes must remain a complete raw record",
+    "valid": true
+  },
+  "fixture": "frames/unknown/dlt-147.bin",
+  "kind": "frame",
+  "license": {
+    "evidence": "Synthetic fixture authored for the PacketcraftR XOD-60 corpus; no production capture, private data, or third-party payload is included",
+    "spdx": "CC0-1.0"
+  },
+  "protocols": [
+    "raw"
+  ],
+  "review": {
+    "evidence": "https://linear.app/xodud/issue/XOD-60",
+    "reviewed_utc": "2026-07-10T00:00:00Z",
+    "reviewer": "Codex XOD-60 automated implementation review"
+  },
+  "schema": "packetcraftr.fixture-provenance/v1",
+  "sha256": "0516bfb2fab718098d4d4e423a45ba30b111d845dd295a7760d8c7de122b31ab",
+  "source": {
+    "description": "Unknown DLT bytes must remain a complete raw record",
+    "generator": {
+      "invocation": "python3 scripts/seed-fixture-corpus.py --write --verify-tcpdump",
+      "name": "Python standard library",
+      "summary": "Deterministic network-byte-order construction with explicit checksums and lengths",
+      "version": "3.12.3"
+    },
+    "oracle": null,
+    "reference": "https://www.tcpdump.org/linktypes.html",
+    "type": "generated"
+  }
+}

@@ -6,6 +6,7 @@ PacketcraftR publishes JSON Schema draft 2020-12 documents for formats that are 
 | --- | --- | --- |
 | `packetcraftr.packet/v1` | [packetcraftr.packet.v1.schema.json](packetcraftr.packet.v1.schema.json) | Ordered packet documents using tagged reflective `FieldValue` objects |
 | `packetcraftr.output/v1` | [packetcraftr.output.v1.schema.json](packetcraftr.output.v1.schema.json) | Aggregate JSON results and individual NDJSON records |
+| `packetcraftr.fixture-provenance/v1` | [packetcraftr.fixture-provenance.v1.schema.json](packetcraftr.fixture-provenance.v1.schema.json) | Hash, source/license, semantic expectation, capture metadata, and review evidence for each authoritative test fixture |
 
 The value of a document's `schema` property is the PacketcraftR format identifier. The JSON Schema meta-schema URI remains in the schema file's `$schema` property; it is not accepted as an extra property in a `PacketDocument`.
 
@@ -74,3 +75,9 @@ jsonschema schemas/packetcraftr.output.v1.schema.json \
 CI also requires every document in `tests/fixtures/invalid-output` to fail
 validation. Those fixtures freeze aggregate/stream separation, mandatory
 stream sequencing, and command-specific result shapes.
+
+Every non-example file in `tests/fixtures` has a
+`<fixture>.provenance.json` sidecar. CI validates those documents against the
+fixture-provenance schema, recomputes each SHA-256, binds each declared path to
+its sidecar name, and enforces sidecar changes over the complete pull-request
+or push range. See the [fixture and provenance policy](../tests/fixtures/README.md).

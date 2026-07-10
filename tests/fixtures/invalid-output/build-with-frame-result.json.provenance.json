@@ -1,0 +1,43 @@
+{
+  "authority": "malformed_seed",
+  "capture": null,
+  "created_utc": "2026-07-10T00:00:00Z",
+  "expected": {
+    "diagnostic_codes": [
+      "cli.output_schema"
+    ],
+    "exact_rebuild": null,
+    "layers": [],
+    "link_type": null,
+    "notes": "Negative packetcraftr.output/v1 schema fixture",
+    "valid": false
+  },
+  "fixture": "invalid-output/build-with-frame-result.json",
+  "kind": "malformed_input",
+  "license": {
+    "evidence": "Synthetic fixture authored for the PacketcraftR XOD-60 corpus; no production capture, private data, or third-party payload is included",
+    "spdx": "CC0-1.0"
+  },
+  "protocols": [
+    "output_contract"
+  ],
+  "review": {
+    "evidence": "https://linear.app/xodud/issue/XOD-60",
+    "reviewed_utc": "2026-07-10T00:00:00Z",
+    "reviewer": "Codex XOD-60 automated implementation review"
+  },
+  "schema": "packetcraftr.fixture-provenance/v1",
+  "sha256": "cbcf446ae9fa3ec6d5b30110dc5d563d89b1c3594379e7bfe00a05adfa8f1f4e",
+  "source": {
+    "description": "Negative packetcraftr.output/v1 schema fixture",
+    "generator": {
+      "invocation": "hand-authored negative JSON document",
+      "name": "PacketcraftR output-contract fixture",
+      "summary": "Authored with XOD-62 to freeze a schema-invalid output shape",
+      "version": "a2f5650"
+    },
+    "oracle": null,
+    "reference": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v1.schema.json",
+    "type": "derived"
+  }
+}

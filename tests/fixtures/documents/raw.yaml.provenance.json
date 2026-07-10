@@ -1,0 +1,43 @@
+{
+  "authority": "derived",
+  "capture": null,
+  "created_utc": "2026-07-10T00:00:00Z",
+  "expected": {
+    "diagnostic_codes": [],
+    "exact_rebuild": true,
+    "layers": [
+      "raw"
+    ],
+    "link_type": null,
+    "notes": "Versioned YAML packet document preserving four raw bytes",
+    "valid": true
+  },
+  "fixture": "documents/raw.yaml",
+  "kind": "document",
+  "license": {
+    "evidence": "Synthetic fixture authored for the PacketcraftR XOD-60 corpus; no production capture, private data, or third-party payload is included",
+    "spdx": "CC0-1.0"
+  },
+  "protocols": [
+    "raw"
+  ],
+  "review": {
+    "evidence": "https://linear.app/xodud/issue/XOD-60",
+    "reviewed_utc": "2026-07-10T00:00:00Z",
+    "reviewer": "Codex XOD-60 automated implementation review"
+  },
+  "schema": "packetcraftr.fixture-provenance/v1",
+  "sha256": "3b5554f1ff4df0488c8e30542bb1d2fecd9692dba0cca3b5be0b4c5b7c95ecba",
+  "source": {
+    "description": "Versioned YAML packet document preserving four raw bytes",
+    "generator": {
+      "invocation": "python3 scripts/seed-fixture-corpus.py --write --verify-tcpdump",
+      "name": "Python standard library",
+      "summary": "Deterministic network-byte-order construction with explicit checksums and lengths",
+      "version": "3.12.3"
+    },
+    "oracle": null,
+    "reference": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.packet.v1.schema.json",
+    "type": "derived"
+  }
+}

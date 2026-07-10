@@ -1,0 +1,2 @@
+# Fixture provenance hashes identify exact repository bytes on every platform.
+tests/fixtures/** -text

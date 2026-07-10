@@ -112,8 +112,12 @@ fn every_authoritative_fixture_has_one_hash_verified_sidecar() {
 
     let mut roots = BTreeSet::new();
     for fixture in fixtures {
-        let relative = fixture.strip_prefix(&root).unwrap().to_str().unwrap();
-        let (_, provenance) = verified(relative);
+        let relative = fixture
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
+        let (_, provenance) = verified(&relative);
         assert!(matches!(
             provenance.authority.as_str(),
             "authoritative" | "derived" | "malformed_seed"

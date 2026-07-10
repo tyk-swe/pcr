@@ -146,7 +146,10 @@ impl CaptureSession for NativeCaptureSession {
             let (next_state, timed_out) = self.shared.wait_timeout(state, remaining)?;
             state = next_state;
             if timed_out {
-                return Ok(None);
+                // Re-enter the loop once so an error, closure, or frame that
+                // raced the timeout wins over an apparently empty result. If
+                // state is still unchanged, the expired deadline returns None.
+                continue;
             }
         }
     }
@@ -608,15 +611,20 @@ mod tests {
             },
             Arc::new(AtomicUsize::new(0)),
         );
-        let error = match session.wait_ready() {
-            Err(error) => error,
-            Ok(()) => loop {
-                match session.next_frame(Duration::from_secs(1)) {
-                    Err(error) => break error,
-                    Ok(Some(_)) => {}
-                    Ok(None) => panic!("capture closed without its overflow error"),
-                }
-            },
+        // Do not drain the first frame before the worker observes the second;
+        // otherwise there is no overflow to assert. This synchronizes on the
+        // backend counter rather than scheduler timing.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while session.statistics().overflow_events == 0 {
+            assert!(Instant::now() < deadline);
+            thread::yield_now();
+        }
+        let error = loop {
+            match session.next_frame(Duration::from_millis(50)) {
+                Err(error) => break error,
+                Ok(_) if Instant::now() < deadline => thread::yield_now(),
+                Ok(_) => panic!("capture did not surface its overflow error"),
+            }
         };
         assert!(matches!(error, LiveIoError::CaptureQueueOverflow { .. }));
         assert!(session.statistics().has_loss());

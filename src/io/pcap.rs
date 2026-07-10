@@ -580,6 +580,7 @@ pub struct CaptureWriter<W> {
     inner: W,
     state: WriterState,
     max_size: usize,
+    max_interfaces: usize,
 }
 
 impl<W: Write> CaptureWriter<W> {
@@ -603,6 +604,24 @@ impl<W: Write> CaptureWriter<W> {
         link_type: LinkType,
         max_size: usize,
     ) -> Result<Self, CaptureError> {
+        Self::with_limits(
+            inner,
+            format,
+            link_type,
+            max_size,
+            DEFAULT_PCAPNG_INTERFACE_LIMIT,
+        )
+    }
+
+    /// Creates a writer with caller-provided packet/block and PCAPNG
+    /// interface limits.
+    pub fn with_limits(
+        inner: W,
+        format: CaptureFileFormat,
+        link_type: LinkType,
+        max_size: usize,
+        max_interfaces: usize,
+    ) -> Result<Self, CaptureError> {
         match format {
             CaptureFileFormat::Pcap => Self::pcap_with_options(
                 inner,
@@ -612,8 +631,12 @@ impl<W: Write> CaptureWriter<W> {
                 max_size,
             ),
             CaptureFileFormat::PcapNg => {
-                let mut writer =
-                    Self::pcapng_with_options(inner, PcapEndianness::Little, max_size)?;
+                let mut writer = Self::pcapng_with_resource_limits(
+                    inner,
+                    PcapEndianness::Little,
+                    max_size,
+                    max_interfaces,
+                )?;
                 writer.add_interface_with_snaplen(link_type, usize_to_u32_limit(max_size)?)?;
                 Ok(writer)
             }
@@ -664,6 +687,7 @@ impl<W: Write> CaptureWriter<W> {
                 link_type,
             },
             max_size,
+            max_interfaces: DEFAULT_PCAPNG_INTERFACE_LIMIT,
         })
     }
 
@@ -682,9 +706,25 @@ impl<W: Write> CaptureWriter<W> {
 
     /// Creates a PCAPNG writer with explicit byte order and block limit.
     pub fn pcapng_with_options(
+        inner: W,
+        endianness: PcapEndianness,
+        max_size: usize,
+    ) -> Result<Self, CaptureError> {
+        Self::pcapng_with_resource_limits(
+            inner,
+            endianness,
+            max_size,
+            DEFAULT_PCAPNG_INTERFACE_LIMIT,
+        )
+    }
+
+    /// Creates a PCAPNG writer with explicit byte-order, block-size, and
+    /// per-stream interface limits.
+    pub fn pcapng_with_resource_limits(
         mut inner: W,
         endianness: PcapEndianness,
         max_size: usize,
+        max_interfaces: usize,
     ) -> Result<Self, CaptureError> {
         if max_size < 28 {
             return Err(CaptureError::SizeLimitExceeded {
@@ -701,6 +741,7 @@ impl<W: Write> CaptureWriter<W> {
                 interfaces: Vec::new(),
             },
             max_size,
+            max_interfaces,
         })
     }
 
@@ -721,6 +762,11 @@ impl<W: Write> CaptureWriter<W> {
 
     pub fn size_limit(&self) -> usize {
         self.max_size
+    }
+
+    /// Returns the configured PCAPNG interface limit.
+    pub fn interface_limit(&self) -> usize {
+        self.max_interfaces
     }
 
     /// Adds a PCAPNG interface using the writer's configured size limit as
@@ -781,14 +827,26 @@ impl<W: Write> CaptureWriter<W> {
             WriterState::PcapNg {
                 endianness,
                 interfaces,
-            } => (
-                *endianness,
-                u32::try_from(interfaces.len()).map_err(|_| CaptureError::SizeLimitExceeded {
-                    kind: "pcapng interface count",
-                    declared: interfaces.len() as u64 + 1,
-                    limit: u32::MAX as usize,
-                })?,
-            ),
+            } => {
+                let next_count =
+                    interfaces
+                        .len()
+                        .checked_add(1)
+                        .ok_or(CaptureError::InterfaceLimit {
+                            limit: self.max_interfaces,
+                        })?;
+                if next_count > self.max_interfaces {
+                    return Err(CaptureError::InterfaceLimit {
+                        limit: self.max_interfaces,
+                    });
+                }
+                (
+                    *endianness,
+                    u32::try_from(interfaces.len()).map_err(|_| CaptureError::InterfaceLimit {
+                        limit: self.max_interfaces.min(u32::MAX as usize),
+                    })?,
+                )
+            }
         };
 
         if link_type.0 > u16::MAX as u32 {
@@ -2030,6 +2088,46 @@ mod tests {
             reader.next_frame(),
             Err(CaptureError::InterfaceLimit { limit: 1 })
         ));
+    }
+
+    #[test]
+    fn pcapng_writer_bounds_interfaces_atomically() {
+        let mut writer = CaptureWriter::pcapng_with_resource_limits(
+            Vec::new(),
+            PcapEndianness::Little,
+            DEFAULT_CAPTURE_SIZE_LIMIT,
+            1,
+        )
+        .unwrap();
+        assert_eq!(writer.interface_limit(), 1);
+        assert_eq!(writer.add_interface(LinkType::ETHERNET).unwrap(), 0);
+        let bytes_after_first = writer.get_ref().len();
+
+        assert!(matches!(
+            writer.add_interface(LinkType::LINUX_SLL),
+            Err(CaptureError::InterfaceLimit { limit: 1 })
+        ));
+        assert_eq!(writer.get_ref().len(), bytes_after_first);
+
+        let mut original = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]);
+        original.interface = Some(0);
+        writer.write_frame(&original).unwrap();
+        let mut reader = CaptureReader::new(Cursor::new(writer.into_inner())).unwrap();
+        assert_eq!(reader.next_frame().unwrap(), Some(original));
+
+        let mut zero_limit = CaptureWriter::pcapng_with_resource_limits(
+            Vec::new(),
+            PcapEndianness::Little,
+            DEFAULT_CAPTURE_SIZE_LIMIT,
+            0,
+        )
+        .unwrap();
+        let section_length = zero_limit.get_ref().len();
+        assert!(matches!(
+            zero_limit.add_interface(LinkType::ETHERNET),
+            Err(CaptureError::InterfaceLimit { limit: 0 })
+        ));
+        assert_eq!(zero_limit.get_ref().len(), section_length);
     }
 
     #[test]

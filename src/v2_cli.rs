@@ -59,9 +59,9 @@ enum Command {
     /// Transmit a packet under traffic policy.
     Send(UnavailableArgs),
     /// Capture-ready request/response exchange.
-    Exchange(UnavailableArgs),
+    Exchange(UnavailableCaptureArgs),
     /// Stream live captured frames.
-    Capture(UnavailableArgs),
+    Capture(UnavailableCaptureArgs),
     /// Replay a PCAP/PCAPNG stream.
     Replay(UnavailableArgs),
     /// Run a structured network scan.
@@ -124,6 +124,33 @@ struct UnavailableArgs {
     /// Packet expression (accepted for forward-compatible scripts).
     #[arg(long)]
     packet: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct UnavailableCaptureArgs {
+    /// Packet expression (accepted for forward-compatible scripts).
+    #[arg(long)]
+    packet: Option<String>,
+    /// Aggregate backend capture-queue frame bound.
+    #[arg(long, default_value_t = crate::client::DEFAULT_CAPTURE_QUEUE_FRAMES)]
+    max_queue_frames: usize,
+    /// Aggregate retained/queued capture byte bound.
+    #[arg(long, default_value_t = crate::client::DEFAULT_CAPTURE_QUEUE_BYTES)]
+    max_captured_bytes: usize,
+    /// Maximum bytes retained from any one captured frame.
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_SIZE_LIMIT)]
+    snap_length: usize,
+    /// Backend queue behavior when a configured bound is reached.
+    #[arg(long, value_enum, default_value_t = CliCaptureOverflowPolicy::Fail)]
+    overflow_policy: CliCaptureOverflowPolicy,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliCaptureOverflowPolicy {
+    #[default]
+    Fail,
+    DropNewest,
+    DropOldest,
 }
 
 pub(crate) fn run_entrypoint() -> ExitCode {
@@ -203,14 +230,25 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Interfaces => run_interfaces(cli.output),
         Command::Plan(arguments)
         | Command::Send(arguments)
-        | Command::Exchange(arguments)
-        | Command::Capture(arguments)
         | Command::Replay(arguments)
         | Command::Scan(arguments)
         | Command::Traceroute(arguments)
         | Command::Dns(arguments)
         | Command::Fuzz(arguments) => {
             let _ = arguments.packet;
+            Err(CliError::new(
+                4,
+                "this live/tool workflow is capability-gated in 0.2.0-alpha.1",
+            ))
+        }
+        Command::Exchange(arguments) | Command::Capture(arguments) => {
+            let _ = (
+                arguments.packet,
+                arguments.max_queue_frames,
+                arguments.max_captured_bytes,
+                arguments.snap_length,
+                arguments.overflow_policy,
+            );
             Err(CliError::new(
                 4,
                 "this live/tool workflow is capability-gated in 0.2.0-alpha.1",

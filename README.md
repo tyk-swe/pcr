@@ -142,7 +142,7 @@ Default resource ceilings are intentionally finite:
 | PCAPNG interfaces per section | 4,096 |
 | PCAPNG metadata blocks before the next packet | 4,096 |
 | Concrete packets per template expansion | 10,000 |
-| Queued captured or unsolicited frames | 4,096 |
+| Backend capture queue frames (aggregate) | 4,096 |
 | Retained captured bytes per exchange | 256 MiB |
 | Reassembly flows | 8,192 |
 | Buffered/history bytes per reassembly flow | 1 MiB |
@@ -153,6 +153,13 @@ Default resource ceilings are intentionally finite:
 | Idle TCP-flow expiry | 2 minutes |
 
 All parsers and queues must use checked arithmetic, honor configurable bounds, and fail closed.
+The `capture` and `exchange` command grammar reserves `--max-queue-frames`,
+`--max-captured-bytes`, `--snap-length`, and `--overflow-policy`. The queue
+frame bound is one aggregate backend limit; response and unsolicited retention
+classes do not add together to increase it. The default overflow policy fails
+the operation. Explicit `drop-newest` and `drop-oldest` policies must report
+received, dropped, byte, and overflow counters, and any loss is surfaced in
+structured diagnostics and operation statistics.
 
 ## Development
 

@@ -63,6 +63,29 @@ fn unavailable_live_command_uses_capability_exit_code_and_json_error() {
     assert_eq!(value["command"], "send");
 }
 
+#[test]
+fn capture_commands_reserve_the_documented_queue_limit_contract() {
+    for command in ["capture", "exchange"] {
+        let output = binary().args([command, "--help"]).output().unwrap();
+        assert!(output.status.success(), "{command}");
+        let help = String::from_utf8(output.stdout).unwrap();
+        for expected in [
+            "--max-queue-frames",
+            "--max-captured-bytes",
+            "--snap-length",
+            "--overflow-policy",
+            "drop-newest",
+            "drop-oldest",
+            "[default: 4096]",
+        ] {
+            assert!(
+                help.contains(expected),
+                "{command}: missing {expected}\n{help}"
+            );
+        }
+    }
+}
+
 #[cfg(all(windows, feature = "live"))]
 #[test]
 fn portable_windows_interfaces_reports_the_native_capability_boundary() {

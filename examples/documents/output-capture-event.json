@@ -31,6 +31,13 @@
     "elapsed": {
       "secs": 0,
       "nanos": 250000
+    },
+    "capture": {
+      "received_frames": 1,
+      "received_bytes": 4,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
     }
   }
 }

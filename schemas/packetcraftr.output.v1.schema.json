@@ -214,7 +214,8 @@
         "packets_attempted",
         "packets_completed",
         "bytes",
-        "elapsed"
+        "elapsed",
+        "capture"
       ],
       "properties": {
         "packets_attempted": {
@@ -228,6 +229,37 @@
         },
         "elapsed": {
           "$ref": "#/$defs/duration"
+        },
+        "capture": {
+          "$ref": "#/$defs/captureStatistics"
+        }
+      },
+      "additionalProperties": false
+    },
+    "captureStatistics": {
+      "type": "object",
+      "required": [
+        "received_frames",
+        "received_bytes",
+        "dropped_frames",
+        "dropped_bytes",
+        "overflow_events"
+      ],
+      "properties": {
+        "received_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "received_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "dropped_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "dropped_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "overflow_events": {
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false

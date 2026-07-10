@@ -20,12 +20,57 @@ use crate::io::{
 };
 use crate::protocols::Ethernet;
 
+/// Aggregate backend capture-queue capacity used by default.
+pub const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
+/// Aggregate backend capture-queue byte capacity used by default.
+pub const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
+
+/// Backend capture counters. Received counters include frames delivered to the
+/// owned capture session; dropped counters describe frames/bytes lost before
+/// delivery, and overflow events count distinct queue-overflow observations.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureStatistics {
+    pub received_frames: u64,
+    pub received_bytes: u64,
+    pub dropped_frames: u64,
+    pub dropped_bytes: u64,
+    pub overflow_events: u64,
+}
+
+impl CaptureStatistics {
+    /// Validates counter arithmetic and required frame/byte relationships.
+    pub fn validate(self) -> Result<Self, LiveIoError> {
+        self.received_frames
+            .checked_add(self.dropped_frames)
+            .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
+                message: "received and dropped frame counters overflow u64".to_owned(),
+            })?;
+        self.received_bytes
+            .checked_add(self.dropped_bytes)
+            .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
+                message: "received and dropped byte counters overflow u64".to_owned(),
+            })?;
+        if self.dropped_frames == 0 && self.dropped_bytes != 0 {
+            return Err(LiveIoError::InvalidCaptureStatistics {
+                message: "dropped bytes were reported without a dropped frame".to_owned(),
+            });
+        }
+        Ok(self)
+    }
+
+    /// Returns whether the backend reported any drop or queue overflow.
+    pub fn has_loss(self) -> bool {
+        self.dropped_frames != 0 || self.dropped_bytes != 0 || self.overflow_events != 0
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationStats {
     pub packets_attempted: u64,
     pub packets_completed: u64,
     pub bytes: u64,
     pub elapsed: Duration,
+    pub capture: CaptureStatistics,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -123,6 +168,22 @@ pub enum LiveIoError {
     Capture { message: String },
     #[error("capture did not become ready: {message}")]
     CaptureReadiness { message: String },
+    #[error("invalid capture queue limit {field}={value}: {reason}")]
+    InvalidCaptureQueueLimit {
+        field: &'static str,
+        value: usize,
+        reason: &'static str,
+    },
+    #[error(
+        "capture queue overflowed {overflow_events} time(s), dropping {dropped_frames} frame(s) / {dropped_bytes} byte(s)"
+    )]
+    CaptureQueueOverflow {
+        dropped_frames: u64,
+        dropped_bytes: u64,
+        overflow_events: u64,
+    },
+    #[error("capture backend returned invalid statistics: {message}")]
+    InvalidCaptureStatistics { message: String },
 }
 
 #[derive(Clone, Debug)]
@@ -169,7 +230,7 @@ pub enum ClientError {
     PacketExceedsMtu { actual: usize, mtu: u32 },
 }
 
-pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = 4_096;
+pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
 
 pub trait CaptureSession: Send {
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
@@ -178,6 +239,9 @@ pub trait CaptureSession: Send {
     /// Stop the receiver and join all capture work before returning. An error
     /// means the implementation could not confirm complete cleanup.
     fn shutdown(&mut self) -> Result<(), LiveIoError>;
+    /// Returns cumulative backend counters, including queue loss that was not
+    /// otherwise observable through delivered frames.
+    fn statistics(&self) -> CaptureStatistics;
 }
 
 struct CaptureGuard<C: CaptureSession> {
@@ -207,6 +271,10 @@ impl<C: CaptureSession> CaptureSession for CaptureGuard<C> {
         self.shutdown_attempted = true;
         self.inner.shutdown()
     }
+
+    fn statistics(&self) -> CaptureStatistics {
+        self.inner.statistics()
+    }
 }
 
 impl<C: CaptureSession> Drop for CaptureGuard<C> {
@@ -228,11 +296,67 @@ pub trait ExchangeIo: PacketIo {
     ) -> Result<Self::Capture, LiveIoError>;
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureOverflowPolicy {
+    #[default]
+    Fail,
+    DropNewest,
+    DropOldest,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureQueueLimits {
     pub max_frames: usize,
     pub max_bytes: usize,
     pub snap_length: usize,
+    pub overflow_policy: CaptureOverflowPolicy,
+}
+
+impl Default for CaptureQueueLimits {
+    fn default() -> Self {
+        Self {
+            max_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
+            max_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
+            snap_length: crate::io::DEFAULT_CAPTURE_SIZE_LIMIT,
+            overflow_policy: CaptureOverflowPolicy::Fail,
+        }
+    }
+}
+
+impl CaptureQueueLimits {
+    /// Validates non-zero limits, byte/snap consistency, and worst-case frame
+    /// accounting before a backend allocates or starts capture.
+    pub fn validate(self) -> Result<Self, LiveIoError> {
+        for (field, value) in [
+            ("max_frames", self.max_frames),
+            ("max_bytes", self.max_bytes),
+            ("snap_length", self.snap_length),
+        ] {
+            if value == 0 {
+                return Err(LiveIoError::InvalidCaptureQueueLimit {
+                    field,
+                    value,
+                    reason: "must be greater than zero",
+                });
+            }
+        }
+        if self.snap_length > self.max_bytes {
+            return Err(LiveIoError::InvalidCaptureQueueLimit {
+                field: "snap_length",
+                value: self.snap_length,
+                reason: "cannot exceed max_bytes",
+            });
+        }
+        self.max_frames.checked_mul(self.snap_length).ok_or(
+            LiveIoError::InvalidCaptureQueueLimit {
+                field: "max_frames * snap_length",
+                value: self.max_frames,
+                reason: "worst-case queue byte accounting overflows usize",
+            },
+        )?;
+        Ok(self)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -242,7 +366,11 @@ pub struct ExchangeOptions {
     pub max_template_packets: usize,
     pub max_unsolicited: usize,
     pub max_responses: usize,
+    /// One aggregate backend queue bound shared by matched, unsolicited, and
+    /// undecodable capture traffic.
+    pub max_capture_queue_frames: usize,
     pub max_captured_bytes: usize,
+    pub capture_overflow_policy: CaptureOverflowPolicy,
     pub decode: DecodeOptions,
 }
 
@@ -254,7 +382,9 @@ impl Default for ExchangeOptions {
             max_template_packets: DEFAULT_MAX_TEMPLATE_PACKETS,
             max_unsolicited: DEFAULT_MAX_UNSOLICITED_FRAMES,
             max_responses: DEFAULT_MAX_UNSOLICITED_FRAMES,
-            max_captured_bytes: 256 * 1024 * 1024,
+            max_capture_queue_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
+            max_captured_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
+            capture_overflow_policy: CaptureOverflowPolicy::Fail,
             decode: DecodeOptions::default(),
         }
     }
@@ -588,6 +718,7 @@ where
                 packets_completed: 1,
                 bytes: bytes_sent as u64,
                 elapsed: started.elapsed(),
+                capture: CaptureStatistics::default(),
             },
         })
     }
@@ -731,18 +862,14 @@ where
             .expect("non-empty prepared exchange")
             .1
             .plan;
-        let capture_frame_limit = options
-            .max_unsolicited
-            .saturating_add(options.max_responses)
-            .max(1);
-        let mut capture = CaptureGuard::new(self.io.arm_capture(
-            first_route,
-            CaptureQueueLimits {
-                max_frames: capture_frame_limit,
-                max_bytes: options.max_captured_bytes,
-                snap_length: options.decode.max_packet_size,
-            },
-        )?);
+        let capture_limits = CaptureQueueLimits {
+            max_frames: options.max_capture_queue_frames,
+            max_bytes: options.max_captured_bytes,
+            snap_length: options.decode.max_packet_size,
+            overflow_policy: options.capture_overflow_policy,
+        }
+        .validate()?;
+        let mut capture = CaptureGuard::new(self.io.arm_capture(first_route, capture_limits)?);
         if let Err(error) = capture.wait_ready() {
             return Err(error_after_shutdown(&mut capture, error));
         }
@@ -835,6 +962,30 @@ where
             );
         }
         capture.shutdown()?;
+        let capture_statistics = capture.statistics().validate()?;
+        if capture_statistics.has_loss() {
+            if capture_limits.overflow_policy == CaptureOverflowPolicy::Fail {
+                return Err(LiveIoError::CaptureQueueOverflow {
+                    dropped_frames: capture_statistics.dropped_frames,
+                    dropped_bytes: capture_statistics.dropped_bytes,
+                    overflow_events: capture_statistics.overflow_events,
+                }
+                .into());
+            }
+            push_diagnostic_once(
+                &mut captured.diagnostics,
+                crate::core::Diagnostic::warning(
+                    "capture.queue_overflow",
+                    format!(
+                        "capture backend reported {} overflow event(s), {} dropped frame(s), and {} dropped byte(s) under {:?}",
+                        capture_statistics.overflow_events,
+                        capture_statistics.dropped_frames,
+                        capture_statistics.dropped_bytes,
+                        capture_limits.overflow_policy,
+                    ),
+                ),
+            );
+        }
 
         let mut answered = vec![false; prepared.len()];
         for response in &captured.responses {
@@ -858,6 +1009,7 @@ where
                 packets_completed: completed_sends,
                 bytes: total_bytes,
                 elapsed: started.elapsed(),
+                capture: capture_statistics,
             },
         })
     }
@@ -1283,6 +1435,8 @@ mod tests {
         events: Arc<Mutex<Vec<&'static str>>>,
         response: Arc<Mutex<Option<CapturedFrame>>>,
         deliver_before_send: bool,
+        limits: Arc<Mutex<Vec<CaptureQueueLimits>>>,
+        capture_statistics: CaptureStatistics,
     }
 
     impl PacketIo for FakeIo {
@@ -1324,6 +1478,7 @@ mod tests {
         events: Arc<Mutex<Vec<&'static str>>>,
         response: Arc<Mutex<Option<CapturedFrame>>>,
         deliver_before_send: bool,
+        statistics: CaptureStatistics,
     }
 
     impl CaptureSession for FakeCapture {
@@ -1338,6 +1493,16 @@ mod tests {
                 let mut response = self.response.lock().unwrap().take();
                 if let Some(frame) = &mut response {
                     frame.timestamp = std::time::SystemTime::now();
+                    self.statistics.received_frames = self
+                        .statistics
+                        .received_frames
+                        .checked_add(1)
+                        .expect("test capture frame counter");
+                    self.statistics.received_bytes = self
+                        .statistics
+                        .received_bytes
+                        .checked_add(frame.bytes.len() as u64)
+                        .expect("test capture byte counter");
                 }
                 Ok(response)
             } else {
@@ -1349,6 +1514,10 @@ mod tests {
             self.events.lock().unwrap().push("shutdown");
             Ok(())
         }
+
+        fn statistics(&self) -> CaptureStatistics {
+            self.statistics
+        }
     }
 
     impl ExchangeIo for FakeIo {
@@ -1357,13 +1526,15 @@ mod tests {
         fn arm_capture(
             &self,
             _route: &PlannedRoute,
-            _limits: CaptureQueueLimits,
+            limits: CaptureQueueLimits,
         ) -> Result<Self::Capture, LiveIoError> {
             self.events.lock().unwrap().push("arm");
+            self.limits.lock().unwrap().push(limits);
             Ok(FakeCapture {
                 events: Arc::clone(&self.events),
                 response: Arc::clone(&self.response),
                 deliver_before_send: self.deliver_before_send,
+                statistics: self.capture_statistics,
             })
         }
     }
@@ -1397,6 +1568,10 @@ mod tests {
                 message: "join failed".to_owned(),
             })
         }
+
+        fn statistics(&self) -> CaptureStatistics {
+            CaptureStatistics::default()
+        }
     }
 
     impl ExchangeIo for ReadinessAndShutdownFailIo {
@@ -1426,6 +1601,10 @@ mod tests {
         fn shutdown(&mut self) -> Result<(), LiveIoError> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(())
+        }
+
+        fn statistics(&self) -> CaptureStatistics {
+            CaptureStatistics::default()
         }
     }
 
@@ -1529,6 +1708,159 @@ mod tests {
             ("ethernet-stacked-vlan", ethernet_stacked),
             ("vlan-rooted-stacked-vlan", vlan_rooted_stacked),
         ]
+    }
+
+    fn exchange_with_capture_statistics(
+        statistics: CaptureStatistics,
+        overflow_policy: CaptureOverflowPolicy,
+    ) -> Result<ExchangeResult, ClientError> {
+        let io = FakeIo {
+            events: Arc::new(Mutex::new(Vec::new())),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: statistics,
+        };
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            FixedRoutes(route(LinkCapability::Layer3)),
+            CountingNeighbors::default(),
+            io,
+            TrafficPolicy::default(),
+        );
+        client.exchange(
+            &PacketTemplate::new(packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12345,
+                9,
+            )),
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        interface: None,
+                    },
+                    ..SendOptions::default()
+                },
+                capture_overflow_policy: overflow_policy,
+                ..ExchangeOptions::default()
+            },
+        )
+    }
+
+    #[test]
+    fn capture_queue_limits_fail_closed_at_zero_and_arithmetic_overflow() {
+        assert_eq!(
+            CaptureQueueLimits::default().validate().unwrap(),
+            CaptureQueueLimits::default()
+        );
+
+        for (field, limits) in [
+            (
+                "max_frames",
+                CaptureQueueLimits {
+                    max_frames: 0,
+                    ..CaptureQueueLimits::default()
+                },
+            ),
+            (
+                "max_bytes",
+                CaptureQueueLimits {
+                    max_bytes: 0,
+                    ..CaptureQueueLimits::default()
+                },
+            ),
+            (
+                "snap_length",
+                CaptureQueueLimits {
+                    snap_length: 0,
+                    ..CaptureQueueLimits::default()
+                },
+            ),
+        ] {
+            assert!(matches!(
+                limits.validate(),
+                Err(LiveIoError::InvalidCaptureQueueLimit {
+                    field: actual,
+                    ..
+                }) if actual == field
+            ));
+        }
+
+        assert!(matches!(
+            CaptureQueueLimits {
+                max_frames: usize::MAX,
+                max_bytes: usize::MAX,
+                snap_length: 2,
+                overflow_policy: CaptureOverflowPolicy::Fail,
+            }
+            .validate(),
+            Err(LiveIoError::InvalidCaptureQueueLimit {
+                field: "max_frames * snap_length",
+                ..
+            })
+        ));
+        assert!(matches!(
+            CaptureQueueLimits {
+                max_bytes: 1,
+                snap_length: 2,
+                ..CaptureQueueLimits::default()
+            }
+            .validate(),
+            Err(LiveIoError::InvalidCaptureQueueLimit {
+                field: "snap_length",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn capture_loss_is_a_typed_failure_or_visible_diagnostic_by_policy() {
+        let statistics = CaptureStatistics {
+            received_frames: 3,
+            received_bytes: 192,
+            dropped_frames: 2,
+            dropped_bytes: 128,
+            overflow_events: 1,
+        };
+
+        let error =
+            exchange_with_capture_statistics(statistics, CaptureOverflowPolicy::Fail).unwrap_err();
+        assert!(matches!(
+            error,
+            ClientError::Io(LiveIoError::CaptureQueueOverflow {
+                dropped_frames: 2,
+                dropped_bytes: 128,
+                overflow_events: 1,
+            })
+        ));
+
+        for policy in [
+            CaptureOverflowPolicy::DropNewest,
+            CaptureOverflowPolicy::DropOldest,
+        ] {
+            let result = exchange_with_capture_statistics(statistics, policy).unwrap();
+            assert_eq!(result.stats.capture, statistics, "{policy:?}");
+            assert!(result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "capture.queue_overflow"));
+        }
+    }
+
+    #[test]
+    fn invalid_capture_statistics_fail_closed() {
+        let statistics = CaptureStatistics {
+            dropped_bytes: 1,
+            ..CaptureStatistics::default()
+        };
+        let error = exchange_with_capture_statistics(statistics, CaptureOverflowPolicy::DropNewest)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ClientError::Io(LiveIoError::InvalidCaptureStatistics { .. })
+        ));
     }
 
     #[test]
@@ -1721,6 +2053,7 @@ mod tests {
             .unwrap()
             .bytes;
         let events = Arc::new(Mutex::new(Vec::new()));
+        let limits = Arc::new(Mutex::new(Vec::new()));
         let io = FakeIo {
             events: Arc::clone(&events),
             response: Arc::new(Mutex::new(Some(
@@ -1728,6 +2061,8 @@ mod tests {
                     .unwrap(),
             ))),
             deliver_before_send: false,
+            limits: Arc::clone(&limits),
+            capture_statistics: CaptureStatistics::default(),
         };
         let client = Client::new(
             registry,
@@ -1761,6 +2096,10 @@ mod tests {
         assert_eq!(
             *events.lock().unwrap(),
             ["arm", "ready", "send", "shutdown"]
+        );
+        assert_eq!(
+            limits.lock().unwrap().as_slice(),
+            &[CaptureQueueLimits::default()]
         );
         assert_eq!(result.responses.len(), 1);
         assert!(result.unanswered.is_empty());
@@ -1798,6 +2137,8 @@ mod tests {
                     .unwrap(),
                 ))),
                 deliver_before_send: true,
+                limits: Arc::new(Mutex::new(Vec::new())),
+                capture_statistics: CaptureStatistics::default(),
             },
             TrafficPolicy::default(),
         );
@@ -1848,6 +2189,8 @@ mod tests {
                 events: Arc::new(Mutex::new(Vec::new())),
                 response: Arc::new(Mutex::new(Some(invalid))),
                 deliver_before_send: false,
+                limits: Arc::new(Mutex::new(Vec::new())),
+                capture_statistics: CaptureStatistics::default(),
             },
             TrafficPolicy::default(),
         );
@@ -2233,6 +2576,8 @@ mod tests {
                 events: Arc::new(Mutex::new(Vec::new())),
                 response: Arc::new(Mutex::new(None)),
                 deliver_before_send: false,
+                limits: Arc::new(Mutex::new(Vec::new())),
+                capture_statistics: CaptureStatistics::default(),
             },
             TrafficPolicy {
                 max_bytes_per_operation: 2_200,

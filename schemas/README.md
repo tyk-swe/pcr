@@ -11,7 +11,7 @@ The value of a document's `schema` property is the PacketcraftR format identifie
 
 Packet documents deliberately do not enumerate protocols or field names. A `ProtocolRegistry` is extensible, so it performs protocol-specific field, range, layer-binding, and required-field checks after structural schema validation. Parser byte/layer/depth limits are runtime policy and are not relaxed by a document passing JSON Schema validation.
 
-An output success envelope contains `result` and no `error`; an error envelope contains `error` and no `result`. Each line emitted by an NDJSON command is a complete `packetcraftr.output/v1` object and uses `sequence` to preserve stream order. `diagnostics` is always an array, including when empty.
+An output success envelope contains `result` and no `error`; an error envelope contains `error` and no `result`. Each line emitted by an NDJSON command is a complete `packetcraftr.output/v1` object and uses `sequence` to preserve stream order. `diagnostics` is always an array, including when empty. When `stats` is present, its required `capture` object reports received and dropped frames/bytes plus queue-overflow events; non-zero loss is also represented by a diagnostic or a typed error according to the selected overflow policy.
 
 Examples are in [examples/documents](../examples/documents). Validate them with a draft 2020-12 implementation, for example:
 

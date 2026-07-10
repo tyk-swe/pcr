@@ -31,10 +31,11 @@ pub mod session;
 mod v2_cli;
 
 pub use client::{
-    CaptureQueueLimits, CaptureSession, Client, ClientError, ExchangeIo, ExchangeOptions,
-    ExchangeResult, IoSendReport, LiveIoError, MatchedResponse, OperationStats, PacketIo,
-    SendOptions, SendReport, TrafficPolicy, TrafficPolicyError, TransmissionFrame,
-    UnsupportedNeighborResolver, UnsupportedPacketIo, DEFAULT_MAX_UNSOLICITED_FRAMES,
+    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, Client,
+    ClientError, ExchangeIo, ExchangeOptions, ExchangeResult, IoSendReport, LiveIoError,
+    MatchedResponse, OperationStats, PacketIo, SendOptions, SendReport, TrafficPolicy,
+    TrafficPolicyError, TransmissionFrame, UnsupportedNeighborResolver, UnsupportedPacketIo,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_MAX_UNSOLICITED_FRAMES,
 };
 pub use core::{
     BuildContext, BuildError, BuildMode, BuildOptions, Builder, BuiltPacket, ByteRange, CodecError,

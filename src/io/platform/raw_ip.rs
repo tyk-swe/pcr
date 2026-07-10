@@ -7,9 +7,16 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 #[cfg(target_os = "macos")]
 use std::num::NonZeroU32;
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
 
 use bytes::Bytes;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+#[cfg(windows)]
+use windows::Win32::Networking::WinSock::{
+    setsockopt, WSAGetLastError, IPPROTO_IP, IPPROTO_IPV6, IPV6_UNICAST_IF, IP_UNICAST_IF, SOCKET,
+    SOCKET_ERROR,
+};
 
 use super::super::{IoSendReport, Layer3Frame, LiveIoError};
 use super::InterfaceId;
@@ -64,7 +71,6 @@ impl RawIpBackend for SystemRawIpBackend {
         }
 
         bind_interface(&socket, packet)?;
-        bind_route_source(&socket, packet)?;
         if packet.destination == IpAddr::V4(Ipv4Addr::BROADCAST) {
             socket
                 .set_broadcast(true)
@@ -102,29 +108,39 @@ fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSock
 }
 
 #[cfg(windows)]
-fn bind_interface(_socket: &Socket, _packet: &PreparedRawIp) -> Result<(), RawSocketError> {
-    // Binding the route-selected source address below constrains Winsock to
-    // that address and its owning interface without exposing a socket handle.
-    Ok(())
-}
-
-#[cfg(not(windows))]
-fn bind_route_source(_socket: &Socket, _packet: &PreparedRawIp) -> Result<(), RawSocketError> {
-    // Linux SO_BINDTODEVICE and macOS IP_BOUND_IF constrain the route without
-    // making a crafted source address fail local-address validation.
-    Ok(())
-}
-
-#[cfg(windows)]
-fn bind_route_source(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSocketError> {
-    // Winsock has no socket2 interface-index binding. The route-selected
-    // source is assigned to exactly one adapter by the native route provider.
-    socket
-        .bind(&socket_address(
-            packet.interface_source,
-            packet.interface.index,
+fn bind_interface(socket: &Socket, packet: &PreparedRawIp) -> Result<(), RawSocketError> {
+    let (level, option, index) = match packet.family {
+        IpFamily::V4 => (
+            IPPROTO_IP.0,
+            IP_UNICAST_IF,
+            packet.interface.index.to_be_bytes(),
+        ),
+        IpFamily::V6 => (
+            IPPROTO_IPV6.0,
+            IPV6_UNICAST_IF,
+            packet.interface.index.to_ne_bytes(),
+        ),
+    };
+    let raw_socket = usize::try_from(socket.as_raw_socket()).map_err(|_| {
+        raw_error(
+            "binding the selected Windows interface",
+            io::Error::new(io::ErrorKind::InvalidInput, "socket handle exceeds usize"),
+        )
+    })?;
+    // SAFETY: socket2 owns a live Winsock SOCKET for the duration of this
+    // call, and `index` is the documented four-byte IF_INDEX option value.
+    let result = unsafe { setsockopt(SOCKET(raw_socket), level, option, Some(&index)) };
+    if result == SOCKET_ERROR {
+        // SAFETY: WSAGetLastError has no preconditions and is read
+        // immediately after the failed Winsock call on the same thread.
+        let code = unsafe { WSAGetLastError().0 };
+        Err(raw_error(
+            "binding the selected Windows interface",
+            io::Error::from_raw_os_error(code),
         ))
-        .map_err(|source| raw_error("binding the route-selected source address", source))
+    } else {
+        Ok(())
+    }
 }
 
 fn socket_address(address: IpAddr, interface_index: u32) -> SockAddr {

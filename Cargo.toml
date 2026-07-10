@@ -55,7 +55,7 @@ native-route = [
     "dep:windows",
 ]
 native-layer2 = ["live", "dep:libloading", "dep:pcap", "dep:windows"]
-native-layer3 = ["live", "dep:socket2"]
+native-layer3 = ["live", "dep:socket2", "dep:windows"]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }

@@ -1198,7 +1198,9 @@ mod tests {
         DestinationScope, InterfaceId, LinkCapability, LinkMode, LinkType, MacAddress,
         RouteDecision,
     };
-    use crate::protocols::{default_registry, Ethernet, Ipv4, Ipv6, SegmentRoutingHeader, Udp};
+    use crate::protocols::{
+        default_registry, Ethernet, Ipv4, Ipv6, SegmentRoutingHeader, Udp, Vlan, Vlan8021ad,
+    };
 
     #[derive(Clone)]
     struct FixedRoutes(RouteDecision);
@@ -1255,6 +1257,24 @@ mod tests {
         ) -> Result<MacAddress, NeighborError> {
             self.0.fetch_add(1, Ordering::SeqCst);
             Ok(MacAddress([0, 1, 2, 3, 4, 5]))
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct FailingNeighbors;
+
+    impl NeighborResolver for FailingNeighbors {
+        fn resolve(
+            &self,
+            interface: &InterfaceId,
+            _interface_source: IpAddr,
+            target: IpAddr,
+        ) -> Result<MacAddress, NeighborError> {
+            Err(NeighborError::Resolution {
+                interface: interface.name.clone(),
+                target,
+                message: "deterministic test failure".to_owned(),
+            })
         }
     }
 
@@ -1440,6 +1460,147 @@ mod tests {
                 ..Udp::default()
             });
         packet
+    }
+
+    fn canonical_link_intent_packets() -> Vec<(&'static str, Packet)> {
+        let base = || {
+            packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12345,
+                9,
+            )
+        };
+
+        let mut ethernet = base();
+        ethernet.insert(0, Ethernet::default()).unwrap();
+
+        let mut customer_vlan_root = base();
+        customer_vlan_root.insert(0, Vlan::default()).unwrap();
+
+        let mut service_vlan_root = base();
+        service_vlan_root.insert(0, Vlan8021ad::default()).unwrap();
+
+        let mut ethernet_stacked = base();
+        ethernet_stacked
+            .insert(
+                0,
+                Vlan {
+                    vlan_id: 200,
+                    ..Vlan::default()
+                },
+            )
+            .unwrap();
+        ethernet_stacked
+            .insert(
+                0,
+                Vlan8021ad {
+                    vlan_id: 100,
+                    ..Vlan8021ad::default()
+                },
+            )
+            .unwrap();
+        ethernet_stacked.insert(0, Ethernet::default()).unwrap();
+
+        let mut vlan_rooted_stacked = base();
+        vlan_rooted_stacked
+            .insert(
+                0,
+                Vlan {
+                    vlan_id: 200,
+                    ..Vlan::default()
+                },
+            )
+            .unwrap();
+        vlan_rooted_stacked
+            .insert(
+                0,
+                Vlan8021ad {
+                    vlan_id: 100,
+                    ..Vlan8021ad::default()
+                },
+            )
+            .unwrap();
+
+        vec![
+            ("ethernet", ethernet),
+            ("vlan", customer_vlan_root),
+            ("vlan8021ad", service_vlan_root),
+            ("ethernet-stacked-vlan", ethernet_stacked),
+            ("vlan-rooted-stacked-vlan", vlan_rooted_stacked),
+        ]
+    }
+
+    #[test]
+    fn raw_layer3_backend_never_receives_canonical_link_layer_bytes() {
+        let io = RecordingIo::default();
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            FixedRoutes(route(LinkCapability::Layer3)),
+            CountingNeighbors::default(),
+            io.clone(),
+            TrafficPolicy::default(),
+        );
+
+        for (case, request) in canonical_link_intent_packets() {
+            let error = client
+                .send(
+                    request,
+                    SendOptions {
+                        plan: PlanOptions {
+                            link_mode: LinkMode::Layer3,
+                            interface: None,
+                        },
+                        ..SendOptions::default()
+                    },
+                )
+                .unwrap_err();
+
+            assert!(
+                matches!(error, ClientError::Plan(PlanError::EthernetInLayer3)),
+                "{case}: {error}"
+            );
+            assert!(io.0.lock().unwrap().is_empty(), "{case}");
+        }
+    }
+
+    #[test]
+    fn neighbor_failure_cannot_fall_back_from_explicit_layer2() {
+        let io = RecordingIo::default();
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            FixedRoutes(RouteDecision {
+                capability: LinkCapability::Layer2And3,
+                link_type: LinkType::ETHERNET,
+                ..route(LinkCapability::Layer2And3)
+            }),
+            FailingNeighbors,
+            io.clone(),
+            TrafficPolicy::default(),
+        );
+        let request = canonical_link_intent_packets()
+            .into_iter()
+            .find_map(|(case, packet)| (case == "vlan8021ad").then_some(packet))
+            .unwrap();
+
+        let error = client
+            .send(
+                request,
+                SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer2,
+                        interface: None,
+                    },
+                    ..SendOptions::default()
+                },
+            )
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClientError::Neighbor(NeighborError::Resolution { .. })
+        ));
+        assert!(io.0.lock().unwrap().is_empty());
     }
 
     #[test]

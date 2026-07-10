@@ -195,6 +195,15 @@ pub enum PlanError {
 #[derive(Clone, Debug, Default)]
 pub struct RoutePlanner;
 
+fn has_link_layer_intent(packet: &Packet) -> bool {
+    packet.iter().any(|layer| {
+        matches!(
+            layer.protocol_id().as_str(),
+            "ethernet" | "vlan" | "vlan8021ad"
+        )
+    })
+}
+
 impl RoutePlanner {
     /// Perform passive route/source/link selection. This never invokes ARP/NDP,
     /// capture, or transmission.
@@ -214,13 +223,8 @@ impl RoutePlanner {
         }) {
             return Err(PlanError::OfflineOnlyLinkHeader { protocol });
         }
-        let has_ethernet = packet.iter().any(|layer| {
-            matches!(
-                layer.protocol_id().as_str(),
-                "ethernet" | "vlan" | "802.1q" | "802.1ad"
-            )
-        });
-        if options.link_mode == LinkMode::Layer3 && has_ethernet {
+        let has_link_layer_intent = has_link_layer_intent(packet);
+        if options.link_mode == LinkMode::Layer3 && has_link_layer_intent {
             return Err(PlanError::EthernetInLayer3);
         }
         let has_ip = packet
@@ -285,7 +289,7 @@ impl RoutePlanner {
         let mode = match options.link_mode {
             LinkMode::Layer3 => LinkMode::Layer3,
             LinkMode::Layer2 => LinkMode::Layer2,
-            LinkMode::Auto if has_ethernet => LinkMode::Layer2,
+            LinkMode::Auto if has_link_layer_intent => LinkMode::Layer2,
             LinkMode::Auto if ip_root && route.capability.supports_layer3() => LinkMode::Layer3,
             LinkMode::Auto => LinkMode::Layer2,
         };
@@ -569,7 +573,7 @@ mod tests {
 
     use super::*;
     use crate::core::{Raw, WireValue};
-    use crate::protocols::{Ipv6, SegmentRoutingHeader};
+    use crate::protocols::{Ethernet, Ipv4, Ipv6, SegmentRoutingHeader, Vlan, Vlan8021ad};
 
     struct FixedRoute(RouteDecision);
 
@@ -649,6 +653,153 @@ mod tests {
             mtu: 1500,
             capability: LinkCapability::Layer2And3,
             link_type: super::super::LinkType::ETHERNET,
+        }
+    }
+
+    fn canonical_link_intent_packets() -> Vec<(&'static str, Packet)> {
+        let network_layer = || Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 10),
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        };
+
+        let mut ethernet = Packet::new();
+        ethernet.push(Ethernet::default()).push(network_layer());
+
+        let mut customer_vlan_root = Packet::new();
+        customer_vlan_root
+            .push(Vlan::default())
+            .push(network_layer());
+
+        let mut service_vlan_root = Packet::new();
+        service_vlan_root
+            .push(Vlan8021ad::default())
+            .push(network_layer());
+
+        let mut ethernet_stacked = Packet::new();
+        ethernet_stacked
+            .push(Ethernet::default())
+            .push(Vlan8021ad {
+                vlan_id: 100,
+                ..Vlan8021ad::default()
+            })
+            .push(Vlan {
+                vlan_id: 200,
+                ..Vlan::default()
+            })
+            .push(network_layer());
+
+        let mut vlan_rooted_stacked = Packet::new();
+        vlan_rooted_stacked
+            .push(Vlan8021ad {
+                vlan_id: 100,
+                ..Vlan8021ad::default()
+            })
+            .push(Vlan {
+                vlan_id: 200,
+                ..Vlan::default()
+            })
+            .push(network_layer());
+
+        // This deliberately unusual order proves canonical link intent wins
+        // over the otherwise Layer 3-capable IP-root Auto branch.
+        let mut ip_root_with_service_vlan = Packet::new();
+        ip_root_with_service_vlan
+            .push(network_layer())
+            .push(Vlan8021ad::default());
+
+        vec![
+            ("ethernet", ethernet),
+            ("vlan", customer_vlan_root),
+            ("vlan8021ad", service_vlan_root),
+            ("ethernet-stacked-vlan", ethernet_stacked),
+            ("vlan-rooted-stacked-vlan", vlan_rooted_stacked),
+            ("ip-root-with-service-vlan", ip_root_with_service_vlan),
+        ]
+    }
+
+    #[test]
+    fn explicit_layer3_rejects_every_canonical_link_intent_before_route_lookup() {
+        for (case, packet) in canonical_link_intent_packets() {
+            let provider = InterfaceOnlyRoute::new(route(None));
+            let error = RoutePlanner
+                .plan(
+                    &packet,
+                    None,
+                    &PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        interface: None,
+                    },
+                    &provider,
+                )
+                .unwrap_err();
+
+            assert!(matches!(error, PlanError::EthernetInLayer3), "{case}");
+            assert_eq!(provider.ip_lookups.load(Ordering::SeqCst), 0, "{case}");
+            assert_eq!(
+                provider.interface_lookups.load(Ordering::SeqCst),
+                0,
+                "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn auto_selects_layer2_for_canonical_single_and_stacked_link_intent() {
+        for (case, packet) in canonical_link_intent_packets() {
+            let protocol_ids = packet
+                .iter()
+                .map(|layer| layer.protocol_id().to_string())
+                .collect::<Vec<_>>();
+            assert!(
+                protocol_ids.iter().any(|protocol| {
+                    matches!(protocol.as_str(), "ethernet" | "vlan" | "vlan8021ad")
+                }),
+                "{case}: {protocol_ids:?}"
+            );
+
+            let plan = RoutePlanner
+                .plan(
+                    &packet,
+                    None,
+                    &PlanOptions::default(),
+                    &FixedRoute(route(None)),
+                )
+                .unwrap();
+
+            assert_eq!(plan.mode, LinkMode::Layer2, "{case}: {protocol_ids:?}");
+        }
+    }
+
+    #[test]
+    fn auto_link_intent_does_not_fall_back_when_layer2_is_unsupported() {
+        let packet = canonical_link_intent_packets()
+            .into_iter()
+            .find_map(|(case, packet)| (case == "vlan8021ad").then_some(packet))
+            .unwrap();
+        let decision = RouteDecision {
+            capability: LinkCapability::Layer3,
+            link_type: super::super::LinkType::IPV4,
+            ..route(None)
+        };
+
+        for link_mode in [LinkMode::Auto, LinkMode::Layer2] {
+            let error = RoutePlanner
+                .plan(
+                    &packet,
+                    None,
+                    &PlanOptions {
+                        link_mode,
+                        interface: None,
+                    },
+                    &FixedRoute(decision.clone()),
+                )
+                .unwrap_err();
+
+            assert!(
+                matches!(error, PlanError::Layer2Unsupported),
+                "{link_mode:?}"
+            );
         }
     }
 

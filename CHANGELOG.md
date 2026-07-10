@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added repository metadata, an architecture decision record set, a platform/capability matrix, a fixture provenance policy, a migration guide, a security policy, and feature-matrix CI.
 - Added typed RFC 8754 Segment Routing Header handling for IPv6 routing type 4.
 - Added deterministic lifecycle coverage requiring reply capture to report readiness before the first send.
+- Added an enforceable component/native-adapter architecture, platform-neutral interface/capture/L2/L3 provider seams, checked transmission-frame dispatch, and external-provider compile coverage.
 
 ### Changed
 

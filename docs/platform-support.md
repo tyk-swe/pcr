@@ -2,7 +2,7 @@
 
 This document distinguishes the current alpha checkpoint from the stable v0.2 target. "Builds" does not mean a live networking workflow has been release-qualified.
 
-Status snapshot: 2026-07-09 (`0.2.0-alpha.1`).
+Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 
 ## Status legend
 
@@ -27,6 +27,18 @@ Status snapshot: 2026-07-09 (`0.2.0-alpha.1`).
 | Scan, traceroute, DNS, and fuzz tools | Planned | Planned | Planned | v0.1 paths were removed; replacements will use shared APIs |
 
 Consult the exact release notes and `packetcraftr --help` for the checkout in use; a planned row is not a stable v0.2 guarantee.
+
+## Build and feature contracts
+
+| Cargo profile | Linux | macOS | Windows | Native dependency contract |
+| --- | --- | --- | --- | --- |
+| `--no-default-features` | Portable | Portable | Portable | No `pnet`, `pcap`, `rtnetlink`, `socket2`, or `windows` adapter package |
+| Default features | Portable core plus isolated alpha interface enumeration | Portable core plus isolated alpha interface enumeration | Portable | Current `live` enables only the temporary Unix enumeration adapter |
+| `--all-features` | Same target behavior as default in this checkpoint | Same target behavior as default in this checkpoint | Portable | Explicit target-native features arrive in XOD-30/XOD-31/XOD-32 |
+
+Every profile exposes the platform-neutral provider traits. An application can implement interface, route, neighbor, typed Layer 2/Layer 3 transmission, and capture providers without importing a native wrapper. `Layer2Frame` and `Layer3Frame` reject a materialized route for the other mode, and `DispatchPacketIo` cannot cross those provider boundaries.
+
+The component and native ownership rules are fixed by [ADR 0004](adr/0004-component-and-native-adapter-boundaries.md). Portable components forbid unsafe code. Direct native dependencies, FFI, and any reviewed unsafe implementation are confined to the private `io::platform` subtree and checked by CI.
 
 ## Stable v0.2 target
 
@@ -53,12 +65,14 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 - Future native capture/injection adapters will require libpcap development/runtime packages (`libpcap-dev` on Debian/Ubuntu); the current alpha does not link libpcap.
 - Live operations commonly need root or narrowly granted `CAP_NET_RAW`; capture configuration can also need `CAP_NET_ADMIN` depending on the operation.
 - Route and interface discovery uses netlink in the v0.2 target.
+- The selected safe route wrapper is `rtnetlink`; libpcap integration uses the `pcap` crate. Both remain optional and target-specific.
 
 ### macOS
 
 - Portable and offline use: no external packet-capture package.
 - Future live capture/injection uses the system libpcap/BPF facilities and can require elevated privileges or an administrator-managed device policy.
 - Route selection uses routing sockets and native interface APIs in the v0.2 target.
+- Routing/raw-socket setup is isolated behind `socket2` plus the private native ABI adapter; libpcap/BPF integration uses the `pcap` crate.
 
 ### Windows
 
@@ -67,6 +81,7 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 - Future Layer 2 capture/injection requires a supported Npcap installation. Building native integration can require the matching Npcap SDK.
 - A future explicit native-adapter profile must pin and provision its supported Npcap SDK/runtime contract. Missing or incompatible native dependencies must remain capability errors and must never silently change link mode.
 - Route/source selection uses Windows IP Helper APIs such as `GetBestRoute2` in the v0.2 target.
+- IP Helper/Winsock calls use narrowly enabled `windows` crate bindings; Npcap integration uses the `pcap` crate behind the future explicit native feature.
 
 ## Link-mode contract
 
@@ -84,7 +99,7 @@ For an off-link destination, neighbor resolution targets the selected route gate
 
 ## Continuous-integration coverage
 
-Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default and no-default profiles compile and test on macOS. Windows runs separately named portable default and portable no-default jobs, and CI rejects either dependency graph if it contains `pnet` (and therefore the `Packet.lib` link boundary). These unprivileged hosted jobs do not qualify live I/O.
+Pull requests run formatting and default/no-default/all-feature lint, test, and documentation profiles on Linux. Default, no-default, and all-feature profiles compile and test on macOS. Windows runs separately named portable default, portable no-default, and portable all-feature jobs, and CI rejects every profile's dependency graph if it contains `pnet` (and therefore the `Packet.lib` link boundary). A separate architecture check resolves no-default dependency trees for Linux, macOS, and Windows targets and rejects native adapter packages, native references outside the platform subtree, or unsafe/FFI outside its single owner. These unprivileged hosted jobs do not qualify live I/O.
 
 Stable release qualification additionally requires:
 

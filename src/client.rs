@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![forbid(unsafe_code)]
+
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -20,49 +22,15 @@ use crate::io::{
 };
 use crate::protocols::Ethernet;
 
-/// Aggregate backend capture-queue capacity used by default.
-pub const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
-/// Aggregate backend capture-queue byte capacity used by default.
-pub const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
-
-/// Backend capture counters. Received counters include frames delivered to the
-/// owned capture session; dropped counters describe frames/bytes lost before
-/// delivery, and overflow events count distinct queue-overflow observations.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CaptureStatistics {
-    pub received_frames: u64,
-    pub received_bytes: u64,
-    pub dropped_frames: u64,
-    pub dropped_bytes: u64,
-    pub overflow_events: u64,
-}
-
-impl CaptureStatistics {
-    /// Validates counter arithmetic and required frame/byte relationships.
-    pub fn validate(self) -> Result<Self, LiveIoError> {
-        self.received_frames
-            .checked_add(self.dropped_frames)
-            .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
-                message: "received and dropped frame counters overflow u64".to_owned(),
-            })?;
-        self.received_bytes
-            .checked_add(self.dropped_bytes)
-            .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
-                message: "received and dropped byte counters overflow u64".to_owned(),
-            })?;
-        if self.dropped_frames == 0 && self.dropped_bytes != 0 {
-            return Err(LiveIoError::InvalidCaptureStatistics {
-                message: "dropped bytes were reported without a dropped frame".to_owned(),
-            });
-        }
-        Ok(self)
-    }
-
-    /// Returns whether the backend reported any drop or queue overflow.
-    pub fn has_loss(self) -> bool {
-        self.dropped_frames != 0 || self.dropped_bytes != 0 || self.overflow_events != 0
-    }
-}
+// Compatibility surface: provider implementations historically imported these
+// contracts through `packetcraftr::client`. Their ownership is now `io`.
+pub use crate::io::{
+    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
+    DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceInfo,
+    InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LiveIoError,
+    PacketIo, SystemInterfaceProvider, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES,
+    DEFAULT_CAPTURE_QUEUE_FRAMES,
+};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationStats {
@@ -124,69 +92,6 @@ pub struct SendOptions {
 }
 
 #[derive(Clone, Debug)]
-pub struct TransmissionFrame<'a> {
-    pub bytes: &'a Bytes,
-    pub route: &'a MaterializedRoute,
-    /// When true, the backend must add the reported Ethernet envelope and may
-    /// not fall back to Layer 3.
-    pub synthesize_ethernet: bool,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct IoSendReport {
-    pub bytes_sent: usize,
-    pub wire_bytes: Option<Bytes>,
-}
-
-pub trait PacketIo: Send + Sync {
-    fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError>;
-}
-
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum LiveIoError {
-    #[error("live packet I/O is unavailable: {message}")]
-    Unsupported { message: String },
-    #[error("live packet I/O requires additional privileges: {message}")]
-    Privilege { message: String },
-    #[error("packet transmission failed: {message}")]
-    Send { message: String },
-    #[error(
-        "packet transmission was incomplete: submitted {expected} bytes, backend reported {actual}"
-    )]
-    PartialSend { expected: usize, actual: usize },
-    #[error(
-        "packet transmission report is inconsistent: bytes_sent is {bytes_sent}, wire_bytes contains {wire_bytes} bytes"
-    )]
-    InvalidSendReport {
-        bytes_sent: usize,
-        wire_bytes: usize,
-    },
-    #[error("Layer 2 envelope synthesis failed: {message}")]
-    Encapsulation { message: String },
-    #[error("capture failed: {message}")]
-    Capture { message: String },
-    #[error("capture did not become ready: {message}")]
-    CaptureReadiness { message: String },
-    #[error("invalid capture queue limit {field}={value}: {reason}")]
-    InvalidCaptureQueueLimit {
-        field: &'static str,
-        value: usize,
-        reason: &'static str,
-    },
-    #[error(
-        "capture queue overflowed {overflow_events} time(s), dropping {dropped_frames} frame(s) / {dropped_bytes} byte(s)"
-    )]
-    CaptureQueueOverflow {
-        dropped_frames: u64,
-        dropped_bytes: u64,
-        overflow_events: u64,
-    },
-    #[error("capture backend returned invalid statistics: {message}")]
-    InvalidCaptureStatistics { message: String },
-}
-
-#[derive(Clone, Debug)]
 pub struct SendReport {
     pub built: BuiltPacket,
     pub route: MaterializedRoute,
@@ -232,18 +137,6 @@ pub enum ClientError {
 
 pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
 
-pub trait CaptureSession: Send {
-    /// Readiness is an explicit barrier. No exchange frame may be sent first.
-    fn wait_ready(&mut self) -> Result<(), LiveIoError>;
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<CapturedFrame>, LiveIoError>;
-    /// Stop the receiver and join all capture work before returning. An error
-    /// means the implementation could not confirm complete cleanup.
-    fn shutdown(&mut self) -> Result<(), LiveIoError>;
-    /// Returns cumulative backend counters, including queue loss that was not
-    /// otherwise observable through delivered frames.
-    fn statistics(&self) -> CaptureStatistics;
-}
-
 struct CaptureGuard<C: CaptureSession> {
     inner: C,
     shutdown_attempted: bool,
@@ -283,79 +176,6 @@ impl<C: CaptureSession> Drop for CaptureGuard<C> {
             self.shutdown_attempted = true;
             let _ = self.inner.shutdown();
         }
-    }
-}
-
-pub trait ExchangeIo: PacketIo {
-    type Capture: CaptureSession;
-
-    fn arm_capture(
-        &self,
-        route: &PlannedRoute,
-        limits: CaptureQueueLimits,
-    ) -> Result<Self::Capture, LiveIoError>;
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CaptureOverflowPolicy {
-    #[default]
-    Fail,
-    DropNewest,
-    DropOldest,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CaptureQueueLimits {
-    pub max_frames: usize,
-    pub max_bytes: usize,
-    pub snap_length: usize,
-    pub overflow_policy: CaptureOverflowPolicy,
-}
-
-impl Default for CaptureQueueLimits {
-    fn default() -> Self {
-        Self {
-            max_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
-            max_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
-            snap_length: crate::io::DEFAULT_CAPTURE_SIZE_LIMIT,
-            overflow_policy: CaptureOverflowPolicy::Fail,
-        }
-    }
-}
-
-impl CaptureQueueLimits {
-    /// Validates non-zero limits, byte/snap consistency, and worst-case frame
-    /// accounting before a backend allocates or starts capture.
-    pub fn validate(self) -> Result<Self, LiveIoError> {
-        for (field, value) in [
-            ("max_frames", self.max_frames),
-            ("max_bytes", self.max_bytes),
-            ("snap_length", self.snap_length),
-        ] {
-            if value == 0 {
-                return Err(LiveIoError::InvalidCaptureQueueLimit {
-                    field,
-                    value,
-                    reason: "must be greater than zero",
-                });
-            }
-        }
-        if self.snap_length > self.max_bytes {
-            return Err(LiveIoError::InvalidCaptureQueueLimit {
-                field: "snap_length",
-                value: self.snap_length,
-                reason: "cannot exceed max_bytes",
-            });
-        }
-        self.max_frames.checked_mul(self.snap_length).ok_or(
-            LiveIoError::InvalidCaptureQueueLimit {
-                field: "max_frames * snap_length",
-                value: self.max_frames,
-                reason: "worst-case queue byte accounting overflows usize",
-            },
-        )?;
-        Ok(self)
     }
 }
 
@@ -698,12 +518,11 @@ where
         } else {
             preliminary
         };
-        let io_report = self.io.send(TransmissionFrame {
-            bytes: &built.bytes,
-            // Link-layer synthesis is already included in the exact build.
-            synthesize_ethernet: false,
-            route: &route,
-        })?;
+        // Link-layer synthesis is already included in the exact build. The
+        // typed frame selects the matching native provider boundary.
+        let io_report = self
+            .io
+            .send(TransmissionFrame::try_new(&built.bytes, &route)?)?;
         validate_send_report(built.bytes.len(), &io_report)?;
         let bytes_sent = io_report.bytes_sent;
         let wire_bytes = io_report
@@ -900,11 +719,11 @@ where
             }
             let send_started = Instant::now();
             let send_wall_time = std::time::SystemTime::now();
-            let sent = match self.io.send(TransmissionFrame {
-                bytes: &built.bytes,
-                route,
-                synthesize_ethernet: false,
-            }) {
+            let frame = match TransmissionFrame::try_new(&built.bytes, route) {
+                Ok(frame) => frame,
+                Err(error) => return Err(error_after_shutdown(&mut capture, error)),
+            };
+            let sent = match self.io.send(frame) {
                 Ok(report) => report,
                 Err(error) => return Err(error_after_shutdown(&mut capture, error)),
             };
@@ -1443,8 +1262,8 @@ mod tests {
         fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
             self.events.lock().unwrap().push("send");
             Ok(IoSendReport {
-                bytes_sent: frame.bytes.len(),
-                wire_bytes: Some(frame.bytes.clone()),
+                bytes_sent: frame.bytes().len(),
+                wire_bytes: Some(frame.bytes().clone()),
             })
         }
     }
@@ -1454,10 +1273,10 @@ mod tests {
 
     impl PacketIo for RecordingIo {
         fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
-            self.0.lock().unwrap().push(frame.bytes.clone());
+            self.0.lock().unwrap().push(frame.bytes().clone());
             Ok(IoSendReport {
-                bytes_sent: frame.bytes.len(),
-                wire_bytes: Some(frame.bytes.clone()),
+                bytes_sent: frame.bytes().len(),
+                wire_bytes: Some(frame.bytes().clone()),
             })
         }
     }
@@ -1468,7 +1287,7 @@ mod tests {
     impl PacketIo for PartialIo {
         fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
             Ok(IoSendReport {
-                bytes_sent: frame.bytes.len().saturating_sub(1),
+                bytes_sent: frame.bytes().len().saturating_sub(1),
                 wire_bytes: None,
             })
         }
@@ -1520,7 +1339,7 @@ mod tests {
         }
     }
 
-    impl ExchangeIo for FakeIo {
+    impl CaptureProvider for FakeIo {
         type Capture = FakeCapture;
 
         fn arm_capture(
@@ -1574,7 +1393,7 @@ mod tests {
         }
     }
 
-    impl ExchangeIo for ReadinessAndShutdownFailIo {
+    impl CaptureProvider for ReadinessAndShutdownFailIo {
         type Capture = ReadinessAndShutdownFailCapture;
 
         fn arm_capture(

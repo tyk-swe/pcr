@@ -1,6 +1,28 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[workspace.package]
+version = "0.2.0-alpha.1"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.metadata.packetcraftr]
+components = ["core", "protocols", "io", "session", "tools", "facade"]
+publish-order = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session", "packetcraftr-tools", "packetcraftr"]
+native-dependency-owner = "packetcraftr-io::platform"
+unsafe-owner = "packetcraftr-io::platform"
+
+[workspace.metadata.packetcraftr.native-wrappers]
+linux-route = "rtnetlink"
+layer2-capture-injection = "pcap"
+macos-route-and-raw-sockets = "socket2"
+windows-network-apis = "windows"
+
 [package]
 name = "packetcraftr"
-version = "0.2.0-alpha.1"
+version.workspace = true
 edition = "2021"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
@@ -12,6 +34,9 @@ homepage = "https://github.com/tyk-swe/pcr"
 documentation = "https://docs.rs/packetcraftr"
 keywords = ["packet", "network", "cli", "testing"]
 categories = ["command-line-utilities", "network-programming"]
+
+[lints]
+workspace = true
 
 [[bin]]
 name = "packetcraftr"

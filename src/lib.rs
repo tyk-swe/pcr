@@ -21,21 +21,20 @@
 //! ```
 
 #![warn(unreachable_pub)]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod client;
 pub mod core;
 pub mod io;
 pub mod protocols;
 pub mod session;
+pub mod tools;
 mod v2_cli;
 
 pub use client::{
-    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, Client,
-    ClientError, ExchangeIo, ExchangeOptions, ExchangeResult, IoSendReport, LiveIoError,
-    MatchedResponse, OperationStats, PacketIo, SendOptions, SendReport, TrafficPolicy,
-    TrafficPolicyError, TransmissionFrame, UnsupportedNeighborResolver, UnsupportedPacketIo,
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_MAX_UNSOLICITED_FRAMES,
+    Client, ClientError, ExchangeOptions, ExchangeResult, MatchedResponse, OperationStats,
+    SendOptions, SendReport, TrafficPolicy, TrafficPolicyError, UnsupportedNeighborResolver,
+    UnsupportedPacketIo, DEFAULT_MAX_UNSOLICITED_FRAMES,
 };
 pub use core::{
     BuildContext, BuildError, BuildMode, BuildOptions, Builder, BuiltPacket, ByteRange, CodecError,
@@ -49,11 +48,15 @@ pub use core::{
     TemplateError, TemplateValues, WireValue,
 };
 pub use io::{
-    CaptureDirection, CaptureError, CaptureFileFormat, CaptureReader, CaptureRecordError,
-    CaptureWriter, CapturedFrame, DestinationScope, InterfaceId, LinkCapability, LinkMode,
-    LinkType, MacAddress, MaterializedRoute, NeighborError, NeighborResolver, PcapEndianness,
-    PlanError, PlanOptions, PlannedRoute, ReplayTiming, RouteDecision, RoutePlanner, RouteProvider,
-    DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_PCAPNG_INTERFACE_LIMIT,
+    CaptureDirection, CaptureError, CaptureFileFormat, CaptureOverflowPolicy, CaptureProvider,
+    CaptureQueueLimits, CaptureReader, CaptureRecordError, CaptureSession, CaptureStatistics,
+    CaptureWriter, CapturedFrame, DestinationScope, DispatchPacketIo, ExchangeIo, InterfaceAddress,
+    InterfaceFlags, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
+    Layer2Io, Layer3Frame, Layer3Io, LinkCapability, LinkMode, LinkType, LiveIoError, MacAddress,
+    MaterializedRoute, NeighborError, NeighborResolver, PacketIo, PcapEndianness, PlanError,
+    PlanOptions, PlannedRoute, ReplayTiming, RouteDecision, RoutePlanner, RouteProvider,
+    SystemInterfaceProvider, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES,
+    DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_PCAPNG_INTERFACE_LIMIT,
     DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT,
 };
 pub use protocols::{

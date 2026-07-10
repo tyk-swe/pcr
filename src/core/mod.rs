@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![forbid(unsafe_code)]
+
 //! Portable packet model, reflection, registry, building, and bounded dissection.
 //!
 //! This module has no dependency on an async runtime or operating-system packet I/O.

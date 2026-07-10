@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+#![forbid(unsafe_code)]
+
 use std::fs::File;
 use std::io::{self, IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
@@ -132,10 +134,10 @@ struct UnavailableCaptureArgs {
     #[arg(long)]
     packet: Option<String>,
     /// Aggregate backend capture-queue frame bound.
-    #[arg(long, default_value_t = crate::client::DEFAULT_CAPTURE_QUEUE_FRAMES)]
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_QUEUE_FRAMES)]
     max_queue_frames: usize,
     /// Aggregate retained/queued capture byte bound.
-    #[arg(long, default_value_t = crate::client::DEFAULT_CAPTURE_QUEUE_BYTES)]
+    #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_QUEUE_BYTES)]
     max_captured_bytes: usize,
     /// Maximum bytes retained from any one captured frame.
     #[arg(long, default_value_t = crate::io::DEFAULT_CAPTURE_SIZE_LIMIT)]
@@ -416,21 +418,24 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
     Ok(())
 }
 
-#[cfg(all(feature = "live", not(windows)))]
 fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
     if matches!(output, OutputFormat::Raw | OutputFormat::Hex) {
         return Err(CliError::new(2, "interfaces supports text or JSON output"));
     }
-    let interfaces = pnet::datalink::interfaces();
+    let interfaces = crate::io::InterfaceProvider::interfaces(&crate::io::SystemInterfaceProvider)
+        .map_err(|error| CliError::new(4, error.to_string()))?;
     if output == OutputFormat::Json {
         let values = interfaces
             .iter()
             .map(|interface| {
                 json!({
-                    "name": interface.name,
-                    "index": interface.index,
-                    "mac": interface.mac.map(|value| value.to_string()),
-                    "addresses": interface.ips.iter().map(ToString::to_string).collect::<Vec<_>>(),
+                    "name": interface.id.name,
+                    "index": interface.id.index,
+                    "description": interface.description,
+                    "mac": interface.mac_address.map(|value| value.to_string()),
+                    "addresses": interface.addresses.iter().map(|value| {
+                        format!("{}/{}", value.address, value.prefix_length)
+                    }).collect::<Vec<_>>(),
                     "flags": interface.flags,
                 })
             })
@@ -445,33 +450,17 @@ fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
     }
     for interface in interfaces {
         let addresses = interface
-            .ips
+            .addresses
             .iter()
-            .map(ToString::to_string)
+            .map(|value| format!("{}/{}", value.address, value.prefix_length))
             .collect::<Vec<_>>()
             .join(", ");
         write_stdout_line(format_args!(
             "{} (index {}): {}",
-            interface.name, interface.index, addresses
+            interface.id.name, interface.id.index, addresses
         ))?;
     }
     Ok(())
-}
-
-#[cfg(all(feature = "live", windows))]
-fn run_interfaces(_output: OutputFormat) -> Result<(), CliError> {
-    Err(CliError::new(
-        4,
-        "Windows interface enumeration is unavailable in the portable profile; use a PacketcraftR build with the Windows native adapter when available (Npcap is required only for native Layer 2 capture and injection)",
-    ))
-}
-
-#[cfg(not(feature = "live"))]
-fn run_interfaces(_output: OutputFormat) -> Result<(), CliError> {
-    Err(CliError::new(
-        4,
-        "interface enumeration requires the live feature",
-    ))
 }
 
 fn read_recipe(

@@ -70,6 +70,8 @@ assert_eq!(packet.get::<Raw>().unwrap().bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef
 
 External Rust crates can implement `Layer`, `LayerCodec`, and `ProtocolModule`, then register the module through a `RegistryBuilder`. Registration is compile-time Rust composition: v0.2 deliberately has no native dynamic-library plugin system and no global mutable registry.
 
+Native and injected networking providers implement platform-neutral contracts owned by `packetcraftr::io`: interface and route discovery, neighbor resolution, typed Layer 2/Layer 3 send, and owned capture. The root reexports those contracts, while their former `packetcraftr::client::*` paths remain alpha compatibility reexports. Checked `Layer2Frame` and `Layer3Frame` values keep Ethernet bytes away from raw Layer 3 adapters and vice versa. Native handles never enter the public traits.
+
 The architecture decisions are recorded in [docs/adr](docs/adr/README.md).
 
 ## Building from source
@@ -82,7 +84,7 @@ cargo build --no-default-features
 cargo test --no-default-features
 ```
 
-The portable packet kernel and offline capture path do not require libpcap. On Linux and macOS, the default `live` feature currently enables interface enumeration without enabling capture or injection. Windows default and `--no-default-features` builds are deliberately portable: they do not resolve `pnet`, link `Packet.lib`, or require Npcap. The Windows `interfaces` command reports a capability error until the dedicated native adapter is available. Later capture and injection adapters will require libpcap on Linux/macOS and Npcap on Windows, plus the relevant operating-system privileges.
+The portable packet kernel and offline capture path do not require libpcap. On Linux and macOS, the default `live` feature currently enables interface enumeration through the private platform adapter without enabling capture or injection. Windows default and `--no-default-features` builds are deliberately portable: they do not resolve `pnet`, link `Packet.lib`, or require Npcap. The Windows `interfaces` command reports a capability error until the dedicated native adapter is available. Later capture and injection adapters will require libpcap on Linux/macOS and Npcap on Windows, plus the relevant operating-system privileges.
 
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
@@ -163,7 +165,7 @@ structured diagnostics and operation statistics.
 
 ## Development
 
-The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux. Default and no-default profiles also compile and test on macOS. Windows CI names and tests both profiles as portable and verifies that neither dependency graph contains `pnet` or its `Packet.lib` link requirement.
+The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux and macOS. Windows CI names and tests all three profiles as portable and verifies that none of their dependency graphs contains `pnet` or its `Packet.lib` link requirement.
 
 ```console
 cargo fmt --all -- --check
@@ -175,6 +177,7 @@ cargo clippy --all-features --all-targets -- -D warnings
 cargo test --all-features --all-targets
 RUSTDOCFLAGS='-D warnings' cargo doc --all-features --no-deps
 cargo package --locked
+bash scripts/check-architecture.sh
 ```
 
 Tests never rewrite authoritative packet fixtures. Read the [fixture and provenance policy](tests/fixtures/README.md) before adding or replacing capture data.

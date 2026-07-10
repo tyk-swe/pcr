@@ -4,6 +4,8 @@
 //! Runtime-neutral capture records and streaming offline capture I/O.
 
 mod pcap;
+mod platform;
+mod provider;
 mod route;
 
 pub use crate::core::{CaptureDirection, CaptureRecordError, CapturedFrame, LinkType};
@@ -11,6 +13,13 @@ pub use pcap::{
     CaptureError, CaptureFileFormat, CaptureReader, CaptureWriter, PcapEndianness, ReplayTiming,
     DEFAULT_CAPTURE_SIZE_LIMIT, DEFAULT_PCAPNG_INTERFACE_LIMIT,
     DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT,
+};
+pub use provider::{
+    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
+    DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceInfo,
+    InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LiveIoError,
+    PacketIo, SystemInterfaceProvider, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES,
+    DEFAULT_CAPTURE_QUEUE_FRAMES,
 };
 pub use route::{
     DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute,

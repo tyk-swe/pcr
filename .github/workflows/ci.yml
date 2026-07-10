@@ -102,6 +102,17 @@ jobs:
           command: check advisories bans licenses sources
           arguments: --all-features
 
+  architecture-policy:
+    name: Component and native boundary policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Enforce component, native dependency, and unsafe ownership
+        run: bash scripts/check-architecture.sh
+
   rustsec:
     name: RustSec advisory audit
     runs-on: ubuntu-24.04
@@ -142,12 +153,18 @@ jobs:
           - name: macOS / no default features
             os: macos-14
             flags: --no-default-features
+          - name: macOS / all features
+            os: macos-14
+            flags: --all-features
           - name: Windows / portable default features
             os: windows-2022
             flags: ""
           - name: Windows / portable no default features
             os: windows-2022
             flags: --no-default-features
+          - name: Windows / portable all features
+            os: windows-2022
+            flags: --all-features
     steps:
       - uses: actions/checkout@v4
       - name: Install the pinned Rust toolchain
@@ -177,6 +194,7 @@ jobs:
       - portable-platforms
       - schemas
       - dependency-policy
+      - architecture-policy
       - rustsec
       - fixtures
     runs-on: ubuntu-24.04
@@ -189,5 +207,6 @@ jobs:
           test "${{ needs.portable-platforms.result }}" = "success"
           test "${{ needs.schemas.result }}" = "success"
           test "${{ needs.dependency-policy.result }}" = "success"
+          test "${{ needs.architecture-policy.result }}" = "success"
           test "${{ needs.rustsec.result }}" = "success"
           test "${{ needs.fixtures.result }}" = "success"

@@ -217,7 +217,7 @@
               "$ref": "#/$defs/tracerouteStreamSuccess"
             },
             {
-              "$ref": "#/$defs/dnsRecordSuccess"
+              "$ref": "#/$defs/dnsStreamSuccess"
             },
             {
               "$ref": "#/$defs/fuzzCaseSuccess"
@@ -561,14 +561,14 @@
         "result"
       ]
     },
-    "dnsRecordSuccess": {
+    "dnsStreamSuccess": {
       "type": "object",
       "properties": {
         "command": {
           "const": "dns"
         },
         "result": {
-          "$ref": "#/$defs/dnsRecordResult"
+          "$ref": "#/$defs/dnsStreamResult"
         }
       },
       "required": [
@@ -962,18 +962,80 @@
     "dnsResult": {
       "type": "object",
       "required": [
+        "server",
+        "server_port",
+        "resolved_addresses",
         "query_name",
         "query_type",
+        "transaction_id",
+        "transport",
+        "outcome",
         "answers",
         "authorities",
-        "additionals"
+        "additionals",
+        "rejected_records",
+        "rejected_record_count",
+        "attempts",
+        "undecoded"
       ],
       "properties": {
+        "server": {
+          "type": "string"
+        },
+        "server_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
         "query_name": {
           "type": "string"
         },
         "query_type": {
+          "$ref": "#/$defs/dnsQueryType"
+        },
+        "transaction_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "transport": {
+          "const": "udp"
+        },
+        "outcome": {
+          "$ref": "#/$defs/dnsOutcome"
+        },
+        "response_code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "response_code_name": {
           "type": "string"
+        },
+        "authoritative": {
+          "type": "boolean"
+        },
+        "truncated": {
+          "type": "boolean"
+        },
+        "recursion_desired": {
+          "type": "boolean"
+        },
+        "recursion_available": {
+          "type": "boolean"
+        },
+        "authenticated_data": {
+          "type": "boolean"
+        },
+        "checking_disabled": {
+          "type": "boolean"
         },
         "answers": {
           "$ref": "#/$defs/dnsRecords"
@@ -983,6 +1045,28 @@
         },
         "additionals": {
           "$ref": "#/$defs/dnsRecords"
+        },
+        "rejected_records": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsRejectedRecord"
+          }
+        },
+        "rejected_record_count": {
+          "$ref": "#/$defs/uint64"
+        },
+        "attempts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsAttempt"
+          },
+          "minItems": 1
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dnsUndecoded"
+          }
         }
       },
       "additionalProperties": false
@@ -1356,34 +1440,213 @@
         }
       ]
     },
-    "dnsRecordResult": {
-      "type": "object",
-      "required": [
-        "query_name",
-        "query_type",
-        "section",
-        "record"
-      ],
-      "properties": {
-        "query_name": {
-          "type": "string"
+    "dnsStreamResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "server",
+            "server_port",
+            "query_name",
+            "query_type",
+            "evidence"
+          ],
+          "properties": {
+            "event": {
+              "const": "attempt"
+            },
+            "server": {
+              "type": "string"
+            },
+            "server_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "query_name": {
+              "type": "string"
+            },
+            "query_type": {
+              "$ref": "#/$defs/dnsQueryType"
+            },
+            "evidence": {
+              "$ref": "#/$defs/dnsAttempt"
+            }
+          },
+          "additionalProperties": false
         },
-        "query_type": {
-          "type": "string"
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "server",
+            "server_port",
+            "query_name",
+            "query_type",
+            "section",
+            "record"
+          ],
+          "properties": {
+            "event": {
+              "const": "record"
+            },
+            "server": {
+              "type": "string"
+            },
+            "server_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "query_name": {
+              "type": "string"
+            },
+            "query_type": {
+              "$ref": "#/$defs/dnsQueryType"
+            },
+            "section": {
+              "$ref": "#/$defs/dnsSection"
+            },
+            "record": {
+              "$ref": "#/$defs/dnsRecord"
+            }
+          },
+          "additionalProperties": false
         },
-        "section": {
-          "type": "string",
-          "enum": [
-            "answer",
-            "authority",
-            "additional"
-          ]
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "server",
+            "server_port",
+            "query_name",
+            "query_type",
+            "record"
+          ],
+          "properties": {
+            "event": {
+              "const": "rejected"
+            },
+            "server": {
+              "type": "string"
+            },
+            "server_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "query_name": {
+              "type": "string"
+            },
+            "query_type": {
+              "$ref": "#/$defs/dnsQueryType"
+            },
+            "record": {
+              "$ref": "#/$defs/dnsRejectedRecord"
+            }
+          },
+          "additionalProperties": false
         },
-        "record": {
-          "$ref": "#/$defs/dnsRecord"
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "evidence"
+          ],
+          "properties": {
+            "event": {
+              "const": "undecoded"
+            },
+            "evidence": {
+              "$ref": "#/$defs/dnsUndecoded"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "server",
+            "server_port",
+            "resolved_addresses",
+            "query_name",
+            "query_type",
+            "transaction_id",
+            "transport",
+            "outcome",
+            "rejected_record_count"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "server": {
+              "type": "string"
+            },
+            "server_port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "resolved_addresses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "query_name": {
+              "type": "string"
+            },
+            "query_type": {
+              "$ref": "#/$defs/dnsQueryType"
+            },
+            "transaction_id": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "transport": {
+              "const": "udp"
+            },
+            "outcome": {
+              "$ref": "#/$defs/dnsOutcome"
+            },
+            "response_code": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 15
+            },
+            "response_code_name": {
+              "type": "string"
+            },
+            "authoritative": {
+              "type": "boolean"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "recursion_desired": {
+              "type": "boolean"
+            },
+            "recursion_available": {
+              "type": "boolean"
+            },
+            "authenticated_data": {
+              "type": "boolean"
+            },
+            "checking_disabled": {
+              "type": "boolean"
+            },
+            "rejected_record_count": {
+              "$ref": "#/$defs/uint64"
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "fuzzCaseResult": {
       "type": "object",
@@ -2015,6 +2278,151 @@
       },
       "additionalProperties": false
     },
+    "dnsQueryType": {
+      "type": "string",
+      "enum": [
+        "a",
+        "aaaa",
+        "cname",
+        "mx",
+        "ns",
+        "ptr",
+        "soa",
+        "srv",
+        "txt",
+        "any"
+      ]
+    },
+    "dnsSection": {
+      "type": "string",
+      "enum": [
+        "answer",
+        "authority",
+        "additional"
+      ]
+    },
+    "dnsOutcome": {
+      "type": "string",
+      "enum": [
+        "response",
+        "truncated",
+        "timeout",
+        "unrelated",
+        "decode_failure",
+        "network_failure"
+      ]
+    },
+    "dnsAttemptStatus": {
+      "type": "string",
+      "enum": [
+        "response",
+        "truncated",
+        "timeout",
+        "unrelated",
+        "decode_failure",
+        "network_failure"
+      ]
+    },
+    "dnsAttempt": {
+      "type": "object",
+      "required": [
+        "attempt",
+        "server_address",
+        "source_port",
+        "status",
+        "sent_at",
+        "reason"
+      ],
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "server_address": {
+          "type": "string"
+        },
+        "source_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "status": {
+          "$ref": "#/$defs/dnsAttemptStatus"
+        },
+        "sent_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "received_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "latency": {
+          "$ref": "#/$defs/duration"
+        },
+        "frame": {
+          "$ref": "#/$defs/frame"
+        },
+        "response_code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 15
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "dnsRejectedRecord": {
+      "type": "object",
+      "required": [
+        "section",
+        "index",
+        "owner",
+        "type_code",
+        "reason"
+      ],
+      "properties": {
+        "section": {
+          "$ref": "#/$defs/dnsSection"
+        },
+        "index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "type_code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "dnsUndecoded": {
+      "type": "object",
+      "required": [
+        "attempt",
+        "frame"
+      ],
+      "properties": {
+        "attempt": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32
+        },
+        "frame": {
+          "$ref": "#/$defs/frame"
+        }
+      },
+      "additionalProperties": false
+    },
     "dnsRecords": {
       "type": "array",
       "items": {
@@ -2025,12 +2433,18 @@
       "type": "object",
       "required": [
           "owner",
+          "class",
           "ttl",
           "type"
         ],
         "properties": {
           "owner": {
             "type": "string"
+          },
+          "class": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 65535
           },
           "ttl": {
             "type": "integer",
@@ -2127,6 +2541,12 @@
               "type": "string"
             }
           },
+          "strings_hex": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/hexBytes"
+            }
+          },
           "type_code": {
             "type": "integer",
             "minimum": 0,
@@ -2136,6 +2556,149 @@
             "$ref": "#/$defs/hexBytes"
           }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "a",
+                  "aaaa"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "address"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cname"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "canonical_name"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "mx"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "preference",
+              "exchange"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "ns"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "name_server"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "ptr"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "pointer"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "soa"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "primary_name_server",
+              "responsible_mailbox",
+              "serial",
+              "refresh",
+              "retry",
+              "expire",
+              "minimum"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "srv"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "priority",
+              "weight",
+              "port",
+              "target"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "txt"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "strings",
+              "strings_hex"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "unknown"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "type_code",
+              "rdata_hex"
+            ]
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "fuzzCase": {

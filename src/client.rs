@@ -24,9 +24,10 @@ use crate::io::{
 };
 use crate::protocols::Ethernet;
 use crate::tools::{
-    AuthorizedScanTarget, ScanAuthorizer, ScanBatch, ScanBatchExecution, ScanExecutionError,
-    ScanExecutor, ScanMatchedResponse, ScanStats, ScanTarget, ScanTransport, TracerouteBatch,
-    TracerouteBatchExecution, TracerouteExecutionError, TracerouteExecutor,
+    AuthorizedScanTarget, DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor,
+    DnsMatchedResponse, DnsStats, ScanAuthorizer, ScanBatch, ScanBatchExecution,
+    ScanExecutionError, ScanExecutor, ScanMatchedResponse, ScanStats, ScanTarget, ScanTransport,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutionError, TracerouteExecutor,
     TracerouteMatchedResponse, TracerouteStats, TracerouteStrategy,
 };
 
@@ -506,6 +507,10 @@ impl<R: HostnameResolver> ScanAuthorizer for TrafficPolicyScanAuthorizer<'_, R> 
 /// Traceroute uses the same declared-hostname-before-DNS and every-address
 /// authorization contract as scan.
 pub type TrafficPolicyTracerouteAuthorizer<'a, R> = TrafficPolicyScanAuthorizer<'a, R>;
+
+/// DNS retries use the same declared-hostname-before-resolution and
+/// every-address authorization contract as scan.
+pub type TrafficPolicyDnsAuthorizer<'a, R> = TrafficPolicyScanAuthorizer<'a, R>;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SendOptions {
@@ -1494,6 +1499,106 @@ fn invalid_scan_execution(message: impl Into<String>) -> ScanExecutionError {
             "cli.scan_executor",
             FailureKind::Cli,
             Some("use homogeneous bounded scan batches and retain at least one response per probe"),
+        ),
+        Vec::new(),
+    )
+}
+
+/// Façade adapter that executes one component-neutral DNS exchange through
+/// the capture-ready [`Client::exchange`] lifecycle.
+pub struct ClientDnsExecutor<'a, R, N, I> {
+    client: &'a Client<R, N, I>,
+    options: ExchangeOptions,
+}
+
+impl<'a, R, N, I> ClientDnsExecutor<'a, R, N, I> {
+    pub fn new(client: &'a Client<R, N, I>, options: ExchangeOptions) -> Self {
+        Self { client, options }
+    }
+}
+
+impl<R, N, I> DnsExecutor for ClientDnsExecutor<'_, R, N, I>
+where
+    R: RouteProvider,
+    N: NeighborResolver,
+    I: ExchangeIo,
+{
+    fn execute(
+        &mut self,
+        exchange: &DnsExchange,
+    ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+        if exchange.max_responses == 0 {
+            return Err(invalid_dns_execution(
+                "DNS exchange must retain at least one response",
+            ));
+        }
+        if exchange.max_responses > self.options.max_responses {
+            return Err(invalid_dns_execution(format!(
+                "DNS exchange requests {} responses but the client is bounded to {}",
+                exchange.max_responses, self.options.max_responses
+            )));
+        }
+        let mut options = self.options.clone();
+        options.timeout = exchange.timeout;
+        options.max_template_packets = 1;
+        options.max_responses = exchange.max_responses;
+        options.max_unsolicited = options.max_unsolicited.min(exchange.max_responses);
+        options.send.destination = Some(exchange.probe.server_address);
+        let result = self
+            .client
+            .exchange(&PacketTemplate::new(exchange.probe.packet()), options)
+            .map_err(|error| DnsExecutionError::classified(&error))?;
+        let ExchangeResult {
+            mut sent,
+            mut sent_evidence,
+            responses,
+            unanswered: _,
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats,
+        } = result;
+        if sent.len() != 1 || sent_evidence.len() != 1 {
+            return Err(invalid_dns_execution(
+                "single-query DNS exchange returned an invalid sent-evidence count",
+            ));
+        }
+        if responses.iter().any(|response| response.request_index != 0) {
+            return Err(invalid_dns_execution(
+                "single-query DNS exchange returned a response for an unknown request index",
+            ));
+        }
+        Ok(DnsExchangeExecution {
+            sent: sent.remove(0).packet,
+            sent_evidence: sent_evidence.remove(0),
+            responses: responses
+                .into_iter()
+                .map(|response| DnsMatchedResponse {
+                    response: response.response,
+                    latency: response.latency,
+                })
+                .collect(),
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats: DnsStats {
+                packets_attempted: stats.packets_attempted,
+                packets_completed: stats.packets_completed,
+                bytes: stats.bytes,
+                elapsed: stats.elapsed,
+                capture: stats.capture,
+            },
+        })
+    }
+}
+
+fn invalid_dns_execution(message: impl Into<String>) -> DnsExecutionError {
+    DnsExecutionError::new(
+        message,
+        ErrorClassification::new(
+            "cli.dns_executor",
+            FailureKind::Cli,
+            Some("use one bounded UDP DNS query and retain at least one response"),
         ),
         Vec::new(),
     )

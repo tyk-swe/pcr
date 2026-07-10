@@ -28,7 +28,8 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | Defragmentation and TCP reassembly | Alpha, CI | Alpha, CI | Alpha, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
 | Structured scan workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable planner, matcher/classifier, policy, timing, and injected lifecycle tests run in hosted CI; privileged qualification remains a dedicated-runner gate |
 | Structured traceroute workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable hop planner, IPv4/IPv6 quoted-error classifier, policy, timing, and injected exchange seams run in hosted CI; privileged qualification remains a dedicated-runner gate |
-| DNS and fuzz tools | Planned | Planned | Planned | v0.1 paths were removed; replacements will use shared APIs |
+| Structured DNS workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable codec, relevance, policy/rebinding, timing, and injected exchange tests run in hosted CI; privileged UDP qualification remains a dedicated-runner gate |
+| Fuzz tool | Planned | Planned | Planned | The v0.1 path was removed; its replacement will use shared APIs |
 
 Consult the exact release notes and `packetcraftr --help` for the checkout in use; a planned row is not a stable v0.2 guarantee.
 
@@ -59,6 +60,7 @@ The native CLI feature requirements are explicit:
 | `exchange` | `native-route` + `native-layer2` for capture, plus the selected Layer 2 or Layer 3 send path |
 | `scan` | Same route, capture, and selected send paths as `exchange` |
 | `traceroute` | Same route, capture, and selected send paths as `exchange` |
+| `dns` | Same route, capture, and selected UDP send paths as `exchange` |
 | Ethernet `replay` | `native-route` + `native-layer2` |
 | Raw IPv4/IPv6 `replay` | `native-route` + `native-layer3` |
 
@@ -91,7 +93,7 @@ authorize a silent link-mode or provider fallback.
 | Route/device/runtime send or capture | `io.route*`, `io.device`, `io.send`, `io.capture*` | 5 |
 | Neighbor or resolver timeout/failure | `io.neighbor*`, `io.hostname_resolution` | 5 |
 | Incomplete send | `io.partial_send` | 5 |
-| Invalid CLI resource limit | `cli.capture_limit`, `cli.capture_timeout`, `cli.exchange_limit`, `cli.neighbor_limit` | 2 |
+| Invalid CLI resource limit | `cli.capture_limit`, `cli.capture_timeout`, `cli.exchange_limit`, `cli.neighbor_limit`, `cli.dns_limit` | 2 |
 | Packet/live-frame validation | `packet.*` | 3 |
 | Inconsistent provider report/state | `internal.*` | 70 |
 
@@ -115,7 +117,7 @@ The component and native ownership rules are fixed by [ADR 0004](adr/0004-compon
 | Layer 3 transmission where supported | Required | Required | Required |
 | Gateway-aware ARP/NDP | Required | Required | Required |
 | Coordinated send/capture/exchange | Required | Required | Required |
-| Scan and traceroute tools | Required | Required | Required |
+| Scan, traceroute, and DNS tools | Required | Required | Required |
 | Actionable privilege/dependency errors | Required | Required | Required |
 
 Explicitly complete packets must produce identical protocol bytes on every platform. Platform adapters may differ only in route discovery, link materialization, capture/injection, timestamp facilities, and error reporting.

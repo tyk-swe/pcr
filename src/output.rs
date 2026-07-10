@@ -21,10 +21,14 @@ use crate::io::{
     InterfaceInfo, LinkCapability, LinkMode, MaterializedRoute, PlannedRoute, ReplayTiming,
     RouteDecision,
 };
-use crate::tools::{ReplayFrameEvidence, ReplaySummary, ScanResult, TracerouteResult};
 pub use crate::tools::{
-    ScanClassification, ScanProbeStatus, TracerouteCompletion as TraceCompletionReason,
-    TracerouteProbeStatus as TraceProbeStatus, TracerouteResponseKind as TraceResponseKind,
+    DnsAttemptStatus, DnsOutcome, DnsSection, ScanClassification, ScanProbeStatus,
+    TracerouteCompletion as TraceCompletionReason, TracerouteProbeStatus as TraceProbeStatus,
+    TracerouteResponseKind as TraceResponseKind,
+};
+use crate::tools::{
+    DnsRecord, DnsRecordValue, DnsResult, ReplayFrameEvidence, ReplaySummary, ScanResult,
+    TracerouteResult,
 };
 
 /// Version identifier emitted by every structured CLI record.
@@ -1362,7 +1366,9 @@ pub enum DnsRecordData {
         target: String,
     },
     Txt {
+        /// UTF-8 display projections. `strings_hex` remains the exact value.
         strings: Vec<String>,
+        strings_hex: Vec<String>,
     },
     Unknown {
         type_code: u16,
@@ -1373,6 +1379,7 @@ pub enum DnsRecordData {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsRecordOutput {
     pub owner: String,
+    pub class: u16,
     pub ttl: u32,
     #[serde(flatten)]
     pub data: DnsRecordData,
@@ -1381,28 +1388,361 @@ pub struct DnsRecordOutput {
 /// Aggregate or streamed result of `dns`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsCommandResult {
+    pub server: String,
+    pub server_port: u16,
+    pub resolved_addresses: Vec<IpAddr>,
     pub query_name: String,
     pub query_type: String,
+    pub transaction_id: u16,
+    pub transport: String,
+    pub outcome: DnsOutcome,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_code: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_code_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authoritative: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recursion_desired: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recursion_available: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authenticated_data: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub checking_disabled: Option<bool>,
     pub answers: Vec<DnsRecordOutput>,
     pub authorities: Vec<DnsRecordOutput>,
     pub additionals: Vec<DnsRecordOutput>,
+    pub rejected_records: Vec<DnsRejectedRecordOutput>,
+    pub rejected_record_count: usize,
+    pub attempts: Vec<DnsAttemptOutput>,
+    pub undecoded: Vec<DnsUndecodedOutput>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DnsSection {
-    Answer,
-    Authority,
-    Additional,
+impl DnsCommandResult {
+    pub fn try_from_dns(
+        result: DnsResult,
+    ) -> Result<(Self, Vec<Diagnostic>, OperationStats), OutputContractError> {
+        let DnsResult {
+            server,
+            server_port,
+            resolved_addresses,
+            query_name,
+            query_type,
+            transaction_id,
+            transport,
+            outcome,
+            response,
+            attempts,
+            undecoded,
+            diagnostics,
+            stats,
+        } = result;
+        let (
+            response_code,
+            response_code_name,
+            authoritative,
+            truncated,
+            recursion_desired,
+            recursion_available,
+            authenticated_data,
+            checking_disabled,
+            answers,
+            authorities,
+            additionals,
+            rejected_records,
+            rejected_record_count,
+        ) = if let Some(response) = response {
+            (
+                Some(response.response_code),
+                Some(response.response_code_name().to_owned()),
+                Some(response.authoritative),
+                Some(response.truncated),
+                Some(response.recursion_desired),
+                Some(response.recursion_available),
+                Some(response.authenticated_data),
+                Some(response.checking_disabled),
+                response
+                    .answers
+                    .into_iter()
+                    .map(DnsRecordOutput::from_record)
+                    .collect(),
+                response
+                    .authorities
+                    .into_iter()
+                    .map(DnsRecordOutput::from_record)
+                    .collect(),
+                response
+                    .additionals
+                    .into_iter()
+                    .map(DnsRecordOutput::from_record)
+                    .collect(),
+                response
+                    .rejected_records
+                    .into_iter()
+                    .map(|record| DnsRejectedRecordOutput {
+                        section: record.section,
+                        index: record.index,
+                        owner: record.owner,
+                        type_code: record.type_code,
+                        reason: record.reason,
+                    })
+                    .collect(),
+                response.rejected_record_count,
+            )
+        } else {
+            (
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                0,
+            )
+        };
+        let attempts = attempts
+            .into_iter()
+            .map(|evidence| {
+                Ok(DnsAttemptOutput {
+                    attempt: evidence.attempt,
+                    server_address: evidence.server_address,
+                    source_port: evidence.source_port,
+                    status: evidence.status,
+                    sent_at: evidence.sent_at.try_into()?,
+                    received_at: evidence
+                        .received_at
+                        .map(OutputTimestamp::try_from)
+                        .transpose()?,
+                    latency: evidence.latency,
+                    frame: evidence
+                        .response
+                        .map(FrameOutput::try_from_frame)
+                        .transpose()?,
+                    response_code: evidence.response_code,
+                    reason: evidence.reason,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        let undecoded = undecoded
+            .into_iter()
+            .map(|evidence| {
+                Ok(DnsUndecodedOutput {
+                    attempt: evidence.attempt,
+                    frame: FrameOutput::try_from_frame(evidence.frame)?,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        let stats = OperationStats {
+            packets_attempted: stats.packets_attempted,
+            packets_completed: stats.packets_completed,
+            bytes: stats.bytes,
+            elapsed: stats.elapsed,
+            capture: stats.capture,
+        };
+        Ok((
+            Self {
+                server,
+                server_port,
+                resolved_addresses,
+                query_name,
+                query_type: query_type.to_string(),
+                transaction_id,
+                transport: transport.to_string(),
+                outcome,
+                response_code,
+                response_code_name,
+                authoritative,
+                truncated,
+                recursion_desired,
+                recursion_available,
+                authenticated_data,
+                checking_disabled,
+                answers,
+                authorities,
+                additionals,
+                rejected_records,
+                rejected_record_count,
+                attempts,
+                undecoded,
+            },
+            diagnostics,
+            stats,
+        ))
+    }
+}
+
+impl DnsRecordOutput {
+    fn from_record(record: DnsRecord) -> Self {
+        let data = match record.value {
+            DnsRecordValue::A(address) => DnsRecordData::A { address },
+            DnsRecordValue::Aaaa(address) => DnsRecordData::Aaaa { address },
+            DnsRecordValue::Cname(canonical_name) => DnsRecordData::Cname { canonical_name },
+            DnsRecordValue::Mx {
+                preference,
+                exchange,
+            } => DnsRecordData::Mx {
+                preference,
+                exchange,
+            },
+            DnsRecordValue::Ns(name_server) => DnsRecordData::Ns { name_server },
+            DnsRecordValue::Ptr(pointer) => DnsRecordData::Ptr { pointer },
+            DnsRecordValue::Soa {
+                primary_name_server,
+                responsible_mailbox,
+                serial,
+                refresh,
+                retry,
+                expire,
+                minimum,
+            } => DnsRecordData::Soa {
+                primary_name_server,
+                responsible_mailbox,
+                serial,
+                refresh,
+                retry,
+                expire,
+                minimum,
+            },
+            DnsRecordValue::Srv {
+                priority,
+                weight,
+                port,
+                target,
+            } => DnsRecordData::Srv {
+                priority,
+                weight,
+                port,
+                target,
+            },
+            DnsRecordValue::Txt(strings) => DnsRecordData::Txt {
+                strings: strings
+                    .iter()
+                    .map(|value| String::from_utf8_lossy(value).into_owned())
+                    .collect(),
+                strings_hex: strings.iter().map(|value| compact_hex(value)).collect(),
+            },
+            DnsRecordValue::Unknown { type_code, rdata } => DnsRecordData::Unknown {
+                type_code,
+                rdata_hex: compact_hex(&rdata),
+            },
+        };
+        Self {
+            owner: record.owner,
+            class: record.class,
+            ttl: record.ttl,
+            data,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DnsRejectedRecordOutput {
+    pub section: DnsSection,
+    pub index: usize,
+    pub owner: String,
+    pub type_code: u16,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DnsAttemptOutput {
+    pub attempt: u32,
+    pub server_address: IpAddr,
+    pub source_port: u16,
+    pub status: DnsAttemptStatus,
+    pub sent_at: OutputTimestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub received_at: Option<OutputTimestamp>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame: Option<FrameOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_code: Option<u8>,
+    pub reason: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DnsUndecodedOutput {
+    pub attempt: u32,
+    pub frame: FrameOutput,
 }
 
 /// One typed record produced by streaming `dns` output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsRecordCommandResult {
+    pub server: String,
+    pub server_port: u16,
     pub query_name: String,
     pub query_type: String,
     pub section: DnsSection,
     pub record: DnsRecordOutput,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum DnsStreamCommandResult {
+    Attempt {
+        server: String,
+        server_port: u16,
+        query_name: String,
+        query_type: String,
+        evidence: DnsAttemptOutput,
+    },
+    Record {
+        server: String,
+        server_port: u16,
+        query_name: String,
+        query_type: String,
+        section: DnsSection,
+        record: DnsRecordOutput,
+    },
+    Rejected {
+        server: String,
+        server_port: u16,
+        query_name: String,
+        query_type: String,
+        record: DnsRejectedRecordOutput,
+    },
+    Undecoded {
+        evidence: DnsUndecodedOutput,
+    },
+    Complete {
+        server: String,
+        server_port: u16,
+        resolved_addresses: Vec<IpAddr>,
+        query_name: String,
+        query_type: String,
+        transaction_id: u16,
+        transport: String,
+        outcome: DnsOutcome,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        response_code: Option<u8>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        response_code_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        authoritative: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        truncated: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recursion_desired: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recursion_available: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        authenticated_data: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        checking_disabled: Option<bool>,
+        rejected_record_count: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -1454,9 +1794,10 @@ fn compact_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::tools::{
-        ScanEndpointResult, ScanProbeEvidence, ScanProbeStatus, ScanTransport,
-        TracerouteCompletion, TracerouteHopResult, TracerouteProbeEvidence, TracerouteProbeStatus,
-        TracerouteResponseKind, TracerouteStats, TracerouteStrategy,
+        DnsQueryType, DnsRecord, DnsRecordValue, DnsStats, DnsTransport, ScanEndpointResult,
+        ScanProbeEvidence, ScanProbeStatus, ScanTransport, TracerouteCompletion,
+        TracerouteHopResult, TracerouteProbeEvidence, TracerouteProbeStatus,
+        TracerouteResponseKind, TracerouteStats, TracerouteStrategy, ValidatedDnsResponse,
     };
 
     #[test]
@@ -1499,6 +1840,58 @@ mod tests {
         let value = serde_json::to_value(stream).unwrap();
         assert_eq!(value["mode"], "stream");
         assert_eq!(value["sequence"], 7);
+    }
+
+    #[test]
+    fn dns_output_preserves_exact_txt_bytes_and_json_escapes_controls() {
+        let exact = Bytes::from_static(b"remote\x1b[31m");
+        let result = DnsResult {
+            server: "10.0.0.53".to_owned(),
+            server_port: 53,
+            resolved_addresses: vec!["10.0.0.53".parse().unwrap()],
+            query_name: "txt.example.".to_owned(),
+            query_type: DnsQueryType::Txt,
+            transaction_id: 7,
+            transport: DnsTransport::Udp,
+            outcome: DnsOutcome::Response,
+            response: Some(ValidatedDnsResponse {
+                transaction_id: 7,
+                response_code: 0,
+                authoritative: false,
+                truncated: false,
+                recursion_desired: true,
+                recursion_available: true,
+                authenticated_data: false,
+                checking_disabled: false,
+                answers: vec![DnsRecord {
+                    owner: "txt.example.".to_owned(),
+                    class: 1,
+                    ttl: 60,
+                    value: DnsRecordValue::Txt(vec![exact]),
+                }],
+                authorities: Vec::new(),
+                additionals: Vec::new(),
+                rejected_records: Vec::new(),
+                rejected_record_count: 0,
+            }),
+            attempts: Vec::new(),
+            undecoded: Vec::new(),
+            diagnostics: Vec::new(),
+            stats: DnsStats::default(),
+        };
+        let (output, _, _) = DnsCommandResult::try_from_dns(result).unwrap();
+        let DnsRecordData::Txt {
+            strings,
+            strings_hex,
+        } = &output.answers[0].data
+        else {
+            panic!("expected TXT output");
+        };
+        assert_eq!(strings_hex, &["72656d6f74651b5b33316d"]);
+        assert_eq!(strings[0].as_bytes(), b"remote\x1b[31m");
+        let json = serde_json::to_string(&output).unwrap();
+        assert!(!json.contains('\x1b'));
+        assert!(json.contains("\\u001b"));
     }
 
     #[test]

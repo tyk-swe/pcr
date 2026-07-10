@@ -92,9 +92,11 @@ live planning.
 | `routes` | Packet-independent | — | — |
 
 DNS message parsing and correlation are owned by the structured DNS workflow;
-UDP/TCP destination port 53 does not cause implicit DNS dissection. Replay and
-read preserve captured bytes and metadata rather than manufacturing a typed
-interpretation.
+UDP/TCP destination port 53 does not cause implicit DNS dissection. The live
+CLI uses capture-ready UDP; the pure length-prefixed TCP frame decoder applies
+the same bounded message validation without claiming a raw TCP packet is a
+connected DNS session. Replay and read preserve captured bytes and metadata
+rather than manufacturing a typed interpretation.
 
 ## Strictness and preservation
 

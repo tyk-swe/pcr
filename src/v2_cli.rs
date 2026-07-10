@@ -3,7 +3,9 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::hash_map::RandomState;
 use std::fs::File;
+use std::hash::{BuildHasher, Hasher};
 use std::io::{self, IsTerminal, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
@@ -15,9 +17,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
 use crate::client::{
-    Client, ClientScanExecutor, ClientTracerouteExecutor, ExchangeOptions, LiveTarget, SendOptions,
-    SystemHostnameResolver, TrafficPolicy, TrafficPolicyError, TrafficPolicyScanAuthorizer,
-    TrafficPolicyTracerouteAuthorizer,
+    Client, ClientDnsExecutor, ClientScanExecutor, ClientTracerouteExecutor, ExchangeOptions,
+    LiveTarget, SendOptions, SystemHostnameResolver, TrafficPolicy, TrafficPolicyDnsAuthorizer,
+    TrafficPolicyError, TrafficPolicyScanAuthorizer, TrafficPolicyTracerouteAuthorizer,
 };
 use crate::core::{
     parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,
@@ -36,21 +38,24 @@ use crate::io::{
 };
 use crate::output::{
     AggregateErrorOutput, AggregateOutput, BuildCommandResult, CaptureFrameCommandResult,
-    CommandName, DissectCommandResult, ExchangeCommandResult, ExchangeStreamCommandResult,
-    FrameOutput, InterfacesCommandResult, OutputContractError, OutputError, OutputFormat,
-    PlanCommandResult, ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult,
-    RoutesCommandResult, ScanCommandResult, ScanStreamCommandResult, SendCommandResult,
-    StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceProbeStatus, TraceResponseKind,
-    TracerouteCommandResult, TracerouteStreamCommandResult,
+    CommandName, DissectCommandResult, DnsAttemptStatus, DnsCommandResult, DnsOutcome,
+    DnsRecordOutput, DnsSection, DnsStreamCommandResult, ExchangeCommandResult,
+    ExchangeStreamCommandResult, FrameOutput, InterfacesCommandResult, OutputContractError,
+    OutputError, OutputFormat, PlanCommandResult, ReadFrameCommandResult, ReplayCommandResult,
+    ReplayFrameCommandResult, RoutesCommandResult, ScanCommandResult, ScanStreamCommandResult,
+    SendCommandResult, StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceProbeStatus,
+    TraceResponseKind, TracerouteCommandResult, TracerouteStreamCommandResult,
 };
 use crate::tools::{
-    replay_capture, scan, traceroute, ReplayAuthorizationError, ReplayAuthorizer, ReplayError,
-    ReplayLimits, ReplayOptions, ReplayTransmission, ReplayTransmitter, ScanAddressFamily,
-    ScanBatch, ScanBatchExecution, ScanError, ScanExecutionError, ScanExecutor, ScanLimits,
-    ScanRequest, ScanTarget, ScanTransport, SystemReplayClock, SystemScanClock,
-    SystemTracerouteClock, TracerouteAddressFamily, TracerouteBatch, TracerouteBatchExecution,
-    TracerouteError, TracerouteExecutionError, TracerouteExecutor, TracerouteLimits,
-    TracerouteRequest, TracerouteStrategy,
+    dns, replay_capture, scan, traceroute, DnsAddressFamily, DnsError, DnsExchange,
+    DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsLimits, DnsQueryType, DnsRequest,
+    ReplayAuthorizationError, ReplayAuthorizer, ReplayError, ReplayLimits, ReplayOptions,
+    ReplayTransmission, ReplayTransmitter, ScanAddressFamily, ScanBatch, ScanBatchExecution,
+    ScanError, ScanExecutionError, ScanExecutor, ScanLimits, ScanRequest, ScanTarget,
+    ScanTransport, SystemDnsClock, SystemReplayClock, SystemScanClock, SystemTracerouteClock,
+    TracerouteAddressFamily, TracerouteBatch, TracerouteBatchExecution, TracerouteError,
+    TracerouteExecutionError, TracerouteExecutor, TracerouteLimits, TracerouteRequest,
+    TracerouteStrategy,
 };
 
 #[derive(Debug, Parser)]
@@ -92,7 +97,7 @@ enum Command {
     /// Run structured traceroute probes.
     Traceroute(TracerouteArgs),
     /// Run a structured DNS operation.
-    Dns(UnavailableArgs),
+    Dns(DnsArgs),
     /// Run bounded field-aware packet fuzzing.
     Fuzz(UnavailableArgs),
     /// Enumerate passive interface-bound route decisions.
@@ -276,6 +281,130 @@ struct ScanArgs {
     max_duration_ms: u64,
     /// Maximum undecodable exact frames retained across the scan.
     #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
+    max_undecoded: usize,
+    /// Interface name or numeric index used as an exact route constraint.
+    #[arg(long, value_name = "NAME_OR_INDEX")]
+    interface: Option<String>,
+    /// Interface-owned source preference used only for route selection.
+    #[arg(long)]
+    source: Option<IpAddr>,
+    /// Automatic, Layer 2, or raw Layer 3 transmission intent.
+    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
+    link_mode: CliLinkMode,
+    #[command(flatten)]
+    limits: CaptureLimitArgs,
+    #[command(flatten)]
+    policy: TrafficPolicyArgs,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliDnsAddressFamily {
+    #[default]
+    Any,
+    Ipv4,
+    Ipv6,
+}
+
+impl From<CliDnsAddressFamily> for DnsAddressFamily {
+    fn from(value: CliDnsAddressFamily) -> Self {
+        match value {
+            CliDnsAddressFamily::Any => Self::Any,
+            CliDnsAddressFamily::Ipv4 => Self::Ipv4,
+            CliDnsAddressFamily::Ipv6 => Self::Ipv6,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliDnsQueryType {
+    #[default]
+    A,
+    Aaaa,
+    Cname,
+    Mx,
+    Ns,
+    Ptr,
+    Soa,
+    Srv,
+    Txt,
+    Any,
+}
+
+impl From<CliDnsQueryType> for DnsQueryType {
+    fn from(value: CliDnsQueryType) -> Self {
+        match value {
+            CliDnsQueryType::A => Self::A,
+            CliDnsQueryType::Aaaa => Self::Aaaa,
+            CliDnsQueryType::Cname => Self::Cname,
+            CliDnsQueryType::Mx => Self::Mx,
+            CliDnsQueryType::Ns => Self::Ns,
+            CliDnsQueryType::Ptr => Self::Ptr,
+            CliDnsQueryType::Soa => Self::Soa,
+            CliDnsQueryType::Srv => Self::Srv,
+            CliDnsQueryType::Txt => Self::Txt,
+            CliDnsQueryType::Any => Self::Any,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct DnsArgs {
+    /// Explicit DNS server IP address or hostname.
+    #[arg(value_name = "SERVER")]
+    server: String,
+    /// Bounded ASCII DNS owner name to query.
+    #[arg(value_name = "NAME")]
+    name: String,
+    /// DNS question type.
+    #[arg(long = "type", value_enum, default_value_t = CliDnsQueryType::A)]
+    query_type: CliDnsQueryType,
+    /// Select the first authorized server address or one IP family.
+    #[arg(long, value_enum, default_value_t = CliDnsAddressFamily::Any)]
+    family: CliDnsAddressFamily,
+    /// DNS server UDP port.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_DNS_SERVER_PORT)]
+    port: u16,
+    /// Explicit 16-bit transaction ID; a process-local value is generated when omitted.
+    #[arg(long)]
+    transaction_id: Option<u16>,
+    /// First UDP source port; an ephemeral-range value is generated when omitted.
+    #[arg(long)]
+    source_port: Option<u16>,
+    /// Disable the recursion-desired query flag.
+    #[arg(long)]
+    no_recursion: bool,
+    /// Number of independently re-resolved and re-authorized attempts.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_DNS_ATTEMPTS)]
+    attempts: u32,
+    /// Response window for each capture-ready query.
+    #[arg(long, default_value_t = 1_000)]
+    timeout_ms: u64,
+    /// Optional average query-rate ceiling.
+    #[arg(long)]
+    rate: Option<u32>,
+    /// Maximum worst-case timeout plus intentional retry delay in milliseconds.
+    #[arg(long, default_value_t = 3_600_000)]
+    max_duration_ms: u64,
+    /// Maximum complete DNS message bytes decoded.
+    #[arg(long, default_value_t = crate::tools::MAX_DNS_MESSAGE_BYTES)]
+    max_message_bytes: usize,
+    /// Maximum total answer, authority, and additional records decoded.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_DNS_RECORDS)]
+    max_records: usize,
+    /// Maximum compression-pointer traversals for any decoded DNS name.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_DNS_NAME_POINTERS)]
+    max_name_pointers: usize,
+    /// Maximum TXT character strings in one record.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_DNS_TXT_STRINGS)]
+    max_txt_strings: usize,
+    /// Maximum aggregate TXT data bytes in one record.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_DNS_TXT_BYTES)]
+    max_txt_bytes: usize,
+    /// Maximum rejected-record metadata entries retained.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_REJECTED_DNS_RECORDS)]
+    max_rejected_records: usize,
+    /// Maximum undecodable exact frames retained across attempts.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_UNDECODED_DNS_FRAMES)]
     max_undecoded: usize,
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
@@ -717,7 +846,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Replay(arguments) => run_replay(arguments, cli.output),
         Command::Scan(arguments) => run_scan(arguments, cli.output),
         Command::Traceroute(arguments) => run_traceroute(arguments, cli.output),
-        Command::Dns(arguments) | Command::Fuzz(arguments) => {
+        Command::Dns(arguments) => run_dns(arguments, cli.output),
+        Command::Fuzz(arguments) => {
             let _ = arguments.packet;
             Err(CliError::new(
                 4,
@@ -1811,6 +1941,456 @@ fn emit_scan_record(sequence: &mut u64, result: ScanStreamCommandResult) -> Resu
         CliError::classified(OutputContractError::SequenceOverflow).at_sequence(*sequence)
     })?;
     Ok(())
+}
+
+fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
+    let DnsArgs {
+        server,
+        name,
+        query_type,
+        family,
+        port,
+        transaction_id,
+        source_port,
+        no_recursion,
+        attempts,
+        timeout_ms,
+        rate,
+        max_duration_ms,
+        max_message_bytes,
+        max_records,
+        max_name_pointers,
+        max_txt_strings,
+        max_txt_bytes,
+        max_rejected_records,
+        max_undecoded,
+        interface,
+        source,
+        link_mode,
+        limits,
+        policy,
+    } = arguments;
+    let server = match server.parse::<LiveTarget>().map_err(CliError::classified)? {
+        LiveTarget::Address(address) => ScanTarget::Address(address),
+        LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
+    };
+    let queue_limits = limits.into_limits();
+    let request = DnsRequest {
+        server,
+        address_family: family.into(),
+        server_port: port,
+        source_port: source_port.unwrap_or_else(generated_dns_source_port),
+        query_name: name,
+        query_type: query_type.into(),
+        transaction_id: transaction_id.unwrap_or_else(generated_dns_transaction_id),
+        recursion_desired: !no_recursion,
+        attempts,
+        timeout: Duration::from_millis(timeout_ms),
+        queries_per_second: rate,
+        limits: DnsLimits {
+            max_message_bytes,
+            max_records,
+            max_name_pointers,
+            max_txt_strings,
+            max_txt_bytes,
+            max_rejected_records,
+            max_evidence_frames: queue_limits.max_frames,
+            max_evidence_bytes: queue_limits.max_bytes,
+            max_undecoded,
+            max_duration: Duration::from_millis(max_duration_ms),
+        },
+    };
+    request.validate().map_err(dns_cli_error)?;
+    let policy = policy.into_policy();
+    policy.validate().map_err(CliError::classified)?;
+    validate_live_interface_selector("dns", interface.as_deref())?;
+
+    let registry = default_registry_arc()?;
+    let mut exchange = ExchangeOptions {
+        send: SendOptions {
+            destination: None,
+            plan: crate::io::PlanOptions {
+                link_mode: link_mode.into(),
+                interface: None,
+                preferred_source: source,
+            },
+            build: BuildOptions::default(),
+            allow_permissive_live: false,
+        },
+        timeout: request.timeout,
+        max_template_packets: 1,
+        max_unsolicited: queue_limits.max_frames,
+        max_responses: queue_limits.max_frames,
+        max_capture_queue_frames: queue_limits.max_frames,
+        max_captured_bytes: queue_limits.max_bytes,
+        capture_overflow_policy: queue_limits.overflow_policy,
+        decode: DecodeOptions::default(),
+    };
+    exchange.decode.max_packet_size = queue_limits.snap_length;
+    exchange.validate().map_err(CliError::classified)?;
+
+    let mut executor = CliDnsExecutor {
+        registry: Arc::clone(&registry),
+        policy: policy.clone(),
+        exchange,
+        interface,
+        interface_resolved: false,
+    };
+    let resolver = SystemHostnameResolver;
+    let mut authorizer = TrafficPolicyDnsAuthorizer::new(&policy, &resolver);
+    let mut clock = SystemDnsClock;
+    let result = dns(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut clock,
+    )
+    .map_err(dns_cli_error)?;
+    let (result, diagnostics, stats) =
+        DnsCommandResult::try_from_dns(result).map_err(CliError::classified)?;
+    match output {
+        OutputFormat::Text => render_dns_text(result, diagnostics, stats),
+        OutputFormat::Json => emit_json(
+            &AggregateOutput::success(CommandName::Dns, result, diagnostics).with_stats(stats),
+        ),
+        OutputFormat::Ndjson => render_dns_stream(result, diagnostics, stats),
+        _ => Err(CliError::classified(
+            OutputContractError::UnsupportedFormat {
+                command: CommandName::Dns,
+                format: output,
+            },
+        )),
+    }
+}
+
+fn generated_dns_transaction_id() -> u16 {
+    generated_dns_entropy() as u16
+}
+
+fn generated_dns_source_port() -> u16 {
+    const WIDTH: u64 = u16::MAX as u64 - crate::tools::DNS_EPHEMERAL_SOURCE_PORT_BASE as u64 + 1;
+    crate::tools::DNS_EPHEMERAL_SOURCE_PORT_BASE + (generated_dns_entropy() % WIDTH) as u16
+}
+
+fn generated_dns_entropy() -> u64 {
+    let time = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut hasher = RandomState::new().build_hasher();
+    hasher.write_u128(time);
+    hasher.write_u32(std::process::id());
+    hasher.finish()
+}
+
+struct CliDnsExecutor {
+    registry: Arc<crate::core::ProtocolRegistry>,
+    policy: TrafficPolicy,
+    exchange: ExchangeOptions,
+    interface: Option<String>,
+    interface_resolved: bool,
+}
+
+impl DnsExecutor for CliDnsExecutor {
+    fn execute(
+        &mut self,
+        exchange: &DnsExchange,
+    ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+        if !self.interface_resolved {
+            self.exchange.send.plan.interface =
+                resolve_interface(self.interface.take(), &SystemInterfaceProvider)
+                    .map_err(dns_execution_error_from_cli)?;
+            self.interface_resolved = true;
+        }
+        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
+        ClientDnsExecutor::new(&client, self.exchange.clone()).execute(exchange)
+    }
+}
+
+fn dns_execution_error_from_cli(error: CliError) -> DnsExecutionError {
+    DnsExecutionError::new(error.message, error.classification, error.causes)
+}
+
+fn dns_cli_error(error: DnsError) -> CliError {
+    let sequence = error.sequence();
+    let mut error = CliError::classified(error);
+    if let Some(sequence) = sequence {
+        error = error.at_sequence(sequence);
+    }
+    error
+}
+
+fn render_dns_text(
+    result: DnsCommandResult,
+    diagnostics: Vec<crate::core::Diagnostic>,
+    stats: crate::client::OperationStats,
+) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "server={}:{} resolved={} query={} type={} id={} transport={} outcome={}",
+        result.server,
+        result.server_port,
+        result
+            .resolved_addresses
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        result.query_name,
+        result.query_type,
+        result.transaction_id,
+        result.transport,
+        dns_outcome_name(result.outcome),
+    ))?;
+    for attempt in &result.attempts {
+        write_stdout_line(format_args!(
+            "attempt={} server={} source_port={} status={} sent={} received={} latency={} rcode={} reason={}",
+            attempt.attempt,
+            attempt.server_address,
+            attempt.source_port,
+            dns_attempt_status_name(attempt.status),
+            output_timestamp_text(attempt.sent_at),
+            attempt
+                .received_at
+                .map(output_timestamp_text)
+                .unwrap_or_else(|| "none".to_owned()),
+            attempt
+                .latency
+                .map(|value| format!("{value:?}"))
+                .unwrap_or_else(|| "none".to_owned()),
+            attempt
+                .response_code
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "none".to_owned()),
+            attempt.reason,
+        ))?;
+        if let Some(frame) = &attempt.frame {
+            write_stdout_line(format_args!(
+                "  frame dlt={} caplen={} wirelen={} {}",
+                frame.link_type,
+                frame.captured_length,
+                frame.original_length,
+                spaced_hex(frame.bytes())
+            ))?;
+        }
+    }
+    for (section, records) in [
+        (DnsSection::Answer, &result.answers),
+        (DnsSection::Authority, &result.authorities),
+        (DnsSection::Additional, &result.additionals),
+    ] {
+        for record in records {
+            render_dns_record_text(section, record)?;
+        }
+    }
+    for record in &result.rejected_records {
+        write_stdout_line(format_args!(
+            "rejected section={} index={} owner={} type_code={} reason={}",
+            dns_section_name(record.section),
+            record.index,
+            record.owner,
+            record.type_code,
+            record.reason,
+        ))?;
+    }
+    for evidence in &result.undecoded {
+        write_stdout_line(format_args!(
+            "undecoded attempt={} dlt={} caplen={} wirelen={} {}",
+            evidence.attempt,
+            evidence.frame.link_type,
+            evidence.frame.captured_length,
+            evidence.frame.original_length,
+            spaced_hex(evidence.frame.bytes())
+        ))?;
+    }
+    write_stdout_line(format_args!(
+        "dns response_code={} response_name={} authoritative={} truncated={} accepted={} rejected={} queries={} bytes={}",
+        result
+            .response_code
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned()),
+        result.response_code_name.as_deref().unwrap_or("none"),
+        result
+            .authoritative
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned()),
+        result
+            .truncated
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned()),
+        result.answers.len() + result.authorities.len() + result.additionals.len(),
+        result.rejected_record_count,
+        stats.packets_completed,
+        stats.bytes,
+    ))?;
+    render_diagnostics_text(&diagnostics)
+}
+
+fn render_dns_record_text(section: DnsSection, record: &DnsRecordOutput) -> Result<(), CliError> {
+    let data = serde_json::to_string(&record.data)
+        .map_err(|error| CliError::new(4, format!("DNS output serialization failed: {error}")))?;
+    write_stdout_line(format_args!(
+        "record section={} owner={} class={} ttl={} data={}",
+        dns_section_name(section),
+        record.owner,
+        record.class,
+        record.ttl,
+        data,
+    ))
+}
+
+fn render_dns_stream(
+    result: DnsCommandResult,
+    diagnostics: Vec<crate::core::Diagnostic>,
+    stats: crate::client::OperationStats,
+) -> Result<(), CliError> {
+    let DnsCommandResult {
+        server,
+        server_port,
+        resolved_addresses,
+        query_name,
+        query_type,
+        transaction_id,
+        transport,
+        outcome,
+        response_code,
+        response_code_name,
+        authoritative,
+        truncated,
+        recursion_desired,
+        recursion_available,
+        authenticated_data,
+        checking_disabled,
+        answers,
+        authorities,
+        additionals,
+        rejected_records,
+        rejected_record_count,
+        attempts,
+        undecoded,
+    } = result;
+    let mut sequence = 0_u64;
+    for evidence in attempts {
+        emit_dns_record(
+            &mut sequence,
+            DnsStreamCommandResult::Attempt {
+                server: server.clone(),
+                server_port,
+                query_name: query_name.clone(),
+                query_type: query_type.clone(),
+                evidence,
+            },
+        )?;
+    }
+    for (section, records) in [
+        (DnsSection::Answer, answers),
+        (DnsSection::Authority, authorities),
+        (DnsSection::Additional, additionals),
+    ] {
+        for record in records {
+            emit_dns_record(
+                &mut sequence,
+                DnsStreamCommandResult::Record {
+                    server: server.clone(),
+                    server_port,
+                    query_name: query_name.clone(),
+                    query_type: query_type.clone(),
+                    section,
+                    record,
+                },
+            )?;
+        }
+    }
+    for record in rejected_records {
+        emit_dns_record(
+            &mut sequence,
+            DnsStreamCommandResult::Rejected {
+                server: server.clone(),
+                server_port,
+                query_name: query_name.clone(),
+                query_type: query_type.clone(),
+                record,
+            },
+        )?;
+    }
+    for evidence in undecoded {
+        emit_dns_record(
+            &mut sequence,
+            DnsStreamCommandResult::Undecoded { evidence },
+        )?;
+    }
+    emit_json_compact(
+        &StreamRecord::success(
+            CommandName::Dns,
+            sequence,
+            DnsStreamCommandResult::Complete {
+                server,
+                server_port,
+                resolved_addresses,
+                query_name,
+                query_type,
+                transaction_id,
+                transport,
+                outcome,
+                response_code,
+                response_code_name,
+                authoritative,
+                truncated,
+                recursion_desired,
+                recursion_available,
+                authenticated_data,
+                checking_disabled,
+                rejected_record_count,
+            },
+            diagnostics,
+        )
+        .with_stats(stats),
+    )
+    .map_err(|error| error.at_sequence(sequence))
+}
+
+fn emit_dns_record(sequence: &mut u64, result: DnsStreamCommandResult) -> Result<(), CliError> {
+    emit_json_compact(&StreamRecord::success(
+        CommandName::Dns,
+        *sequence,
+        result,
+        Vec::new(),
+    ))
+    .map_err(|error| error.at_sequence(*sequence))?;
+    *sequence = sequence.checked_add(1).ok_or_else(|| {
+        CliError::classified(OutputContractError::SequenceOverflow).at_sequence(*sequence)
+    })?;
+    Ok(())
+}
+
+fn dns_attempt_status_name(value: DnsAttemptStatus) -> &'static str {
+    match value {
+        DnsAttemptStatus::Response => "response",
+        DnsAttemptStatus::Truncated => "truncated",
+        DnsAttemptStatus::Timeout => "timeout",
+        DnsAttemptStatus::Unrelated => "unrelated",
+        DnsAttemptStatus::DecodeFailure => "decode_failure",
+        DnsAttemptStatus::NetworkFailure => "network_failure",
+    }
+}
+
+fn dns_outcome_name(value: DnsOutcome) -> &'static str {
+    match value {
+        DnsOutcome::Response => "response",
+        DnsOutcome::Truncated => "truncated",
+        DnsOutcome::Timeout => "timeout",
+        DnsOutcome::Unrelated => "unrelated",
+        DnsOutcome::DecodeFailure => "decode_failure",
+        DnsOutcome::NetworkFailure => "network_failure",
+    }
+}
+
+fn dns_section_name(value: DnsSection) -> &'static str {
+    match value {
+        DnsSection::Answer => "answer",
+        DnsSection::Authority => "authority",
+        DnsSection::Additional => "additional",
+    }
 }
 
 fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(), CliError> {
@@ -3733,6 +4313,59 @@ mod tests {
         let error = run(cli).unwrap_err();
         assert_eq!(error.classification.code, "cli.scan_limit");
         assert!(error.message.contains("ICMP scans are portless"));
+    }
+
+    #[test]
+    fn dns_cli_parses_query_policy_route_and_finite_bounds() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "dns",
+            "10.0.0.53",
+            "_service._tcp.example.test",
+            "--type",
+            "srv",
+            "--family",
+            "ipv4",
+            "--port",
+            "5353",
+            "--transaction-id",
+            "7",
+            "--source-port",
+            "50000",
+            "--attempts",
+            "3",
+            "--rate",
+            "10",
+            "--interface",
+            "test0",
+            "--source",
+            "10.0.0.2",
+            "--link-mode",
+            "layer3",
+        ])
+        .unwrap();
+        let Command::Dns(arguments) = cli.command else {
+            panic!("expected DNS command");
+        };
+        assert!(matches!(arguments.query_type, CliDnsQueryType::Srv));
+        assert!(matches!(arguments.family, CliDnsAddressFamily::Ipv4));
+        assert_eq!(arguments.port, 5353);
+        assert_eq!(arguments.transaction_id, Some(7));
+        assert_eq!(arguments.source_port, Some(50_000));
+        assert_eq!(arguments.attempts, 3);
+        assert_eq!(arguments.rate, Some(10));
+        assert_eq!(arguments.interface.as_deref(), Some("test0"));
+        assert_eq!(arguments.source, Some("10.0.0.2".parse().unwrap()));
+        assert!(matches!(arguments.link_mode, CliLinkMode::Layer3));
+    }
+
+    #[test]
+    fn dns_request_validation_fails_before_route_or_live_io() {
+        let cli =
+            Cli::try_parse_from(["packetcraftr", "dns", "10.0.0.53", "bad name.example"]).unwrap();
+        let error = run(cli).unwrap_err();
+        assert_eq!(error.classification.code, "packet.dns_query");
+        assert!(error.message.contains("invalid"));
     }
 
     #[test]

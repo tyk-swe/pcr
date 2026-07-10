@@ -1,0 +1,26 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "event": "attempt",
+    "server": "resolver.lab",
+    "server_port": 53,
+    "query_name": "www.example.test.",
+    "query_type": "a",
+    "evidence": {
+      "attempt": 1,
+      "server_address": "192.168.56.53",
+      "source_port": 50000,
+      "status": "timeout",
+      "sent_at": {
+        "unix_seconds": 1770000000,
+        "nanoseconds": 0
+      },
+      "reason": "no checksum-valid, tuple-correlated DNS response before the deadline"
+    }
+  },
+  "diagnostics": []
+}

@@ -20,12 +20,12 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
 | Runtime-neutral captured-frame records and offline capture I/O | Bounded streaming read/write and metadata-preserving PCAP/PCAPNG copy are available through the API and `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
-| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
+| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `interfaces`, and `routes` commands | Available; the remaining final tool name is reserved in `--help` |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
-| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, structured scan, and structured traceroute are available; DNS and fuzz remain later alphas |
+| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, structured scan, structured traceroute, and structured DNS are available; fuzz remains a later alpha |
 | Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; physical crate extraction remains a beta milestone |
 
-Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `dns` and `fuzz` names return the capability exit code instead of falling through to a legacy command.
+Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `fuzz` name returns the capability exit code instead of falling through to a legacy command.
 
 The exact v0.2 packet-layer promise is published in the
 [stable built-in protocol matrix](docs/protocol-support.md) and through the
@@ -186,6 +186,23 @@ burst, cleanup is joined on success and failure, and unsupported native paths
 remain typed errors before transmission. See the
 [structured traceroute contract](docs/traceroute.md).
 
+### Structured DNS
+
+`dns` sends bounded IPv4/IPv6 UDP queries through the same policy-gated,
+capture-ready exchange lifecycle. It authorizes a server hostname before every
+resolution and every returned address before each retry, validates the exact
+reverse tuple, transaction, question, compression, record, and message bounds,
+and separates accepted question-relevant data from rejected section records.
+
+```console
+packetcraftr --output json dns 192.168.56.53 www.example.test \
+  --type a --attempts 2 --timeout-ms 750
+```
+
+Truncation, timeout, unrelated traffic, decode failure, and correlated network
+failure remain distinct typed outcomes. TXT and unknown RDATA retain exact hex;
+terminal text is escaped. See the [structured DNS contract](docs/dns.md).
+
 ### Route-aware and live workflows
 
 `plan` and `routes` are passive. `plan` selects the route, interface-owned
@@ -266,6 +283,7 @@ The v0.2 contracts are:
 - Raw Layer 3 adapters accept only complete IPv4/IPv6 datagrams for the selected route and MTU. They reject header values the operating system would change, preserve spoofed packet sources separately from the bound interface source, and report partial native writes as typed failures.
 - Replay authorizes each fully captured frame before interface or route I/O, fixes its Layer 2/Layer 3 provider from the capture root, applies finite timing/frame/byte ceilings, and requires backend-confirmed bytes before emitting success evidence.
 - Scan authorizes the declared hostname before DNS and every resolved address before probe construction, then uses bounded capture-ready exchanges and accepts only checksum-valid matcher- or quote-correlated responses.
+- DNS authorizes the complete operation before probe construction, repeats hostname and every-answer authorization for each retry, and accepts only checksum-valid reverse-tuple responses with the exact transaction and question; unrelated section data remains rejected audit evidence.
 - Route MTU checks measure the actual built network-layer byte span instead of trusting permissive wire length fields. Oversized packets fail before neighbor discovery or live I/O and require an explicit fragmentation transform.
 - Capture is ready before an exchange sends its first frame, and one owned receive stream routes every frame rather than silently draining traffic.
 - Exchange always attempts to stop and join its capture session after readiness, send, receive, or timeout failures. If the operation and cleanup both fail, both errors remain visible.
@@ -293,6 +311,9 @@ Default resource ceilings are intentionally finite:
 | Active neighbor attempts / timeout per attempt | 3 / 1 second |
 | Active neighbor evidence frames / bytes | 256 / 1 MiB |
 | Active neighbor cache entries / lifetime | 4,096 / 30 seconds |
+| DNS attempts / complete message records | 1 (maximum 32) / 512 |
+| DNS name pointers / TXT strings / TXT bytes | 32 / 256 / 16 KiB |
+| DNS rejected-record / undecoded evidence metadata | 128 / 32 |
 | Reassembly flows | 8,192 |
 | Buffered/history bytes per reassembly flow | 1 MiB |
 | Aggregate reassembly bytes | 256 MiB |

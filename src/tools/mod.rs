@@ -8,9 +8,25 @@
 //! Tool implementations are added incrementally behind this module so the
 //! eventual `packetcraftr-tools` extraction does not change root imports.
 
+mod dns;
 mod replay;
 mod scan;
 mod traceroute;
+
+pub use dns::{
+    canonical_query_name, classify_dns_response, decode_dns_response, decode_dns_tcp_frame, dns,
+    encode_dns_query, response_code_name, AuthorizedDnsTarget, DnsAddressFamily,
+    DnsAttemptEvidence, DnsAttemptStatus, DnsAuthorizationError, DnsError, DnsExchange,
+    DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsLimits, DnsMatchedResponse,
+    DnsOutcome, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsRequest,
+    DnsResponseClassification, DnsResult, DnsSection, DnsStats, DnsTarget, DnsTransport,
+    DnsUndecodedEvidence, DnsWireError, ValidatedDnsResponse, DEFAULT_DNS_ATTEMPTS,
+    DEFAULT_DNS_SERVER_PORT, DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS,
+    DEFAULT_MAX_DNS_TXT_BYTES, DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
+    DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_HEADER_BYTES,
+    MAX_DNS_ATTEMPTS, MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS,
+    MAX_DNS_RECORDS,
+};
 
 pub use replay::{
     replay_capture, ReplayAuthorizationError, ReplayAuthorizer, ReplayClock, ReplayError,
@@ -40,4 +56,6 @@ pub use traceroute::{
 };
 
 pub use scan::SystemScanClock as SystemTracerouteClock;
+pub use scan::SystemScanClock as SystemDnsClock;
+pub use scan::{ScanAuthorizer as DnsAuthorizer, ScanClock as DnsClock};
 pub use scan::{ScanAuthorizer as TracerouteAuthorizer, ScanClock as TracerouteClock};

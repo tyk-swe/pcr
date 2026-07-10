@@ -2,7 +2,7 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
+This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
 
 ## The central change
 
@@ -53,6 +53,14 @@ every attempt instead of a lossy address-per-hop summary, distinguishes
 intermediate, destination-reached, unreachable, and timeout evidence, and
 retains bounded hop-scoped decode failures. See the
 [traceroute contract](traceroute.md).
+
+The v0.2 DNS grammar names an explicit server and question, with a typed
+question type, optional family, finite retry/timeout/rate and decode/evidence
+bounds, and explicit route and traffic policy. It emits only records relevant
+to the validated question or its CNAME/glue chain; unrelated declared section
+records remain rejected audit evidence. Each retry re-resolves and reauthorizes
+the server hostname, so changed answers cannot inherit prior approval. See the
+[DNS contract](dns.md).
 
 ### Dry run becomes two explicit operations
 

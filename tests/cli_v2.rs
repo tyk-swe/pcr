@@ -272,6 +272,49 @@ fn traceroute_policy_and_request_errors_precede_resolver_route_and_live_io() {
 }
 
 #[test]
+fn dns_policy_and_request_errors_precede_resolver_route_and_live_io() {
+    let hostname = binary()
+        .args([
+            "--output",
+            "json",
+            "dns",
+            "resolver.example",
+            "www.example.test",
+            "--interface",
+            "definitely-not-a-real-interface",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(hostname.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&hostname.stdout).unwrap();
+    assert_eq!(value["command"], "dns");
+    assert_eq!(value["error"]["code"], "policy.hostname_resolution");
+
+    let public = binary()
+        .args(["--output", "ndjson", "dns", "8.8.8.8", "www.example.test"])
+        .output()
+        .unwrap();
+    assert_eq!(public.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&public.stdout).unwrap();
+    assert_eq!(value["sequence"], 0);
+    assert_eq!(value["error"]["code"], "policy.public_destination");
+
+    let invalid = binary()
+        .args([
+            "--output",
+            "json",
+            "dns",
+            "192.168.56.53",
+            "bad name.example",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(invalid.status.code(), Some(3));
+    let value: serde_json::Value = serde_json::from_slice(&invalid.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "packet.dns_query");
+}
+
+#[test]
 fn send_budget_and_output_contracts_precede_route_or_live_io() {
     let budget = binary()
         .args([

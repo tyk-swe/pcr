@@ -376,8 +376,7 @@ pub const STABLE_WORKFLOW_PROTOCOLS: &[WorkflowProtocolSupport] = &[
         matches: DNS_MATCHERS,
         capture_roots: true,
         packet_independent: false,
-        notes:
-            "DNS messages are tool-owned payloads; transport ports never trigger implicit decoding",
+        notes: "bounded DNS messages are tool-owned payloads; live queries use UDP and the pure TCP frame decoder shares validation without implicit port-based dissection",
     },
     WorkflowProtocolSupport {
         workflow: "fuzz",

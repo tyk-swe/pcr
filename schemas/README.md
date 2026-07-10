@@ -37,7 +37,9 @@ carrying the frame count and final statistics. `exchange` emits `sent`,
 its final `complete` event. `scan` emits one `port` event per resolved endpoint,
 bounded `undecoded` evidence events, and a final `complete` event. `traceroute`
 emits one hop containing every attempt, bounded hop-scoped `undecoded` evidence,
-and a final `complete` event. A runtime
+and a final `complete` event. `dns` emits attempts, question-relevant records,
+rejected-record audit evidence, bounded undecoded frames, and one final
+`complete` event. A runtime
 failure replaces the next event with a terminal error at the next unused
 sequence.
 
@@ -81,7 +83,10 @@ jsonschema schemas/packetcraftr.output.v1.schema.json \
   --instance examples/documents/output-scan-complete.json \
   --instance examples/documents/output-traceroute-success.json \
   --instance examples/documents/output-traceroute-event.json \
-  --instance examples/documents/output-traceroute-complete.json
+  --instance examples/documents/output-traceroute-complete.json \
+  --instance examples/documents/output-dns-success.json \
+  --instance examples/documents/output-dns-event.json \
+  --instance examples/documents/output-dns-complete.json
 ```
 
 CI also requires every document in `tests/fixtures/invalid-output` to fail

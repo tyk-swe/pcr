@@ -1518,8 +1518,8 @@ mod tests {
 
     use super::*;
     use crate::client::{
-        Client, ClientScanExecutor, ClientTracerouteExecutor, ExchangeOptions, HostnameResolver,
-        TargetResolutionError, TrafficPolicy, TrafficPolicyScanAuthorizer,
+        Client, ClientDnsExecutor, ClientScanExecutor, ClientTracerouteExecutor, ExchangeOptions,
+        HostnameResolver, TargetResolutionError, TrafficPolicy, TrafficPolicyScanAuthorizer,
         UnsupportedNeighborResolver,
     };
     use crate::core::PacketLayout;
@@ -2453,6 +2453,49 @@ mod tests {
             };
 
             let result = executor.execute(&batch);
+            assert_eq!(result.is_err(), fail_send);
+            assert_eq!(
+                events.lock().unwrap().as_slice(),
+                ["arm", "ready", "send", "shutdown"]
+            );
+        }
+    }
+
+    #[test]
+    fn client_dns_executor_waits_for_capture_and_always_shuts_it_down() {
+        use crate::tools::{encode_dns_query, DnsExchange, DnsExecutor, DnsProbe, DnsQueryType};
+
+        for fail_send in [false, true] {
+            let registry = Arc::new(default_registry().unwrap());
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let io = LifecycleIo {
+                events: Arc::clone(&events),
+                fail_send,
+            };
+            let client = Client::new(
+                Arc::clone(&registry),
+                FixedRoute(lifecycle_route()),
+                UnsupportedNeighborResolver,
+                io,
+                private_policy(),
+            );
+            let mut executor = ClientDnsExecutor::new(&client, lifecycle_exchange_options());
+            let exchange = DnsExchange {
+                probe: DnsProbe {
+                    attempt: 1,
+                    server_address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                    server_port: 53,
+                    source_port: 50_000,
+                    transaction_id: 7,
+                    query_name: "www.example.".to_owned(),
+                    query_type: DnsQueryType::A,
+                    query: encode_dns_query("www.example", DnsQueryType::A, 7, true).unwrap(),
+                },
+                timeout: Duration::from_millis(1),
+                max_responses: 8,
+            };
+
+            let result = executor.execute(&exchange);
             assert_eq!(result.is_err(), fail_send);
             assert_eq!(
                 events.lock().unwrap().as_slice(),

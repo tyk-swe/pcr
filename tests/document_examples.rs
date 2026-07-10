@@ -126,6 +126,42 @@ fn published_capture_stream_event_matches_the_typed_contract() {
 }
 
 #[test]
+fn published_dns_stream_event_matches_the_typed_contract() {
+    let event = packetcraftr::StreamRecord::success(
+        packetcraftr::CommandName::Dns,
+        0,
+        packetcraftr::DnsStreamCommandResult::Attempt {
+            server: "resolver.lab".to_owned(),
+            server_port: 53,
+            query_name: "www.example.test.".to_owned(),
+            query_type: "a".to_owned(),
+            evidence: packetcraftr::DnsAttemptOutput {
+                attempt: 1,
+                server_address: "192.168.56.53".parse().unwrap(),
+                source_port: 50_000,
+                status: packetcraftr::DnsAttemptStatus::Timeout,
+                sent_at: packetcraftr::OutputTimestamp {
+                    unix_seconds: 1_770_000_000,
+                    nanoseconds: 0,
+                },
+                received_at: None,
+                latency: None,
+                frame: None,
+                response_code: None,
+                reason: "no checksum-valid, tuple-correlated DNS response before the deadline"
+                    .to_owned(),
+            },
+        },
+        Vec::new(),
+    );
+
+    assert_eq!(
+        serde_json::to_value(event).unwrap(),
+        json_file("output-dns-event.json")
+    );
+}
+
+#[test]
 fn published_replay_output_matches_the_typed_contract() {
     let result = packetcraftr::ReplayCommandResult::from_summary(
         packetcraftr::ReplaySummary {

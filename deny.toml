@@ -13,6 +13,7 @@ allow = [
     "AGPL-3.0-only",
     "Apache-2.0",
     "BSL-1.0",
+    "ISC",
     "MIT",
     "Unicode-3.0",
     "Unlicense",

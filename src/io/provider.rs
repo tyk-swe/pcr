@@ -182,6 +182,17 @@ pub trait Layer2Io: Send + Sync {
     fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError>;
 }
 
+/// Native Layer 2 injection provider selected for the current target. Builds
+/// without `native-layer2` return an actionable capability error.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemLayer2Io;
+
+impl Layer2Io for SystemLayer2Io {
+    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
+        super::platform::system_send_layer2(frame)
+    }
+}
+
 /// Native or injected raw Layer 3 transmission implementation.
 pub trait Layer3Io: Send + Sync {
     fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError>;
@@ -350,6 +361,53 @@ pub trait CaptureProvider: Send + Sync {
     ) -> Result<Self::Capture, LiveIoError>;
 }
 
+/// Owned native capture session. The native handle and capture worker remain
+/// private behind this platform-neutral session wrapper.
+pub struct SystemCaptureSession {
+    inner: Box<dyn CaptureSession>,
+}
+
+impl SystemCaptureSession {
+    pub(crate) fn new(inner: Box<dyn CaptureSession>) -> Self {
+        Self { inner }
+    }
+}
+
+impl CaptureSession for SystemCaptureSession {
+    fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+        self.inner.wait_ready()
+    }
+
+    fn next_frame(&mut self, timeout: Duration) -> Result<Option<CapturedFrame>, LiveIoError> {
+        self.inner.next_frame(timeout)
+    }
+
+    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        self.inner.shutdown()
+    }
+
+    fn statistics(&self) -> CaptureStatistics {
+        self.inner.statistics()
+    }
+}
+
+/// Native capture provider selected for the current target and the explicit
+/// `native-layer2` feature.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SystemCaptureProvider;
+
+impl CaptureProvider for SystemCaptureProvider {
+    type Capture = SystemCaptureSession;
+
+    fn arm_capture(
+        &self,
+        route: &PlannedRoute,
+        limits: CaptureQueueLimits,
+    ) -> Result<Self::Capture, LiveIoError> {
+        super::platform::system_capture(route, limits).map(SystemCaptureSession::new)
+    }
+}
+
 /// Complete exchange provider composed from packet transmission and capture.
 pub trait ExchangeIo: PacketIo + CaptureProvider {}
 
@@ -362,6 +420,13 @@ pub enum LiveIoError {
     Unsupported { message: String },
     #[error("interface discovery failed: {message}")]
     InterfaceDiscovery { message: String },
+    #[error("native dependency {dependency} is unavailable: {message}")]
+    MissingDependency {
+        dependency: &'static str,
+        message: String,
+    },
+    #[error("network device {interface} is unavailable: {message}")]
+    Device { interface: String, message: String },
     #[error("live packet I/O requires additional privileges: {message}")]
     Privilege { message: String },
     #[error("packet transmission failed: {message}")]

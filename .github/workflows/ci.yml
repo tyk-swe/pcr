@@ -47,6 +47,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal --component clippy
+      - name: Install libpcap development files
+        if: matrix.profile.flags == '--all-features'
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - name: Clippy
         run: cargo clippy --locked --all-targets ${{ matrix.profile.flags }} -- -D warnings
       - name: Test
@@ -162,7 +165,7 @@ jobs:
           - name: Windows / no default features (portable)
             os: windows-2022
             flags: --no-default-features
-          - name: Windows / all features (native route)
+          - name: Windows / all features (native route + Npcap ABI)
             os: windows-2022
             flags: --all-features
     steps:
@@ -178,24 +181,28 @@ jobs:
         shell: pwsh
         run: |
           $tree = cargo tree --color never --locked --target x86_64-pc-windows-msvc --edges normal ${{ matrix.flags }} --prefix none --format '{p}'
-          $nativeDependencies = $tree | Select-String -Pattern '^(?:pnet(?:_| )|windows )'
+          $nativeDependencies = $tree | Select-String -Pattern '^(?:libloading |pnet(?:_| )|windows )'
           if ($nativeDependencies) {
             $nativeDependencies | ForEach-Object { Write-Error $_ }
-            throw 'portable Windows profiles must not resolve pnet, Packet.lib, or the Windows native adapter'
+            throw 'portable Windows profiles must not resolve pnet, libloading, or the Windows native adapter'
           }
-      - name: Assert the native-route Windows dependency boundary
+      - name: Assert the native Windows dependency boundary
         if: runner.os == 'Windows' && matrix.flags == '--all-features'
         shell: pwsh
         run: |
           $tree = cargo tree --color never --locked --target x86_64-pc-windows-msvc --edges normal --all-features --prefix none --format '{p}'
-          $packetLibraryBoundary = $tree | Select-String -Pattern '^pnet(?:_| )'
+          $packetLibraryBoundary = $tree | Select-String -Pattern '^(?:pcap |pnet(?:_| ))'
           if ($packetLibraryBoundary) {
             $packetLibraryBoundary | ForEach-Object { Write-Error $_ }
-            throw 'native-route must not resolve pnet or its Packet.lib link boundary'
+            throw 'Windows native adapters must not statically link pcap, pnet, or Packet.lib'
           }
           $windowsBindings = $tree | Select-String -Pattern '^windows '
           if (-not $windowsBindings) {
             throw 'the Windows all-feature profile must resolve the native IP Helper bindings'
+          }
+          $runtimeLoader = $tree | Select-String -Pattern '^libloading '
+          if (-not $runtimeLoader) {
+            throw 'the Windows all-feature profile must resolve the Npcap runtime loader'
           }
 
   required:

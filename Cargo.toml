@@ -16,7 +16,7 @@ unsafe-owner = "packetcraftr-io::platform"
 
 [workspace.metadata.packetcraftr.native-wrappers]
 linux-route = "rtnetlink"
-layer2-capture-injection = "pcap"
+layer2-capture-injection = "pcap (Unix); libloading/Npcap SDK 1.16 ABI (Windows)"
 macos-route-and-raw-sockets = "socket2"
 windows-network-apis = "windows"
 
@@ -53,6 +53,7 @@ native-route = [
     "dep:tokio",
     "dep:windows",
 ]
+native-layer2 = ["live", "dep:libloading", "dep:pcap", "dep:windows"]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
@@ -67,18 +68,22 @@ pnet = { version = "0.35", default-features = false, features = ["std"], optiona
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }
+pcap = { version = "2.4", default-features = false, optional = true }
 rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"], optional = true }
 tokio = { version = "1", default-features = false, features = ["net", "rt"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { version = "0.2", optional = true }
+pcap = { version = "2.4", default-features = false, optional = true }
 socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
+libloading = { version = "0.8", default-features = false, optional = true }
 windows = { version = "0.62", default-features = false, features = [
     "std",
     "Win32_Foundation",
     "Win32_NetworkManagement_IpHelper",
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
+    "Win32_System_SystemInformation",
 ], optional = true }

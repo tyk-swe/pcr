@@ -86,15 +86,17 @@ cargo test --no-default-features
 
 The portable packet kernel and offline capture path do not require libpcap. On Linux and macOS, the default `live` feature enables temporary interface enumeration without capture or injection. Windows default and every target's `--no-default-features` build remain portable. The explicit `native-route` feature selects passive native route, source, MTU, and interface discovery through Linux route netlink, macOS routing sockets/`getifaddrs`, or Windows IP Helper. It does not require libpcap, Npcap, raw-socket privileges, ARP/NDP, capture, or transmission.
 
-Build and test the current target's passive native provider with:
+Build and test the current target's native providers with:
 
 ```console
 cargo test --features native-route
-# Equivalent to the CI native-provider profile today:
+# Linux/macOS: requires the system libpcap development/runtime files.
+cargo test --features native-layer2
+# Equivalent to the complete CI native-provider profile:
 cargo test --all-features
 ```
 
-Later capture and injection adapters will require libpcap on Linux/macOS and Npcap on Windows, plus the relevant operating-system privileges.
+`native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. Live use still requires the native runtime and relevant operating-system privileges; missing dependencies, devices, permissions, and unsupported modes are typed errors rather than fallbacks.
 
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
@@ -175,7 +177,7 @@ structured diagnostics and operation statistics.
 
 ## Development
 
-The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable. All-feature jobs execute the target's passive native route/interface provider tests and continue to reject `pnet` or its `Packet.lib` link requirement on Windows.
+The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable. All-feature jobs compile the target's native route and Layer 2 adapters, exercise passive providers and mocked capture lifecycles, and continue to reject static `pcap`, `pnet`, or `Packet.lib` linkage on Windows. Privileged live-I/O qualification remains a separate release-candidate gate.
 
 ```console
 cargo fmt --all -- --check

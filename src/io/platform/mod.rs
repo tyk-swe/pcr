@@ -12,8 +12,17 @@ use std::net::IpAddr;
 
 #[cfg(target_os = "linux")]
 mod linux;
+#[cfg(feature = "native-layer2")]
+mod live_capture;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(all(feature = "native-layer2", windows))]
+mod npcap;
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos")
+))]
+mod pcap_backend;
 #[cfg(all(feature = "live", not(feature = "native-route"), not(windows)))]
 mod pnet_enumeration;
 #[cfg(windows)]
@@ -23,6 +32,71 @@ use super::provider::{InterfaceInfo, LiveIoError};
 #[cfg(feature = "native-route")]
 use super::route::{classify_destination, RouteSelectionReason};
 use super::route::{InterfaceId, NativeRouteError, RouteDecision};
+
+#[cfg(feature = "native-layer2")]
+pub(super) fn system_capture(
+    route: &super::route::PlannedRoute,
+    limits: super::provider::CaptureQueueLimits,
+) -> Result<Box<dyn super::provider::CaptureSession>, LiveIoError> {
+    // Reject invalid bounds before opening a device or allocating native
+    // resources. NativeCaptureSession validates again at its ownership seam.
+    let limits = limits.validate()?;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let parts = pcap_backend::open_capture(&route.route.interface, limits)?;
+    #[cfg(windows)]
+    let parts = npcap::open_capture(&route.route.interface, limits)?;
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    return Err(LiveIoError::Unsupported {
+        message: "native Layer 2 capture is unsupported on this target".to_owned(),
+    });
+
+    Ok(Box::new(live_capture::NativeCaptureSession::spawn(
+        parts, limits,
+    )?))
+}
+
+#[cfg(not(feature = "native-layer2"))]
+pub(super) fn system_capture(
+    _route: &super::route::PlannedRoute,
+    _limits: super::provider::CaptureQueueLimits,
+) -> Result<Box<dyn super::provider::CaptureSession>, LiveIoError> {
+    Err(LiveIoError::Unsupported {
+        message: "enable the native-layer2 feature for native packet capture".to_owned(),
+    })
+}
+
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos")
+))]
+pub(super) fn system_send_layer2(
+    frame: super::provider::Layer2Frame<'_>,
+) -> Result<super::provider::IoSendReport, LiveIoError> {
+    pcap_backend::send_layer2(frame)
+}
+
+#[cfg(all(feature = "native-layer2", windows))]
+pub(super) fn system_send_layer2(
+    frame: super::provider::Layer2Frame<'_>,
+) -> Result<super::provider::IoSendReport, LiveIoError> {
+    npcap::send_layer2(frame)
+}
+
+#[cfg(any(
+    not(feature = "native-layer2"),
+    all(
+        feature = "native-layer2",
+        not(any(target_os = "linux", target_os = "macos", windows))
+    )
+))]
+pub(super) fn system_send_layer2(
+    _frame: super::provider::Layer2Frame<'_>,
+) -> Result<super::provider::IoSendReport, LiveIoError> {
+    Err(LiveIoError::Unsupported {
+        message: "enable the native-layer2 feature on a supported target for Layer 2 injection"
+            .to_owned(),
+    })
+}
 
 #[cfg(all(feature = "native-route", target_os = "linux"))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {

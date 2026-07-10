@@ -80,7 +80,7 @@ done
 
 mapfile -t native_reference_files < <(
     rust_files_matching \
-        'pnet::|rtnetlink::|socket2::|windows::|pcap::(Capture|Device|Error|Linktype|Packet|Savefile)' || true
+        'libloading::|pnet::|rtnetlink::|socket2::|windows::|pcap::(Capture|Device|Error|Linktype|Packet|Savefile)' || true
 )
 for path in "${native_reference_files[@]}"; do
     case "${path}" in
@@ -101,7 +101,7 @@ if contains_regex 'pub([[:space:]]*\([^)]*\))?[[:space:]]+mod[[:space:]]+platfor
     exit 1
 fi
 
-native_packages='^(pnet([_ ]|$)|pcap([_ ]|$)|rtnetlink([_ ]|$)|netlink-|socket2[[:space:]]|windows[[:space:]])'
+native_packages='^(libloading[[:space:]]|pnet([_ ]|$)|pcap([_ ]|$)|rtnetlink([_ ]|$)|netlink-|socket2[[:space:]]|windows[[:space:]])'
 portable_targets=(
     x86_64-unknown-linux-gnu
     aarch64-apple-darwin
@@ -129,7 +129,7 @@ cargo metadata --locked --no-deps --format-version 1 | python3 -c '
 import json
 import sys
 
-native = {"pcap", "pnet", "rtnetlink", "socket2", "windows"}
+native = {"libloading", "pcap", "pnet", "rtnetlink", "socket2", "windows"}
 violations = []
 for package in json.load(sys.stdin)["packages"]:
     for dependency in package["dependencies"]:

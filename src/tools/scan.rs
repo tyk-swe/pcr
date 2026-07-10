@@ -1518,8 +1518,9 @@ mod tests {
 
     use super::*;
     use crate::client::{
-        Client, ClientScanExecutor, ExchangeOptions, HostnameResolver, TargetResolutionError,
-        TrafficPolicy, TrafficPolicyScanAuthorizer, UnsupportedNeighborResolver,
+        Client, ClientScanExecutor, ClientTracerouteExecutor, ExchangeOptions, HostnameResolver,
+        TargetResolutionError, TrafficPolicy, TrafficPolicyScanAuthorizer,
+        UnsupportedNeighborResolver,
     };
     use crate::core::PacketLayout;
     use crate::io::{
@@ -2333,7 +2334,8 @@ mod tests {
     impl PacketIo for LifecycleIo {
         fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
             let mut events = self.events.lock().unwrap();
-            assert_eq!(events.as_slice(), ["arm", "ready"]);
+            assert!(events.as_slice().starts_with(&["arm", "ready"]));
+            assert!(events[2..].iter().all(|event| *event == "send"));
             events.push("send");
             if self.fail_send {
                 return Err(LiveIoError::Send {
@@ -2457,5 +2459,149 @@ mod tests {
                 ["arm", "ready", "send", "shutdown"]
             );
         }
+    }
+
+    #[test]
+    fn client_traceroute_executor_waits_for_capture_and_always_shuts_it_down() {
+        use crate::tools::{
+            TracerouteBatch, TracerouteExecutor, TracerouteProbe, TracerouteStrategy,
+        };
+
+        for fail_send in [false, true] {
+            let registry = Arc::new(default_registry().unwrap());
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let io = LifecycleIo {
+                events: Arc::clone(&events),
+                fail_send,
+            };
+            let client = Client::new(
+                Arc::clone(&registry),
+                FixedRoute(lifecycle_route()),
+                UnsupportedNeighborResolver,
+                io,
+                private_policy(),
+            );
+            let mut executor = ClientTracerouteExecutor::new(&client, lifecycle_exchange_options());
+            let batch = TracerouteBatch {
+                probes: vec![TracerouteProbe {
+                    sequence: 0,
+                    address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                    strategy: TracerouteStrategy::Udp,
+                    destination_port: Some(33_434),
+                    hop_limit: 1,
+                    attempt: 1,
+                }],
+                timeout: Duration::from_millis(1),
+            };
+
+            let result = executor.execute(&batch);
+            assert_eq!(result.is_err(), fail_send);
+            assert_eq!(
+                events.lock().unwrap().as_slice(),
+                ["arm", "ready", "send", "shutdown"]
+            );
+        }
+    }
+
+    #[test]
+    fn client_traceroute_executor_expands_unique_udp_tcp_and_icmp_probe_identities() {
+        use crate::tools::{
+            TracerouteBatch, TracerouteExecutor, TracerouteProbe, TracerouteStrategy,
+        };
+
+        for strategy in [
+            TracerouteStrategy::Udp,
+            TracerouteStrategy::Tcp,
+            TracerouteStrategy::Icmp,
+        ] {
+            let registry = Arc::new(default_registry().unwrap());
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let client = Client::new(
+                Arc::clone(&registry),
+                FixedRoute(lifecycle_route()),
+                UnsupportedNeighborResolver,
+                LifecycleIo {
+                    events: Arc::clone(&events),
+                    fail_send: false,
+                },
+                private_policy(),
+            );
+            let mut options = lifecycle_exchange_options();
+            options.max_template_packets = 2;
+            let mut executor = ClientTracerouteExecutor::new(&client, options);
+            let batch = TracerouteBatch {
+                probes: (0_u64..2)
+                    .map(|sequence| TracerouteProbe {
+                        sequence,
+                        address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                        strategy,
+                        destination_port: match strategy {
+                            TracerouteStrategy::Udp => Some(33_434 + sequence as u16),
+                            TracerouteStrategy::Tcp => Some(443),
+                            TracerouteStrategy::Icmp => None,
+                        },
+                        hop_limit: 4,
+                        attempt: sequence as u32 + 1,
+                    })
+                    .collect(),
+                timeout: Duration::from_millis(1),
+            };
+
+            let result = executor.execute(&batch).unwrap();
+            assert_eq!(result.sent.len(), 2);
+            assert_eq!(result.sent[0].get::<Ipv4>().unwrap().ttl, 4);
+            assert_eq!(result.sent[1].get::<Ipv4>().unwrap().ttl, 4);
+            let field = match strategy {
+                TracerouteStrategy::Udp => "destination_port",
+                TracerouteStrategy::Tcp => "sequence",
+                TracerouteStrategy::Icmp => "body",
+            };
+            assert_ne!(
+                result.sent[0].iter().nth(1).unwrap().field(field),
+                result.sent[1].iter().nth(1).unwrap().field(field)
+            );
+            assert_eq!(
+                events.lock().unwrap().as_slice(),
+                ["arm", "ready", "send", "send", "shutdown"]
+            );
+        }
+    }
+
+    #[test]
+    fn client_traceroute_executor_rejects_unsupported_link_capability_before_capture_or_send() {
+        use crate::tools::{
+            TracerouteBatch, TracerouteExecutor, TracerouteProbe, TracerouteStrategy,
+        };
+
+        let registry = Arc::new(default_registry().unwrap());
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let client = Client::new(
+            Arc::clone(&registry),
+            FixedRoute(lifecycle_route()),
+            UnsupportedNeighborResolver,
+            LifecycleIo {
+                events: Arc::clone(&events),
+                fail_send: false,
+            },
+            private_policy(),
+        );
+        let mut options = lifecycle_exchange_options();
+        options.send.plan.link_mode = LinkMode::Layer2;
+        let mut executor = ClientTracerouteExecutor::new(&client, options);
+        let batch = TracerouteBatch {
+            probes: vec![TracerouteProbe {
+                sequence: 0,
+                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                strategy: TracerouteStrategy::Udp,
+                destination_port: Some(33_434),
+                hop_limit: 1,
+                attempt: 1,
+            }],
+            timeout: Duration::from_millis(1),
+        };
+
+        let error = executor.execute(&batch).unwrap_err();
+        assert_eq!(error.classification().kind, FailureKind::Capability);
+        assert!(events.lock().unwrap().is_empty());
     }
 }

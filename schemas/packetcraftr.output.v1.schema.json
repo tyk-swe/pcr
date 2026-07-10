@@ -214,7 +214,7 @@
               "$ref": "#/$defs/scanStreamSuccess"
             },
             {
-              "$ref": "#/$defs/tracerouteHopSuccess"
+              "$ref": "#/$defs/tracerouteStreamSuccess"
             },
             {
               "$ref": "#/$defs/dnsRecordSuccess"
@@ -546,14 +546,14 @@
         "result"
       ]
     },
-    "tracerouteHopSuccess": {
+    "tracerouteStreamSuccess": {
       "type": "object",
       "properties": {
         "command": {
           "const": "traceroute"
         },
         "result": {
-          "$ref": "#/$defs/tracerouteHopResult"
+          "$ref": "#/$defs/tracerouteStreamResult"
         }
       },
       "required": [
@@ -886,17 +886,65 @@
       "type": "object",
       "required": [
         "target",
+        "resolved_addresses",
+        "destination",
+        "strategy",
         "hops",
+        "undecoded",
         "completion"
       ],
       "properties": {
         "target": {
           "type": "string"
         },
+        "resolved_addresses": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "destination": {
+          "type": "string"
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "udp",
+            "icmp",
+            "tcp"
+          ]
+        },
+        "destination_port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
         "hops": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/traceHop"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "hop_limit",
+              "frame"
+            ],
+            "properties": {
+              "hop_limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 255
+              },
+              "frame": {
+                "$ref": "#/$defs/frame"
+              }
+            },
+            "additionalProperties": false
           }
         },
         "completion": {
@@ -905,8 +953,7 @@
             "destination_reached",
             "unreachable",
             "maximum_hops",
-            "timeout",
-            "error"
+            "timeout"
           ]
         }
       },
@@ -1207,21 +1254,107 @@
         }
       ]
     },
-    "tracerouteHopResult": {
-      "type": "object",
-      "required": [
-        "target",
-        "hop"
-      ],
-      "properties": {
-        "target": {
-          "type": "string"
+    "tracerouteStreamResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "target",
+            "destination",
+            "hop"
+          ],
+          "properties": {
+            "event": {
+              "const": "hop"
+            },
+            "target": {
+              "type": "string"
+            },
+            "destination": {
+              "type": "string"
+            },
+            "hop": {
+              "$ref": "#/$defs/traceHop"
+            }
+          },
+          "additionalProperties": false
         },
-        "hop": {
-          "$ref": "#/$defs/traceHop"
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "hop_limit",
+            "frame"
+          ],
+          "properties": {
+            "event": {
+              "const": "undecoded"
+            },
+            "hop_limit": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 255
+            },
+            "frame": {
+              "$ref": "#/$defs/frame"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "target",
+            "resolved_addresses",
+            "destination",
+            "strategy",
+            "completion"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "target": {
+              "type": "string"
+            },
+            "resolved_addresses": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "destination": {
+              "type": "string"
+            },
+            "strategy": {
+              "type": "string",
+              "enum": [
+                "udp",
+                "icmp",
+                "tcp"
+              ]
+            },
+            "destination_port": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "completion": {
+              "type": "string",
+              "enum": [
+                "destination_reached",
+                "unreachable",
+                "maximum_hops",
+                "timeout"
+              ]
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "dnsRecordResult": {
       "type": "object",
@@ -1793,45 +1926,87 @@
       "properties": {
         "hop_limit": {
           "type": "integer",
-          "minimum": 0,
+          "minimum": 1,
           "maximum": 255
         },
         "probes": {
           "type": "array",
+          "minItems": 1,
           "items": {
             "type": "object",
             "required": [
+              "sequence",
               "hop_limit",
               "attempt",
-              "status"
+              "strategy",
+              "destination",
+              "status",
+              "sent_at",
+              "reason"
             ],
             "properties": {
+              "sequence": {
+                "$ref": "#/$defs/uint64"
+              },
               "hop_limit": {
                 "type": "integer",
-                "minimum": 0,
+                "minimum": 1,
                 "maximum": 255
               },
               "attempt": {
                 "type": "integer",
-                "minimum": 0,
+                "minimum": 1,
                 "maximum": 4294967295
+              },
+              "strategy": {
+                "type": "string",
+                "enum": [
+                  "udp",
+                  "icmp",
+                  "tcp"
+                ]
+              },
+              "destination": {
+                "type": "string"
+              },
+              "destination_port": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
               },
               "status": {
                 "type": "string",
                 "enum": [
                   "response",
-                  "timeout",
-                  "error"
+                  "timeout"
+                ]
+              },
+              "response_kind": {
+                "type": "string",
+                "enum": [
+                  "intermediate",
+                  "destination_reached",
+                  "unreachable"
                 ]
               },
               "responder": {
                 "type": "string"
               },
+              "sent_at": {
+                "$ref": "#/$defs/timestamp"
+              },
+              "received_at": {
+                "$ref": "#/$defs/timestamp"
+              },
               "latency": {
                 "$ref": "#/$defs/duration"
               },
-              "error": {
-                "$ref": "#/$defs/error"
+              "frame": {
+                "$ref": "#/$defs/frame"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
               }
             },
             "additionalProperties": false

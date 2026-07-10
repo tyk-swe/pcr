@@ -27,7 +27,8 @@ Status snapshot: 2026-07-10 (`0.2.0-alpha.1`).
 | Exact bounded replay CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable policy/timing/transmitter seams are deterministic in hosted CI; privileged Ethernet/raw-IP replay remains a dedicated-runner gate |
 | Defragmentation and TCP reassembly | Alpha, CI | Alpha, CI | Alpha, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
 | Structured scan workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable planner, matcher/classifier, policy, timing, and injected lifecycle tests run in hosted CI; privileged qualification remains a dedicated-runner gate |
-| Traceroute, DNS, and fuzz tools | Planned | Planned | Planned | v0.1 paths were removed; replacements will use shared APIs |
+| Structured traceroute workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable hop planner, IPv4/IPv6 quoted-error classifier, policy, timing, and injected exchange seams run in hosted CI; privileged qualification remains a dedicated-runner gate |
+| DNS and fuzz tools | Planned | Planned | Planned | v0.1 paths were removed; replacements will use shared APIs |
 
 Consult the exact release notes and `packetcraftr --help` for the checkout in use; a planned row is not a stable v0.2 guarantee.
 
@@ -57,6 +58,7 @@ The native CLI feature requirements are explicit:
 | `capture` | `native-route` + `native-layer2` |
 | `exchange` | `native-route` + `native-layer2` for capture, plus the selected Layer 2 or Layer 3 send path |
 | `scan` | Same route, capture, and selected send paths as `exchange` |
+| `traceroute` | Same route, capture, and selected send paths as `exchange` |
 | Ethernet `replay` | `native-route` + `native-layer2` |
 | Raw IPv4/IPv6 `replay` | `native-route` + `native-layer3` |
 

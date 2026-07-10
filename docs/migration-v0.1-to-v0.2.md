@@ -2,7 +2,7 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
+This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
 
 ## The central change
 
@@ -46,6 +46,13 @@ for TCP/UDP, and use finite attempt, timeout, rate, batch, packet, byte, and
 evidence limits. Each attempt reports response or timeout evidence; final
 classifications distinguish open, closed, filtered, unreachable, unknown, and
 timeout. See the [scan contract](scan.md).
+
+The v0.2 traceroute grammar selects `--strategy udp|icmp|tcp`, an optional
+family, a finite first/maximum hop range, attempts, timeout, and rate. It emits
+every attempt instead of a lossy address-per-hop summary, distinguishes
+intermediate, destination-reached, unreachable, and timeout evidence, and
+retains bounded hop-scoped decode failures. See the
+[traceroute contract](traceroute.md).
 
 ### Dry run becomes two explicit operations
 

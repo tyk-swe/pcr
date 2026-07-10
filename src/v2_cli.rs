@@ -15,8 +15,9 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
 use crate::client::{
-    Client, ClientScanExecutor, ExchangeOptions, LiveTarget, SendOptions, SystemHostnameResolver,
-    TrafficPolicy, TrafficPolicyError, TrafficPolicyScanAuthorizer,
+    Client, ClientScanExecutor, ClientTracerouteExecutor, ExchangeOptions, LiveTarget, SendOptions,
+    SystemHostnameResolver, TrafficPolicy, TrafficPolicyError, TrafficPolicyScanAuthorizer,
+    TrafficPolicyTracerouteAuthorizer,
 };
 use crate::core::{
     parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,
@@ -39,13 +40,17 @@ use crate::output::{
     FrameOutput, InterfacesCommandResult, OutputContractError, OutputError, OutputFormat,
     PlanCommandResult, ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult,
     RoutesCommandResult, ScanCommandResult, ScanStreamCommandResult, SendCommandResult,
-    StreamErrorRecord, StreamRecord,
+    StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceProbeStatus, TraceResponseKind,
+    TracerouteCommandResult, TracerouteStreamCommandResult,
 };
 use crate::tools::{
-    replay_capture, scan, ReplayAuthorizationError, ReplayAuthorizer, ReplayError, ReplayLimits,
-    ReplayOptions, ReplayTransmission, ReplayTransmitter, ScanAddressFamily, ScanBatch,
-    ScanBatchExecution, ScanError, ScanExecutionError, ScanExecutor, ScanLimits, ScanRequest,
-    ScanTarget, ScanTransport, SystemReplayClock, SystemScanClock,
+    replay_capture, scan, traceroute, ReplayAuthorizationError, ReplayAuthorizer, ReplayError,
+    ReplayLimits, ReplayOptions, ReplayTransmission, ReplayTransmitter, ScanAddressFamily,
+    ScanBatch, ScanBatchExecution, ScanError, ScanExecutionError, ScanExecutor, ScanLimits,
+    ScanRequest, ScanTarget, ScanTransport, SystemReplayClock, SystemScanClock,
+    SystemTracerouteClock, TracerouteAddressFamily, TracerouteBatch, TracerouteBatchExecution,
+    TracerouteError, TracerouteExecutionError, TracerouteExecutor, TracerouteLimits,
+    TracerouteRequest, TracerouteStrategy,
 };
 
 #[derive(Debug, Parser)]
@@ -85,7 +90,7 @@ enum Command {
     /// Run a structured network scan.
     Scan(ScanArgs),
     /// Run structured traceroute probes.
-    Traceroute(UnavailableArgs),
+    Traceroute(TracerouteArgs),
     /// Run a structured DNS operation.
     Dns(UnavailableArgs),
     /// Run bounded field-aware packet fuzzing.
@@ -271,6 +276,95 @@ struct ScanArgs {
     max_duration_ms: u64,
     /// Maximum undecodable exact frames retained across the scan.
     #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
+    max_undecoded: usize,
+    /// Interface name or numeric index used as an exact route constraint.
+    #[arg(long, value_name = "NAME_OR_INDEX")]
+    interface: Option<String>,
+    /// Interface-owned source preference used only for route selection.
+    #[arg(long)]
+    source: Option<IpAddr>,
+    /// Automatic, Layer 2, or raw Layer 3 transmission intent.
+    #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
+    link_mode: CliLinkMode,
+    #[command(flatten)]
+    limits: CaptureLimitArgs,
+    #[command(flatten)]
+    policy: TrafficPolicyArgs,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliTracerouteStrategy {
+    #[default]
+    Udp,
+    Icmp,
+    Tcp,
+}
+
+impl From<CliTracerouteStrategy> for TracerouteStrategy {
+    fn from(value: CliTracerouteStrategy) -> Self {
+        match value {
+            CliTracerouteStrategy::Udp => Self::Udp,
+            CliTracerouteStrategy::Icmp => Self::Icmp,
+            CliTracerouteStrategy::Tcp => Self::Tcp,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliTracerouteAddressFamily {
+    #[default]
+    Any,
+    Ipv4,
+    Ipv6,
+}
+
+impl From<CliTracerouteAddressFamily> for TracerouteAddressFamily {
+    fn from(value: CliTracerouteAddressFamily) -> Self {
+        match value {
+            CliTracerouteAddressFamily::Any => Self::Any,
+            CliTracerouteAddressFamily::Ipv4 => Self::Ipv4,
+            CliTracerouteAddressFamily::Ipv6 => Self::Ipv6,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct TracerouteArgs {
+    /// Explicit IP address or hostname to trace.
+    #[arg(value_name = "ADDRESS_OR_HOSTNAME")]
+    target: String,
+    /// UDP, ICMP echo, or TCP SYN probes.
+    #[arg(long, value_enum, default_value_t = CliTracerouteStrategy::Udp)]
+    strategy: CliTracerouteStrategy,
+    /// Select the first authorized address or only one IP family.
+    #[arg(long, value_enum, default_value_t = CliTracerouteAddressFamily::Any)]
+    family: CliTracerouteAddressFamily,
+    /// UDP base destination port or fixed TCP destination port.
+    #[arg(long)]
+    port: Option<u16>,
+    /// First non-zero IPv4 TTL or IPv6 hop limit.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_TRACEROUTE_FIRST_HOP)]
+    first_hop: u8,
+    /// Last IPv4 TTL or IPv6 hop limit attempted.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_TRACEROUTE_MAX_HOPS)]
+    max_hops: u8,
+    /// Number of attempts retained for every hop.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_TRACEROUTE_PROBES_PER_HOP)]
+    attempts: u32,
+    /// Response window for each capture-ready hop batch.
+    #[arg(long, default_value_t = 1_000)]
+    timeout_ms: u64,
+    /// Optional average probe-rate ceiling; each hop remains one deliberate burst.
+    #[arg(long)]
+    rate: Option<u32>,
+    /// Maximum generated probes across all hops.
+    #[arg(long, default_value_t = crate::core::DEFAULT_MAX_TEMPLATE_PACKETS)]
+    max_probes: usize,
+    /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
+    #[arg(long, default_value_t = 3_600_000)]
+    max_duration_ms: u64,
+    /// Maximum hop-scoped undecodable exact frames retained.
+    #[arg(long, default_value_t = crate::tools::DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES)]
     max_undecoded: usize,
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
@@ -622,7 +716,8 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Exchange(arguments) => run_exchange(arguments, cli.output),
         Command::Replay(arguments) => run_replay(arguments, cli.output),
         Command::Scan(arguments) => run_scan(arguments, cli.output),
-        Command::Traceroute(arguments) | Command::Dns(arguments) | Command::Fuzz(arguments) => {
+        Command::Traceroute(arguments) => run_traceroute(arguments, cli.output),
+        Command::Dns(arguments) | Command::Fuzz(arguments) => {
             let _ = arguments.packet;
             Err(CliError::new(
                 4,
@@ -1427,7 +1522,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
     scan_limits.validate().map_err(scan_cli_error)?;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
-    validate_scan_interface_selector(interface.as_deref())?;
+    validate_live_interface_selector("scan", interface.as_deref())?;
     let request = ScanRequest {
         target,
         transport: transport.into(),
@@ -1498,17 +1593,23 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
     }
 }
 
-fn validate_scan_interface_selector(selector: Option<&str>) -> Result<(), CliError> {
+fn validate_live_interface_selector(command: &str, selector: Option<&str>) -> Result<(), CliError> {
     let Some(selector) = selector else {
         return Ok(());
     };
     if selector.is_empty() {
-        return Err(CliError::new(2, "scan interface cannot be empty"));
+        return Err(CliError::new(
+            2,
+            format!("{command} interface cannot be empty"),
+        ));
     }
     let numeric = selector.bytes().all(|byte| byte.is_ascii_digit());
     let index = selector.parse::<u32>().unwrap_or(0);
     if numeric && index == 0 {
-        return Err(CliError::new(2, "scan interface index must be non-zero"));
+        return Err(CliError::new(
+            2,
+            format!("{command} interface index must be non-zero"),
+        ));
     }
     Ok(())
 }
@@ -1701,6 +1802,337 @@ fn render_scan_stream(
 fn emit_scan_record(sequence: &mut u64, result: ScanStreamCommandResult) -> Result<(), CliError> {
     emit_json_compact(&StreamRecord::success(
         CommandName::Scan,
+        *sequence,
+        result,
+        Vec::new(),
+    ))
+    .map_err(|error| error.at_sequence(*sequence))?;
+    *sequence = sequence.checked_add(1).ok_or_else(|| {
+        CliError::classified(OutputContractError::SequenceOverflow).at_sequence(*sequence)
+    })?;
+    Ok(())
+}
+
+fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(), CliError> {
+    let TracerouteArgs {
+        target,
+        strategy,
+        family,
+        port,
+        first_hop,
+        max_hops,
+        attempts,
+        timeout_ms,
+        rate,
+        max_probes,
+        max_duration_ms,
+        max_undecoded,
+        interface,
+        source,
+        link_mode,
+        limits,
+        policy,
+    } = arguments;
+    let target = match target.parse::<LiveTarget>().map_err(CliError::classified)? {
+        LiveTarget::Address(address) => ScanTarget::Address(address),
+        LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
+    };
+    let strategy: TracerouteStrategy = strategy.into();
+    let destination_port = match strategy {
+        TracerouteStrategy::Udp => Some(port.unwrap_or(crate::tools::DEFAULT_TRACEROUTE_UDP_PORT)),
+        TracerouteStrategy::Tcp => Some(port.unwrap_or(crate::tools::DEFAULT_TRACEROUTE_TCP_PORT)),
+        TracerouteStrategy::Icmp => port,
+    };
+    let queue_limits = limits.into_limits();
+    let trace_limits = TracerouteLimits {
+        max_probes,
+        max_duration: Duration::from_millis(max_duration_ms),
+        max_evidence_frames: queue_limits.max_frames,
+        max_evidence_bytes: queue_limits.max_bytes,
+        max_undecoded,
+    };
+    let request = TracerouteRequest {
+        target,
+        strategy,
+        address_family: family.into(),
+        destination_port,
+        first_hop,
+        max_hops,
+        probes_per_hop: attempts,
+        timeout: Duration::from_millis(timeout_ms),
+        probes_per_second: rate,
+        limits: trace_limits,
+    };
+    request.validate().map_err(traceroute_cli_error)?;
+    let policy = policy.into_policy();
+    policy.validate().map_err(CliError::classified)?;
+    validate_live_interface_selector("traceroute", interface.as_deref())?;
+
+    let registry = default_registry_arc()?;
+    let mut exchange = ExchangeOptions {
+        send: SendOptions {
+            destination: None,
+            plan: crate::io::PlanOptions {
+                link_mode: link_mode.into(),
+                interface: None,
+                preferred_source: source,
+            },
+            build: BuildOptions::default(),
+            allow_permissive_live: false,
+        },
+        timeout: request.timeout,
+        max_template_packets: attempts as usize,
+        max_unsolicited: queue_limits.max_frames,
+        max_responses: queue_limits.max_frames,
+        max_capture_queue_frames: queue_limits.max_frames,
+        max_captured_bytes: queue_limits.max_bytes,
+        capture_overflow_policy: queue_limits.overflow_policy,
+        decode: DecodeOptions::default(),
+    };
+    exchange.decode.max_packet_size = queue_limits.snap_length;
+    exchange.validate().map_err(CliError::classified)?;
+
+    let mut executor = CliTracerouteExecutor {
+        registry: Arc::clone(&registry),
+        policy: policy.clone(),
+        exchange,
+        interface,
+        interface_resolved: false,
+    };
+    let resolver = SystemHostnameResolver;
+    let mut authorizer = TrafficPolicyTracerouteAuthorizer::new(&policy, &resolver);
+    let mut clock = SystemTracerouteClock;
+    let result = traceroute(
+        &request,
+        &mut authorizer,
+        &registry,
+        &mut executor,
+        &mut clock,
+    )
+    .map_err(traceroute_cli_error)?;
+    let (result, diagnostics, stats) =
+        TracerouteCommandResult::try_from_traceroute(result).map_err(CliError::classified)?;
+
+    match output {
+        OutputFormat::Text => render_traceroute_text(result, diagnostics, stats),
+        OutputFormat::Json => emit_json(
+            &AggregateOutput::success(CommandName::Traceroute, result, diagnostics)
+                .with_stats(stats),
+        ),
+        OutputFormat::Ndjson => render_traceroute_stream(result, diagnostics, stats),
+        _ => Err(CliError::classified(
+            OutputContractError::UnsupportedFormat {
+                command: CommandName::Traceroute,
+                format: output,
+            },
+        )),
+    }
+}
+
+struct CliTracerouteExecutor {
+    registry: Arc<crate::core::ProtocolRegistry>,
+    policy: TrafficPolicy,
+    exchange: ExchangeOptions,
+    interface: Option<String>,
+    interface_resolved: bool,
+}
+
+impl TracerouteExecutor for CliTracerouteExecutor {
+    fn execute(
+        &mut self,
+        batch: &TracerouteBatch,
+    ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+        if !self.interface_resolved {
+            self.exchange.send.plan.interface =
+                resolve_interface(self.interface.take(), &SystemInterfaceProvider)
+                    .map_err(traceroute_execution_error_from_cli)?;
+            self.interface_resolved = true;
+        }
+        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
+        ClientTracerouteExecutor::new(&client, self.exchange.clone()).execute(batch)
+    }
+}
+
+fn traceroute_execution_error_from_cli(error: CliError) -> TracerouteExecutionError {
+    TracerouteExecutionError::new(error.message, error.classification, error.causes)
+}
+
+fn traceroute_cli_error(error: TracerouteError) -> CliError {
+    let sequence = error.sequence();
+    let mut error = CliError::classified(error);
+    if let Some(sequence) = sequence {
+        error = error.at_sequence(sequence);
+    }
+    error
+}
+
+fn render_traceroute_text(
+    result: TracerouteCommandResult,
+    diagnostics: Vec<crate::core::Diagnostic>,
+    stats: crate::client::OperationStats,
+) -> Result<(), CliError> {
+    write_stdout_line(format_args!(
+        "target={} resolved={} destination={} strategy={} port={}",
+        result.target,
+        result
+            .resolved_addresses
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(","),
+        result.destination,
+        result.strategy,
+        result
+            .destination_port
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "none".to_owned()),
+    ))?;
+    for hop in &result.hops {
+        write_stdout_line(format_args!("hop={}", hop.hop_limit))?;
+        for probe in &hop.probes {
+            write_stdout_line(format_args!(
+                "  sequence={} attempt={} status={} response={} sent={} received={} responder={} latency={} port={} reason={}",
+                probe.sequence,
+                probe.attempt,
+                trace_probe_status_name(probe.status),
+                probe
+                    .response_kind
+                    .map(trace_response_kind_name)
+                    .unwrap_or("none"),
+                output_timestamp_text(probe.sent_at),
+                probe
+                    .received_at
+                    .map(output_timestamp_text)
+                    .unwrap_or_else(|| "none".to_owned()),
+                probe
+                    .responder
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "none".to_owned()),
+                probe
+                    .latency
+                    .map(|value| format!("{value:?}"))
+                    .unwrap_or_else(|| "none".to_owned()),
+                probe
+                    .destination_port
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "none".to_owned()),
+                probe.reason,
+            ))?;
+            if let Some(frame) = &probe.frame {
+                write_stdout_line(format_args!(
+                    "    frame dlt={} caplen={} wirelen={} {}",
+                    frame.link_type,
+                    frame.captured_length,
+                    frame.original_length,
+                    spaced_hex(frame.bytes())
+                ))?;
+            }
+        }
+    }
+    for evidence in &result.undecoded {
+        write_stdout_line(format_args!(
+            "undecoded hop={} dlt={} caplen={} wirelen={} {}",
+            evidence.hop_limit,
+            evidence.frame.link_type,
+            evidence.frame.captured_length,
+            evidence.frame.original_length,
+            spaced_hex(evidence.frame.bytes())
+        ))?;
+    }
+    write_stdout_line(format_args!(
+        "trace completion={} hops={} probes={} bytes={}",
+        trace_completion_name(result.completion),
+        result.hops.len(),
+        stats.packets_completed,
+        stats.bytes
+    ))?;
+    render_diagnostics_text(&diagnostics)
+}
+
+fn trace_probe_status_name(value: TraceProbeStatus) -> &'static str {
+    match value {
+        TraceProbeStatus::Response => "response",
+        TraceProbeStatus::Timeout => "timeout",
+    }
+}
+
+fn trace_response_kind_name(value: TraceResponseKind) -> &'static str {
+    match value {
+        TraceResponseKind::Intermediate => "intermediate",
+        TraceResponseKind::DestinationReached => "destination_reached",
+        TraceResponseKind::Unreachable => "unreachable",
+    }
+}
+
+fn trace_completion_name(value: TraceCompletionReason) -> &'static str {
+    match value {
+        TraceCompletionReason::DestinationReached => "destination_reached",
+        TraceCompletionReason::Unreachable => "unreachable",
+        TraceCompletionReason::MaximumHops => "maximum_hops",
+        TraceCompletionReason::Timeout => "timeout",
+    }
+}
+
+fn render_traceroute_stream(
+    result: TracerouteCommandResult,
+    diagnostics: Vec<crate::core::Diagnostic>,
+    stats: crate::client::OperationStats,
+) -> Result<(), CliError> {
+    let TracerouteCommandResult {
+        target,
+        resolved_addresses,
+        destination,
+        strategy,
+        destination_port,
+        hops,
+        undecoded,
+        completion,
+    } = result;
+    let mut sequence = 0_u64;
+    for hop in hops {
+        emit_traceroute_record(
+            &mut sequence,
+            TracerouteStreamCommandResult::Hop {
+                target: target.clone(),
+                destination,
+                hop,
+            },
+        )?;
+    }
+    for evidence in undecoded {
+        emit_traceroute_record(
+            &mut sequence,
+            TracerouteStreamCommandResult::Undecoded {
+                hop_limit: evidence.hop_limit,
+                frame: evidence.frame,
+            },
+        )?;
+    }
+    emit_json_compact(
+        &StreamRecord::success(
+            CommandName::Traceroute,
+            sequence,
+            TracerouteStreamCommandResult::Complete {
+                target,
+                resolved_addresses,
+                destination,
+                strategy,
+                destination_port,
+                completion,
+            },
+            diagnostics,
+        )
+        .with_stats(stats),
+    )
+    .map_err(|error| error.at_sequence(sequence))
+}
+
+fn emit_traceroute_record(
+    sequence: &mut u64,
+    result: TracerouteStreamCommandResult,
+) -> Result<(), CliError> {
+    emit_json_compact(&StreamRecord::success(
+        CommandName::Traceroute,
         *sequence,
         result,
         Vec::new(),
@@ -3301,6 +3733,57 @@ mod tests {
         let error = run(cli).unwrap_err();
         assert_eq!(error.classification.code, "cli.scan_limit");
         assert!(error.message.contains("ICMP scans are portless"));
+    }
+
+    #[test]
+    fn traceroute_cli_parses_strategy_family_hops_attempts_and_rate() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "traceroute",
+            "192.168.56.10",
+            "--strategy",
+            "tcp",
+            "--family",
+            "ipv4",
+            "--port",
+            "443",
+            "--first-hop",
+            "2",
+            "--max-hops",
+            "12",
+            "--attempts",
+            "4",
+            "--rate",
+            "20",
+        ])
+        .unwrap();
+        let Command::Traceroute(arguments) = cli.command else {
+            panic!("expected traceroute command");
+        };
+        assert!(matches!(arguments.strategy, CliTracerouteStrategy::Tcp));
+        assert!(matches!(arguments.family, CliTracerouteAddressFamily::Ipv4));
+        assert_eq!(arguments.port, Some(443));
+        assert_eq!(arguments.first_hop, 2);
+        assert_eq!(arguments.max_hops, 12);
+        assert_eq!(arguments.attempts, 4);
+        assert_eq!(arguments.rate, Some(20));
+    }
+
+    #[test]
+    fn traceroute_request_validation_fails_before_route_or_live_io() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "traceroute",
+            "192.168.56.10",
+            "--strategy",
+            "icmp",
+            "--port",
+            "80",
+        ])
+        .unwrap();
+        let error = run(cli).unwrap_err();
+        assert_eq!(error.classification.code, "cli.traceroute_limit");
+        assert!(error.message.contains("ICMP traceroute is portless"));
     }
 
     #[test]

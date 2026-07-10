@@ -25,7 +25,9 @@ use crate::io::{
 use crate::protocols::Ethernet;
 use crate::tools::{
     AuthorizedScanTarget, ScanAuthorizer, ScanBatch, ScanBatchExecution, ScanExecutionError,
-    ScanExecutor, ScanMatchedResponse, ScanStats, ScanTarget, ScanTransport,
+    ScanExecutor, ScanMatchedResponse, ScanStats, ScanTarget, ScanTransport, TracerouteBatch,
+    TracerouteBatchExecution, TracerouteExecutionError, TracerouteExecutor,
+    TracerouteMatchedResponse, TracerouteStats, TracerouteStrategy,
 };
 
 // Compatibility surface: provider implementations historically imported these
@@ -500,6 +502,10 @@ impl<R: HostnameResolver> ScanAuthorizer for TrafficPolicyScanAuthorizer<'_, R> 
         Ok(())
     }
 }
+
+/// Traceroute uses the same declared-hostname-before-DNS and every-address
+/// authorization contract as scan.
+pub type TrafficPolicyTracerouteAuthorizer<'a, R> = TrafficPolicyScanAuthorizer<'a, R>;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SendOptions {
@@ -1488,6 +1494,134 @@ fn invalid_scan_execution(message: impl Into<String>) -> ScanExecutionError {
             "cli.scan_executor",
             FailureKind::Cli,
             Some("use homogeneous bounded scan batches and retain at least one response per probe"),
+        ),
+        Vec::new(),
+    )
+}
+
+/// Façade adapter that executes one homogeneous traceroute hop through the
+/// capture-ready [`Client::exchange`] lifecycle.
+pub struct ClientTracerouteExecutor<'a, R, N, I> {
+    client: &'a Client<R, N, I>,
+    options: ExchangeOptions,
+}
+
+impl<'a, R, N, I> ClientTracerouteExecutor<'a, R, N, I> {
+    pub fn new(client: &'a Client<R, N, I>, options: ExchangeOptions) -> Self {
+        Self { client, options }
+    }
+}
+
+impl<R, N, I> TracerouteExecutor for ClientTracerouteExecutor<'_, R, N, I>
+where
+    R: RouteProvider,
+    N: NeighborResolver,
+    I: ExchangeIo,
+{
+    fn execute(
+        &mut self,
+        batch: &TracerouteBatch,
+    ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+        let Some(first) = batch.probes.first() else {
+            return Err(invalid_traceroute_execution(
+                "traceroute executor received an empty hop batch",
+            ));
+        };
+        if batch.probes.iter().any(|probe| {
+            probe.address != first.address
+                || probe.strategy != first.strategy
+                || probe.hop_limit != first.hop_limit
+        }) {
+            return Err(invalid_traceroute_execution(
+                "traceroute batches must share address, strategy, and hop limit",
+            ));
+        }
+        if self.options.max_responses < batch.probes.len() {
+            return Err(invalid_traceroute_execution(format!(
+                "max_responses={} is smaller than traceroute hop batch size {}",
+                self.options.max_responses,
+                batch.probes.len()
+            )));
+        }
+
+        let varying_field = match first.strategy {
+            TracerouteStrategy::Udp => "destination_port",
+            TracerouteStrategy::Tcp => "sequence",
+            TracerouteStrategy::Icmp => "body",
+        };
+        let first_packet = first.packet();
+        let mut template = PacketTemplate::new(first_packet);
+        if batch.probes.len() > 1 {
+            let values = batch
+                .probes
+                .iter()
+                .map(|probe| {
+                    probe
+                        .packet()
+                        .iter()
+                        .nth(1)
+                        .and_then(|layer| layer.field(varying_field))
+                        .ok_or_else(|| {
+                            invalid_traceroute_execution(format!(
+                                "{} probe has no {varying_field} correlation field",
+                                probe.strategy
+                            ))
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            template = template.axis(1, varying_field, TemplateValues::Values(values));
+        }
+
+        let mut options = self.options.clone();
+        options.timeout = batch.timeout;
+        options.max_template_packets = batch.probes.len();
+        options.send.destination = Some(first.address);
+        let exchange = self
+            .client
+            .exchange(&template, options)
+            .map_err(|error| TracerouteExecutionError::classified(&error))?;
+        let ExchangeResult {
+            sent,
+            sent_evidence,
+            responses,
+            unanswered: _,
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats,
+        } = exchange;
+        Ok(TracerouteBatchExecution {
+            sent: sent.into_iter().map(|built| built.packet).collect(),
+            sent_evidence,
+            responses: responses
+                .into_iter()
+                .map(|response| TracerouteMatchedResponse {
+                    request_index: response.request_index,
+                    response: response.response,
+                    latency: response.latency,
+                })
+                .collect(),
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats: TracerouteStats {
+                packets_attempted: stats.packets_attempted,
+                packets_completed: stats.packets_completed,
+                bytes: stats.bytes,
+                elapsed: stats.elapsed,
+                capture: stats.capture,
+            },
+        })
+    }
+}
+
+fn invalid_traceroute_execution(message: impl Into<String>) -> TracerouteExecutionError {
+    TracerouteExecutionError::new(
+        message,
+        ErrorClassification::new(
+            "cli.traceroute_executor",
+            FailureKind::Cli,
+            Some("use homogeneous bounded hop batches and retain at least one response per probe"),
         ),
         Vec::new(),
     )

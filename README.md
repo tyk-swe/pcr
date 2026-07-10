@@ -20,12 +20,12 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
 | Runtime-neutral captured-frame records and offline capture I/O | Bounded streaming read/write and metadata-preserving PCAP/PCAPNG copy are available through the API and `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
-| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
+| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `interfaces`, and `routes` commands | Available; remaining final tool names are reserved in `--help` |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
-| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, and the structured scan workflow are available; remaining tool workflows are later alphas |
+| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, structured scan, and structured traceroute are available; DNS and fuzz remain later alphas |
 | Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; physical crate extraction remains a beta milestone |
 
-Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `traceroute`, `dns`, and `fuzz` names return the capability exit code instead of falling through to a legacy command.
+Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `dns` and `fuzz` names return the capability exit code instead of falling through to a legacy command.
 
 The exact v0.2 packet-layer promise is published in the
 [stable built-in protocol matrix](docs/protocol-support.md) and through the
@@ -166,6 +166,25 @@ packetcraftr --output json scan 192.168.56.10 \
 Results distinguish correlated response evidence, timeouts, closed,
 filtered, unreachable, and unknown endpoints. Policy denials and runtime
 failures remain typed errors. See the [structured scan contract](docs/scan.md).
+
+### Structured traceroute
+
+`traceroute` sends bounded UDP, ICMP echo, or TCP SYN hop batches over IPv4 or
+IPv6. It authorizes hostname intent before DNS and every answer before choosing
+the first requested-family address. Every attempt retains its timing, status,
+responder, terminal/intermediate meaning, and bounded exact response evidence.
+
+```console
+packetcraftr --output ndjson traceroute 192.168.56.10 \
+  --strategy udp --max-hops 20 --attempts 3 \
+  --timeout-ms 750 --rate 12
+```
+
+Only checksum-valid direct replies or ICMP errors quoting the exact original
+probe can advance or terminate the trace. Capture readiness precedes each hop
+burst, cleanup is joined on success and failure, and unsupported native paths
+remain typed errors before transmission. See the
+[structured traceroute contract](docs/traceroute.md).
 
 ### Route-aware and live workflows
 

@@ -21,8 +21,11 @@ use crate::io::{
     InterfaceInfo, LinkCapability, LinkMode, MaterializedRoute, PlannedRoute, ReplayTiming,
     RouteDecision,
 };
-use crate::tools::{ReplayFrameEvidence, ReplaySummary, ScanResult};
-pub use crate::tools::{ScanClassification, ScanProbeStatus};
+use crate::tools::{ReplayFrameEvidence, ReplaySummary, ScanResult, TracerouteResult};
+pub use crate::tools::{
+    ScanClassification, ScanProbeStatus, TracerouteCompletion as TraceCompletionReason,
+    TracerouteProbeStatus as TraceProbeStatus, TracerouteResponseKind as TraceResponseKind,
+};
 
 /// Version identifier emitted by every structured CLI record.
 pub const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
@@ -1161,25 +1164,28 @@ pub enum ScanStreamCommandResult {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceProbeStatus {
-    Response,
-    Timeout,
-    Error,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TraceProbeOutput {
+    pub sequence: u64,
     pub hop_limit: u8,
     pub attempt: u32,
+    pub strategy: String,
+    pub destination: IpAddr,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_port: Option<u16>,
     pub status: TraceProbeStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_kind: Option<TraceResponseKind>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub responder: Option<IpAddr>,
+    pub sent_at: OutputTimestamp,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub received_at: Option<OutputTimestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latency: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<OutputError>,
+    pub frame: Option<FrameOutput>,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -1188,29 +1194,133 @@ pub struct TraceHopOutput {
     pub probes: Vec<TraceProbeOutput>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TraceCompletionReason {
-    DestinationReached,
-    Unreachable,
-    MaximumHops,
-    Timeout,
-    Error,
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TraceUndecodedOutput {
+    pub hop_limit: u8,
+    pub frame: FrameOutput,
 }
 
 /// Aggregate or streamed result of `traceroute`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TracerouteCommandResult {
     pub target: String,
+    pub resolved_addresses: Vec<IpAddr>,
+    pub destination: IpAddr,
+    pub strategy: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_port: Option<u16>,
     pub hops: Vec<TraceHopOutput>,
+    pub undecoded: Vec<TraceUndecodedOutput>,
     pub completion: TraceCompletionReason,
 }
 
-/// One completed hop record produced by streaming `traceroute` output.
+impl TracerouteCommandResult {
+    pub fn try_from_traceroute(
+        result: TracerouteResult,
+    ) -> Result<(Self, Vec<Diagnostic>, OperationStats), OutputContractError> {
+        let TracerouteResult {
+            target,
+            resolved_addresses,
+            destination,
+            strategy,
+            destination_port,
+            hops,
+            undecoded,
+            completion,
+            diagnostics,
+            stats,
+        } = result;
+        let hops = hops
+            .into_iter()
+            .map(|hop| {
+                let probes = hop
+                    .probes
+                    .into_iter()
+                    .map(|probe| {
+                        Ok(TraceProbeOutput {
+                            sequence: probe.sequence,
+                            hop_limit: probe.hop_limit,
+                            attempt: probe.attempt,
+                            strategy: probe.strategy.to_string(),
+                            destination: probe.destination,
+                            destination_port: probe.destination_port,
+                            status: probe.status,
+                            response_kind: probe.response_kind,
+                            responder: probe.responder,
+                            sent_at: probe.sent_at.try_into()?,
+                            received_at: probe
+                                .received_at
+                                .map(OutputTimestamp::try_from)
+                                .transpose()?,
+                            latency: probe.latency,
+                            frame: probe
+                                .response
+                                .map(FrameOutput::try_from_frame)
+                                .transpose()?,
+                            reason: probe.reason,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, OutputContractError>>()?;
+                Ok(TraceHopOutput {
+                    hop_limit: hop.hop_limit,
+                    probes,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        let undecoded = undecoded
+            .into_iter()
+            .map(|evidence| {
+                Ok(TraceUndecodedOutput {
+                    hop_limit: evidence.hop_limit,
+                    frame: FrameOutput::try_from_frame(evidence.frame)?,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        let stats = OperationStats {
+            packets_attempted: stats.packets_attempted,
+            packets_completed: stats.packets_completed,
+            bytes: stats.bytes,
+            elapsed: stats.elapsed,
+            capture: stats.capture,
+        };
+        Ok((
+            Self {
+                target,
+                resolved_addresses,
+                destination,
+                strategy: strategy.to_string(),
+                destination_port,
+                hops,
+                undecoded,
+                completion,
+            },
+            diagnostics,
+            stats,
+        ))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct TracerouteHopCommandResult {
-    pub target: String,
-    pub hop: TraceHopOutput,
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum TracerouteStreamCommandResult {
+    Hop {
+        target: String,
+        destination: IpAddr,
+        hop: TraceHopOutput,
+    },
+    Undecoded {
+        hop_limit: u8,
+        frame: FrameOutput,
+    },
+    Complete {
+        target: String,
+        resolved_addresses: Vec<IpAddr>,
+        destination: IpAddr,
+        strategy: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        destination_port: Option<u16>,
+        completion: TraceCompletionReason,
+    },
 }
 
 /// Typed DNS record data; unknown records preserve exact RDATA as hexadecimal.
@@ -1343,7 +1453,11 @@ fn compact_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::{ScanEndpointResult, ScanProbeEvidence, ScanProbeStatus, ScanTransport};
+    use crate::tools::{
+        ScanEndpointResult, ScanProbeEvidence, ScanProbeStatus, ScanTransport,
+        TracerouteCompletion, TracerouteHopResult, TracerouteProbeEvidence, TracerouteProbeStatus,
+        TracerouteResponseKind, TracerouteStats, TracerouteStrategy,
+    };
 
     #[test]
     fn command_matrix_is_complete_and_has_no_duplicate_formats() {
@@ -1479,6 +1593,70 @@ mod tests {
         assert!(value["result"]["ports"][0]["evidence"][0]
             .get("received_at")
             .is_none());
+        assert_eq!(value["stats"]["packets_completed"], 1);
+    }
+
+    #[test]
+    fn traceroute_output_preserves_typed_per_attempt_timing_and_terminal_evidence() {
+        let destination: IpAddr = "192.168.56.10".parse().unwrap();
+        let responder: IpAddr = "192.168.56.1".parse().unwrap();
+        let result = TracerouteResult {
+            target: "router.lab".to_owned(),
+            resolved_addresses: vec![destination],
+            destination,
+            strategy: TracerouteStrategy::Udp,
+            destination_port: Some(33_434),
+            hops: vec![TracerouteHopResult {
+                hop_limit: 1,
+                probes: vec![TracerouteProbeEvidence {
+                    sequence: 0,
+                    hop_limit: 1,
+                    attempt: 1,
+                    destination,
+                    strategy: TracerouteStrategy::Udp,
+                    destination_port: Some(33_434),
+                    status: TracerouteProbeStatus::Response,
+                    response_kind: Some(TracerouteResponseKind::Intermediate),
+                    responder: Some(responder),
+                    sent_at: UNIX_EPOCH + Duration::from_secs(7),
+                    received_at: Some(
+                        UNIX_EPOCH + Duration::from_secs(7) + Duration::from_millis(4),
+                    ),
+                    latency: Some(Duration::from_millis(4)),
+                    response: None,
+                    reason: "correlated time exceeded".to_owned(),
+                }],
+            }],
+            undecoded: Vec::new(),
+            completion: TracerouteCompletion::MaximumHops,
+            diagnostics: Vec::new(),
+            stats: TracerouteStats {
+                packets_attempted: 1,
+                packets_completed: 1,
+                bytes: 60,
+                elapsed: Duration::from_millis(10),
+                capture: CaptureStatistics::default(),
+            },
+        };
+
+        let (result, diagnostics, stats) =
+            TracerouteCommandResult::try_from_traceroute(result).unwrap();
+        let value = serde_json::to_value(
+            AggregateOutput::success(CommandName::Traceroute, result, diagnostics)
+                .with_stats(stats),
+        )
+        .unwrap();
+        assert_eq!(value["result"]["destination"], "192.168.56.10");
+        assert_eq!(value["result"]["hops"][0]["probes"][0]["sequence"], 0);
+        assert_eq!(
+            value["result"]["hops"][0]["probes"][0]["response_kind"],
+            "intermediate"
+        );
+        assert_eq!(
+            value["result"]["hops"][0]["probes"][0]["latency"]["nanos"],
+            4_000_000
+        );
+        assert_eq!(value["result"]["completion"], "maximum_hops");
         assert_eq!(value["stats"]["packets_completed"], 1);
     }
 }

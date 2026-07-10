@@ -34,10 +34,11 @@ pub mod tools;
 mod v2_cli;
 
 pub use client::{
-    Client, ClientError, ClientScanExecutor, ExchangeOptions, ExchangeResult, Hostname,
-    HostnameResolver, LiveTarget, MatchedResponse, OperationStats, ResolvedTarget, SendOptions,
-    SendReport, SystemHostnameResolver, TargetResolutionError, TrafficPolicy, TrafficPolicyError,
-    TrafficPolicyScanAuthorizer, UnsupportedNeighborResolver, UnsupportedPacketIo,
+    Client, ClientError, ClientScanExecutor, ClientTracerouteExecutor, ExchangeOptions,
+    ExchangeResult, Hostname, HostnameResolver, LiveTarget, MatchedResponse, OperationStats,
+    ResolvedTarget, SendOptions, SendReport, SystemHostnameResolver, TargetResolutionError,
+    TrafficPolicy, TrafficPolicyError, TrafficPolicyScanAuthorizer,
+    TrafficPolicyTracerouteAuthorizer, UnsupportedNeighborResolver, UnsupportedPacketIo,
     DEFAULT_MAX_RESOLVED_ADDRESSES, DEFAULT_MAX_UNSOLICITED_FRAMES, MAX_EXCHANGE_TIMEOUT,
     MAX_RESOLVED_ADDRESSES,
 };
@@ -85,9 +86,9 @@ pub use output::{
     ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult, RoutesCommandResult,
     ScanClassification, ScanCommandResult, ScanPortCommandResult, ScanPortOutput, ScanProbeStatus,
     ScanStreamCommandResult, SendCommandResult, StreamErrorRecord, StreamRecord,
-    TraceCompletionReason, TraceHopOutput, TraceProbeOutput, TraceProbeStatus,
-    TracerouteCommandResult, TracerouteHopCommandResult, WireFrameOutput, COMMAND_OUTPUT_CONTRACTS,
-    OUTPUT_SCHEMA_V1,
+    TraceCompletionReason, TraceHopOutput, TraceProbeOutput, TraceProbeStatus, TraceResponseKind,
+    TraceUndecodedOutput, TracerouteCommandResult, TracerouteStreamCommandResult, WireFrameOutput,
+    COMMAND_OUTPUT_CONTRACTS, OUTPUT_SCHEMA_V1,
 };
 pub use protocols::{
     default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, CaptureByteOrder,
@@ -103,15 +104,25 @@ pub use session::{
     TcpReassemblyError, TcpReassemblyEvent, TcpSegment,
 };
 pub use tools::{
-    classify_scan_response, replay_capture, scan, AuthorizedScanTarget, ReplayAuthorizationError,
-    ReplayAuthorizer, ReplayClock, ReplayError, ReplayFrameEvidence, ReplayLimits, ReplayOptions,
-    ReplaySummary, ReplayTransmission, ReplayTransmitter, ScanAddressFamily,
-    ScanAuthorizationError, ScanAuthorizer, ScanBatch, ScanBatchExecution, ScanClock,
-    ScanEndpointResult, ScanError, ScanExecutionError, ScanExecutor, ScanLimits,
-    ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanRequest, ScanResponseClassification,
-    ScanResult, ScanStats, ScanTarget, ScanTransport, SystemReplayClock, SystemScanClock,
-    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES, DEFAULT_SCAN_BATCH_SIZE,
-    MAX_REPLAY_DURATION, MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
+    classify_scan_response, classify_traceroute_response, replay_capture, scan, traceroute,
+    AuthorizedScanTarget, AuthorizedTracerouteTarget, ReplayAuthorizationError, ReplayAuthorizer,
+    ReplayClock, ReplayError, ReplayFrameEvidence, ReplayLimits, ReplayOptions, ReplaySummary,
+    ReplayTransmission, ReplayTransmitter, ScanAddressFamily, ScanAuthorizationError,
+    ScanAuthorizer, ScanBatch, ScanBatchExecution, ScanClock, ScanEndpointResult, ScanError,
+    ScanExecutionError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe,
+    ScanProbeEvidence, ScanRequest, ScanResponseClassification, ScanResult, ScanStats, ScanTarget,
+    ScanTransport, SystemReplayClock, SystemScanClock, SystemTracerouteClock,
+    TracerouteAddressFamily, TracerouteAuthorizationError, TracerouteAuthorizer, TracerouteBatch,
+    TracerouteBatchExecution, TracerouteClock, TracerouteCompletion, TracerouteError,
+    TracerouteExecutionError, TracerouteExecutor, TracerouteHopResult, TracerouteLimits,
+    TracerouteMatchedResponse, TracerouteProbe, TracerouteProbeEvidence, TracerouteProbeStatus,
+    TracerouteRequest, TracerouteResponseClassification, TracerouteResponseKind, TracerouteResult,
+    TracerouteStats, TracerouteStrategy, TracerouteTarget, TracerouteUndecodedEvidence,
+    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES,
+    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DEFAULT_SCAN_BATCH_SIZE, DEFAULT_TRACEROUTE_FIRST_HOP,
+    DEFAULT_TRACEROUTE_MAX_HOPS, DEFAULT_TRACEROUTE_PROBES_PER_HOP, DEFAULT_TRACEROUTE_TCP_PORT,
+    DEFAULT_TRACEROUTE_UDP_PORT, MAX_REPLAY_DURATION, MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION,
+    MAX_SCAN_PROBES, MAX_SCAN_RATE, MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP,
 };
 
 /// Run the intentionally breaking v0.2 command-line interface.

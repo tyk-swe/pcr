@@ -353,6 +353,74 @@ mod tests {
     }
 
     #[test]
+    fn icmpv4_and_icmpv6_codec_paths_round_trip_exact_bytes() {
+        let registry = Arc::new(default_registry().unwrap());
+        let builder = Builder::new(Arc::clone(&registry));
+
+        let mut ipv4 = Packet::new();
+        ipv4.push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        })
+        .push(Icmpv4 {
+            body: Bytes::from_static(&[0x12, 0x34, 0, 1]),
+            ..Icmpv4::default()
+        });
+        let built4 = builder
+            .build(ipv4, BuildContext::default(), BuildOptions::default())
+            .unwrap();
+        let decoded4 = Dissector::new(Arc::clone(&registry))
+            .decode_with_root(
+                built4.bytes.clone(),
+                "ipv4".into(),
+                DecodeOptions::default(),
+            )
+            .unwrap();
+        assert!(decoded4.packet.get::<Icmpv4>().is_some());
+        assert!(decoded4.diagnostics.is_empty());
+        let rebuilt4 = builder
+            .build(
+                decoded4.packet,
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(rebuilt4.bytes, built4.bytes);
+
+        let mut ipv6 = Packet::new();
+        ipv6.push(Ipv6 {
+            source: "2001:db8::1".parse().unwrap(),
+            destination: "2001:db8::2".parse().unwrap(),
+            ..Ipv6::default()
+        })
+        .push(Icmpv6 {
+            body: Bytes::from_static(&[0x56, 0x78, 0, 2]),
+            ..Icmpv6::default()
+        });
+        let built6 = builder
+            .build(ipv6, BuildContext::default(), BuildOptions::default())
+            .unwrap();
+        let decoded6 = Dissector::new(Arc::clone(&registry))
+            .decode_with_root(
+                built6.bytes.clone(),
+                "ipv6".into(),
+                DecodeOptions::default(),
+            )
+            .unwrap();
+        assert!(decoded6.packet.get::<Icmpv6>().is_some());
+        assert!(decoded6.diagnostics.is_empty());
+        let rebuilt6 = builder
+            .build(
+                decoded6.packet,
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(rebuilt6.bytes, built6.bytes);
+    }
+
+    #[test]
     fn ethernet_padding_is_preserved_without_changing_ip_or_udp_lengths() {
         let registry = Arc::new(default_registry().unwrap());
         let mut packet = Packet::new();

@@ -18,6 +18,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TARGET_ROOT = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+if not TARGET_ROOT.is_absolute():
+    TARGET_ROOT = ROOT / TARGET_ROOT
 DOCUMENT = ROOT / "docs" / "cli-examples.md"
 COMMANDS = (
     "build",
@@ -43,7 +46,7 @@ EXAMPLE_BLOCK = re.compile(
 
 def default_binary() -> Path:
     name = "packetcraftr.exe" if os.name == "nt" else "packetcraftr"
-    return ROOT / "target" / "debug" / name
+    return TARGET_ROOT / "debug" / name
 
 
 def run(binary: Path, arguments: list[str], stdout_path: Path | None = None) -> subprocess.CompletedProcess[bytes]:

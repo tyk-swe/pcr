@@ -365,6 +365,42 @@ fn external_codec_factories_must_materialize_required_fields() {
 }
 
 #[test]
+fn registry_rejects_duplicate_conflicting_and_dangling_extensions() {
+    let mut builder = ProtocolRegistry::builder();
+    builder.module(&BuiltinProtocols).unwrap();
+    builder.module(&FooModule).unwrap();
+
+    assert!(matches!(
+        builder.register_codec(FooCodec),
+        Err(RegistryError::DuplicateProtocol { protocol })
+            if protocol == ProtocolId::new("example.foo")
+    ));
+    assert!(matches!(
+        builder.bind_link_type(1, "example.foo"),
+        Err(RegistryError::DuplicateLinkType { link_type: 1 })
+    ));
+
+    builder.bind("ipv4", 253, "raw", 10).unwrap();
+    assert!(matches!(
+        builder.bind("ipv4", 253, "udp", 10),
+        Err(RegistryError::BindingConflict {
+            parent,
+            discriminator: 253,
+            priority: 10,
+        }) if parent == ProtocolId::new("ipv4")
+    ));
+
+    let mut dangling = ProtocolRegistry::builder();
+    dangling.register_codec(FooCodec).unwrap();
+    dangling.bind_link_type(147, "example.missing").unwrap();
+    assert!(matches!(
+        dangling.build(),
+        Err(RegistryError::UnknownProtocol { protocol })
+            if protocol == ProtocolId::new("example.missing")
+    ));
+}
+
+#[test]
 fn published_documentation_covers_the_versioned_protocol_manifest() {
     let matrix = include_str!("../docs/protocol-support.md");
     for support in BUILTIN_PROTOCOLS {

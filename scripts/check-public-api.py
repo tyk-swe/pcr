@@ -8,13 +8,17 @@ import difflib
 import hashlib
 import html
 import json
+import os
 import re
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DOC_ROOT = ROOT / "target" / "doc" / "packetcraftr"
+TARGET_ROOT = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+if not TARGET_ROOT.is_absolute():
+    TARGET_ROOT = ROOT / TARGET_ROOT
+DOC_ROOT = TARGET_ROOT / "doc" / "packetcraftr"
 BASELINE = ROOT / "api" / "packetcraftr-v0.2-beta.txt"
 CHANGELOG = ROOT / "CHANGELOG.md"
 ITEM_PAGE = re.compile(

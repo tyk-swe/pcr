@@ -51,6 +51,18 @@ Release has a platform binary, select the exact target named in its notes and
 verify it with the same checksum file. Otherwise install from the workspace
 archive.
 
+Maintainers assemble and verify those two deterministic inputs from a clean
+commit with:
+
+```console
+bash scripts/verify-release-archive.sh --output-dir dist
+(cd dist && sha256sum --check SHA256SUMS)
+```
+
+The verifier assembles the workspace twice and rejects any byte difference
+before it retains an output. This is preparation only: it does not create a tag,
+upload an asset, or publish a package.
+
 On Linux or macOS, after choosing a published version:
 
 ```console

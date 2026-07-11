@@ -6,12 +6,16 @@ from __future__ import annotations
 import argparse
 import difflib
 import hashlib
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TARGET_ROOT = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+if not TARGET_ROOT.is_absolute():
+    TARGET_ROOT = ROOT / TARGET_ROOT
 COMMANDS = [
     "build",
     "dissect",
@@ -105,7 +109,7 @@ def main() -> int:
     parser.add_argument(
         "--binary",
         type=Path,
-        default=ROOT / "target" / "debug" / "packetcraftr",
+        default=TARGET_ROOT / "debug" / "packetcraftr",
     )
     parser.add_argument(
         "--bless",

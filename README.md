@@ -407,22 +407,21 @@ structured diagnostics and operation statistics.
 
 The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable and excludes `socket2` along with the other native adapters. All-feature jobs compile the target's native route, Layer 2, and raw Layer 3 adapters, exercise passive providers and injected capture/send lifecycles, and continue to reject static `pcap`, `pnet`, or `Packet.lib` linkage on Windows. Privileged live-I/O qualification remains a separate release-candidate gate.
 
+The [reproducible portable beta gate](docs/beta-gate.md) is the single local and
+CI entry point for formatting, MSRV, policy, schemas, fixtures, portable
+lint/tests/doctests/rustdoc, frozen API/CLI contracts, executable examples,
+clean installation, and deterministic GitHub Release inputs. After installing
+its pinned prerequisites and fetching the locked dependency graph, run it from
+a clean checkout:
+
 ```console
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
-cargo clippy --workspace --no-default-features --all-targets -- -D warnings
-cargo test --workspace --no-default-features --all-targets
-cargo clippy --workspace --all-features --all-targets -- -D warnings
-cargo test --workspace --all-features --all-targets
-RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
-bash scripts/verify-release-archive.sh
-bash scripts/check-architecture.sh
-python3 scripts/validate-fixture-corpus.py
-python3 scripts/test-fixture-policy.py
-cargo build --locked --no-default-features
-python3 scripts/check-documentation-examples.py
+PACKETCRAFTR_OFFLINE_AFTER_POLICY=1 \
+PACKETCRAFTR_RELEASE_OUTPUT_DIR=dist \
+bash scripts/check-beta-gate.sh
 ```
+
+CI separately repeats the default/all-feature and macOS/Windows profiles so a
+host-only local pass cannot substitute for the required cross-platform matrix.
 
 Tests never rewrite authoritative packet fixtures. The read-only corpus covers
 every registered capture root, valid and malformed PCAP/PCAPNG, packet

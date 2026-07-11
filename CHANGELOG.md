@@ -41,6 +41,7 @@ advanced to the first beta even though its compatibility baselines are frozen.
 - Added a warning-free public Rust API guide, compile-tested portable/live extension examples, semantic `FailureCategory` recovery classes, typed capture-evidence completeness and receiver-drop counters, and a rustdoc-derived beta façade baseline enforced in CI.
 - Added the reviewed v0.2 CLI contract, exact help/parse/version goldens, packet-schema negative fixtures, a shipped YAML packet example, and a digest gate covering CLI grammar, exit classes, packet/output schemas, and mapping documentation.
 - Added complete executable examples for all 14 CLI commands, platform-specific native dependency/privilege troubleshooting, GitHub-only install/Release verification guidance, and auditable v0.1 migration/support corrections.
+- Added one clean-checkout portable beta gate covering MSRV, policy, schemas, fixtures, lint/tests/doctests/rustdoc, frozen API/CLI contracts, examples, installability, and byte-reproducible GitHub Release archive/checksum inputs.
 - Public API baseline: `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762` (reviewed for the v0.2 beta freeze).
 - CLI/schema baseline: `sha256:2f28da6eb04772bd2e9d021b71799f707d3f63e103be9af75f4d5a8f4eb2f269` (reviewed for the v0.2 beta freeze).
 

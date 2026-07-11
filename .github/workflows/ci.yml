@@ -54,25 +54,44 @@ jobs:
         run: cargo clippy --locked --workspace --all-targets ${{ matrix.profile.flags }} -- -D warnings
       - name: Test
         run: cargo test --locked --workspace --all-targets ${{ matrix.profile.flags }}
+      - name: Test public documentation examples
+        run: cargo test --locked --workspace --doc ${{ matrix.profile.flags }}
       - name: Build documentation
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked --workspace --no-deps ${{ matrix.profile.flags }}
 
   package:
-    name: Package
+    name: Portable beta gate and Release inputs
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install the pinned Rust toolchain
-        run: rustup toolchain install 1.96.0 --profile minimal
-      - name: Verify GitHub Release workspace archive
-        run: bash scripts/verify-release-archive.sh
-      - name: Verify a clean CLI install
+        run: rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
+      - name: Install pinned beta-gate tools
         run: |
-          cargo install --locked --path . --root "${RUNNER_TEMP}/packetcraftr-install"
-          "${RUNNER_TEMP}/packetcraftr-install/bin/packetcraftr" --version
+          python -m pip install --disable-pip-version-check -r scripts/beta-gate-requirements.txt
+          cargo install cargo-deny --version 0.19.7 --locked
+      - name: Fetch locked Rust dependencies before the offline gate
+        run: cargo fetch --locked
+      - name: Run the reproducible portable beta gate
+        env:
+          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SHA: ${{ github.sha }}
+          PACKETCRAFTR_OFFLINE_AFTER_POLICY: "1"
+          PACKETCRAFTR_RELEASE_OUTPUT_DIR: ${{ runner.temp }}/packetcraftr-release-inputs
+        run: bash scripts/check-beta-gate.sh
+      - name: List verified deterministic Release inputs
+        run: |
+          cd "${RUNNER_TEMP}/packetcraftr-release-inputs"
+          sha256sum --check SHA256SUMS
+          find . -maxdepth 1 -type f -printf '%f\n' | sort
 
   schemas:
     name: JSON schemas and examples
@@ -81,47 +100,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install schema validator
-        run: python -m pip install --disable-pip-version-check check-jsonschema
-      - name: Validate packet documents
-        run: >-
-          check-jsonschema
-          --schemafile schemas/packetcraftr.packet.v1.schema.json
-          examples/documents/packet-*.json
-          examples/documents/packet-*.yaml
-      - name: Reject invalid packet documents
-        run: |
-          for fixture in tests/schema-invalid/packet/*.json; do
-            if check-jsonschema \
-              --schemafile schemas/packetcraftr.packet.v1.schema.json \
-              "${fixture}"; then
-              echo "invalid packet document unexpectedly passed: ${fixture}" >&2
-              exit 1
-            fi
-          done
-      - name: Validate output documents
-        run: >-
-          check-jsonschema
-          --schemafile schemas/packetcraftr.output.v1.schema.json
-          examples/documents/output-*.json
-      - name: Validate fixture provenance documents
-        run: |
-          find tests/fixtures -type f \
-            \( -name '*.provenance.json' -o -name 'provenance.example.json' \) \
-            -print0 | xargs -0 check-jsonschema \
-              --schemafile schemas/packetcraftr.fixture-provenance.v1.schema.json
+        run: python -m pip install --disable-pip-version-check -r scripts/beta-gate-requirements.txt
+      - name: Validate schemas, examples, and negative fixtures
+        run: bash scripts/check-schemas.sh
       - name: Verify fixture paths and hashes
         run: python3 scripts/validate-fixture-corpus.py
-      - name: Reject invalid output documents
-        run: |
-          for fixture in tests/fixtures/invalid-output/*.json; do
-            [[ "${fixture}" == *.provenance.json ]] && continue
-            if check-jsonschema \
-              --schemafile schemas/packetcraftr.output.v1.schema.json \
-              "${fixture}"; then
-              echo "invalid output fixture unexpectedly passed: ${fixture}" >&2
-              exit 1
-            fi
-          done
 
   documentation_examples:
     name: Documentation and CLI examples

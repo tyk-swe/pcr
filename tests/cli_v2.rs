@@ -295,6 +295,26 @@ fn json_build_uses_versioned_success_envelope() {
     assert!(value["diagnostics"].is_array());
 }
 
+#[cfg(all(feature = "live", unix))]
+#[test]
+fn interfaces_command_succeeds_end_to_end_on_supported_unix_profiles() {
+    let output = binary()
+        .args(["--output", "json", "interfaces"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["schema"], "packetcraftr.output/v1");
+    assert_eq!(value["command"], "interfaces");
+    assert_eq!(value["status"], "success");
+    assert!(value["result"]["interfaces"].is_array());
+}
+
 #[cfg(not(feature = "native-route"))]
 #[test]
 fn unavailable_live_command_uses_capability_exit_code_and_json_error() {

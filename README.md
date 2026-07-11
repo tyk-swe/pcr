@@ -4,21 +4,24 @@
 
 PacketcraftR is a Rust packet-construction, dissection, capture, and network-testing framework with a first-class CLI. The v0.2 line is rebuilding the project around arbitrary layer stacks, reflective fields, an explicit protocol registry, exact wire-byte preservation, and bounded parsers.
 
-> **Prerelease warning:** `0.2.0-alpha.1` remains a prerelease version, but this
-> checkout contains the reviewed v0.2 beta-candidate freezes for the public Rust
-> API, CLI, packet documents, and output documents. Any incompatible change to
-> those contracts is now a release blocker unless the compatibility policy
-> explicitly permits it.
+> **Beta warning:** `0.2.0-beta.1` freezes the reviewed v0.2 public Rust API,
+> CLI, packet documents, and output documents. It is not the stable release:
+> privileged live-I/O and final cross-platform qualification still gate the
+> release candidate. Any incompatible contract regression is a 0.2.0 release
+> blocker unless the compatibility policy explicitly permits it.
+
+Use the [beta feedback and release-blocker policy](docs/beta-feedback.md) for
+reproducible compatibility, artifact, or capability reports.
 
 PacketcraftR is licensed under the [GNU Affero General Public License v3.0 only](LICENSE) and has a Rust 1.96 minimum supported Rust version (MSRV) throughout the v0.2 series.
 
 ## Project status
 
 This checkout contains the portable v0.2 kernel, passive native route providers,
-and policy-gated live CLI workflows. The table describes the beta-candidate
+and policy-gated live CLI workflows. The table describes the frozen beta
 contract; privileged qualification remains a separate release gate.
 
-| Area | Beta-candidate status |
+| Area | Beta status |
 | --- | --- |
 | Ordered `Packet`, object-safe `Layer`, reflective schemas and field values | Frozen public API and invariant-tested implementation |
 | Immutable `ProtocolRegistry`, external codecs and deterministic bindings | Frozen public API and compile-tested external extension path |
@@ -32,7 +35,7 @@ contract; privileged qualification remains a separate release gate.
 | Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; core, protocols, I/O, and session packages are extracted behind unchanged façade paths |
 
 Run `packetcraftr --help` for the complete frozen command grammar and finite
-defaults; CI compares that text with the reviewed beta-candidate golden.
+defaults; CI compares that text with the reviewed beta golden.
 
 The exact v0.2 packet-layer promise is published in the
 [stable built-in protocol matrix](docs/protocol-support.md) and through the
@@ -60,7 +63,7 @@ strict/permissive   bounded
  diagnostics       diagnostics
 ```
 
-The beta-candidate public façade is centered on:
+The beta public façade is centered on:
 
 - `Packet`, `Layer`, `LayerSchema`, `FieldSchema`, and `FieldValue` for typed and reflective editing.
 - `WireValue<T>` for dependent values that are automatic, exact, or deliberately raw.
@@ -69,7 +72,7 @@ The beta-candidate public façade is centered on:
 - `Raw`, `Padding`, and `MalformedLayer`, which retain content that cannot be decoded safely.
 - `CapturedFrame`, which retains link type, timestamps, captured/wire lengths, interface metadata, and all bytes up to the snap length. Its fallible constructors reject lengths that cannot represent the supplied bytes, and dissection revalidates records before reading them. Exchange results retain bounded, undecodable frames in this raw form instead of discarding their evidence.
 
-A minimal beta-candidate API shape looks like this:
+A minimal beta API shape looks like this:
 
 ```rust
 use packetcraftr::{Packet, Raw};
@@ -99,13 +102,12 @@ The architecture decisions are recorded in [docs/adr](docs/adr/README.md).
 
 ## Building from source
 
-The `0.2.0-alpha.1` Cargo version in this checkout is an unpublished development
-baseline: the repository currently has no corresponding tag or GitHub Release.
-PacketcraftR packages are not published to a public registry. Install an exact
-reviewed checkout locally, or use only assets and checksums attached to the
-[GitHub Releases page](https://github.com/tyk-swe/pcr/releases) once a Release is
-published. The complete source/archive, checksum, local-install, and versioned
-API-reference procedure is in the
+The `0.2.0-beta.1` Cargo version identifies the `v0.2.0-beta.1` GitHub
+prerelease. PacketcraftR packages are not published to a public registry.
+Install an exact reviewed checkout locally, or use only the archive and checksum
+attached to the [GitHub Releases page](https://github.com/tyk-swe/pcr/releases).
+The archive embeds its source commit in `RELEASE-METADATA.toml`. The complete
+download, checksum, local-install, and versioned API-reference procedure is in the
 [installation and Release guide](docs/install-and-release.md).
 
 Install Rust 1.96 through `rustup`, then build the portable surface:
@@ -353,7 +355,7 @@ The v0.2 contracts are:
 - Unsupported link types and unknown payloads remain explicit raw data; unsupported combinations produce typed errors.
 - Display truncation never truncates the captured bytes stored in a result.
 
-The beta-candidate contracts and guards above are implemented and regression
+The beta contracts and guards above are implemented and regression
 tested. Privileged live-I/O qualification on the dedicated Linux, macOS, and
 Windows runners remains a release gate: inspect plans and exact bytes, use
 isolated authorized labs, keep finite budgets, and prefer offline operations

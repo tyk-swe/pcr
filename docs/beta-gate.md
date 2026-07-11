@@ -67,7 +67,8 @@ sha256sum --check SHA256SUMS
 `scripts/build-release-inputs.sh OUTPUT_DIRECTORY` is the narrow deterministic
 assembler. `scripts/verify-release-archive.sh --output-dir DIRECTORY` calls it
 twice, compares both byte streams, validates the checksum, checks all five local
-package file lists and required contract documents, and compiles the extracted
+package file lists and required contract documents, verifies the exported
+version/tag/source commit in `RELEASE-METADATA.toml`, and compiles the extracted
 workspace. The requested output directory must be empty so stale assets cannot
 join the checksum set. Neither command creates a tag or GitHub Release.
 

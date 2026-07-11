@@ -10,7 +10,7 @@ v0.2 as an undocumented compatibility layer.
 
 This guide documents the target v0.2 interface. The reviewed
 [CLI contract](cli-contract.md), its golden help, and the versioned schemas are
-the beta-candidate compatibility baseline. All 14 final command names are
+the beta compatibility baseline. All 14 final command names are
 implemented, including the offline-by-default `fuzz` replacement.
 
 ## The central change
@@ -31,7 +31,7 @@ A reusable packet never contains an interface name, listener configuration, outp
 
 ## Command mapping
 
-The expressions below use the beta-candidate field spellings recorded by the
+The expressions below use the beta field spellings recorded by the
 public API and document-contract freeze.
 
 | v0.1 | v0.2 replacement |

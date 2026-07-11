@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub prerelease tag to download and smoke-test
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -259,6 +264,147 @@ jobs:
           if (-not $rawSocket) {
             throw 'the Windows all-feature profile must resolve the raw IP socket adapter'
           }
+
+  release-smoke:
+    name: Release artifact / ${{ matrix.name }}
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: macOS
+            os: macos-14
+          - name: Windows
+            os: windows-2022
+    steps:
+      - name: Install the beta MSRV
+        shell: bash
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Download and authenticate GitHub prerelease assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if [[ ! "${RELEASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]; then
+            echo "release_tag must be a canonical v-prefixed SemVer tag" >&2
+            exit 2
+          fi
+
+          download="${RUNNER_TEMP}/packetcraftr-release-download"
+          archive="packetcraftr-workspace-${version}.tar.gz"
+          mkdir -p "${download}"
+
+          state="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')"
+          IFS=$'\t' read -r actual_tag is_draft is_prerelease <<<"${state}"
+          if [[ "${actual_tag}" != "${RELEASE_TAG}" || "${is_draft}" != "false" || "${is_prerelease}" != "true" ]]; then
+            echo "selected GitHub Release is not the expected published prerelease" >&2
+            exit 1
+          fi
+
+          assets="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | sort)"
+          expected_assets="$(printf '%s\n' SHA256SUMS "${archive}" | sort)"
+          if [[ "${assets}" != "${expected_assets}" ]]; then
+            echo "GitHub prerelease asset set differs" >&2
+            printf 'expected:\n%s\nactual:\n%s\n' "${expected_assets}" "${assets}" >&2
+            exit 1
+          fi
+
+          object_type="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.type')"
+          source_commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
+          while [[ "${object_type}" == "tag" ]]; do
+            object_type="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${source_commit}" --jq '.object.type')"
+            source_commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${source_commit}" --jq '.object.sha')"
+          done
+          if [[ "${object_type}" != "commit" || ! "${source_commit}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release tag does not resolve to a commit" >&2
+            exit 1
+          fi
+
+          gh release download "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir "${download}" \
+            --pattern SHA256SUMS \
+            --pattern "${archive}"
+
+          python - "${download}" "${archive}" <<'PY'
+          import hashlib
+          import pathlib
+          import sys
+
+          directory = pathlib.Path(sys.argv[1])
+          archive_name = sys.argv[2]
+          lines = [line for line in (directory / "SHA256SUMS").read_text(encoding="utf-8").splitlines() if line]
+          if len(lines) != 1:
+              raise SystemExit("SHA256SUMS must contain exactly one distributable")
+          digest, separator, name = lines[0].partition("  ")
+          if separator != "  " or name != archive_name or len(digest) != 64:
+              raise SystemExit("SHA256SUMS does not name the selected archive exactly")
+          actual = hashlib.sha256((directory / archive_name).read_bytes()).hexdigest()
+          if actual != digest:
+              raise SystemExit(f"archive checksum mismatch: expected {digest}, actual {actual}")
+          print(f"verified {archive_name} ({actual})")
+          PY
+
+          tar --extract --gzip --file "${download}/${archive}" --directory "${download}"
+          workspace="${download}/packetcraftr-workspace-${version}"
+          if [[ ! -d "${workspace}" ]]; then
+            echo "workspace archive has the wrong top-level directory" >&2
+            exit 1
+          fi
+
+          {
+            echo "RELEASE_VERSION=${version}"
+            echo "RELEASE_TAG=${RELEASE_TAG}"
+            echo "RELEASE_COMMIT=${source_commit}"
+            echo "RELEASE_WORKSPACE=${workspace}"
+            echo "RELEASE_INSTALL_ROOT=${RUNNER_TEMP}/packetcraftr-release-install"
+          } >>"${GITHUB_ENV}"
+      - name: Verify embedded source and package metadata
+        shell: bash
+        run: >-
+          python "${RELEASE_WORKSPACE}/scripts/check-release-metadata.py"
+          --workspace "${RELEASE_WORKSPACE}"
+          --expected-version "${RELEASE_VERSION}"
+          --expected-tag "${RELEASE_TAG}"
+          --expected-commit "${RELEASE_COMMIT}"
+      - name: Install the portable CLI from the downloaded archive
+        shell: bash
+        run: >-
+          cargo install --locked
+          --path "${RELEASE_WORKSPACE}"
+          --no-default-features
+          --root "${RELEASE_INSTALL_ROOT}"
+      - name: Smoke-test version and frozen CLI workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="${RELEASE_INSTALL_ROOT}/bin/packetcraftr"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then
+            binary="${binary}.exe"
+          fi
+          version_output="$("${binary}" --version)"
+          if [[ "${version_output}" != "packetcraftr ${RELEASE_VERSION}" ]]; then
+            echo "installed version differs: ${version_output}" >&2
+            exit 1
+          fi
+          python "${RELEASE_WORKSPACE}/scripts/check-cli-contract.py" --binary "${binary}"
+          python "${RELEASE_WORKSPACE}/scripts/check-documentation-examples.py" --binary "${binary}"
+
+  release-smoke-required:
+    name: Release artifact checks
+    if: always() && github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+    needs: release-smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Confirm every downloaded-artifact smoke job passed
+        run: test "${{ needs.release-smoke.result }}" = "success"
 
   required:
     name: Required checks

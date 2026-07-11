@@ -2,13 +2,14 @@
 
 All notable changes to PacketcraftR are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Early v0.2 alpha development was intentionally breaking; the reviewed Rust API, CLI, packet-document, and output-document contracts are now frozen at the beta-candidate boundary.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Early v0.2 alpha development was intentionally breaking; the reviewed Rust API, CLI, packet-document, and output-document contracts are frozen by the first beta.
 
-## 0.2.0-alpha.1 - Unreleased
+## 0.2.0-beta.1 - 2026-07-11
 
-This heading is the cumulative unpublished development baseline. No
-`0.2.0-alpha.1` tag or GitHub Release exists; the Cargo version has not yet been
-advanced to the first beta even though its compatibility baselines are frozen.
+This first public v0.2 beta is the compatibility-freeze checkpoint. GitHub
+Releases are the only distribution channel; every workspace package remains
+blocked from public registries. Privileged live-I/O and final cross-platform
+qualification remain release-candidate gates, not deferred implementations.
 
 ### Added
 
@@ -42,11 +43,15 @@ advanced to the first beta even though its compatibility baselines are frozen.
 - Added the reviewed v0.2 CLI contract, exact help/parse/version goldens, packet-schema negative fixtures, a shipped YAML packet example, and a digest gate covering CLI grammar, exit classes, packet/output schemas, and mapping documentation.
 - Added complete executable examples for all 14 CLI commands, platform-specific native dependency/privilege troubleshooting, GitHub-only install/Release verification guidance, and auditable v0.1 migration/support corrections.
 - Added one clean-checkout portable beta gate covering MSRV, policy, schemas, fixtures, lint/tests/doctests/rustdoc, frozen API/CLI contracts, examples, installability, and byte-reproducible GitHub Release archive/checksum inputs.
+- Added exported tag/version/source metadata, commit- and checksum-bound GitHub prerelease notes, a public beta-feedback route, and no-checkout Linux/macOS/Windows smoke tests for downloaded Release assets.
 - Public API baseline: `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762` (reviewed for the v0.2 beta freeze).
-- CLI/schema baseline: `sha256:2f28da6eb04772bd2e9d021b71799f707d3f63e103be9af75f4d5a8f4eb2f269` (reviewed for the v0.2 beta freeze).
+- CLI/schema baseline: `sha256:8d0bca4ec73bcff60f998710b5bd48ef73f798dc753651a75037e1669d686d7b` (reviewed for the v0.2 beta freeze).
 
 ### Changed
 
+- Advanced every synchronized workspace package and exact internal dependency
+  to `0.2.0-beta.1`; the Release archive embeds its tag, version, and exact
+  source commit in `RELEASE-METADATA.toml`.
 - Set the v0.2 MSRV to Rust 1.96 and retained the `packetcraftr` crate and binary names.
 - Reply capture now uses a bounded three-second window when no explicit timeout is supplied.
 - Listener events retain complete captured bytes; display truncation is presentation metadata only.

@@ -22,6 +22,7 @@ fi
 
 tree="${RELEASE_TREE:-HEAD}"
 git cat-file -e "${tree}^{tree}"
+commit="$(git rev-parse "${tree}^{commit}")"
 package_flags=(--locked)
 if [[ -n "${RELEASE_TREE:-}" ]]; then
     package_flags+=(--allow-dirty)
@@ -75,24 +76,29 @@ tar --extract --gzip --file "${archive}" --directory "${temporary}/unpacked"
 workspace="${temporary}/unpacked/${prefix}"
 
 release_contract_files=(
+    RELEASE-METADATA.toml
     api/README.md
     api/packetcraftr-v0.2-beta.txt
     CHANGELOG.md
+    docs/beta-feedback.md
+    docs/beta-gate.md
     docs/cli-contract.md
     docs/cli-examples.md
-    docs/beta-gate.md
     docs/install-and-release.md
     docs/migration-v0.1-to-v0.2.md
     docs/platform-support.md
     docs/public-api.md
+    docs/releases/0.2.0-beta.1.md.in
     schemas/packetcraftr.output.v1.schema.json
     schemas/packetcraftr.packet.v1.schema.json
     scripts/check-documentation-examples.py
+    scripts/check-release-metadata.py
     scripts/check-public-api.py
     scripts/build-release-inputs.sh
     scripts/check-beta-gate.sh
     scripts/check-schemas.sh
     scripts/beta-gate-requirements.txt
+    scripts/render-release-notes.py
     SECURITY.md
 )
 for required in "${release_contract_files[@]}"; do
@@ -108,6 +114,11 @@ done
 
 (
     cd "${workspace}"
+    python3 scripts/check-release-metadata.py \
+        --workspace . \
+        --expected-version "${version}" \
+        --expected-tag "v${version}" \
+        --expected-commit "${commit}"
     cargo metadata --locked --no-deps --format-version 1 >/dev/null
     cargo check --locked --workspace --all-targets
 )

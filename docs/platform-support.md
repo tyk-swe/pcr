@@ -1,13 +1,14 @@
 # Platform and capability matrix
 
-This document distinguishes the implemented v0.2 beta-candidate contract from
+This document distinguishes the implemented v0.2 beta contract from
 the remaining privileged release qualification. "Builds" or "hosted CI" does
 not mean that a live networking workflow has passed its dedicated-runner gate.
 
-Status snapshot: 2026-07-11 (`0.2.0-alpha.1`).
+Status snapshot: 2026-07-11 (`0.2.0-beta.1`).
 
-The Cargo version has not yet been advanced or tagged; `0.2.0-alpha.1` is the
-unpublished development version containing the reviewed beta freezes.
+`0.2.0-beta.1` is the tagged compatibility-freeze prerelease. It contains every
+stable-promised implementation; the runner gates below qualify those paths for
+the release candidate.
 
 ## Status legend
 
@@ -18,7 +19,7 @@ unpublished development version containing the reviewed beta freezes.
 - **Runner gate:** implementation has deterministic/injected CI coverage but
   still requires the named privileged/native-dependency release runner.
 
-## Current beta-candidate implementation
+## Current beta implementation
 
 | Capability | Linux | macOS | Windows | Notes |
 | --- | --- | --- | --- | --- |

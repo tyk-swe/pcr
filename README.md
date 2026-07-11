@@ -290,7 +290,7 @@ privileges described in the [platform matrix](docs/platform-support.md).
 ```console
 # Transmit one authorized lab packet and preserve its exact sent bytes.
 packetcraftr --output pcapng send \
-  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)/raw(text="hello")' \
+  --packet 'ipv4(dst="192.0.2.10",identification=1)/udp(dport=9)/raw(text="hello")' \
   --interface "$LAB_INTERFACE" --link-mode layer3 \
   --max-packets 1 --max-bytes 1500 > sent.pcapng
 
@@ -302,7 +302,7 @@ packetcraftr --output ndjson capture \
 
 # Arm and await capture before sending, then retain at most one response.
 packetcraftr --output json exchange \
-  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)' \
+  --packet 'ipv4(dst="192.0.2.10",identification=1)/udp(dport=9)' \
   --interface "$LAB_INTERFACE" --timeout-ms 1000 \
   --max-responses 1 --max-unsolicited 0 --max-queue-frames 64
 ```

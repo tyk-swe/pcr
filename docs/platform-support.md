@@ -283,3 +283,7 @@ Stable release qualification additionally requires:
 - a Windows x86_64 MSVC runner with the documented Npcap version.
 
 A missing dedicated runner is a release blocker for the corresponding advertised live capability, not a reason to downgrade silently to portable-only behavior.
+
+The version-pinned topology, privilege boundary, exact candidate invocation,
+semantic evidence verifier, and retention contract for the first row are in
+the [privileged Linux qualification procedure](linux-live-qualification.md).

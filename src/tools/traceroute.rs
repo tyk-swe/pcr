@@ -20,6 +20,7 @@ use crate::io::{
 };
 use crate::protocols::{Icmpv4, Icmpv6, Ipv4, Ipv6, Tcp, Udp};
 
+use super::nonzero_ipv4_identification;
 use super::scan::{
     classify_scan_response, AuthorizedScanTarget, ScanAuthorizationError, ScanAuthorizer,
     ScanClock, ScanStats, ScanTarget, ScanTransport, MAX_SCAN_PROBES, MAX_SCAN_RATE,
@@ -776,7 +777,7 @@ fn probe_packet(probe: &TracerouteProbe) -> Packet {
             packet.push(Ipv4 {
                 destination,
                 ttl: probe.hop_limit,
-                identification: probe.sequence as u16,
+                identification: nonzero_ipv4_identification(probe.sequence),
                 ..Ipv4::default()
             });
             match probe.strategy {

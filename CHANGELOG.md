@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Fixed generated IPv4 scan, traceroute, and DNS probes to use deterministic
+  nonzero identification values, preserving exact native Layer 3 bytes instead
+  of reaching the kernel-rewrite rejection on the first probe.
 - Made downloaded Release archive extraction portable to Git Bash by entering
   the download directory before invoking `tar` with a relative asset path, and
   pinned manual Release validation packaging to the requested immutable tag.

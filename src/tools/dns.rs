@@ -22,6 +22,7 @@ use crate::io::{
 };
 use crate::protocols::{Ipv4, Ipv6, Udp};
 
+use super::nonzero_ipv4_identification;
 use super::scan::{
     classify_scan_response, AuthorizedScanTarget, ScanAuthorizationError, ScanAuthorizer,
     ScanClassification, ScanClock, ScanStats, ScanTarget, ScanTransport, MAX_SCAN_RATE,
@@ -522,7 +523,7 @@ impl DnsProbe {
             IpAddr::V4(destination) => {
                 packet.push(Ipv4 {
                     destination,
-                    identification: self.attempt as u16,
+                    identification: nonzero_ipv4_identification(u64::from(self.attempt)),
                     ..Ipv4::default()
                 });
             }

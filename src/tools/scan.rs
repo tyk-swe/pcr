@@ -25,6 +25,8 @@ use crate::io::{
 };
 use crate::protocols::{Icmpv4, Icmpv6, Ipv4, Ipv6, Tcp, Udp};
 
+use super::nonzero_ipv4_identification;
+
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;
 pub const DEFAULT_MAX_UNDECODED_SCAN_FRAMES: usize = 64;
@@ -867,7 +869,7 @@ fn probe_packet(probe: &ScanProbe) -> Packet {
         IpAddr::V4(destination) => {
             packet.push(Ipv4 {
                 destination,
-                identification: probe.sequence as u16,
+                identification: nonzero_ipv4_identification(probe.sequence),
                 ..Ipv4::default()
             });
             match probe.transport {

@@ -131,7 +131,7 @@ one unchanged onto a connected system.
 <!-- cli-example:send -->
 ```console
 packetcraftr --output json send \
-  --packet 'ipv4(dst="192.168.56.10")/udp(dport=9)/raw(text="hello")' \
+  --packet 'ipv4(dst="192.168.56.10",identification=1)/udp(dport=9)/raw(text="hello")' \
   --interface lab0 --link-mode layer3 --max-packets 1 --max-bytes 1500
 ```
 
@@ -143,7 +143,7 @@ response and no unsolicited decoded frames.
 <!-- cli-example:exchange -->
 ```console
 packetcraftr --output json exchange \
-  --packet 'ipv4(dst="192.168.56.10")/udp(dport=9)' \
+  --packet 'ipv4(dst="192.168.56.10",identification=1)/udp(dport=9)' \
   --interface lab0 --link-mode layer3 --timeout-ms 100 \
   --max-packets 1 --max-bytes 1500 --max-responses 1 \
   --max-unsolicited 0 --max-queue-frames 8 --max-captured-bytes 12000 \

@@ -29,7 +29,7 @@ packetcraftr --output ndjson fuzz \
 
 # Deliberately exercise dependent lengths in a private lab.
 packetcraftr fuzz \
-  --packet 'ipv4(src="192.168.56.1",dst="192.168.56.2")/udp(sport=40000,dport=9)/raw(text="hello")' \
+  --packet 'ipv4(src="192.168.56.1",dst="192.168.56.2",identification=1)/udp(sport=40000,dport=9)/raw(text="hello")' \
   --strategy malformed --field 1.length --mode permissive --live \
   --allow-malformed-live --allow-permissive-packets \
   --interface lab0 --timeout-ms 250 --rate 10

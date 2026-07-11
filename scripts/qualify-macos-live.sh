@@ -223,6 +223,22 @@ if [[ "${peer_ready}" != 1 ]]; then
     exit 1
 fi
 
+ipv6_ready=0
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    client_ipv6_state="$(ifconfig "${client_interface}" | grep "inet6 ${client_ipv6} " || true)"
+    if [[ -n "${client_ipv6_state}" && "${client_ipv6_state}" != *tentative* &&
+        "${client_ipv6_state}" != *duplicated* ]]; then
+        ipv6_ready=1
+        break
+    fi
+    sleep 0.25
+done
+if [[ "${ipv6_ready}" != 1 ]]; then
+    echo "client IPv6 address did not complete duplicate-address detection" >&2
+    ifconfig "${client_interface}" >&2 || true
+    exit 1
+fi
+
 python3 - "${evidence}/metadata.json" <<PY
 import json, os, sys
 metadata = {

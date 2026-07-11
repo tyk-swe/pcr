@@ -8,6 +8,7 @@ on:
       - scripts/verify-macos-live-evidence.py
       - scripts/linux-live-peer.py
       - examples/live_qualification_peer.rs
+      - crates/io/src/io/platform/macos.rs
   workflow_dispatch:
     inputs:
       expected_commit:

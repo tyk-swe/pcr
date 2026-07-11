@@ -471,6 +471,7 @@ fn parse_route_addresses(
     mask: libc::c_int,
 ) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], NativeRouteError> {
     let mut output = [None; libc::RTAX_MAX as usize];
+    let address_slots = output.len();
     let mut offset = 0;
     for (index, slot) in output.iter_mut().enumerate() {
         if mask & (1 << index) == 0 {
@@ -483,18 +484,41 @@ fn parse_route_addresses(
         };
         let length = usize::from(length_byte);
         let stride = roundup(length);
-        if offset
-            .checked_add(stride)
-            .is_none_or(|end| end > bytes.len())
-        {
+        let Some(address_end) = offset.checked_add(length) else {
             return Err(NativeRouteError::InvalidResponse {
-                message: "macOS route response contained an invalid sockaddr".to_owned(),
+                message: "macOS route response sockaddr length overflowed".to_owned(),
+            });
+        };
+        if address_end > bytes.len() {
+            return Err(NativeRouteError::InvalidResponse {
+                message: format!(
+                    "macOS route response truncated sockaddr index {index}: offset={offset} length={length} bytes={}",
+                    bytes.len()
+                ),
             });
         }
+        let padded_end = offset.checked_add(stride);
+        let has_later_address = ((index + 1)..address_slots).any(|later| mask & (1 << later) != 0);
+        let next_offset = match padded_end {
+            Some(end) if end <= bytes.len() => end,
+            // Darwin may omit only the otherwise-unused alignment trailer
+            // after the final compact sockaddr. Its declared bytes remain
+            // complete and there is no later address whose alignment could
+            // become ambiguous.
+            _ if !has_later_address && address_end == bytes.len() => address_end,
+            _ => {
+                return Err(NativeRouteError::InvalidResponse {
+                    message: format!(
+                        "macOS route response contained an invalid sockaddr at index {index}: offset={offset} length={length} stride={stride} bytes={}",
+                        bytes.len()
+                    ),
+                })
+            }
+        };
         if length != 0 {
             *slot = sockaddr_ip(bytes[offset..].as_ptr().cast::<libc::sockaddr>(), length);
         }
-        offset += stride;
+        offset = next_offset;
     }
     Ok(output)
 }
@@ -544,5 +568,22 @@ mod tests {
             .unwrap();
         assert_eq!(ipv6.selection_reason, RouteSelectionReason::Local);
         assert!(ipv6.selected_address.is_some_and(|source| source.is_ipv6()));
+    }
+
+    #[test]
+    fn route_address_parser_accepts_only_an_unpadded_final_compact_sockaddr() {
+        let mut destination = encode_sockaddr(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0)));
+        let compact_mask = [7_u8, 0, 0xff, 0xff, 0xff, 0, 0];
+        destination.extend_from_slice(&compact_mask);
+        let addresses =
+            parse_route_addresses(&destination, libc::RTA_DST | libc::RTA_NETMASK).unwrap();
+        assert_eq!(
+            addresses[libc::RTAX_DST as usize],
+            Some(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0)))
+        );
+
+        let error =
+            parse_route_addresses(&compact_mask, libc::RTA_NETMASK | libc::RTA_IFA).unwrap_err();
+        assert!(error.to_string().contains("invalid sockaddr"));
     }
 }

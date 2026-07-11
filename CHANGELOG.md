@@ -13,8 +13,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   authorization regressions, offline local packaging of all five unpublished
   crates, credential scanning, and an enforced no-public-registry release policy.
 - Added exact-candidate macOS arm64/x86_64 live qualification over an isolated
-  paired-feth topology, with real routing-socket, BPF, neighbor, Layer 2/3,
-  exchange, replay, scan, traceroute, DNS, fuzz, and typed failure evidence.
+  paired-feth topology and an unaddressed PacketcraftR-native user-space peer,
+  with real routing-socket, zero-loss BPF, neighbor, Layer 2/3, exchange,
+  replay, scan, traceroute, DNS, fuzz, and typed failure evidence.
 
 ### Fixed
 

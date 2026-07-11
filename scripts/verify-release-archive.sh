@@ -117,6 +117,7 @@ if git cat-file -e "${tree}:scripts/audit-rc-readiness.sh" 2>/dev/null; then
         .github/workflows/macos-live-qualification.yml
         docs/macos-live-qualification.md
         docs/rc-security-audit.md
+        examples/live_qualification_peer.rs
         scripts/audit-rc-readiness.sh
         scripts/qualify-macos-live.sh
         scripts/rc-audit-requirements.txt

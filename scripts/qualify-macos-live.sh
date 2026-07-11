@@ -50,7 +50,7 @@ fi
 
 root="$(git rev-parse --show-toplevel)"
 tooling_commit="$(git -C "${root}" rev-parse HEAD)"
-for command in arp cargo find grep ifconfig install ping python3 route rustc sed shasum sudo tar tcpdump; do
+for command in arp cargo find grep ifconfig install python3 route rustc sed shasum sudo tar tcpdump; do
     if ! command -v "${command}" >/dev/null 2>&1; then
         echo "required macOS qualification command is unavailable: ${command}" >&2
         exit 1
@@ -138,6 +138,11 @@ done
 client_interface="feth${unit}"
 peer_interface="feth$((unit + 1))"
 qualified_binary="/tmp/packetcraftr-q50-${expected_architecture}-$$"
+peer_binary="/tmp/packetcraftr-q50-peer-${expected_architecture}-$$"
+peer_ready_file="${evidence}/peer.ready"
+peer_stop_file="${evidence}/peer.stop"
+peer_report_file="${evidence}/peer-report.json"
+peer_pid=""
 client_ipv4="10.50.1.2"
 peer_ipv4="10.50.1.9"
 client_ipv6="fd50:1::2"
@@ -148,12 +153,13 @@ peer_mac="02:50:00:00:01:09"
 cleanup() {
     status=$?
     trap - EXIT INT TERM
+    touch "${peer_stop_file}" >/dev/null 2>&1 || true
     for pid in $(jobs -pr); do
         kill "${pid}" >/dev/null 2>&1 || true
     done
     sudo -n ifconfig "${client_interface}" destroy >/dev/null 2>&1 || true
     sudo -n ifconfig "${peer_interface}" destroy >/dev/null 2>&1 || true
-    rm -f "${qualified_binary}"
+    rm -f "${qualified_binary}" "${peer_binary}"
     rm -rf "${temporary}"
     exit "${status}"
 }
@@ -162,10 +168,13 @@ trap cleanup EXIT INT TERM
 echo "[macOS live] build and test exact candidate"
 (
     cd "${workspace}"
-    cargo build --locked --release --all-features
+    cargo build --locked --release --all-features \
+        --bin packetcraftr --example live_qualification_peer
 ) >"${evidence}/build.log" 2>&1
 install -m 0755 "${workspace}/target/release/packetcraftr" "${qualified_binary}"
+install -m 0755 "${workspace}/target/release/examples/live_qualification_peer" "${peer_binary}"
 binary_sha256="$(shasum -a 256 "${qualified_binary}" | awk '{print $1}')"
+peer_binary_sha256="$(shasum -a 256 "${peer_binary}" | awk '{print $1}')"
 if [[ "$("${qualified_binary}" --version)" != "packetcraftr ${version}" ]]; then
     echo "candidate binary version mismatch" >&2
     exit 1
@@ -173,6 +182,7 @@ fi
 (
     cd "${workspace}"
     cargo test --locked --workspace --all-features
+    cargo test --locked --all-features --example live_qualification_peer
 ) >"${evidence}/failure-path-tests.log" 2>&1
 
 echo "[macOS live] create isolated paired feth/BPF topology"
@@ -184,31 +194,21 @@ sudo -n ifconfig "${peer_interface}" ether "${peer_mac}"
 sudo -n ifconfig "${client_interface}" mtu 1280
 sudo -n ifconfig "${peer_interface}" mtu 1280
 sudo -n ifconfig "${client_interface}" inet "${client_ipv4}" netmask 255.255.255.0 up
-sudo -n ifconfig "${peer_interface}" inet "${peer_ipv4}" netmask 255.255.255.0 up
 sudo -n ifconfig "${client_interface}" inet6 "${client_ipv6}" prefixlen 64 alias
-sudo -n ifconfig "${peer_interface}" inet6 "${peer_ipv6}" prefixlen 64 alias
+sudo -n ifconfig "${peer_interface}" up
 
-topology_ready=0
-for _ in 1 2 3 4 5 6 7 8 9 10; do
-    if ping -c 1 -S "${client_ipv4}" "${peer_ipv4}" >/dev/null 2>&1; then
-        topology_ready=1
-        break
-    fi
-    sleep 0.2
-done
-if [[ "${topology_ready}" != 1 ]]; then
-    echo "paired feth topology did not become ready" >&2
-    ifconfig "${client_interface}" >&2 || true
-    ifconfig "${peer_interface}" >&2 || true
-    exit 1
-fi
-
-python3 "${root}/scripts/linux-live-peer.py" serve \
-    --ipv4 "${peer_ipv4}" --ipv6 "${peer_ipv6}" >"${evidence}/peer.log" 2>&1 &
+rm -f "${peer_ready_file}" "${peer_stop_file}" "${peer_report_file}"
+sudo -n "${peer_binary}" \
+    --interface "${peer_interface}" \
+    --client-mac "${client_mac}" --peer-mac "${peer_mac}" \
+    --client-ipv4 "${client_ipv4}" --peer-ipv4 "${peer_ipv4}" \
+    --client-ipv6 "${client_ipv6}" --peer-ipv6 "${peer_ipv6}" \
+    --ready-file "${peer_ready_file}" --stop-file "${peer_stop_file}" \
+    --report-file "${peer_report_file}" >"${evidence}/peer.log" 2>&1 &
 peer_pid=$!
 peer_ready=0
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if grep '^ready ' "${evidence}/peer.log" >/dev/null 2>&1; then
+    if [[ -f "${peer_ready_file}" ]]; then
         peer_ready=1
         break
     fi
@@ -224,7 +224,7 @@ if [[ "${peer_ready}" != 1 ]]; then
 fi
 
 python3 - "${evidence}/metadata.json" <<PY
-import json, os, platform, sys
+import json, os, sys
 metadata = {
     "schema": "packetcraftr.qualification-input/v1",
     "platform": "macos",
@@ -235,6 +235,7 @@ metadata = {
     "tooling_commit": "${tooling_commit}",
     "archive_sha256": "${archive_sha256}",
     "binary_sha256": "${binary_sha256}",
+    "peer_binary_sha256": "${peer_binary_sha256}",
     "rust_version": "1.96.0",
     "runner_image": os.environ.get("ImageOS"),
     "runner_image_version": os.environ.get("ImageVersion"),
@@ -249,6 +250,8 @@ metadata = {
         "client_ipv6": "${client_ipv6}",
         "peer_ipv6": "${peer_ipv6}",
         "mtu": 1280,
+        "peer_mode": "packetcraftr-native-bpf",
+        "peer_interface_addresses": "none",
     },
 }
 with open(sys.argv[1], "w", encoding="utf-8") as output:
@@ -316,12 +319,17 @@ run_json exchange-ipv6.json exchange \
     --max-packets 1 --max-bytes 1500 --max-responses 1 --max-unsolicited 8 "${live_limits[@]}"
 
 client --output pcapng capture \
-    --packet "ipv4(dst=${client_ipv4},identification=505)/udp(dport=9)" \
+    --packet "eth(source=${peer_mac},destination=${client_mac},ether_type=2048)/raw(hex=00)" \
     --interface "${client_interface}" --timeout-ms 800 --max-packets 8 --max-bytes 12000 \
     "${live_limits[@]}" >"${evidence}/capture.pcapng" 2>"${evidence}/capture.stderr" &
 capture_pid=$!
 sleep 0.25
-ping -c 1 -S "${peer_ipv4}" "${client_ipv4}" >/dev/null
+capture_trigger_hex="$("${qualified_binary}" --output hex build \
+    --packet "ipv4(src=${peer_ipv4},dst=${client_ipv4},identification=505)/udp(sport=9000,dport=9)/raw(text=capture)")"
+client --output json send \
+    --packet "eth(source=${peer_mac},destination=${client_mac},ether_type=2048)/raw(hex=${capture_trigger_hex})" \
+    --interface "${peer_interface}" --link-mode layer2 --max-packets 1 --max-bytes 1500 \
+    >"${evidence}/capture-trigger.json"
 wait "${capture_pid}"
 "${qualified_binary}" --output ndjson read "${evidence}/capture.pcapng" \
     --max-frames 8 --max-bytes 12000 --max-frame-bytes 1500 --max-interfaces 8 \
@@ -412,6 +420,9 @@ set -e
 printf '%s\n' "${mtu_status}" >"${evidence}/low-mtu.exit"
 
 echo "[macOS live] validate and bundle evidence"
+touch "${peer_stop_file}"
+wait "${peer_pid}"
+peer_pid=""
 python3 "${root}/scripts/verify-macos-live-evidence.py" --evidence "${evidence}"
 python3 - "${evidence}" <<'PY'
 import hashlib, sys

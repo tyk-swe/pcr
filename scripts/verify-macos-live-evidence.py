@@ -76,7 +76,60 @@ def main() -> int:
         topology = metadata.get("topology")
         if not isinstance(topology, dict) or topology.get("kind") != "paired-feth":
             raise EvidenceError("metadata does not identify the isolated feth topology")
+        if (
+            topology.get("peer_mode") != "packetcraftr-native-bpf"
+            or topology.get("peer_interface_addresses") != "none"
+        ):
+            raise EvidenceError("metadata does not identify the isolated native-I/O peer")
         interface_name = topology["client_interface"]
+        peer_interface = topology["peer_interface"]
+
+        peer = load_json(root / "peer-report.json")
+        if (
+            peer.get("schema") != "packetcraftr.live-qualification-peer/v1"
+            or peer.get("status") != "pass"
+            or peer.get("interface") != peer_interface
+        ):
+            raise EvidenceError("the Packetcraftr-backed peer did not complete successfully")
+        peer_capture = peer.get("capture")
+        if not isinstance(peer_capture, dict) or any(
+            peer_capture.get(field, 0) != 0
+            for field in (
+                "dropped_frames",
+                "dropped_bytes",
+                "overflow_events",
+                "receiver_dropped_frames",
+            )
+        ):
+            raise EvidenceError("the Packetcraftr-backed peer reported capture loss")
+        peer_responses = peer.get("responses")
+        required_peer_responses = (
+            "arp",
+            "ndp",
+            "udp_echo_ipv4",
+            "udp_echo_ipv6",
+            "dns_ipv4",
+            "dns_ipv6",
+            "tcp_syn_ack_ipv4",
+            "icmp_echo_ipv6",
+            "traceroute_unreachable_ipv4",
+            "traceroute_unreachable_ipv6",
+        )
+        if not isinstance(peer_responses, dict) or any(
+            not isinstance(peer_responses.get(case), int)
+            or int(peer_responses[case]) < 1
+            for case in required_peer_responses
+        ):
+            raise EvidenceError("the isolated peer omitted a required protocol response")
+        if peer_responses.get("total") != sum(
+            int(peer_responses[case]) for case in required_peer_responses
+        ):
+            raise EvidenceError("the isolated peer response accounting is inconsistent")
+        received_frames = peer_capture.get("received_frames")
+        if not isinstance(received_frames, int) or received_frames < int(
+            peer_responses["total"]
+        ):
+            raise EvidenceError("the isolated peer sent more replies than it captured requests")
 
         interfaces = success(root, "interfaces.json", "interfaces").get("interfaces")
         if not isinstance(interfaces, list) or not any(
@@ -128,12 +181,15 @@ def main() -> int:
         capture = ndjson_records(root / "capture-read.ndjson")
         if not any(record.get("status") == "success" for record in capture):
             raise EvidenceError("finite capture did not retain a frame")
+        success(root, "capture-trigger.json", "send")
         rows.append({"case": "capture-pcapng-readback", "status": "pass"})
 
-        source_record = ndjson_records(root / "stacked-vlan-source.ndjson")[0]
-        captured_record = ndjson_records(root / "stacked-vlan-captured.ndjson")[0]
+        source_records = ndjson_records(root / "stacked-vlan-source.ndjson")
+        captured_records = ndjson_records(root / "stacked-vlan-captured.ndjson")
         expected_hex = (root / "stacked-vlan.hex").read_text(encoding="utf-8").strip()
-        if frame_hex(source_record) != expected_hex or frame_hex(captured_record) != expected_hex:
+        source_hex = [frame_hex(record) for record in source_records]
+        captured_hex = [frame_hex(record) for record in captured_records]
+        if expected_hex not in source_hex or expected_hex not in captured_hex:
             raise EvidenceError("stacked VLAN replay changed explicit packet bytes")
         replay = success(root, "stacked-vlan-replay.json", "replay")
         if replay.get("frames_completed") != 1:
@@ -159,6 +215,7 @@ def main() -> int:
         if mtu_exit == 0 or not isinstance(mtu_error, dict) or mtu_error.get("code") != "packet.mtu":
             raise EvidenceError("low-MTU send did not fail before native I/O")
         rows.append({"case": "low-mtu", "status": "pass"})
+        rows.append({"case": "native-bpf-userspace-peer-zero-loss", "status": "pass"})
 
         packet_files = [
             "send-layer2-ipv4.json",

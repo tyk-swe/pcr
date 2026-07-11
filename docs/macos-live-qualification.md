@@ -18,23 +18,29 @@ version rather than treating the moving image as release identity.
 
 ## Isolated topology and privilege boundary
 
-The harness creates two disposable `feth` interfaces, fixes their local MAC,
-IPv4, IPv6, and MTU values, and connects them with the kernel's `peer` control.
+The harness creates two disposable `feth` interfaces, fixes their MAC and MTU
+values, assigns IPv4/IPv6 addresses only to the client side, and connects them
+with the kernel's `peer` control. A candidate-built Rust peer owns the otherwise
+unaddressed peer side through PacketcraftR's `SystemCaptureProvider` and
+`SystemLayer2Io`. It answers ARP, NDP, UDP, TCP, ICMP, traceroute, and DNS frames
+in user space, so the host network stack cannot satisfy traffic without crossing
+the fake-Ethernet cable and native BPF boundary.
 Apple's open-source `ifconfig` and XNU implementations define that fake-Ethernet
 peer and its `DLT_EN10MB` BPF taps. The pair is an in-runner cable: no test
 packet is addressed or routed to GitHub infrastructure or the public network.
 
-Every PacketcraftR live command runs with `sudo`; a separate `nobody` capture
-proves that an absent BPF permission returns `capability.privilege`. Cleanup
-destroys both interfaces and joins the peer/capture processes on success,
-failure, or interruption.
+Every PacketcraftR live command and the peer run with `sudo`; a separate
+`nobody` capture proves that an absent BPF permission returns
+`capability.privilege`. Cleanup destroys both interfaces and joins the
+peer/capture processes on success, failure, or interruption.
 
 ## Sign-off matrix and evidence
 
 For both architectures the exact candidate must pass:
 
 - native interface and route inventory plus interface-scoped IPv4/IPv6 plans;
-- kernel ARP/NDP through Layer 2 sends and IPv4/IPv6 raw Layer 3 sends;
+- active ARP/NDP against the unaddressed user-space peer through Layer 2 sends
+  and IPv4/IPv6 raw Layer 3 sends;
 - capture-ready IPv4/IPv6 exchange and finite PCAPNG readback;
 - byte-identical stacked-Q-in-Q/VLAN replay observed on the peer BPF device;
 - TCP/ICMP scan, direct traceroute, deterministic DNS, and one bounded live case
@@ -42,6 +48,9 @@ For both architectures the exact candidate must pass:
 - the injected readiness, queue/loss, partial-send, timeout, and cleanup unit
   regressions from the same archive; and
 - actionable unprivileged BPF and low-MTU failures.
+
+The peer report must account for every required response family and show zero
+receiver, queue, or overflow loss before evidence can pass.
 
 `verify-macos-live-evidence.py` generates `report.json` only after the semantic
 assertions pass. The retained bundle includes candidate/archive/binary identity,

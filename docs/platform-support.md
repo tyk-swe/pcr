@@ -31,7 +31,7 @@ the release candidate.
 | Route/source planning and inventory CLI | Implemented, CI | Implemented, CI | Implemented, CI | `plan` and interface-bound `routes` use `native-route`; both remain passive |
 | Live Layer 2 capture/injection CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `send`/`capture` use libpcap or runtime-loaded Npcap; hosted CI covers policy, ABI, and lifecycle seams, while privileged qualification requires dedicated runners |
 | Gateway-aware ARP/NDP | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
-| Raw Layer 3 transmission CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `send --link-mode layer3` uses target raw sockets; hosted CI covers validation and injected send seams, while privileged qualification requires dedicated runners |
+| Raw Layer 3 transmission CLI | IPv4/IPv6, CI + runner gate | Exact IPv4; IPv6 typed unsupported, CI + runner gate | IPv4/IPv6, CI + runner gate | Darwin cannot accept a caller-supplied complete IPv6 header; PacketcraftR fails that explicit mode before socket I/O instead of mutating bytes or falling back to BPF |
 | Coordinated exchange CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `exchange` awaits capture readiness before send and shares bounded retention, loss reporting, and joined shutdown contracts |
 | Exact bounded replay CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable policy/timing/transmitter seams are deterministic in hosted CI; privileged Ethernet/raw-IP replay remains a dedicated-runner gate |
 | Defragmentation and TCP reassembly | Frozen, CI | Frozen, CI | Frozen, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
@@ -57,7 +57,7 @@ use; a runner-gated row is not a stable v0.2 qualification claim.
 
 `SystemNeighborResolver` composes the system interface, Layer 2, and capture providers. Its rich route-planner path uses the interface-owned source IP and MAC, selected next hop, MTU, link type, and exact VLAN stack. ARP and NDP use finite attempts and timeouts, protocol validation, bounded captured evidence, joined shutdown, and a bounded finite-lifetime cache. Selecting both `native-route` and `native-layer2` supplies the complete native planning and resolution path; either provider family remains independently injectable.
 
-`--features native-layer3` selects `SystemLayer3Io` on Linux, macOS, and Windows. It accepts only complete IPv4/IPv6 datagrams whose destination, family, and size match the materialized route, constrains the route-selected interface independently of a crafted packet source, enables full-header raw transmission, and checks complete writes. Linux uses device binding, macOS uses interface-index binding, and Winsock uses its family-appropriate unicast or multicast interface option. Linux and Windows may fill selected zero or derived IPv4 fields; macOS additionally consumes total length and fragment fields in host order. The adapter validates values that the kernel would rewrite and uses a private macOS submission copy, so a success can report the original exact wire bytes. Spoofed raw UDP that Windows can silently discard is rejected before send; other platform restrictions remain typed socket errors.
+`--features native-layer3` selects `SystemLayer3Io` on Linux, macOS, and Windows. It accepts only complete datagrams whose destination, family, and size match the materialized route, constrains the route-selected interface independently of a crafted packet source, enables supported full-header raw transmission, and checks complete writes. Linux uses device binding and supports complete IPv4/IPv6; macOS uses interface-index binding for exact IPv4; Winsock uses its family-appropriate unicast or multicast interface option for IPv4/IPv6. Darwin raw IPv6 always synthesizes its header and rejects `IPV6_HDRINCL`, so an explicit macOS Layer 3 IPv6 request returns `capability.unsupported` before socket I/O; callers can explicitly choose Layer 2 when exact IPv6 Ethernet transmission is appropriate. Linux and Windows may fill selected zero or derived IPv4 fields; macOS consumes total length and fragment fields in host order. The adapter validates values that the kernel would rewrite and uses a private macOS IPv4 submission copy, so a success can report the original exact wire bytes. Spoofed raw UDP that Windows can silently discard is rejected before send; other platform restrictions remain typed socket errors.
 
 The native CLI feature requirements are explicit:
 
@@ -74,7 +74,7 @@ The native CLI feature requirements are explicit:
 | Offline `fuzz` | None; portable on every profile |
 | Live `fuzz` | Same route, capture, and selected send paths as `exchange` |
 | Ethernet `replay` | `native-route` + `native-layer2` |
-| Raw IPv4/IPv6 `replay` | `native-route` + `native-layer3` |
+| Raw IPv4/IPv6 `replay` | `native-route` + `native-layer3`; complete-header IPv6 is typed unsupported on macOS |
 
 An unavailable feature, native runtime, device, or privilege is returned as a
 typed capability failure; no command silently changes link mode or substitutes
@@ -150,7 +150,7 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 
 - Portable and offline use: no external packet-capture package.
 - `native-layer2` uses the system libpcap/BPF facilities and can require elevated privileges or an administrator-managed device policy.
-- `native-layer3` uses raw IPv4/IPv6 sockets, macOS interface-index binding, and a private host-order IPv4 submission copy; root-equivalent raw-socket privilege is normally required.
+- `native-layer3` uses an exact raw IPv4 socket, macOS interface-index binding, and a private host-order IPv4 submission copy; root-equivalent raw-socket privilege is normally required. Complete-header raw IPv6 is rejected before native I/O because Darwin synthesizes that header and has no `IPV6_HDRINCL` support; explicit Layer 2 remains available without an automatic fallback.
 - `native-route` route selection uses routing sockets and `getifaddrs`; it is exercised on hosted macOS CI for IPv4/IPv6 loopback selection and interface enumeration.
 - Routing-socket setup is isolated behind `socket2` 0.6 plus the private native ABI adapter; libpcap/BPF integration uses `pcap` 2.4.
 - CI currently qualifies passive discovery on macOS 14 arm64; both `socket2` and `libc` are MIT OR Apache-2.0 licensed.
@@ -231,8 +231,8 @@ administrator-managed ownership without making them world-writable:
 ls -l /dev/bpf*
 ```
 
-Layer 2 access depends on the host's BPF policy; raw Layer 3 sockets normally
-require an elevated process. Use a dedicated authorized test host or an
+Layer 2 access depends on the host's BPF policy; exact raw IPv4 Layer 3 sockets
+normally require an elevated process. Use a dedicated authorized test host or an
 administrator-managed launch policy. If the process can enumerate routes but
 cannot open capture, the route feature is working and the failure is specifically
 the BPF device/privilege boundary.

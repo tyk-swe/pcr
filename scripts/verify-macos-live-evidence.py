@@ -153,11 +153,31 @@ def main() -> int:
             if plan.get("mode") != "layer2" or not plan.get("synthesized_ethernet"):
                 raise EvidenceError(f"{family} plan did not preserve Layer 2 intent")
             rows.append({"case": f"plan-{family}", "status": "pass"})
-            for mode in ("layer2", "layer3"):
+            for mode in ("layer2",):
                 sent = success(root, f"send-{mode}-{family}.json", "send").get("frame")
                 if not isinstance(sent, dict) or not sent.get("bytes_hex"):
                     raise EvidenceError(f"{mode} {family} send omitted exact bytes")
                 rows.append({"case": f"send-{mode}-{family}", "status": "pass"})
+
+        sent_ipv4 = success(root, "send-layer3-ipv4.json", "send").get("frame")
+        if not isinstance(sent_ipv4, dict) or not sent_ipv4.get("bytes_hex"):
+            raise EvidenceError("Layer 3 IPv4 send omitted exact bytes")
+        rows.append({"case": "send-layer3-ipv4", "status": "pass"})
+
+        layer3_ipv6_exit = int((root / "send-layer3-ipv6.exit").read_text().strip())
+        layer3_ipv6 = load_json(root / "send-layer3-ipv6.json")
+        layer3_ipv6_error = layer3_ipv6.get("error")
+        if (
+            layer3_ipv6_exit != 4
+            or layer3_ipv6.get("command") != "send"
+            or layer3_ipv6.get("status") != "error"
+            or not isinstance(layer3_ipv6_error, dict)
+            or layer3_ipv6_error.get("code") != "capability.unsupported"
+        ):
+            raise EvidenceError(
+                "Darwin exact-header Layer 3 IPv6 did not fail as a typed capability"
+            )
+        rows.append({"case": "send-layer3-ipv6-typed-unsupported", "status": "pass"})
 
         for family in ("ipv4", "ipv6"):
             exchange = success(root, f"exchange-{family}.json", "exchange")

@@ -133,13 +133,13 @@ Build and test the current target's native providers with:
 cargo test --features native-route
 # Linux/macOS: requires the system libpcap development/runtime files.
 cargo test --features native-layer2
-# Raw IPv4/IPv6 sockets on Linux, macOS, or Windows:
+# Raw IPv4/IPv6 sockets on Linux/Windows and exact raw IPv4 on macOS:
 cargo test --features native-layer3
 # Equivalent to the complete CI native-provider profile:
 cargo test --all-features
 ```
 
-`native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. `SystemNeighborResolver` composes those providers with interface metadata to perform bounded ARP or NDP; pair it with `native-route` for target-native route, gateway, source, and MTU selection. `native-layer3` provides `SystemLayer3Io` through target raw sockets, constrains the route-selected path separately from crafted source fields, and validates that mandatory kernel header processing cannot change the intended wire bytes. Live use still requires the relevant native runtime and operating-system privileges; missing dependencies, devices, permissions, unsupported packet classes, and unsupported modes are typed errors rather than fallbacks.
+`native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. `SystemNeighborResolver` composes those providers with interface metadata to perform bounded ARP or NDP; pair it with `native-route` for target-native route, gateway, source, and MTU selection. `native-layer3` provides `SystemLayer3Io` through target raw sockets, constrains the route-selected path separately from crafted source fields, and validates that mandatory kernel header processing cannot change the intended wire bytes. Darwin's synthesized raw IPv6 header makes complete-header transmission unsupported, so that explicit mode fails before socket I/O instead of falling back or reporting mutated bytes. Live use still requires the relevant native runtime and operating-system privileges; missing dependencies, devices, permissions, unsupported packet classes, and unsupported modes are typed errors rather than fallbacks.
 
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
@@ -343,7 +343,7 @@ The v0.2 contracts are:
 - Decode-only multiplexing roots must explicitly admit each concrete protocol they return. The raw-IP root therefore continues registry binding from the decoded IPv4 or IPv6 layer rather than misrepresenting it as a generic link layer.
 - Padding records an explicit ownership boundary when its bytes sit outside an IPv4, IPv6, or UDP declared length or the fixed ARP body. Invalid or unsupported boundaries fail strict builds; preserved network/datagram trailers emit diagnostics and require the live opt-in.
 - Synthesized or resolved Layer 2 bytes are part of the exact built frame. Byte-policy checks include that envelope before neighbor traffic, and a backend-reported partial send is a typed failure.
-- Raw Layer 3 adapters accept only complete IPv4/IPv6 datagrams for the selected route and MTU. They reject header values the operating system would change, preserve spoofed packet sources separately from the bound interface source, and report partial native writes as typed failures.
+- Raw Layer 3 adapters accept only complete datagrams for the selected route and MTU. They reject header values or platform modes the operating system would change, preserve spoofed packet sources separately from the bound interface source, and report partial native writes as typed failures; complete-header IPv6 is explicitly unsupported on macOS.
 - Replay authorizes each fully captured frame before interface or route I/O, fixes its Layer 2/Layer 3 provider from the capture root, applies finite timing/frame/byte ceilings, and requires backend-confirmed bytes before emitting success evidence.
 - Scan authorizes the declared hostname before DNS and every resolved address before probe construction, then uses bounded capture-ready exchanges and accepts only checksum-valid matcher- or quote-correlated responses.
 - DNS authorizes the complete operation before probe construction, repeats hostname and every-answer authorization for each retry, and accepts only checksum-valid reverse-tuple responses with the exact transaction and question; unrelated section data remains rejected audit evidence.

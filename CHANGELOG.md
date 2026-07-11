@@ -35,6 +35,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   addresses, with target-specific regressions for both native ABIs; native
   fallback source selection now prefers the destination prefix and address
   scope instead of an unrelated first same-family address.
+- Classified complete-header raw IPv6 as unsupported on macOS before native
+  I/O because Darwin synthesizes that header and rejects `IPV6_HDRINCL`; the
+  explicit Layer 2 path retains exact IPv6 transmission without a fallback.
 - Fixed generated IPv4 scan, traceroute, and DNS probes to use deterministic
   nonzero identification values, preserving exact native Layer 3 bytes instead
   of reaching the kernel-rewrite rejection on the first probe.

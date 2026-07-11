@@ -174,6 +174,7 @@ fn send_with<B: RawIpBackend>(
     backend: &B,
 ) -> Result<IoSendReport, LiveIoError> {
     let packet = prepare(frame)?;
+    validate_platform_support(&packet)?;
     let actual = backend
         .send(&packet)
         .map_err(|error| map_raw_error(&packet.interface, error))?;
@@ -185,6 +186,22 @@ fn send_with<B: RawIpBackend>(
         bytes_sent: packet.wire_bytes.len(),
         wire_bytes: Some(packet.wire_bytes),
     })
+}
+
+#[cfg(target_os = "macos")]
+fn validate_platform_support(packet: &PreparedRawIp) -> Result<(), LiveIoError> {
+    if packet.family == IpFamily::V6 {
+        return Err(LiveIoError::Unsupported {
+            message: "Darwin raw IPv6 sockets synthesize the IPv6 header and do not support IPV6_HDRINCL; exact complete-header transmission requires an explicit Layer 2 path"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn validate_platform_support(_packet: &PreparedRawIp) -> Result<(), LiveIoError> {
+    Ok(())
 }
 
 fn prepare(frame: Layer3Frame<'_>) -> Result<PreparedRawIp, LiveIoError> {
@@ -585,9 +602,20 @@ mod tests {
         let bytes = ipv6(source, destination);
         let backend = RecordingBackend::complete();
 
-        let report = send_with(Layer3Frame::try_new(&bytes, &route).unwrap(), &backend).unwrap();
-
-        assert_eq!(report.wire_bytes, Some(bytes));
+        #[cfg(not(target_os = "macos"))]
+        {
+            let report =
+                send_with(Layer3Frame::try_new(&bytes, &route).unwrap(), &backend).unwrap();
+            assert_eq!(report.wire_bytes, Some(bytes));
+        }
+        #[cfg(target_os = "macos")]
+        {
+            assert!(matches!(
+                send_with(Layer3Frame::try_new(&bytes, &route).unwrap(), &backend),
+                Err(LiveIoError::Unsupported { .. })
+            ));
+            assert!(backend.packet.lock().unwrap().is_none());
+        }
     }
 
     #[test]

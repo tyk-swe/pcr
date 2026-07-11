@@ -320,9 +320,14 @@ run_json send-layer2-ipv6.json send \
 run_json send-layer3-ipv4.json send \
     --packet "ipv4(dst=${peer_ipv4},identification=503)/udp(sport=40102,dport=9000)/raw(text=layer3-ipv4)" \
     --interface "${client_interface}" --link-mode layer3 --max-packets 1 --max-bytes 1500
-run_json send-layer3-ipv6.json send \
+set +e
+client --output json send \
     --packet "ipv6(dst=${peer_ipv6})/udp(sport=40103,dport=9000)/raw(text=layer3-ipv6)" \
-    --interface "${client_interface}" --link-mode layer3 --max-packets 1 --max-bytes 1500
+    --interface "${client_interface}" --link-mode layer3 --max-packets 1 --max-bytes 1500 \
+    >"${evidence}/send-layer3-ipv6.json"
+layer3_ipv6_status=$?
+set -e
+printf '%s\n' "${layer3_ipv6_status}" >"${evidence}/send-layer3-ipv6.exit"
 
 echo "[macOS live] capture-ready exchange and finite capture"
 run_json exchange-ipv4.json exchange \
@@ -331,7 +336,7 @@ run_json exchange-ipv4.json exchange \
     --max-packets 1 --max-bytes 1500 --max-responses 1 --max-unsolicited 8 "${live_limits[@]}"
 run_json exchange-ipv6.json exchange \
     --packet "ipv6(dst=${peer_ipv6})/udp(sport=41001,dport=9000)/raw(text=exchange-ipv6)" \
-    --interface "${client_interface}" --link-mode layer3 --timeout-ms 1200 \
+    --interface "${client_interface}" --link-mode layer2 --timeout-ms 1200 \
     --max-packets 1 --max-bytes 1500 --max-responses 1 --max-unsolicited 8 "${live_limits[@]}"
 
 client --output pcapng capture \
@@ -380,7 +385,7 @@ run_json scan-ipv4.json scan "${peer_ipv4}" --transport tcp --ports 9443 --attem
     "${live_limits[@]}"
 run_json scan-ipv6.json scan "${peer_ipv6}" --transport icmp --family ipv6 --attempts 1 \
     --timeout-ms 700 --batch-size 1 --rate 10 --max-probes 1 --max-duration-ms 2500 \
-    --interface "${client_interface}" --link-mode layer3 --max-packets 1 --max-bytes 1500 \
+    --interface "${client_interface}" --link-mode layer2 --max-packets 1 --max-bytes 1500 \
     "${live_limits[@]}"
 run_json traceroute-ipv4.json traceroute "${peer_ipv4}" --strategy udp --first-hop 1 \
     --max-hops 1 --attempts 1 --timeout-ms 700 --rate 10 --max-probes 1 \
@@ -388,7 +393,7 @@ run_json traceroute-ipv4.json traceroute "${peer_ipv4}" --strategy udp --first-h
     --max-packets 1 --max-bytes 1500 "${live_limits[@]}"
 run_json traceroute-ipv6.json traceroute "${peer_ipv6}" --strategy udp --family ipv6 \
     --first-hop 1 --max-hops 1 --attempts 1 --timeout-ms 700 --rate 10 --max-probes 1 \
-    --max-duration-ms 2500 --interface "${client_interface}" --link-mode layer3 \
+    --max-duration-ms 2500 --interface "${client_interface}" --link-mode layer2 \
     --max-packets 1 --max-bytes 1500 "${live_limits[@]}"
 run_json dns-ipv4.json dns "${peer_ipv4}" www.example.test --type a --port 5353 \
     --transaction-id 20501 --source-port 42000 --attempts 1 --timeout-ms 700 --rate 10 \
@@ -396,7 +401,7 @@ run_json dns-ipv4.json dns "${peer_ipv4}" www.example.test --type a --port 5353 
     --max-packets 1 --max-bytes 1500 "${live_limits[@]}"
 run_json dns-ipv6.json dns "${peer_ipv6}" www.example.test --type a --port 5353 \
     --transaction-id 20502 --source-port 42001 --attempts 1 --timeout-ms 700 --rate 10 \
-    --max-duration-ms 2500 --interface "${client_interface}" --link-mode layer3 \
+    --max-duration-ms 2500 --interface "${client_interface}" --link-mode layer2 \
     --max-packets 1 --max-bytes 1500 "${live_limits[@]}"
 
 fuzz_packet="ipv4(dst=${peer_ipv4},identification=507)/udp(sport=43000,dport=9000)/raw(text=hello)"

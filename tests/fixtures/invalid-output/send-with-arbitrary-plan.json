@@ -1,0 +1,18 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "send",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "frame": {
+      "bytes_hex": "00",
+      "length": 1
+    },
+    "route": {
+      "plan": {
+        "arbitrary": true
+      }
+    }
+  },
+  "diagnostics": []
+}

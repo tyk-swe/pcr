@@ -85,6 +85,16 @@ fn write_public_raw_capture() -> PathBuf {
     write_link_capture(packetcraftr::LinkType::RAW, &[built.bytes.as_ref()])
 }
 
+fn decode_output_hex(output: &[u8]) -> Vec<u8> {
+    let value = std::str::from_utf8(output).unwrap().trim();
+    assert_eq!(value.len() % 2, 0);
+    value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
+}
+
 #[test]
 fn build_expression_emits_complete_frame_hex() {
     let output = binary()
@@ -106,6 +116,79 @@ fn build_expression_emits_complete_frame_hex() {
     let hex = String::from_utf8(output.stdout).unwrap();
     assert!(hex.trim().starts_with("45"));
     assert!(hex.trim().ends_with("6869"));
+}
+
+#[test]
+fn exact_bytes_agree_across_raw_hex_ndjson_pcap_and_pcapng() {
+    let expression = "raw(hex=0001027f80ffdeadbeef)";
+    let raw = binary()
+        .args(["--output", "raw", "build", "--packet", expression])
+        .output()
+        .unwrap();
+    assert!(raw.status.success());
+    let expected = raw.stdout;
+
+    let hex = binary()
+        .args(["--output", "hex", "build", "--packet", expression])
+        .output()
+        .unwrap();
+    assert!(hex.status.success());
+    assert_eq!(decode_output_hex(&hex.stdout), expected);
+
+    let path = write_link_capture(packetcraftr::LinkType::RAW, &[&expected]);
+    let read_hex = binary()
+        .args(["--output", "hex", "read"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(read_hex.status.success());
+    assert_eq!(decode_output_hex(&read_hex.stdout), expected);
+
+    let ndjson = binary()
+        .args(["--output", "ndjson", "read"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(ndjson.status.success());
+    let record: serde_json::Value = serde_json::from_slice(&ndjson.stdout).unwrap();
+    assert_eq!(
+        decode_output_hex(
+            record["result"]["frame"]["bytes_hex"]
+                .as_str()
+                .unwrap()
+                .as_bytes()
+        ),
+        expected
+    );
+    assert_eq!(
+        record["result"]["frame"]["captured_length"],
+        expected.len() as u64
+    );
+    assert_eq!(
+        record["result"]["frame"]["original_length"],
+        expected.len() as u64
+    );
+
+    for format in ["pcap", "pcapng"] {
+        let output = binary()
+            .args(["--output", format, "read"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut reader =
+            packetcraftr::CaptureReader::new(std::io::Cursor::new(output.stdout)).unwrap();
+        let frame = reader.next_frame().unwrap().unwrap();
+        assert_eq!(frame.bytes.as_ref(), expected, "{format}");
+        assert_eq!(frame.captured_length as usize, expected.len(), "{format}");
+        assert_eq!(frame.original_length as usize, expected.len(), "{format}");
+        assert!(reader.next_frame().unwrap().is_none(), "{format}");
+    }
+    std::fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -845,25 +928,52 @@ fn unsupported_json_for_read_is_typed_before_opening_the_input() {
 
 #[cfg(unix)]
 #[test]
-fn closed_stdout_is_a_runtime_io_error_without_a_panic() {
-    let path = temp_path("closed-stdout");
-    std::fs::write(&path, vec![0u8; 1024 * 1024]).unwrap();
+fn closed_stdout_is_cleanly_classified_for_every_output_family() {
+    let bytes = vec![0u8; 1024 * 1024];
+    let raw_path = temp_path("closed-stdout-raw");
+    std::fs::write(&raw_path, &bytes).unwrap();
+    let capture_path = write_link_capture(packetcraftr::LinkType(147), &[&bytes]);
 
-    let mut child = binary()
-        .args(["--output", "hex", "dissect", "--file"])
-        .arg(&path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    drop(child.stdout.take());
-    let output = child.wait_with_output().unwrap();
-    std::fs::remove_file(path).unwrap();
+    for format in ["json", "hex", "raw"] {
+        let mut child = binary()
+            .args(["--output", format, "dissect", "--file"])
+            .arg(&raw_path)
+            .args(["--link-type", "147"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take());
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(5), "{format}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("write stdout failed"), "{format}: {stderr}");
+        assert!(!stderr.contains("panicked"), "{format}: {stderr}");
+    }
 
-    assert_eq!(output.status.code(), Some(5));
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("write stdout failed"), "{stderr}");
-    assert!(!stderr.contains("panicked"), "{stderr}");
+    for format in ["text", "ndjson", "pcap", "pcapng"] {
+        let mut child = binary()
+            .args(["--output", format, "read"])
+            .arg(&capture_path)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        drop(child.stdout.take());
+        let output = child.wait_with_output().unwrap();
+        assert_eq!(output.status.code(), Some(5), "{format}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("write stdout failed")
+                || stderr.contains("write capture output failed")
+                || stderr.contains("capture I/O failed"),
+            "{format}: {stderr}"
+        );
+        assert!(!stderr.contains("panicked"), "{format}: {stderr}");
+    }
+
+    std::fs::remove_file(raw_path).unwrap();
+    std::fs::remove_file(capture_path).unwrap();
 }
 
 #[test]

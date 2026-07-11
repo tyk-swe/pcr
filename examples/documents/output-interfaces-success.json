@@ -1,0 +1,28 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "interfaces",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "interfaces": [
+      {
+        "name": "lab0",
+        "index": 2,
+        "description": "isolated test interface",
+        "mac": "02:00:00:00:00:01",
+        "addresses": ["192.168.56.2/24"],
+        "flags": {
+          "up": true,
+          "broadcast": true,
+          "loopback": false,
+          "point_to_point": false,
+          "multicast": true
+        },
+        "mtu": 1500,
+        "capability": "layer2_and3",
+        "link_type": 1
+      }
+    ]
+  },
+  "diagnostics": []
+}

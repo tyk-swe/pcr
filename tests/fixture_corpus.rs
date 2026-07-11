@@ -16,7 +16,7 @@ use packetcraftr::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-const FIXTURE_COUNT: usize = 25;
+const FIXTURE_COUNT: usize = 28;
 
 #[derive(Debug, Deserialize)]
 struct Provenance {
@@ -314,7 +314,10 @@ fn negative_output_documents_are_hash_verified_before_schema_ci() {
         "invalid-output/aggregate-error-with-sequence.json",
         "invalid-output/build-with-frame-result.json",
         "invalid-output/exchange-stream-with-aggregate-result.json",
+        "invalid-output/plan-with-arbitrary-route.json",
         "invalid-output/read-as-aggregate.json",
+        "invalid-output/routes-with-arbitrary-decision.json",
+        "invalid-output/send-with-arbitrary-plan.json",
         "invalid-output/stream-without-sequence.json",
     ] {
         let (bytes, provenance) = verified(relative);

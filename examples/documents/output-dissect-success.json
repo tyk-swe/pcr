@@ -1,0 +1,53 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dissect",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "bytes_hex": "deadbeef",
+    "length": 4,
+    "link_type": 147,
+    "packet": {
+      "schema": "packetcraftr.packet/v1",
+      "layers": [
+        {
+          "protocol": "raw",
+          "fields": {
+            "bytes": {
+              "type": "bytes",
+              "value": [222, 173, 190, 239]
+            }
+          }
+        }
+      ]
+    },
+    "layout": {
+      "layers": [
+        {
+          "index": 0,
+          "protocol": "raw",
+          "range": {
+            "start": 0,
+            "end": 4
+          },
+          "fields": [
+            {
+              "name": "bytes",
+              "range": {
+                "start": 0,
+                "end": 4
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "diagnostics": [
+    {
+      "code": "decode.unsupported_link_type",
+      "severity": "warning",
+      "message": "no root binding for link type 147"
+    }
+  ]
+}

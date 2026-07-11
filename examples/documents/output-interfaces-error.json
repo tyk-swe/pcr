@@ -1,0 +1,15 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "interfaces",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "error",
+  "error": {
+    "code": "cli.output_format",
+    "kind": "cli",
+    "message": "interfaces does not support ndjson output; choose text, json",
+    "causes": [],
+    "remediation": "choose one of the formats listed for this command"
+  },
+  "diagnostics": []
+}

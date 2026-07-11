@@ -1,0 +1,20 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "read",
+  "mode": "stream",
+  "status": "success",
+  "sequence": 0,
+  "result": {
+    "frame": {
+      "timestamp": {
+        "unix_seconds": 0,
+        "nanoseconds": 0
+      },
+      "captured_length": 4,
+      "original_length": 4,
+      "link_type": 147,
+      "bytes_hex": "deadbeef"
+    }
+  },
+  "diagnostics": []
+}

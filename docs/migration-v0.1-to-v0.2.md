@@ -252,9 +252,10 @@ Do not parse v0.1 human output or JSON in v0.2.
 
 Aggregate envelopes carry `"mode": "aggregate"` and never carry
 `sequence`. NDJSON records carry `"mode": "stream"`; every success and
-terminal error carries a zero-based `sequence`, and a terminal error uses the
-next value after the last successful record. In particular, `read --output
-json` is no longer an alias for an NDJSON stream: use `--output ndjson`.
+error carries a `sequence`. A per-item failure retains the source item's
+sequence; a terminal failure after prior output uses the next value after the
+last successful record. In particular, `read --output json` is no longer an
+alias for an NDJSON stream: use `--output ndjson`.
 
 Display limits affect presentation only. Captured bytes retained by the API and written to capture files remain complete up to the configured snap length.
 

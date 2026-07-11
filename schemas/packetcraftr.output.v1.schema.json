@@ -719,7 +719,7 @@
       ],
       "properties": {
         "route": {
-          "type": "object"
+          "$ref": "#/$defs/plannedRoute"
         }
       },
       "additionalProperties": false
@@ -733,7 +733,7 @@
         "routes": {
           "type": "array",
           "items": {
-            "type": "object"
+            "$ref": "#/$defs/routeDecision"
           }
         }
       },
@@ -1915,6 +1915,197 @@
       },
       "additionalProperties": false
     },
+    "routeDecision": {
+      "type": "object",
+      "required": [
+        "interface",
+        "selected_address",
+        "preferred_source",
+        "next_hop",
+        "selection_reason",
+        "destination_scope",
+        "mtu",
+        "capability",
+        "link_type"
+      ],
+      "properties": {
+        "interface": {
+          "$ref": "#/$defs/interfaceId"
+        },
+        "source_mac": {
+          "$ref": "#/$defs/macAddress"
+        },
+        "selected_address": {
+          "$ref": "#/$defs/nullableIpAddress"
+        },
+        "preferred_source": {
+          "$ref": "#/$defs/nullableIpAddress"
+        },
+        "next_hop": {
+          "$ref": "#/$defs/nullableIpAddress"
+        },
+        "selection_reason": {
+          "type": "string",
+          "enum": [
+            "local",
+            "on_link",
+            "gateway",
+            "interface_only"
+          ]
+        },
+        "destination_scope": {
+          "type": "string",
+          "enum": [
+            "host",
+            "link",
+            "private",
+            "global",
+            "multicast",
+            "unspecified"
+          ]
+        },
+        "mtu": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "capability": {
+          "type": "string",
+          "enum": [
+            "layer2",
+            "layer3",
+            "layer2_and3"
+          ]
+        },
+        "link_type": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        }
+      },
+      "additionalProperties": false
+    },
+    "plannedRoute": {
+      "type": "object",
+      "required": [
+        "route",
+        "mode",
+        "visited_destinations",
+        "packet_source",
+        "neighbor_source",
+        "neighbor_target",
+        "destination_mac",
+        "source_mac",
+        "synthesized_ethernet"
+      ],
+      "properties": {
+        "route": {
+          "$ref": "#/$defs/routeDecision"
+        },
+        "mode": {
+          "$ref": "#/$defs/linkMode"
+        },
+        "lookup_destination": {
+          "type": "string",
+          "minLength": 1
+        },
+        "final_destination": {
+          "type": "string",
+          "minLength": 1
+        },
+        "visited_destinations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "packet_source": {
+          "$ref": "#/$defs/nullableIpAddress"
+        },
+        "neighbor_source": {
+          "$ref": "#/$defs/nullableIpAddress"
+        },
+        "neighbor_target": {
+          "$ref": "#/$defs/nullableIpAddress"
+        },
+        "destination_mac": {
+          "$ref": "#/$defs/nullableMacAddress"
+        },
+        "source_mac": {
+          "$ref": "#/$defs/nullableMacAddress"
+        },
+        "neighbor_vlan_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/neighborVlanTag"
+          }
+        },
+        "synthesized_ethernet": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "neighborVlanTag": {
+      "type": "object",
+      "required": [
+        "kind",
+        "priority",
+        "drop_eligible",
+        "vlan_id"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "ieee8021_q",
+            "ieee8021_ad"
+          ]
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 7
+        },
+        "drop_eligible": {
+          "type": "boolean"
+        },
+        "vlan_id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4095
+        }
+      },
+      "additionalProperties": false
+    },
+    "macAddress": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "items": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 255
+      }
+    },
+    "nullableMacAddress": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/macAddress"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullableIpAddress": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
     "linkMode": {
       "type": "string",
       "enum": [
@@ -2050,7 +2241,7 @@
       ],
       "properties": {
         "plan": {
-          "type": "object"
+          "$ref": "#/$defs/plannedRoute"
         },
         "neighbor": {
           "type": "object",
@@ -2064,7 +2255,8 @@
           ],
           "properties": {
             "mac_address": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$"
             },
             "attempts": {
               "type": "integer",
@@ -2154,7 +2346,12 @@
           "maximum": 65535
         },
         "transport": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp",
+            "icmp"
+          ]
         },
         "classification": {
           "type": "string",
@@ -2189,7 +2386,13 @@
       ],
       "properties": {
         "protocol": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp",
+            "icmpv4",
+            "icmpv6"
+          ]
         },
         "destination": {
           "type": "string"

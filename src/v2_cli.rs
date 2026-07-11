@@ -4851,6 +4851,36 @@ mod tests {
     }
 
     #[test]
+    fn per_item_tool_errors_retain_their_input_sequence() {
+        let scan = scan_cli_error(ScanError::InvalidEvidence {
+            sequence: 7,
+            message: "invalid scan evidence".to_owned(),
+        });
+        assert_eq!(scan.sequence, Some(7));
+
+        let traceroute = traceroute_cli_error(TracerouteError::InvalidEvidence {
+            sequence: 8,
+            message: "invalid traceroute evidence".to_owned(),
+        });
+        assert_eq!(traceroute.sequence, Some(8));
+
+        let dns = dns_cli_error(DnsError::InvalidEvidence {
+            attempt: 3,
+            message: "invalid DNS evidence".to_owned(),
+        });
+        assert_eq!(dns.sequence, Some(2));
+
+        let fuzz = fuzz_cli_error(FuzzError::InvalidEvidence {
+            case_index: 9,
+            message: "invalid fuzz evidence".to_owned(),
+        });
+        assert_eq!(fuzz.sequence, Some(9));
+
+        let replay = replay_cli_error(ReplayError::output(10, "replay output failed"));
+        assert_eq!(replay.sequence, Some(10));
+    }
+
+    #[test]
     fn classified_live_errors_use_the_frozen_cli_exit_contract() {
         let capability = CliError::classified(crate::io::LiveIoError::Privilege {
             message: "permission denied".to_owned(),

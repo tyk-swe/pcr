@@ -1907,6 +1907,15 @@ mod tests {
 
     #[test]
     fn command_matrix_is_complete_and_has_no_duplicate_formats() {
+        const ALL_FORMATS: &[OutputFormat] = &[
+            OutputFormat::Text,
+            OutputFormat::Json,
+            OutputFormat::Ndjson,
+            OutputFormat::Hex,
+            OutputFormat::Raw,
+            OutputFormat::Pcap,
+            OutputFormat::Pcapng,
+        ];
         assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 14);
         for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
             assert!(!contract.formats.is_empty());
@@ -1916,6 +1925,15 @@ mod tests {
                 .any(|prior| prior.command == contract.command));
             for (index, format) in contract.formats.iter().enumerate() {
                 assert!(!contract.formats[..index].contains(format));
+            }
+            for format in ALL_FORMATS {
+                assert_eq!(
+                    contract.command.require_format(*format).is_ok(),
+                    contract.formats.contains(format),
+                    "{} / {}",
+                    contract.command,
+                    format
+                );
             }
         }
     }

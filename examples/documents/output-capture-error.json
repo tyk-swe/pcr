@@ -1,0 +1,15 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "capture",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "error",
+  "error": {
+    "code": "policy.public_destination",
+    "kind": "policy",
+    "message": "traffic policy denies public destination 8.8.8.8",
+    "causes": [],
+    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+  },
+  "diagnostics": []
+}

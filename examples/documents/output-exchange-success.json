@@ -1,0 +1,35 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "exchange",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "sent": [
+      {
+        "bytes_hex": "deadbeef",
+        "length": 4
+      }
+    ],
+    "responses": [],
+    "unanswered": [0],
+    "unsolicited": [],
+    "undecoded": []
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 4,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

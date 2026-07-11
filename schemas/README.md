@@ -17,7 +17,8 @@ an aggregate error contains `error` and no `result` or `sequence`. Both carry
 `"mode": "aggregate"`. Each NDJSON line is a complete
 `packetcraftr.output/v1` object with `"mode": "stream"` and a zero-based
 `sequence`. Terminal stream errors use the next unused sequence, including
-sequence zero when the stream fails before its first result. `diagnostics` is
+sequence zero when the stream fails before its first result. An error tied to
+a specific input item retains that item's source sequence. `diagnostics` is
 always an array. When `stats` is present, its required `capture` object reports
 received and dropped frames/bytes plus queue-overflow events; non-zero loss is
 also represented by a diagnostic or typed error according to the selected
@@ -31,6 +32,9 @@ operations construct these types once, and text, JSON, NDJSON, hex, and raw
 renderers consume the same result rather than recreating a wire shape. Commands
 that support both JSON and NDJSON have separate aggregate and per-item result
 types, so a stream never repeats an aggregate summary as an event.
+Route-bearing results are closed over the exact `RouteDecision`,
+`PlannedRoute`, link capability, source/next-hop, MAC, VLAN, MTU, and link-type
+shape; arbitrary plan or route objects are rejected.
 `capture` emits zero or more `frame` events followed by one `complete` event
 carrying the frame count and final statistics. `exchange` emits `sent`,
 `response`, `unanswered`, `unsolicited`, or `undecoded` evidence events before
@@ -71,35 +75,27 @@ documented exit classes. A classified live failure may add a non-empty
 `remediation` string. JSON escaping preserves control-bearing source values for
 machines; terminal-safe text rendering is a separate presentation rule.
 
-Examples are in [examples/documents](../examples/documents). Validate them with a draft 2020-12 implementation, for example:
+Examples are in [examples/documents](../examples/documents). The corpus has at
+least one typed success and one real CLI-derived error for every command, plus
+the aggregate and stream variants of commands supporting both modes. Validate
+it with a draft 2020-12 implementation, for example:
 
 ```console
 jsonschema schemas/packetcraftr.packet.v1.schema.json \
   --instance examples/documents/packet-ipv4-udp.json
 
-jsonschema schemas/packetcraftr.output.v1.schema.json \
-  --instance examples/documents/output-build-success.json \
-  --instance examples/documents/output-build-error.json \
-  --instance examples/documents/output-capture-event.json \
-  --instance examples/documents/output-exchange-event.json \
-  --instance examples/documents/output-replay-success.json \
-  --instance examples/documents/output-scan-success.json \
-  --instance examples/documents/output-scan-event.json \
-  --instance examples/documents/output-scan-complete.json \
-  --instance examples/documents/output-traceroute-success.json \
-  --instance examples/documents/output-traceroute-event.json \
-  --instance examples/documents/output-traceroute-complete.json \
-  --instance examples/documents/output-dns-success.json \
-  --instance examples/documents/output-dns-event.json \
-  --instance examples/documents/output-dns-complete.json \
-  --instance examples/documents/output-fuzz-success.json \
-  --instance examples/documents/output-fuzz-event.json \
-  --instance examples/documents/output-fuzz-complete.json
+check-jsonschema \
+  --schemafile schemas/packetcraftr.output.v1.schema.json \
+  examples/documents/output-*.json
 ```
 
 CI also requires every document in `tests/fixtures/invalid-output` to fail
 validation. Those fixtures freeze aggregate/stream separation, mandatory
-stream sequencing, and command-specific result shapes.
+stream sequencing, command-specific result shapes, and the rejection of
+arbitrary route/plan payloads. Integration tests additionally compare exact
+bytes across raw, whole-frame hex, NDJSON, classic PCAP, and PCAPNG and force
+closed stdout for every output family to keep broken pipes typed as runtime I/O
+failures rather than panics.
 
 Every non-example file in `tests/fixtures` has a
 `<fixture>.provenance.json` sidecar. CI validates those documents against the

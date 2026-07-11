@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "policy.public_destination",
+    "kind": "policy",
+    "message": "DNS authorization failed: traffic policy denies public destination 8.8.8.8",
+    "causes": [],
+    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+  },
+  "diagnostics": []
+}

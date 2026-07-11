@@ -1,0 +1,15 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "read",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "error",
+  "error": {
+    "code": "cli.capture_limit",
+    "kind": "cli",
+    "message": "capture stream limits must be non-zero",
+    "causes": [],
+    "remediation": "use finite non-zero capture frame, byte, packet, and interface limits"
+  },
+  "diagnostics": []
+}

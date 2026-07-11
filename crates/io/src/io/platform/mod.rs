@@ -290,16 +290,7 @@ pub(super) fn finish_route(
     }
     let selected_address = preferred_source
         .or(snapshot.selected_address)
-        .or_else(|| {
-            snapshot
-                .interface
-                .addresses
-                .iter()
-                .map(|assigned| assigned.address)
-                .find(|address| {
-                    address.is_ipv4() == destination.is_ipv4() && !address.is_unspecified()
-                })
-        })
+        .or_else(|| fallback_source(&snapshot.interface.addresses, destination))
         .ok_or_else(|| NativeRouteError::InvalidResponse {
             message: format!(
                 "interface {} has no source address for {destination}",
@@ -341,6 +332,67 @@ pub(super) fn finish_route(
         capability: snapshot.interface.capability,
         link_type: snapshot.interface.link_type,
     })
+}
+
+#[cfg(feature = "native-route")]
+fn fallback_source(
+    addresses: &[super::provider::InterfaceAddress],
+    destination: IpAddr,
+) -> Option<IpAddr> {
+    let mut best: Option<(IpAddr, (bool, u8, bool))> = None;
+    for assigned in addresses {
+        let address = assigned.address;
+        if address.is_ipv4() != destination.is_ipv4()
+            || address.is_unspecified()
+            || address.is_multicast()
+        {
+            continue;
+        }
+        let prefix_match = prefix_matches(address, destination, assigned.prefix_length);
+        let rank = (
+            prefix_match,
+            if prefix_match {
+                assigned.prefix_length
+            } else {
+                0
+            },
+            address_scope(address) == address_scope(destination),
+        );
+        if best.as_ref().is_none_or(|(_, current)| rank > *current) {
+            best = Some((address, rank));
+        }
+    }
+    best.map(|(address, _)| address)
+}
+
+#[cfg(feature = "native-route")]
+fn prefix_matches(source: IpAddr, destination: IpAddr, prefix_length: u8) -> bool {
+    match (source, destination) {
+        (IpAddr::V4(source), IpAddr::V4(destination)) if prefix_length <= 32 => {
+            prefix_length == 0
+                || (u32::from(source) >> (32 - prefix_length))
+                    == (u32::from(destination) >> (32 - prefix_length))
+        }
+        (IpAddr::V6(source), IpAddr::V6(destination)) if prefix_length <= 128 => {
+            prefix_length == 0
+                || (u128::from(source) >> (128 - prefix_length))
+                    == (u128::from(destination) >> (128 - prefix_length))
+        }
+        _ => false,
+    }
+}
+
+#[cfg(feature = "native-route")]
+fn address_scope(address: IpAddr) -> u8 {
+    match address {
+        IpAddr::V4(address) if address.is_loopback() => 1,
+        IpAddr::V6(address) if address.is_loopback() => 1,
+        IpAddr::V4(address) if address.is_link_local() => 2,
+        IpAddr::V6(address) if address.is_unicast_link_local() => 2,
+        IpAddr::V4(address) if address.is_private() => 3,
+        IpAddr::V6(address) if address.is_unique_local() => 3,
+        _ => 4,
+    }
 }
 
 #[cfg(feature = "native-route")]
@@ -494,6 +546,41 @@ mod tests {
 
         assert_eq!(decision.selected_address, Some(preferred));
         assert_eq!(decision.preferred_source, Some(preferred));
+    }
+
+    #[test]
+    fn native_snapshot_fallback_prefers_the_destination_prefix_and_scope() {
+        let selected = IpAddr::V6("fd50:1::2".parse::<Ipv6Addr>().unwrap());
+        let mut interface = interface();
+        interface.addresses = vec![
+            InterfaceAddress {
+                address: IpAddr::V6("fe80::2".parse::<Ipv6Addr>().unwrap()),
+                prefix_length: 64,
+            },
+            InterfaceAddress {
+                address: selected,
+                prefix_length: 64,
+            },
+            InterfaceAddress {
+                address: IpAddr::V6("2001:db8::2".parse::<Ipv6Addr>().unwrap()),
+                prefix_length: 64,
+            },
+        ];
+        let decision = finish_route(
+            IpAddr::V6("fd50:1::9".parse::<Ipv6Addr>().unwrap()),
+            None,
+            None,
+            NativeRouteSnapshot {
+                interface,
+                selected_address: None,
+                next_hop: None,
+                route_mtu: None,
+                selection_reason: RouteSelectionReason::OnLink,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(decision.selected_address, Some(selected));
     }
 
     #[test]

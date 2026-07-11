@@ -25,7 +25,7 @@ Neighbor materialization changes only fixed-width Ethernet address fields. The h
 - Active discovery has explicit time, attempt, memory, cache, and cleanup bounds.
 - Captured evidence and native loss counters make both success and exhaustion auditable.
 - VLAN, low-MTU, unsupported-link, missing-source, dependency, permission, and cleanup failures remain typed errors.
-- Privileged cross-platform topology qualification is still required before stable live capability claims.
+- Privileged cross-platform integration evidence is required before live capability claims.
 
 ## Alternatives considered
 

@@ -5,13 +5,13 @@
 
 ## Context
 
-The first v0.2 CLI commands assembled JSON with command-local `json!` values.
+The first CLI commands assembled JSON with command-local `json!` values.
 The common schema accepted any object or array as `result`, and `read` used
 `--output json` to emit multiple compact JSON values. That made the meaning of
 JSON depend on the command, allowed one command's result shape to pass as
 another's, and left no type-level rule requiring sequence numbers on terminal
 stream errors. Copying that pattern into live and tool commands would force a
-cross-command rewrite immediately before the beta API freeze.
+cross-command rewrite as more workflows were added.
 
 Text, JSON, NDJSON, whole-frame hex/raw, PCAP, and PCAPNG also have different
 cardinality and byte-preservation rules. A renderer must not infer a result by
@@ -28,7 +28,7 @@ operation statistics, command identifier, schema identifier, and explicit
 mode. Constructors keep status, result/error exclusivity, mode, and sequence
 presence out of caller control.
 
-Each implemented and planned v0.2 command has a deliberate result type.
+Each command has a deliberate result type.
 Commands that offer both JSON and NDJSON also have a separate per-item stream
 result type.
 `build`, `dissect`, `read`, `replay`, and `interfaces` construct those results before
@@ -77,7 +77,7 @@ that a consumer received the requested command's result.
 
 ### Infer streaming from the command name
 
-Rejected because several planned commands support both aggregate summaries and
+Rejected because several commands support both aggregate summaries and
 event streams, and terminal failures still need an unambiguous sequence rule.
 
 ### Let each renderer construct its own result

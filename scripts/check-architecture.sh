@@ -64,7 +64,7 @@ portable_modules=(
     src/tools/mod.rs
     src/output.rs
     src/client.rs
-    src/v2_cli.rs
+    src/cli.rs
 )
 
 for module in "${portable_modules[@]}"; do

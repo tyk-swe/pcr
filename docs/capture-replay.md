@@ -1,6 +1,6 @@
 # Streaming capture write and replay
 
-PacketcraftR v0.2 treats capture files as bounded streams of complete records.
+PacketcraftR treats capture files as bounded streams of complete records.
 Offline parsing and writing are pure Rust; native libpcap/Npcap is used only
 when a replay actually selects Layer 2 transmission.
 

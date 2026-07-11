@@ -1,5 +1,5 @@
 ===== packetcraftr --help =====
-PacketcraftR v0.2 beta candidate: arbitrary packet stacks, strict/permissive exact building, bounded dissection, passive route planning, and policy-gated live workflows under frozen CLI, exit-code, packet-document, and output contracts. Native features, dependencies, and privileges determine which live paths are available.
+PacketcraftR builds and dissects arbitrary packet stacks with exact bytes, bounded parsing, passive route planning, and policy-gated live workflows. Native features, dependencies, and privileges determine which live paths are available.
 
 Usage: packetcraftr [OPTIONS] <COMMAND>
 

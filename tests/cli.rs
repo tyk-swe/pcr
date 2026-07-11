@@ -106,7 +106,7 @@ fn decode_output_hex(output: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn cli_help_parse_error_and_version_match_the_beta_goldens() {
+fn cli_help_parse_error_and_version_match_the_committed_goldens() {
     const COMMANDS: &[&str] = &[
         "build",
         "dissect",

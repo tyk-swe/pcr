@@ -68,7 +68,7 @@ use crate::tools::{
     bin_name = "packetcraftr",
     version,
     about = "Reflective packet construction, dissection, capture, and network tools",
-    long_about = "PacketcraftR v0.2 beta candidate: arbitrary packet stacks, strict/permissive exact building, bounded dissection, passive route planning, and policy-gated live workflows under frozen CLI, exit-code, packet-document, and output contracts. Native features, dependencies, and privileges determine which live paths are available."
+    long_about = "PacketcraftR builds and dissects arbitrary packet stacks with exact bytes, bounded parsing, passive route planning, and policy-gated live workflows. Native features, dependencies, and privileges determine which live paths are available."
 )]
 struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Text)]

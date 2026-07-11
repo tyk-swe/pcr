@@ -5,7 +5,7 @@
 
 ## Context
 
-Early v0.2 development proved packet, protocol, route, capture, session, and client contracts in one crate before component-crate extraction. Without explicit dependency directions, provider traits drift into the façade, native wrapper types leak into callers, and a later split creates cycles or forces downstream import changes. Native dependencies and FFI also need one auditable owner: portable packet work must remain buildable without a host SDK, packet-capture runtime, privileged runner, or unsafe code.
+Packet, protocol, route, capture, session, and client contracts need explicit dependency directions. Otherwise provider traits drift into the façade, native wrapper types leak into callers, and component changes create cycles or force downstream import changes. Native dependencies and FFI also need one auditable owner: portable packet work must remain buildable without a host SDK, packet-capture runtime, privileged runner, or unsafe code.
 
 Linux, macOS, and Windows require different route, capture, and raw-socket facilities. The public contracts must express their common semantics while preserving target-specific capability errors. An unavailable Layer 2 or Layer 3 implementation must not silently redirect bytes to another provider.
 
@@ -40,7 +40,7 @@ Dependencies may only point rightward/downward in this list; components never de
 
 `Layer2Frame` and `Layer3Frame` have checked constructors and private fields. `TransmissionFrame` selects one of them from a materialized `LinkMode`; `DispatchPacketIo` sends each variant only to the corresponding provider. An unresolved `Auto` mode or mismatched constructor is a typed error. The high-level client submits the exact already-built bytes and never asks a backend to infer or synthesize a different envelope.
 
-Provider contracts are exported from `packetcraftr::io` and the root. The historical `packetcraftr::client::*` provider paths remained compatibility reexports only through the extraction checkpoint and were removed at the beta API freeze. Ordinary root imports remain unchanged; module-qualified callers migrate to the owning `packetcraftr::io` path.
+Provider contracts are exported from `packetcraftr::io` and the root. Ordinary callers use either the façade reexports or the owning `packetcraftr::io` path.
 
 ### Unsafe and FFI policy
 
@@ -66,15 +66,15 @@ Target adapters use the following wrapper families:
 | Windows routes/interfaces/raw L3 | [`windows`](https://microsoft.github.io/windows-docs-rs/doc/windows/Win32/NetworkManagement/IpHelper/index.html) IP Helper and Winsock bindings | Request only required Win32 feature namespaces; map status codes immediately |
 | Windows L2 capture/injection | `libloading` plus the pinned Npcap SDK 1.16 C ABI and Npcap 1.88 runtime | Resolve the system-installed DLL from a trusted path; portable/default profiles and native builds never statically link `Packet.lib` |
 
-Native packages are optional, target-specific, use `default-features = false` where supported, and are locked in `Cargo.lock`. Adding or updating one requires its platform ticket to record the tested wrapper version, native SDK/runtime version, license, minimum host version, and privileged qualification evidence. The legacy Unix `pnet` interface enumeration remains isolated in `io::platform` for default builds; `native-route` selects the platform-neutral route/interface contracts, `native-layer2` selects only the capture/injection boundary, and `native-layer3` selects only raw IP transmission.
+Native packages are optional, target-specific, use `default-features = false` where supported, and are locked in `Cargo.lock`. Adding or updating one requires review of the wrapper version, native SDK or runtime, license, minimum host version, and privileged integration evidence. The legacy Unix `pnet` interface enumeration remains isolated in `io::platform` for default builds; `native-route` selects the platform-neutral route/interface contracts, `native-layer2` selects only the capture/injection boundary, and `native-layer3` selects only raw IP transmission.
 
 ### Features, builds, and publication
 
 `--no-default-features` is the portable contract on every target: packet construction/dissection, documents, offline capture, injected providers, and external provider implementations compile without native adapter packages. The default `live` feature retains the isolated legacy Unix enumeration adapter while Windows default remains portable. The explicit `native-route` feature enables passive target-native route, source, MTU, and interface selection; it does not imply neighbor discovery, capture, or transmission. The separate `native-layer2` feature enables libpcap on Linux/macOS and dynamic Npcap loading on Windows. `native-layer3` enables `socket2` raw IP transmission on supported targets. `--all-features` exercises all native boundaries while preserving the portable no-default contract.
 
-CI covers Linux default/no-default/all-feature tests, lints, and docs; macOS default/no-default/all-feature compile and tests; Windows portable default/no-default plus native all-feature compile and tests; and target-resolved no-default dependency-tree checks for all three operating-system families. Hosted jobs compile native Layer 2 adapters and test their owned lifecycle with injected sources without opening a device. Privileged live qualification is separate and remains mandatory before advertising release-candidate capture or transmission capability.
+CI covers Linux default/no-default/all-feature tests, lints, and docs; macOS default/no-default/all-feature compile and tests; Windows portable default/no-default plus native all-feature compile and tests; and target-resolved no-default dependency-tree checks for all three operating-system families. Hosted jobs compile native Layer 2 adapters and test their owned lifecycle with injected sources without opening a device. Live capability claims additionally require privileged integration evidence.
 
-All extracted crates take one version and their edition, MSRV, license, and repository metadata from `[workspace.package]`. Workspace metadata records the local assembly order (`packetcraftr-core`, `packetcraftr-protocols`, `packetcraftr-io`, `packetcraftr-session`, then `packetcraftr`) and the native/unsafe owner. Internal dependencies use exact synchronized versions plus local verification paths. Every package has `publish = false`: GitHub Releases carry one buildable workspace archive rather than public-registry packages. Root reexports remain the ordinary public surface, and the production graph has no cycle.
+All component crates take one version and their edition, MSRV, license, and repository metadata from `[workspace.package]`. Workspace metadata records the local assembly order (`packetcraftr-core`, `packetcraftr-protocols`, `packetcraftr-io`, `packetcraftr-session`, then `packetcraftr`) and the native/unsafe owner. Internal dependencies use exact synchronized versions plus local paths. Every package has `publish = false`. Root reexports remain the ordinary public surface, and the production graph has no cycle.
 
 ## Consequences
 

@@ -1,16 +1,30 @@
 [workspace]
-members = ["."]
+members = [
+    ".",
+    "crates/core",
+    "crates/io",
+    "crates/protocols",
+    "crates/session",
+]
 resolver = "2"
 
 [workspace.package]
 version = "0.2.0-alpha.1"
+edition = "2021"
+rust-version = "1.96"
+license = "AGPL-3.0-only"
+authors = ["tyk-swe"]
+repository = "https://github.com/tyk-swe/pcr"
+homepage = "https://github.com/tyk-swe/pcr"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
 
 [workspace.metadata.packetcraftr]
 components = ["core", "protocols", "io", "session", "tools", "facade"]
-publish-order = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session", "packetcraftr-tools", "packetcraftr"]
+extracted-packages = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session"]
+facade-owned-components = ["tools", "client", "output", "cli"]
+package-order = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session", "packetcraftr"]
 native-dependency-owner = "packetcraftr-io::platform"
 unsafe-owner = "packetcraftr-io::platform"
 
@@ -24,17 +38,18 @@ windows-network-apis = "windows"
 [package]
 name = "packetcraftr"
 version.workspace = true
-edition = "2021"
-rust-version = "1.96"
-license = "AGPL-3.0-only"
-authors = ["tyk-swe"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
 description = "Modular packet crafting, transmission, and automation toolkit"
 readme = "README.md"
-repository = "https://github.com/tyk-swe/pcr"
-homepage = "https://github.com/tyk-swe/pcr"
+repository.workspace = true
+homepage.workspace = true
 documentation = "https://docs.rs/packetcraftr"
 keywords = ["packet", "network", "cli", "testing"]
 categories = ["command-line-utilities", "network-programming"]
+publish = false
 
 [lints]
 workspace = true
@@ -45,52 +60,21 @@ path = "src/main.rs"
 
 [features]
 default = ["live"]
-live = ["dep:pnet"]
-native-route = [
-    "dep:futures-util",
-    "dep:libc",
-    "dep:rtnetlink",
-    "dep:socket2",
-    "dep:tokio",
-    "dep:windows",
-]
-native-layer2 = ["live", "dep:libloading", "dep:pcap", "dep:windows"]
-native-layer3 = ["live", "dep:socket2", "dep:windows"]
+live = ["packetcraftr-io/live"]
+native-route = ["packetcraftr-io/native-route"]
+native-layer2 = ["live", "packetcraftr-io/native-layer2"]
+native-layer3 = ["live", "packetcraftr-io/native-layer3"]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+packetcraftr-core = { version = "=0.2.0-alpha.1", path = "crates/core" }
+packetcraftr-io = { version = "=0.2.0-alpha.1", path = "crates/io", default-features = false }
+packetcraftr-protocols = { version = "=0.2.0-alpha.1", path = "crates/protocols" }
+packetcraftr-session = { version = "=0.2.0-alpha.1", path = "crates/session" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-noyalib = { version = "0.0.5", features = ["compat-serde-yaml"] }
 
 [dev-dependencies]
 sha2 = "0.10"
-
-[target.'cfg(not(windows))'.dependencies]
-pnet = { version = "0.35", default-features = false, features = ["std"], optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }
-pcap = { version = "2.4", default-features = false, optional = true }
-rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"], optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
-tokio = { version = "1", default-features = false, features = ["net", "rt"], optional = true }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-libc = { version = "0.2", optional = true }
-pcap = { version = "2.4", default-features = false, optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
-
-[target.'cfg(windows)'.dependencies]
-libloading = { version = "0.8", default-features = false, optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
-windows = { version = "0.62", default-features = false, features = [
-    "std",
-    "Win32_Foundation",
-    "Win32_NetworkManagement_IpHelper",
-    "Win32_NetworkManagement_Ndis",
-    "Win32_Networking_WinSock",
-    "Win32_System_SystemInformation",
-], optional = true }

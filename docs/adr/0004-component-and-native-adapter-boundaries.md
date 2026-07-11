@@ -17,11 +17,10 @@ The module boundaries are the extraction boundaries. Arrows below mean "may depe
 
 ```text
 packetcraftr-protocols ───────> packetcraftr-core
-packetcraftr-io ──────────────> packetcraftr-core
-packetcraftr-session ─────────> packetcraftr-core, packetcraftr-protocols, packetcraftr-io
-packetcraftr-tools ───────────> packetcraftr-core, packetcraftr-protocols,
-                                packetcraftr-io, packetcraftr-session
-packetcraftr façade/client ───> all component crates
+packetcraftr-io ──────────────> packetcraftr-core, packetcraftr-protocols
+packetcraftr-session ─────────> standard library and portable dependencies only
+packetcraftr façade ──────────> all extracted component crates
+  └── client/tools/output/CLI remain façade-owned
 
 packetcraftr-io::platform ────> packetcraftr-io public provider contracts
 ```
@@ -33,8 +32,8 @@ Dependencies may only point rightward/downward in this list; components never de
 | `core` | ordered packet model, fields, registry contracts, build/dissect, documents, capture records, and diagnostics |
 | `protocols` | built-in codecs, typed protocol layers, bindings, and response matchers |
 | `io` | offline capture I/O, interface/route/neighbor values, capture sessions, typed L2/L3 transmission seams, and platform adapters |
-| `session` | bounded exchange state, fragmentation, flow tracking, and reassembly |
-| `tools` | reusable scan, traceroute, DNS, replay, and fuzz workflows |
+| `session` | bounded fragmentation, TCP flow tracking, and reassembly |
+| root `tools` | reusable scan, traceroute, DNS, replay, and fuzz workflows composed with façade policy seams |
 | root façade | stable reexports, high-level policy/client composition, output contracts, and CLI wiring |
 
 `io` owns `InterfaceProvider`, `RouteProvider`, `NeighborResolver`, `Layer2Io`, `Layer3Io`, `PacketIo`, `CaptureProvider`, and `ExchangeIo`. These traits use only standard-library and PacketcraftR-owned types. Native handles, wrapper errors, socket addresses, and capture-library packet types cannot cross the public boundary.
@@ -45,7 +44,7 @@ Provider contracts are exported from `packetcraftr::io` and the root. The histor
 
 ### Unsafe and FFI policy
 
-The workspace lint is `unsafe_code = "deny"`. Portable modules (`core`, `protocols`, `session`, `tools`, the client, and CLI) strengthen that to `#![forbid(unsafe_code)]`. The crate-private `src/io/platform` subtree is the only location allowed to lower the lint and the only location allowed to contain:
+The workspace lint is `unsafe_code = "deny"`. Portable crates and modules (`core`, `protocols`, `session`, the root façade, `tools`, the client, and CLI) strengthen that to `#![forbid(unsafe_code)]`. The crate-private `crates/io/src/io/platform` subtree is the only location allowed to lower the lint and the only location allowed to contain:
 
 - an `unsafe` block, function, implementation, or trait;
 - an `extern "C"`/`extern "system"` boundary; or
@@ -75,7 +74,7 @@ Native packages are optional, target-specific, use `default-features = false` wh
 
 CI covers Linux default/no-default/all-feature tests, lints, and docs; macOS default/no-default/all-feature compile and tests; Windows portable default/no-default plus native all-feature compile and tests; and target-resolved no-default dependency-tree checks for all three operating-system families. Hosted jobs compile native Layer 2 adapters and test their owned lifecycle with injected sources without opening a device. Privileged live qualification is separate and remains mandatory before advertising release-candidate capture or transmission capability.
 
-All extracted crates take one version from `[workspace.package]` and release together. Their publish order is `packetcraftr-core`, `packetcraftr-protocols`, `packetcraftr-io`, `packetcraftr-session`, `packetcraftr-tools`, then `packetcraftr`. Workspace metadata records that order and the native/unsafe owner. Component crates use exact synchronized internal dependency versions for a stable release; root reexports remain the ordinary public surface. This graph has no cycle.
+All extracted crates take one version and their edition, MSRV, license, and repository metadata from `[workspace.package]`. Workspace metadata records the local assembly order (`packetcraftr-core`, `packetcraftr-protocols`, `packetcraftr-io`, `packetcraftr-session`, then `packetcraftr`) and the native/unsafe owner. Internal dependencies use exact synchronized versions plus local verification paths. Every package has `publish = false`: GitHub Releases carry one buildable workspace archive rather than public-registry packages. Root reexports remain the ordinary public surface, and the production graph has no cycle.
 
 ## Consequences
 
@@ -84,7 +83,7 @@ All extracted crates take one version from `[workspace.package]` and release tog
 - A provider cannot accidentally receive the other link mode through `DispatchPacketIo`.
 - Portable builds remain useful for offline work, tests, and custom injected providers.
 - Native error translation is repetitive across targets, but platform-specific semantics remain visible as typed capability, privilege, send, and capture failures.
-- The eventual crate extraction can follow the recorded DAG and publication order without adding a compatibility cycle through the façade.
+- The physical crate extraction follows the recorded DAG without adding a compatibility cycle through the façade.
 
 ## Alternatives considered
 

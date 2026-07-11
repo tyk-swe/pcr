@@ -1442,6 +1442,7 @@ fn boundary_value(
             }
             _ => FieldValue::List(Vec::new()),
         },
+        _ => original.clone(),
     }
 }
 
@@ -1514,6 +1515,7 @@ fn random_value(
             }
             _ => FieldValue::List(Vec::new()),
         },
+        _ => original.clone(),
     }
 }
 
@@ -1559,6 +1561,7 @@ fn bounded_value_size(
             }
             total
         }
+        _ => return None,
     };
     (size <= remaining).then_some(size)
 }
@@ -1663,6 +1666,7 @@ fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValue> {
                 push(FieldValue::List(value[..value.len() / 2].to_vec()));
             }
         }
+        _ => {}
     }
     values
 }

@@ -882,9 +882,9 @@ mod tests {
 
     use super::*;
     use crate::core::{
-        BuildContext, BuildOptions, Builder, DecodeOptions, Dissector, Packet, PacketDocument,
+        BuildContext, BuildOptions, Builder, CapturedFrame, DecodeOptions, Dissector, LinkType,
+        Packet, PacketDocument,
     };
-    use crate::io::{CapturedFrame, LinkType};
     use crate::protocols::{default_registry, Ipv4, Ipv6, Raw};
 
     fn ipv4_bytes() -> Vec<u8> {

@@ -503,20 +503,64 @@ version = "0.2.0-alpha.1"
 dependencies = [
  "bytes",
  "clap",
+ "packetcraftr-core",
+ "packetcraftr-io",
+ "packetcraftr-protocols",
+ "packetcraftr-session",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "packetcraftr-core"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "bytes",
+ "noyalib",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "packetcraftr-io"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "bytes",
  "futures-util",
  "libc",
  "libloading",
- "noyalib",
+ "packetcraftr-core",
+ "packetcraftr-protocols",
  "pcap",
  "pnet",
  "rtnetlink",
  "serde",
- "serde_json",
- "sha2",
  "socket2",
  "thiserror 2.0.18",
  "tokio",
  "windows",
+]
+
+[[package]]
+name = "packetcraftr-protocols"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "bytes",
+ "packetcraftr-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-session"
+version = "0.2.0-alpha.1"
+dependencies = [
+ "bytes",
+ "serde",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

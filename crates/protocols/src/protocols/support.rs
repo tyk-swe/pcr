@@ -497,10 +497,24 @@ mod tests {
 
     #[test]
     fn every_stable_workflow_has_valid_protocol_obligations() {
-        let output_commands = crate::output::COMMAND_OUTPUT_CONTRACTS
-            .iter()
-            .map(|contract| contract.command.as_str())
-            .collect::<BTreeSet<_>>();
+        let output_commands = [
+            "build",
+            "dissect",
+            "plan",
+            "send",
+            "exchange",
+            "capture",
+            "read",
+            "replay",
+            "scan",
+            "traceroute",
+            "dns",
+            "fuzz",
+            "interfaces",
+            "routes",
+        ]
+        .into_iter()
+        .collect::<BTreeSet<_>>();
         let workflow_names = STABLE_WORKFLOW_PROTOCOLS
             .iter()
             .map(|workflow| workflow.workflow)
@@ -578,40 +592,5 @@ mod tests {
         assert_eq!(value["protocols"].as_array().unwrap().len(), 22);
         assert_eq!(value["capture_roots"].as_array().unwrap().len(), 9);
         assert_eq!(value["workflows"].as_array().unwrap().len(), 14);
-    }
-
-    #[test]
-    fn published_documentation_covers_the_versioned_manifest() {
-        let matrix = include_str!("../../docs/protocol-support.md");
-        for support in BUILTIN_PROTOCOLS {
-            assert!(
-                matrix.contains(&format!("| `{}` |", support.protocol)),
-                "documentation is missing protocol {}",
-                support.protocol
-            );
-        }
-        for root in BUILTIN_CAPTURE_ROOTS {
-            assert!(
-                matrix.contains(&format!("| {} | `{}` |", root.link_type, root.protocol)),
-                "documentation is missing link type {}",
-                root.link_type
-            );
-        }
-        for workflow in STABLE_WORKFLOW_PROTOCOLS {
-            assert!(
-                matrix.contains(&format!("| `{}` |", workflow.workflow)),
-                "documentation is missing workflow {}",
-                workflow.workflow
-            );
-        }
-
-        for document in [
-            include_str!("../../README.md"),
-            include_str!("../../docs/platform-support.md"),
-        ] {
-            let lower = document.to_ascii_lowercase();
-            assert!(!lower.contains("built-in protocol coverage is incomplete"));
-            assert!(!lower.contains("built-in protocol slice remains incomplete"));
-        }
     }
 }

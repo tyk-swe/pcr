@@ -33,9 +33,9 @@ contains_regex() {
 rust_files_matching() {
     local pattern="$1"
     if ${have_rg}; then
-        rg --files-with-matches "${pattern}" src --glob '*.rs'
+        rg --files-with-matches "${pattern}" src crates --glob '*.rs'
     else
-        find src -type f -name '*.rs' -exec grep --extended-regexp --files-with-matches -- "${pattern}" {} +
+        find src crates -type f -name '*.rs' -exec grep --extended-regexp --files-with-matches -- "${pattern}" {} +
     fi
 }
 
@@ -49,11 +49,15 @@ filter_regex() {
 }
 
 portable_modules=(
-    src/core/mod.rs
-    src/protocols/mod.rs
-    src/session/mod.rs
+    crates/core/src/lib.rs
+    crates/core/src/core/mod.rs
+    crates/core/src/error.rs
+    crates/protocols/src/lib.rs
+    crates/protocols/src/protocols/mod.rs
+    crates/session/src/lib.rs
+    crates/session/src/session/mod.rs
+    src/lib.rs
     src/tools/mod.rs
-    src/error.rs
     src/output.rs
     src/client.rs
     src/v2_cli.rs
@@ -72,9 +76,9 @@ mapfile -t unsafe_or_ffi_files < <(
 )
 for path in "${unsafe_or_ffi_files[@]}"; do
     case "${path}" in
-        src/io/platform/*) ;;
+        crates/io/src/io/platform/*) ;;
         *)
-            echo "unsafe/FFI policy violation outside src/io/platform: ${path}" >&2
+            echo "unsafe/FFI policy violation outside packetcraftr-io::platform: ${path}" >&2
             exit 1
             ;;
     esac
@@ -82,28 +86,47 @@ done
 
 mapfile -t native_reference_files < <(
     rust_files_matching \
-        'libloading::|pnet::|rtnetlink::|socket2::|windows::|pcap::(Capture|Device|Error|Linktype|Packet|Savefile)' || true
+        'futures_util::|libc::|libloading::|pnet::|rtnetlink::|socket2::|tokio::|windows::|pcap::(Capture|Device|Error|Linktype|Packet|Savefile)' || true
 )
 for path in "${native_reference_files[@]}"; do
     case "${path}" in
-        src/io/platform/*) ;;
+        crates/io/src/io/platform/*) ;;
         *)
-            echo "native dependency reference outside src/io/platform: ${path}" >&2
+            echo "native dependency reference outside packetcraftr-io::platform: ${path}" >&2
             exit 1
             ;;
     esac
 done
 
-if ! contains_fixed 'mod platform;' src/io/mod.rs; then
+io_module=crates/io/src/io/mod.rs
+if ! contains_fixed 'mod platform;' "${io_module}"; then
     echo "the platform adapter module must remain crate-private" >&2
     exit 1
 fi
-if contains_regex 'pub([[:space:]]*\([^)]*\))?[[:space:]]+mod[[:space:]]+platform' src/io/mod.rs; then
-    echo "src/io/platform must not be exported through the public API" >&2
+if contains_regex 'pub([[:space:]]*\([^)]*\))?[[:space:]]+mod[[:space:]]+platform' "${io_module}"; then
+    echo "packetcraftr-io::platform must not be exported through the public API" >&2
     exit 1
 fi
 
-native_packages='^(libloading[[:space:]]|pnet([_ ]|$)|pcap([_ ]|$)|rtnetlink([_ ]|$)|netlink-|socket2[[:space:]]|windows[[:space:]])'
+for legacy in src/core src/protocols src/io src/session src/error.rs; do
+    if [[ -e "${legacy}" ]]; then
+        echo "legacy façade-owned component source remains after extraction: ${legacy}" >&2
+        exit 1
+    fi
+done
+
+for reexport in \
+    'pub use packetcraftr_core::{core, error};' \
+    'pub use packetcraftr_io::io;' \
+    'pub use packetcraftr_protocols::protocols;' \
+    'pub use packetcraftr_session::session;'; do
+    if ! contains_fixed "${reexport}" src/lib.rs; then
+        echo "the root façade is missing component reexport: ${reexport}" >&2
+        exit 1
+    fi
+done
+
+native_packages='^(futures-util[[:space:]]|libc[[:space:]]|libloading[[:space:]]|pnet([_ ]|$)|pcap([_ ]|$)|rtnetlink([_ ]|$)|netlink-|socket2[[:space:]]|tokio[[:space:]]|windows[[:space:]])'
 portable_targets=(
     x86_64-unknown-linux-gnu
     aarch64-apple-darwin
@@ -130,14 +153,104 @@ done
 cargo metadata --locked --no-deps --format-version 1 | python3 -c '
 import json
 import sys
+from pathlib import Path
 
-native = {"libloading", "pcap", "pnet", "rtnetlink", "socket2", "windows"}
+native = {
+    "futures-util",
+    "libc",
+    "libloading",
+    "pcap",
+    "pnet",
+    "rtnetlink",
+    "socket2",
+    "tokio",
+    "windows",
+}
+component_edges = {
+    "packetcraftr-core": set(),
+    "packetcraftr-protocols": {"packetcraftr-core"},
+    "packetcraftr-io": {"packetcraftr-core", "packetcraftr-protocols"},
+    "packetcraftr-session": set(),
+    "packetcraftr": {
+        "packetcraftr-core",
+        "packetcraftr-protocols",
+        "packetcraftr-io",
+        "packetcraftr-session",
+    },
+}
+data = json.load(sys.stdin)
+packages = {package["name"]: package for package in data["packages"]}
 violations = []
-for package in json.load(sys.stdin)["packages"]:
+missing = set(component_edges) - set(packages)
+if missing:
+    violations.append(f"workspace is missing packages: {sorted(missing)}")
+
+root = packages.get("packetcraftr")
+version = root["version"] if root else None
+workspace_root = Path(data["workspace_root"])
+workspace_license = workspace_root / "LICENSE"
+
+for name, expected_edges in component_edges.items():
+    package = packages.get(name)
+    if package is None:
+        continue
+    if package["version"] != version:
+        violations.append(f"{name} must share root version {version}")
+    if package.get("edition") != "2021":
+        violations.append(f"{name} must share the 2021 edition")
+    if package.get("rust_version") != "1.96":
+        violations.append(f"{name} must share MSRV 1.96")
+    if package.get("license") != "AGPL-3.0-only":
+        violations.append(f"{name} must use AGPL-3.0-only metadata")
+    if package.get("repository") != "https://github.com/tyk-swe/pcr":
+        violations.append(f"{name} has inconsistent repository metadata")
+    if package.get("publish") != []:
+        violations.append(f"{name} must remain unavailable to public registries")
+    readme = package.get("readme")
+    if not readme or not Path(readme).is_file():
+        violations.append(f"{name} must have a package-local README")
+    manifest_dir = Path(package["manifest_path"]).parent
+    license_file = manifest_dir / "LICENSE"
+    if not license_file.is_file():
+        violations.append(f"{name} archive is missing a package-local LICENSE")
+    elif name != "packetcraftr" and license_file.read_bytes() != workspace_license.read_bytes():
+        violations.append(f"{name} LICENSE differs from the workspace license")
+
+    actual_edges = {
+        dependency["name"]
+        for dependency in package["dependencies"]
+        if dependency["kind"] is None and dependency["name"] in component_edges
+    }
+    if actual_edges != expected_edges:
+        violations.append(
+            f"{name} component edges are {sorted(actual_edges)}, expected {sorted(expected_edges)}"
+        )
+    for dependency in package["dependencies"]:
+        if dependency["name"] not in expected_edges:
+            continue
+        dependency_name = dependency["name"]
+        if dependency["kind"] is not None:
+            violations.append(f"{name} -> {dependency_name} must be a normal dependency")
+        if dependency["req"] != f"={version}":
+            violations.append(
+                f"{name} -> {dependency_name} must require exact version ={version}"
+            )
+        if dependency.get("path") is None:
+            violations.append(f"{name} -> {dependency_name} must retain a local path")
+        else:
+            expected_path = Path(packages[dependency_name]["manifest_path"]).parent
+            if Path(dependency["path"]) != expected_path:
+                violations.append(
+                    f"{name} -> {dependency_name} resolves outside its workspace package"
+                )
+
+for package in packages.values():
     for dependency in package["dependencies"]:
         if dependency["name"] not in native:
             continue
         name = dependency["name"]
+        if package["name"] != "packetcraftr-io":
+            violations.append(f"{name} must be owned only by packetcraftr-io")
         if not dependency["optional"]:
             violations.append(f"{name} must be optional")
         if dependency["target"] is None:
@@ -145,13 +258,15 @@ for package in json.load(sys.stdin)["packages"]:
         if dependency["uses_default_features"]:
             violations.append(f"{name} must disable default features")
 if violations:
-    print("native dependency declaration policy failed:", file=sys.stderr)
+    print("component and native dependency metadata policy failed:", file=sys.stderr)
     print("\n".join(violations), file=sys.stderr)
     raise SystemExit(1)
 '
 
 for required in \
     'resolver = "2"' \
+    'extracted-packages = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session"]' \
+    'package-order = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session", "packetcraftr"]' \
     'native-dependency-owner = "packetcraftr-io::platform"' \
     'unsafe-owner = "packetcraftr-io::platform"'; do
     if ! contains_fixed "${required}" Cargo.toml; then

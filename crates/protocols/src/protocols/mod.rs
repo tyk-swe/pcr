@@ -236,9 +236,9 @@ mod tests {
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap()
             .bytes;
-        let frame = crate::io::CapturedFrame::new(
+        let frame = crate::core::CapturedFrame::new(
             std::time::SystemTime::UNIX_EPOCH,
-            crate::io::LinkType::RAW,
+            crate::core::LinkType::RAW,
             bytes,
         )
         .unwrap();
@@ -264,9 +264,9 @@ mod tests {
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap()
             .bytes;
-        let frame = crate::io::CapturedFrame::new(
+        let frame = crate::core::CapturedFrame::new(
             std::time::SystemTime::UNIX_EPOCH,
-            crate::io::LinkType::RAW,
+            crate::core::LinkType::RAW,
             bytes,
         )
         .unwrap();

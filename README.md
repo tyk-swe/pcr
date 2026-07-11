@@ -23,7 +23,7 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | Complete v0.2 command set: `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `fuzz`, `interfaces`, and `routes` | Available as alpha workflows |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, structured scan/traceroute/DNS, and deterministic field-aware fuzzing are available |
-| Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; physical crate extraction remains a beta milestone |
+| Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; core, protocols, I/O, and session packages are extracted behind unchanged façade paths |
 
 Run `packetcraftr --help` for the complete alpha command grammar and current finite defaults.
 
@@ -77,6 +77,16 @@ assert_eq!(packet.get::<Raw>().unwrap().bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef
 External Rust crates can implement `Layer`, `LayerCodec`, and `ProtocolModule`, then register the module through a `RegistryBuilder`. Registration is compile-time Rust composition: v0.2 deliberately has no native dynamic-library plugin system and no global mutable registry.
 
 Native and injected networking providers implement platform-neutral contracts owned by `packetcraftr::io`: interface and route discovery, neighbor resolution, typed Layer 2/Layer 3 send, and owned capture. The root reexports those contracts, while their former `packetcraftr::client::*` paths remain alpha compatibility reexports. Checked `Layer2Frame` and `Layer3Frame` values keep Ethernet bytes away from raw Layer 3 adapters and vice versa. Native handles never enter the public traits.
+
+The repository is an acyclic Cargo workspace with synchronized, unpublished
+`packetcraftr-core`, `packetcraftr-protocols`, `packetcraftr-io`, and
+`packetcraftr-session` implementation packages. Ordinary applications should
+continue to import `packetcraftr`; its `core`, `protocols`, `io`, and `session`
+modules and intentional top-level reexports preserve the documented façade.
+Client policy, reusable tools, output contracts, and CLI composition remain
+façade-owned so no component depends back on the root package. Release
+artifacts are assembled as one buildable GitHub workspace archive, and every
+package has `publish = false` to prevent accidental registry publication.
 
 The architecture decisions are recorded in [docs/adr](docs/adr/README.md).
 
@@ -364,14 +374,14 @@ The pull-request checks exercise formatting and the default, no-default-feature,
 
 ```console
 cargo fmt --all -- --check
-cargo clippy --all-targets -- -D warnings
-cargo test --all-targets
-cargo clippy --no-default-features --all-targets -- -D warnings
-cargo test --no-default-features --all-targets
-cargo clippy --all-features --all-targets -- -D warnings
-cargo test --all-features --all-targets
-RUSTDOCFLAGS='-D warnings' cargo doc --all-features --no-deps
-cargo package --locked
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace --all-targets
+cargo clippy --workspace --no-default-features --all-targets -- -D warnings
+cargo test --workspace --no-default-features --all-targets
+cargo clippy --workspace --all-features --all-targets -- -D warnings
+cargo test --workspace --all-features --all-targets
+RUSTDOCFLAGS='-D warnings' cargo doc --workspace --all-features --no-deps
+bash scripts/verify-release-archive.sh
 bash scripts/check-architecture.sh
 python3 scripts/validate-fixture-corpus.py
 python3 scripts/test-fixture-policy.py

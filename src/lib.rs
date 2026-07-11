@@ -21,17 +21,17 @@
 //! ```
 
 #![warn(unreachable_pub)]
-#![deny(unsafe_code)]
+#![forbid(unsafe_code)]
 
 pub mod client;
-pub mod core;
-pub mod error;
-pub mod io;
 pub mod output;
-pub mod protocols;
-pub mod session;
 pub mod tools;
 mod v2_cli;
+
+pub use packetcraftr_core::{core, error};
+pub use packetcraftr_io::io;
+pub use packetcraftr_protocols::protocols;
+pub use packetcraftr_session::session;
 
 pub use client::{
     Client, ClientDnsExecutor, ClientError, ClientFuzzExecutor, ClientScanExecutor,

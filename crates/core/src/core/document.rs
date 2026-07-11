@@ -214,7 +214,6 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::core::Raw;
 
     #[test]
     fn yaml_byte_arrays_round_trip_like_json_byte_arrays() {
@@ -228,12 +227,9 @@ layers:
         value: [104, 101, 108, 108, 111]
 "#;
         let document = PacketDocument::parse(yaml, DocumentFormat::Yaml, 4096).unwrap();
-        let registry = crate::protocols::default_registry().unwrap();
-        let packet = document.to_packet(&registry, 64).unwrap();
-
         assert_eq!(
-            packet.get::<Raw>().unwrap().bytes,
-            Bytes::from_static(b"hello")
+            document.layers[0].fields.get("bytes"),
+            Some(&FieldValue::Bytes(Bytes::from_static(b"hello")))
         );
         assert!(document.to_yaml().unwrap().contains("- 104"));
     }

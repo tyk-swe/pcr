@@ -446,7 +446,7 @@ mod tests {
 
     #[test]
     fn expression_list_nesting_is_bounded() {
-        let registry = crate::protocols::default_registry().unwrap();
+        let registry = ProtocolRegistry::builder().build().unwrap();
         let error = parse_packet_expression(
             "raw(bytes=[[[[1]]]])",
             &registry,

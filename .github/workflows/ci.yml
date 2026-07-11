@@ -51,13 +51,13 @@ jobs:
         if: matrix.profile.flags == '--all-features'
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - name: Clippy
-        run: cargo clippy --locked --all-targets ${{ matrix.profile.flags }} -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets ${{ matrix.profile.flags }} -- -D warnings
       - name: Test
-        run: cargo test --locked --all-targets ${{ matrix.profile.flags }}
+        run: cargo test --locked --workspace --all-targets ${{ matrix.profile.flags }}
       - name: Build documentation
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --no-deps ${{ matrix.profile.flags }}
+        run: cargo doc --locked --workspace --no-deps ${{ matrix.profile.flags }}
 
   package:
     name: Package
@@ -67,8 +67,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal
-      - name: Verify the publishable crate
-        run: cargo package --locked
+      - name: Verify GitHub Release workspace archive
+        run: bash scripts/verify-release-archive.sh
       - name: Verify a clean CLI install
         run: |
           cargo install --locked --path . --root "${RUNNER_TEMP}/packetcraftr-install"
@@ -198,9 +198,9 @@ jobs:
       - name: Install the pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal
       - name: Compile target profile
-        run: cargo check --locked --all-targets ${{ matrix.flags }}
+        run: cargo check --locked --workspace --all-targets ${{ matrix.flags }}
       - name: Test target profile
-        run: cargo test --locked --all-targets ${{ matrix.flags }}
+        run: cargo test --locked --workspace --all-targets ${{ matrix.flags }}
       - name: Assert the portable Windows dependency boundary
         if: runner.os == 'Windows' && matrix.flags != '--all-features'
         shell: pwsh

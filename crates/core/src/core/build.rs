@@ -398,14 +398,17 @@ fn reflected_byte_length(packet: &Packet) -> Result<usize, BuildError> {
 mod tests {
     use super::*;
     use crate::core::Raw;
-    use crate::protocols::{default_registry, Ipv4};
+
+    fn empty_registry() -> Arc<ProtocolRegistry> {
+        Arc::new(ProtocolRegistry::builder().build().unwrap())
+    }
 
     #[test]
     fn byte_layer_limit_is_rejected_before_encoding() {
         let mut packet = Packet::new();
         packet.push(Raw::new(vec![0_u8; 1024]));
         assert!(matches!(
-            Builder::new(Arc::new(default_registry().unwrap())).build(
+            Builder::new(empty_registry()).build(
                 packet,
                 BuildContext::default(),
                 BuildOptions {
@@ -424,10 +427,10 @@ mod tests {
     fn padding_without_a_link_envelope_is_not_a_strict_ip_packet() {
         let mut packet = Packet::new();
         packet
-            .push(Ipv4::default())
+            .push(Raw::default())
             .push(Padding::new(vec![0_u8; 4]));
         assert!(matches!(
-            Builder::new(Arc::new(default_registry().unwrap())).build(
+            Builder::new(empty_registry()).build(
                 packet,
                 BuildContext::default(),
                 BuildOptions::default(),
@@ -440,10 +443,10 @@ mod tests {
     fn padding_coverage_boundary_must_reference_an_enclosing_layer() {
         let mut packet = Packet::new();
         packet
-            .push(Ipv4::default())
+            .push(Raw::default())
             .push(Padding::after_layer(vec![0_u8; 4], 1));
         assert!(matches!(
-            Builder::new(Arc::new(default_registry().unwrap())).build(
+            Builder::new(empty_registry()).build(
                 packet,
                 BuildContext::default(),
                 BuildOptions::default(),

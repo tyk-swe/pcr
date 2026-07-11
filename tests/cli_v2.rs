@@ -315,6 +315,130 @@ fn dns_policy_and_request_errors_precede_resolver_route_and_live_io() {
 }
 
 #[test]
+fn fuzz_is_deterministic_offline_and_live_policy_precedes_route_io() {
+    let arguments = [
+        "--output",
+        "json",
+        "fuzz",
+        "--packet",
+        "raw(hex=\"00\")",
+        "--seed",
+        "9",
+        "--cases",
+        "3",
+        "--strategy",
+        "bit-flip",
+        "--field",
+        "0.bytes",
+        "--interface",
+        "definitely-not-a-real-interface",
+    ];
+    let first = binary().args(arguments).output().unwrap();
+    let second = binary().args(arguments).output().unwrap();
+    assert!(first.status.success());
+    assert!(second.status.success());
+    let first: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    let second: serde_json::Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(first["result"], second["result"]);
+    assert_eq!(first["result"]["mode"], "offline");
+
+    let public = binary()
+        .args([
+            "--output",
+            "json",
+            "fuzz",
+            "--packet",
+            "ipv4(src=192.0.2.1,dst=8.8.8.8)/udp(sport=40000,dport=9)/raw(hex=\"00\")",
+            "--cases",
+            "1",
+            "--strategy",
+            "bit-flip",
+            "--field",
+            "2.bytes",
+            "--live",
+            "--interface",
+            "definitely-not-a-real-interface",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(public.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&public.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.public_destination");
+}
+
+#[test]
+fn fuzz_malformed_live_requires_both_explicit_opt_ins_before_route_io() {
+    let base = [
+        "--output",
+        "json",
+        "fuzz",
+        "--packet",
+        "ipv4(src=192.168.56.1,dst=192.168.56.2)/udp(sport=40000,dport=9)/raw(hex=\"00\")",
+        "--cases",
+        "1",
+        "--strategy",
+        "malformed",
+        "--field",
+        "1.length",
+        "--mode",
+        "permissive",
+        "--live",
+        "--interface",
+        "definitely-not-a-real-interface",
+    ];
+    let call_site = binary()
+        .args(base)
+        .arg("--allow-permissive-packets")
+        .output()
+        .unwrap();
+    assert_eq!(call_site.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&call_site.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.fuzz_malformed_opt_in");
+
+    let policy = binary()
+        .args(base)
+        .arg("--allow-malformed-live")
+        .output()
+        .unwrap();
+    assert_eq!(policy.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&policy.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.permissive_packet");
+}
+
+#[test]
+fn fuzz_text_escapes_control_values_while_json_keeps_them_structured() {
+    let common = [
+        "fuzz",
+        "--packet",
+        "bsd_null(family=2,byte_order=\"little\")/ipv4(src=192.0.2.1,dst=192.0.2.2)/udp(sport=1,dport=2)",
+        "--seed",
+        "0",
+        "--cases",
+        "1",
+        "--strategy",
+        "boundary",
+        "--field",
+        "0.byte_order",
+    ];
+    let text = binary().args(common).output().unwrap();
+    assert!(text.status.success());
+    assert!(!text.stdout.contains(&0x1b));
+    assert!(String::from_utf8(text.stdout).unwrap().contains("\\u001b"));
+
+    let json = binary()
+        .args(["--output", "json"])
+        .args(common)
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(
+        value["result"]["cases"][0]["mutation"]["value"]["value"],
+        "\u{1b}[31mcontrol\u{1b}[0m"
+    );
+}
+
+#[test]
 fn send_budget_and_output_contracts_precede_route_or_live_io() {
     let budget = binary()
         .args([

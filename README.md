@@ -20,12 +20,12 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
 | Runtime-neutral captured-frame records and offline capture I/O | Bounded streaming read/write and metadata-preserving PCAP/PCAPNG copy are available through the API and `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
-| v0.2 `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `interfaces`, and `routes` commands | Available; the remaining final tool name is reserved in `--help` |
+| Complete v0.2 command set: `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `fuzz`, `interfaces`, and `routes` | Available as alpha workflows |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
-| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, structured scan, structured traceroute, and structured DNS are available; fuzz remains a later alpha |
+| Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, structured scan/traceroute/DNS, and deterministic field-aware fuzzing are available |
 | Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; physical crate extraction remains a beta milestone |
 
-Run `packetcraftr --help` for the commands implemented in this checkpoint. The unavailable `fuzz` name returns the capability exit code instead of falling through to a legacy command.
+Run `packetcraftr --help` for the complete alpha command grammar and current finite defaults.
 
 The exact v0.2 packet-layer promise is published in the
 [stable built-in protocol matrix](docs/protocol-support.md) and through the
@@ -203,6 +203,27 @@ Truncation, timeout, unrelated traffic, decode failure, and correlated network
 failure remain distinct typed outcomes. TXT and unknown RDATA retain exact hex;
 terminal text is escaped. See the [structured DNS contract](docs/dns.md).
 
+### Deterministic field-aware fuzzing
+
+`fuzz` mutates reflective packet fields with explicit boundary, random,
+bit-flip, and malformed-derived-field strategies. It is offline by default:
+generation, exact building, and bounded dissection have no resolver, route, or
+native-I/O seam. Absolute case indices derive independent seeds, so one case
+can be reproduced without replaying its predecessors.
+
+```console
+packetcraftr --output json fuzz \
+  --packet 'ipv4(src="192.0.2.1",dst="192.0.2.2")/udp(sport=40000,dport=9)/raw(text="hello")' \
+  --seed 42 --cases 64 --strategy boundary,random,bit-flip
+```
+
+`--live` is a separate opt-in and sends built cases through the shared traffic
+policy and capture-ready exchange lifecycle. Permissive or malformed live
+bytes additionally require both `--allow-malformed-live` and
+`--allow-permissive-packets`. Case, packet, aggregate byte, field/list,
+shrink, rate, timeout, duration, capture, and evidence bounds are finite. See
+the [bounded fuzz contract](docs/fuzz.md).
+
 ### Route-aware and live workflows
 
 `plan` and `routes` are passive. `plan` selects the route, interface-owned
@@ -284,6 +305,7 @@ The v0.2 contracts are:
 - Replay authorizes each fully captured frame before interface or route I/O, fixes its Layer 2/Layer 3 provider from the capture root, applies finite timing/frame/byte ceilings, and requires backend-confirmed bytes before emitting success evidence.
 - Scan authorizes the declared hostname before DNS and every resolved address before probe construction, then uses bounded capture-ready exchanges and accepts only checksum-valid matcher- or quote-correlated responses.
 - DNS authorizes the complete operation before probe construction, repeats hostname and every-answer authorization for each retry, and accepts only checksum-valid reverse-tuple responses with the exact transaction and question; unrelated section data remains rejected audit evidence.
+- Fuzzing is offline by default and derives each case directly from its operation seed and absolute index. Live fuzzing authorizes the complete packet/wire budget before route I/O and requires independent operation and policy opt-ins for permissive or malformed bytes.
 - Route MTU checks measure the actual built network-layer byte span instead of trusting permissive wire length fields. Oversized packets fail before neighbor discovery or live I/O and require an explicit fragmentation transform.
 - Capture is ready before an exchange sends its first frame, and one owned receive stream routes every frame rather than silently draining traffic.
 - Exchange always attempts to stop and join its capture session after readiness, send, receive, or timeout failures. If the operation and cleanup both fail, both errors remain visible.
@@ -314,6 +336,9 @@ Default resource ceilings are intentionally finite:
 | DNS attempts / complete message records | 1 (maximum 32) / 512 |
 | DNS name pointers / TXT strings / TXT bytes | 32 / 256 / 16 KiB |
 | DNS rejected-record / undecoded evidence metadata | 128 / 32 |
+| Fuzz cases / maximum cases | 64 / 10,000 (hard maximum 100,000) |
+| Fuzz field bytes / list items / shrink values | 4 KiB / 256 / 8 |
+| Fuzz packet / aggregate and evidence bytes | 16 MiB / 256 MiB |
 | Reassembly flows | 8,192 |
 | Buffered/history bytes per reassembly flow | 1 MiB |
 | Aggregate reassembly bytes | 256 MiB |

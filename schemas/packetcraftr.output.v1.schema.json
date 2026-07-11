@@ -1075,10 +1075,30 @@
       "type": "object",
       "required": [
         "seed",
+        "first_case",
+        "mode",
+        "cases_generated",
+        "cases_built",
+        "cases_rejected",
         "cases"
       ],
       "properties": {
         "seed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "first_case": {
+          "$ref": "#/$defs/uint64"
+        },
+        "mode": {
+          "$ref": "#/$defs/fuzzMode"
+        },
+        "cases_generated": {
+          "$ref": "#/$defs/uint64"
+        },
+        "cases_built": {
+          "$ref": "#/$defs/uint64"
+        },
+        "cases_rejected": {
           "$ref": "#/$defs/uint64"
         },
         "cases": {
@@ -1649,20 +1669,64 @@
       ]
     },
     "fuzzCaseResult": {
-      "type": "object",
-      "required": [
-        "operation_seed",
-        "case"
-      ],
-      "properties": {
-        "operation_seed": {
-          "$ref": "#/$defs/uint64"
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "operation_seed",
+            "case"
+          ],
+          "properties": {
+            "event": {
+              "const": "case"
+            },
+            "operation_seed": {
+              "$ref": "#/$defs/uint64"
+            },
+            "case": {
+              "$ref": "#/$defs/fuzzCase"
+            }
+          },
+          "additionalProperties": false
         },
-        "case": {
-          "$ref": "#/$defs/fuzzCase"
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "operation_seed",
+            "first_case",
+            "mode",
+            "cases_generated",
+            "cases_built",
+            "cases_rejected"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "operation_seed": {
+              "$ref": "#/$defs/uint64"
+            },
+            "first_case": {
+              "$ref": "#/$defs/uint64"
+            },
+            "mode": {
+              "$ref": "#/$defs/fuzzMode"
+            },
+            "cases_generated": {
+              "$ref": "#/$defs/uint64"
+            },
+            "cases_built": {
+              "$ref": "#/$defs/uint64"
+            },
+            "cases_rejected": {
+              "$ref": "#/$defs/uint64"
+            }
+          },
+          "additionalProperties": false
         }
-      },
-      "additionalProperties": false
+      ]
     },
     "packetDocument": {
       "type": "object",
@@ -2706,9 +2770,15 @@
       "required": [
         "index",
         "seed",
-        "frame",
+        "mutation",
+        "reproduction",
+        "shrink_values",
+        "recipe",
         "outcome",
-        "evidence"
+        "responses",
+        "unmatched",
+        "undecoded",
+        "diagnostics"
       ],
       "properties": {
         "index": {
@@ -2717,8 +2787,29 @@
         "seed": {
           "$ref": "#/$defs/uint64"
         },
+        "mutation": {
+          "$ref": "#/$defs/fuzzMutation"
+        },
+        "reproduction": {
+          "$ref": "#/$defs/fuzzReproduction"
+        },
+        "shrink_values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fieldValue"
+          }
+        },
+        "recipe": {
+          "$ref": "#/$defs/packetDocument"
+        },
         "frame": {
           "$ref": "#/$defs/wireFrame"
+        },
+        "decoded": {
+          "$ref": "#/$defs/packetDocument"
+        },
+        "requires_live_opt_in": {
+          "type": "boolean"
         },
         "outcome": {
           "type": "string",
@@ -2734,14 +2825,251 @@
         "error": {
           "$ref": "#/$defs/error"
         },
-        "evidence": {
+        "sent": {
+          "$ref": "#/$defs/frame"
+        },
+        "responses": {
           "type": "array",
           "items": {
             "$ref": "#/$defs/frame"
           }
+        },
+        "unmatched": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frame"
+          }
+        },
+        "undecoded": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frame"
+          }
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/diagnostic"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": {
+              "outcome": {
+                "enum": ["built", "sent", "response", "timeout"]
+              }
+            }
+          },
+          "then": {
+            "required": ["frame", "requires_live_opt_in"]
+          }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": {
+              "outcome": {
+                "enum": ["sent", "response", "timeout"]
+              }
+            }
+          },
+          "then": {
+            "required": ["sent"]
+          }
+        },
+        {
+          "if": {
+            "required": ["outcome"],
+            "properties": {
+              "outcome": {
+                "enum": ["rejected", "error"]
+              }
+            }
+          },
+          "then": {
+            "required": ["error"]
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "fuzzMode": {
+      "type": "string",
+      "enum": [
+        "offline",
+        "live"
+      ]
+    },
+    "fuzzMutation": {
+      "type": "object",
+      "required": [
+        "layer",
+        "protocol",
+        "field",
+        "strategy",
+        "original",
+        "value"
+      ],
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/uint64"
+        },
+        "protocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "strategy": {
+          "type": "string",
+          "enum": [
+            "boundary",
+            "random",
+            "bit_flip",
+            "malformed"
+          ]
+        },
+        "original": {
+          "$ref": "#/$defs/fieldValue"
+        },
+        "value": {
+          "$ref": "#/$defs/fieldValue"
         }
       },
       "additionalProperties": false
+    },
+    "fuzzReproduction": {
+      "type": "object",
+      "required": [
+        "operation_seed",
+        "case_index",
+        "case_seed"
+      ],
+      "properties": {
+        "operation_seed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "case_index": {
+          "$ref": "#/$defs/uint64"
+        },
+        "case_seed": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "fieldValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "bool" },
+            "value": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "unsigned" },
+            "value": { "$ref": "#/$defs/uint64" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "signed" },
+            "value": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "text" },
+            "value": { "type": "string" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "bytes" },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "ipv4" },
+            "value": { "type": "string", "format": "ipv4" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "ipv6" },
+            "value": { "type": "string", "format": "ipv6" }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "mac" },
+            "value": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["type", "value"],
+          "properties": {
+            "type": { "const": "list" },
+            "value": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/fieldValue" }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
     },
     "error": {
       "type": "object",

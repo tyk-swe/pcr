@@ -2,7 +2,9 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative. `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `interfaces`, and `routes` are wired in this checkpoint; reserved tool commands that are not yet implemented return exit code 4 with an explicit capability error.
+This guide documents the target v0.2 interface. During alpha development,
+`packetcraftr --help` is authoritative. All 14 final command names are wired in
+this checkpoint, including the offline-by-default `fuzz` replacement.
 
 ## The central change
 
@@ -61,6 +63,16 @@ to the validated question or its CNAME/glue chain; unrelated declared section
 records remain rejected audit evidence. Each retry re-resolves and reauthorizes
 the server hostname, so changed answers cannot inherit prior approval. See the
 [DNS contract](dns.md).
+
+The v0.2 fuzz grammar takes the same packet expression/document input as the
+builder and mutates reflective `LAYER.FIELD` targets through explicit
+`boundary`, `random`, `bit-flip`, or `malformed` strategies. The operation seed
+and absolute case index reproduce a case directly; each result includes the
+attempted tagged values, mutated packet recipe, shrink values, diagnostics, and
+exact bytes when build succeeds. Offline build/dissection is the default and
+has no live seam. `--live` uses shared traffic policy and capture-ready
+exchange, while permissive/malformed transmission requires separate operation
+and policy acknowledgements. See the [fuzz contract](fuzz.md).
 
 ### Dry run becomes two explicit operations
 

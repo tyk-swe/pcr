@@ -11,8 +11,8 @@ use packetcraftr::core::{
     LayerEncodeContext, LayerSchema, ProtocolId,
 };
 use packetcraftr::{
-    Builder, BuiltinProtocols, Dissector, Ethernet, Packet, ProtocolModule, ProtocolRegistry, Raw,
-    RegistryBuilder, RegistryError, WireValue,
+    fuzz, Builder, BuiltinProtocols, Dissector, Ethernet, FuzzRequest, FuzzStrategy, FuzzTarget,
+    Packet, ProtocolModule, ProtocolRegistry, Raw, RegistryBuilder, RegistryError, WireValue,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -190,4 +190,44 @@ fn external_module_builds_and_decodes_ethernet_foo_raw() {
         decoded.packet.get::<Raw>().unwrap().bytes.as_ref(),
         &[0xaa, 0xbb]
     );
+}
+
+#[test]
+fn external_reflective_fields_participate_in_bounded_fuzzing() {
+    let mut builder = ProtocolRegistry::builder();
+    builder.module(&BuiltinProtocols).unwrap();
+    builder.module(&FooModule).unwrap();
+    let registry = Arc::new(builder.build().unwrap());
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet {
+            destination: [0, 1, 2, 3, 4, 5],
+            source: [6, 7, 8, 9, 10, 11],
+            ether_type: WireValue::Auto,
+        })
+        .push(Foo { value: 0x1234 })
+        .push(Raw::new(vec![0xaa]));
+
+    let result = fuzz(
+        &FuzzRequest {
+            seed: 99,
+            cases: 16,
+            strategies: vec![FuzzStrategy::Boundary, FuzzStrategy::Random],
+            targets: vec![FuzzTarget {
+                layer: 1,
+                field: "value".to_owned(),
+            }],
+            ..FuzzRequest::default()
+        },
+        packet,
+        registry,
+    )
+    .unwrap();
+    assert_eq!(result.cases.len(), 16);
+    assert!(result
+        .cases
+        .iter()
+        .all(|case| case.mutation.protocol == "example.foo"));
+    assert!(result.cases.iter().any(|case| case.built.is_some()));
+    assert!(result.cases.iter().any(|case| case.error.is_some()));
 }

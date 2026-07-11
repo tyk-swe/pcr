@@ -22,13 +22,13 @@ use crate::io::{
     RouteDecision,
 };
 pub use crate::tools::{
-    DnsAttemptStatus, DnsOutcome, DnsSection, ScanClassification, ScanProbeStatus,
-    TracerouteCompletion as TraceCompletionReason, TracerouteProbeStatus as TraceProbeStatus,
-    TracerouteResponseKind as TraceResponseKind,
+    DnsAttemptStatus, DnsOutcome, DnsSection, FuzzCaseOutcome, FuzzMode, ScanClassification,
+    ScanProbeStatus, TracerouteCompletion as TraceCompletionReason,
+    TracerouteProbeStatus as TraceProbeStatus, TracerouteResponseKind as TraceResponseKind,
 };
 use crate::tools::{
-    DnsRecord, DnsRecordValue, DnsResult, ReplayFrameEvidence, ReplaySummary, ScanResult,
-    TracerouteResult,
+    DnsRecord, DnsRecordValue, DnsResult, FuzzMutation, FuzzReproduction, FuzzResult,
+    ReplayFrameEvidence, ReplaySummary, ScanResult, TracerouteResult,
 };
 
 /// Version identifier emitted by every structured CLI record.
@@ -1745,41 +1745,146 @@ pub enum DnsStreamCommandResult {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FuzzCaseOutcome {
-    Built,
-    Rejected,
-    Sent,
-    Response,
-    Timeout,
-    Error,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FuzzCaseOutput {
     pub index: u64,
     pub seed: u64,
-    pub frame: WireFrameOutput,
+    pub mutation: FuzzMutation,
+    pub reproduction: FuzzReproduction,
+    pub shrink_values: Vec<crate::core::FieldValue>,
+    pub recipe: PacketDocument,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame: Option<WireFrameOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decoded: Option<PacketDocument>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_live_opt_in: Option<bool>,
     pub outcome: FuzzCaseOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<OutputError>,
-    pub evidence: Vec<FrameOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent: Option<FrameOutput>,
+    pub responses: Vec<FrameOutput>,
+    pub unmatched: Vec<FrameOutput>,
+    pub undecoded: Vec<FrameOutput>,
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 /// Aggregate or streamed result of `fuzz`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FuzzCommandResult {
     pub seed: u64,
+    pub first_case: u64,
+    pub mode: FuzzMode,
+    pub cases_generated: u64,
+    pub cases_built: u64,
+    pub cases_rejected: u64,
     pub cases: Vec<FuzzCaseOutput>,
 }
 
-/// One deterministic case produced by streaming `fuzz` output.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FuzzCaseCommandResult {
-    pub operation_seed: u64,
-    pub case: FuzzCaseOutput,
+impl FuzzCommandResult {
+    pub fn try_from_fuzz(
+        result: FuzzResult,
+    ) -> Result<(Self, Vec<Diagnostic>, OperationStats), OutputContractError> {
+        let FuzzResult {
+            mode,
+            seed,
+            first_case,
+            cases,
+            diagnostics,
+            stats,
+        } = result;
+        let cases = cases
+            .into_iter()
+            .map(|case| {
+                let frame = case
+                    .built
+                    .as_ref()
+                    .map(|built| WireFrameOutput::new(built.bytes.clone()));
+                let requires_live_opt_in =
+                    case.built.as_ref().map(|built| built.requires_live_opt_in);
+                let decoded = case
+                    .decoded
+                    .as_ref()
+                    .map(|decoded| PacketDocument::from_packet(&decoded.packet));
+                let error = case.error.as_ref().map(|error| {
+                    OutputError::new(error.classification(), error.to_string(), error.causes())
+                });
+                Ok(FuzzCaseOutput {
+                    index: case.index,
+                    seed: case.seed,
+                    mutation: case.mutation,
+                    reproduction: case.reproduction,
+                    shrink_values: case.shrink_values,
+                    recipe: PacketDocument::from_packet(&case.recipe),
+                    frame,
+                    decoded,
+                    requires_live_opt_in,
+                    outcome: case.outcome,
+                    error,
+                    sent: case.sent.map(FrameOutput::try_from_frame).transpose()?,
+                    responses: case
+                        .responses
+                        .into_iter()
+                        .map(FrameOutput::try_from_frame)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    unmatched: case
+                        .unmatched
+                        .into_iter()
+                        .map(FrameOutput::try_from_frame)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    undecoded: case
+                        .undecoded
+                        .into_iter()
+                        .map(FrameOutput::try_from_frame)
+                        .collect::<Result<Vec<_>, _>>()?,
+                    diagnostics: case.diagnostics,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        let operation_stats = OperationStats {
+            packets_attempted: stats.packets_attempted,
+            packets_completed: stats.packets_completed,
+            bytes: stats.bytes,
+            elapsed: stats.elapsed,
+            capture: stats.capture,
+        };
+        Ok((
+            Self {
+                seed,
+                first_case,
+                mode,
+                cases_generated: stats.cases_generated,
+                cases_built: stats.cases_built,
+                cases_rejected: stats.cases_rejected,
+                cases,
+            },
+            diagnostics,
+            operation_stats,
+        ))
+    }
 }
+
+/// Independently useful events in deterministic `fuzz` streaming output.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum FuzzStreamCommandResult {
+    Case {
+        operation_seed: u64,
+        case: Box<FuzzCaseOutput>,
+    },
+    Complete {
+        operation_seed: u64,
+        first_case: u64,
+        mode: FuzzMode,
+        cases_generated: u64,
+        cases_built: u64,
+        cases_rejected: u64,
+    },
+}
+
+/// Compatibility name retained for the early typed-output placeholder.
+pub type FuzzCaseCommandResult = FuzzStreamCommandResult;
 
 fn compact_hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len().saturating_mul(2));

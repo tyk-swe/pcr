@@ -42,13 +42,18 @@ rejected-record audit evidence, bounded undecoded frames, and one final
 `complete` event. A runtime
 failure replaces the next event with a terminal error at the next unused
 sequence.
+`fuzz` emits one deterministic `case` event for every requested absolute case
+index, including bounded mutation/build rejections, followed by one `complete`
+event with generation counts and operation statistics. Each case carries its
+tagged mutation, reproduction tuple, shrink values, complete recipe, exact
+built/sent bytes when available, and separately typed matched, unmatched, and
+undecodable evidence.
 
 ## Command/format matrix
 
 The matrix is also published as `COMMAND_OUTPUT_CONTRACTS`. Unsupported
 combinations fail with `cli.output_format` before file, provider, resolver,
-route, capture, or send side effects. Capability-gated commands still return a
-capability error until their implementation issue lands.
+route, capture, or send side effects.
 
 | Command | Formats |
 | --- | --- |
@@ -86,7 +91,10 @@ jsonschema schemas/packetcraftr.output.v1.schema.json \
   --instance examples/documents/output-traceroute-complete.json \
   --instance examples/documents/output-dns-success.json \
   --instance examples/documents/output-dns-event.json \
-  --instance examples/documents/output-dns-complete.json
+  --instance examples/documents/output-dns-complete.json \
+  --instance examples/documents/output-fuzz-success.json \
+  --instance examples/documents/output-fuzz-event.json \
+  --instance examples/documents/output-fuzz-complete.json
 ```
 
 CI also requires every document in `tests/fixtures/invalid-output` to fail

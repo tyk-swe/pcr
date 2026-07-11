@@ -25,10 +25,12 @@ use crate::io::{
 use crate::protocols::Ethernet;
 use crate::tools::{
     AuthorizedScanTarget, DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor,
-    DnsMatchedResponse, DnsStats, ScanAuthorizer, ScanBatch, ScanBatchExecution,
-    ScanExecutionError, ScanExecutor, ScanMatchedResponse, ScanStats, ScanTarget, ScanTransport,
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutionError, TracerouteExecutor,
-    TracerouteMatchedResponse, TracerouteStats, TracerouteStrategy,
+    DnsMatchedResponse, DnsStats, FuzzAuthorizationError, FuzzAuthorizer, FuzzCaseExecution,
+    FuzzExecutionCase, FuzzExecutionError, FuzzExecutionStats, FuzzExecutor, ScanAuthorizer,
+    ScanBatch, ScanBatchExecution, ScanExecutionError, ScanExecutor, ScanMatchedResponse,
+    ScanStats, ScanTarget, ScanTransport, TracerouteBatch, TracerouteBatchExecution,
+    TracerouteExecutionError, TracerouteExecutor, TracerouteMatchedResponse, TracerouteStats,
+    TracerouteStrategy,
 };
 
 // Compatibility surface: provider implementations historically imported these
@@ -511,6 +513,65 @@ pub type TrafficPolicyTracerouteAuthorizer<'a, R> = TrafficPolicyScanAuthorizer<
 /// DNS retries use the same declared-hostname-before-resolution and
 /// every-address authorization contract as scan.
 pub type TrafficPolicyDnsAuthorizer<'a, R> = TrafficPolicyScanAuthorizer<'a, R>;
+
+/// Façade adapter that authorizes a complete fuzz campaign before any packet
+/// reaches route, capture, neighbor, or transmission providers.
+pub struct TrafficPolicyFuzzAuthorizer<'a> {
+    policy: &'a TrafficPolicy,
+}
+
+impl<'a> TrafficPolicyFuzzAuthorizer<'a> {
+    pub fn new(policy: &'a TrafficPolicy) -> Self {
+        Self { policy }
+    }
+}
+
+impl FuzzAuthorizer for TrafficPolicyFuzzAuthorizer<'_> {
+    fn authorize_operation(
+        &mut self,
+        packets: &[Packet],
+        destination: Option<IpAddr>,
+        maximum_wire_bytes: u64,
+        requires_malformed_live: bool,
+    ) -> Result<(), FuzzAuthorizationError> {
+        self.policy
+            .validate()
+            .map_err(|error| FuzzAuthorizationError::classified(&error))?;
+        let packet_count = packets.len() as u64;
+        if packet_count > self.policy.max_packets_per_operation {
+            return Err(FuzzAuthorizationError::classified(
+                &TrafficPolicyError::PacketLimit {
+                    actual: packet_count,
+                    limit: self.policy.max_packets_per_operation,
+                },
+            ));
+        }
+        if maximum_wire_bytes > self.policy.max_bytes_per_operation {
+            return Err(FuzzAuthorizationError::classified(
+                &TrafficPolicyError::ByteLimit {
+                    actual: maximum_wire_bytes,
+                    limit: self.policy.max_bytes_per_operation,
+                },
+            ));
+        }
+        if requires_malformed_live && !self.policy.allow_permissive_packets {
+            return Err(FuzzAuthorizationError::classified(
+                &TrafficPolicyError::PermissivePacket,
+            ));
+        }
+        if let Some(destination) = destination {
+            self.policy
+                .authorize_destination(destination)
+                .map_err(|error| FuzzAuthorizationError::classified(&error))?;
+        }
+        for packet in packets {
+            self.policy
+                .authorize_packet_destinations(packet)
+                .map_err(|error| FuzzAuthorizationError::classified(&error))?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SendOptions {
@@ -1499,6 +1560,92 @@ fn invalid_scan_execution(message: impl Into<String>) -> ScanExecutionError {
             "cli.scan_executor",
             FailureKind::Cli,
             Some("use homogeneous bounded scan batches and retain at least one response per probe"),
+        ),
+        Vec::new(),
+    )
+}
+
+/// Façade adapter that executes one already-generated fuzz case through the
+/// capture-ready [`Client::exchange`] lifecycle.
+pub struct ClientFuzzExecutor<'a, R, N, I> {
+    client: &'a Client<R, N, I>,
+    options: ExchangeOptions,
+}
+
+impl<'a, R, N, I> ClientFuzzExecutor<'a, R, N, I> {
+    pub fn new(client: &'a Client<R, N, I>, options: ExchangeOptions) -> Self {
+        Self { client, options }
+    }
+}
+
+impl<R, N, I> FuzzExecutor for ClientFuzzExecutor<'_, R, N, I>
+where
+    R: RouteProvider,
+    N: NeighborResolver,
+    I: ExchangeIo,
+{
+    fn execute(
+        &mut self,
+        case: &FuzzExecutionCase,
+        timeout: Duration,
+    ) -> Result<FuzzCaseExecution, FuzzExecutionError> {
+        let mut options = self.options.clone();
+        options.timeout = timeout;
+        options.max_template_packets = 1;
+        let exchange = self
+            .client
+            .exchange(&PacketTemplate::new(case.packet.clone()), options)
+            .map_err(|error| FuzzExecutionError::classified(&error))?;
+        let ExchangeResult {
+            mut sent,
+            mut sent_evidence,
+            responses,
+            unanswered: _,
+            unsolicited,
+            undecoded,
+            diagnostics,
+            stats,
+        } = exchange;
+        if sent.len() != 1 || sent_evidence.len() != 1 {
+            return Err(invalid_fuzz_execution(format!(
+                "expected one built and sent frame, received {} built and {} sent",
+                sent.len(),
+                sent_evidence.len()
+            )));
+        }
+        let built = sent.pop().expect("validated one built fuzz packet");
+        let sent = sent_evidence.pop().expect("validated one sent fuzz frame");
+        Ok(FuzzCaseExecution {
+            built,
+            sent,
+            responses: responses
+                .into_iter()
+                .map(|response| response.response.frame)
+                .collect(),
+            unmatched: unsolicited
+                .into_iter()
+                .map(|response| response.frame)
+                .collect(),
+            undecoded,
+            diagnostics,
+            stats: FuzzExecutionStats {
+                packets_attempted: stats.packets_attempted,
+                packets_completed: stats.packets_completed,
+                bytes: stats.bytes,
+                elapsed: stats.elapsed,
+                capture: stats.capture,
+            },
+        })
+    }
+}
+
+fn invalid_fuzz_execution(message: impl Into<String>) -> FuzzExecutionError {
+    FuzzExecutionError::new(
+        message,
+        ErrorClassification::new(
+            "cli.fuzz_executor",
+            FailureKind::Cli,
+            Some("execute exactly one bounded fuzz case per capture-ready exchange"),
         ),
         Vec::new(),
     )
@@ -3249,6 +3396,79 @@ mod tests {
         assert_eq!(result.sent_evidence[0].bytes, result.sent[0].bytes);
         assert!(result.unanswered.is_empty());
         assert!(result.unsolicited.is_empty());
+    }
+
+    #[test]
+    fn fuzz_executor_uses_the_capture_ready_exchange_lifecycle() {
+        let registry = Arc::new(default_registry().unwrap());
+        let response_packet = packet(
+            Ipv4Addr::new(10, 0, 0, 2),
+            Ipv4Addr::new(10, 0, 0, 1),
+            9,
+            12345,
+        );
+        let response_bytes = Builder::new(Arc::clone(&registry))
+            .build(
+                response_packet,
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap()
+            .bytes;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let io = FakeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(Some(
+                CapturedFrame::new(std::time::SystemTime::now(), LinkType::IPV4, response_bytes)
+                    .unwrap(),
+            ))),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        };
+        let client = Client::new(
+            registry,
+            FixedRoutes(route(LinkCapability::Layer3)),
+            CountingNeighbors::default(),
+            io,
+            TrafficPolicy::default(),
+        );
+        let case = FuzzExecutionCase {
+            index: 7,
+            seed: 11,
+            packet: packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12345,
+                9,
+            ),
+        };
+        let result = ClientFuzzExecutor::new(
+            &client,
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        interface: None,
+                        preferred_source: None,
+                    },
+                    ..SendOptions::default()
+                },
+                ..ExchangeOptions::default()
+            },
+        )
+        .execute(&case, Duration::from_millis(10))
+        .unwrap();
+
+        assert_eq!(
+            *events.lock().unwrap(),
+            ["arm", "ready", "send", "shutdown"]
+        );
+        assert_eq!(result.responses.len(), 1);
+        assert_eq!(result.sent.link_type, LinkType::RAW);
+        assert_eq!(result.stats.packets_attempted, 1);
+        assert_eq!(result.stats.packets_completed, 1);
+        assert_eq!(result.stats.bytes, result.sent.bytes.len() as u64);
     }
 
     #[test]

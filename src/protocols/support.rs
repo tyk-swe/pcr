@@ -382,10 +382,10 @@ pub const STABLE_WORKFLOW_PROTOCOLS: &[WorkflowProtocolSupport] = &[
         workflow: "fuzz",
         builds: ALL_BUILD,
         dissects: ALL_DISSECT,
-        matches: NONE,
-        capture_roots: false,
+        matches: MATCHERS,
+        capture_roots: true,
         packet_independent: false,
-        notes: "offline field-aware mutation uses every constructible codec by default",
+        notes: "offline field-aware mutation covers every constructible codec; explicit live cases reuse shared matchers and capture roots",
     },
     WorkflowProtocolSupport {
         workflow: "interfaces",

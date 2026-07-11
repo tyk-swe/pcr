@@ -87,7 +87,7 @@ live planning.
 | `scan` | Live recipe | Every codec; all four matchers | Yes |
 | `traceroute` | Live recipe | Every codec; all four matchers | Yes |
 | `dns` | Ethernet/VLAN, IPv4/IPv6, TCP/UDP, raw | Same stack; TCP/UDP matchers | Yes |
-| `fuzz` | Every constructible codec | Every codec | — |
+| `fuzz` | Every constructible codec | Every codec; all four matchers for optional live cases | Yes for optional live cases |
 | `interfaces` | Packet-independent | — | — |
 | `routes` | Packet-independent | — | — |
 
@@ -97,6 +97,12 @@ CLI uses capture-ready UDP; the pure length-prefixed TCP frame decoder applies
 the same bounded message validation without claiming a raw TCP packet is a
 connected DNS session. Replay and read preserve captured bytes and metadata
 rather than manufacturing a typed interpretation.
+
+Fuzzing enumerates reflective fields from every constructible codec. Offline
+cases build and dissect without a native boundary. Explicit live cases reuse
+the normal route materialization, registered response matchers, capture roots,
+traffic policy, and permissive-packet opt-in instead of introducing a
+payload-only or protocol-specific send path.
 
 ## Strictness and preservation
 

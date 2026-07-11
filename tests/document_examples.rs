@@ -162,6 +162,65 @@ fn published_dns_stream_event_matches_the_typed_contract() {
 }
 
 #[test]
+fn published_fuzz_outputs_match_the_deterministic_offline_cli() {
+    let aggregate = binary()
+        .args([
+            "--output",
+            "json",
+            "fuzz",
+            "--packet",
+            "raw(hex=\"00\")",
+            "--seed",
+            "1",
+            "--cases",
+            "1",
+            "--strategy",
+            "bit-flip",
+            "--field",
+            "0.bytes",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        aggregate.status.success(),
+        "{}",
+        String::from_utf8_lossy(&aggregate.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&aggregate.stdout).unwrap(),
+        json_file("output-fuzz-success.json")
+    );
+
+    let stream = binary()
+        .args([
+            "--output",
+            "ndjson",
+            "fuzz",
+            "--packet",
+            "raw(hex=\"00\")",
+            "--seed",
+            "1",
+            "--cases",
+            "1",
+            "--strategy",
+            "bit-flip",
+            "--field",
+            "0.bytes",
+        ])
+        .output()
+        .unwrap();
+    assert!(stream.status.success());
+    let records = String::from_utf8(stream.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0], json_file("output-fuzz-event.json"));
+    assert_eq!(records[1], json_file("output-fuzz-complete.json"));
+}
+
+#[test]
 fn published_replay_output_matches_the_typed_contract() {
     let result = packetcraftr::ReplayCommandResult::from_summary(
         packetcraftr::ReplaySummary {

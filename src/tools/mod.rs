@@ -9,6 +9,7 @@
 //! eventual `packetcraftr-tools` extraction does not change root imports.
 
 mod dns;
+mod fuzz;
 mod replay;
 mod scan;
 mod traceroute;
@@ -26,6 +27,17 @@ pub use dns::{
     DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_HEADER_BYTES,
     MAX_DNS_ATTEMPTS, MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS,
     MAX_DNS_RECORDS,
+};
+
+pub use fuzz::{
+    fuzz, fuzz_live, FuzzAuthorizationError, FuzzAuthorizer, FuzzCase, FuzzCaseExecution,
+    FuzzCaseFailure, FuzzCaseOutcome, FuzzClock, FuzzError, FuzzExecutionCase, FuzzExecutionError,
+    FuzzExecutionStats, FuzzExecutor, FuzzLimits, FuzzLiveOptions, FuzzMode, FuzzMutation,
+    FuzzReproduction, FuzzRequest, FuzzResult, FuzzStats, FuzzStrategy, FuzzTarget,
+    FuzzTargetParseError, SystemFuzzClock, DEFAULT_FUZZ_CASES, DEFAULT_MAX_FUZZ_CASES,
+    DEFAULT_MAX_FUZZ_FIELD_BYTES, DEFAULT_MAX_FUZZ_LIST_ITEMS, DEFAULT_MAX_FUZZ_SHRINK_STEPS,
+    MAX_FUZZ_CASES, MAX_FUZZ_DURATION, MAX_FUZZ_FIELD_BYTES, MAX_FUZZ_LIST_ITEMS, MAX_FUZZ_RATE,
+    MAX_FUZZ_SHRINK_STEPS, MAX_FUZZ_STRATEGIES, MAX_FUZZ_TARGET_FIELDS,
 };
 
 pub use replay::{

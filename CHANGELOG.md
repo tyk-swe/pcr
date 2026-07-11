@@ -31,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Published the versioned `packetcraftr.protocol-support/v1` manifest and stable documentation for all 22 built-in codecs, nine numeric capture roots, four matchers, and 14 CLI workflow obligations; extended the authoritative corpus to every root and both BSD NULL byte orders.
 - Added aggregate-bounded capture writers, public PCAP/PCAPNG interface timestamp metadata, streaming metadata-preserving `read` capture output, and a policy-gated `replay` workflow with injectable timing/transmission, exact wire evidence, finite speed/rate/resource limits, and typed unsupported-root/partial-send failures.
 - Added a bounded structured `dns` workflow and CLI over the shared policy and capture-ready exchange seams: IPv4/IPv6 UDP queries, independent retry-time hostname/every-answer authorization, exact tuple/transaction/question correlation, bounded compression and RDATA decoding, question-relevant record filtering, rejected-record audit evidence, terminal-safe TXT display with exact hex, and typed text/JSON/NDJSON results.
+- Added deterministic bounded field-aware `fuzz`: offline-by-default reflective boundary/random/bit-flip/malformed mutation, direct case-index reproduction, finite shrink data and allocation/wire/evidence/duration limits, bounded build/dissection results, explicit live and malformed double opt-ins, complete traffic-policy preauthorization, capture-ready `Client::exchange` execution, and typed text/JSON/NDJSON evidence.
 
 ### Changed
 

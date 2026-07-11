@@ -1,0 +1,75 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "fuzz",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "seed": 1,
+    "first_case": 0,
+    "mode": "offline",
+    "cases_generated": 1,
+    "cases_built": 1,
+    "cases_rejected": 0,
+    "cases": [
+      {
+        "index": 0,
+        "seed": 5206558337466748783,
+        "mutation": {
+          "layer": 0,
+          "protocol": "raw",
+          "field": "bytes",
+          "strategy": "bit_flip",
+          "original": { "type": "bytes", "value": [0] },
+          "value": { "type": "bytes", "value": [4] }
+        },
+        "reproduction": {
+          "operation_seed": 1,
+          "case_index": 0,
+          "case_seed": 5206558337466748783
+        },
+        "shrink_values": [
+          { "type": "bytes", "value": [] },
+          { "type": "bytes", "value": [0] }
+        ],
+        "recipe": {
+          "schema": "packetcraftr.packet/v1",
+          "layers": [
+            {
+              "protocol": "raw",
+              "fields": {
+                "bytes": { "type": "bytes", "value": [4] }
+              }
+            }
+          ]
+        },
+        "frame": { "bytes_hex": "04", "length": 1 },
+        "requires_live_opt_in": false,
+        "outcome": "built",
+        "responses": [],
+        "unmatched": [],
+        "undecoded": [],
+        "diagnostics": [
+          {
+            "code": "fuzz.decode_unavailable",
+            "severity": "info",
+            "message": "built root has no registered capture-link representation; exact bytes are retained"
+          }
+        ]
+      }
+    ]
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 1,
+    "elapsed": { "secs": 0, "nanos": 0 },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

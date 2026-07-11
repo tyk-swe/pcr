@@ -15,6 +15,7 @@ from typing import Any
 
 
 COMMIT = re.compile(r"[0-9a-f]{40}")
+VERSION = re.compile(r"0\.2\.0(?:-(?:alpha|beta|rc)\.(?:0|[1-9][0-9]*))?")
 MALFORMED_NOISE = "0249000001020249000001010800450000100000"
 REQUIRED_TESTS = (
     "exchange_arms_and_awaits_capture_before_send_and_matches_response",
@@ -119,7 +120,10 @@ def main() -> int:
     require(metadata.get("schema") == "packetcraftr.qualification-input/v1", "metadata schema")
     require(COMMIT.fullmatch(str(metadata.get("candidate_commit", ""))) is not None, "candidate commit")
     require(COMMIT.fullmatch(str(metadata.get("tooling_commit", ""))) is not None, "tooling commit")
-    require(str(metadata.get("version", "")).startswith("0.2.0-"), "candidate version")
+    require(
+        VERSION.fullmatch(str(metadata.get("version", ""))) is not None,
+        "candidate version",
+    )
     require(metadata.get("rust_version") == "1.96.0", "qualification MSRV")
     require(re.fullmatch(r"[0-9a-f]{64}", str(metadata.get("binary_sha256", ""))) is not None, "binary hash")
     checks.append("candidate identity, binary hash, and pinned MSRV")

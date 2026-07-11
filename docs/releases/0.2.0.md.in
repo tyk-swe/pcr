@@ -32,10 +32,18 @@ packetcraftr --version
 
 ## Qualified targets and limits
 
-The approved release lineage passed portable and native checks on Linux x86_64,
-macOS arm64/x86_64, and Windows x86_64 MSVC with Npcap 1.88, plus the shared
-four-platform exact-byte and PCAP/PCAPNG interchange corpus. Native use still
-requires the documented operating-system dependency and privilege boundary.
+The approved release lineage passed portable checks on Linux x86_64, macOS
+arm64/x86_64, and Windows x86_64 MSVC; privileged Linux/macOS live checks; the
+hosted Windows route/raw/dependency boundary; and the shared four-platform
+exact-byte and PCAP/PCAPNG interchange corpus. Native use still requires the
+documented operating-system dependency and privilege boundary.
+
+The release owner explicitly waived the unavailable dedicated Windows/Npcap
+runner. Real Npcap capture/injection and live workflows that depend on it are
+therefore an unqualified preview in 0.2.0, not a passed stable matrix row.
+Portable Windows, IP Helper route/source selection, constrained Winsock
+loopback sends, portable byte parity, and typed missing/incompatible-Npcap
+behavior are qualified.
 
 Darwin cannot transmit an exact caller-supplied IPv6 header through a raw IPv6
 socket because the kernel synthesizes that header. PacketcraftR reports this as

@@ -585,8 +585,14 @@ def finalize_command(args: argparse.Namespace) -> None:
         ],
         "separate_release_qualifications": [
             {"owner": "XOD-50", "scope": "privileged macOS live I/O"},
-            {"owner": "XOD-51", "scope": "privileged Windows/Npcap live I/O"},
             {"owner": "XOD-52", "scope": "cross-platform parity and artifact matrix"},
+        ],
+        "scope_waivers": [
+            {
+                "owner": "release owner / XOD-51",
+                "scope": "privileged Windows/Npcap live I/O",
+                "disposition": "Unqualified 0.2.0 preview; hosted MSVC boundary is not a substitute for real Npcap evidence.",
+            }
         ],
         "package_archives": packages,
         "log_sha256": logs,
@@ -608,8 +614,10 @@ Status: **PASS**
 
 The only accepted dependency item is the pinned `RUSTSEC-2024-0436`
 maintenance notice documented in `deny.toml`; XOD-54 owns the release-time
-review. Privileged macOS, Windows, and cross-platform parity remain separately
-owned release qualifications, not accepted security-audit bypasses.
+review. Privileged macOS and cross-platform parity remain separately owned
+release qualifications, not accepted security-audit bypasses. The release
+owner explicitly waived privileged Windows/Npcap live I/O for 0.2.0; it
+remains an unqualified preview and is not represented as a passing row.
 """
     (args.output.parent / "REPORT.md").write_text(report, encoding="utf-8")
 

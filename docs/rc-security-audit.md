@@ -79,9 +79,13 @@ deny vulnerabilities. Platform behavior remains separately gated and owned:
 
 - XOD-49: privileged Linux live I/O;
 - XOD-50: privileged macOS live I/O;
-- XOD-51: privileged Windows/Npcap live I/O;
 - XOD-52: cross-platform parity and artifact matrix; and
 - XOD-54: RC rehearsal and final candidate go/no-go.
+
+XOD-51's dedicated Windows/Npcap live gate was explicitly waived by the
+release owner on 2026-07-11. It is recorded as an unqualified 0.2.0 preview in
+the audit summary and Release notes, not as a security-audit pass or qualified
+platform row.
 
 Do not place confidential findings in the evidence bundle or a public issue.
 Route them through `SECURITY.md`; the public audit may record only a sanitized

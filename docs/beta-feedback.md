@@ -20,7 +20,9 @@ capability defect, artifact/version/source mismatch, or unbounded-resource
 regression is a 0.2.0 release blocker before RC. Compatible additions and work
 outside the published v0.2 scope may be scheduled separately.
 
-No stable-promised implementation is deferred from this beta. Privileged Linux,
-macOS, and Windows live-I/O runs, cross-platform parity, and the final
-security/resource/package audit are qualification gates for the exact beta
-lineage before an RC can be approved.
+The Beta originally required privileged Linux, macOS, and Windows live-I/O
+runs, cross-platform parity, and the final security/resource/package audit.
+On 2026-07-11 the release owner explicitly removed real Windows/Npcap live I/O
+from the qualified 0.2.0 scope because its dedicated runner was unavailable.
+That path is documented as an unqualified preview rather than silently deferred
+or represented as passing; the other exact-lineage qualification gates remain.

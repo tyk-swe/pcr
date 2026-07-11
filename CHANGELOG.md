@@ -25,6 +25,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   and malformed inputs, PCAP/PCAPNG transcodes, external codecs, DNS wire data,
   and deterministic fuzz seeds with retained per-case and corpus digests.
 
+### Changed
+
+- Scoped Windows x86_64 MSVC Npcap live capture/injection and dependent live
+  workflows as an unqualified preview for 0.2.0 after the release owner
+  explicitly waived the unavailable dedicated-runner gate. Portable Windows,
+  native route discovery, constrained Winsock loopback sends, wire parity, and
+  typed missing/incompatible-Npcap behavior remain release-qualified.
+
 ### Fixed
 
 - Generalized the GitHub-only release gate from Beta to RC/stable metadata and

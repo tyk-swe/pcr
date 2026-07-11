@@ -1,10 +1,18 @@
 # Windows x86_64 MSVC and Npcap qualification
 
-The Windows release gate separates facts that a disposable hosted runner can
-prove from the privileged native-dependency rows that require a controlled
-runner. Both paths build and test the exact extracted candidate archive with
-Rust 1.96.0; neither treats the workflow checkout or an uncommitted workspace as
-the release input.
+The Windows qualification procedure separates facts that a disposable hosted
+runner can prove from privileged native-dependency rows that require a
+controlled runner. Both paths build and test the exact extracted candidate
+archive with Rust 1.96.0; neither treats the workflow checkout or an uncommitted
+workspace as the release input.
+
+## 0.2.0 release decision
+
+On 2026-07-11, the release owner explicitly waived the dedicated Npcap runner
+because no eligible host was available. XOD-51 is canceled rather than marked
+as passed. For 0.2.0, real Npcap capture/injection and live workflows that
+depend on it are an unqualified preview. The hosted MSVC boundary below remains
+qualified, and this complete live procedure is retained for a later Release.
 
 ## Hosted MSVC boundary
 
@@ -93,8 +101,9 @@ gh workflow run windows-qualification.yml --ref main \
 
 `verify-windows-live-evidence.py` generates a pass report only after the native
 protocol matrix, exact frames, Npcap identity, and zero-loss accounting all
-agree. Record the job URL, artifact ID, evidence bundle digest, candidate
-commit, archive digest, binary digests, and Npcap DLL digest on XOD-51.
+agree. A future qualification must record the job URL, artifact ID, evidence
+bundle digest, candidate commit, archive digest, binary digests, and Npcap DLL
+digest; the 0.2.0 waiver is not reusable as evidence of such a pass.
 
 Vendor references:
 

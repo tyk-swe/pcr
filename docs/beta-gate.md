@@ -87,9 +87,11 @@ required jobs extend that portable gate rather than redefining it:
   failure; and
 - `Required checks` fails unless every job succeeds.
 
-Hosted runners do not perform privileged live packet I/O. Those target-specific
+Hosted runners do not perform privileged live packet I/O. Linux and macOS
 runner gates remain part of release-candidate qualification, not the portable
-beta regression gate.
+Beta regression gate. The release owner explicitly waived the unavailable
+Windows/Npcap runner for 0.2.0, whose real Npcap path is therefore documented
+as an unqualified preview rather than covered by this gate.
 
 The exact-candidate security, resource-bound, secret, and local-package review
 is specified separately in the [RC audit contract](rc-security-audit.md). Its

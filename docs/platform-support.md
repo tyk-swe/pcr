@@ -10,6 +10,16 @@ Status snapshot: 2026-07-11 (`0.2.0-beta.1`).
 stable-promised implementation; the runner gates below qualify those paths for
 the release candidate.
 
+## 0.2.0 Windows/Npcap scope waiver
+
+On 2026-07-11, the release owner explicitly waived the unavailable dedicated
+Windows/Npcap runner. This is a visible scope reduction, not a qualification
+pass: real Npcap capture/injection and live workflows that depend on it are an
+unqualified preview for 0.2.0. Portable Windows, passive IP Helper discovery,
+constrained Winsock loopback sends, exact portable parity, and typed
+missing/incompatible-Npcap behavior remain qualified. The complete dedicated
+workflow stays in the repository for a later release.
+
 ## Status legend
 
 - **Frozen:** the beta API/CLI/schema contract is compatibility-reviewed and
@@ -18,6 +28,8 @@ the release candidate.
   integration.
 - **Runner gate:** implementation has deterministic/injected CI coverage but
   still requires the named privileged/native-dependency release runner.
+- **Unqualified preview:** implemented and covered through hosted/injected
+  seams, but not claimed as a stable live capability by this Release.
 
 ## Current beta implementation
 
@@ -29,16 +41,16 @@ the release candidate.
 | Exact portable parity | Four-platform gate | Four-platform gate | Four-platform gate | One candidate archive, manifest, authoritative fixture corpus, capture transcodes, and fuzz seeds must produce identical case/corpus digests; see the [parity procedure](parity-qualification.md) |
 | Packet-expression/document CLI | Frozen, CI | Frozen, CI | Frozen, CI | One exclusive recipe grammar is shared by every packet-taking command |
 | Route/source planning and inventory CLI | Implemented, CI | Implemented, CI | Implemented, CI | `plan` and interface-bound `routes` use `native-route`; both remain passive |
-| Live Layer 2 capture/injection CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `send`/`capture` use libpcap or runtime-loaded Npcap; hosted CI covers policy, ABI, and lifecycle seams, while privileged qualification requires dedicated runners |
-| Gateway-aware ARP/NDP | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
-| Raw Layer 3 transmission CLI | IPv4/IPv6, CI + runner gate | Exact IPv4; IPv6 typed unsupported, CI + runner gate | IPv4/IPv6, CI + runner gate | Darwin cannot accept a caller-supplied complete IPv6 header; PacketcraftR fails that explicit mode before socket I/O instead of mutating bytes or falling back to BPF |
-| Coordinated exchange CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `exchange` awaits capture readiness before send and shares bounded retention, loss reporting, and joined shutdown contracts |
-| Exact bounded replay CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable policy/timing/transmitter seams are deterministic in hosted CI; privileged Ethernet/raw-IP replay remains a dedicated-runner gate |
+| Live Layer 2 capture/injection CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI; unqualified preview | `send`/`capture` use libpcap or runtime-loaded Npcap; Windows hosted CI covers policy, ABI, and lifecycle seams but not real Npcap traffic |
+| Gateway-aware ARP/NDP | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI; unqualified preview | Portable resolver logic is deterministically tested with injected providers; Windows Npcap-backed discovery has no 0.2.0 live sign-off |
+| Raw Layer 3 transmission CLI | IPv4/IPv6, CI + runner gate | Exact IPv4; IPv6 typed unsupported, CI + runner gate | Loopback qualified; broader live preview | Darwin cannot accept a caller-supplied complete IPv6 header; Windows hosted evidence covers constrained Winsock loopback sends |
+| Coordinated exchange CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI; unqualified preview | `exchange` awaits capture readiness before send; the Windows path depends on unqualified Npcap capture |
+| Exact bounded replay CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable qualified; live preview | Portable policy/timing/transmitter seams are deterministic in hosted CI; Windows Ethernet replay lacks real Npcap sign-off |
 | Defragmentation and TCP reassembly | Frozen, CI | Frozen, CI | Frozen, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
-| Structured scan workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable planner, matcher/classifier, policy, timing, and injected lifecycle tests run in hosted CI; privileged qualification remains a dedicated-runner gate |
-| Structured traceroute workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable hop planner, IPv4/IPv6 quoted-error classifier, policy, timing, and injected exchange seams run in hosted CI; privileged qualification remains a dedicated-runner gate |
-| Structured DNS workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable codec, relevance, policy/rebinding, timing, and injected exchange tests run in hosted CI; privileged UDP qualification remains a dedicated-runner gate |
-| Bounded field-aware fuzz workflow | Offline frozen, CI; live runner gate | Offline frozen, CI; live runner gate | Offline frozen, CI; live runner gate | Offline deterministic mutation/build/dissection is portable and hosted-CI tested; optional live cases use the shared route, policy, exchange, and selected native send path |
+| Structured scan workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable/injected qualified; live preview | Portable planner, matcher/classifier, policy, timing, and injected lifecycle tests run in hosted CI |
+| Structured traceroute workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable/injected qualified; live preview | Portable hop planning and quoted-error classifiers are qualified; Windows Npcap-backed exchange is not |
+| Structured DNS workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable/injected qualified; live preview | Portable codec, relevance, policy/rebinding, timing, and injected exchange tests run in hosted CI |
+| Bounded field-aware fuzz workflow | Offline frozen, CI; live runner gate | Offline frozen, CI; live runner gate | Offline frozen, CI; live preview | Offline deterministic mutation/build/dissection is portable and hosted-CI tested; Windows live fuzz depends on unqualified Npcap I/O |
 
 Consult the exact release notes and `packetcraftr --help` for the checkout in
 use; a runner-gated row is not a stable v0.2 qualification claim.
@@ -117,7 +129,7 @@ repeats both checks, preventing a changed DNS answer from bypassing policy.
 
 The component and native ownership rules are fixed by [ADR 0004](adr/0004-component-and-native-adapter-boundaries.md). Portable components forbid unsafe code. Direct native dependencies, FFI, and any reviewed unsafe implementation are confined to the private `io::platform` subtree and checked by CI.
 
-## Stable v0.2 release target
+## Qualified stable v0.2 release scope
 
 | Capability | Linux x86_64 GNU | macOS arm64/x86_64 | Windows x86_64 MSVC |
 | --- | --- | --- | --- |
@@ -125,12 +137,12 @@ The component and native ownership rules are fixed by [ADR 0004](adr/0004-compon
 | Streaming PCAP/PCAPNG read/write | Required | Required | Required |
 | Interface enumeration | Required | Required | Required |
 | Native route/source selection | Netlink | Routing sockets/native interface APIs | `GetBestRoute2`/adapter APIs |
-| Layer 2 capture/injection | libpcap | libpcap/BPF | Npcap |
-| Layer 3 transmission where supported | Required | Required | Required |
-| Gateway-aware ARP/NDP | Required | Required | Required |
-| Coordinated send/capture/exchange | Required | Required | Required |
-| Scan, traceroute, DNS, and bounded fuzz tools | Required | Required | Required |
-| Actionable privilege/dependency errors | Required | Required | Required |
+| Layer 2 capture/injection | libpcap | libpcap/BPF | Npcap preview; unqualified |
+| Layer 3 transmission where supported | Required | Required | Constrained loopback qualified; broader preview |
+| Gateway-aware ARP/NDP | Required | Required | Npcap-backed preview; unqualified |
+| Coordinated send/capture/exchange | Required | Required | Npcap-backed preview; unqualified |
+| Scan, traceroute, DNS, and bounded fuzz tools | Required | Required | Portable/injected qualified; live preview |
+| Actionable privilege/dependency errors | Required | Required | Missing/incompatible dependency qualified; live permission paths preview |
 
 Explicitly complete packets must produce identical protocol bytes on every platform. Platform adapters may differ only in route discovery, link materialization, capture/injection, timestamp facilities, and error reporting.
 
@@ -164,7 +176,7 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 - The adapter obtains the Windows directory from the operating system, loads `System32\\Npcap\\wpcap.dll` with restricted dependent-DLL search flags, validates every required symbol, and initializes UTF-8 mode once. A missing/incompatible runtime is a typed dependency error and never changes link mode.
 - `native-route` route/source selection uses `GetBestRoute2` and adapter enumeration uses `GetAdaptersAddresses`; both IPv4 and IPv6 paths are exercised on hosted Windows CI.
 - IP Helper calls use narrowly enabled `windows` 0.62 bindings. Npcap uses its C ABI through optional, ISC-licensed `libloading` 0.8 so ordinary Windows builds and hosted native tests have no `wpcap.lib`/`Packet.lib` link boundary.
-- CI currently qualifies passive discovery plus Npcap ABI/error/lifecycle behavior on Windows Server 2022 x86_64 MSVC. Actual capture/injection with Npcap 1.88 remains mandatory on a dedicated privileged runner before release candidate.
+- CI qualifies passive discovery, constrained Winsock loopback sends, exact portable bytes, and Npcap ABI/error/lifecycle behavior on Windows Server 2022 x86_64 MSVC. Actual capture/injection with Npcap 1.88 was explicitly waived for 0.2.0 and remains an unqualified preview.
 
 ## Capability troubleshooting
 
@@ -280,10 +292,12 @@ Pull requests run formatting and default/no-default/all-feature lint, test, and 
 Stable release qualification additionally requires:
 
 - privileged Linux network-namespace topologies for Ethernet, VLAN, routed IPv4/IPv6, gateway resolution, low MTUs, exchange, scans, and traceroute;
-- dedicated macOS arm64/x86_64 live-I/O runners; and
-- a Windows x86_64 MSVC runner with the documented Npcap version.
+- dedicated macOS arm64/x86_64 live-I/O runners.
 
-A missing dedicated runner is a release blocker for the corresponding advertised live capability, not a reason to downgrade silently to portable-only behavior.
+The release owner explicitly removed Windows/Npcap live I/O from the qualified
+0.2.0 scope because its dedicated runner was unavailable. The downgrade is
+recorded here and in the Release notes; no hosted result is represented as a
+real Npcap pass.
 
 The version-pinned topology, privilege boundary, exact candidate invocation,
 semantic evidence verifier, and retention contract for the first row are in

@@ -33,9 +33,16 @@ packetcraftr --version
 ## Qualification status
 
 The exact candidate has completed the portable gate, security/resource/package
-audit, privileged Linux and macOS live matrices, Windows x86_64 MSVC + Npcap
-matrix, and four-platform portable byte-parity matrix. Downloaded-asset smoke
+audit, privileged Linux and macOS live matrices, the hosted Windows x86_64 MSVC
+boundary, and four-platform portable byte-parity matrix. Downloaded-asset smoke
 tests cover Linux x86_64, macOS arm64/x86_64, and Windows x86_64 MSVC.
+
+The release owner explicitly waived the unavailable dedicated Windows/Npcap
+runner. Real Npcap capture/injection and live workflows that depend on it are
+therefore an unqualified preview in 0.2.0, not a passed stable matrix row.
+Portable Windows, IP Helper route/source selection, constrained Winsock
+loopback sends, portable byte parity, and typed missing/incompatible-Npcap
+behavior are qualified.
 
 Darwin cannot transmit an exact caller-supplied IPv6 header through a raw IPv6
 socket because the kernel synthesizes that header. PacketcraftR reports this as

@@ -141,6 +141,13 @@ cargo test --all-features
 
 `native-layer2` provides owned, bounded capture and complete-frame injection through libpcap 2.4 on Linux/macOS. Windows x86_64 MSVC loads the Npcap 1.88 runtime dynamically using the pinned SDK 1.16 ABI, so compilation does not require an SDK or import library. `SystemNeighborResolver` composes those providers with interface metadata to perform bounded ARP or NDP; pair it with `native-route` for target-native route, gateway, source, and MTU selection. `native-layer3` provides `SystemLayer3Io` through target raw sockets, constrains the route-selected path separately from crafted source fields, and validates that mandatory kernel header processing cannot change the intended wire bytes. Darwin's synthesized raw IPv6 header makes complete-header transmission unsupported, so that explicit mode fails before socket I/O instead of falling back or reporting mutated bytes. Live use still requires the relevant native runtime and operating-system privileges; missing dependencies, devices, permissions, unsupported packet classes, and unsupported modes are typed errors rather than fallbacks.
 
+For 0.2.0, real Windows/Npcap capture and injection plus live workflows that
+depend on them are an explicitly unqualified preview: the release owner waived
+the unavailable dedicated Npcap runner rather than recording a false pass.
+Portable Windows, IP Helper route/source selection, constrained Winsock
+loopback sends, exact portable bytes, and missing/incompatible-Npcap failures
+are qualified. See the [platform matrix](docs/platform-support.md).
+
 See the [platform and capability matrix](docs/platform-support.md) before depending on a live workflow.
 
 ## CLI direction
@@ -355,12 +362,11 @@ The v0.2 contracts are:
 - Unsupported link types and unknown payloads remain explicit raw data; unsupported combinations produce typed errors.
 - Display truncation never truncates the captured bytes stored in a result.
 
-The beta contracts and guards above are implemented and regression
-tested. Privileged live-I/O qualification on the dedicated Linux, macOS, and
-Windows runners remains a release gate: inspect plans and exact bytes, use
-isolated authorized labs, keep finite budgets, and prefer offline operations
-until the relevant target/profile is listed as qualified for the Release you
-use.
+The beta contracts and guards above are implemented and regression tested.
+Privileged Linux and macOS live-I/O are release-qualified. Windows/Npcap live
+I/O is not qualified for 0.2.0 and remains a preview; inspect plans and exact
+bytes, use isolated authorized labs, keep finite budgets, and prefer portable
+or offline operations unless a later Release explicitly records that gate.
 
 Default resource ceilings are intentionally finite:
 
@@ -407,7 +413,7 @@ structured diagnostics and operation statistics.
 
 ## Development
 
-The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable and excludes `socket2` along with the other native adapters. All-feature jobs compile the target's native route, Layer 2, and raw Layer 3 adapters, exercise passive providers and injected capture/send lifecycles, and continue to reject static `pcap`, `pnet`, or `Packet.lib` linkage on Windows. Privileged live-I/O qualification remains a separate release-candidate gate.
+The pull-request checks exercise formatting and the default, no-default-feature, and all-feature profiles on Linux, macOS, and Windows. No-default profiles are portable; Windows default is also portable and excludes `socket2` along with the other native adapters. All-feature jobs compile the target's native route, Layer 2, and raw Layer 3 adapters, exercise passive providers and injected capture/send lifecycles, and continue to reject static `pcap`, `pnet`, or `Packet.lib` linkage on Windows. Privileged Linux/macOS live-I/O qualification remains a release gate; real Windows/Npcap live I/O is retained as an unqualified 0.2.0 preview.
 
 The [reproducible portable beta gate](docs/beta-gate.md) is the single local and
 CI entry point for formatting, MSRV, policy, schemas, fixtures, portable

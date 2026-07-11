@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   pre-deserialization JSON/YAML byte and nesting ceilings, checked resource and
   authorization regressions, offline local packaging of all five unpublished
   crates, credential scanning, and an enforced no-public-registry release policy.
+- Added exact-candidate macOS arm64/x86_64 live qualification over an isolated
+  paired-feth topology, with real routing-socket, BPF, neighbor, Layer 2/3,
+  exchange, replay, scan, traceroute, DNS, fuzz, and typed failure evidence.
 
 ### Fixed
 

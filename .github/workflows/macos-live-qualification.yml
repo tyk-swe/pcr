@@ -1,6 +1,12 @@
 name: macOS live qualification
 
 on:
+  push:
+    paths:
+      - .github/workflows/macos-live-qualification.yml
+      - scripts/qualify-macos-live.sh
+      - scripts/verify-macos-live-evidence.py
+      - scripts/linux-live-peer.py
   workflow_dispatch:
     inputs:
       expected_commit:
@@ -34,7 +40,7 @@ jobs:
       - name: Check out the exact approved candidate
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.expected_commit }}
+          ref: ${{ inputs.expected_commit || github.sha }}
           fetch-depth: 0
 
       - name: Install the stable MSRV
@@ -56,14 +62,14 @@ jobs:
       - name: Build deterministic approved-candidate inputs
         shell: bash
         env:
-          RELEASE_TREE: ${{ inputs.expected_commit }}
+          RELEASE_TREE: ${{ inputs.expected_commit || github.sha }}
         run: bash scripts/build-release-inputs.sh "${RUNNER_TEMP}/candidate"
 
       - name: Run real route, BPF, and raw-socket qualification
         shell: bash
         env:
           EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
-          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || github.sha }}
         run: |
           set -euo pipefail
           archive="$(find "${RUNNER_TEMP}/candidate" -maxdepth 1 \

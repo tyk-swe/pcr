@@ -1,0 +1,45 @@
+# PacketcraftR 0.2.0-beta.1
+
+Source commit: `{{SOURCE_COMMIT}}`
+
+Workspace archive SHA-256: `{{ARCHIVE_SHA256}}`
+
+Post-publication portable artifact smoke evidence: {{SMOKE_EVIDENCE}}
+
+This beta is the v0.2 compatibility-freeze checkpoint. The public Rust façade,
+14-command CLI grammar and exit classes, packet/output schemas, exact portable
+wire behavior, fixtures, and GitHub Release artifact contract are frozen.
+
+## Distribution
+
+GitHub Releases are the only distribution channel. The attached
+`packetcraftr-workspace-0.2.0-beta.1.tar.gz` is a complete buildable workspace;
+`SHA256SUMS` authenticates it. The archive's `RELEASE-METADATA.toml` binds the
+version and tag to the source commit above. All five Cargo packages retain
+`publish = false`; nothing is published to crates.io or another registry.
+
+The MSRV is Rust 1.96.0. Install the portable CLI from the verified extracted
+workspace with:
+
+```console
+cargo install --locked --path . --no-default-features
+packetcraftr --version
+```
+
+## Frozen baselines
+
+- Public Rust API: `319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762`
+- CLI/schema: `{{CLI_SCHEMA_BASELINE}}`
+
+## Qualification status
+
+The portable default/no-default/all-feature build and test profiles are green
+on hosted Linux, macOS, and Windows CI. Stable-promised native implementations
+are present, but privileged Linux live-I/O, macOS arm64/x86_64 live-I/O,
+Windows x86_64 MSVC + Npcap live-I/O, cross-platform parity, and the final
+security/resource/package audit remain RC qualification gates.
+
+See the [platform matrix](https://github.com/tyk-swe/pcr/blob/v0.2.0-beta.1/docs/platform-support.md),
+[installation guide](https://github.com/tyk-swe/pcr/blob/v0.2.0-beta.1/docs/install-and-release.md),
+and [beta feedback policy](https://github.com/tyk-swe/pcr/blob/v0.2.0-beta.1/docs/beta-feedback.md).
+Confirmed freeze regressions are 0.2.0 release blockers before RC.

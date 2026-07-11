@@ -1,0 +1,55 @@
+# PacketcraftR 0.2.0
+
+Source commit: `{{SOURCE_COMMIT}}`
+
+Workspace archive SHA-256: `{{ARCHIVE_SHA256}}`
+
+Post-publication downloaded-artifact smoke evidence: {{SMOKE_EVIDENCE}}
+
+PacketcraftR 0.2.0 is the stable GitHub-only release of the runtime-neutral
+packet kernel, bounded capture/replay and active-tool workflows, native
+Linux/macOS/Windows adapters, and frozen v0.2 Rust/CLI/document contracts.
+
+## Distribution
+
+GitHub Releases are the only distribution channel. The attached
+`packetcraftr-workspace-0.2.0.tar.gz` is the complete buildable workspace;
+`SHA256SUMS` authenticates it. All five Cargo packages retain
+`publish = false`; nothing is published to crates.io, docs.rs, or another
+public registry. The MSRV is Rust 1.96.0.
+
+Install the portable CLI from the verified extracted workspace with:
+
+```console
+cargo install --locked --path . --no-default-features
+packetcraftr --version
+```
+
+## Frozen baselines
+
+- Public Rust API: `319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762`
+- CLI/schema: `{{CLI_SCHEMA_BASELINE}}`
+
+## Qualified targets and limits
+
+The approved release lineage passed portable checks on Linux x86_64, macOS
+arm64/x86_64, and Windows x86_64 MSVC; privileged Linux/macOS live checks; the
+hosted Windows route/raw/dependency boundary; and the shared four-platform
+exact-byte and PCAP/PCAPNG interchange corpus. Native use still requires the
+documented operating-system dependency and privilege boundary.
+
+The release owner explicitly waived the unavailable dedicated Windows/Npcap
+runner. Real Npcap capture/injection and live workflows that depend on it are
+therefore an unqualified preview in 0.2.0, not a passed stable matrix row.
+Portable Windows, IP Helper route/source selection, constrained Winsock
+loopback sends, portable byte parity, and typed missing/incompatible-Npcap
+behavior are qualified.
+
+Darwin cannot transmit an exact caller-supplied IPv6 header through a raw IPv6
+socket because the kernel synthesizes that header. PacketcraftR reports this as
+typed `capability.unsupported` before I/O; exact IPv6 transmission on macOS is
+qualified through native BPF Layer 2 instead of silently falling back.
+
+See the [platform matrix](https://github.com/tyk-swe/pcr/blob/v0.2.0/docs/platform-support.md),
+[installation guide](https://github.com/tyk-swe/pcr/blob/v0.2.0/docs/install-and-release.md),
+and [migration guide](https://github.com/tyk-swe/pcr/blob/v0.2.0/docs/migration-v0.1-to-v0.2.md).

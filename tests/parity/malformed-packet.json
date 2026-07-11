@@ -1,0 +1,22 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "malformed",
+      "fields": {
+        "protocol": {
+          "type": "text",
+          "value": "ipv4"
+        },
+        "bytes": {
+          "type": "bytes",
+          "value": [69, 0, 0, 40, 18, 52]
+        },
+        "reason": {
+          "type": "text",
+          "value": "parity corpus intentionally truncated IPv4 header"
+        }
+      }
+    }
+  ]
+}

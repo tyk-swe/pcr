@@ -1,0 +1,22 @@
+[package]
+name = "packetcraftr-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Portable packet model, registry, builder, and dissector for PacketcraftR"
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes = { version = "1", features = ["serde"] }
+noyalib = { version = "0.0.5", features = ["compat-serde-yaml"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["unbounded_depth"] }
+thiserror = "2"

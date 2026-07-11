@@ -1,0 +1,46 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "source": {
+          "type": "ipv4",
+          "value": "192.0.2.1"
+        },
+        "destination": {
+          "type": "ipv4",
+          "value": "198.51.100.2"
+        }
+      }
+    },
+    {
+      "protocol": "udp",
+      "fields": {
+        "source_port": {
+          "type": "unsigned",
+          "value": 49152
+        },
+        "destination_port": {
+          "type": "unsigned",
+          "value": 9
+        }
+      }
+    },
+    {
+      "protocol": "raw",
+      "fields": {
+        "bytes": {
+          "type": "bytes",
+          "value": [
+            104,
+            101,
+            108,
+            108,
+            111
+          ]
+        }
+      }
+    }
+  ]
+}

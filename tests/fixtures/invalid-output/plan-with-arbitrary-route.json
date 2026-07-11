@@ -1,0 +1,12 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "plan",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "route": {
+      "arbitrary": true
+    }
+  },
+  "diagnostics": []
+}

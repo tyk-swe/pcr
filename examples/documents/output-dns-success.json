@@ -1,0 +1,92 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "dns",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "server": "resolver.lab",
+    "server_port": 53,
+    "resolved_addresses": [
+      "192.168.56.53"
+    ],
+    "query_name": "txt.example.test.",
+    "query_type": "txt",
+    "transaction_id": 20547,
+    "transport": "udp",
+    "outcome": "response",
+    "response_code": 0,
+    "response_code_name": "no_error",
+    "authoritative": false,
+    "truncated": false,
+    "recursion_desired": true,
+    "recursion_available": true,
+    "authenticated_data": false,
+    "checking_disabled": false,
+    "answers": [
+      {
+        "owner": "txt.example.test.",
+        "class": 1,
+        "ttl": 60,
+        "type": "txt",
+        "strings": [
+          "remote\u001b[31m"
+        ],
+        "strings_hex": [
+          "72656d6f74651b5b33316d"
+        ]
+      }
+    ],
+    "authorities": [],
+    "additionals": [],
+    "rejected_records": [
+      {
+        "section": "additional",
+        "index": 0,
+        "owner": "unrelated.example.test.",
+        "type_code": 1,
+        "reason": "additional record is not IN-class address glue referenced by accepted data"
+      }
+    ],
+    "rejected_record_count": 1,
+    "attempts": [
+      {
+        "attempt": 1,
+        "server_address": "192.168.56.53",
+        "source_port": 50000,
+        "status": "response",
+        "sent_at": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 0
+        },
+        "received_at": {
+          "unix_seconds": 1770000000,
+          "nanoseconds": 5000000
+        },
+        "latency": {
+          "secs": 0,
+          "nanos": 5000000
+        },
+        "response_code": 0,
+        "reason": "validated DNS response with code no_error"
+      }
+    ],
+    "undecoded": []
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 58,
+    "elapsed": {
+      "secs": 0,
+      "nanos": 5000000
+    },
+    "capture": {
+      "received_frames": 1,
+      "received_bytes": 96,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

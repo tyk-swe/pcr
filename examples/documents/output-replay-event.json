@@ -1,0 +1,32 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "replay",
+  "mode": "stream",
+  "status": "success",
+  "sequence": 0,
+  "result": {
+    "source_sequence": 0,
+    "interface": {
+      "name": "lab0",
+      "index": 2
+    },
+    "link_mode": "auto",
+    "scheduled_delay": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "bytes_sent": 4,
+    "frame": {
+      "timestamp": {
+        "unix_seconds": 0,
+        "nanoseconds": 0
+      },
+      "captured_length": 4,
+      "original_length": 4,
+      "link_type": 147,
+      "bytes_hex": "deadbeef"
+    },
+    "transmitted": true
+  },
+  "diagnostics": []
+}

@@ -1,0 +1,43 @@
+{
+  "authority": "malformed_seed",
+  "capture": null,
+  "created_utc": "2026-07-11T00:00:00Z",
+  "expected": {
+    "diagnostic_codes": [
+      "cli.output_schema"
+    ],
+    "exact_rebuild": null,
+    "layers": [],
+    "link_type": null,
+    "notes": "Negative packetcraftr.output/v1 schema fixture",
+    "valid": false
+  },
+  "fixture": "invalid-output/plan-with-arbitrary-route.json",
+  "kind": "malformed_input",
+  "license": {
+    "evidence": "Synthetic fixture authored for the PacketcraftR XOD-42 conformance pass; no production capture, private data, or third-party payload is included",
+    "spdx": "CC0-1.0"
+  },
+  "protocols": [
+    "output_contract"
+  ],
+  "review": {
+    "evidence": "https://linear.app/xodud/issue/XOD-42",
+    "reviewed_utc": "2026-07-11T00:00:00Z",
+    "reviewer": "Codex XOD-42 automated implementation review"
+  },
+  "schema": "packetcraftr.fixture-provenance/v1",
+  "sha256": "6f434c6dfed2ca987ba9e1ae3d05f7b120e4be1886e0f7dc58ca50db9bd4b1ba",
+  "source": {
+    "description": "Negative packetcraftr.output/v1 plan-route schema fixture",
+    "generator": {
+      "invocation": "hand-authored negative JSON document",
+      "name": "PacketcraftR output-contract fixture",
+      "summary": "Authored with XOD-42 to reject an arbitrary plan route object",
+      "version": "XOD-42"
+    },
+    "oracle": null,
+    "reference": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v1.schema.json",
+    "type": "derived"
+  }
+}

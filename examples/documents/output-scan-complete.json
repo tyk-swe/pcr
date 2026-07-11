@@ -1,0 +1,31 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "complete",
+    "target": "192.168.56.10",
+    "resolved_addresses": [
+      "192.168.56.10"
+    ]
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 40,
+    "elapsed": {
+      "secs": 1,
+      "nanos": 0
+    },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

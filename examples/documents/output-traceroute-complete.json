@@ -1,0 +1,35 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "traceroute",
+  "mode": "stream",
+  "sequence": 2,
+  "status": "success",
+  "result": {
+    "event": "complete",
+    "target": "router.lab",
+    "resolved_addresses": [
+      "192.168.56.10"
+    ],
+    "destination": "192.168.56.10",
+    "strategy": "udp",
+    "destination_port": 33434,
+    "completion": "destination_reached"
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 3,
+    "packets_completed": 3,
+    "bytes": 126,
+    "elapsed": {
+      "secs": 1,
+      "nanos": 15000000
+    },
+    "capture": {
+      "received_frames": 2,
+      "received_bytes": 8,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

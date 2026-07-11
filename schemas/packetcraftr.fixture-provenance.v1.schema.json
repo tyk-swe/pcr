@@ -1,0 +1,334 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.fixture-provenance.v1.schema.json",
+  "title": "PacketcraftR fixture provenance v1",
+  "type": "object",
+  "required": [
+    "schema",
+    "fixture",
+    "sha256",
+    "kind",
+    "authority",
+    "created_utc",
+    "protocols",
+    "capture",
+    "source",
+    "license",
+    "expected",
+    "review"
+  ],
+  "properties": {
+    "schema": {
+      "const": "packetcraftr.fixture-provenance/v1"
+    },
+    "fixture": {
+      "type": "string",
+      "pattern": "^(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "frame",
+        "pcap",
+        "pcapng",
+        "document",
+        "expected_result",
+        "malformed_input"
+      ]
+    },
+    "authority": {
+      "type": "string",
+      "enum": [
+        "authoritative",
+        "derived",
+        "malformed_seed"
+      ]
+    },
+    "created_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "protocols": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+      }
+    },
+    "capture": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/captureMetadata"
+        }
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/source"
+    },
+    "license": {
+      "$ref": "#/$defs/license"
+    },
+    "expected": {
+      "$ref": "#/$defs/expected"
+    },
+    "review": {
+      "$ref": "#/$defs/review"
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "enum": [
+              "pcap",
+              "pcapng"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "capture": {
+            "$ref": "#/$defs/captureMetadata"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "captureMetadata": {
+      "type": "object",
+      "required": [
+        "link_types",
+        "interfaces"
+      ],
+      "properties": {
+        "link_types": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/uint32"
+          }
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "link_type"
+            ],
+            "properties": {
+              "id": {
+                "$ref": "#/$defs/uint32"
+              },
+              "link_type": {
+                "$ref": "#/$defs/uint32"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "tool": {
+      "type": "object",
+      "required": [
+        "name",
+        "version",
+        "invocation"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "invocation": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "summary": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "required": [
+        "type",
+        "description",
+        "reference",
+        "generator",
+        "oracle"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "rfc_vector",
+            "generated",
+            "tool_output",
+            "captured",
+            "derived"
+          ]
+        },
+        "description": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reference": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "format": "uri"
+            }
+          ]
+        },
+        "generator": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/tool"
+            }
+          ]
+        },
+        "oracle": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/tool"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "license": {
+      "type": "object",
+      "required": [
+        "spdx",
+        "evidence"
+      ],
+      "properties": {
+        "spdx": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9.+()-]+(?: (?:AND|OR|WITH) [A-Za-z0-9.+()-]+)*$"
+        },
+        "evidence": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": false
+    },
+    "expected": {
+      "type": "object",
+      "required": [
+        "link_type",
+        "layers",
+        "diagnostic_codes",
+        "exact_rebuild",
+        "valid",
+        "notes"
+      ],
+      "properties": {
+        "link_type": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/uint32"
+            }
+          ]
+        },
+        "layers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+          }
+        },
+        "diagnostic_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9_.-]*$"
+          }
+        },
+        "exact_rebuild": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "boolean"
+            }
+          ]
+        },
+        "valid": {
+          "type": "boolean"
+        },
+        "notes": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": false
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "reviewer",
+        "reviewed_utc",
+        "evidence"
+      ],
+      "properties": {
+        "reviewer": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reviewed_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evidence": {
+          "type": "string",
+          "format": "uri"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "fuzz",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "cli.fuzz_limit",
+    "kind": "cli",
+    "message": "invalid fuzz limit cases=0: must be within 1..=10000",
+    "causes": [],
+    "remediation": "use valid layer.field targets and finite non-zero case, byte, rate, timeout, evidence, and duration limits"
+  },
+  "diagnostics": []
+}

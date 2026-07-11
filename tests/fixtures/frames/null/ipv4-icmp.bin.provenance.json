@@ -1,0 +1,57 @@
+{
+  "authority": "authoritative",
+  "capture": {
+    "interfaces": [],
+    "link_types": [
+      0
+    ]
+  },
+  "created_utc": "2026-07-10T00:00:00Z",
+  "expected": {
+    "diagnostic_codes": [],
+    "exact_rebuild": true,
+    "layers": [
+      "bsd_null",
+      "ipv4",
+      "icmpv4"
+    ],
+    "link_type": 0,
+    "notes": "Little-endian BSD NULL family header followed by IPv4 ICMP",
+    "valid": true
+  },
+  "fixture": "frames/null/ipv4-icmp.bin",
+  "kind": "frame",
+  "license": {
+    "evidence": "Synthetic fixture authored for the PacketcraftR XOD-60 corpus; no production capture, private data, or third-party payload is included",
+    "spdx": "CC0-1.0"
+  },
+  "protocols": [
+    "bsd_null",
+    "ipv4",
+    "icmpv4"
+  ],
+  "review": {
+    "evidence": "https://linear.app/xodud/issue/XOD-60",
+    "reviewed_utc": "2026-07-10T00:00:00Z",
+    "reviewer": "Codex XOD-60 automated implementation review"
+  },
+  "schema": "packetcraftr.fixture-provenance/v1",
+  "sha256": "b8505b7d48153a4624fb815f09f032bd8f8af4a25c0e16f4668af5a76d979036",
+  "source": {
+    "description": "Little-endian BSD NULL family header followed by IPv4 ICMP",
+    "generator": {
+      "invocation": "python3 scripts/seed-fixture-corpus.py --write --verify-tcpdump",
+      "name": "Python standard library",
+      "summary": "Deterministic network-byte-order construction with explicit checksums and lengths",
+      "version": "3.12.3"
+    },
+    "oracle": {
+      "invocation": "tcpdump -nn -vvv -r <deterministic wrapper capture>",
+      "name": "tcpdump/libpcap",
+      "summary": "Independent libpcap parser accepted the frame/capture and decoded its documented root",
+      "version": "tcpdump version 4.99.4 / libpcap version 1.10.4 (with TPACKET_V3)"
+    },
+    "reference": "https://www.tcpdump.org/linktypes.html",
+    "type": "generated"
+  }
+}

@@ -35,7 +35,9 @@ A coordinated exchange owns one receive stream:
 
 The send boundary is exact: a backend report must say that every submitted byte was sent, and any optional returned wire image must have that same length. A partial or internally inconsistent report is a typed I/O failure. Failure handling still stops and joins capture; if both the operation and shutdown fail, the result retains both causes instead of masking either one.
 
-When reply capture has no explicit timeout, use a bounded three-second default reply window. Queue capacity and overflow behavior are explicit and reported in operation statistics/diagnostics.
+When reply capture has no explicit timeout, use a bounded three-second default reply window, with a one-hour configured maximum. The backend queue and retained evidence use one aggregate 4,096-frame / 256 MiB ceiling shared by matched, unsolicited, and undecodable traffic; retention-class limits never add together to enlarge it. Snap length is independently bounded to 16 MiB per frame. Invalid timeouts or limits fail before route lookup, neighbor discovery, capture, or transmission.
+
+Queue overflow policy is explicit: `fail` is the default and returns a typed error; `drop-newest` and `drop-oldest` are opt-in loss policies. Every backend must return cumulative received-frame/byte, dropped-frame/byte, and overflow-event counters through the owned session. Inconsistent counters fail closed. Successful lossy capture adds a structured warning and the counters to operation statistics, so backend loss is never silent.
 
 ## Consequences
 

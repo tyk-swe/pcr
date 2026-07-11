@@ -1,0 +1,30 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "fuzz",
+  "mode": "stream",
+  "sequence": 1,
+  "status": "success",
+  "result": {
+    "event": "complete",
+    "operation_seed": 1,
+    "first_case": 0,
+    "mode": "offline",
+    "cases_generated": 1,
+    "cases_built": 1,
+    "cases_rejected": 0
+  },
+  "diagnostics": [],
+  "stats": {
+    "packets_attempted": 1,
+    "packets_completed": 1,
+    "bytes": 1,
+    "elapsed": { "secs": 0, "nanos": 0 },
+    "capture": {
+      "received_frames": 0,
+      "received_bytes": 0,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
+    }
+  }
+}

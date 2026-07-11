@@ -2,9 +2,99 @@
 
 All notable changes to PacketcraftR are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v0.2 alpha series is intentionally breaking; compatibility is frozen only at beta.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Early v0.2 alpha development was intentionally breaking; the reviewed Rust API, CLI, packet-document, and output-document contracts are frozen by the first beta.
 
-## 0.2.0-alpha.1 - Unreleased
+## Unreleased
+
+## 0.2.0 - 2026-07-11
+
+PacketcraftR 0.2.0 is the GitHub-only stable publication of the exact qualified
+RC lineage. No implementation or frozen contract changed after the go/no-go;
+the stable transition changes only synchronized version/release metadata and
+status prose. Real Windows/Npcap live I/O remains the explicit scope waiver
+documented below, and no package is published to a public registry.
+
+### Changed
+
+- Advanced every synchronized workspace package and exact internal dependency
+  from `0.2.0-rc.1` to `0.2.0`.
+- Kept the Beta-frozen public API baseline unchanged at
+  `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762`.
+- CLI/schema baseline: `sha256:0cb98ef621ab5c47e2705da226ca44bec4715e2c627e3e07abef38b2e862065f`
+  after the reviewed stable version-string advance; the command grammar, exit
+  classes, and packet/output schemas are unchanged.
+
+## 0.2.0-rc.1 - 2026-07-11
+
+This GitHub-only release candidate advances the frozen Beta contract through
+the exact native, parity, security/resource, packaging, and downloaded-artifact
+release rehearsal. The unavailable Windows/Npcap live runner is an explicit
+owner-approved scope waiver, not a qualification pass; no package is published
+to a public registry.
+
+### Added
+
+- Added a retained exact-candidate RC security/resource/package audit covering
+  pre-deserialization JSON/YAML byte and nesting ceilings, checked resource and
+  authorization regressions, offline local packaging of all five unpublished
+  crates, credential scanning, and an enforced no-public-registry release policy.
+- Added exact-candidate macOS arm64/x86_64 live qualification over an isolated
+  paired-feth topology and an unaddressed PacketcraftR-native user-space peer,
+  with real routing-socket, zero-loss BPF, neighbor, Layer 2/3, exchange,
+  replay, scan, traceroute, DNS, fuzz, and typed failure evidence.
+- Added exact-candidate Windows x86_64 MSVC hosted qualification plus a
+  licensed, pre-provisioned Npcap 1.88 dedicated-runner gate, including native
+  route/raw-socket evidence, portable wire baselines, missing-runtime behavior,
+  and an isolated zero-loss Npcap peer matrix.
+- Added one-archive Linux/macOS arm64/macOS x86_64/Windows portable parity
+  qualification covering exact protocol bytes, every capture root, JSON/YAML
+  and malformed inputs, PCAP/PCAPNG transcodes, external codecs, DNS wire data,
+  and deterministic fuzz seeds with retained per-case and corpus digests.
+
+### Changed
+
+- Advanced every synchronized workspace package and exact internal dependency
+  to `0.2.0-rc.1`; the GitHub Release archive remains the only distribution.
+- Kept the Beta-frozen public API baseline unchanged at
+  `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762`.
+- CLI/schema baseline: `sha256:ea94b9bd8ffcddec5c7bcc09a699f5e435bc212a0237636ac910c2c6ff0011c2`
+  after the reviewed version-string advance; the command grammar, exit classes,
+  and packet/output schemas are unchanged.
+- Scoped Windows x86_64 MSVC Npcap live capture/injection and dependent live
+  workflows as an unqualified preview for 0.2.0 after the release owner
+  explicitly waived the unavailable dedicated-runner gate. Portable Windows,
+  native route discovery, constrained Winsock loopback sends, wire parity, and
+  typed missing/incompatible-Npcap behavior remain release-qualified.
+
+### Fixed
+
+- Generalized the GitHub-only release gate from Beta to RC/stable metadata and
+  Release state, rendered notes and archive contracts from the selected tree,
+  and expanded downloaded-artifact smoke coverage to both macOS architectures.
+- Accepted Darwin's complete compact final routing-socket sockaddr when its
+  otherwise-unused alignment trailer is omitted, while retaining strict bounds
+  whenever another route address follows.
+- Matched Darwin's route-socket 32-bit sockaddr alignment on both 64-bit
+  architectures and omitted IPv6 scope IDs from unscoped Windows route
+  addresses, with target-specific regressions for both native ABIs; native
+  fallback source selection now prefers the destination prefix and address
+  scope instead of an unrelated first same-family address.
+- Classified complete-header raw IPv6 as unsupported on macOS before native
+  I/O because Darwin synthesizes that header and rejects `IPV6_HDRINCL`; the
+  explicit Layer 2 path retains exact IPv6 transmission without a fallback.
+- Fixed generated IPv4 scan, traceroute, and DNS probes to use deterministic
+  nonzero identification values, preserving exact native Layer 3 bytes instead
+  of reaching the kernel-rewrite rejection on the first probe.
+- Made downloaded Release archive extraction portable to Git Bash by entering
+  the download directory before invoking `tar` with a relative asset path, and
+  pinned manual Release validation packaging to the requested immutable tag.
+
+## 0.2.0-beta.1 - 2026-07-11
+
+This first public v0.2 beta is the compatibility-freeze checkpoint. GitHub
+Releases are the only distribution channel; every workspace package remains
+blocked from public registries. Privileged live-I/O and final cross-platform
+qualification remain release-candidate gates, not deferred implementations.
 
 ### Added
 
@@ -18,22 +108,59 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added repository metadata, an architecture decision record set, a platform/capability matrix, a fixture provenance policy, a migration guide, a security policy, and feature-matrix CI.
 - Added typed RFC 8754 Segment Routing Header handling for IPv6 routing type 4.
 - Added deterministic lifecycle coverage requiring reply capture to report readiness before the first send.
+- Added an enforceable component/native-adapter architecture, platform-neutral interface/capture/L2/L3 provider seams, checked transmission-frame dispatch, and external-provider compile coverage.
+- Added passive native route, interface, source-address, next-hop, and MTU providers behind `native-route`: route netlink on Linux, routing sockets plus native interface APIs on macOS, and IP Helper on Windows. Selection reasons and unsupported preferences use platform-neutral typed values/errors.
+- Added native Layer 2 capture and injection behind `native-layer2`: libpcap on Linux/macOS and a securely runtime-loaded, pinned Npcap ABI on Windows x86_64 MSVC. Capture sessions own their worker and handle, expose an explicit readiness barrier, enforce frame/byte queue bounds, preserve native timestamps/link types/interface metadata and complete captured bytes, report native/queue loss, and join every shutdown path.
+- Added injectable and system-composed active neighbor resolution with gateway-aware IPv4 ARP and IPv6 NDP, exact VLAN/interface correlation, finite attempts and timeouts, bounded captured evidence, joined capture cleanup, and a bounded finite-lifetime cache.
+- Added `native-layer3` and `SystemLayer3Io` raw IPv4/IPv6 transmission on Linux, macOS, and Windows with route-selected path binding, exact-frame validation, typed platform/privilege failures, and complete-write reporting.
+- Added a stable `ClassifiedError` taxonomy for live capability, dependency, privilege, policy, timeout/runtime I/O, partial-send, and invariant failures, including CLI exit classes and remediation.
+- Added policy-gated, bounded, injectable hostname resolution through `LiveTarget`, `HostnameResolver`, and opaque `ResolvedTarget` values.
+- Added public typed aggregate/stream output envelopes, typed result contracts for every v0.2 command, an explicit command/format capability matrix, and command-specific JSON Schema validation with negative fixtures.
+- Added passive `plan` and interface-bound `routes` CLI workflows plus policy-gated `send`, finite live `capture`, and capture-ready `exchange` workflows. They share exclusive packet inputs, explicit route/link constraints, traffic and capture budgets, typed JSON/NDJSON results, and exact hex/raw/PCAP/PCAPNG output where applicable.
+- Added a 21-file authoritative fixture corpus with strict `packetcraftr.fixture-provenance/v1` sidecars, hash-first read-only tests, schema/source/license/review validation, and full pull-request/push-range enforcement for binary, capture, JSON/YAML, expected-result, and malformed fixtures.
+- Published the versioned `packetcraftr.protocol-support/v1` manifest and stable documentation for all 22 built-in codecs, nine numeric capture roots, four matchers, and 14 CLI workflow obligations; extended the authoritative corpus to every root and both BSD NULL byte orders.
+- Added aggregate-bounded capture writers, public PCAP/PCAPNG interface timestamp metadata, streaming metadata-preserving `read` capture output, and a policy-gated `replay` workflow with injectable timing/transmission, exact wire evidence, finite speed/rate/resource limits, and typed unsupported-root/partial-send failures.
+- Added a bounded structured `dns` workflow and CLI over the shared policy and capture-ready exchange seams: IPv4/IPv6 UDP queries, independent retry-time hostname/every-answer authorization, exact tuple/transaction/question correlation, bounded compression and RDATA decoding, question-relevant record filtering, rejected-record audit evidence, terminal-safe TXT display with exact hex, and typed text/JSON/NDJSON results.
+- Added deterministic bounded field-aware `fuzz`: offline-by-default reflective boundary/random/bit-flip/malformed mutation, direct case-index reproduction, finite shrink data and allocation/wire/evidence/duration limits, bounded build/dissection results, explicit live and malformed double opt-ins, complete traffic-policy preauthorization, capture-ready `Client::exchange` execution, and typed text/JSON/NDJSON evidence.
+- Completed the all-command output conformance pass: typed success/error goldens for all 14 commands, closed route/plan schemas, sequenced per-item and terminal stream failures, complete-frame parity across raw/hex/NDJSON/PCAP/PCAPNG, terminal-safe text, and broken-pipe coverage for every output family.
+- Extracted synchronized, unpublished core, protocol, I/O, and session implementation crates behind unchanged `packetcraftr` façade paths, with an enforced acyclic dependency graph and buildable GitHub Release workspace archives.
+- Added a warning-free public Rust API guide, compile-tested portable/live extension examples, semantic `FailureCategory` recovery classes, typed capture-evidence completeness and receiver-drop counters, and a rustdoc-derived beta façade baseline enforced in CI.
+- Added the reviewed v0.2 CLI contract, exact help/parse/version goldens, packet-schema negative fixtures, a shipped YAML packet example, and a digest gate covering CLI grammar, exit classes, packet/output schemas, and mapping documentation.
+- Added complete executable examples for all 14 CLI commands, platform-specific native dependency/privilege troubleshooting, GitHub-only install/Release verification guidance, and auditable v0.1 migration/support corrections.
+- Added one clean-checkout portable beta gate covering MSRV, policy, schemas, fixtures, lint/tests/doctests/rustdoc, frozen API/CLI contracts, examples, installability, and byte-reproducible GitHub Release archive/checksum inputs.
+- Added exported tag/version/source metadata, commit- and checksum-bound GitHub prerelease notes, a public beta-feedback route, and no-checkout Linux/macOS/Windows smoke tests for downloaded Release assets.
+- Public API baseline: `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762` (reviewed for the v0.2 beta freeze).
+- CLI/schema baseline: `sha256:8d0bca4ec73bcff60f998710b5bd48ef73f798dc753651a75037e1669d686d7b` (reviewed for the v0.2 beta freeze).
 
 ### Changed
 
+- Advanced every synchronized workspace package and exact internal dependency
+  to `0.2.0-beta.1`; the Release archive embeds its tag, version, and exact
+  source commit in `RELEASE-METADATA.toml`.
 - Set the v0.2 MSRV to Rust 1.96 and retained the `packetcraftr` crate and binary names.
 - Reply capture now uses a bounded three-second window when no explicit timeout is supplied.
 - Listener events retain complete captured bytes; display truncation is presentation metadata only.
 - Coordinated exchange arms and awaits its owned capture session before sending, and shuts it down on readiness, send, capture, decode, timeout, and success paths.
 - Route-selected IP sources and resolved/interface-owned MAC addresses are materialized into the exact transmitted frame while spoofed packet sources remain distinct from neighbor-resolution sources.
+- Neighbor materialization now carries the complete interface-owned source/MAC, next hop, VLAN stack, MTU, and link type to rich resolvers, and retains resolution attempts, capture records, truncation state, cache state, and backend statistics with the materialized route.
+- Route planning can pass an interface-owned source preference through compatible providers; legacy injected providers retain source compatibility and fail explicitly if they cannot honor the preference.
 - Synthesized Ethernet envelopes are built and included in traffic-policy byte accounting before neighbor discovery; post-resolution edits must remain fixed-width.
 - Route MTU enforcement now measures the actual built network-layer byte span instead of trusting permissive length fields, and rejects oversized packets before neighbor discovery or live I/O.
 - Destination-free Ethernet/custom-EtherType and complete ARP packets now use explicit passive interface selection without fake IP lookups or neighbor traffic.
 - Exchange passes frame-count, aggregate-byte, and snap-length limits to capture backends and retains bounded decode failures as complete raw capture records for packet evidence.
 - Live backends must report a complete send and internally consistent optional wire bytes. Partial sends are typed failures, and exchange preserves both the operation and capture-shutdown errors when both occur.
+- Raw Layer 3 sends reject route/destination/MTU mismatches and IPv4 values that a target kernel would rewrite. macOS converts only its private submission copy's length/fragment fields to host order while retaining the final built bytes as wire evidence.
+- Exchange validates timeout and capture/retention limits before route or live side effects, and all retained evidence classes share one aggregate frame ceiling.
+- Human CLI output escapes terminal and bidi controls while JSON preserves structured strings through JSON escaping.
+- Aggregate JSON and streaming NDJSON are now distinct formats. Every NDJSON success or terminal-error record carries a frozen zero-based sequence, while aggregate envelopes cannot carry one; `build`, `dissect`, `read`, and `interfaces` now render exclusively from typed results.
+- Live CLI policy and limit validation now precedes resolver, route, neighbor, capture, or transmission work as applicable; capture and exchange retain readiness, loss, timeout, and cleanup evidence through the shared classified-error contract.
+- Exchange results retain timestamped exact sent-frame evidence; PCAPNG output preserves mixed raw-send and captured-response link types as separate interfaces, while classic PCAP rejects an unrepresentable mixed stream.
+- Froze `FieldSchema::required` as an after-defaults reflective invariant enforced for built-in and external codecs at construction, materialization, and decode boundaries; capture receiver loss is no longer misclassified as queue overflow.
+- Froze `packetcraftr.packet/v1` JSON/YAML mapping and CLI parser behavior: packet bytes are capped before decoding, layers are streamed under a finite ceiling, recursive field lists have an absolute ceiling, and duplicates, aliases, custom tags, and multi-document YAML are rejected before an unbounded generic tree can be built.
 
 ### Fixed
 
+- Canonicalized the CLI display name and line endings so the frozen help, parse-error, and version goldens are byte-equivalent on Windows, macOS, and Linux checkouts.
 - Removed the receive path that could drain and discard Layer 2 frames.
 - Rejected IPv6 routing type 0 and unsupported generic routing headers before transmission.
 - Rejected legacy ARP, VLAN, PPPoE, and custom-EtherType combinations when the fixed builder could only relabel IP bytes.
@@ -46,13 +173,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Rejected inconsistent capture-record lengths before dissection, prior fragments extending beyond a later final datagram length, and unbounded sparse TCP segment queues; TCP sequence tracking now remains bounded across the 32-bit wrap boundary.
 - Retained a bounded tail of emitted TCP bytes so contradictory retransmissions remain detectable without unbounded flow memory, with the history charged to per-flow and aggregate limits.
 - Added checked PCAPNG `if_tsoffset` writing so explicitly offset interfaces round-trip valid pre-Unix-epoch timestamps in either byte order.
+- Preserved typed native I/O causes through neighbor resolution and preserved both operation and cleanup errors without flattening either into incidental text.
 
 ### Removed
 
 - The v0.1 flag-heavy CLI, private fixed packet pipeline, and public `run_cli` façade.
 - The v0.1 rules engine, daemon, external-command actions, REPL, embedded Prometheus endpoint, and per-tool feature maze.
 - Legacy DNS/scan/traceroute/fuzz implementations that bypassed the shared packet, exchange, and session APIs.
+- Alpha-only provider reexports from `packetcraftr::client`; use the owning `packetcraftr::io` module or stable root reexports.
 
 ## 0.1.0
 
-The original private, fixed-pipeline release. Historical changes predate this changelog. Critical fixes are maintained on `release/0.1` only until the v0.2 release-candidate stage.
+The original private, fixed-pipeline release. Historical changes predate this
+changelog. There is no maintained `release/0.1` branch or upstream backport
+promise.

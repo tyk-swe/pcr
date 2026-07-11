@@ -1,0 +1,12 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "exchange",
+  "mode": "stream",
+  "status": "success",
+  "sequence": 3,
+  "result": {
+    "event": "complete",
+    "unanswered": [1, 2]
+  },
+  "diagnostics": []
+}

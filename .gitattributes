@@ -1,0 +1,6 @@
+# Fixture provenance hashes identify exact repository bytes on every platform.
+tests/fixtures/** -text
+
+# Embed the archived commit without making the tracked release metadata
+# self-referential.
+RELEASE-METADATA.toml export-subst

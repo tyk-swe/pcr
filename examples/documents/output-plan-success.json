@@ -1,0 +1,44 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "plan",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "route": {
+      "route": {
+        "interface": {
+          "name": "lab0",
+          "index": 2
+        },
+        "source_mac": [2, 0, 0, 0, 0, 1],
+        "selected_address": "192.168.56.2",
+        "preferred_source": null,
+        "next_hop": "192.168.56.1",
+        "selection_reason": "gateway",
+        "destination_scope": "private",
+        "mtu": 1500,
+        "capability": "layer2_and3",
+        "link_type": 1
+      },
+      "mode": "layer2",
+      "lookup_destination": "192.168.56.9",
+      "final_destination": "192.168.56.9",
+      "visited_destinations": ["192.168.56.9"],
+      "packet_source": "192.168.56.2",
+      "neighbor_source": "192.168.56.2",
+      "neighbor_target": "192.168.56.1",
+      "destination_mac": [2, 0, 0, 0, 0, 2],
+      "source_mac": [2, 0, 0, 0, 0, 1],
+      "neighbor_vlan_tags": [
+        {
+          "kind": "ieee8021_q",
+          "priority": 0,
+          "drop_eligible": false,
+          "vlan_id": 42
+        }
+      ],
+      "synthesized_ethernet": true
+    }
+  },
+  "diagnostics": []
+}

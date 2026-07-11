@@ -1,0 +1,64 @@
+{
+  "authority": "authoritative",
+  "capture": {
+    "interfaces": [
+      {
+        "id": 0,
+        "link_type": 1
+      }
+    ],
+    "link_types": [
+      1
+    ]
+  },
+  "created_utc": "2026-07-10T00:00:00Z",
+  "expected": {
+    "diagnostic_codes": [],
+    "exact_rebuild": true,
+    "layers": [
+      "ethernet",
+      "ipv4",
+      "udp",
+      "raw"
+    ],
+    "link_type": 1,
+    "notes": "Little-endian classic PCAP with one Ethernet frame",
+    "valid": true
+  },
+  "fixture": "captures/pcap/ethernet-ipv4-udp.pcap",
+  "kind": "pcap",
+  "license": {
+    "evidence": "Synthetic fixture authored for the PacketcraftR XOD-60 corpus; no production capture, private data, or third-party payload is included",
+    "spdx": "CC0-1.0"
+  },
+  "protocols": [
+    "ethernet",
+    "ipv4",
+    "udp",
+    "raw"
+  ],
+  "review": {
+    "evidence": "https://linear.app/xodud/issue/XOD-60",
+    "reviewed_utc": "2026-07-10T00:00:00Z",
+    "reviewer": "Codex XOD-60 automated implementation review"
+  },
+  "schema": "packetcraftr.fixture-provenance/v1",
+  "sha256": "fa225ecedb7838a13c74aa96a75046373caa1ec3401f5767337e3da4e629e6be",
+  "source": {
+    "description": "Little-endian classic PCAP with one Ethernet frame",
+    "generator": {
+      "invocation": "python3 scripts/seed-fixture-corpus.py --write --verify-tcpdump",
+      "name": "Python standard library",
+      "summary": "Deterministic network-byte-order construction with explicit checksums and lengths",
+      "version": "3.12.3"
+    },
+    "oracle": {
+      "invocation": "tcpdump -nn -vvv -r <deterministic wrapper capture>",
+      "name": "tcpdump/libpcap",
+      "summary": "Independent libpcap parser accepted the frame/capture and decoded its documented root",
+      "version": "tcpdump version 4.99.4 / libpcap version 1.10.4 (with TPACKET_V3)"
+    },
+    "reference": "https://www.ietf.org/archive/id/draft-gharris-opsawg-pcap-02.html",
+    "type": "generated"
+  }
+}

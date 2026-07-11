@@ -1,0 +1,15 @@
+{
+  "fixture": "frames/ethernet/ipv4-udp.bin",
+  "link_type": 1,
+  "layers": [
+    "ethernet",
+    "ipv4",
+    "udp",
+    "raw"
+  ],
+  "source": "192.0.2.1",
+  "destination": "198.51.100.2",
+  "source_port": 49152,
+  "destination_port": 9,
+  "payload_hex": "68656c6c6f"
+}

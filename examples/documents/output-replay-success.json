@@ -1,0 +1,24 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "replay",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "source_format": "pcap",
+    "timing": "immediate",
+    "requested_interface": {
+      "name": "lab0",
+      "index": 2
+    },
+    "requested_link_mode": "auto",
+    "frames_attempted": 0,
+    "frames_completed": 0,
+    "bytes_completed": 0,
+    "scheduled_duration": {
+      "secs": 0,
+      "nanos": 0
+    },
+    "frames": []
+  },
+  "diagnostics": []
+}

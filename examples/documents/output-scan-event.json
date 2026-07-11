@@ -1,0 +1,33 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "scan",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "event": "port",
+    "target": "192.168.56.10",
+    "resolved_address": "192.168.56.10",
+    "port": {
+      "port": 443,
+      "transport": "tcp",
+      "classification": "timeout",
+      "evidence": [
+        {
+          "protocol": "tcp",
+          "destination": "192.168.56.10",
+          "destination_port": 443,
+          "attempt": 1,
+          "status": "timeout",
+          "classification": "timeout",
+          "sent_at": {
+            "unix_seconds": 1770000000,
+            "nanoseconds": 0
+          },
+          "reason": "no checksum-valid, protocol-consistent response before the deadline"
+        }
+      ]
+    }
+  },
+  "diagnostics": []
+}

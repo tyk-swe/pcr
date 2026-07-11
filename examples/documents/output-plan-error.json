@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "plan",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "cli.interface_required",
+    "kind": "cli",
+    "message": "destination-free Layer 2 planning requires an explicit interface",
+    "causes": [],
+    "remediation": "select an explicit interface for a destination-free Layer 2 packet"
+  },
+  "diagnostics": []
+}

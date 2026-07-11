@@ -1,0 +1,172 @@
+name: Cross-platform parity qualification
+
+on:
+  push:
+    paths:
+      - .github/workflows/parity-qualification.yml
+      - Cargo.lock
+      - Cargo.toml
+      - RELEASE-METADATA.toml
+      - crates/**
+      - src/**
+      - tests/fixtures/**
+      - tests/parity/**
+      - scripts/build-release-inputs.sh
+      - scripts/generate-parity-evidence.py
+      - scripts/compare-parity-evidence.py
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Full approved candidate commit to package and compare
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-platform-parity-qualification
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    name: Package exact shared candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact approved candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Build deterministic approved-candidate inputs
+        shell: bash
+        env:
+          RELEASE_TREE: ${{ inputs.expected_commit || github.sha }}
+        run: bash scripts/build-release-inputs.sh "${RUNNER_TEMP}/candidate"
+
+      - name: Retain the one shared candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/candidate
+          if-no-files-found: error
+          retention-days: 90
+
+  platform:
+    name: ${{ matrix.platform }} exact-byte corpus
+    needs: candidate
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            runner: ubuntu-24.04
+          - platform: macos-arm64
+            runner: macos-15
+          - platform: macos-x86_64
+            runner: macos-15-intel
+          - platform: windows-x86_64
+            runner: windows-2022
+    steps:
+      - name: Check out parity tooling from the exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Install the stable MSRV
+        uses: dtolnay/rust-toolchain@1.96.0
+
+      - name: Download the one shared candidate
+        uses: actions/download-artifact@v4
+        with:
+          name: parity-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/candidate
+
+      - name: Generate Linux/macOS parity evidence
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || github.sha }}
+          PLATFORM_ID: ${{ matrix.platform }}
+        run: |
+          set -euo pipefail
+          python3 scripts/generate-parity-evidence.py \
+            --candidate-directory "${RUNNER_TEMP}/candidate" \
+            --expected-commit "${EXPECTED_COMMIT}" \
+            --platform "${PLATFORM_ID}" \
+            --evidence "${RUNNER_TEMP}/parity-evidence" \
+            --bundle "${RUNNER_TEMP}/parity-evidence.tar.gz"
+
+      - name: Generate Windows parity evidence
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || github.sha }}
+          PLATFORM_ID: ${{ matrix.platform }}
+        run: |
+          python scripts/generate-parity-evidence.py `
+            --candidate-directory "$env:RUNNER_TEMP\candidate" `
+            --expected-commit $env:EXPECTED_COMMIT `
+            --platform $env:PLATFORM_ID `
+            --evidence "$env:RUNNER_TEMP\parity-evidence" `
+            --bundle "$env:RUNNER_TEMP\parity-evidence.tar.gz"
+          if ($LASTEXITCODE -ne 0) {
+            throw "parity evidence generation exited $LASTEXITCODE"
+          }
+
+      - name: Retain platform parity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-evidence-${{ matrix.platform }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/parity-evidence
+            ${{ runner.temp }}/parity-evidence.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+
+  compare:
+    name: Require four-platform parity
+    needs: platform
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out parity tooling from the exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Download all platform evidence
+        uses: actions/download-artifact@v4
+        with:
+          pattern: parity-evidence-*-${{ github.run_id }}
+          path: ${{ runner.temp }}/platform-evidence
+
+      - name: Compare every case and capture format
+        shell: bash
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || github.sha }}
+        run: |
+          set -euo pipefail
+          python3 scripts/compare-parity-evidence.py \
+            --artifacts-root "${RUNNER_TEMP}/platform-evidence" \
+            --expected-commit "${EXPECTED_COMMIT}" \
+            --output "${RUNNER_TEMP}/parity-comparison" \
+            --bundle "${RUNNER_TEMP}/parity-comparison.tar.gz"
+
+      - name: Retain release-signoff comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-comparison-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/parity-comparison
+            ${{ runner.temp }}/parity-comparison.tar.gz
+          if-no-files-found: error
+          retention-days: 90

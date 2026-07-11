@@ -1,20 +1,22 @@
 {
   "schema": "packetcraftr.output/v1",
   "command": "capture",
+  "mode": "stream",
   "status": "success",
   "sequence": 0,
   "result": {
+    "event": "frame",
     "frame": {
       "timestamp": {
-        "secs_since_epoch": 1783555200,
-        "nanos_since_epoch": 125000000
+        "unix_seconds": 1783555200,
+        "nanoseconds": 125000000
       },
       "captured_length": 4,
       "original_length": 4,
       "link_type": 147,
       "interface": 0,
       "direction": "inbound",
-      "bytes": [222, 173, 190, 239]
+      "bytes_hex": "deadbeef"
     }
   },
   "diagnostics": [
@@ -31,6 +33,13 @@
     "elapsed": {
       "secs": 0,
       "nanos": 250000
+    },
+    "capture": {
+      "received_frames": 1,
+      "received_bytes": 4,
+      "dropped_frames": 0,
+      "dropped_bytes": 0,
+      "overflow_events": 0
     }
   }
 }

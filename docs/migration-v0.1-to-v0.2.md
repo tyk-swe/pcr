@@ -2,7 +2,16 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development, `packetcraftr --help` is authoritative: the final command names are present, but commands not yet implemented return exit code 4 with an explicit capability error.
+“Removed” in this guide means removed: v0.2 does not accept aliases for the old
+flags, translate rule files, preserve the old JSON shape, start removed
+subsystems with a warning, or provide a feature that restores them. Keep a v0.1
+binary only as an explicitly isolated migration input; do not put it in front of
+v0.2 as an undocumented compatibility layer.
+
+This guide documents the target v0.2 interface. The reviewed
+[CLI contract](cli-contract.md), its golden help, and the versioned schemas are
+the beta compatibility baseline. All 14 final command names are
+implemented, including the offline-by-default `fuzz` replacement.
 
 ## The central change
 
@@ -22,7 +31,8 @@ A reusable packet never contains an interface name, listener configuration, outp
 
 ## Command mapping
 
-The expressions below show the intended shape. Field spellings can still change before the beta freeze.
+The expressions below use the beta field spellings recorded by the
+public API and document-contract freeze.
 
 | v0.1 | v0.2 replacement |
 | --- | --- |
@@ -40,6 +50,38 @@ The expressions below show the intended shape. Field spellings can still change 
 | interactive REPL | removed; use shell history, packet documents, or a Rust application |
 | embedded Prometheus HTTP endpoint | removed; export typed `OperationStats` through the application's observability stack |
 
+The v0.2 scan grammar is intentionally workflow-specific rather than a bundle
+of legacy packet flags. Select `--transport tcp|udp|icmp`, provide `--ports`
+for TCP/UDP, and use finite attempt, timeout, rate, batch, packet, byte, and
+evidence limits. Each attempt reports response or timeout evidence; final
+classifications distinguish open, closed, filtered, unreachable, unknown, and
+timeout. See the [scan contract](scan.md).
+
+The v0.2 traceroute grammar selects `--strategy udp|icmp|tcp`, an optional
+family, a finite first/maximum hop range, attempts, timeout, and rate. It emits
+every attempt instead of a lossy address-per-hop summary, distinguishes
+intermediate, destination-reached, unreachable, and timeout evidence, and
+retains bounded hop-scoped decode failures. See the
+[traceroute contract](traceroute.md).
+
+The v0.2 DNS grammar names an explicit server and question, with a typed
+question type, optional family, finite retry/timeout/rate and decode/evidence
+bounds, and explicit route and traffic policy. It emits only records relevant
+to the validated question or its CNAME/glue chain; unrelated declared section
+records remain rejected audit evidence. Each retry re-resolves and reauthorizes
+the server hostname, so changed answers cannot inherit prior approval. See the
+[DNS contract](dns.md).
+
+The v0.2 fuzz grammar takes the same packet expression/document input as the
+builder and mutates reflective `LAYER.FIELD` targets through explicit
+`boundary`, `random`, `bit-flip`, or `malformed` strategies. The operation seed
+and absolute case index reproduce a case directly; each result includes the
+attempted tagged values, mutated packet recipe, shrink values, diagnostics, and
+exact bytes when build succeeds. Offline build/dissection is the default and
+has no live seam. `--live` uses shared traffic policy and capture-ready
+exchange, while permissive/malformed transmission requires separate operation
+and policy acknowledgements. See the [fuzz contract](fuzz.md).
+
 ### Dry run becomes two explicit operations
 
 Use `build` when only packet bytes and diagnostics are required:
@@ -55,6 +97,65 @@ packetcraftr plan --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)/raw(text="hello"
 ```
 
 `plan` may query passive operating-system state. It must not perform ARP, NDP, capture, or transmission. Unresolved destination MAC addresses remain reported as unresolved.
+
+`routes` is passive too. It reports one provider-neutral
+route decision for each up interface, not a verbatim operating-system route
+table dump:
+
+```console
+packetcraftr --output json routes
+```
+
+### Live workflows are explicit and bounded
+
+`send`, `capture`, and `exchange` accept the same exclusive packet recipe and
+route constraints as `plan`. Interface names or indices, interface-owned source
+preferences, and `auto`/`layer2`/`layer3` intent stay at the workflow boundary:
+
+```console
+packetcraftr send \
+  --packet 'ipv4(dst="192.0.2.10",identification=1)/udp(dport=9)/raw(text="hello")' \
+  --interface "$LAB_INTERFACE" --link-mode layer3 \
+  --max-packets 1 --max-bytes 1500
+
+packetcraftr --output ndjson capture \
+  --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)' \
+  --interface "$LAB_INTERFACE" --timeout-ms 1000 \
+  --max-queue-frames 64 --max-captured-bytes 1048576
+
+packetcraftr --output json exchange \
+  --packet 'ipv4(dst="192.0.2.10",identification=1)/udp(dport=9)' \
+  --interface "$LAB_INTERFACE" --timeout-ms 1000 \
+  --max-responses 1 --max-unsolicited 0 --max-queue-frames 64
+```
+
+The default traffic policy denies public destinations, hostname resolution,
+and permissively built live bytes. Public targets and hostnames have separate
+acknowledgement flags. A permissive live send needs both the operation-level
+`--allow-permissive-live` flag and policy-level
+`--allow-permissive-packets`. Invalid capture/exchange limits fail before route
+or live I/O, and traffic-policy checks precede active neighbor or transmission
+work. Standalone capture applies its packet/byte budgets to emitted frames and
+bytes. Exchange owns
+one capture session, crosses its readiness barrier before sending, and attempts
+shutdown on every success or error path.
+
+`read` also exposes bounded capture-file writing: PCAP can be copied to PCAP or
+PCAPNG, and PCAPNG can be copied to PCAPNG without losing interface,
+timestamp-resolution/offset, captured-length, original-length, or byte
+metadata. `replay` consumes the same bounded stream and requires an exact
+interface plus traffic authorization:
+
+```console
+packetcraftr --output ndjson replay evidence.pcapng \
+  --interface "$LAB_INTERFACE" --link-mode auto --speed 2 \
+  --max-packets 1000 --max-bytes 16777216
+```
+
+Only complete Ethernet and raw IPv4/IPv6 roots are live-replayable.
+Capture-only or unknown roots fail explicitly, public destinations remain
+denied by default, and malformed bytes require both replay- and policy-level
+opt-ins.
 
 ### Flag-heavy packets become expressions
 
@@ -92,7 +193,12 @@ Supplying more than one source is a CLI error with exit code 2.
 
 ## Packet documents
 
-Complex packets move to versioned JSON or YAML with the identifier `packetcraftr.packet/v1`. The following is an illustrative alpha document; validate it against the [schema shipped with PacketcraftR](../schemas/packetcraftr.packet.v1.schema.json) and see the complete [IPv4/UDP JSON example](../examples/documents/packet-ipv4-udp.json):
+Complex packets move to versioned JSON or YAML with the identifier
+`packetcraftr.packet/v1`. Both syntaxes use the same closed, explicitly tagged
+mapping. Validate documents against the
+[schema shipped with PacketcraftR](../schemas/packetcraftr.packet.v1.schema.json)
+and see the complete [IPv4/UDP JSON example](../examples/documents/packet-ipv4-udp.json)
+and [raw YAML example](../examples/documents/packet-raw.yaml):
 
 ```yaml
 schema: packetcraftr.packet/v1
@@ -130,6 +236,11 @@ layers:
 
 Reflective document values carry an explicit `type`. Derived fields omitted from a fresh typed layer retain their codec defaults, normally `Auto`; serializers include their reflected representation when exact or raw intent must be preserved.
 
+Packet input is capped at 16 MiB before UTF-8 decoding. JSON and YAML parsing
+then enforce 64-layer and 64-recursive-list ceilings before an unbounded generic
+tree can be allocated. Duplicate or unknown structural keys, YAML aliases,
+custom tags, and multiple YAML documents are rejected.
+
 Do not put route, interface, timeout, capture, replay, traffic policy, or output settings in this document. Keep those at the command or client call site.
 
 ## Derived fields and malformed packets
@@ -151,11 +262,18 @@ Do not parse v0.1 human output or JSON in v0.2.
 | Need | v0.2 format |
 | --- | --- |
 | Human inspection | text |
-| Aggregate automation result | `packetcraftr.output/v1` JSON object/array |
-| Capture or event stream | NDJSON |
+| Aggregate automation result | typed `packetcraftr.output/v1` JSON object (`--output json`) |
+| Capture or event stream | independently valid sequenced records (`--output ndjson`) |
 | Exact printable bytes | whole-frame hex |
 | Exact binary bytes | raw |
 | Capture interchange | PCAP or PCAPNG |
+
+Aggregate envelopes carry `"mode": "aggregate"` and never carry
+`sequence`. NDJSON records carry `"mode": "stream"`; every success and
+error carries a `sequence`. A per-item failure retains the source item's
+sequence; a terminal failure after prior output uses the next value after the
+last successful record. In particular, `read --output json` is no longer an
+alias for an NDJSON stream: use `--output ndjson`.
 
 Display limits affect presentation only. Captured bytes retained by the API and written to capture files remain complete up to the configured snap length.
 
@@ -163,13 +281,23 @@ Exit codes are stable at the v0.2 CLI freeze:
 
 | Code | Meaning |
 | ---: | --- |
-| 0 | Success |
-| 2 | CLI or packet-document/schema error |
-| 3 | Packet build or dissection error |
-| 4 | Unsupported capability, missing native dependency, or privilege error |
-| 5 | Route, capture, send, timeout, or other runtime I/O error |
+| 0 | Success, `--help`, or `--version` |
+| 2 | CLI grammar, recipe, limit, or packet-document/schema validation |
+| 3 | Packet build, dissection, capture-record, or replay-input failure |
+| 4 | Unsupported capability, missing native dependency, or privilege |
+| 5 | Route, neighbor, send, capture, timeout, cleanup, or other runtime I/O |
 | 6 | Traffic-policy denial |
-| 70 | Internal invariant failure |
+| 70 | Internal provider or output invariant failure |
+
+`ClassifiedError::classification()` maps live Rust errors to a stable
+`ErrorClassification` containing a machine code, one of these exit classes,
+and optional remediation. Unsupported capability, missing native dependency,
+privilege, runtime route/capture/send, partial send, policy denial, timeout,
+and provider-invariant failures therefore do not depend on log-string parsing.
+`ClassifiedError::causes()` retains separate operation and cleanup diagnostics
+for structured output when both fail.
+Human error output escapes terminal control and bidi-control characters;
+machine output remains a JSON value and uses normal JSON string escaping.
 
 ## Rust API migration
 
@@ -183,9 +311,44 @@ v0.1 exposed a `run_cli`-oriented façade and private fixed builders. v0.2 appli
 
 Root `packetcraftr` reexports are the stable application import path even after internal component crates are extracted.
 
+Provider traits and values are owned by `packetcraftr::io` and are also
+available from the root. Early v0.2 alpha callers that used
+`packetcraftr::client::{PacketIo, CaptureProvider, CaptureSession, ...}` must
+change those imports to `packetcraftr::{...}` or `packetcraftr::io::{...}`.
+The `client` module now contains only high-level client, policy, target, and
+workflow contracts.
+
+`FieldSchema::required` is frozen as an after-defaults invariant: callers may
+omit a required field when the codec supplies a default, but every constructed,
+materialized, and decoded layer must reflect a value for it. External codecs
+that return a missing required field now fail with
+`FieldError::MissingRequired` at the factory, builder, or dissector boundary.
+
+`ErrorClassification` is now non-exhaustive and carries a
+`FailureCategory` in addition to the CLI-oriented `FailureKind`. Construct it
+with `ErrorClassification::new` rather than a struct literal. The category lets
+callers distinguish validation, capability, policy, timeout, runtime I/O,
+cleanup, and invariant handling without parsing a machine code or message.
+
+Capture loss is part of the result contract. `CaptureStatistics` separately
+reports `receiver_dropped_frames`, derives `CaptureEvidenceCompleteness`, and
+can produce a typed evidence-loss error. A native receiver drop is no longer
+reported as a queue overflow merely because the operation is fail-closed.
+
+Applications that need native Layer 2 route materialization can compose `SystemRouteProvider`, `SystemNeighborResolver`, and the typed native I/O providers. `RoutePlanner::plan` remains passive; `RoutePlanner::materialize` is the explicit boundary that may perform bounded ARP/NDP. Custom resolvers can continue implementing the legacy `NeighborResolver::resolve` method, while `resolve_request` receives interface-owned MAC/IP, next hop, VLAN, MTU, and link-type context and can return captured evidence.
+
+Hostname-capable applications should parse `LiveTarget`, inject a
+`HostnameResolver` (or use `SystemHostnameResolver`), and call
+`TrafficPolicy::resolve_target` or `Client::plan_target`. Hostname resolution
+is a separate policy opt-in. The declared name is authorized before DNS, and
+every selected address is authorized after every resolution before route
+planning. A `ResolvedTarget` cannot be constructed with unchecked fields.
+
 ## Feature migration
 
-The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate's only optional capability is `live`; packet construction, dissection, documents, reassembly, and offline capture remain portable without default features.
+The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate has four narrow native capabilities: default `live` for the legacy isolated Unix interface enumerator, `native-route` for passive target-native route/interface discovery, `native-layer2` for native capture/injection, and `native-layer3` for raw IP transmission. Packet construction, dissection, documents, reassembly, offline capture, neighbor protocol logic, and injected providers remain portable without default features. `native-route` alone does not emit ARP/NDP, capture, or transmission. `native-layer2` explicitly opts into system libpcap on Linux/macOS or runtime-loaded Npcap 1.88 on Windows x86_64 MSVC; `native-layer3` opts into target raw sockets. Selecting all three supplies the complete native planning and send path.
+
+Raw IPv4 socket kernels do not preserve every possible crafted header. In particular, a zero identification or inconsistent total length/checksum can be rewritten. `SystemLayer3Io` fails those cases before the socket call; set a nonzero IPv4 identification and build internally consistent lengths/checksums when using the native Layer 3 path. Windows silently discards spoofed raw UDP on affected client editions, so that case is rejected before send; other raw-socket restrictions remain typed native errors.
 
 If an application previously depended on an embedded subsystem, move orchestration outward:
 
@@ -196,4 +359,12 @@ If an application previously depended on an embedded subsystem, move orchestrati
 
 ## Rollout advice
 
-Pin an exact alpha version, store packet documents in version control, validate them in CI, and compare exact built bytes before enabling live transmission. Move to beta only after all used APIs and document fields appear in the beta migration notes. Existing v0.1 deployments that need only critical fixes should remain on `release/0.1` until the v0.2 release candidate is qualified.
+Pin an exact reviewed commit or published GitHub Release, store packet documents in version control,
+validate them in CI, and compare exact built bytes before enabling live
+transmission. Treat changes to the reviewed Rust API, CLI grammar, exit classes,
+packet mapping, or output schemas as compatibility events; incompatible
+beta-to-stable changes block release unless the published compatibility policy
+permits them. There is no maintained v0.1 branch or compatibility adapter.
+Deployments that cannot migrate immediately must freeze and audit their exact
+v0.1 artifact or maintain a private fork; they should not expect upstream
+backports that are not attached to a published supported Release.

@@ -1,0 +1,63 @@
+[package]
+name = "packetcraftr-io"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Capture, routing, neighbor, and native adapter boundaries for PacketcraftR"
+readme = "README.md"
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+default = ["live"]
+live = ["dep:pnet"]
+native-route = [
+    "dep:futures-util",
+    "dep:libc",
+    "dep:rtnetlink",
+    "dep:socket2",
+    "dep:tokio",
+    "dep:windows",
+]
+native-layer2 = ["live", "dep:libloading", "dep:pcap", "dep:windows"]
+native-layer3 = ["live", "dep:socket2", "dep:windows"]
+
+[dependencies]
+bytes = { version = "1", features = ["serde"] }
+packetcraftr-core = { version = "=0.2.0", path = "../core" }
+packetcraftr-protocols = { version = "=0.2.0", path = "../protocols" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[target.'cfg(not(windows))'.dependencies]
+pnet = { version = "0.35", default-features = false, features = ["std"], optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }
+pcap = { version = "2.4", default-features = false, optional = true }
+rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"], optional = true }
+socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
+tokio = { version = "1", default-features = false, features = ["net", "rt"], optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { version = "0.2", default-features = false, optional = true }
+pcap = { version = "2.4", default-features = false, optional = true }
+socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+libloading = { version = "0.8", default-features = false, optional = true }
+socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
+windows = { version = "0.62", default-features = false, features = [
+    "std",
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+    "Win32_System_SystemInformation",
+], optional = true }

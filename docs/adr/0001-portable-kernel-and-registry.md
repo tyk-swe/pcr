@@ -2,6 +2,7 @@
 
 - Status: Accepted
 - Date: 2026-07-09
+- Amended: 2026-07-11 (physical component extraction)
 
 ## Context
 
@@ -33,6 +34,16 @@ packetcraftr            stable façade, high-level Client, CLI
 ```
 
 Applications import normal APIs from `packetcraftr`. Component crates are implementation boundaries, not a requirement for ordinary users.
+
+The 2026-07-11 beta extraction physically separated `packetcraftr-core`,
+`packetcraftr-protocols`, `packetcraftr-io`, and `packetcraftr-session` behind
+those unchanged root paths. The reusable tool workflows, high-level client,
+output contracts, and CLI remain façade-owned because they compose one another;
+extracting them now would introduce a reverse dependency or duplicate the
+policy layer. A later tools extraction is permitted only if it preserves the
+acyclic graph and the same root imports. All packages are synchronized,
+`publish = false`, and assembled together for GitHub Releases rather than a
+public registry.
 
 Public library failures use typed, non-exhaustive errors. `anyhow` is permitted only where the CLI composes independently typed operations.
 

@@ -1,0 +1,7 @@
+schema: packetcraftr.packet/v1
+layers:
+  - protocol: raw
+    fields:
+      bytes:
+        type: bytes
+        value: [222, 173, 190, 239]

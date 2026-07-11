@@ -20,12 +20,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   licensed, pre-provisioned Npcap 1.88 dedicated-runner gate, including native
   route/raw-socket evidence, portable wire baselines, missing-runtime behavior,
   and an isolated zero-loss Npcap peer matrix.
+- Added one-archive Linux/macOS arm64/macOS x86_64/Windows portable parity
+  qualification covering exact protocol bytes, every capture root, JSON/YAML
+  and malformed inputs, PCAP/PCAPNG transcodes, external codecs, DNS wire data,
+  and deterministic fuzz seeds with retained per-case and corpus digests.
 
 ### Fixed
 
 - Accepted Darwin's complete compact final routing-socket sockaddr when its
   otherwise-unused alignment trailer is omitted, while retaining strict bounds
   whenever another route address follows.
+- Matched Darwin's route-socket 32-bit sockaddr alignment on both 64-bit
+  architectures and omitted IPv6 scope IDs from unscoped Windows route
+  addresses, with target-specific regressions for both native ABIs.
 - Fixed generated IPv4 scan, traceroute, and DNS probes to use deterministic
   nonzero identification values, preserving exact native Layer 3 bytes instead
   of reaching the kernel-rewrite rejection on the first probe.

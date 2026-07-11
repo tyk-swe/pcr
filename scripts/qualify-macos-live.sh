@@ -339,16 +339,15 @@ run_json exchange-ipv6.json exchange \
     --interface "${client_interface}" --link-mode layer2 --timeout-ms 1200 \
     --max-packets 1 --max-bytes 1500 --max-responses 1 --max-unsolicited 8 "${live_limits[@]}"
 
+capture_packet="eth(src=${peer_mac},dst=${client_mac})/ipv4(src=${peer_ipv4},dst=${client_ipv4},identification=505)/udp(sport=9000,dport=9)/raw(text=capture)"
 client --output pcapng capture \
-    --packet "eth(source=${peer_mac},destination=${client_mac},ether_type=2048)/raw(hex=00)" \
+    --packet "${capture_packet}" \
     --interface "${client_interface}" --timeout-ms 800 --max-packets 8 --max-bytes 12000 \
     "${live_limits[@]}" >"${evidence}/capture.pcapng" 2>"${evidence}/capture.stderr" &
 capture_pid=$!
 sleep 0.25
-capture_trigger_hex="$("${qualified_binary}" --output hex build \
-    --packet "ipv4(src=${peer_ipv4},dst=${client_ipv4},identification=505)/udp(sport=9000,dport=9)/raw(text=capture)")"
 client --output json send \
-    --packet "eth(source=${peer_mac},destination=${client_mac},ether_type=2048)/raw(hex=${capture_trigger_hex})" \
+    --packet "${capture_packet}" \
     --interface "${peer_interface}" --link-mode layer2 --max-packets 1 --max-bytes 1500 \
     >"${evidence}/capture-trigger.json"
 wait "${capture_pid}"

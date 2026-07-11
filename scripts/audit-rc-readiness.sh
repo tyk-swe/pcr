@@ -70,7 +70,8 @@ run_step() {
     local logfile="$2"
     shift 2
     echo "[RC audit] ${label}"
-    if "$@" >"${evidence}/${logfile}" 2>&1; then
+    printf 'step: %s\n' "${label}" >"${evidence}/${logfile}"
+    if "$@" >>"${evidence}/${logfile}" 2>&1; then
         echo "[RC audit] ${label}: passed"
     else
         echo "[RC audit] ${label}: failed" >&2

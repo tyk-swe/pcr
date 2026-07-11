@@ -276,6 +276,10 @@ def secret_line_allowed(workspace: Path, filename: str, line_number: int) -> str
         r"\s*default:\s*[0-9a-f]{40}\s*", line
     ) and "expected_commit" in nearby:
         return "explicit candidate commit input default"
+    if filename == "RELEASE-METADATA.toml" and re.fullmatch(
+        r'\s*commit\s*=\s*"[0-9a-f]{40}"\s*', line
+    ):
+        return "exact source commit embedded by the deterministic archive"
     dns_paths = {
         "examples/documents/output-dns-success.json",
         "src/output.rs",

@@ -352,7 +352,10 @@ jobs:
           print(f"verified {archive_name} ({actual})")
           PY
 
-          tar --extract --gzip --file "${download}/${archive}" --directory "${download}"
+          (
+            cd "${download}"
+            tar --extract --gzip --file "${archive}"
+          )
           workspace="${download}/packetcraftr-workspace-${version}"
           if [[ ! -d "${workspace}" ]]; then
             echo "workspace archive has the wrong top-level directory" >&2

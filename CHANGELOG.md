@@ -4,6 +4,13 @@ All notable changes to PacketcraftR are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Early v0.2 alpha development was intentionally breaking; the reviewed Rust API, CLI, packet-document, and output-document contracts are frozen by the first beta.
 
+## Unreleased
+
+### Fixed
+
+- Made downloaded Release archive extraction portable to Git Bash by entering
+  the download directory before invoking `tar` with a relative asset path.
+
 ## 0.2.0-beta.1 - 2026-07-11
 
 This first public v0.2 beta is the compatibility-freeze checkpoint. GitHub

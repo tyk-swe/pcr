@@ -10,7 +10,7 @@ cd "${root}"
 shopt -s nullglob
 
 if ! command -v check-jsonschema >/dev/null 2>&1; then
-    echo "check-jsonschema is required; install scripts/beta-gate-requirements.txt" >&2
+    echo "check-jsonschema is required; install scripts/requirements.txt" >&2
     exit 2
 fi
 

@@ -2,19 +2,17 @@
 
 PacketcraftR handles attacker-controlled bytes and can generate live network traffic. We treat parser panics, unbounded resource use, unsafe transmission behavior, capture lifecycle races, and protocol-validation bypasses as security issues.
 
-## Supported versions
+## Supported code
 
 | Version or branch | Security support |
 | --- | --- |
-| `main` and the current v0.2 development line | Active security fixes |
-| A GitHub Release explicitly named as supported in its notes | Support stated by that Release |
-| v0.1, older snapshots, and unsupported forks | No maintained upstream branch |
+| `main` | Active security fixes |
+| A tagged snapshot explicitly named in a security advisory | Support stated by that advisory |
+| Older snapshots and unsupported forks | No maintained upstream branch |
 
-The `0.2.0` package version is the reviewed stable GitHub Release. Its support
-scope, completed qualification, and explicit Windows/Npcap scope waiver are
-stated in the GitHub Release notes. A supported branch means that fixes are
-accepted. It does not make PacketcraftR or its traffic policy a security
-boundary for an otherwise unauthorized network.
+A supported branch means that fixes are accepted. It does not make
+PacketcraftR or its traffic policy a security boundary for an otherwise
+unauthorized network.
 
 ## Reporting a vulnerability
 
@@ -54,12 +52,12 @@ Do not include credentials, private keys, personal data, or raw production captu
 
 Good-faith research that follows these expectations is welcome. This policy does not authorize testing systems you do not own or have permission to assess.
 
-## Release handling
+## Fix handling
 
 Security fixes are developed privately when early disclosure would increase
-risk. A release advisory should identify affected commits/versions, impact,
-mitigations, fixed versions, and credit when requested. There is no maintained
-v0.1 release branch or standing v0.1 backport promise; users of historical
-snapshots must migrate, maintain an audited fork, or arrange support explicitly.
+risk. An advisory should identify affected commits, impact, mitigations, fixed
+code, and credit when requested. Unsupported snapshots have no standing
+backport promise; users must update, maintain an audited fork, or arrange
+support explicitly.
 
 The project does not promise embargoes requested by third parties when users are already being actively harmed, but maintainers will make a good-faith effort to coordinate a responsible release.

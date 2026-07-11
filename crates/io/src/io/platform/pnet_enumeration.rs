@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Temporary Unix interface-enumeration adapter retained during v0.2 alpha.
+//! Legacy Unix interface-enumeration adapter used by the default feature.
 
 use super::super::provider::{InterfaceAddress, InterfaceFlags, InterfaceInfo};
 use super::super::{InterfaceId, LinkCapability, LinkType, MacAddress};

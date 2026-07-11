@@ -1,8 +1,0 @@
-# Temporary local-only dependency resolution used by the RC package audit.
-# The audit copies this file to .cargo/config.toml in an expendable copy of the
-# exact candidate. It is never included in Release inputs or a package.
-[patch.crates-io]
-packetcraftr-core = { path = "crates/core" }
-packetcraftr-protocols = { path = "crates/protocols" }
-packetcraftr-io = { path = "crates/io" }
-packetcraftr-session = { path = "crates/session" }

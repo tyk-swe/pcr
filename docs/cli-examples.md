@@ -1,6 +1,6 @@
 # CLI workflows and executable examples
 
-These examples cover the complete frozen v0.2 command surface. Run packet
+These examples cover the complete command surface. Run packet
 construction, dissection, capture-file conversion, and offline fuzzing anywhere.
 Run passive native discovery or live traffic only in an isolated lab that you
 own or are explicitly authorized to test.

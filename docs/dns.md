@@ -44,7 +44,7 @@ the recursion-desired flag.
 Each attempt uses `Client::exchange`, so capture reaches its readiness barrier
 before transmission and shutdown is attempted on success and every failure
 path. The selected interface, preferred source, and `auto`/`layer2`/`layer3`
-intent are explicit workflow options. No socket or legacy asynchronous DNS
+intent are explicit workflow options. No socket-specific asynchronous DNS
 runtime is hidden inside the portable workflow.
 
 ## Validation, relevance, and evidence

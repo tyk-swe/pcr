@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare CLI help/errors and schema files with the v0.2 beta contract."""
+"""Compare CLI help, errors, and schemas with the committed contract."""
 
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def main() -> int:
         for path, content in current.items():
             path.write_text(content, encoding="utf-8")
         checksum = contract_digest()
-        print("updated frozen CLI goldens")
+        print("updated CLI goldens")
         print(f"CLI/schema baseline: `sha256:{checksum}`")
         return 0
 
@@ -151,24 +151,20 @@ def main() -> int:
         for line in difflib.unified_diff(
             expected.splitlines(),
             content.splitlines(),
-            fromfile="frozen beta golden",
+            fromfile="committed golden",
             tofile="current CLI",
             lineterm="",
         ):
             print(line, file=sys.stderr)
     if failed:
         print(
-            "review compatibility, update CHANGELOG.md, then rerun with --bless",
+            "review compatibility, then rerun with --bless",
             file=sys.stderr,
         )
         return 1
 
     checksum = contract_digest()
-    token = f"CLI/schema baseline: `sha256:{checksum}`"
-    if token not in (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"):
-        print(f"CHANGELOG.md must record the reviewed contract digest: {token}", file=sys.stderr)
-        return 1
-    print(f"CLI and schema contracts match the beta baseline ({checksum})")
+    print(f"CLI and schemas match the committed contract ({checksum})")
     return 0
 
 

@@ -14,7 +14,7 @@ pub const EXIT_IO: u8 = 5;
 pub const EXIT_POLICY: u8 = 6;
 pub const EXIT_INTERNAL: u8 = 70;
 
-/// Top-level failure classes frozen by the v0.2 CLI contract.
+/// Top-level failure classes defined by the CLI contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureKind {

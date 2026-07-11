@@ -107,7 +107,7 @@ impl fmt::Display for CommandName {
     }
 }
 
-/// User-selectable output formats across implemented and planned commands.
+/// User-selectable output formats across supported commands.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, ValueEnum)]
 pub enum OutputFormat {
     #[default]
@@ -1883,7 +1883,7 @@ pub enum FuzzStreamCommandResult {
     },
 }
 
-/// Compatibility name retained for the early typed-output placeholder.
+/// Compatibility alias for [`FuzzStreamCommandResult`].
 pub type FuzzCaseCommandResult = FuzzStreamCommandResult;
 
 fn compact_hex(bytes: &[u8]) -> String {

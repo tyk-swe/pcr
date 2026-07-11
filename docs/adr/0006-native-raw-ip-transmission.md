@@ -15,7 +15,7 @@ Before opening a socket, the adapter validates a complete IPv4/IPv6 header, exac
 
 Linux binds the route-selected device, macOS binds its interface index, and Winsock sets the family-appropriate unicast or multicast interface option. All three constraints are independent from the source encoded in the packet, preserving a crafted/spoofed source while selecting the planned path. macOS receives a private submission copy whose IPv4 total-length and flags/fragment-offset fields are converted to host order; the immutable built bytes remain the reported wire evidence. Every target enables full-header inclusion, submits the route destination, requires a complete native write, and maps permission, interface, unsupported, and send failures to typed errors.
 
-Raw UDP with a non-local crafted source is rejected on Windows because affected client versions can silently drop it. Raw TCP and other operating-system restrictions are attempted only where the native provider permits them and remain typed socket errors. Hosted tests use an injected raw backend for validation, exact-byte, partial-write, and error mapping; privileged runner qualification remains required for live capability claims.
+Raw UDP with a non-local crafted source is rejected on Windows because affected client systems can silently drop it. Raw TCP and other operating-system restrictions are attempted only where the native provider permits them and remain typed socket errors. Hosted tests use an injected raw backend for validation, exact-byte, partial-write, and error mapping; privileged integration evidence remains required for live capability claims.
 
 ## Consequences
 

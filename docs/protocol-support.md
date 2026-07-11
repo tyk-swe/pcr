@@ -1,15 +1,14 @@
-# Stable built-in protocol support
+# Built-in protocol support
 
-This document publishes the built-in packet-layer promise for PacketcraftR
-v0.2. The matching public Rust value is `BUILTIN_PROTOCOL_SUPPORT`; serializing
-it produces a manifest whose schema identifier is
+This document defines PacketcraftR's built-in packet-layer contract. The
+matching public Rust value is `BUILTIN_PROTOCOL_SUPPORT`; serializing it
+produces a manifest whose schema identifier is
 `packetcraftr.protocol-support/v1`. Registry invariant tests require the
 manifest to contain exactly every built-in codec, numeric capture root,
-response matcher, and stable CLI workflow.
+response matcher, and CLI workflow.
 
-This is a protocol-layer contract, not a claim that every command or privileged
-platform path has completed release qualification. The
-[platform matrix](platform-support.md) records those separate gates.
+This is a protocol-layer contract. The [platform matrix](platform-support.md)
+records separate native capability and privilege requirements.
 
 ## Codec matrix
 
@@ -64,11 +63,11 @@ nine bindings:
 | 276 | `linux_sll2` | Network order | IPv6 exact rebuild |
 
 The provenance-checked corpus also contains an unregistered DLT 147 frame to
-freeze unknown-root raw preservation.
+verify unknown-root raw preservation.
 
-## Stable workflow obligations
+## Workflow obligations
 
-The manifest maps all 14 stable command names to concrete build, dissect,
+The manifest maps all 14 command names to concrete build, dissect,
 matcher, and capture-root obligations. “Live recipe” includes the constructible
 Ethernet/VLAN, ARP, IPv4/IPv6/extension, ICMP, TCP, UDP, raw, padding, and
 explicit malformed layers; capture-only BSD/SLL envelopes fail explicitly in

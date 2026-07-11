@@ -277,7 +277,7 @@ const DNS_DISSECT: &[&str] = &[
     "vlan8021ad",
 ];
 
-/// Packet-layer obligations for every command in the stable v0.2 CLI surface.
+/// Packet-layer obligations for every command in the CLI surface.
 pub const STABLE_WORKFLOW_PROTOCOLS: &[WorkflowProtocolSupport] = &[
     WorkflowProtocolSupport {
         workflow: "build",

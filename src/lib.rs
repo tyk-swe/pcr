@@ -24,10 +24,10 @@
 #![warn(unreachable_pub)]
 #![forbid(unsafe_code)]
 
+mod cli;
 pub mod client;
 pub mod output;
 pub mod tools;
-mod v2_cli;
 
 pub use packetcraftr_core::{core, error};
 pub use packetcraftr_io::io;
@@ -148,8 +148,7 @@ pub use tools::{
     MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP,
 };
 
-/// Runs the frozen v0.2 command-line entry point and returns its stable exit
-/// class.
+/// Runs the command-line entry point and returns its documented exit class.
 pub fn run_cli_entrypoint() -> std::process::ExitCode {
-    v2_cli::run_entrypoint()
+    cli::run_entrypoint()
 }

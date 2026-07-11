@@ -1,6 +1,6 @@
-# Stable v0.2 CLI contract
+# CLI contract
 
-The v0.2 beta command grammar consists of exactly these 14 commands:
+The command grammar consists of exactly these 14 commands:
 
 ```text
 build       dissect      plan         send         exchange
@@ -8,13 +8,13 @@ capture     read         replay       scan         traceroute
 dns         fuzz         interfaces   routes
 ```
 
-`packetcraftr --help` and each `packetcraftr COMMAND --help` define the frozen
+`packetcraftr --help` and each `packetcraftr COMMAND --help` define the
 option names, value spellings, conflicts, finite defaults, and help text. CI
-compares them with `tests/golden/cli-help.txt`; it also freezes `--version` and
-the canonical text parse-error rendering. Functionality promised by stable has
-an implemented command path. A build without the required native feature,
-runtime, device, or privilege returns a typed capability error; it is not a
-placeholder command and never changes link mode or bytes as a fallback.
+compares them with `tests/golden/cli-help.txt`; it also tracks `--version` and
+the canonical text parse-error rendering. Every command has an implemented
+path. A build without the required native feature, runtime, device, or
+privilege returns a typed capability error and never changes link mode or
+bytes as a fallback.
 
 ## Packet recipes
 
@@ -67,10 +67,8 @@ macOS, and Windows.
 
 ## Compatibility review
 
-`scripts/check-cli-contract.py` hashes this contract, the packet/output schemas,
-and the help/parse/version goldens. CI requires the digest recorded in the
-changelog. Any command, option, default, conflict, value spelling, exit class,
-packet mapping, output shape, or schema change must therefore update the
-goldens or schemas, receive explicit compatibility review, and add a changelog
-entry. An incompatible beta-to-stable change is a release blocker unless the
-published compatibility policy explicitly permits it.
+`scripts/check-cli-contract.py` compares this contract, the packet and output
+schemas, and the help, parse-error, and version goldens. Any command, option,
+default, conflict, value spelling, exit class, packet mapping, output shape, or
+schema change must update the corresponding golden or schema after explicit
+compatibility review.

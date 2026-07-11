@@ -1,6 +1,6 @@
 # Architecture decision records
 
-Architecture decision records (ADRs) capture decisions that constrain PacketcraftR v0.2. They explain why public contracts exist and are not substitutes for API documentation.
+Architecture decision records (ADRs) capture decisions that constrain PacketcraftR. They explain why public contracts exist and are not substitutes for API documentation.
 
 | ADR | Status | Decision |
 | --- | --- | --- |

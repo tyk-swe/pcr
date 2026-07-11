@@ -1,0 +1,11 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "raw",
+      "fields": {
+        "bytes": [0, 1, 2]
+      }
+    }
+  ]
+}

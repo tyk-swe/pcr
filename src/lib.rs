@@ -148,7 +148,8 @@ pub use tools::{
     MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP,
 };
 
-/// Run the intentionally breaking v0.2 command-line interface.
+/// Runs the frozen v0.2 command-line entry point and returns its stable exit
+/// class.
 pub fn run_cli_entrypoint() -> std::process::ExitCode {
     v2_cli::run_entrypoint()
 }

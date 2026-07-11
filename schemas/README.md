@@ -12,6 +12,27 @@ The value of a document's `schema` property is the PacketcraftR format identifie
 
 Packet documents deliberately do not enumerate protocols or field names. A `ProtocolRegistry` is extensible, so it performs protocol-specific field, range, layer-binding, and required-field checks after structural schema validation. Parser byte/layer/depth limits are runtime policy and are not relaxed by a document passing JSON Schema validation.
 
+JSON and YAML use the same closed `PacketDocument` mapping. A document is one
+object with `schema` and `layers`; each layer has `protocol` and an optional
+`fields` map; every field value uses the explicit `type`/`value` tagged shape
+in the packet schema. Byte and MAC values are integer arrays, IP addresses are
+strings, and every list element is another tagged field value. Duplicate keys,
+unknown structural properties, multiple YAML documents, YAML alias expansion,
+and custom YAML tags are rejected. YAML uses the YAML 1.2 scalar rules, so its
+typed result is identical to the equivalent JSON document.
+
+`FieldSchema.required` is an after-defaults reflective invariant, not a
+required JSON/YAML input property. A caller may omit a registry field when its
+codec supplies a default. After construction, `Layer::field` must return a
+value for every required schema field; factory, build/materialization, and
+decode boundaries enforce this rule.
+
+`PacketDocument::parse_with_resource_limits` enforces the 16 MiB default byte
+ceiling before parsing, the 64-layer default ceiling while streaming the
+`layers` sequence, and the absolute 64-level `FieldValue::List` nesting ceiling
+before recursive typed allocation. The CLI uses those published defaults.
+Passing JSON Schema validation never raises the runtime ceilings.
+
 An aggregate success envelope contains `result` and no `error` or `sequence`;
 an aggregate error contains `error` and no `result` or `sequence`. Both carry
 `"mode": "aggregate"`. Each NDJSON line is a complete
@@ -20,7 +41,9 @@ an aggregate error contains `error` and no `result` or `sequence`. Both carry
 sequence zero when the stream fails before its first result. An error tied to
 a specific input item retains that item's source sequence. `diagnostics` is
 always an array. When `stats` is present, its required `capture` object reports
-received and dropped frames/bytes plus queue-overflow events; non-zero loss is
+received and dropped frames/bytes plus queue-overflow events. A non-zero
+`receiver_dropped_frames` property identifies the subset reported below the
+owned queue; it is omitted when zero for v1 compatibility. Non-zero loss is
 also represented by a diagnostic or typed error according to the selected
 overflow policy.
 
@@ -85,17 +108,26 @@ jsonschema schemas/packetcraftr.packet.v1.schema.json \
   --instance examples/documents/packet-ipv4-udp.json
 
 check-jsonschema \
+  --schemafile schemas/packetcraftr.packet.v1.schema.json \
+  examples/documents/packet-*.json examples/documents/packet-*.yaml
+
+check-jsonschema \
   --schemafile schemas/packetcraftr.output.v1.schema.json \
   examples/documents/output-*.json
 ```
 
-CI also requires every document in `tests/fixtures/invalid-output` to fail
-validation. Those fixtures freeze aggregate/stream separation, mandatory
-stream sequencing, command-specific result shapes, and the rejection of
-arbitrary route/plan payloads. Integration tests additionally compare exact
-bytes across raw, whole-frame hex, NDJSON, classic PCAP, and PCAPNG and force
-closed stdout for every output family to keep broken pipes typed as runtime I/O
-failures rather than panics.
+CI also requires every document under
+[`tests/schema-invalid/packet`](../tests/schema-invalid/packet) and every
+non-provenance document under
+[`tests/fixtures/invalid-output`](../tests/fixtures/invalid-output) to fail its
+corresponding schema. These negative corpora freeze closed structural keys,
+tagged field values, aggregate/stream separation, command-specific results,
+and stream sequencing.
+
+Integration tests additionally compare exact bytes across JSON `bytes_hex`,
+whole-frame hex, raw, NDJSON, classic PCAP, and PCAPNG and force closed stdout
+for every output family to keep broken pipes typed as runtime I/O failures
+rather than panics.
 
 Every non-example file in `tests/fixtures` has a
 `<fixture>.provenance.json` sidecar. CI validates those documents against the

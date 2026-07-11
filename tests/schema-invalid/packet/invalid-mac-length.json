@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ethernet",
+      "fields": {
+        "source": {
+          "type": "mac",
+          "value": [2, 0, 0, 0, 1]
+        }
+      }
+    }
+  ]
+}

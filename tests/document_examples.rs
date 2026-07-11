@@ -96,27 +96,29 @@ fn every_command_has_published_success_and_error_goldens() {
 }
 
 #[test]
-fn packet_document_example_builds_through_the_public_cli() {
-    let output = binary()
-        .args([
-            "--output",
-            "json",
-            "build",
-            "--packet-file",
-            example("packet-ipv4-udp.json").to_str().unwrap(),
-        ])
-        .output()
-        .unwrap();
+fn packet_document_examples_build_through_the_public_cli() {
+    for (name, expected_length) in [("packet-ipv4-udp.json", 47), ("packet-raw.yaml", 4)] {
+        let output = binary()
+            .args([
+                "--output",
+                "json",
+                "build",
+                "--packet-file",
+                example(name).to_str().unwrap(),
+            ])
+            .output()
+            .unwrap();
 
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["schema"], "packetcraftr.output/v1");
-    assert_eq!(value["status"], "success");
-    assert_eq!(value["result"]["length"], 47);
+        assert!(
+            output.status.success(),
+            "{name}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["schema"], "packetcraftr.output/v1", "{name}");
+        assert_eq!(value["status"], "success", "{name}");
+        assert_eq!(value["result"]["length"], expected_length, "{name}");
+    }
 }
 
 #[test]

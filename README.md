@@ -4,28 +4,35 @@
 
 PacketcraftR is a Rust packet-construction, dissection, capture, and network-testing framework with a first-class CLI. The v0.2 line is rebuilding the project around arbitrary layer stacks, reflective fields, an explicit protocol registry, exact wire-byte preservation, and bounded parsers.
 
-> **Alpha warning:** `0.2.0-alpha.1` is an intentionally breaking development release. The Rust API, packet documents, output documents, and command-line interface are not stable until the beta API freeze. Do not depend on v0.1 flags or JSON shapes surviving the alpha series.
+> **Prerelease warning:** `0.2.0-alpha.1` remains a prerelease version, but this
+> checkout contains the reviewed v0.2 beta-candidate freezes for the public Rust
+> API, CLI, packet documents, and output documents. Any incompatible change to
+> those contracts is now a release blocker unless the compatibility policy
+> explicitly permits it.
 
 PacketcraftR is licensed under the [GNU Affero General Public License v3.0 only](LICENSE) and has a Rust 1.96 minimum supported Rust version (MSRV) throughout the v0.2 series.
 
 ## Project status
 
-This checkout contains the portable v0.2 kernel, passive native route providers, and policy-gated live CLI workflows. The table describes the alpha checkpoint, not the final v0.2 promise.
+This checkout contains the portable v0.2 kernel, passive native route providers,
+and policy-gated live CLI workflows. The table describes the beta-candidate
+contract; privileged qualification remains a separate release gate.
 
-| Area | Alpha status |
+| Area | Beta-candidate status |
 | --- | --- |
-| Ordered `Packet`, object-safe `Layer`, reflective schemas and field values | Available as an alpha API |
-| Immutable `ProtocolRegistry`, external codecs and deterministic bindings | Available as an alpha API |
+| Ordered `Packet`, object-safe `Layer`, reflective schemas and field values | Frozen public API and invariant-tested implementation |
+| Immutable `ProtocolRegistry`, external codecs and deterministic bindings | Frozen public API and compile-tested external extension path |
 | Strict/permissive generic building, layouts, and diagnostics | Stable built-in protocol matrix implemented and invariant-tested; beta Rust API candidate is frozen and diff-checked |
 | Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
 | Runtime-neutral captured-frame records and offline capture I/O | Bounded streaming read/write and metadata-preserving PCAP/PCAPNG copy are available through the API and `read` |
-| Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
-| Complete v0.2 command set: `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `fuzz`, `interfaces`, and `routes` | Available as alpha workflows |
+| Packet expressions and `packetcraftr.packet/v1` documents | Frozen mapping with bounded JSON/YAML parsing and schema gates |
+| Complete v0.2 command set: `build`, `dissect`, `plan`, `send`, `exchange`, `capture`, `read`, `replay`, `scan`, `traceroute`, `dns`, `fuzz`, `interfaces`, and `routes` | Frozen CLI grammar, exit classes, and output contracts |
 | Routing, neighbor discovery, live send/capture, and exchange | Injectable APIs and CLI composition are available with passive Linux/macOS/Windows routes, native Layer 2 I/O, bounded gateway-aware ARP/NDP, raw Layer 3 adapters, finite traffic/capture budgets, and typed capability failures |
 | Reassembly, templates, scans, traceroute, DNS, and fuzzing | Bounded fragment/TCP stages, templates, structured scan/traceroute/DNS, and deterministic field-aware fuzzing are available |
 | Built-in protocol catalog and extracted component crates | Stable codec/root catalog complete; core, protocols, I/O, and session packages are extracted behind unchanged façade paths |
 
-Run `packetcraftr --help` for the complete alpha command grammar and current finite defaults.
+Run `packetcraftr --help` for the complete frozen command grammar and finite
+defaults; CI compares that text with the reviewed beta-candidate golden.
 
 The exact v0.2 packet-layer promise is published in the
 [stable built-in protocol matrix](docs/protocol-support.md) and through the
@@ -62,7 +69,7 @@ The beta-candidate public façade is centered on:
 - `Raw`, `Padding`, and `MalformedLayer`, which retain content that cannot be decoded safely.
 - `CapturedFrame`, which retains link type, timestamps, captured/wire lengths, interface metadata, and all bytes up to the snap length. Its fallible constructors reject lengths that cannot represent the supplied bytes, and dissection revalidates records before reading them. Exchange results retain bounded, undecodable frames in this raw form instead of discarding their evidence.
 
-A minimal alpha API shape looks like this:
+A minimal beta-candidate API shape looks like this:
 
 ```rust
 use packetcraftr::{Packet, Raw};
@@ -136,7 +143,11 @@ packetcraftr build --packet 'ether()/ipv4(dst="192.0.2.10")/tcp(dport=443)/raw(h
 
 Versioned JSON or YAML documents are intended for generated, complex, or reviewable packets. Workflow settings such as interface, timeout, output format, replay timing, or traffic policy never belong inside a packet document. The versioned [packet and output JSON Schemas](schemas/README.md) and [example documents](examples/documents) are included in the repository.
 
-Machine-readable aggregate output uses one typed `packetcraftr.output/v1` JSON envelope. Streaming commands use independently valid NDJSON records; every success and error has a `sequence`. Per-item errors retain their input sequence, while a terminal error after prior records takes the next unused value. JSON and NDJSON are distinct `--output` values rather than command-dependent meanings of `json`. Raw and hexadecimal formats always refer to the complete captured or built frame, never payload-only bytes. Golden success/error documents cover every command, and exact-byte tests compare raw, hex, NDJSON, PCAP, and PCAPNG. The complete command/format matrix is part of the [output schema contract](schemas/README.md#commandformat-matrix).
+Machine-readable aggregate output uses one typed `packetcraftr.output/v1` JSON envelope. Streaming commands use independently valid NDJSON records; every success and error has a `sequence`. Per-item errors retain their input sequence, while a terminal error after prior records takes the next unused value. JSON and NDJSON are distinct `--output` values rather than command-dependent meanings of `json`. Raw and hexadecimal formats always refer to the complete captured or built frame, never payload-only bytes. Golden success/error documents cover every command, and exact-byte tests compare JSON `bytes_hex`, raw, hex, NDJSON, PCAP, and PCAPNG. The complete command/format matrix is part of the [output schema contract](schemas/README.md#commandformat-matrix).
+
+The [stable CLI contract](docs/cli-contract.md) freezes the 14-command grammar,
+help/defaults, recipe exclusivity, exit classes, streaming behavior, permitted
+platform variance, and beta compatibility-review gate.
 
 ### Offline capture and replay
 

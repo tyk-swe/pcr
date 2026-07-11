@@ -1,0 +1,8 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "fields": {}
+    }
+  ]
+}

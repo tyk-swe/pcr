@@ -25,7 +25,7 @@ use crate::client::{
 use crate::core::{
     parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,
     Dissector, DocumentFormat, ExpressionOptions, Packet, PacketDocument, PacketTemplate,
-    DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_LAYERS,
+    DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_NESTING, DEFAULT_MAX_LAYERS,
 };
 use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
 use crate::io::{
@@ -67,7 +67,7 @@ use crate::tools::{
     name = "packetcraftr",
     version,
     about = "Reflective packet construction, dissection, capture, and network tools",
-    long_about = "PacketcraftR v0.2 alpha: arbitrary packet stacks, strict/permissive exact building, bounded dissection, passive route planning, and policy-gated live send/capture/exchange workflows. Native features, dependencies, and privileges determine which live paths are available."
+    long_about = "PacketcraftR v0.2 beta candidate: arbitrary packet stacks, strict/permissive exact building, bounded dissection, passive route planning, and policy-gated live workflows under frozen CLI, exit-code, packet-document, and output contracts. Native features, dependencies, and privileges determine which live paths are available."
 )]
 struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = OutputFormat::Text)]
@@ -4348,9 +4348,15 @@ fn read_recipe(
                 .then_some(DocumentFormat::Yaml)
         });
     if let Some(format) = format {
-        return PacketDocument::parse(&input, format, DEFAULT_MAX_DOCUMENT_BYTES)
-            .and_then(|document| document.to_packet(registry, DEFAULT_MAX_LAYERS))
-            .map_err(|source| CliError::new(2, source.to_string()));
+        return PacketDocument::parse_with_resource_limits(
+            &input,
+            format,
+            DEFAULT_MAX_DOCUMENT_BYTES,
+            DEFAULT_MAX_LAYERS,
+            DEFAULT_MAX_DOCUMENT_NESTING,
+        )
+        .and_then(|document| document.to_packet(registry, DEFAULT_MAX_LAYERS))
+        .map_err(|source| CliError::new(2, source.to_string()));
     }
     parse_expression(&input, registry)
 }

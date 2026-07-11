@@ -2,9 +2,10 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
-This guide documents the target v0.2 interface. During alpha development,
-`packetcraftr --help` is authoritative. All 14 final command names are wired in
-this checkpoint, including the offline-by-default `fuzz` replacement.
+This guide documents the target v0.2 interface. The reviewed
+[CLI contract](cli-contract.md), its golden help, and the versioned schemas are
+the beta-candidate compatibility baseline. All 14 final command names are
+implemented, including the offline-by-default `fuzz` replacement.
 
 ## The central change
 
@@ -186,7 +187,12 @@ Supplying more than one source is a CLI error with exit code 2.
 
 ## Packet documents
 
-Complex packets move to versioned JSON or YAML with the identifier `packetcraftr.packet/v1`. The following is an illustrative alpha document; validate it against the [schema shipped with PacketcraftR](../schemas/packetcraftr.packet.v1.schema.json) and see the complete [IPv4/UDP JSON example](../examples/documents/packet-ipv4-udp.json):
+Complex packets move to versioned JSON or YAML with the identifier
+`packetcraftr.packet/v1`. Both syntaxes use the same closed, explicitly tagged
+mapping. Validate documents against the
+[schema shipped with PacketcraftR](../schemas/packetcraftr.packet.v1.schema.json)
+and see the complete [IPv4/UDP JSON example](../examples/documents/packet-ipv4-udp.json)
+and [raw YAML example](../examples/documents/packet-raw.yaml):
 
 ```yaml
 schema: packetcraftr.packet/v1
@@ -223,6 +229,11 @@ layers:
 ```
 
 Reflective document values carry an explicit `type`. Derived fields omitted from a fresh typed layer retain their codec defaults, normally `Auto`; serializers include their reflected representation when exact or raw intent must be preserved.
+
+Packet input is capped at 16 MiB before UTF-8 decoding. JSON and YAML parsing
+then enforce 64-layer and 64-recursive-list ceilings before an unbounded generic
+tree can be allocated. Duplicate or unknown structural keys, YAML aliases,
+custom tags, and multiple YAML documents are rejected.
 
 Do not put route, interface, timeout, capture, replay, traffic policy, or output settings in this document. Keep those at the command or client call site.
 
@@ -264,13 +275,13 @@ Exit codes are stable at the v0.2 CLI freeze:
 
 | Code | Meaning |
 | ---: | --- |
-| 0 | Success |
-| 2 | CLI or packet-document/schema error |
-| 3 | Packet build or dissection error |
-| 4 | Unsupported capability, missing native dependency, or privilege error |
-| 5 | Route, capture, send, timeout, or other runtime I/O error |
+| 0 | Success, `--help`, or `--version` |
+| 2 | CLI grammar, recipe, limit, or packet-document/schema validation |
+| 3 | Packet build, dissection, capture-record, or replay-input failure |
+| 4 | Unsupported capability, missing native dependency, or privilege |
+| 5 | Route, neighbor, send, capture, timeout, cleanup, or other runtime I/O |
 | 6 | Traffic-policy denial |
-| 70 | Internal invariant failure |
+| 70 | Internal provider or output invariant failure |
 
 `ClassifiedError::classification()` maps live Rust errors to a stable
 `ErrorClassification` containing a machine code, one of these exit classes,
@@ -342,4 +353,10 @@ If an application previously depended on an embedded subsystem, move orchestrati
 
 ## Rollout advice
 
-Pin an exact alpha version, store packet documents in version control, validate them in CI, and compare exact built bytes before enabling live transmission. Move to beta only after all used APIs and document fields appear in the beta migration notes. Existing v0.1 deployments that need only critical fixes should remain on `release/0.1` until the v0.2 release candidate is qualified.
+Pin an exact prerelease version, store packet documents in version control,
+validate them in CI, and compare exact built bytes before enabling live
+transmission. Treat changes to the reviewed Rust API, CLI grammar, exit classes,
+packet mapping, or output schemas as compatibility events; incompatible
+beta-to-stable changes block release unless the published compatibility policy
+permits them. Existing v0.1 deployments that need only critical fixes should
+remain on `release/0.1` until the v0.2 release candidate is qualified.

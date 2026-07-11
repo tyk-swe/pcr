@@ -35,7 +35,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Completed the all-command output conformance pass: typed success/error goldens for all 14 commands, closed route/plan schemas, sequenced per-item and terminal stream failures, complete-frame parity across raw/hex/NDJSON/PCAP/PCAPNG, terminal-safe text, and broken-pipe coverage for every output family.
 - Extracted synchronized, unpublished core, protocol, I/O, and session implementation crates behind unchanged `packetcraftr` façade paths, with an enforced acyclic dependency graph and buildable GitHub Release workspace archives.
 - Added a warning-free public Rust API guide, compile-tested portable/live extension examples, semantic `FailureCategory` recovery classes, typed capture-evidence completeness and receiver-drop counters, and a rustdoc-derived beta façade baseline enforced in CI.
-- Public API baseline: `sha256:60bc9b70e0547c69f41d717943b7dd6f7d62171cce64ec4359ecfc6e784736b9` (reviewed for the v0.2 beta freeze).
+- Added the reviewed v0.2 CLI contract, exact help/parse/version goldens, packet-schema negative fixtures, a shipped YAML packet example, and a digest gate covering CLI grammar, exit classes, packet/output schemas, and mapping documentation.
+- Public API baseline: `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762` (reviewed for the v0.2 beta freeze).
+- CLI/schema baseline: `sha256:2f28da6eb04772bd2e9d021b71799f707d3f63e103be9af75f4d5a8f4eb2f269` (reviewed for the v0.2 beta freeze).
 
 ### Changed
 
@@ -58,6 +60,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Live CLI policy and limit validation now precedes resolver, route, neighbor, capture, or transmission work as applicable; capture and exchange retain readiness, loss, timeout, and cleanup evidence through the shared classified-error contract.
 - Exchange results retain timestamped exact sent-frame evidence; PCAPNG output preserves mixed raw-send and captured-response link types as separate interfaces, while classic PCAP rejects an unrepresentable mixed stream.
 - Froze `FieldSchema::required` as an after-defaults reflective invariant enforced for built-in and external codecs at construction, materialization, and decode boundaries; capture receiver loss is no longer misclassified as queue overflow.
+- Froze `packetcraftr.packet/v1` JSON/YAML mapping and CLI parser behavior: packet bytes are capped before decoding, layers are streamed under a finite ceiling, recursive field lists have an absolute ceiling, and duplicates, aliases, custom tags, and multi-document YAML are rejected before an unbounded generic tree can be built.
 
 ### Fixed
 

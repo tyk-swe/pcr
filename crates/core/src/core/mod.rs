@@ -29,7 +29,7 @@ pub use diagnostic::{Diagnostic, DiagnosticSeverity};
 pub use dissect::{DecodeError, DecodeOptions, DecodedPacket, Dissector};
 pub use document::{
     DocumentError, DocumentFormat, LayerDocument, PacketDocument, DEFAULT_MAX_DOCUMENT_BYTES,
-    DEFAULT_MAX_DOCUMENT_NESTING, PACKET_DOCUMENT_SCHEMA_V1,
+    DEFAULT_MAX_DOCUMENT_NESTING, MAX_DOCUMENT_NESTING, PACKET_DOCUMENT_SCHEMA_V1,
 };
 pub use expression::{
     decode_hex, parse_packet_expression, ExpressionError, ExpressionOptions,

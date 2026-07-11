@@ -13,6 +13,16 @@ fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
 }
 
+fn normalize_cli_text(bytes: &[u8]) -> String {
+    let text = String::from_utf8(bytes.to_vec())
+        .unwrap()
+        .replace("\r\n", "\n");
+    text.split('\n')
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn temp_path(label: &str) -> PathBuf {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -96,6 +106,64 @@ fn decode_output_hex(output: &[u8]) -> Vec<u8> {
 }
 
 #[test]
+fn cli_help_parse_error_and_version_match_the_beta_goldens() {
+    const COMMANDS: &[&str] = &[
+        "build",
+        "dissect",
+        "read",
+        "interfaces",
+        "plan",
+        "send",
+        "exchange",
+        "capture",
+        "replay",
+        "scan",
+        "traceroute",
+        "dns",
+        "fuzz",
+        "routes",
+    ];
+
+    let mut sections = Vec::with_capacity(COMMANDS.len() + 1);
+    for (label, arguments) in std::iter::once(("packetcraftr --help".to_owned(), vec!["--help"]))
+        .chain(COMMANDS.iter().map(|command| {
+            (
+                format!("packetcraftr {command} --help"),
+                vec![*command, "--help"],
+            )
+        }))
+    {
+        let output = binary().args(arguments).output().unwrap();
+        assert!(output.status.success(), "{label}");
+        assert!(output.stderr.is_empty(), "{label}");
+        sections.push(format!(
+            "===== {label} =====\n{}\n",
+            normalize_cli_text(&output.stdout).trim_end()
+        ));
+    }
+    assert_eq!(sections.join("\n"), include_str!("golden/cli-help.txt"));
+
+    let parse_error = binary()
+        .args(["build", "--unknown-option"])
+        .output()
+        .unwrap();
+    assert_eq!(parse_error.status.code(), Some(2));
+    assert!(parse_error.stdout.is_empty());
+    assert_eq!(
+        normalize_cli_text(&parse_error.stderr),
+        include_str!("golden/cli-parse-error.txt")
+    );
+
+    let version = binary().arg("--version").output().unwrap();
+    assert!(version.status.success());
+    assert!(version.stderr.is_empty());
+    assert_eq!(
+        normalize_cli_text(&version.stdout),
+        include_str!("golden/cli-version.txt")
+    );
+}
+
+#[test]
 fn build_expression_emits_complete_frame_hex() {
     let output = binary()
         .args([
@@ -119,7 +187,7 @@ fn build_expression_emits_complete_frame_hex() {
 }
 
 #[test]
-fn exact_bytes_agree_across_raw_hex_ndjson_pcap_and_pcapng() {
+fn exact_bytes_agree_across_json_raw_hex_ndjson_pcap_and_pcapng() {
     let expression = "raw(hex=0001027f80ffdeadbeef)";
     let raw = binary()
         .args(["--output", "raw", "build", "--packet", expression])
@@ -127,6 +195,22 @@ fn exact_bytes_agree_across_raw_hex_ndjson_pcap_and_pcapng() {
         .unwrap();
     assert!(raw.status.success());
     let expected = raw.stdout;
+
+    let json = binary()
+        .args(["--output", "json", "build", "--packet", expression])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let aggregate: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(
+        decode_output_hex(
+            aggregate["result"]["bytes_hex"]
+                .as_str()
+                .unwrap()
+                .as_bytes()
+        ),
+        expected
+    );
 
     let hex = binary()
         .args(["--output", "hex", "build", "--packet", expression])

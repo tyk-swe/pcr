@@ -37,7 +37,7 @@
         },
         "fields": {
           "type": "object",
-          "description": "Registry-defined field names mapped to explicitly tagged reflective values.",
+          "description": "Registry-defined field names mapped to explicitly tagged reflective values. Registry-required fields may be omitted when the codec supplies a default; required presence is enforced after construction.",
           "propertyNames": {
             "minLength": 1
           },

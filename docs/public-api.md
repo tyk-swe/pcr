@@ -41,6 +41,16 @@ required field. Public factory, builder, and dissector boundaries enforce this
 through `Layer::validate_required_fields()` and return a typed
 `FieldError::MissingRequired` cause when an external codec violates it.
 
+## Packet-document parsing
+
+`PacketDocument::parse` applies the stable default byte, layer, and recursive
+list ceilings. `parse_with_resource_limits` lets an application select explicit
+byte and layer budgets and choose a nesting budget no greater than the absolute
+`MAX_DOCUMENT_NESTING` ceiling. JSON is depth-checked before typed
+deserialization; YAML is streamed under equivalent parser budgets. Both reject
+duplicate structural/reflective keys, and the configured limits are enforced
+before a generic document tree could grow past them.
+
 ## Results and errors
 
 Portable build/dissect calls return `BuiltPacket` and `DecodedPacket`; route

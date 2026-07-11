@@ -95,7 +95,7 @@ def contract_digest() -> str:
     for path in CONTRACT_FILES:
         digest.update(path.relative_to(ROOT).as_posix().encode())
         digest.update(b"\0")
-        digest.update(path.read_bytes())
+        digest.update(path.read_text(encoding="utf-8").replace("\r\n", "\n").encode())
         digest.update(b"\0")
     return digest.hexdigest()
 

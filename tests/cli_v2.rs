@@ -141,7 +141,10 @@ fn cli_help_parse_error_and_version_match_the_beta_goldens() {
             normalize_cli_text(&output.stdout).trim_end()
         ));
     }
-    assert_eq!(sections.join("\n"), include_str!("golden/cli-help.txt"));
+    assert_eq!(
+        sections.join("\n"),
+        normalize_cli_text(include_str!("golden/cli-help.txt").as_bytes())
+    );
 
     let parse_error = binary()
         .args(["build", "--unknown-option"])
@@ -151,7 +154,7 @@ fn cli_help_parse_error_and_version_match_the_beta_goldens() {
     assert!(parse_error.stdout.is_empty());
     assert_eq!(
         normalize_cli_text(&parse_error.stderr),
-        include_str!("golden/cli-parse-error.txt")
+        normalize_cli_text(include_str!("golden/cli-parse-error.txt").as_bytes())
     );
 
     let version = binary().arg("--version").output().unwrap();
@@ -159,7 +162,7 @@ fn cli_help_parse_error_and_version_match_the_beta_goldens() {
     assert!(version.stderr.is_empty());
     assert_eq!(
         normalize_cli_text(&version.stdout),
-        include_str!("golden/cli-version.txt")
+        normalize_cli_text(include_str!("golden/cli-version.txt").as_bytes())
     );
 }
 

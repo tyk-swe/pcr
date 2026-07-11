@@ -65,6 +65,7 @@ use crate::tools::{
 #[derive(Debug, Parser)]
 #[command(
     name = "packetcraftr",
+    bin_name = "packetcraftr",
     version,
     about = "Reflective packet construction, dissection, capture, and network tools",
     long_about = "PacketcraftR v0.2 beta candidate: arbitrary packet stacks, strict/permissive exact building, bounded dissection, passive route planning, and policy-gated live workflows under frozen CLI, exit-code, packet-document, and output contracts. Native features, dependencies, and privileges determine which live paths are available."
@@ -4690,6 +4691,15 @@ mod tests {
             "packet.json",
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn help_uses_the_frozen_cross_platform_binary_name() {
+        let error = Cli::try_parse_from(["packetcraftr.exe", "build", "--help"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+        let help = error.to_string();
+        assert!(help.contains("Usage: packetcraftr build [OPTIONS]"));
+        assert!(!help.contains("packetcraftr.exe"));
     }
 
     #[test]

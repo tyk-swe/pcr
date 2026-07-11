@@ -64,6 +64,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Canonicalized the CLI display name and line endings so the frozen help, parse-error, and version goldens are byte-equivalent on Windows, macOS, and Linux checkouts.
 - Removed the receive path that could drain and discard Layer 2 frames.
 - Rejected IPv6 routing type 0 and unsupported generic routing headers before transmission.
 - Rejected legacy ARP, VLAN, PPPoE, and custom-EtherType combinations when the fixed builder could only relabel IP bytes.

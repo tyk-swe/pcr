@@ -84,6 +84,7 @@ bash scripts/verify-release-archive.sh --output-dir "${release_directory}"
 archive_digest="$(awk 'NR == 1 { print $1 }' "${release_directory}/SHA256SUMS")"
 python3 scripts/render-release-notes.py \
     --archive-sha256 "${archive_digest}" \
+    --tree "${RELEASE_TREE:-HEAD}" \
     --output "${temporary}/release-notes.md"
 
 if command -v rg >/dev/null 2>&1; then

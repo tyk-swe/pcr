@@ -9,7 +9,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Fixed
 
 - Made downloaded Release archive extraction portable to Git Bash by entering
-  the download directory before invoking `tar` with a relative asset path.
+  the download directory before invoking `tar` with a relative asset path, and
+  pinned manual Release validation packaging to the requested immutable tag.
 
 ## 0.2.0-beta.1 - 2026-07-11
 

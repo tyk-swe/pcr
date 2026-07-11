@@ -91,6 +91,7 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           PACKETCRAFTR_OFFLINE_AFTER_POLICY: "1"
           PACKETCRAFTR_RELEASE_OUTPUT_DIR: ${{ runner.temp }}/packetcraftr-release-inputs
+          RELEASE_TREE: ${{ inputs.release_tag }}
         run: bash scripts/check-beta-gate.sh
       - name: List verified deterministic Release inputs
         run: |

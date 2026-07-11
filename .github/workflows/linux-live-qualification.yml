@@ -6,12 +6,11 @@ on:
       release_tag:
         description: GitHub prerelease/candidate tag to download
         required: true
-        default: v0.2.0-beta.1
+        default: v0.2.0-rc.1
         type: string
       expected_commit:
         description: Full source commit embedded in the candidate archive
         required: true
-        default: e61f77f693d80d3c7f4231ffcaecc37ef5a71ccd
         type: string
 
 permissions:
@@ -31,9 +30,10 @@ jobs:
       - name: Check out reviewed qualification tooling
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.expected_commit }}
           fetch-depth: 0
 
-      - name: Install the beta MSRV
+      - name: Install the stable MSRV
         uses: dtolnay/rust-toolchain@1.96.0
 
       - name: Confirm the dedicated runner boundary

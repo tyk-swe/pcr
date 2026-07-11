@@ -6,12 +6,11 @@ on:
       release_tag:
         description: GitHub prerelease/candidate tag to download
         required: true
-        default: v0.2.0-beta.1
+        default: v0.2.0-rc.1
         type: string
       expected_commit:
         description: Full source commit embedded in the candidate archive
         required: true
-        default: e61f77f693d80d3c7f4231ffcaecc37ef5a71ccd
         type: string
 
 permissions:

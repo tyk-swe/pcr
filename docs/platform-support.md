@@ -1,14 +1,14 @@
 # Platform and capability matrix
 
-This document distinguishes the implemented v0.2 beta contract from
-the remaining privileged release qualification. "Builds" or "hosted CI" does
-not mean that a live networking workflow has passed its dedicated-runner gate.
+This document distinguishes the frozen v0.2 contract, qualified native
+surfaces, and explicit release scope waivers. "Builds" or "hosted CI" does not
+mean that a live networking workflow passed its dedicated-runner gate.
 
-Status snapshot: 2026-07-11 (`0.2.0-beta.1`).
+Status snapshot: 2026-07-11 (`0.2.0-rc.1`).
 
-`0.2.0-beta.1` is the tagged compatibility-freeze prerelease. It contains every
-stable-promised implementation; the runner gates below qualify those paths for
-the release candidate.
+`0.2.0-rc.1` is the GitHub-only stable candidate. Its contract remains frozen
+from Beta; the matrix below separates release-qualified behavior from the
+owner-approved Windows/Npcap scope waiver.
 
 ## 0.2.0 Windows/Npcap scope waiver
 
@@ -31,7 +31,7 @@ workflow stays in the repository for a later release.
 - **Unqualified preview:** implemented and covered through hosted/injected
   seams, but not claimed as a stable live capability by this Release.
 
-## Current beta implementation
+## Release-candidate implementation
 
 | Capability | Linux | macOS | Windows | Notes |
 | --- | --- | --- | --- | --- |

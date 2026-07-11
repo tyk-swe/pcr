@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+## 0.2.0-rc.1 - 2026-07-11
+
+This GitHub-only release candidate advances the frozen Beta contract through
+the exact native, parity, security/resource, packaging, and downloaded-artifact
+release rehearsal. The unavailable Windows/Npcap live runner is an explicit
+owner-approved scope waiver, not a qualification pass; no package is published
+to a public registry.
+
 ### Added
 
 - Added a retained exact-candidate RC security/resource/package audit covering
@@ -27,6 +35,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Changed
 
+- Advanced every synchronized workspace package and exact internal dependency
+  to `0.2.0-rc.1`; the GitHub Release archive remains the only distribution.
+- Kept the Beta-frozen public API baseline unchanged at
+  `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762`.
+- CLI/schema baseline: `sha256:ea94b9bd8ffcddec5c7bcc09a699f5e435bc212a0237636ac910c2c6ff0011c2`
+  after the reviewed version-string advance; the command grammar, exit classes,
+  and packet/output schemas are unchanged.
 - Scoped Windows x86_64 MSVC Npcap live capture/injection and dependent live
   workflows as an unqualified preview for 0.2.0 after the release owner
   explicitly waived the unavailable dedicated-runner gate. Portable Windows,

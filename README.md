@@ -4,11 +4,11 @@
 
 PacketcraftR is a Rust packet-construction, dissection, capture, and network-testing framework with a first-class CLI. The v0.2 line is rebuilding the project around arbitrary layer stacks, reflective fields, an explicit protocol registry, exact wire-byte preservation, and bounded parsers.
 
-> **Beta warning:** `0.2.0-beta.1` freezes the reviewed v0.2 public Rust API,
-> CLI, packet documents, and output documents. It is not the stable release:
-> privileged live-I/O and final cross-platform qualification still gate the
-> release candidate. Any incompatible contract regression is a 0.2.0 release
-> blocker unless the compatibility policy explicitly permits it.
+> **Release-candidate warning:** `0.2.0-rc.1` is the exact candidate for the
+> stable v0.2 public Rust API, CLI, packet documents, output documents, and
+> qualified native surfaces. It is not the stable release. Any failed
+> candidate verification or incompatible contract regression remains a 0.2.0
+> release blocker unless the compatibility policy explicitly permits it.
 
 Use the [beta feedback and release-blocker policy](docs/beta-feedback.md) for
 reproducible compatibility, artifact, or capability reports.
@@ -17,11 +17,12 @@ PacketcraftR is licensed under the [GNU Affero General Public License v3.0 only]
 
 ## Project status
 
-This checkout contains the portable v0.2 kernel, passive native route providers,
-and policy-gated live CLI workflows. The table describes the frozen beta
-contract; privileged qualification remains a separate release gate.
+This checkout contains the `0.2.0-rc.1` candidate: the portable v0.2 kernel,
+passive native route providers, and policy-gated live CLI workflows. The table
+describes the frozen release-candidate contract; the qualified and explicitly
+waived native boundaries are recorded in the platform matrix.
 
-| Area | Beta status |
+| Area | RC status |
 | --- | --- |
 | Ordered `Packet`, object-safe `Layer`, reflective schemas and field values | Frozen public API and invariant-tested implementation |
 | Immutable `ProtocolRegistry`, external codecs and deterministic bindings | Frozen public API and compile-tested external extension path |
@@ -63,7 +64,7 @@ strict/permissive   bounded
  diagnostics       diagnostics
 ```
 
-The beta public façade is centered on:
+The frozen v0.2 public façade is centered on:
 
 - `Packet`, `Layer`, `LayerSchema`, `FieldSchema`, and `FieldValue` for typed and reflective editing.
 - `WireValue<T>` for dependent values that are automatic, exact, or deliberately raw.
@@ -72,7 +73,7 @@ The beta public façade is centered on:
 - `Raw`, `Padding`, and `MalformedLayer`, which retain content that cannot be decoded safely.
 - `CapturedFrame`, which retains link type, timestamps, captured/wire lengths, interface metadata, and all bytes up to the snap length. Its fallible constructors reject lengths that cannot represent the supplied bytes, and dissection revalidates records before reading them. Exchange results retain bounded, undecodable frames in this raw form instead of discarding their evidence.
 
-A minimal beta API shape looks like this:
+A minimal frozen API shape looks like this:
 
 ```rust
 use packetcraftr::{Packet, Raw};
@@ -102,10 +103,11 @@ The architecture decisions are recorded in [docs/adr](docs/adr/README.md).
 
 ## Building from source
 
-The `0.2.0-beta.1` Cargo version identifies the `v0.2.0-beta.1` GitHub
-prerelease. PacketcraftR packages are not published to a public registry.
-Install an exact reviewed checkout locally, or use only the archive and checksum
-attached to the [GitHub Releases page](https://github.com/tyk-swe/pcr/releases).
+The `0.2.0-rc.1` Cargo version identifies the `v0.2.0-rc.1` GitHub
+prerelease candidate. PacketcraftR packages are not published to a public
+registry. Install an exact reviewed checkout locally, or use only the archive
+and checksum attached to the
+[GitHub Releases page](https://github.com/tyk-swe/pcr/releases).
 The archive embeds its source commit in `RELEASE-METADATA.toml`. The complete
 download, checksum, local-install, and versioned API-reference procedure is in the
 [installation and Release guide](docs/install-and-release.md).

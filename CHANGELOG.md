@@ -16,9 +16,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
   paired-feth topology and an unaddressed PacketcraftR-native user-space peer,
   with real routing-socket, zero-loss BPF, neighbor, Layer 2/3, exchange,
   replay, scan, traceroute, DNS, fuzz, and typed failure evidence.
+- Added exact-candidate Windows x86_64 MSVC hosted qualification plus a
+  licensed, pre-provisioned Npcap 1.88 dedicated-runner gate, including native
+  route/raw-socket evidence, portable wire baselines, missing-runtime behavior,
+  and an isolated zero-loss Npcap peer matrix.
 
 ### Fixed
 
+- Accepted Darwin's complete compact final routing-socket sockaddr when its
+  otherwise-unused alignment trailer is omitted, while retaining strict bounds
+  whenever another route address follows.
 - Fixed generated IPv4 scan, traceroute, and DNS probes to use deterministic
   nonzero identification values, preserving exact native Layer 3 bytes instead
   of reaching the kernel-rewrite rejection on the first probe.

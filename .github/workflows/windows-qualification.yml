@@ -1,0 +1,173 @@
+name: Windows qualification
+
+on:
+  push:
+    paths:
+      - .github/workflows/windows-qualification.yml
+      - docs/windows-qualification.md
+      - examples/live_qualification_peer.rs
+      - crates/io/src/io/platform/npcap.rs
+      - crates/io/src/io/platform/raw_ip.rs
+      - crates/io/src/io/platform/windows.rs
+      - scripts/qualify-windows-hosted.py
+      - scripts/qualify-windows-live.py
+      - scripts/verify-windows-hosted-evidence.py
+      - scripts/verify-windows-live-evidence.py
+  workflow_dispatch:
+    inputs:
+      expected_commit:
+        description: Full approved candidate commit to package and qualify
+        required: true
+        type: string
+      run_npcap_live:
+        description: Run the licensed, pre-provisioned dedicated Npcap runner gate
+        required: true
+        default: false
+        type: boolean
+      client_interface:
+        description: Dedicated isolated-switch client adapter alias
+        required: false
+        type: string
+      peer_interface:
+        description: Dedicated isolated-switch unaddressed peer adapter alias
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-qualification-${{ github.event_name == 'workflow_dispatch' && inputs.run_npcap_live || 'hosted' }}
+  cancel-in-progress: false
+
+jobs:
+  hosted:
+    name: Hosted x86_64 MSVC boundary
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Check out the exact approved candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit || github.sha }}
+          fetch-depth: 0
+
+      - name: Install the stable MSRV
+        shell: pwsh
+        run: rustup toolchain install 1.96.0 --profile minimal
+
+      - name: Confirm the hosted Windows boundary
+        shell: pwsh
+        run: |
+          if (-not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitProcess) {
+            throw 'Windows qualification requires a native 64-bit runner and process'
+          }
+          if (Test-Path "$env:WINDIR\System32\Npcap\wpcap.dll") {
+            throw 'the hosted missing-runtime boundary unexpectedly contains Npcap'
+          }
+          python --version
+          rustc --version
+
+      - name: Build deterministic approved-candidate inputs
+        shell: bash
+        env:
+          RELEASE_TREE: ${{ inputs.expected_commit || github.sha }}
+        run: bash scripts/build-release-inputs.sh "${RUNNER_TEMP}/candidate"
+
+      - name: Qualify native route, raw sockets, wire bytes, and missing Npcap
+        shell: pwsh
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit || github.sha }}
+        run: |
+          $archive = Get-ChildItem "$env:RUNNER_TEMP\candidate" -Filter 'packetcraftr-workspace-*.tar.gz'
+          if ($archive.Count -ne 1) {
+            throw "expected one candidate archive, found $($archive.Count)"
+          }
+          python scripts/qualify-windows-hosted.py `
+            --archive $archive.FullName `
+            --checksums "$env:RUNNER_TEMP\candidate\SHA256SUMS" `
+            --expected-commit $env:EXPECTED_COMMIT `
+            --evidence "$env:RUNNER_TEMP\windows-hosted-evidence" `
+            --bundle "$env:RUNNER_TEMP\windows-hosted-evidence.tar.gz"
+          if ($LASTEXITCODE -ne 0) {
+            throw "hosted Windows qualification exited $LASTEXITCODE"
+          }
+
+      - name: Retain sanitized hosted-boundary evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-hosted-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/windows-hosted-evidence
+            ${{ runner.temp }}/windows-hosted-evidence.tar.gz
+          if-no-files-found: error
+          retention-days: 90
+
+  npcap-live:
+    name: Dedicated Npcap 1.88 live I/O
+    if: github.event_name == 'workflow_dispatch' && inputs.run_npcap_live
+    runs-on: [self-hosted, Windows, X64, packetcraftr-npcap-1.88]
+    timeout-minutes: 60
+    steps:
+      - name: Require explicit isolated adapter aliases
+        shell: pwsh
+        env:
+          CLIENT_INTERFACE: ${{ inputs.client_interface }}
+          PEER_INTERFACE: ${{ inputs.peer_interface }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CLIENT_INTERFACE) -or
+              [string]::IsNullOrWhiteSpace($env:PEER_INTERFACE) -or
+              $env:CLIENT_INTERFACE -eq $env:PEER_INTERFACE) {
+            throw 'distinct client_interface and peer_interface inputs are required'
+          }
+
+      - name: Check out the exact approved candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit }}
+          fetch-depth: 0
+
+      - name: Install the stable MSRV
+        shell: pwsh
+        run: rustup toolchain install 1.96.0 --profile minimal
+
+      - name: Build deterministic approved-candidate inputs
+        shell: bash
+        env:
+          RELEASE_TREE: ${{ inputs.expected_commit }}
+        run: bash scripts/build-release-inputs.sh "${RUNNER_TEMP}/candidate"
+
+      - name: Run real Npcap, IP Helper, and Winsock qualification
+        shell: pwsh
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          CLIENT_INTERFACE: ${{ inputs.client_interface }}
+          PEER_INTERFACE: ${{ inputs.peer_interface }}
+        run: |
+          $archive = Get-ChildItem "$env:RUNNER_TEMP\candidate" -Filter 'packetcraftr-workspace-*.tar.gz'
+          if ($archive.Count -ne 1) {
+            throw "expected one candidate archive, found $($archive.Count)"
+          }
+          python scripts/qualify-windows-live.py `
+            --archive $archive.FullName `
+            --checksums "$env:RUNNER_TEMP\candidate\SHA256SUMS" `
+            --expected-commit $env:EXPECTED_COMMIT `
+            --client-interface $env:CLIENT_INTERFACE `
+            --peer-interface $env:PEER_INTERFACE `
+            --evidence "$env:RUNNER_TEMP\windows-live-evidence" `
+            --bundle "$env:RUNNER_TEMP\windows-live-evidence.tar.gz"
+          if ($LASTEXITCODE -ne 0) {
+            throw "dedicated Windows qualification exited $LASTEXITCODE"
+          }
+
+      - name: Retain sanitized Npcap release-signoff evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-npcap-live-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/windows-live-evidence
+            ${{ runner.temp }}/windows-live-evidence.tar.gz
+          if-no-files-found: error
+          retention-days: 90

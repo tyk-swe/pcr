@@ -115,15 +115,21 @@ if git cat-file -e "${tree}:scripts/audit-rc-readiness.sh" 2>/dev/null; then
     rc_contract_files=(
         .github/workflows/rc-security-audit.yml
         .github/workflows/macos-live-qualification.yml
+        .github/workflows/windows-qualification.yml
         docs/macos-live-qualification.md
         docs/rc-security-audit.md
+        docs/windows-qualification.md
         examples/live_qualification_peer.rs
         scripts/audit-rc-readiness.sh
         scripts/qualify-macos-live.sh
+        scripts/qualify-windows-hosted.py
+        scripts/qualify-windows-live.py
         scripts/rc-audit-requirements.txt
         scripts/rc-package-patches.toml
         scripts/verify-macos-live-evidence.py
         scripts/verify-rc-audit.py
+        scripts/verify-windows-hosted-evidence.py
+        scripts/verify-windows-live-evidence.py
     )
     for required in "${rc_contract_files[@]}"; do
         if [[ ! -f "${workspace}/${required}" ]]; then

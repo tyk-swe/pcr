@@ -287,3 +287,5 @@ A missing dedicated runner is a release blocker for the corresponding advertised
 The version-pinned topology, privilege boundary, exact candidate invocation,
 semantic evidence verifier, and retention contract for the first row are in
 the [privileged Linux qualification procedure](linux-live-qualification.md).
+The equivalent Windows hosted/native-dependency split and dedicated-runner
+contract are in the [Windows qualification procedure](windows-qualification.md).

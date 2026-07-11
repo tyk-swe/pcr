@@ -1,44 +1,52 @@
 # Platform and capability matrix
 
-This document distinguishes the current alpha checkpoint from the stable v0.2 target. "Builds" does not mean a live networking workflow has been release-qualified.
+This document distinguishes the implemented v0.2 beta-candidate contract from
+the remaining privileged release qualification. "Builds" or "hosted CI" does
+not mean that a live networking workflow has passed its dedicated-runner gate.
 
 Status snapshot: 2026-07-11 (`0.2.0-alpha.1`).
 
+The Cargo version has not yet been advanced or tagged; `0.2.0-alpha.1` is the
+unpublished development version containing the reviewed beta freezes.
+
 ## Status legend
 
-- **Alpha:** implementation exists but its API and qualification are incomplete.
-- **Planned:** required before stable v0.2, but not complete in this checkpoint.
-- **CI:** compiled or tested in unprivileged continuous integration.
-- **Runner:** requires a dedicated privileged/native-dependency test runner.
+- **Frozen:** the beta API/CLI/schema contract is compatibility-reviewed and
+  baseline-diffed.
+- **CI:** implemented and compiled or tested in unprivileged hosted continuous
+  integration.
+- **Runner gate:** implementation has deterministic/injected CI coverage but
+  still requires the named privileged/native-dependency release runner.
 
-## Current alpha checkpoint
+## Current beta-candidate implementation
 
 | Capability | Linux | macOS | Windows | Notes |
 | --- | --- | --- | --- | --- |
-| Portable packet/layer/field model | Alpha, CI | Alpha, CI | Alpha, CI | Runtime-neutral; no native capture dependency |
-| Generic registry, build, and dissection APIs | Beta candidate, CI | Beta candidate, CI | Beta candidate, CI | The [stable built-in protocol matrix](protocol-support.md) is complete and corpus-backed; the Rust façade is baseline-diffed in CI |
-| Offline classic PCAP/PCAPNG | Alpha, CI | Alpha, CI | Alpha, CI | Pure Rust bounded read/write; metadata-preserving multi-interface copy through `read` and the public API |
-| Packet-expression/document CLI | Alpha, CI | Alpha, CI | Alpha, CI | One exclusive recipe grammar is shared by `build`, `plan`, `send`, `capture`, and `exchange` |
-| Route/source planning and inventory CLI | Native alpha, CI | Native alpha, CI | Native alpha, CI | `plan` and interface-bound `routes` use `native-route`; both remain passive |
-| Live Layer 2 capture/injection CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `send`/`capture` use libpcap or runtime-loaded Npcap; hosted CI covers policy, ABI, and lifecycle seams, while privileged qualification requires dedicated runners |
-| Gateway-aware ARP/NDP | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
-| Raw Layer 3 transmission CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `send --link-mode layer3` uses target raw sockets; hosted CI covers validation and injected send seams, while privileged qualification requires dedicated runners |
-| Coordinated exchange CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | `exchange` awaits capture readiness before send and shares bounded retention, loss reporting, and joined shutdown contracts |
-| Exact bounded replay CLI | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable policy/timing/transmitter seams are deterministic in hosted CI; privileged Ethernet/raw-IP replay remains a dedicated-runner gate |
-| Defragmentation and TCP reassembly | Alpha, CI | Alpha, CI | Alpha, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
-| Structured scan workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable planner, matcher/classifier, policy, timing, and injected lifecycle tests run in hosted CI; privileged qualification remains a dedicated-runner gate |
-| Structured traceroute workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable hop planner, IPv4/IPv6 quoted-error classifier, policy, timing, and injected exchange seams run in hosted CI; privileged qualification remains a dedicated-runner gate |
-| Structured DNS workflow | Native alpha, CI/Runner | Native alpha, CI/Runner | Native alpha, CI/Runner | Portable codec, relevance, policy/rebinding, timing, and injected exchange tests run in hosted CI; privileged UDP qualification remains a dedicated-runner gate |
-| Bounded field-aware fuzz workflow | Alpha, CI/Runner | Alpha, CI/Runner | Alpha, CI/Runner | Offline deterministic mutation/build/dissection is portable and hosted-CI tested; optional live cases use the shared route, policy, exchange, and selected native send path |
+| Portable packet/layer/field model | Frozen, CI | Frozen, CI | Frozen, CI | Runtime-neutral; no native capture dependency |
+| Generic registry, build, and dissection APIs | Frozen, CI | Frozen, CI | Frozen, CI | The [stable built-in protocol matrix](protocol-support.md) is complete and corpus-backed; the Rust façade is baseline-diffed in CI |
+| Offline classic PCAP/PCAPNG | Frozen, CI | Frozen, CI | Frozen, CI | Pure Rust bounded read/write; metadata-preserving multi-interface copy through `read` and the public API |
+| Packet-expression/document CLI | Frozen, CI | Frozen, CI | Frozen, CI | One exclusive recipe grammar is shared by every packet-taking command |
+| Route/source planning and inventory CLI | Implemented, CI | Implemented, CI | Implemented, CI | `plan` and interface-bound `routes` use `native-route`; both remain passive |
+| Live Layer 2 capture/injection CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `send`/`capture` use libpcap or runtime-loaded Npcap; hosted CI covers policy, ABI, and lifecycle seams, while privileged qualification requires dedicated runners |
+| Gateway-aware ARP/NDP | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable resolver logic is deterministically tested with injected providers; privileged routed/VLAN qualification remains a release gate |
+| Raw Layer 3 transmission CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `send --link-mode layer3` uses target raw sockets; hosted CI covers validation and injected send seams, while privileged qualification requires dedicated runners |
+| Coordinated exchange CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | `exchange` awaits capture readiness before send and shares bounded retention, loss reporting, and joined shutdown contracts |
+| Exact bounded replay CLI | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable policy/timing/transmitter seams are deterministic in hosted CI; privileged Ethernet/raw-IP replay remains a dedicated-runner gate |
+| Defragmentation and TCP reassembly | Frozen, CI | Frozen, CI | Frozen, CI | Portable stages bounded by flow, byte, fragment, pending-TCP-segment, and expiry limits |
+| Structured scan workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable planner, matcher/classifier, policy, timing, and injected lifecycle tests run in hosted CI; privileged qualification remains a dedicated-runner gate |
+| Structured traceroute workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable hop planner, IPv4/IPv6 quoted-error classifier, policy, timing, and injected exchange seams run in hosted CI; privileged qualification remains a dedicated-runner gate |
+| Structured DNS workflow | Implemented, CI + runner gate | Implemented, CI + runner gate | Implemented, CI + runner gate | Portable codec, relevance, policy/rebinding, timing, and injected exchange tests run in hosted CI; privileged UDP qualification remains a dedicated-runner gate |
+| Bounded field-aware fuzz workflow | Offline frozen, CI; live runner gate | Offline frozen, CI; live runner gate | Offline frozen, CI; live runner gate | Offline deterministic mutation/build/dissection is portable and hosted-CI tested; optional live cases use the shared route, policy, exchange, and selected native send path |
 
-Consult the exact release notes and `packetcraftr --help` for the checkout in use; a planned row is not a stable v0.2 guarantee.
+Consult the exact release notes and `packetcraftr --help` for the checkout in
+use; a runner-gated row is not a stable v0.2 qualification claim.
 
 ## Build and feature contracts
 
 | Cargo profile | Linux | macOS | Windows | Native dependency contract |
 | --- | --- | --- | --- | --- |
 | `--no-default-features` | Portable | Portable | Portable | No `libloading`, `pnet`, `pcap`, `rtnetlink`, `socket2`, or `windows` adapter package |
-| Default features | Portable core plus isolated alpha interface enumeration | Portable core plus isolated alpha interface enumeration | Portable | Current `live` enables only the temporary Unix enumeration adapter |
+| Default features | Portable core plus isolated interface enumeration | Portable core plus isolated interface enumeration | Portable | Current `live` enables only the legacy Unix enumeration adapter; use explicit native features for v0.2 providers |
 | `--all-features` | Native routes/interfaces and libpcap L2 | Native routes/interfaces and libpcap L2 | Native routes/interfaces and dynamic Npcap L2 | Hosted tests do not require capture privileges; Windows resolves the DLL only when live I/O is opened |
 
 `--features native-route` may also be selected without the default `live` feature. It returns platform-neutral `RouteDecision`, `InterfaceInfo`, `RouteSelectionReason`, and `NativeRouteError` values. Route lookup can constrain an exact interface and an interface-owned preferred source, rejects family/assignment/mismatch failures, reports the next hop and effective MTU, and never invokes ARP/NDP, capture, or transmission.
@@ -107,7 +115,7 @@ repeats both checks, preventing a changed DNS answer from bypassing policy.
 
 The component and native ownership rules are fixed by [ADR 0004](adr/0004-component-and-native-adapter-boundaries.md). Portable components forbid unsafe code. Direct native dependencies, FFI, and any reviewed unsafe implementation are confined to the private `io::platform` subtree and checked by CI.
 
-## Stable v0.2 target
+## Stable v0.2 release target
 
 | Capability | Linux x86_64 GNU | macOS arm64/x86_64 | Windows x86_64 MSVC |
 | --- | --- | --- | --- |
@@ -155,6 +163,97 @@ Explicitly complete packets must produce identical protocol bytes on every platf
 - `native-route` route/source selection uses `GetBestRoute2` and adapter enumeration uses `GetAdaptersAddresses`; both IPv4 and IPv6 paths are exercised on hosted Windows CI.
 - IP Helper calls use narrowly enabled `windows` 0.62 bindings. Npcap uses its C ABI through optional, ISC-licensed `libloading` 0.8 so ordinary Windows builds and hosted native tests have no `wpcap.lib`/`Packet.lib` link boundary.
 - CI currently qualifies passive discovery plus Npcap ABI/error/lifecycle behavior on Windows Server 2022 x86_64 MSVC. Actual capture/injection with Npcap 1.88 remains mandatory on a dedicated privileged runner before release candidate.
+
+## Capability troubleshooting
+
+Start with the structured error and process exit code. Exit 4 means the selected
+feature, runtime, device access, or privilege is absent; its `remediation` field
+names the boundary PacketcraftR refused to cross. Exit 5 means the requested
+capability was present but route/device/send/capture/timeout/cleanup work failed.
+Exit 6 is a policy denial. Never solve exit 4 or 6 by silently changing link
+mode, interface, destination, or authorization flags.
+
+First prove the portable and selected native profiles separately:
+
+```console
+cargo build --locked --no-default-features
+cargo build --locked --features native-route
+# Linux/macOS require libpcap development files for this profile.
+cargo build --locked --features native-route,native-layer2,native-layer3
+packetcraftr --output json interfaces
+packetcraftr --output json routes
+```
+
+`plan` and `routes` need `native-route` but no packet privilege. If either
+returns a privilege error, capture the structured remediation and platform
+details; do not elevate the process as a first response. An exact interface
+constraint must match a current name or numeric index on the same target.
+
+### Linux checks
+
+On Debian/Ubuntu, install the compile-time/runtime libpcap files for Layer 2:
+
+```console
+sudo apt-get update
+sudo apt-get install libpcap-dev
+ldconfig -p | grep libpcap
+```
+
+Raw Layer 3 and most Layer 2 operations require root or a narrowly reviewed
+capability grant. Inspect the installed binary before changing it:
+
+```console
+getcap "$(command -v packetcraftr)"
+```
+
+In an isolated runner, an administrator may grant the minimum capabilities the
+approved workflow needs, commonly `CAP_NET_RAW` and, for capture/device
+configuration that requires it, `CAP_NET_ADMIN`:
+
+```console
+sudo setcap cap_net_raw,cap_net_admin=eip "$(command -v packetcraftr)"
+getcap "$(command -v packetcraftr)"
+```
+
+File capabilities confer broad packet access, are tied to that executable inode,
+and can disappear on reinstall. Prefer a disposable network namespace or
+dedicated runner, do not grant them to a writable shared binary, and remove them
+with `sudo setcap -r PATH` when qualification ends.
+
+### macOS checks
+
+The system supplies libpcap/BPF. Confirm BPF devices exist and inspect their
+administrator-managed ownership without making them world-writable:
+
+```console
+ls -l /dev/bpf*
+```
+
+Layer 2 access depends on the host's BPF policy; raw Layer 3 sockets normally
+require an elevated process. Use a dedicated authorized test host or an
+administrator-managed launch policy. If the process can enumerate routes but
+cannot open capture, the route feature is working and the failure is specifically
+the BPF device/privilege boundary.
+
+### Windows checks
+
+The portable and `native-route` profiles do not need Npcap. Layer 2 requires the
+64-bit Npcap 1.88 runtime at the path loaded by PacketcraftR; the SDK is not an
+end-user or build-time requirement. In PowerShell:
+
+```powershell
+Get-Service npcap -ErrorAction SilentlyContinue
+Test-Path "$env:WINDIR\System32\Npcap\wpcap.dll"
+```
+
+If either check fails, install or repair the documented Npcap runtime through
+its vendor and retry from a fresh process. If Npcap was installed in
+administrator-only mode, run only the authorized lab invocation with the
+required elevation. A present DLL with `capability.missing_dependency` can mean
+the wrong architecture, version, symbol set, or a dependent-DLL load failure;
+PacketcraftR deliberately refuses the legacy search path and does not fall back
+to another provider. Winsock raw-socket restrictions are separate from Npcap,
+so successful capture does not imply raw TCP/UDP transmission is permitted.
 
 ## Link-mode contract
 

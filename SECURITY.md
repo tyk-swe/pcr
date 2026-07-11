@@ -6,11 +6,15 @@ PacketcraftR handles attacker-controlled bytes and can generate live network tra
 
 | Version or branch | Security support |
 | --- | --- |
-| `main` / v0.2 prereleases | Active security fixes |
-| `release/0.1` | Critical fixes only until v0.2 reaches release candidate |
-| Older snapshots and unsupported forks | No upstream support |
+| `main` and the current v0.2 development line | Active security fixes |
+| A GitHub Release explicitly named as supported in its notes | Support stated by that Release |
+| v0.1, older snapshots, and unsupported forks | No maintained upstream branch |
 
-Alpha releases are not API-stable and are not suitable as a security boundary. A supported version means that fixes are accepted; it does not mean every planned v0.2 hardening measure has landed.
+The current `0.2.0-alpha.1` package version is an unpublished development
+baseline containing the reviewed beta-candidate contract; there is no matching
+tag or Release. A supported branch means that fixes are accepted. It does not
+make PacketcraftR, its traffic policy, or a prerelease checkout a security
+boundary for an otherwise unauthorized network.
 
 ## Reporting a vulnerability
 
@@ -52,6 +56,10 @@ Good-faith research that follows these expectations is welcome. This policy does
 
 ## Release handling
 
-Security fixes are developed privately when early disclosure would increase risk. A release advisory should identify affected versions, impact, mitigations, fixed versions, and credit when requested. Critical fixes that affect v0.1 are backported to `release/0.1` while that branch remains in its critical-fixes window.
+Security fixes are developed privately when early disclosure would increase
+risk. A release advisory should identify affected commits/versions, impact,
+mitigations, fixed versions, and credit when requested. There is no maintained
+v0.1 release branch or standing v0.1 backport promise; users of historical
+snapshots must migrate, maintain an audited fork, or arrange support explicitly.
 
 The project does not promise embargoes requested by third parties when users are already being actively harmed, but maintainers will make a good-faith effort to coordinate a responsible release.

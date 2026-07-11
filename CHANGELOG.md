@@ -2,9 +2,13 @@
 
 All notable changes to PacketcraftR are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The v0.2 alpha series is intentionally breaking; compatibility is frozen only at beta.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Early v0.2 alpha development was intentionally breaking; the reviewed Rust API, CLI, packet-document, and output-document contracts are now frozen at the beta-candidate boundary.
 
 ## 0.2.0-alpha.1 - Unreleased
+
+This heading is the cumulative unpublished development baseline. No
+`0.2.0-alpha.1` tag or GitHub Release exists; the Cargo version has not yet been
+advanced to the first beta even though its compatibility baselines are frozen.
 
 ### Added
 
@@ -36,6 +40,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Extracted synchronized, unpublished core, protocol, I/O, and session implementation crates behind unchanged `packetcraftr` façade paths, with an enforced acyclic dependency graph and buildable GitHub Release workspace archives.
 - Added a warning-free public Rust API guide, compile-tested portable/live extension examples, semantic `FailureCategory` recovery classes, typed capture-evidence completeness and receiver-drop counters, and a rustdoc-derived beta façade baseline enforced in CI.
 - Added the reviewed v0.2 CLI contract, exact help/parse/version goldens, packet-schema negative fixtures, a shipped YAML packet example, and a digest gate covering CLI grammar, exit classes, packet/output schemas, and mapping documentation.
+- Added complete executable examples for all 14 CLI commands, platform-specific native dependency/privilege troubleshooting, GitHub-only install/Release verification guidance, and auditable v0.1 migration/support corrections.
 - Public API baseline: `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762` (reviewed for the v0.2 beta freeze).
 - CLI/schema baseline: `sha256:2f28da6eb04772bd2e9d021b71799f707d3f63e103be9af75f4d5a8f4eb2f269` (reviewed for the v0.2 beta freeze).
 
@@ -88,4 +93,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## 0.1.0
 
-The original private, fixed-pipeline release. Historical changes predate this changelog. Critical fixes are maintained on `release/0.1` only until the v0.2 release-candidate stage.
+The original private, fixed-pipeline release. Historical changes predate this
+changelog. There is no maintained `release/0.1` branch or upstream backport
+promise.

@@ -99,6 +99,15 @@ The architecture decisions are recorded in [docs/adr](docs/adr/README.md).
 
 ## Building from source
 
+The `0.2.0-alpha.1` Cargo version in this checkout is an unpublished development
+baseline: the repository currently has no corresponding tag or GitHub Release.
+PacketcraftR packages are not published to a public registry. Install an exact
+reviewed checkout locally, or use only assets and checksums attached to the
+[GitHub Releases page](https://github.com/tyk-swe/pcr/releases) once a Release is
+published. The complete source/archive, checksum, local-install, and versioned
+API-reference procedure is in the
+[installation and Release guide](docs/install-and-release.md).
+
 Install Rust 1.96 through `rustup`, then build the portable surface:
 
 ```console
@@ -107,7 +116,14 @@ cargo build --no-default-features
 cargo test --no-default-features
 ```
 
-The portable packet kernel and offline capture path do not require libpcap. On Linux and macOS, the default `live` feature enables temporary interface enumeration without capture or injection. Windows default and every target's `--no-default-features` build remain portable. The explicit `native-route` feature selects passive native route, source, MTU, and interface discovery through Linux route netlink, macOS routing sockets/`getifaddrs`, or Windows IP Helper. It does not require libpcap, Npcap, raw-socket privileges, ARP/NDP, capture, or transmission.
+The portable packet kernel and offline capture path do not require libpcap. On
+Linux and macOS, the default `live` feature enables the isolated legacy
+interface enumerator without capture or injection. Windows default and every
+target's `--no-default-features` build remain portable. The explicit
+`native-route` feature selects passive native route, source, MTU, and interface
+discovery through Linux route netlink, macOS routing sockets/`getifaddrs`, or
+Windows IP Helper. It does not require libpcap, Npcap, raw-socket privileges,
+ARP/NDP, capture, or transmission.
 
 Build and test the current target's native providers with:
 
@@ -148,6 +164,9 @@ Machine-readable aggregate output uses one typed `packetcraftr.output/v1` JSON e
 The [stable CLI contract](docs/cli-contract.md) freezes the 14-command grammar,
 help/defaults, recipe exclusivity, exit classes, streaming behavior, permitted
 platform variance, and beta compatibility-review gate.
+The [executable workflow examples](docs/cli-examples.md) cover every command;
+CI runs their offline paths and proves that native/live paths fail with a typed
+capability error before side effects under the portable build.
 
 ### Offline capture and replay
 
@@ -334,7 +353,12 @@ The v0.2 contracts are:
 - Unsupported link types and unknown payloads remain explicit raw data; unsupported combinations produce typed errors.
 - Display truncation never truncates the captured bytes stored in a result.
 
-Alpha releases do not yet implement every final guard on every execution path. Inspect the plan and built bytes, use isolated labs, set finite budgets, and prefer offline operations while the live APIs are under development.
+The beta-candidate contracts and guards above are implemented and regression
+tested. Privileged live-I/O qualification on the dedicated Linux, macOS, and
+Windows runners remains a release gate: inspect plans and exact bytes, use
+isolated authorized labs, keep finite budgets, and prefer offline operations
+until the relevant target/profile is listed as qualified for the Release you
+use.
 
 Default resource ceilings are intentionally finite:
 
@@ -396,6 +420,8 @@ bash scripts/verify-release-archive.sh
 bash scripts/check-architecture.sh
 python3 scripts/validate-fixture-corpus.py
 python3 scripts/test-fixture-policy.py
+cargo build --locked --no-default-features
+python3 scripts/check-documentation-examples.py
 ```
 
 Tests never rewrite authoritative packet fixtures. The read-only corpus covers

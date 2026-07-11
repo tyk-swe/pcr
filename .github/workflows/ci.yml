@@ -123,6 +123,19 @@ jobs:
             fi
           done
 
+  documentation_examples:
+    name: Documentation and CLI examples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Build the portable frozen CLI
+        run: cargo build --locked --no-default-features
+      - name: Execute all documented command workflows
+        run: python3 scripts/check-documentation-examples.py
+
   dependency-policy:
     name: Dependency, license, and source policy
     runs-on: ubuntu-24.04
@@ -273,6 +286,7 @@ jobs:
       - package
       - portable-platforms
       - schemas
+      - documentation_examples
       - dependency-policy
       - architecture-policy
       - public-api
@@ -287,6 +301,7 @@ jobs:
           test "${{ needs.package.result }}" = "success"
           test "${{ needs.portable-platforms.result }}" = "success"
           test "${{ needs.schemas.result }}" = "success"
+          test "${{ needs.documentation_examples.result }}" = "success"
           test "${{ needs.dependency-policy.result }}" = "success"
           test "${{ needs.architecture-policy.result }}" = "success"
           test "${{ needs.public-api.result }}" = "success"

@@ -2,6 +2,12 @@
 
 v0.2 intentionally replaces the v0.1 packet pipeline and CLI. There is no compatibility adapter for old flags, rule files, or JSON output. Existing valid PCAP files remain supported.
 
+“Removed” in this guide means removed: v0.2 does not accept aliases for the old
+flags, translate rule files, preserve the old JSON shape, start removed
+subsystems with a warning, or provide a feature that restores them. Keep a v0.1
+binary only as an explicitly isolated migration input; do not put it in front of
+v0.2 as an undocumented compatibility layer.
+
 This guide documents the target v0.2 interface. The reviewed
 [CLI contract](cli-contract.md), its golden help, and the versioned schemas are
 the beta-candidate compatibility baseline. All 14 final command names are
@@ -92,7 +98,7 @@ packetcraftr plan --packet 'ipv4(dst="192.0.2.10")/udp(dport=9)/raw(text="hello"
 
 `plan` may query passive operating-system state. It must not perform ARP, NDP, capture, or transmission. Unresolved destination MAC addresses remain reported as unresolved.
 
-`routes` is passive too. In this checkpoint it reports one provider-neutral
+`routes` is passive too. It reports one provider-neutral
 route decision for each up interface, not a verbatim operating-system route
 table dump:
 
@@ -306,7 +312,7 @@ v0.1 exposed a `run_cli`-oriented façade and private fixed builders. v0.2 appli
 Root `packetcraftr` reexports are the stable application import path even after internal component crates are extracted.
 
 Provider traits and values are owned by `packetcraftr::io` and are also
-available from the root. Alpha callers that used
+available from the root. Early v0.2 alpha callers that used
 `packetcraftr::client::{PacketIo, CaptureProvider, CaptureSession, ...}` must
 change those imports to `packetcraftr::{...}` or `packetcraftr::io::{...}`.
 The `client` module now contains only high-level client, policy, target, and
@@ -340,7 +346,7 @@ planning. A `ResolvedTarget` cannot be constructed with unchecked fields.
 
 ## Feature migration
 
-The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate has four narrow native capabilities in this checkpoint: default `live` for the temporary Unix interface enumerator, `native-route` for passive target-native route/interface discovery, `native-layer2` for native capture/injection, and `native-layer3` for raw IP transmission. Packet construction, dissection, documents, reassembly, offline capture, neighbor protocol logic, and injected providers remain portable without default features. `native-route` alone does not emit ARP/NDP, capture, or transmission. `native-layer2` explicitly opts into system libpcap on Linux/macOS or runtime-loaded Npcap 1.88 on Windows x86_64 MSVC; `native-layer3` opts into target raw sockets. Selecting all three supplies the complete native planning and send path.
+The old `experimental`, `daemon`, `repl`, `rules`, `metrics`, and per-tool feature maze has been removed. The root crate has four narrow native capabilities: default `live` for the legacy isolated Unix interface enumerator, `native-route` for passive target-native route/interface discovery, `native-layer2` for native capture/injection, and `native-layer3` for raw IP transmission. Packet construction, dissection, documents, reassembly, offline capture, neighbor protocol logic, and injected providers remain portable without default features. `native-route` alone does not emit ARP/NDP, capture, or transmission. `native-layer2` explicitly opts into system libpcap on Linux/macOS or runtime-loaded Npcap 1.88 on Windows x86_64 MSVC; `native-layer3` opts into target raw sockets. Selecting all three supplies the complete native planning and send path.
 
 Raw IPv4 socket kernels do not preserve every possible crafted header. In particular, a zero identification or inconsistent total length/checksum can be rewritten. `SystemLayer3Io` fails those cases before the socket call; set a nonzero IPv4 identification and build internally consistent lengths/checksums when using the native Layer 3 path. Windows silently discards spoofed raw UDP on affected client editions, so that case is rejected before send; other raw-socket restrictions remain typed native errors.
 
@@ -353,10 +359,12 @@ If an application previously depended on an embedded subsystem, move orchestrati
 
 ## Rollout advice
 
-Pin an exact prerelease version, store packet documents in version control,
+Pin an exact reviewed commit or published GitHub Release, store packet documents in version control,
 validate them in CI, and compare exact built bytes before enabling live
 transmission. Treat changes to the reviewed Rust API, CLI grammar, exit classes,
 packet mapping, or output schemas as compatibility events; incompatible
 beta-to-stable changes block release unless the published compatibility policy
-permits them. Existing v0.1 deployments that need only critical fixes should
-remain on `release/0.1` until the v0.2 release candidate is qualified.
+permits them. There is no maintained v0.1 branch or compatibility adapter.
+Deployments that cannot migrate immediately must freeze and audit their exact
+v0.1 artifact or maintain a private fork; they should not expect upstream
+backports that are not attached to a published supported Release.

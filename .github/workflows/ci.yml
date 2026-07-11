@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: GitHub prerelease tag to download and smoke-test
+        description: GitHub Release tag to download and smoke-test
         required: false
         type: string
 
@@ -67,7 +67,7 @@ jobs:
         run: cargo doc --locked --workspace --no-deps ${{ matrix.profile.flags }}
 
   package:
-    name: Portable beta gate and Release inputs
+    name: Portable release gate and Release inputs
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -277,17 +277,28 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux
+          - name: Linux x86_64
             os: ubuntu-24.04
-          - name: macOS
-            os: macos-14
-          - name: Windows
+            architecture: X64
+          - name: macOS arm64
+            os: macos-15
+            architecture: ARM64
+          - name: macOS x86_64
+            os: macos-15-intel
+            architecture: X64
+          - name: Windows x86_64 MSVC
             os: windows-2022
+            architecture: X64
     steps:
-      - name: Install the beta MSRV
+      - name: Confirm the advertised target architecture
+        shell: bash
+        env:
+          EXPECTED_RUNNER_ARCH: ${{ matrix.architecture }}
+        run: test "${RUNNER_ARCH}" = "${EXPECTED_RUNNER_ARCH}"
+      - name: Install the release MSRV
         shell: bash
         run: rustup toolchain install 1.96.0 --profile minimal
-      - name: Download and authenticate GitHub prerelease assets
+      - name: Download and authenticate GitHub Release assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -299,6 +310,10 @@ jobs:
             echo "release_tag must be a canonical v-prefixed SemVer tag" >&2
             exit 2
           fi
+          expected_prerelease=false
+          if [[ "${version}" == *-* ]]; then
+            expected_prerelease=true
+          fi
 
           download="${RUNNER_TEMP}/packetcraftr-release-download"
           archive="packetcraftr-workspace-${version}.tar.gz"
@@ -306,15 +321,15 @@ jobs:
 
           state="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,isPrerelease --jq '[.tagName, .isDraft, .isPrerelease] | @tsv')"
           IFS=$'\t' read -r actual_tag is_draft is_prerelease <<<"${state}"
-          if [[ "${actual_tag}" != "${RELEASE_TAG}" || "${is_draft}" != "false" || "${is_prerelease}" != "true" ]]; then
-            echo "selected GitHub Release is not the expected published prerelease" >&2
+          if [[ "${actual_tag}" != "${RELEASE_TAG}" || "${is_draft}" != "false" || "${is_prerelease}" != "${expected_prerelease}" ]]; then
+            echo "selected GitHub Release state differs from the version channel" >&2
             exit 1
           fi
 
           assets="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name' | sort)"
           expected_assets="$(printf '%s\n' SHA256SUMS "${archive}" | sort)"
           if [[ "${assets}" != "${expected_assets}" ]]; then
-            echo "GitHub prerelease asset set differs" >&2
+            echo "GitHub Release asset set differs" >&2
             printf 'expected:\n%s\nactual:\n%s\n' "${expected_assets}" "${assets}" >&2
             exit 1
           fi

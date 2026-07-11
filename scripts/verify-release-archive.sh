@@ -88,7 +88,7 @@ release_contract_files=(
     docs/migration-v0.1-to-v0.2.md
     docs/platform-support.md
     docs/public-api.md
-    docs/releases/0.2.0-beta.1.md.in
+    "docs/releases/${version}.md.in"
     schemas/packetcraftr.output.v1.schema.json
     schemas/packetcraftr.packet.v1.schema.json
     scripts/check-documentation-examples.py

@@ -26,10 +26,21 @@ REPOSITORY = "https://github.com/tyk-swe/pcr"
 LICENSE = "AGPL-3.0-only"
 RUST_VERSION = "1.96"
 COMMIT = re.compile(r"[0-9a-f]{40}")
+VERSION = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(alpha|beta|rc)\.(?:0|[1-9][0-9]*))?"
+)
 
 
 def fail(message: str) -> None:
     raise ValueError(message)
+
+
+def release_channel(version: str) -> str:
+    match = VERSION.fullmatch(version)
+    if match is None:
+        fail(f"Release version is not canonical SemVer: {version}")
+    return match.group(1) or "stable"
 
 
 def cargo_metadata(workspace: Path) -> dict[str, object]:
@@ -66,6 +77,9 @@ def main() -> int:
         expected_commit = args.expected_commit.lower()
         if not COMMIT.fullmatch(expected_commit):
             fail(f"invalid expected commit: {args.expected_commit}")
+        channel = release_channel(args.expected_version)
+        if args.expected_tag != f"v{args.expected_version}":
+            fail("expected Release tag does not match the expected version")
 
         release_path = workspace / "RELEASE-METADATA.toml"
         cargo_path = workspace / "Cargo.toml"
@@ -77,7 +91,7 @@ def main() -> int:
             "version": args.expected_version,
             "tag": args.expected_tag,
             "commit": expected_commit,
-            "channel": "beta",
+            "channel": channel,
             "repository": REPOSITORY,
             "rust_version": "1.96.0",
             "license": LICENSE,

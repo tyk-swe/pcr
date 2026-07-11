@@ -18,6 +18,10 @@ from pathlib import Path, PurePosixPath
 
 COMMIT = re.compile(r"[0-9a-f]{40}")
 DIGEST = re.compile(r"[0-9a-f]{64}")
+VERSION = re.compile(
+    r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)"
+    r"(?:-(alpha|beta|rc)\.(?:0|[1-9][0-9]*))?"
+)
 PACKAGE_NAMES = (
     "packetcraftr-core",
     "packetcraftr-protocols",
@@ -126,6 +130,13 @@ class AuditError(ValueError):
     pass
 
 
+def release_channel(version: str) -> str:
+    match = VERSION.fullmatch(version)
+    if match is None:
+        raise AuditError(f"Release version is not canonical SemVer: {version}")
+    return match.group(1) or "stable"
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -212,17 +223,20 @@ def archive_command(args: argparse.Namespace) -> None:
             raise AuditError("candidate archive metadata is not a regular file")
         release = tomllib.loads(metadata_file.read().decode("utf-8"))
         version = release.get("version")
+        if not isinstance(version, str):
+            raise AuditError("release metadata version is not a string")
+        channel = release_channel(version)
         expected_metadata = {
             "schema": "packetcraftr.release/v1",
             "version": version,
             "tag": f"v{version}",
             "commit": expected_commit,
-            "channel": "beta",
+            "channel": channel,
             "repository": "https://github.com/tyk-swe/pcr",
             "rust_version": "1.96.0",
             "license": "AGPL-3.0-only",
         }
-        if not isinstance(version, str) or release != expected_metadata:
+        if release != expected_metadata:
             raise AuditError(
                 f"release metadata differs: expected={expected_metadata!r} actual={release!r}"
             )
@@ -240,6 +254,7 @@ def archive_command(args: argparse.Namespace) -> None:
             "archive_size": archive.stat().st_size,
             "checksums_sha256": sha256(checksums),
             "commit": expected_commit,
+            "channel": channel,
             "members": len(members),
             "version": version,
             "workspace": prefix,

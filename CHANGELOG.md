@@ -27,6 +27,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- Generalized the GitHub-only release gate from Beta to RC/stable metadata and
+  Release state, rendered notes and archive contracts from the selected tree,
+  and expanded downloaded-artifact smoke coverage to both macOS architectures.
 - Accepted Darwin's complete compact final routing-socket sockaddr when its
   otherwise-unused alignment trailer is omitted, while retaining strict bounds
   whenever another route address follows.

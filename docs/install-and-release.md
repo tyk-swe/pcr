@@ -6,10 +6,10 @@ PacketcraftR is distributed from the
 packages set `publish = false`; there is no public Rust package-registry or
 hosted API-documentation release channel.
 
-The `0.2.0-beta.1` value in the current Cargo metadata identifies the
-`v0.2.0-beta.1` GitHub prerelease. Its Release page, tag, notes, attached
-checksum, and workspace archive are the authority. A locally assembled archive
-is not an upstream release, even when its bytes happen to match.
+The version in Cargo metadata identifies the matching `vVERSION` GitHub
+Release. Its Release page, tag, notes, attached checksum, and workspace archive
+are the authority. A locally assembled archive is not an upstream release, even
+when its bytes happen to match.
 
 ## Install an exact source checkout
 
@@ -37,13 +37,14 @@ privilege.
 
 ## Release asset contract
 
-The beta Release provides:
+Each PacketcraftR Release provides:
 
 - `packetcraftr-workspace-VERSION.tar.gz`, the complete buildable workspace;
 - `SHA256SUMS`, containing the SHA-256 digest of every attached distributable;
   and
 - Release notes naming the source commit, Rust MSRV, qualified targets/features,
-  remaining live-I/O gates, and any additional platform binary archives.
+  remaining prerelease gates or stable limitations, and any additional platform
+  binary archives.
 
 The extracted workspace contains `RELEASE-METADATA.toml`. Its version and tag
 must match the selected asset and its `commit` must match the commit resolved by
@@ -105,11 +106,11 @@ Never replace a failed verification with a checksum copied from an unrelated
 build or discussion.
 
 The same procedure is exercised after publication by the manually dispatched
-`Release artifact / ...` CI matrix. Those Linux, macOS, and Windows jobs start
-without a repository checkout, download the two assets from the GitHub
-prerelease, resolve the tag through the GitHub API, validate embedded metadata,
-install the portable CLI, compare the frozen CLI/schema contract, and execute
-all 14 documented command workflows.
+`Release artifact / ...` CI matrix. Those Linux x86_64, macOS arm64/x86_64,
+and Windows x86_64 MSVC jobs start without a repository checkout, download the
+two assets from the GitHub Release, resolve the tag through the GitHub API,
+validate embedded metadata, install the portable CLI, compare the frozen
+CLI/schema contract, and execute all 14 documented command workflows.
 
 ## API and contract reference
 

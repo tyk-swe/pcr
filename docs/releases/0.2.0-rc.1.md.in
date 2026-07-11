@@ -1,0 +1,49 @@
+# PacketcraftR 0.2.0-rc.1
+
+Source commit: `{{SOURCE_COMMIT}}`
+
+Workspace archive SHA-256: `{{ARCHIVE_SHA256}}`
+
+Post-publication downloaded-artifact smoke evidence: {{SMOKE_EVIDENCE}}
+
+This release candidate is the GitHub-only rehearsal for PacketcraftR 0.2.0.
+The public Rust façade, 14-command CLI grammar and exit classes, packet/output
+schemas, portable wire behavior, and fixture corpus remain frozen from Beta.
+
+## Distribution
+
+GitHub Releases are the only distribution channel. The attached
+`packetcraftr-workspace-0.2.0-rc.1.tar.gz` is the complete buildable workspace;
+`SHA256SUMS` authenticates it. All five Cargo packages retain
+`publish = false`; nothing is published to crates.io, docs.rs, or another
+public registry. The MSRV is Rust 1.96.0.
+
+Install the portable CLI from the verified extracted workspace with:
+
+```console
+cargo install --locked --path . --no-default-features
+packetcraftr --version
+```
+
+## Frozen baselines
+
+- Public Rust API: `319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762`
+- CLI/schema: `{{CLI_SCHEMA_BASELINE}}`
+
+## Qualification status
+
+The exact candidate has completed the portable gate, security/resource/package
+audit, privileged Linux and macOS live matrices, Windows x86_64 MSVC + Npcap
+matrix, and four-platform portable byte-parity matrix. Downloaded-asset smoke
+tests cover Linux x86_64, macOS arm64/x86_64, and Windows x86_64 MSVC.
+
+Darwin cannot transmit an exact caller-supplied IPv6 header through a raw IPv6
+socket because the kernel synthesizes that header. PacketcraftR reports this as
+typed `capability.unsupported` before I/O; exact IPv6 transmission on macOS is
+qualified through native BPF Layer 2 instead of silently falling back.
+
+See the [platform matrix](https://github.com/tyk-swe/pcr/blob/v0.2.0-rc.1/docs/platform-support.md)
+and [installation guide](https://github.com/tyk-swe/pcr/blob/v0.2.0-rc.1/docs/install-and-release.md).
+Any failed RC verification remains a stable-release blocker and triggers the
+documented remove-or-supersede response; RC artifacts are never published to a
+package registry.

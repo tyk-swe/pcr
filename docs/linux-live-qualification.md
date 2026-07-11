@@ -34,14 +34,14 @@ Download both assets from the candidate's GitHub Release, then run:
 
 ```console
 mkdir -p /tmp/packetcraftr-candidate
-release_tag=v0.2.0-rc.1
+release_tag=v0.2.0
 source_commit="$(gh api "repos/tyk-swe/pcr/git/ref/tags/${release_tag}" --jq .object.sha)"
 gh release download "${release_tag}" --repo tyk-swe/pcr \
   --pattern 'packetcraftr-workspace-*.tar.gz' --pattern SHA256SUMS \
   --dir /tmp/packetcraftr-candidate
 (cd /tmp/packetcraftr-candidate && sha256sum --check SHA256SUMS)
 scripts/qualify-linux-live.sh \
-  --archive /tmp/packetcraftr-candidate/packetcraftr-workspace-0.2.0-rc.1.tar.gz \
+  --archive /tmp/packetcraftr-candidate/packetcraftr-workspace-0.2.0.tar.gz \
   --checksums /tmp/packetcraftr-candidate/SHA256SUMS \
   --expected-commit "${source_commit}" \
   --evidence /tmp/packetcraftr-linux-live

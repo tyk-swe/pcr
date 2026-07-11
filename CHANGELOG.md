@@ -6,6 +6,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+## 0.2.0 - 2026-07-11
+
+PacketcraftR 0.2.0 is the GitHub-only stable publication of the exact qualified
+RC lineage. No implementation or frozen contract changed after the go/no-go;
+the stable transition changes only synchronized version/release metadata and
+status prose. Real Windows/Npcap live I/O remains the explicit scope waiver
+documented below, and no package is published to a public registry.
+
+### Changed
+
+- Advanced every synchronized workspace package and exact internal dependency
+  from `0.2.0-rc.1` to `0.2.0`.
+- Kept the Beta-frozen public API baseline unchanged at
+  `sha256:319ac1647b8e40e9453178e418c40a26bfab98914df425b6e2c7dab1b8941762`.
+- CLI/schema baseline: `sha256:0cb98ef621ab5c47e2705da226ca44bec4715e2c627e3e07abef38b2e862065f`
+  after the reviewed stable version-string advance; the command grammar, exit
+  classes, and packet/output schemas are unchanged.
+
 ## 0.2.0-rc.1 - 2026-07-11
 
 This GitHub-only release candidate advances the frozen Beta contract through

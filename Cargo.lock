@@ -499,7 +499,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "packetcraftr"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "clap",
@@ -515,7 +515,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-core"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "noyalib",
@@ -526,7 +526,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-io"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -546,7 +546,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-protocols"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "packetcraftr-core",
@@ -556,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-session"
-version = "0.2.0-rc.1"
+version = "0.2.0"
 dependencies = [
  "bytes",
  "serde",

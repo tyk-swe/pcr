@@ -10,11 +10,11 @@ PacketcraftR handles attacker-controlled bytes and can generate live network tra
 | A GitHub Release explicitly named as supported in its notes | Support stated by that Release |
 | v0.1, older snapshots, and unsupported forks | No maintained upstream branch |
 
-The `0.2.0-rc.1` package version is the reviewed stable candidate. Its support
+The `0.2.0` package version is the reviewed stable GitHub Release. Its support
 scope, completed qualification, and explicit Windows/Npcap scope waiver are
 stated in the GitHub Release notes. A supported branch means that fixes are
-accepted. It does not make PacketcraftR, its traffic policy, or a prerelease
-checkout a security boundary for an otherwise unauthorized network.
+accepted. It does not make PacketcraftR or its traffic policy a security
+boundary for an otherwise unauthorized network.
 
 ## Reporting a vulnerability
 

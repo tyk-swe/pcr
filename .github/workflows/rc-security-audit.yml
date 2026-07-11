@@ -6,7 +6,7 @@ on:
       release_tag:
         description: GitHub prerelease/candidate tag to download
         required: true
-        default: v0.2.0-rc.1
+        default: v0.2.0
         type: string
       expected_commit:
         description: Full source commit embedded in the candidate archive

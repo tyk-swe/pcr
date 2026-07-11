@@ -6,6 +6,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## Unreleased
 
+### Added
+
+- Added a retained exact-candidate RC security/resource/package audit covering
+  pre-deserialization JSON/YAML byte and nesting ceilings, checked resource and
+  authorization regressions, offline local packaging of all five unpublished
+  crates, credential scanning, and an enforced no-public-registry release policy.
+
 ### Fixed
 
 - Fixed generated IPv4 scan, traceroute, and DNS probes to use deterministic

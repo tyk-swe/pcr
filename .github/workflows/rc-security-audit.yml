@@ -1,0 +1,97 @@
+name: RC security and package audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: GitHub prerelease/candidate tag to download
+        required: true
+        default: v0.2.0-beta.1
+        type: string
+      expected_commit:
+        description: Full source commit embedded in the candidate archive
+        required: true
+        default: e61f77f693d80d3c7f4231ffcaecc37ef5a71ccd
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rc-security-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    name: Exact archive security/resource/package gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - name: Check out the exact candidate tooling
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.expected_commit }}
+          fetch-depth: 0
+
+      - name: Install Rust 1.96 and native build dependencies
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal --component clippy,rustfmt
+          sudo apt-get update
+          sudo apt-get install --yes libpcap-dev
+
+      - name: Install pinned audit tools
+        run: |
+          python3 -m pip install --disable-pip-version-check \
+            -r scripts/beta-gate-requirements.txt \
+            -r scripts/rc-audit-requirements.txt
+          cargo install cargo-deny --version 0.19.7 --locked
+
+      - name: Download and authenticate the GitHub Release inputs
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          object_type="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.type')"
+          source_commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" --jq '.object.sha')"
+          while [[ "${object_type}" == tag ]]; do
+            object_type="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${source_commit}" --jq '.object.type')"
+            source_commit="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${source_commit}" --jq '.object.sha')"
+          done
+          test "${object_type}" = commit
+          test "${source_commit}" = "${EXPECTED_COMMIT}"
+          mkdir -p "${RUNNER_TEMP}/candidate"
+          gh release download "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern 'packetcraftr-workspace-*.tar.gz' \
+            --pattern SHA256SUMS \
+            --dir "${RUNNER_TEMP}/candidate"
+
+      - name: Run the exact-candidate audit
+        env:
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t archives < <(find "${RUNNER_TEMP}/candidate" -maxdepth 1 \
+            -name 'packetcraftr-workspace-*.tar.gz' -type f -print)
+          test "${#archives[@]}" = 1
+          bash scripts/audit-rc-readiness.sh \
+            --archive "${archives[0]}" \
+            --checksums "${RUNNER_TEMP}/candidate/SHA256SUMS" \
+            --expected-commit "${EXPECTED_COMMIT}" \
+            --evidence "${RUNNER_TEMP}/rc-audit-evidence" \
+            --bundle "${RUNNER_TEMP}/rc-audit-evidence.tar.gz"
+
+      - name: Retain sanitized audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-audit-${{ inputs.release_tag }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/rc-audit-evidence
+            ${{ runner.temp }}/rc-audit-evidence.tar.gz
+          if-no-files-found: error
+          retention-days: 90

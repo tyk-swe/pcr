@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-root="$(git rev-parse --show-toplevel)"
+if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    :
+else
+    root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
 cd "${root}"
 shopt -s nullglob
 

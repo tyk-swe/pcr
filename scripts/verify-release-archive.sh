@@ -108,6 +108,26 @@ for required in "${release_contract_files[@]}"; do
     fi
 done
 
+# The immutable first beta predates the RC audit tooling. Later candidates must
+# carry the complete gate so the downloaded workspace can reproduce its own
+# security/resource/package evidence without weakening beta reproduction.
+if git cat-file -e "${tree}:scripts/audit-rc-readiness.sh" 2>/dev/null; then
+    rc_contract_files=(
+        .github/workflows/rc-security-audit.yml
+        docs/rc-security-audit.md
+        scripts/audit-rc-readiness.sh
+        scripts/rc-audit-requirements.txt
+        scripts/rc-package-patches.toml
+        scripts/verify-rc-audit.py
+    )
+    for required in "${rc_contract_files[@]}"; do
+        if [[ ! -f "${workspace}/${required}" ]]; then
+            echo "GitHub Release workspace is missing ${required}" >&2
+            exit 1
+        fi
+    done
+fi
+
 for component in core protocols io session; do
     cmp --silent LICENSE "${workspace}/crates/${component}/LICENSE"
 done

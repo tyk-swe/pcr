@@ -90,3 +90,8 @@ required jobs extend that portable gate rather than redefining it:
 Hosted runners do not perform privileged live packet I/O. Those target-specific
 runner gates remain part of release-candidate qualification, not the portable
 beta regression gate.
+
+The exact-candidate security, resource-bound, secret, and local-package review
+is specified separately in the [RC audit contract](rc-security-audit.md). Its
+retained evidence runs against an authenticated Release archive or later
+approved candidate and is required before the RC rehearsal.

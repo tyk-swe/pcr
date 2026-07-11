@@ -525,7 +525,11 @@ fn parse_route_addresses(
 
 #[cfg(feature = "native-route")]
 fn roundup(length: usize) -> usize {
-    let alignment = size_of::<libc::c_long>();
+    // Darwin's routing socket uses ROUNDUP32 for sockaddr records on both
+    // x86_64 and arm64. This is deliberately independent of pointer/long
+    // width; using c_long here skips four bytes after values such as the
+    // 20-byte sockaddr_dl emitted for a directly connected route.
+    let alignment = size_of::<u32>();
     if length == 0 {
         alignment
     } else {
@@ -585,5 +589,27 @@ mod tests {
         let error =
             parse_route_addresses(&compact_mask, libc::RTA_NETMASK | libc::RTA_IFA).unwrap_err();
         assert!(error.to_string().contains("invalid sockaddr"));
+    }
+
+    #[test]
+    fn route_address_parser_uses_darwin_32_bit_sockaddr_alignment() {
+        let mut message = encode_sockaddr(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0)));
+        let mut gateway = [0_u8; 20];
+        gateway[0] = gateway.len() as u8;
+        gateway[1] = libc::AF_LINK as u8;
+        message.extend_from_slice(&gateway);
+        message.extend_from_slice(&[7_u8, 0, 0xff, 0xff, 0xff, 0, 0]);
+
+        let addresses = parse_route_addresses(
+            &message,
+            libc::RTA_DST | libc::RTA_GATEWAY | libc::RTA_NETMASK,
+        )
+        .unwrap();
+        assert_eq!(
+            addresses[libc::RTAX_DST as usize],
+            Some(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0)))
+        );
+        assert_eq!(roundup(20), 20);
+        assert_eq!(roundup(7), 8);
     }
 }

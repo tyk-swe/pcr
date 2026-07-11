@@ -408,7 +408,14 @@ fn encode_address(address: IpAddr, scope_id: u32) -> SOCKADDR_INET {
                     },
                 },
                 Anonymous: SOCKADDR_IN6_0 {
-                    sin6_scope_id: scope_id,
+                    // A zone index is meaningful only for scoped IPv6
+                    // destinations. GetBestRoute2 rejects a non-zero scope on
+                    // loopback and global addresses with ERROR_INVALID_PARAMETER.
+                    sin6_scope_id: if address.is_unicast_link_local() || address.is_multicast() {
+                        scope_id
+                    } else {
+                        0
+                    },
                 },
             },
         },
@@ -470,5 +477,19 @@ mod tests {
             .unwrap();
         assert_eq!(ipv6.selection_reason, RouteSelectionReason::Local);
         assert!(ipv6.selected_address.is_some_and(|source| source.is_ipv6()));
+    }
+
+    #[test]
+    fn ipv6_scope_id_is_only_encoded_for_scoped_addresses() {
+        let loopback = encode_address(IpAddr::V6(Ipv6Addr::LOCALHOST), 42);
+        let global = encode_address(IpAddr::V6("2001:db8::1".parse::<Ipv6Addr>().unwrap()), 42);
+        let link_local = encode_address(IpAddr::V6("fe80::1".parse::<Ipv6Addr>().unwrap()), 42);
+
+        // SAFETY: each value was constructed with its IPv6 union member active.
+        assert_eq!(unsafe { loopback.Ipv6.Anonymous.sin6_scope_id }, 0);
+        // SAFETY: each value was constructed with its IPv6 union member active.
+        assert_eq!(unsafe { global.Ipv6.Anonymous.sin6_scope_id }, 0);
+        // SAFETY: each value was constructed with its IPv6 union member active.
+        assert_eq!(unsafe { link_local.Ipv6.Anonymous.sin6_scope_id }, 42);
     }
 }

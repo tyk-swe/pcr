@@ -4,11 +4,6 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-authors.workspace = true
-description = "Built-in protocol codecs and matchers for PacketcraftR"
-readme = "README.md"
-repository.workspace = true
-homepage.workspace = true
 publish = false
 
 [lints]
@@ -16,7 +11,7 @@ workspace = true
 
 [dependencies]
 bytes = "1"
-packetcraftr-core = { version = "=0.2.0", path = "../core" }
+packetcraftr-core = { path = "../core" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

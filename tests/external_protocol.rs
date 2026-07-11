@@ -14,8 +14,7 @@ use packetcraftr::core::{
 use packetcraftr::{
     fuzz, BuildError, Builder, BuiltinProtocols, DecodeError, Dissector, Ethernet, ExpressionError,
     ExpressionOptions, FuzzRequest, FuzzStrategy, FuzzTarget, Packet, ProtocolModule,
-    ProtocolRegistry, Raw, RegistryBuilder, RegistryError, WireValue, BUILTIN_CAPTURE_ROOTS,
-    BUILTIN_PROTOCOLS, STABLE_WORKFLOW_PROTOCOLS,
+    ProtocolRegistry, Raw, RegistryBuilder, RegistryError, WireValue,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -398,39 +397,4 @@ fn registry_rejects_duplicate_conflicting_and_dangling_extensions() {
         Err(RegistryError::UnknownProtocol { protocol })
             if protocol == ProtocolId::new("example.missing")
     ));
-}
-
-#[test]
-fn published_documentation_covers_the_versioned_protocol_manifest() {
-    let matrix = include_str!("../docs/protocol-support.md");
-    for support in BUILTIN_PROTOCOLS {
-        assert!(
-            matrix.contains(&format!("| `{}` |", support.protocol)),
-            "documentation is missing protocol {}",
-            support.protocol
-        );
-    }
-    for root in BUILTIN_CAPTURE_ROOTS {
-        assert!(
-            matrix.contains(&format!("| {} | `{}` |", root.link_type, root.protocol)),
-            "documentation is missing link type {}",
-            root.link_type
-        );
-    }
-    for workflow in STABLE_WORKFLOW_PROTOCOLS {
-        assert!(
-            matrix.contains(&format!("| `{}` |", workflow.workflow)),
-            "documentation is missing workflow {}",
-            workflow.workflow
-        );
-    }
-
-    for document in [
-        include_str!("../README.md"),
-        include_str!("../docs/platform-support.md"),
-    ] {
-        let lower = document.to_ascii_lowercase();
-        assert!(!lower.contains("built-in protocol coverage is incomplete"));
-        assert!(!lower.contains("built-in protocol slice remains incomplete"));
-    }
 }

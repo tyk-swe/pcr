@@ -13,27 +13,9 @@ version = "0.2.0"
 edition = "2021"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
-authors = ["tyk-swe"]
-repository = "https://github.com/tyk-swe/pcr"
-homepage = "https://github.com/tyk-swe/pcr"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
-
-[workspace.metadata.packetcraftr]
-components = ["core", "protocols", "io", "session", "tools", "facade"]
-extracted-packages = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session"]
-facade-owned-components = ["tools", "client", "output", "cli"]
-package-order = ["packetcraftr-core", "packetcraftr-protocols", "packetcraftr-io", "packetcraftr-session", "packetcraftr"]
-native-dependency-owner = "packetcraftr-io::platform"
-unsafe-owner = "packetcraftr-io::platform"
-
-[workspace.metadata.packetcraftr.native-wrappers]
-linux-route = "rtnetlink"
-layer2-capture-injection = "pcap (Unix); libloading/Npcap SDK 1.16 ABI (Windows)"
-layer3-raw-ip = "socket2 raw sockets (Linux/macOS/Windows)"
-macos-route-and-raw-sockets = "socket2"
-windows-network-apis = "windows"
 
 [package]
 name = "packetcraftr"
@@ -41,22 +23,10 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-authors.workspace = true
-description = "Modular packet crafting, transmission, and automation toolkit"
-readme = "README.md"
-repository.workspace = true
-homepage.workspace = true
-documentation = "https://github.com/tyk-swe/pcr/blob/main/docs/public-api.md"
-keywords = ["packet", "network", "cli", "testing"]
-categories = ["command-line-utilities", "network-programming"]
 publish = false
 
 [lints]
 workspace = true
-
-[[bin]]
-name = "packetcraftr"
-path = "src/main.rs"
 
 [features]
 default = ["live"]
@@ -68,13 +38,10 @@ native-layer3 = ["live", "packetcraftr-io/native-layer3"]
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-packetcraftr-core = { version = "=0.2.0", path = "crates/core" }
-packetcraftr-io = { version = "=0.2.0", path = "crates/io", default-features = false }
-packetcraftr-protocols = { version = "=0.2.0", path = "crates/protocols" }
-packetcraftr-session = { version = "=0.2.0", path = "crates/session" }
+packetcraftr-core = { path = "crates/core" }
+packetcraftr-io = { path = "crates/io", default-features = false }
+packetcraftr-protocols = { path = "crates/protocols" }
+packetcraftr-session = { path = "crates/session" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
-
-[dev-dependencies]
-sha2 = "0.10"

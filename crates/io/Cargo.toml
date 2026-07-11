@@ -4,11 +4,6 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-authors.workspace = true
-description = "Capture, routing, neighbor, and native adapter boundaries for PacketcraftR"
-readme = "README.md"
-repository.workspace = true
-homepage.workspace = true
 publish = false
 
 [lints]
@@ -30,8 +25,8 @@ native-layer3 = ["live", "dep:socket2", "dep:windows"]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
-packetcraftr-core = { version = "=0.2.0", path = "../core" }
-packetcraftr-protocols = { version = "=0.2.0", path = "../protocols" }
+packetcraftr-core = { path = "../core" }
+packetcraftr-protocols = { path = "../protocols" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 

@@ -20,7 +20,6 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
-#![doc = include_str!("../docs/public-api.md")]
 #![warn(unreachable_pub)]
 #![forbid(unsafe_code)]
 

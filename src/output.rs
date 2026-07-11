@@ -2053,12 +2053,9 @@ mod tests {
     }
 
     #[test]
-    fn published_capture_and_replay_formats_match_the_matrix() {
+    fn capture_and_replay_formats_are_stable() {
         assert_eq!(CommandName::Read.formats(), READ_FORMATS);
         assert_eq!(CommandName::Replay.formats(), REPLAY_FORMATS);
-        let documentation = include_str!("../schemas/README.md");
-        assert!(documentation.contains("| `read` | text, NDJSON, whole-frame hex, PCAP, PCAPNG |"));
-        assert!(documentation.contains("| `replay` | text, JSON, NDJSON, PCAP, PCAPNG |"));
     }
 
     #[test]

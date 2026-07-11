@@ -7,9 +7,18 @@ permissions:
 
 jobs:
   test:
+    name: test (${{ matrix.platform }})
     strategy:
       matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-24.04
+          - platform: macos-x86_64
+            os: macos-15-intel
+          - platform: macos-arm64
+            os: macos-14
+          - platform: windows-msvc
+            os: windows-2022
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -17,7 +26,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add clippy rustfmt
       - if: runner.os == 'Linux'
-        run: cargo fmt --all -- --check
-      - run: cargo check --locked --workspace --all-targets --no-default-features
-      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --workspace --all-features
+        run: cargo fmt -- --check
+      - run: cargo check --locked --all-targets --no-default-features
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-features

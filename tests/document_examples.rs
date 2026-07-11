@@ -5,6 +5,59 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 
+use packetcraftr::{
+    capture::{
+        Direction as CaptureDirection, Format as CaptureFileFormat, Frame as CapturedFrame,
+        LinkType,
+    },
+    net::{
+        interface::Id as InterfaceId,
+        link::{Capability as LinkCapability, MacAddress, Mode as LinkMode},
+        neighbor::{VlanKind as NeighborVlanKind, VlanTag as NeighborVlanTag},
+        route::{
+            Decision as RouteDecision, Plan as PlannedRoute, Scope as DestinationScope,
+            SelectionReason as RouteSelectionReason,
+        },
+    },
+    output::{
+        capture::{Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult},
+        contract::{Command as CommandName, CONTRACTS as COMMAND_OUTPUT_CONTRACTS},
+        dns::{
+            Attempt as DnsAttemptOutput, AttemptStatus as DnsAttemptStatus,
+            Event as DnsStreamCommandResult, Outcome as DnsOutcome, Record as DnsRecordOutput,
+            RecordData as DnsRecordData, RejectedRecord as DnsRejectedRecordOutput,
+            Result as DnsCommandResult, Section as DnsSection,
+        },
+        envelope::{
+            Aggregate as AggregateOutput, CaptureStats as CaptureStatistics,
+            Stats as OperationStats, Stream as StreamRecord,
+        },
+        frame::{Captured as FrameOutput, Timestamp as OutputTimestamp, Wire as WireFrameOutput},
+        network::{
+            exchange::{Event as ExchangeStreamCommandResult, Result as ExchangeCommandResult},
+            interfaces::{
+                Capability as InterfaceCapability, Flags as InterfaceFlags,
+                Interface as InterfaceOutput, Result as InterfacesCommandResult,
+            },
+            plan::Result as PlanCommandResult,
+            routes::Result as RoutesCommandResult,
+            send::{MaterializedRoute as MaterializedRouteOutput, Result as SendCommandResult},
+        },
+        replay::{Frame as ReplayFrameCommandResult, Result as ReplayCommandResult},
+        scan::{
+            Classification as ScanClassification, Evidence as ProbeEvidenceOutput,
+            Port as ScanPortOutput, ProbeStatus as ScanProbeStatus, Result as ScanCommandResult,
+        },
+        traceroute::{
+            Completion as TraceCompletionReason, Hop as TraceHopOutput, Probe as TraceProbeOutput,
+            ProbeStatus as TraceProbeStatus, ResponseKind as TraceResponseKind,
+            Result as TracerouteCommandResult,
+        },
+    },
+    packet::diagnostic::Diagnostic,
+    workflow::replay::{Summary as ReplaySummary, Timing as ReplayTiming},
+};
+
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
 }
@@ -19,38 +72,38 @@ fn json_file(name: &str) -> serde_json::Value {
     serde_json::from_slice(&fs::read(example(name)).unwrap()).unwrap()
 }
 
-fn route_decision() -> packetcraftr::RouteDecision {
-    packetcraftr::RouteDecision {
-        interface: packetcraftr::InterfaceId {
+fn route_decision() -> RouteDecision {
+    RouteDecision {
+        interface: InterfaceId {
             name: "lab0".to_owned(),
             index: 2,
         },
-        source_mac: Some(packetcraftr::MacAddress([2, 0, 0, 0, 0, 1])),
+        source_mac: Some(MacAddress([2, 0, 0, 0, 0, 1])),
         selected_address: Some("192.168.56.2".parse().unwrap()),
         preferred_source: None,
         next_hop: Some("192.168.56.1".parse().unwrap()),
-        selection_reason: packetcraftr::RouteSelectionReason::Gateway,
-        destination_scope: packetcraftr::DestinationScope::Private,
+        selection_reason: RouteSelectionReason::Gateway,
+        destination_scope: DestinationScope::Private,
         mtu: 1500,
-        capability: packetcraftr::LinkCapability::Layer2And3,
-        link_type: packetcraftr::LinkType::ETHERNET,
+        capability: LinkCapability::Layer2And3,
+        link_type: LinkType::ETHERNET,
     }
 }
 
-fn planned_route() -> packetcraftr::PlannedRoute {
-    packetcraftr::PlannedRoute {
+fn planned_route() -> PlannedRoute {
+    PlannedRoute {
         route: route_decision(),
-        mode: packetcraftr::LinkMode::Layer2,
+        mode: LinkMode::Layer2,
         lookup_destination: Some("192.168.56.9".parse().unwrap()),
         final_destination: Some("192.168.56.9".parse().unwrap()),
         visited_destinations: vec!["192.168.56.9".parse().unwrap()],
         packet_source: Some("192.168.56.2".parse().unwrap()),
         neighbor_source: Some("192.168.56.2".parse().unwrap()),
         neighbor_target: Some("192.168.56.1".parse().unwrap()),
-        destination_mac: Some(packetcraftr::MacAddress([2, 0, 0, 0, 0, 2])),
-        source_mac: Some(packetcraftr::MacAddress([2, 0, 0, 0, 0, 1])),
-        neighbor_vlan_tags: vec![packetcraftr::NeighborVlanTag {
-            kind: packetcraftr::NeighborVlanKind::Ieee8021Q,
+        destination_mac: Some(MacAddress([2, 0, 0, 0, 0, 2])),
+        source_mac: Some(MacAddress([2, 0, 0, 0, 0, 1])),
+        neighbor_vlan_tags: vec![NeighborVlanTag {
+            kind: NeighborVlanKind::Ieee8021Q,
             priority: 0,
             drop_eligible: false,
             vlan_id: 42,
@@ -59,20 +112,20 @@ fn planned_route() -> packetcraftr::PlannedRoute {
     }
 }
 
-fn operation_stats() -> packetcraftr::OperationStats {
-    packetcraftr::OperationStats {
+fn operation_stats() -> OperationStats {
+    OperationStats {
         packets_attempted: 1,
         packets_completed: 1,
         bytes: 4,
         elapsed: std::time::Duration::ZERO,
-        capture: packetcraftr::CaptureStatistics::default(),
+        capture: CaptureStatistics::default(),
     }
 }
 
-fn exact_frame() -> packetcraftr::CapturedFrame {
-    packetcraftr::CapturedFrame::new(
+fn exact_frame() -> CapturedFrame {
+    CapturedFrame::new(
         std::time::UNIX_EPOCH,
-        packetcraftr::LinkType(147),
+        LinkType(147),
         vec![0xde, 0xad, 0xbe, 0xef],
     )
     .unwrap()
@@ -80,7 +133,7 @@ fn exact_frame() -> packetcraftr::CapturedFrame {
 
 #[test]
 fn every_command_has_published_success_and_error_goldens() {
-    for contract in packetcraftr::COMMAND_OUTPUT_CONTRACTS {
+    for contract in COMMAND_OUTPUT_CONTRACTS {
         let command = contract.command.as_str();
         let success = example(&format!("output-{command}-success.json"));
         let event = example(&format!("output-{command}-event.json"));
@@ -167,10 +220,10 @@ fn published_dissect_success_output_matches_the_cli() {
 
 #[test]
 fn published_route_and_live_success_outputs_match_typed_contracts() {
-    let plan = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Plan,
-        packetcraftr::PlanCommandResult {
-            route: planned_route(),
+    let plan = AggregateOutput::success(
+        CommandName::Plan,
+        PlanCommandResult {
+            route: planned_route().into(),
         },
         Vec::new(),
     );
@@ -179,10 +232,10 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         json_file("output-plan-success.json")
     );
 
-    let routes = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Routes,
-        packetcraftr::RoutesCommandResult {
-            routes: vec![route_decision()],
+    let routes = AggregateOutput::success(
+        CommandName::Routes,
+        RoutesCommandResult {
+            routes: vec![route_decision().into()],
         },
         Vec::new(),
     );
@@ -191,16 +244,16 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         json_file("output-routes-success.json")
     );
 
-    let interfaces = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Interfaces,
-        packetcraftr::InterfacesCommandResult {
-            interfaces: vec![packetcraftr::InterfaceOutput {
+    let interfaces = AggregateOutput::success(
+        CommandName::Interfaces,
+        InterfacesCommandResult {
+            interfaces: vec![InterfaceOutput {
                 name: "lab0".to_owned(),
                 index: 2,
                 description: Some("isolated test interface".to_owned()),
                 mac: Some("02:00:00:00:00:01".to_owned()),
                 addresses: vec!["192.168.56.2/24".to_owned()],
-                flags: packetcraftr::InterfaceFlags {
+                flags: InterfaceFlags {
                     up: true,
                     broadcast: true,
                     loopback: false,
@@ -208,7 +261,7 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
                     multicast: true,
                 },
                 mtu: Some(1500),
-                capability: packetcraftr::LinkCapability::Layer2And3,
+                capability: InterfaceCapability::Layer2And3,
                 link_type: 1,
             }],
         },
@@ -219,12 +272,12 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         json_file("output-interfaces-success.json")
     );
 
-    let send = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Send,
-        packetcraftr::SendCommandResult {
-            frame: packetcraftr::WireFrameOutput::new(vec![0xde, 0xad, 0xbe, 0xef]),
-            route: packetcraftr::MaterializedRouteOutput {
-                plan: planned_route(),
+    let send = AggregateOutput::success(
+        CommandName::Send,
+        SendCommandResult {
+            frame: WireFrameOutput::new(vec![0xde, 0xad, 0xbe, 0xef]),
+            route: MaterializedRouteOutput {
+                plan: planned_route().into(),
                 neighbor: None,
             },
         },
@@ -236,12 +289,10 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         json_file("output-send-success.json")
     );
 
-    let exchange = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Exchange,
-        packetcraftr::ExchangeCommandResult {
-            sent: vec![packetcraftr::WireFrameOutput::new(vec![
-                0xde, 0xad, 0xbe, 0xef,
-            ])],
+    let exchange = AggregateOutput::success(
+        CommandName::Exchange,
+        ExchangeCommandResult {
+            sent: vec![WireFrameOutput::new(vec![0xde, 0xad, 0xbe, 0xef])],
             responses: Vec::new(),
             unanswered: vec![0],
             unsolicited: Vec::new(),
@@ -258,10 +309,10 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
 
 #[test]
 fn published_read_and_replay_stream_events_match_typed_contracts() {
-    let read = packetcraftr::StreamRecord::success(
-        packetcraftr::CommandName::Read,
+    let read = StreamRecord::success(
+        CommandName::Read,
         0,
-        packetcraftr::ReadFrameCommandResult::try_from_frame(exact_frame()).unwrap(),
+        ReadFrameCommandResult::try_from_frame(exact_frame()).unwrap(),
         Vec::new(),
     );
     assert_eq!(
@@ -269,19 +320,20 @@ fn published_read_and_replay_stream_events_match_typed_contracts() {
         json_file("output-read-event.json")
     );
 
-    let replay = packetcraftr::StreamRecord::success(
-        packetcraftr::CommandName::Replay,
+    let replay = StreamRecord::success(
+        CommandName::Replay,
         0,
-        packetcraftr::ReplayFrameCommandResult {
+        ReplayFrameCommandResult {
             source_sequence: 0,
-            interface: packetcraftr::InterfaceId {
+            interface: InterfaceId {
                 name: "lab0".to_owned(),
                 index: 2,
-            },
-            link_mode: packetcraftr::LinkMode::Auto,
+            }
+            .into(),
+            link_mode: LinkMode::Auto.into(),
             scheduled_delay: std::time::Duration::ZERO,
             bytes_sent: 4,
-            frame: packetcraftr::FrameOutput::try_from_frame(exact_frame()).unwrap(),
+            frame: FrameOutput::try_from_frame(exact_frame()).unwrap(),
             transmitted: true,
         },
         Vec::new(),
@@ -295,24 +347,24 @@ fn published_read_and_replay_stream_events_match_typed_contracts() {
 #[test]
 fn published_tool_aggregate_success_outputs_match_typed_contracts() {
     let destination = "192.168.56.10".parse().unwrap();
-    let scan = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Scan,
-        packetcraftr::ScanCommandResult {
+    let scan = AggregateOutput::success(
+        CommandName::Scan,
+        ScanCommandResult {
             target: "192.168.56.10".to_owned(),
             resolved_addresses: vec![destination],
-            ports: vec![packetcraftr::ScanPortOutput {
+            ports: vec![ScanPortOutput {
                 port: 443,
                 transport: "tcp".to_owned(),
-                classification: packetcraftr::ScanClassification::Timeout,
-                evidence: vec![packetcraftr::ProbeEvidenceOutput {
+                classification: ScanClassification::Timeout,
+                evidence: vec![ProbeEvidenceOutput {
                     protocol: "tcp".to_owned(),
                     destination,
                     destination_port: Some(443),
                     attempt: 1,
-                    status: packetcraftr::ScanProbeStatus::Timeout,
-                    classification: packetcraftr::ScanClassification::Timeout,
+                    status: ScanProbeStatus::Timeout,
+                    classification: ScanClassification::Timeout,
                     responder: None,
-                    sent_at: packetcraftr::OutputTimestamp {
+                    sent_at: OutputTimestamp {
                         unix_seconds: 1_770_000_000,
                         nanoseconds: 0,
                     },
@@ -327,77 +379,77 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
         },
         Vec::new(),
     )
-    .with_stats(packetcraftr::OperationStats {
+    .with_stats(OperationStats {
         packets_attempted: 1,
         packets_completed: 1,
         bytes: 40,
         elapsed: std::time::Duration::from_secs(1),
-        capture: packetcraftr::CaptureStatistics::default(),
+        capture: CaptureStatistics::default(),
     });
     assert_eq!(
         serde_json::to_value(scan).unwrap(),
         json_file("output-scan-success.json")
     );
 
-    let mut response_frame = packetcraftr::CapturedFrame::new(
+    let mut response_frame = CapturedFrame::new(
         std::time::UNIX_EPOCH
             + std::time::Duration::from_secs(1_770_000_000)
             + std::time::Duration::from_millis(4),
-        packetcraftr::LinkType(147),
+        LinkType(147),
         vec![0xde, 0xad, 0xbe, 0xef],
     )
     .unwrap();
     response_frame.interface = Some(0);
-    response_frame.direction = Some(packetcraftr::CaptureDirection::Inbound);
-    let traceroute = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Traceroute,
-        packetcraftr::TracerouteCommandResult {
+    response_frame.direction = Some(CaptureDirection::Inbound);
+    let traceroute = AggregateOutput::success(
+        CommandName::Traceroute,
+        TracerouteCommandResult {
             target: "router.lab".to_owned(),
             resolved_addresses: vec![destination],
             destination,
             strategy: "udp".to_owned(),
             destination_port: Some(33_434),
             hops: vec![
-                packetcraftr::TraceHopOutput {
+                TraceHopOutput {
                     hop_limit: 1,
                     probes: vec![
-                        packetcraftr::TraceProbeOutput {
+                        TraceProbeOutput {
                             sequence: 0,
                             hop_limit: 1,
                             attempt: 1,
                             strategy: "udp".to_owned(),
                             destination,
                             destination_port: Some(33_434),
-                            status: packetcraftr::TraceProbeStatus::Response,
+                            status: TraceProbeStatus::Response,
                             response_kind: Some(
-                                packetcraftr::TraceResponseKind::Intermediate,
+                                TraceResponseKind::Intermediate,
                             ),
                             responder: Some("192.168.56.1".parse().unwrap()),
-                            sent_at: packetcraftr::OutputTimestamp {
+                            sent_at: OutputTimestamp {
                                 unix_seconds: 1_770_000_000,
                                 nanoseconds: 0,
                             },
-                            received_at: Some(packetcraftr::OutputTimestamp {
+                            received_at: Some(OutputTimestamp {
                                 unix_seconds: 1_770_000_000,
                                 nanoseconds: 4_000_000,
                             }),
                             latency: Some(std::time::Duration::from_millis(4)),
                             frame: Some(
-                                packetcraftr::FrameOutput::try_from_frame(response_frame).unwrap(),
+                                FrameOutput::try_from_frame(response_frame).unwrap(),
                             ),
                             reason: "ICMPv4 time exceeded before reaching the endpoint".to_owned(),
                         },
-                        packetcraftr::TraceProbeOutput {
+                        TraceProbeOutput {
                             sequence: 1,
                             hop_limit: 1,
                             attempt: 2,
                             strategy: "udp".to_owned(),
                             destination,
                             destination_port: Some(33_435),
-                            status: packetcraftr::TraceProbeStatus::Timeout,
+                            status: TraceProbeStatus::Timeout,
                             response_kind: None,
                             responder: None,
-                            sent_at: packetcraftr::OutputTimestamp {
+                            sent_at: OutputTimestamp {
                                 unix_seconds: 1_770_000_000,
                                 nanoseconds: 10_000_000,
                             },
@@ -410,25 +462,25 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
                         },
                     ],
                 },
-                packetcraftr::TraceHopOutput {
+                TraceHopOutput {
                     hop_limit: 2,
-                    probes: vec![packetcraftr::TraceProbeOutput {
+                    probes: vec![TraceProbeOutput {
                         sequence: 2,
                         hop_limit: 2,
                         attempt: 1,
                         strategy: "udp".to_owned(),
                         destination,
                         destination_port: Some(33_436),
-                        status: packetcraftr::TraceProbeStatus::Response,
+                        status: TraceProbeStatus::Response,
                         response_kind: Some(
-                            packetcraftr::TraceResponseKind::DestinationReached,
+                            TraceResponseKind::DestinationReached,
                         ),
                         responder: Some(destination),
-                        sent_at: packetcraftr::OutputTimestamp {
+                        sent_at: OutputTimestamp {
                             unix_seconds: 1_770_000_001,
                             nanoseconds: 0,
                         },
-                        received_at: Some(packetcraftr::OutputTimestamp {
+                        received_at: Some(OutputTimestamp {
                             unix_seconds: 1_770_000_001,
                             nanoseconds: 5_000_000,
                         }),
@@ -439,19 +491,19 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
                 },
             ],
             undecoded: Vec::new(),
-            completion: packetcraftr::TraceCompletionReason::DestinationReached,
+            completion: TraceCompletionReason::DestinationReached,
         },
         Vec::new(),
     )
-    .with_stats(packetcraftr::OperationStats {
+    .with_stats(OperationStats {
         packets_attempted: 3,
         packets_completed: 3,
         bytes: 126,
         elapsed: std::time::Duration::new(1, 15_000_000),
-        capture: packetcraftr::CaptureStatistics {
+        capture: CaptureStatistics {
             received_frames: 2,
             received_bytes: 8,
-            ..packetcraftr::CaptureStatistics::default()
+            ..CaptureStatistics::default()
         },
     });
     assert_eq!(
@@ -459,9 +511,9 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
         json_file("output-traceroute-success.json")
     );
 
-    let dns = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Dns,
-        packetcraftr::DnsCommandResult {
+    let dns = AggregateOutput::success(
+        CommandName::Dns,
+        DnsCommandResult {
             server: "resolver.lab".to_owned(),
             server_port: 53,
             resolved_addresses: vec!["192.168.56.53".parse().unwrap()],
@@ -469,7 +521,7 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
             query_type: "txt".to_owned(),
             transaction_id: 20_547,
             transport: "udp".to_owned(),
-            outcome: packetcraftr::DnsOutcome::Response,
+            outcome: DnsOutcome::Response,
             response_code: Some(0),
             response_code_name: Some("no_error".to_owned()),
             authoritative: Some(false),
@@ -478,19 +530,19 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
             recursion_available: Some(true),
             authenticated_data: Some(false),
             checking_disabled: Some(false),
-            answers: vec![packetcraftr::DnsRecordOutput {
+            answers: vec![DnsRecordOutput {
                 owner: "txt.example.test.".to_owned(),
                 class: 1,
                 ttl: 60,
-                data: packetcraftr::DnsRecordData::Txt {
+                data: DnsRecordData::Txt {
                     strings: vec!["remote\u{1b}[31m".to_owned()],
                     strings_hex: vec!["72656d6f74651b5b33316d".to_owned()],
                 },
             }],
             authorities: Vec::new(),
             additionals: Vec::new(),
-            rejected_records: vec![packetcraftr::DnsRejectedRecordOutput {
-                section: packetcraftr::DnsSection::Additional,
+            rejected_records: vec![DnsRejectedRecordOutput {
+                section: DnsSection::Additional,
                 index: 0,
                 owner: "unrelated.example.test.".to_owned(),
                 type_code: 1,
@@ -499,16 +551,16 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
                         .to_owned(),
             }],
             rejected_record_count: 1,
-            attempts: vec![packetcraftr::DnsAttemptOutput {
+            attempts: vec![DnsAttemptOutput {
                 attempt: 1,
                 server_address: "192.168.56.53".parse().unwrap(),
                 source_port: 50_000,
-                status: packetcraftr::DnsAttemptStatus::Response,
-                sent_at: packetcraftr::OutputTimestamp {
+                status: DnsAttemptStatus::Response,
+                sent_at: OutputTimestamp {
                     unix_seconds: 1_770_000_000,
                     nanoseconds: 0,
                 },
-                received_at: Some(packetcraftr::OutputTimestamp {
+                received_at: Some(OutputTimestamp {
                     unix_seconds: 1_770_000_000,
                     nanoseconds: 5_000_000,
                 }),
@@ -521,15 +573,15 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
         },
         Vec::new(),
     )
-    .with_stats(packetcraftr::OperationStats {
+    .with_stats(OperationStats {
         packets_attempted: 1,
         packets_completed: 1,
         bytes: 58,
         elapsed: std::time::Duration::from_millis(5),
-        capture: packetcraftr::CaptureStatistics {
+        capture: CaptureStatistics {
             received_frames: 1,
             received_bytes: 96,
-            ..packetcraftr::CaptureStatistics::default()
+            ..CaptureStatistics::default()
         },
     });
     assert_eq!(
@@ -655,10 +707,10 @@ fn published_error_outputs_match_every_command_cli_path() {
 
 #[test]
 fn published_exchange_stream_event_matches_the_typed_contract() {
-    let event = packetcraftr::StreamRecord::success(
-        packetcraftr::CommandName::Exchange,
+    let event = StreamRecord::success(
+        CommandName::Exchange,
         3,
-        packetcraftr::ExchangeStreamCommandResult::Complete {
+        ExchangeStreamCommandResult::Complete {
             unanswered: vec![1, 2],
         },
         Vec::new(),
@@ -672,36 +724,36 @@ fn published_exchange_stream_event_matches_the_typed_contract() {
 
 #[test]
 fn published_capture_stream_event_matches_the_typed_contract() {
-    let mut frame = packetcraftr::CapturedFrame::new(
+    let mut frame = CapturedFrame::new(
         std::time::UNIX_EPOCH
             + std::time::Duration::from_secs(1_783_555_200)
             + std::time::Duration::from_millis(125),
-        packetcraftr::LinkType(147),
+        LinkType(147),
         vec![0xde, 0xad, 0xbe, 0xef],
     )
     .unwrap();
     frame.interface = Some(0);
-    frame.direction = Some(packetcraftr::CaptureDirection::Inbound);
-    let event = packetcraftr::StreamRecord::success(
-        packetcraftr::CommandName::Capture,
+    frame.direction = Some(CaptureDirection::Inbound);
+    let event = StreamRecord::success(
+        CommandName::Capture,
         0,
-        packetcraftr::CaptureFrameCommandResult::Frame {
-            frame: packetcraftr::FrameOutput::try_from_frame(frame).unwrap(),
+        CaptureFrameCommandResult::Frame {
+            frame: FrameOutput::try_from_frame(frame).unwrap(),
         },
-        vec![packetcraftr::Diagnostic::warning(
+        vec![Diagnostic::warning(
             "decode.unsupported_link_type",
             "no root binding for link type 147",
         )],
     )
-    .with_stats(packetcraftr::OperationStats {
+    .with_stats(OperationStats {
         packets_attempted: 1,
         packets_completed: 1,
         bytes: 4,
         elapsed: std::time::Duration::from_micros(250),
-        capture: packetcraftr::CaptureStatistics {
+        capture: CaptureStatistics {
             received_frames: 1,
             received_bytes: 4,
-            ..packetcraftr::CaptureStatistics::default()
+            ..CaptureStatistics::default()
         },
     });
 
@@ -713,20 +765,20 @@ fn published_capture_stream_event_matches_the_typed_contract() {
 
 #[test]
 fn published_dns_stream_event_matches_the_typed_contract() {
-    let event = packetcraftr::StreamRecord::success(
-        packetcraftr::CommandName::Dns,
+    let event = StreamRecord::success(
+        CommandName::Dns,
         0,
-        packetcraftr::DnsStreamCommandResult::Attempt {
+        DnsStreamCommandResult::Attempt {
             server: "resolver.lab".to_owned(),
             server_port: 53,
             query_name: "www.example.test.".to_owned(),
             query_type: "a".to_owned(),
-            evidence: packetcraftr::DnsAttemptOutput {
+            evidence: DnsAttemptOutput {
                 attempt: 1,
                 server_address: "192.168.56.53".parse().unwrap(),
                 source_port: 50_000,
-                status: packetcraftr::DnsAttemptStatus::Timeout,
-                sent_at: packetcraftr::OutputTimestamp {
+                status: DnsAttemptStatus::Timeout,
+                sent_at: OutputTimestamp {
                     unix_seconds: 1_770_000_000,
                     nanoseconds: 0,
                 },
@@ -808,27 +860,23 @@ fn published_fuzz_outputs_match_the_deterministic_offline_cli() {
 
 #[test]
 fn published_replay_output_matches_the_typed_contract() {
-    let result = packetcraftr::ReplayCommandResult::from_summary(
-        packetcraftr::ReplaySummary {
-            source_format: packetcraftr::CaptureFileFormat::Pcap,
-            timing: packetcraftr::ReplayTiming::Immediate,
+    let result = ReplayCommandResult::from_summary(
+        ReplaySummary {
+            source_format: CaptureFileFormat::Pcap,
+            timing: ReplayTiming::Immediate,
             frames_attempted: 0,
             frames_completed: 0,
             bytes_completed: 0,
             scheduled_duration: std::time::Duration::ZERO,
         },
-        packetcraftr::InterfaceId {
+        InterfaceId {
             name: "lab0".to_owned(),
             index: 2,
         },
-        packetcraftr::LinkMode::Auto,
+        LinkMode::Auto,
         Vec::new(),
     );
-    let output = packetcraftr::AggregateOutput::success(
-        packetcraftr::CommandName::Replay,
-        result,
-        Vec::new(),
-    );
+    let output = AggregateOutput::success(CommandName::Replay, result, Vec::new());
 
     assert_eq!(
         serde_json::to_value(output).unwrap(),

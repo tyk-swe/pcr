@@ -8,37 +8,51 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use packetcraftr::{
-    CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
-    DestinationScope, DispatchPacketIo, ExchangeIo, Hostname, HostnameResolver, InterfaceAddress,
-    InterfaceFlags, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
-    Layer2Io, Layer3Frame, Layer3Io, LinkCapability, LinkMode, LinkType, LiveIoError, LiveTarget,
-    MacAddress, MaterializedRoute, PacketIo, PlannedRoute, RouteDecision, RouteSelectionReason,
-    TargetResolutionError, TrafficPolicy, TransmissionFrame,
+    capture::{Frame as CapturedFrame, LinkType},
+    client::{
+        policy::Policy,
+        target::{Error as TargetResolutionError, Hostname, Resolver, Target},
+    },
+    net::{
+        capture::{
+            Limits as CaptureLimits, Provider as CaptureProvider, Session as CaptureSession,
+            Statistics as CaptureStatistics,
+        },
+        exchange::Io as ExchangeIo,
+        interface::{Address, Flags, Id, Info, Provider as InterfaceProvider},
+        link::{Capability, MacAddress, Mode},
+        route::{Decision, Materialized, Plan, Scope, SelectionReason},
+        transmit::{
+            Dispatch, Frame as TransmissionFrame, Layer2Frame, Layer2Sender, Layer3Frame,
+            Layer3Sender, Report, Sender,
+        },
+        Error,
+    },
 };
 
 #[derive(Clone, Copy)]
 struct ExternalInterfaces;
 
 impl InterfaceProvider for ExternalInterfaces {
-    fn interfaces(&self) -> Result<Vec<InterfaceInfo>, LiveIoError> {
-        Ok(vec![InterfaceInfo {
-            id: InterfaceId {
+    fn interfaces(&self) -> Result<Vec<Info>, Error> {
+        Ok(vec![Info {
+            id: Id {
                 name: "external0".to_owned(),
                 index: 9,
             },
             description: Some("external provider".to_owned()),
             mac_address: Some(MacAddress([0x02, 0, 0, 0, 0, 9])),
-            addresses: vec![InterfaceAddress {
+            addresses: vec![Address {
                 address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9)),
                 prefix_length: 24,
             }],
-            flags: InterfaceFlags {
+            flags: Flags {
                 up: true,
                 multicast: true,
-                ..InterfaceFlags::default()
+                ..Flags::default()
             },
             mtu: Some(1_500),
-            capability: LinkCapability::Layer2And3,
+            capability: Capability::Layer2And3,
             link_type: LinkType::ETHERNET,
         }])
     }
@@ -47,10 +61,10 @@ impl InterfaceProvider for ExternalInterfaces {
 #[derive(Clone, Copy)]
 struct ExternalLayer2;
 
-impl Layer2Io for ExternalLayer2 {
-    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
-        assert_eq!(frame.route().plan.mode, LinkMode::Layer2);
-        Ok(IoSendReport {
+impl Layer2Sender for ExternalLayer2 {
+    fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<Report, Error> {
+        assert_eq!(frame.route().plan.mode, Mode::Layer2);
+        Ok(Report {
             bytes_sent: frame.bytes().len(),
             wire_bytes: Some(frame.bytes().clone()),
         })
@@ -60,10 +74,10 @@ impl Layer2Io for ExternalLayer2 {
 #[derive(Clone, Copy)]
 struct ExternalLayer3;
 
-impl Layer3Io for ExternalLayer3 {
-    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<IoSendReport, LiveIoError> {
-        assert_eq!(frame.route().plan.mode, LinkMode::Layer3);
-        Ok(IoSendReport {
+impl Layer3Sender for ExternalLayer3 {
+    fn send_layer3(&self, frame: Layer3Frame<'_>) -> Result<Report, Error> {
+        assert_eq!(frame.route().plan.mode, Mode::Layer3);
+        Ok(Report {
             bytes_sent: frame.bytes().len(),
             wire_bytes: None,
         })
@@ -74,7 +88,7 @@ struct ExternalCapture;
 
 struct ExternalHostnameResolver;
 
-impl HostnameResolver for ExternalHostnameResolver {
+impl Resolver for ExternalHostnameResolver {
     fn resolve(
         &self,
         _hostname: &Hostname,
@@ -85,15 +99,15 @@ impl HostnameResolver for ExternalHostnameResolver {
 }
 
 impl CaptureSession for ExternalCapture {
-    fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+    fn wait_ready(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<CapturedFrame>, LiveIoError> {
+    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<CapturedFrame>, Error> {
         Ok(None)
     }
 
-    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+    fn shutdown(&mut self) -> Result<(), Error> {
         Ok(())
     }
 
@@ -103,11 +117,11 @@ impl CaptureSession for ExternalCapture {
 }
 
 struct ExternalExchange {
-    packets: DispatchPacketIo<ExternalLayer2, ExternalLayer3>,
+    packets: Dispatch<ExternalLayer2, ExternalLayer3>,
 }
 
-impl PacketIo for ExternalExchange {
-    fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+impl Sender for ExternalExchange {
+    fn send(&self, frame: TransmissionFrame<'_>) -> Result<Report, Error> {
         self.packets.send(frame)
     }
 }
@@ -115,21 +129,17 @@ impl PacketIo for ExternalExchange {
 impl CaptureProvider for ExternalExchange {
     type Capture = ExternalCapture;
 
-    fn arm_capture(
-        &self,
-        _route: &PlannedRoute,
-        limits: CaptureQueueLimits,
-    ) -> Result<Self::Capture, LiveIoError> {
+    fn arm_capture(&self, _route: &Plan, limits: CaptureLimits) -> Result<Self::Capture, Error> {
         limits.validate()?;
         Ok(ExternalCapture)
     }
 }
 
-fn route(mode: LinkMode) -> MaterializedRoute {
-    MaterializedRoute {
-        plan: PlannedRoute {
-            route: RouteDecision {
-                interface: InterfaceId {
+fn route(mode: Mode) -> Materialized {
+    Materialized {
+        plan: Plan {
+            route: Decision {
+                interface: Id {
                     name: "external0".to_owned(),
                     index: 9,
                 },
@@ -137,10 +147,10 @@ fn route(mode: LinkMode) -> MaterializedRoute {
                 selected_address: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9))),
                 preferred_source: Some(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 9))),
                 next_hop: None,
-                selection_reason: RouteSelectionReason::OnLink,
-                destination_scope: DestinationScope::Private,
+                selection_reason: SelectionReason::OnLink,
+                destination_scope: Scope::Private,
                 mtu: 1_500,
-                capability: LinkCapability::Layer2And3,
+                capability: Capability::Layer2And3,
                 link_type: LinkType::ETHERNET,
             },
             mode,
@@ -153,7 +163,7 @@ fn route(mode: LinkMode) -> MaterializedRoute {
             destination_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 10])),
             source_mac: Some(MacAddress([0x02, 0, 0, 0, 0, 9])),
             neighbor_vlan_tags: Vec::new(),
-            synthesized_ethernet: mode == LinkMode::Layer2,
+            synthesized_ethernet: mode == Mode::Layer2,
         },
         neighbor_resolution: None,
     }
@@ -167,13 +177,13 @@ fn external_provider_uses_only_platform_neutral_contracts() {
     assert_eq!(interfaces[0].id.name, "external0");
 
     let provider = ExternalExchange {
-        packets: DispatchPacketIo::new(ExternalLayer2, ExternalLayer3),
+        packets: Dispatch::new(ExternalLayer2, ExternalLayer3),
     };
     assert_exchange_provider(&provider);
-    let target = "lab.example".parse::<LiveTarget>().unwrap();
-    let resolved = TrafficPolicy {
+    let target = "lab.example".parse::<Target>().unwrap();
+    let resolved = Policy {
         allow_hostname_resolution: true,
-        ..TrafficPolicy::default()
+        ..Policy::default()
     }
     .resolve_target(&target, &ExternalHostnameResolver)
     .unwrap();
@@ -183,9 +193,9 @@ fn external_provider_uses_only_platform_neutral_contracts() {
     );
 
     let bytes = Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]);
-    let layer2_route = route(LinkMode::Layer2);
-    let layer3_route = route(LinkMode::Layer3);
-    let unresolved_route = route(LinkMode::Auto);
+    let layer2_route = route(Mode::Layer2);
+    let layer3_route = route(Mode::Layer3);
+    let unresolved_route = route(Mode::Auto);
 
     let layer2 = TransmissionFrame::try_new(&bytes, &layer2_route).unwrap();
     assert_eq!(provider.send(layer2).unwrap().bytes_sent, bytes.len());
@@ -194,20 +204,20 @@ fn external_provider_uses_only_platform_neutral_contracts() {
 
     assert!(matches!(
         Layer2Frame::try_new(&bytes, &layer3_route),
-        Err(LiveIoError::TransmissionModeMismatch {
-            expected: LinkMode::Layer2,
-            actual: LinkMode::Layer3,
+        Err(Error::TransmissionModeMismatch {
+            expected: Mode::Layer2,
+            actual: Mode::Layer3,
         })
     ));
     assert!(matches!(
         Layer3Frame::try_new(&bytes, &layer2_route),
-        Err(LiveIoError::TransmissionModeMismatch {
-            expected: LinkMode::Layer3,
-            actual: LinkMode::Layer2,
+        Err(Error::TransmissionModeMismatch {
+            expected: Mode::Layer3,
+            actual: Mode::Layer2,
         })
     ));
     assert!(matches!(
         TransmissionFrame::try_new(&bytes, &unresolved_route),
-        Err(LiveIoError::UnresolvedLinkMode)
+        Err(Error::UnresolvedLinkMode)
     ));
 }

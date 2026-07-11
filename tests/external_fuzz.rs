@@ -7,11 +7,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use packetcraftr::{
-    default_registry, fuzz, fuzz_live, BuildContext, BuildOptions, Builder, CapturedFrame,
-    ErrorClassification, FailureKind, FuzzAuthorizationError, FuzzAuthorizer, FuzzCaseExecution,
-    FuzzCaseOutcome, FuzzClock, FuzzExecutionCase, FuzzExecutionError, FuzzExecutionStats,
-    FuzzExecutor, FuzzLiveOptions, FuzzRequest, FuzzStrategy, FuzzTarget, LinkType, Packet,
-    ProtocolRegistry, Raw,
+    capture::{Frame, LinkType},
+    error::{Classification, Kind},
+    packet::{
+        build::{Builder, Context, Options},
+        layer::Raw,
+        registry::Registry,
+        Packet,
+    },
+    protocol::builtin::registry,
+    workflow::{
+        clock::Clock as FuzzClock,
+        fuzz::{
+            run, run_live, AuthorizationError, Authorizer as FuzzAuthorizer, CaseOutcome,
+            Execution, ExecutionCase, ExecutionError, ExecutionStats, Executor as FuzzExecutor,
+            LiveOptions, Request, Strategy, Target,
+        },
+    },
 };
 
 struct Authorizer {
@@ -25,7 +37,7 @@ impl FuzzAuthorizer for Authorizer {
         _destination: Option<IpAddr>,
         maximum_wire_bytes: u64,
         requires_malformed_live: bool,
-    ) -> Result<(), FuzzAuthorizationError> {
+    ) -> Result<(), AuthorizationError> {
         self.calls += 1;
         assert_eq!(packets.len(), 2);
         assert!(maximum_wire_bytes >= 2);
@@ -35,38 +47,33 @@ impl FuzzAuthorizer for Authorizer {
 }
 
 struct Executor {
-    registry: Arc<ProtocolRegistry>,
+    registry: Arc<Registry>,
     calls: usize,
 }
 
 impl FuzzExecutor for Executor {
     fn execute(
         &mut self,
-        case: &FuzzExecutionCase,
+        case: &ExecutionCase,
         _timeout: Duration,
-    ) -> Result<FuzzCaseExecution, FuzzExecutionError> {
+    ) -> Result<Execution, ExecutionError> {
         self.calls += 1;
         let built = Builder::new(Arc::clone(&self.registry))
-            .build(
-                case.packet.clone(),
-                BuildContext::default(),
-                BuildOptions::default(),
-            )
+            .build(case.packet.clone(), Context::default(), Options::default())
             .map_err(|source| {
-                FuzzExecutionError::new(
+                ExecutionError::new(
                     source.to_string(),
-                    ErrorClassification::new("packet.external_fuzz", FailureKind::Packet, None),
+                    Classification::new("packet.external_fuzz", Kind::Packet, None),
                     Vec::new(),
                 )
             })?;
-        let sent =
-            CapturedFrame::new(std::time::UNIX_EPOCH, LinkType(147), built.bytes.clone()).unwrap();
-        Ok(FuzzCaseExecution {
-            stats: FuzzExecutionStats {
+        let sent = Frame::new(std::time::UNIX_EPOCH, LinkType(147), built.bytes.clone()).unwrap();
+        Ok(Execution {
+            stats: ExecutionStats {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: built.bytes.len() as u64,
-                ..FuzzExecutionStats::default()
+                ..ExecutionStats::default()
             },
             built,
             sent,
@@ -94,28 +101,28 @@ impl FuzzClock for Clock {
 
 #[test]
 fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
-    let registry = Arc::new(default_registry().unwrap());
+    let registry = Arc::new(registry().unwrap());
     let mut packet = Packet::new();
     packet.push(Raw::new(vec![0_u8]));
-    let request = FuzzRequest {
+    let request = Request {
         seed: 11,
         cases: 2,
-        strategies: vec![FuzzStrategy::BitFlip],
-        targets: vec![FuzzTarget {
+        strategies: vec![Strategy::BitFlip],
+        targets: vec![Target {
             layer: 0,
             field: "bytes".to_owned(),
         }],
-        ..FuzzRequest::default()
+        ..Request::default()
     };
 
     // The offline API has no authorizer, executor, resolver, route, or clock
     // parameter and therefore cannot produce network side effects.
-    let offline = fuzz(&request, packet.clone(), Arc::clone(&registry)).unwrap();
+    let offline = run(&request, packet.clone(), Arc::clone(&registry)).unwrap();
     assert_eq!(offline.cases.len(), 2);
     assert!(offline
         .cases
         .iter()
-        .all(|case| case.outcome == FuzzCaseOutcome::Built));
+        .all(|case| case.outcome == CaseOutcome::Built));
 
     let mut authorizer = Authorizer { calls: 0 };
     let mut executor = Executor {
@@ -123,9 +130,9 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
         calls: 0,
     };
     let mut clock = Clock::default();
-    let live = fuzz_live(
+    let live = run_live(
         &request,
-        FuzzLiveOptions {
+        LiveOptions {
             timeout: Duration::from_millis(1),
             cases_per_second: Some(1_000),
             destination: None,
@@ -144,7 +151,7 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
     assert!(live
         .cases
         .iter()
-        .all(|case| case.outcome == FuzzCaseOutcome::Timeout));
+        .all(|case| case.outcome == CaseOutcome::Timeout));
     assert_eq!(
         live.cases[1].reproduction.case_seed,
         offline.cases[1].reproduction.case_seed

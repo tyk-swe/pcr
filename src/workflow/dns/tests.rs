@@ -1,0 +1,947 @@
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+    use std::convert::Infallible;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::UNIX_EPOCH;
+
+    use super::*;
+    use crate::capture::LinkType;
+    use crate::client::policy::Policy as TrafficPolicy;
+    use crate::client::target::{
+        Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
+    };
+    use crate::error::Classified;
+    use crate::protocol::internal::default_registry;
+    use crate::workflow::target::Authorized;
+    use crate::workflow::target_adapter::PolicyAuthorizer;
+
+    fn wire_name(name: &str) -> Vec<u8> {
+        let canonical = canonical_query_name(name).unwrap();
+        let mut bytes = Vec::new();
+        encode_name(&canonical, &mut bytes).unwrap();
+        bytes
+    }
+
+    #[derive(Clone)]
+    struct FixtureRecord {
+        owner: Vec<u8>,
+        type_code: u16,
+        class: u16,
+        ttl: u32,
+        rdata: Vec<u8>,
+    }
+
+    impl FixtureRecord {
+        fn in_class(owner: &str, type_code: u16, rdata: Vec<u8>) -> Self {
+            Self {
+                owner: wire_name(owner),
+                type_code,
+                class: DNS_CLASS_IN,
+                ttl: 60,
+                rdata,
+            }
+        }
+
+        fn encode(&self, output: &mut Vec<u8>) {
+            output.extend_from_slice(&self.owner);
+            output.extend_from_slice(&self.type_code.to_be_bytes());
+            output.extend_from_slice(&self.class.to_be_bytes());
+            output.extend_from_slice(&self.ttl.to_be_bytes());
+            output.extend_from_slice(&(self.rdata.len() as u16).to_be_bytes());
+            output.extend_from_slice(&self.rdata);
+        }
+    }
+
+    fn fixture_response(
+        transaction_id: u16,
+        flags: u16,
+        query_name: &str,
+        query_type: DnsQueryType,
+        answers: &[FixtureRecord],
+        authorities: &[FixtureRecord],
+        additionals: &[FixtureRecord],
+    ) -> Vec<u8> {
+        let mut output = Vec::new();
+        output.extend_from_slice(&transaction_id.to_be_bytes());
+        output.extend_from_slice(&(DNS_FLAG_RESPONSE | flags).to_be_bytes());
+        output.extend_from_slice(&1u16.to_be_bytes());
+        output.extend_from_slice(&(answers.len() as u16).to_be_bytes());
+        output.extend_from_slice(&(authorities.len() as u16).to_be_bytes());
+        output.extend_from_slice(&(additionals.len() as u16).to_be_bytes());
+        output.extend_from_slice(&wire_name(query_name));
+        output.extend_from_slice(&query_type.code().to_be_bytes());
+        output.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
+        for record in answers.iter().chain(authorities).chain(additionals) {
+            record.encode(&mut output);
+        }
+        output
+    }
+
+    #[test]
+    fn query_construction_is_canonical_and_bounded() {
+        let query = encode_dns_query("WWW.Example.TEST.", DnsQueryType::Aaaa, 0x5043, true)
+            .expect("valid query");
+        assert_eq!(&query[..2], &[0x50, 0x43]);
+        assert_eq!(
+            canonical_query_name_from_wire(&query).as_deref(),
+            Some("www.example.test.")
+        );
+        assert_eq!(query_type_from_wire(&query), Some(DnsQueryType::Aaaa));
+        assert_eq!(
+            read_u16(&query, 2, "flags").unwrap(),
+            DNS_FLAG_RECURSION_DESIRED
+        );
+        assert!(matches!(
+            canonical_query_name("bad name.example"),
+            Err(DnsWireError::InvalidName { .. })
+        ));
+        assert!(matches!(
+            canonical_query_name(&format!("{}.example", "a".repeat(64))),
+            Err(DnsWireError::InvalidName { .. })
+        ));
+        assert_eq!(dns_source_port(u16::MAX, 2), DNS_EPHEMERAL_SOURCE_PORT_BASE);
+        assert_eq!(dns_source_port(DNS_EPHEMERAL_SOURCE_PORT_BASE, 2), 49_153);
+        assert_eq!(dns_source_port(DNS_EPHEMERAL_SOURCE_PORT_BASE - 1, 2), 1);
+    }
+
+    #[test]
+    fn valid_response_accepts_only_question_relevant_records() {
+        let answers = vec![
+            FixtureRecord::in_class("www.example.test", 5, wire_name("edge.example.test")),
+            FixtureRecord::in_class("edge.example.test", 1, vec![192, 0, 2, 20]),
+            FixtureRecord::in_class("edge.example.test", 28, vec![0; 16]),
+            FixtureRecord::in_class("attacker.evil.test", 1, vec![203, 0, 113, 9]),
+        ];
+        let authorities = vec![
+            FixtureRecord::in_class("example.test", 2, wire_name("ns1.example.test")),
+            FixtureRecord::in_class("evil.test", 2, wire_name("ns.evil.test")),
+        ];
+        let additionals = vec![
+            FixtureRecord::in_class("ns1.example.test", 1, vec![192, 0, 2, 53]),
+            FixtureRecord::in_class("unrelated.example.test", 1, vec![192, 0, 2, 99]),
+        ];
+        let message = fixture_response(
+            7,
+            DNS_FLAG_RECURSION_DESIRED | DNS_FLAG_RECURSION_AVAILABLE,
+            "www.example.test",
+            DnsQueryType::A,
+            &answers,
+            &authorities,
+            &additionals,
+        );
+        let response = decode_dns_response(
+            &message,
+            "www.example.test",
+            DnsQueryType::A,
+            7,
+            DnsLimits::default(),
+        )
+        .unwrap();
+
+        assert_eq!(response.answers.len(), 2);
+        assert_eq!(response.authorities.len(), 1);
+        assert_eq!(response.additionals.len(), 1);
+        assert_eq!(response.rejected_record_count, 4);
+        assert_eq!(response.rejected_records.len(), 4);
+        assert_eq!(response.rejected_records[0].section, DnsSection::Answer);
+        assert!(response.recursion_available);
+
+        let mut tcp_frame = (message.len() as u16).to_be_bytes().to_vec();
+        tcp_frame.extend_from_slice(&message);
+        let tcp_response = decode_dns_tcp_frame(
+            &tcp_frame,
+            "www.example.test",
+            DnsQueryType::A,
+            7,
+            DnsLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(tcp_response.answers.len(), 2);
+        assert_eq!(tcp_response.rejected_record_count, 4);
+
+        let tight_limits = DnsLimits {
+            max_records: 1,
+            ..DnsLimits::default()
+        };
+        assert!(matches!(
+            decode_dns_response(
+                &message,
+                "www.example.test",
+                DnsQueryType::A,
+                7,
+                tight_limits,
+            ),
+            Err(DnsWireError::RecordLimit { .. })
+        ));
+    }
+
+    #[test]
+    fn compressed_owner_and_dnssec_header_bits_are_validated_without_rejection() {
+        let mut message = fixture_response(
+            0x1234,
+            DNS_FLAG_AUTHENTICATED_DATA | DNS_FLAG_CHECKING_DISABLED,
+            "compressed.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[],
+        );
+        message[6..8].copy_from_slice(&1u16.to_be_bytes());
+        message.extend_from_slice(&[0xc0, 0x0c]);
+        message.extend_from_slice(&1u16.to_be_bytes());
+        message.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
+        message.extend_from_slice(&30u32.to_be_bytes());
+        message.extend_from_slice(&4u16.to_be_bytes());
+        message.extend_from_slice(&[192, 0, 2, 1]);
+
+        let response = decode_dns_response(
+            &message,
+            "compressed.example",
+            DnsQueryType::A,
+            0x1234,
+            DnsLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(response.answers.len(), 1);
+        assert!(response.authenticated_data);
+        assert!(response.checking_disabled);
+    }
+
+    #[test]
+    fn txt_bytes_remain_exact_even_when_they_contain_terminal_controls() {
+        let bytes = vec![b'a', 0x1b, b'[', b'3', b'1'];
+        let mut txt = vec![bytes.len() as u8];
+        txt.extend_from_slice(&bytes);
+        let message = fixture_response(
+            9,
+            0,
+            "txt.example",
+            DnsQueryType::Txt,
+            &[FixtureRecord::in_class("txt.example", 16, txt)],
+            &[],
+            &[],
+        );
+        let response = decode_dns_response(
+            &message,
+            "txt.example",
+            DnsQueryType::Txt,
+            9,
+            DnsLimits::default(),
+        )
+        .unwrap();
+        let DnsRecordValue::Txt(strings) = &response.answers[0].value else {
+            panic!("expected TXT record");
+        };
+        assert_eq!(strings, &[Bytes::from(bytes)]);
+        assert!(matches!(
+            decode_dns_response(
+                &message,
+                "txt.example",
+                DnsQueryType::Txt,
+                9,
+                DnsLimits {
+                    max_txt_bytes: 4,
+                    ..DnsLimits::default()
+                },
+            ),
+            Err(DnsWireError::TxtByteLimit { limit: 4 })
+        ));
+    }
+
+    #[test]
+    fn every_published_record_shape_decodes_to_typed_bounded_data() {
+        let mut mx = 10u16.to_be_bytes().to_vec();
+        mx.extend_from_slice(&wire_name("mail.example"));
+        let mut soa = wire_name("ns1.example");
+        soa.extend_from_slice(&wire_name("hostmaster.example"));
+        for value in [1u32, 2, 3, 4, 5] {
+            soa.extend_from_slice(&value.to_be_bytes());
+        }
+        let mut srv = Vec::new();
+        for value in [1u16, 2, 443] {
+            srv.extend_from_slice(&value.to_be_bytes());
+        }
+        srv.extend_from_slice(&wire_name("service.example"));
+        let records = vec![
+            FixtureRecord::in_class("all.example", 1, vec![192, 0, 2, 1]),
+            FixtureRecord::in_class("all.example", 28, Ipv6Addr::LOCALHOST.octets().to_vec()),
+            FixtureRecord::in_class("all.example", 5, wire_name("alias.example")),
+            FixtureRecord::in_class("all.example", 15, mx),
+            FixtureRecord::in_class("all.example", 2, wire_name("ns1.example")),
+            FixtureRecord::in_class("all.example", 12, wire_name("pointer.example")),
+            FixtureRecord::in_class("all.example", 6, soa),
+            FixtureRecord::in_class("all.example", 33, srv),
+            FixtureRecord::in_class("all.example", 16, vec![3, b'o', b'n', b'e']),
+            FixtureRecord::in_class("all.example", 99, vec![0xde, 0xad]),
+        ];
+        let message = fixture_response(12, 0, "all.example", DnsQueryType::Any, &records, &[], &[]);
+        let response = decode_dns_response(
+            &message,
+            "all.example",
+            DnsQueryType::Any,
+            12,
+            DnsLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(response.answers.len(), 10);
+        assert_eq!(response.rejected_record_count, 0);
+        assert_eq!(
+            response
+                .answers
+                .iter()
+                .map(|record| record.value.type_name())
+                .collect::<Vec<_>>(),
+            ["a", "aaaa", "cname", "mx", "ns", "ptr", "soa", "srv", "txt", "unknown"]
+        );
+        let DnsRecordValue::Soa {
+            serial,
+            refresh,
+            retry,
+            expire,
+            minimum,
+            ..
+        } = &response.answers[6].value
+        else {
+            panic!("expected SOA");
+        };
+        assert_eq!(
+            [*serial, *refresh, *retry, *expire, *minimum],
+            [1, 2, 3, 4, 5]
+        );
+        assert!(matches!(
+            &response.answers[9].value,
+            DnsRecordValue::Unknown { type_code: 99, rdata }
+                if rdata.as_ref() == [0xde, 0xad]
+        ));
+    }
+
+    #[test]
+    fn malformed_compression_and_unrelated_identity_are_typed_failures() {
+        let mut looped = Vec::new();
+        looped.extend_from_slice(&3u16.to_be_bytes());
+        looped.extend_from_slice(&DNS_FLAG_RESPONSE.to_be_bytes());
+        looped.extend_from_slice(&1u16.to_be_bytes());
+        looped.extend_from_slice(&[0; 6]);
+        looped.extend_from_slice(&[0xc0, 0x0c]);
+        assert!(matches!(
+            decode_dns_response(
+                &looped,
+                "loop.example",
+                DnsQueryType::A,
+                3,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::PointerLoop { .. })
+        ));
+
+        let mut forward = looped.clone();
+        forward[13] = 0x0e;
+        forward.push(0);
+        assert!(matches!(
+            decode_dns_response(
+                &forward,
+                "forward.example",
+                DnsQueryType::A,
+                3,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::ForwardPointer { .. })
+        ));
+
+        let valid = fixture_response(4, 0, "other.example", DnsQueryType::A, &[], &[], &[]);
+        let error = decode_dns_response(
+            &valid,
+            "expected.example",
+            DnsQueryType::A,
+            4,
+            DnsLimits::default(),
+        )
+        .unwrap_err();
+        assert!(error.is_unrelated());
+    }
+
+    #[test]
+    fn truncation_never_presents_partial_records_and_tcp_length_is_exact() {
+        let mut truncated = fixture_response(
+            11,
+            DNS_FLAG_TRUNCATED,
+            "large.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[],
+        );
+        truncated[6..8].copy_from_slice(&u16::MAX.to_be_bytes());
+        let response = decode_dns_response(
+            &truncated,
+            "large.example",
+            DnsQueryType::A,
+            11,
+            DnsLimits::default(),
+        )
+        .unwrap();
+        assert!(response.truncated);
+        assert!(response.answers.is_empty());
+
+        let mut frame = (truncated.len() as u16).to_be_bytes().to_vec();
+        frame.extend_from_slice(&truncated);
+        assert!(decode_dns_tcp_frame(
+            &frame,
+            "large.example",
+            DnsQueryType::A,
+            11,
+            DnsLimits::default(),
+        )
+        .is_ok());
+        frame[1] = frame[1].wrapping_add(1);
+        assert!(matches!(
+            decode_dns_tcp_frame(
+                &frame,
+                "large.example",
+                DnsQueryType::A,
+                11,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::TcpFrameLength { .. })
+        ));
+    }
+
+    #[test]
+    fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
+        let server = Ipv4Addr::new(10, 0, 0, 53);
+        let client = Ipv4Addr::new(10, 0, 0, 2);
+        let query = encode_dns_query("www.example", DnsQueryType::A, 42, true).unwrap();
+        let probe = DnsProbe {
+            attempt: 1,
+            server_address: IpAddr::V4(server),
+            server_port: 53,
+            source_port: 50_000,
+            transaction_id: 42,
+            query_name: "www.example.".to_owned(),
+            query_type: DnsQueryType::A,
+            query,
+        };
+        let mut sent = Packet::new();
+        sent.push(Ipv4 {
+            source: client,
+            destination: server,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 50_000,
+            destination_port: 53,
+            ..Udp::default()
+        })
+        .push(Raw::new(Bytes::new()));
+        let response_bytes = fixture_response(
+            42,
+            0,
+            "www.example",
+            DnsQueryType::A,
+            &[FixtureRecord::in_class(
+                "www.example",
+                1,
+                vec![192, 0, 2, 5],
+            )],
+            &[],
+            &[],
+        );
+        let decoded = |source: Ipv4Addr, transaction_id: u16, diagnostics: Vec<Diagnostic>| {
+            let mut bytes = response_bytes.clone();
+            bytes[..2].copy_from_slice(&transaction_id.to_be_bytes());
+            let mut packet = Packet::new();
+            packet
+                .push(Ipv4 {
+                    source,
+                    destination: client,
+                    ..Ipv4::default()
+                })
+                .push(Udp {
+                    source_port: 53,
+                    destination_port: 50_000,
+                    ..Udp::default()
+                })
+                .push(Raw::new(bytes.clone()));
+            DecodedPacket {
+                packet,
+                original: Bytes::from(bytes.clone()),
+                frame: Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap(),
+                layout: crate::packet::internal::PacketLayout::default(),
+                diagnostics,
+            }
+        };
+        let registry = default_registry().unwrap();
+
+        assert!(matches!(
+            classify_dns_response(
+                &registry,
+                &probe,
+                &sent,
+                &decoded(server, 42, Vec::new()),
+                DnsLimits::default(),
+            ),
+            Some(DnsResponseClassification::Response(_))
+        ));
+        assert!(matches!(
+            classify_dns_response(
+                &registry,
+                &probe,
+                &sent,
+                &decoded(server, 43, Vec::new()),
+                DnsLimits::default(),
+            ),
+            Some(DnsResponseClassification::Unrelated { .. })
+        ));
+        assert!(matches!(
+            classify_dns_response(
+                &registry,
+                &probe,
+                &sent,
+                &decoded(
+                    server,
+                    42,
+                    vec![Diagnostic::error("udp.checksum", "invalid checksum")],
+                ),
+                DnsLimits::default(),
+            ),
+            Some(DnsResponseClassification::DecodeFailure { .. })
+        ));
+        assert!(classify_dns_response(
+            &registry,
+            &probe,
+            &sent,
+            &decoded(Ipv4Addr::new(10, 0, 0, 99), 42, Vec::new()),
+            DnsLimits::default(),
+        )
+        .is_none());
+
+        let server_v6: Ipv6Addr = "fd00::53".parse().unwrap();
+        let client_v6: Ipv6Addr = "fd00::2".parse().unwrap();
+        let query_v6 = encode_dns_query("www.example", DnsQueryType::A, 44, true).unwrap();
+        let probe_v6 = DnsProbe {
+            attempt: 1,
+            server_address: IpAddr::V6(server_v6),
+            server_port: 53,
+            source_port: 50_001,
+            transaction_id: 44,
+            query_name: "www.example.".to_owned(),
+            query_type: DnsQueryType::A,
+            query: query_v6,
+        };
+        let mut sent_v6 = Packet::new();
+        sent_v6
+            .push(Ipv6 {
+                source: client_v6,
+                destination: server_v6,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 50_001,
+                destination_port: 53,
+                ..Udp::default()
+            })
+            .push(Raw::new(Bytes::new()));
+        let response_v6 = fixture_response(
+            44,
+            0,
+            "www.example",
+            DnsQueryType::A,
+            &[FixtureRecord::in_class(
+                "www.example",
+                1,
+                vec![192, 0, 2, 44],
+            )],
+            &[],
+            &[],
+        );
+        let mut response_packet_v6 = Packet::new();
+        response_packet_v6
+            .push(Ipv6 {
+                source: server_v6,
+                destination: client_v6,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 53,
+                destination_port: 50_001,
+                ..Udp::default()
+            })
+            .push(Raw::new(response_v6.clone()));
+        let decoded_v6 = DecodedPacket {
+            packet: response_packet_v6,
+            original: Bytes::from(response_v6.clone()),
+            frame: Frame::new(UNIX_EPOCH, LinkType::RAW, response_v6).unwrap(),
+            layout: crate::packet::internal::PacketLayout::default(),
+            diagnostics: Vec::new(),
+        };
+        assert!(matches!(
+            classify_dns_response(
+                &registry,
+                &probe_v6,
+                &sent_v6,
+                &decoded_v6,
+                DnsLimits::default(),
+            ),
+            Some(DnsResponseClassification::Response(_))
+        ));
+    }
+
+    struct LocalAuthorizer;
+
+    impl Authorizer for LocalAuthorizer {
+        fn resolve_and_authorize(
+            &mut self,
+            target: &Target,
+        ) -> Result<Authorized, AuthorizationError> {
+            assert_eq!(
+                target,
+                &Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53)))
+            );
+            Ok(Authorized {
+                declared: target.to_string(),
+                addresses: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))],
+            })
+        }
+
+        fn authorize_operation(
+            &mut self,
+            packets: u64,
+            _maximum_wire_bytes: u64,
+        ) -> Result<(), AuthorizationError> {
+            assert_eq!(packets, 1);
+            Ok(())
+        }
+    }
+
+    struct PayloadExecutor {
+        payload: Bytes,
+    }
+
+    impl DnsExecutor for PayloadExecutor {
+        fn execute(
+            &mut self,
+            exchange: &DnsExchange,
+        ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+            let sent_at = UNIX_EPOCH + Duration::from_secs(10);
+            let mut response_packet = Packet::new();
+            response_packet
+                .push(Ipv4 {
+                    source: Ipv4Addr::new(10, 0, 0, 53),
+                    destination: Ipv4Addr::UNSPECIFIED,
+                    ..Ipv4::default()
+                })
+                .push(Udp {
+                    source_port: exchange.probe.server_port,
+                    destination_port: exchange.probe.source_port,
+                    ..Udp::default()
+                })
+                .push(Raw::new(self.payload.clone()));
+            let frame = Frame::new(
+                sent_at + Duration::from_millis(2),
+                LinkType::RAW,
+                self.payload.clone(),
+            )
+            .unwrap();
+            Ok(DnsExchangeExecution {
+                sent: exchange.probe.packet(),
+                sent_evidence: Frame::new(sent_at, LinkType::RAW, exchange.probe.query.clone())
+                    .unwrap(),
+                responses: vec![DnsMatchedResponse {
+                    response: DecodedPacket {
+                        packet: response_packet,
+                        original: self.payload.clone(),
+                        frame,
+                        layout: crate::packet::internal::PacketLayout::default(),
+                        diagnostics: Vec::new(),
+                    },
+                    latency: Duration::from_millis(2),
+                }],
+                unsolicited: Vec::new(),
+                undecoded: Vec::new(),
+                diagnostics: Vec::new(),
+                stats: Stats {
+                    packets_attempted: 1,
+                    packets_completed: 1,
+                    bytes: exchange.probe.query.len() as u64,
+                    elapsed: Duration::from_millis(2),
+                    ..Stats::default()
+                },
+            })
+        }
+    }
+
+    fn single_attempt_request() -> DnsRequest {
+        DnsRequest {
+            server: Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))),
+            address_family: AddressFamily::Ipv4,
+            server_port: 53,
+            source_port: 50_000,
+            query_name: "www.example.test".to_owned(),
+            query_type: DnsQueryType::A,
+            transaction_id: 77,
+            recursion_desired: true,
+            attempts: 1,
+            timeout: Duration::from_millis(10),
+            queries_per_second: None,
+            limits: DnsLimits::default(),
+        }
+    }
+
+    #[test]
+    fn workflow_outcomes_distinguish_valid_truncated_unrelated_and_decode_failure() {
+        let valid = fixture_response(
+            77,
+            0,
+            "www.example.test",
+            DnsQueryType::A,
+            &[FixtureRecord::in_class(
+                "www.example.test",
+                1,
+                vec![192, 0, 2, 10],
+            )],
+            &[],
+            &[],
+        );
+        let truncated = fixture_response(
+            77,
+            DNS_FLAG_TRUNCATED,
+            "www.example.test",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[],
+        );
+        let unrelated = fixture_response(78, 0, "www.example.test", DnsQueryType::A, &[], &[], &[]);
+        for (payload, outcome, status) in [
+            (
+                Bytes::from(valid),
+                DnsOutcome::Response,
+                DnsAttemptStatus::Response,
+            ),
+            (
+                Bytes::from(truncated),
+                DnsOutcome::Truncated,
+                DnsAttemptStatus::Truncated,
+            ),
+            (
+                Bytes::from(unrelated),
+                DnsOutcome::Unrelated,
+                DnsAttemptStatus::Unrelated,
+            ),
+            (
+                Bytes::from_static(b"malformed"),
+                DnsOutcome::DecodeFailure,
+                DnsAttemptStatus::DecodeFailure,
+            ),
+        ] {
+            let result = dns(
+                &single_attempt_request(),
+                &mut LocalAuthorizer,
+                &default_registry().unwrap(),
+                &mut PayloadExecutor { payload },
+                &mut NoopClock,
+            )
+            .unwrap();
+            assert_eq!(result.outcome, outcome);
+            assert_eq!(result.attempts[0].status, status);
+            assert!(result.attempts[0].response.is_some());
+        }
+    }
+
+    struct NoopClock;
+
+    impl Clock for NoopClock {
+        type Error = Infallible;
+
+        fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct ScriptedResolver {
+        calls: Arc<AtomicUsize>,
+        answers: Arc<Mutex<VecDeque<Vec<IpAddr>>>>,
+    }
+
+    impl ScriptedResolver {
+        fn new(answers: impl IntoIterator<Item = Vec<IpAddr>>) -> Self {
+            Self {
+                calls: Arc::new(AtomicUsize::new(0)),
+                answers: Arc::new(Mutex::new(answers.into_iter().collect())),
+            }
+        }
+    }
+
+    impl HostnameResolver for ScriptedResolver {
+        fn resolve(
+            &self,
+            hostname: &Hostname,
+            _limit: usize,
+        ) -> Result<Vec<IpAddr>, TargetResolutionError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            self.answers.lock().unwrap().pop_front().ok_or_else(|| {
+                TargetResolutionError::NoAddresses {
+                    hostname: hostname.to_string(),
+                }
+            })
+        }
+    }
+
+    #[derive(Default)]
+    struct TimeoutExecutor {
+        calls: usize,
+        addresses: Vec<IpAddr>,
+    }
+
+    impl DnsExecutor for TimeoutExecutor {
+        fn execute(
+            &mut self,
+            exchange: &DnsExchange,
+        ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+            self.calls += 1;
+            self.addresses.push(exchange.probe.server_address);
+            Ok(DnsExchangeExecution {
+                sent: exchange.probe.packet(),
+                sent_evidence: Frame::new(
+                    UNIX_EPOCH + Duration::from_secs(u64::from(exchange.probe.attempt)),
+                    LinkType::RAW,
+                    exchange.probe.query.clone(),
+                )
+                .unwrap(),
+                responses: Vec::new(),
+                unsolicited: Vec::new(),
+                undecoded: Vec::new(),
+                diagnostics: Vec::new(),
+                stats: Stats {
+                    packets_attempted: 1,
+                    packets_completed: 1,
+                    bytes: exchange.probe.query.len() as u64,
+                    ..Stats::default()
+                },
+            })
+        }
+    }
+
+    fn private_policy() -> TrafficPolicy {
+        TrafficPolicy {
+            allow_public_destinations: false,
+            allow_hostname_resolution: false,
+            max_packets_per_operation: 32,
+            max_bytes_per_operation: 1_000_000,
+            ..TrafficPolicy::default()
+        }
+    }
+
+    fn retry_request() -> DnsRequest {
+        DnsRequest {
+            server: Target::Hostname("resolver.example".to_owned()),
+            address_family: AddressFamily::Any,
+            server_port: 53,
+            source_port: 50_000,
+            query_name: "www.example.test".to_owned(),
+            query_type: DnsQueryType::A,
+            transaction_id: 0x5043,
+            recursion_desired: true,
+            attempts: 2,
+            timeout: Duration::from_millis(10),
+            queries_per_second: None,
+            limits: DnsLimits::default(),
+        }
+    }
+
+    #[test]
+    fn hostname_intent_is_denied_before_resolver_or_executor_side_effects() {
+        let resolver = ScriptedResolver::new([vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))]]);
+        let policy = private_policy();
+        let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+        let mut executor = TimeoutExecutor::default();
+        let error = dns(
+            &retry_request(),
+            &mut authorizer,
+            &default_registry().unwrap(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .unwrap_err();
+        assert_eq!(error.classification().code, "policy.hostname_resolution");
+        assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(executor.calls, 0);
+    }
+
+    #[test]
+    fn every_mixed_answer_is_authorized_before_family_selection() {
+        let resolver = ScriptedResolver::new([vec![
+            IpAddr::V6(Ipv6Addr::LOCALHOST),
+            IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8)),
+        ]]);
+        let mut policy = private_policy();
+        policy.allow_hostname_resolution = true;
+        let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+        let mut executor = TimeoutExecutor::default();
+        let mut request = retry_request();
+        request.address_family = AddressFamily::Ipv6;
+        request.attempts = 1;
+        let error = dns(
+            &request,
+            &mut authorizer,
+            &default_registry().unwrap(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .unwrap_err();
+        assert_eq!(error.classification().code, "policy.public_destination");
+        assert!(error.to_string().contains("8.8.8.8"));
+        assert_eq!(executor.calls, 0);
+    }
+
+    #[test]
+    fn every_retry_reresolves_and_reauthorizes_rebinding_before_probe_construction() {
+        let resolver = ScriptedResolver::new([
+            vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))],
+            vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))],
+        ]);
+        let mut policy = private_policy();
+        policy.allow_hostname_resolution = true;
+        let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+        let mut executor = TimeoutExecutor::default();
+        let error = dns(
+            &retry_request(),
+            &mut authorizer,
+            &default_registry().unwrap(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .unwrap_err();
+        assert_eq!(error.classification().code, "policy.public_destination");
+        assert_eq!(resolver.calls.load(Ordering::SeqCst), 2);
+        assert_eq!(executor.calls, 1);
+        assert_eq!(
+            executor.addresses,
+            [IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))]
+        );
+    }
+
+    #[test]
+    fn complete_operation_budget_precedes_resolution_and_queries() {
+        let resolver = ScriptedResolver::new([vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))]]);
+        let mut policy = private_policy();
+        policy.allow_hostname_resolution = true;
+        policy.max_packets_per_operation = 1;
+        let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+        let mut executor = TimeoutExecutor::default();
+        let error = dns(
+            &retry_request(),
+            &mut authorizer,
+            &default_registry().unwrap(),
+            &mut executor,
+            &mut NoopClock,
+        )
+        .unwrap_err();
+        assert_eq!(error.classification().code, "policy.packet_limit");
+        assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);
+        assert_eq!(executor.calls, 0);
+    }
+}

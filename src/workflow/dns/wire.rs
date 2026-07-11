@@ -1,0 +1,813 @@
+/// Canonicalizes a bounded ASCII DNS name for wire construction and
+/// case-insensitive correlation. The returned form always has a trailing dot.
+pub fn canonical_query_name(value: &str) -> Result<String, DnsWireError> {
+    if value == "." {
+        return Ok(".".to_owned());
+    }
+    let value = value.strip_suffix('.').unwrap_or(value);
+    if value.is_empty() {
+        return Err(DnsWireError::InvalidName {
+            message: "must not be empty".to_owned(),
+        });
+    }
+    let mut wire_length = 1usize;
+    for label in value.split('.') {
+        if label.is_empty() {
+            return Err(DnsWireError::InvalidName {
+                message: "contains an empty label".to_owned(),
+            });
+        }
+        if label.len() > 63 {
+            return Err(DnsWireError::InvalidName {
+                message: "contains a label longer than 63 bytes".to_owned(),
+            });
+        }
+        if !label
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'*'))
+        {
+            return Err(DnsWireError::InvalidName {
+                message: "labels must use ASCII letters, digits, hyphens, underscores, or wildcard asterisks"
+                    .to_owned(),
+            });
+        }
+        wire_length = wire_length
+            .checked_add(label.len() + 1)
+            .ok_or(DnsWireError::NameTooLong)?;
+    }
+    if wire_length > 255 {
+        return Err(DnsWireError::NameTooLong);
+    }
+    Ok(format!("{}.", value.to_ascii_lowercase()))
+}
+
+/// Constructs one standard IN-class DNS query without resolver or I/O side
+/// effects.
+pub fn encode_dns_query(
+    query_name: &str,
+    query_type: DnsQueryType,
+    transaction_id: u16,
+    recursion_desired: bool,
+) -> Result<Bytes, DnsWireError> {
+    let query_name = canonical_query_name(query_name)?;
+    let mut message = Vec::with_capacity(DNS_HEADER_BYTES + query_name.len() + 5);
+    message.extend_from_slice(&transaction_id.to_be_bytes());
+    let flags = if recursion_desired {
+        DNS_FLAG_RECURSION_DESIRED
+    } else {
+        0
+    };
+    message.extend_from_slice(&flags.to_be_bytes());
+    message.extend_from_slice(&1u16.to_be_bytes());
+    message.extend_from_slice(&0u16.to_be_bytes());
+    message.extend_from_slice(&0u16.to_be_bytes());
+    message.extend_from_slice(&0u16.to_be_bytes());
+    encode_name(&query_name, &mut message)?;
+    message.extend_from_slice(&query_type.code().to_be_bytes());
+    message.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());
+    Ok(Bytes::from(message))
+}
+
+/// Decodes the length prefix of a single DNS-over-TCP frame, then applies the
+/// same transaction, question, bounds, and relevance validation as UDP.
+pub fn decode_dns_tcp_frame(
+    frame: &[u8],
+    query_name: &str,
+    query_type: DnsQueryType,
+    transaction_id: u16,
+    limits: DnsLimits,
+) -> Result<ValidatedDnsResponse, DnsWireError> {
+    let prefix = frame.get(..2).ok_or(DnsWireError::MessageTooShort {
+        actual: frame.len(),
+        minimum: 2,
+    })?;
+    let declared = usize::from(u16::from_be_bytes([prefix[0], prefix[1]]));
+    let payload = &frame[2..];
+    if declared != payload.len() {
+        return Err(DnsWireError::TcpFrameLength {
+            declared,
+            actual: payload.len(),
+        });
+    }
+    decode_dns_response(payload, query_name, query_type, transaction_id, limits)
+}
+
+/// Decodes and validates one complete DNS response. Only records relevant to
+/// the validated question are returned as accepted section data; all other
+/// declared records contribute to a bounded rejected-record audit trail.
+pub fn decode_dns_response(
+    message: &[u8],
+    query_name: &str,
+    query_type: DnsQueryType,
+    transaction_id: u16,
+    limits: DnsLimits,
+) -> Result<ValidatedDnsResponse, DnsWireError> {
+    let query_name = canonical_query_name(query_name)?;
+    if message.len() < DNS_HEADER_BYTES {
+        return Err(DnsWireError::MessageTooShort {
+            actual: message.len(),
+            minimum: DNS_HEADER_BYTES,
+        });
+    }
+    if message.len() > limits.max_message_bytes {
+        return Err(DnsWireError::MessageTooLarge {
+            actual: message.len(),
+            maximum: limits.max_message_bytes,
+        });
+    }
+
+    let actual_id = read_u16(message, 0, "transaction ID")?;
+    let flags = read_u16(message, 2, "flags")?;
+    if flags & DNS_FLAG_RESPONSE == 0 {
+        return Err(DnsWireError::NotResponse);
+    }
+    let opcode = ((flags & DNS_OPCODE_MASK) >> 11) as u8;
+    if opcode != 0 {
+        return Err(DnsWireError::UnsupportedOpcode { opcode });
+    }
+    if flags & DNS_RESERVED_MASK != 0 {
+        return Err(DnsWireError::ReservedHeaderBits);
+    }
+    if actual_id != transaction_id {
+        return Err(DnsWireError::TransactionIdMismatch {
+            expected: transaction_id,
+            actual: actual_id,
+        });
+    }
+    let question_count = read_u16(message, 4, "question count")?;
+    if question_count != 1 {
+        return Err(DnsWireError::QuestionCount {
+            actual: question_count,
+        });
+    }
+    let answer_count = usize::from(read_u16(message, 6, "answer count")?);
+    let authority_count = usize::from(read_u16(message, 8, "authority count")?);
+    let additional_count = usize::from(read_u16(message, 10, "additional count")?);
+    let (actual_name, mut offset) = decode_name(message, DNS_HEADER_BYTES, limits)?;
+    if actual_name != query_name {
+        return Err(DnsWireError::QuestionNameMismatch {
+            expected: query_name,
+            actual: actual_name,
+        });
+    }
+    let actual_type = read_u16(message, offset, "question type")?;
+    offset += 2;
+    if actual_type != query_type.code() {
+        return Err(DnsWireError::QuestionTypeMismatch {
+            expected: query_type.code(),
+            actual: actual_type,
+        });
+    }
+    let actual_class = read_u16(message, offset, "question class")?;
+    offset += 2;
+    if actual_class != DNS_CLASS_IN {
+        return Err(DnsWireError::QuestionClassMismatch {
+            actual: actual_class,
+        });
+    }
+
+    let truncated = flags & DNS_FLAG_TRUNCATED != 0;
+    if truncated {
+        // A UDP truncation may end at any byte after the complete question.
+        // Do not decode or present possibly partial records as accepted facts.
+        return Ok(ValidatedDnsResponse {
+            transaction_id,
+            response_code: (flags & DNS_RCODE_MASK) as u8,
+            authoritative: flags & DNS_FLAG_AUTHORITATIVE != 0,
+            truncated: true,
+            recursion_desired: flags & DNS_FLAG_RECURSION_DESIRED != 0,
+            recursion_available: flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
+            authenticated_data: flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
+            checking_disabled: flags & DNS_FLAG_CHECKING_DISABLED != 0,
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            additionals: Vec::new(),
+            rejected_records: Vec::new(),
+            rejected_record_count: 0,
+        });
+    }
+
+    let record_count = answer_count
+        .checked_add(authority_count)
+        .and_then(|count| count.checked_add(additional_count))
+        .ok_or(DnsWireError::RecordLimit {
+            actual: usize::MAX,
+            limit: limits.max_records,
+        })?;
+    if record_count > limits.max_records {
+        return Err(DnsWireError::RecordLimit {
+            actual: record_count,
+            limit: limits.max_records,
+        });
+    }
+
+    let (answers, next) = decode_records(message, offset, answer_count, limits)?;
+    let (authorities, next) = decode_records(message, next, authority_count, limits)?;
+    let (additionals, next) = decode_records(message, next, additional_count, limits)?;
+    if next != message.len() {
+        return Err(DnsWireError::TrailingBytes {
+            remaining: message.len() - next,
+        });
+    }
+    let RelevantRecords {
+        answers,
+        authorities,
+        additionals,
+        rejected_records,
+        rejected_record_count,
+    } = filter_relevant_records(
+        &query_name,
+        query_type,
+        answers,
+        authorities,
+        additionals,
+        limits.max_rejected_records,
+    );
+    Ok(ValidatedDnsResponse {
+        transaction_id,
+        response_code: (flags & DNS_RCODE_MASK) as u8,
+        authoritative: flags & DNS_FLAG_AUTHORITATIVE != 0,
+        truncated: false,
+        recursion_desired: flags & DNS_FLAG_RECURSION_DESIRED != 0,
+        recursion_available: flags & DNS_FLAG_RECURSION_AVAILABLE != 0,
+        authenticated_data: flags & DNS_FLAG_AUTHENTICATED_DATA != 0,
+        checking_disabled: flags & DNS_FLAG_CHECKING_DISABLED != 0,
+        answers,
+        authorities,
+        additionals,
+        rejected_records,
+        rejected_record_count,
+    })
+}
+
+fn encode_name(name: &str, output: &mut Vec<u8>) -> Result<(), DnsWireError> {
+    if name == "." {
+        output.push(0);
+        return Ok(());
+    }
+    for label in name.trim_end_matches('.').split('.') {
+        output.push(u8::try_from(label.len()).map_err(|_| DnsWireError::NameTooLong)?);
+        output.extend_from_slice(label.as_bytes());
+    }
+    output.push(0);
+    Ok(())
+}
+
+fn read_u16(message: &[u8], offset: usize, field: &'static str) -> Result<u16, DnsWireError> {
+    let bytes = message
+        .get(offset..offset.saturating_add(2))
+        .ok_or(DnsWireError::TruncatedField { field, offset })?;
+    Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
+}
+
+fn read_u32(message: &[u8], offset: usize, field: &'static str) -> Result<u32, DnsWireError> {
+    let bytes = message
+        .get(offset..offset.saturating_add(4))
+        .ok_or(DnsWireError::TruncatedField { field, offset })?;
+    Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
+}
+
+fn decode_name(
+    message: &[u8],
+    offset: usize,
+    limits: DnsLimits,
+) -> Result<(String, usize), DnsWireError> {
+    let mut cursor = offset;
+    let mut resume = None;
+    let mut labels = Vec::new();
+    let mut visited = Vec::new();
+    let mut pointer_count = 0usize;
+    let mut wire_length = 1usize;
+    loop {
+        let length = *message.get(cursor).ok_or(DnsWireError::TruncatedField {
+            field: "name label length",
+            offset: cursor,
+        })?;
+        if length & 0xc0 == 0xc0 {
+            let second = *message
+                .get(cursor + 1)
+                .ok_or(DnsWireError::TruncatedPointer { offset: cursor })?;
+            let pointer = usize::from((u16::from(length & 0x3f) << 8) | u16::from(second));
+            if pointer >= message.len() {
+                return Err(DnsWireError::PointerOutOfBounds {
+                    pointer,
+                    length: message.len(),
+                });
+            }
+            if pointer == cursor {
+                return Err(DnsWireError::PointerLoop { offset: pointer });
+            }
+            if pointer > cursor {
+                return Err(DnsWireError::ForwardPointer {
+                    offset: cursor,
+                    pointer,
+                });
+            }
+            pointer_count += 1;
+            if pointer_count > limits.max_name_pointers {
+                return Err(DnsWireError::PointerLimit {
+                    limit: limits.max_name_pointers,
+                });
+            }
+            if visited.contains(&pointer) {
+                return Err(DnsWireError::PointerLoop { offset: pointer });
+            }
+            visited.push(pointer);
+            resume.get_or_insert(cursor + 2);
+            cursor = pointer;
+            continue;
+        }
+        if length & 0xc0 != 0 {
+            return Err(DnsWireError::ReservedLabelLength { offset: cursor });
+        }
+        cursor += 1;
+        if length == 0 {
+            let next = resume.unwrap_or(cursor);
+            let name = if labels.is_empty() {
+                ".".to_owned()
+            } else {
+                format!("{}.", labels.join("."))
+            };
+            return Ok((name, next));
+        }
+        let length = usize::from(length);
+        if length > 63 {
+            return Err(DnsWireError::LabelTooLong {
+                offset: cursor - 1,
+                actual: length,
+            });
+        }
+        let label = message.get(cursor..cursor.saturating_add(length)).ok_or(
+            DnsWireError::TruncatedField {
+                field: "name label",
+                offset: cursor,
+            },
+        )?;
+        if !label
+            .iter()
+            .all(|byte| byte.is_ascii_graphic() && *byte != b'.')
+        {
+            return Err(DnsWireError::InvalidLabelData { offset: cursor });
+        }
+        wire_length = wire_length
+            .checked_add(length + 1)
+            .ok_or(DnsWireError::NameTooLong)?;
+        if wire_length > 255 {
+            return Err(DnsWireError::NameTooLong);
+        }
+        labels.push(String::from_utf8_lossy(label).to_ascii_lowercase());
+        cursor += length;
+    }
+}
+
+fn decode_records(
+    message: &[u8],
+    mut offset: usize,
+    count: usize,
+    limits: DnsLimits,
+) -> Result<(Vec<DnsRecord>, usize), DnsWireError> {
+    let mut records = Vec::with_capacity(count);
+    for _ in 0..count {
+        let (owner, next) = decode_name(message, offset, limits)?;
+        offset = next;
+        let type_code = read_u16(message, offset, "record type")?;
+        let class = read_u16(message, offset + 2, "record class")?;
+        let ttl = read_u32(message, offset + 4, "record TTL")?;
+        let rdata_length = usize::from(read_u16(message, offset + 8, "RDATA length")?);
+        let rdata_offset = offset + 10;
+        let rdata_end =
+            rdata_offset
+                .checked_add(rdata_length)
+                .ok_or(DnsWireError::TruncatedField {
+                    field: "RDATA",
+                    offset: rdata_offset,
+                })?;
+        let rdata = message
+            .get(rdata_offset..rdata_end)
+            .ok_or(DnsWireError::TruncatedField {
+                field: "RDATA",
+                offset: rdata_offset,
+            })?;
+        let value = decode_rdata(message, type_code, rdata_offset, rdata_end, rdata, limits)?;
+        records.push(DnsRecord {
+            owner,
+            class,
+            ttl,
+            value,
+        });
+        offset = rdata_end;
+    }
+    Ok((records, offset))
+}
+
+fn decode_rdata(
+    message: &[u8],
+    type_code: u16,
+    offset: usize,
+    end: usize,
+    rdata: &[u8],
+    limits: DnsLimits,
+) -> Result<DnsRecordValue, DnsWireError> {
+    let invalid = |message: &str| DnsWireError::InvalidRdata {
+        record_type: type_code,
+        offset,
+        message: message.to_owned(),
+    };
+    let exact_name = |start| -> Result<String, DnsWireError> {
+        let (name, next) = decode_name(message, start, limits)?;
+        if next != end {
+            return Err(invalid("name does not consume the declared RDATA"));
+        }
+        Ok(name)
+    };
+    match type_code {
+        1 => {
+            let bytes: [u8; 4] = rdata
+                .try_into()
+                .map_err(|_| invalid("A RDATA must be 4 bytes"))?;
+            Ok(DnsRecordValue::A(Ipv4Addr::from(bytes)))
+        }
+        2 => Ok(DnsRecordValue::Ns(exact_name(offset)?)),
+        5 => Ok(DnsRecordValue::Cname(exact_name(offset)?)),
+        6 => {
+            let (primary_name_server, next) = decode_name(message, offset, limits)?;
+            let (responsible_mailbox, next) = decode_name(message, next, limits)?;
+            if next.checked_add(20) != Some(end) {
+                return Err(invalid("SOA RDATA must end with five 32-bit integers"));
+            }
+            Ok(DnsRecordValue::Soa {
+                primary_name_server,
+                responsible_mailbox,
+                serial: read_u32(message, next, "SOA serial")?,
+                refresh: read_u32(message, next + 4, "SOA refresh")?,
+                retry: read_u32(message, next + 8, "SOA retry")?,
+                expire: read_u32(message, next + 12, "SOA expire")?,
+                minimum: read_u32(message, next + 16, "SOA minimum")?,
+            })
+        }
+        12 => Ok(DnsRecordValue::Ptr(exact_name(offset)?)),
+        15 => {
+            if rdata.len() < 3 {
+                return Err(invalid("MX RDATA is shorter than preference plus name"));
+            }
+            let preference = read_u16(message, offset, "MX preference")?;
+            let (exchange, next) = decode_name(message, offset + 2, limits)?;
+            if next != end {
+                return Err(invalid("MX name does not consume the declared RDATA"));
+            }
+            Ok(DnsRecordValue::Mx {
+                preference,
+                exchange,
+            })
+        }
+        16 => {
+            let mut cursor = 0usize;
+            let mut strings = Vec::new();
+            let mut total = 0usize;
+            while cursor < rdata.len() {
+                if strings.len() >= limits.max_txt_strings {
+                    return Err(DnsWireError::TxtStringLimit {
+                        limit: limits.max_txt_strings,
+                    });
+                }
+                let length = usize::from(rdata[cursor]);
+                cursor += 1;
+                let string = rdata
+                    .get(cursor..cursor.saturating_add(length))
+                    .ok_or_else(|| invalid("TXT character-string exceeds declared RDATA"))?;
+                total = total
+                    .checked_add(length)
+                    .ok_or(DnsWireError::TxtByteLimit {
+                        limit: limits.max_txt_bytes,
+                    })?;
+                if total > limits.max_txt_bytes {
+                    return Err(DnsWireError::TxtByteLimit {
+                        limit: limits.max_txt_bytes,
+                    });
+                }
+                strings.push(Bytes::copy_from_slice(string));
+                cursor += length;
+            }
+            Ok(DnsRecordValue::Txt(strings))
+        }
+        28 => {
+            let bytes: [u8; 16] = rdata
+                .try_into()
+                .map_err(|_| invalid("AAAA RDATA must be 16 bytes"))?;
+            Ok(DnsRecordValue::Aaaa(Ipv6Addr::from(bytes)))
+        }
+        33 => {
+            if rdata.len() < 7 {
+                return Err(invalid(
+                    "SRV RDATA is shorter than priority, weight, port, and name",
+                ));
+            }
+            let priority = read_u16(message, offset, "SRV priority")?;
+            let weight = read_u16(message, offset + 2, "SRV weight")?;
+            let port = read_u16(message, offset + 4, "SRV port")?;
+            let (target, next) = decode_name(message, offset + 6, limits)?;
+            if next != end {
+                return Err(invalid("SRV name does not consume the declared RDATA"));
+            }
+            Ok(DnsRecordValue::Srv {
+                priority,
+                weight,
+                port,
+                target,
+            })
+        }
+        _ => Ok(DnsRecordValue::Unknown {
+            type_code,
+            rdata: Bytes::copy_from_slice(rdata),
+        }),
+    }
+}
+
+struct RelevantRecords {
+    answers: Vec<DnsRecord>,
+    authorities: Vec<DnsRecord>,
+    additionals: Vec<DnsRecord>,
+    rejected_records: Vec<DnsRejectedRecord>,
+    rejected_record_count: usize,
+}
+
+fn filter_relevant_records(
+    query_name: &str,
+    query_type: DnsQueryType,
+    answers: Vec<DnsRecord>,
+    authorities: Vec<DnsRecord>,
+    additionals: Vec<DnsRecord>,
+    rejected_limit: usize,
+) -> RelevantRecords {
+    let mut relevant_names = vec![query_name.to_owned()];
+    let mut accepted_answers = vec![false; answers.len()];
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for (index, record) in answers.iter().enumerate() {
+            if record.class != DNS_CLASS_IN || !relevant_names.contains(&record.owner) {
+                continue;
+            }
+            let type_code = record.value.type_code();
+            if type_code == DnsQueryType::Cname.code() {
+                accepted_answers[index] = true;
+                if let DnsRecordValue::Cname(target) = &record.value {
+                    if !relevant_names.contains(target) {
+                        relevant_names.push(target.clone());
+                        changed = true;
+                    }
+                }
+            } else if query_type == DnsQueryType::Any || type_code == query_type.code() {
+                accepted_answers[index] = true;
+            }
+        }
+    }
+
+    let mut references = Vec::new();
+    let mut accepted_authorities = vec![false; authorities.len()];
+    for (index, record) in authorities.iter().enumerate() {
+        let relevant_owner = relevant_names
+            .iter()
+            .any(|name| is_same_or_ancestor(&record.owner, name));
+        if record.class == DNS_CLASS_IN
+            && relevant_owner
+            && matches!(
+                record.value,
+                DnsRecordValue::Ns(_) | DnsRecordValue::Soa { .. }
+            )
+        {
+            accepted_authorities[index] = true;
+        }
+    }
+    for (index, record) in answers.iter().enumerate() {
+        if accepted_answers[index] {
+            if let Some(name) = record.value.referenced_name() {
+                push_unique(&mut references, name);
+            }
+        }
+    }
+    for (index, record) in authorities.iter().enumerate() {
+        if accepted_authorities[index] {
+            if let Some(name) = record.value.referenced_name() {
+                push_unique(&mut references, name);
+            }
+        }
+    }
+    let accepted_additionals = additionals
+        .iter()
+        .map(|record| {
+            record.class == DNS_CLASS_IN
+                && references.contains(&record.owner)
+                && matches!(record.value, DnsRecordValue::A(_) | DnsRecordValue::Aaaa(_))
+        })
+        .collect::<Vec<_>>();
+
+    let mut rejected_records = Vec::new();
+    let mut rejected_record_count = 0usize;
+    let mut reject = |section: DnsSection, index: usize, record: &DnsRecord, reason: &str| {
+        rejected_record_count += 1;
+        if rejected_records.len() < rejected_limit {
+            rejected_records.push(DnsRejectedRecord {
+                section,
+                index,
+                owner: record.owner.clone(),
+                type_code: record.value.type_code(),
+                reason: reason.to_owned(),
+            });
+        }
+    };
+    for (index, record) in answers.iter().enumerate() {
+        if !accepted_answers[index] {
+            reject(
+                DnsSection::Answer,
+                index,
+                record,
+                rejection_reason(
+                    record,
+                    "record owner/type is unrelated to the validated question or CNAME chain",
+                ),
+            );
+        }
+    }
+    for (index, record) in authorities.iter().enumerate() {
+        if !accepted_authorities[index] {
+            reject(
+                DnsSection::Authority,
+                index,
+                record,
+                rejection_reason(
+                    record,
+                    "authority is not an IN-class SOA/NS ancestor of the validated question",
+                ),
+            );
+        }
+    }
+    for (index, record) in additionals.iter().enumerate() {
+        if !accepted_additionals[index] {
+            reject(
+                DnsSection::Additional,
+                index,
+                record,
+                rejection_reason(
+                    record,
+                    "additional record is not IN-class address glue referenced by accepted data",
+                ),
+            );
+        }
+    }
+
+    RelevantRecords {
+        answers: answers
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, record)| accepted_answers[index].then_some(record))
+            .collect(),
+        authorities: authorities
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, record)| accepted_authorities[index].then_some(record))
+            .collect(),
+        additionals: additionals
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, record)| accepted_additionals[index].then_some(record))
+            .collect(),
+        rejected_records,
+        rejected_record_count,
+    }
+}
+
+fn rejection_reason<'a>(record: &DnsRecord, default: &'a str) -> &'a str {
+    if record.class != DNS_CLASS_IN {
+        "record class is not IN"
+    } else if record.value.type_code() == DNS_TYPE_OPT {
+        "EDNS OPT metadata is not accepted as question data"
+    } else {
+        default
+    }
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|existing| existing == value) {
+        values.push(value.to_owned());
+    }
+}
+
+fn is_same_or_ancestor(zone: &str, name: &str) -> bool {
+    zone == "."
+        || zone == name
+        || name
+            .strip_suffix(zone)
+            .is_some_and(|prefix| prefix.ends_with('.'))
+}
+
+pub const fn response_code_name(code: u8) -> &'static str {
+    match code {
+        0 => "no_error",
+        1 => "format_error",
+        2 => "server_failure",
+        3 => "name_error",
+        4 => "not_implemented",
+        5 => "refused",
+        6 => "yx_domain",
+        7 => "yx_rrset",
+        8 => "nx_rrset",
+        9 => "not_authoritative",
+        10 => "not_zone",
+        _ => "unknown",
+    }
+}
+
+/// Pure, protocol-aware classification of one decoded frame against an exact
+/// DNS probe. `None` means the frame has no structural relationship to the
+/// request. A reverse-tuple frame with invalid integrity remains typed decode
+/// failure evidence, but can never become an accepted DNS response.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DnsResponseClassification {
+    Response(ValidatedDnsResponse),
+    Unrelated { reason: String },
+    DecodeFailure { reason: String },
+    NetworkFailure { reason: String },
+}
+
+impl DnsResponseClassification {
+    fn rank(&self) -> u8 {
+        match self {
+            Self::Response(_) => 4,
+            Self::NetworkFailure { .. } => 3,
+            Self::DecodeFailure { .. } => 2,
+            Self::Unrelated { .. } => 1,
+        }
+    }
+}
+
+pub fn classify_dns_response(
+    registry: &ProtocolRegistry,
+    probe: &DnsProbe,
+    sent: &Packet,
+    response: &DecodedPacket,
+    limits: DnsLimits,
+) -> Option<DnsResponseClassification> {
+    if direct_udp_match(registry, sent, &response.packet) {
+        if response.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
+        }) {
+            return Some(DnsResponseClassification::DecodeFailure {
+                reason: "correlated UDP response has an invalid checksum diagnostic".to_owned(),
+            });
+        }
+        let Some(payload) = raw_payload(&response.packet) else {
+            return Some(DnsResponseClassification::DecodeFailure {
+                reason: "correlated UDP response has no complete DNS payload".to_owned(),
+            });
+        };
+        return Some(
+            match decode_dns_response(
+                &payload,
+                &probe.query_name,
+                probe.query_type,
+                probe.transaction_id,
+                limits,
+            ) {
+                Ok(validated) => DnsResponseClassification::Response(validated),
+                Err(error) if error.is_unrelated() => DnsResponseClassification::Unrelated {
+                    reason: error.to_string(),
+                },
+                Err(error) => DnsResponseClassification::DecodeFailure {
+                    reason: error.to_string(),
+                },
+            },
+        );
+    }
+
+    probe::observe(registry, ProbeTransport::Udp, sent, response).and_then(|observation| {
+        observation.correlation.is_network_failure().then(|| {
+            DnsResponseClassification::NetworkFailure {
+                reason: observation.reason.to_owned(),
+            }
+        })
+    })
+}
+
+fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Packet) -> bool {
+    let Some(udp) = request
+        .iter()
+        .find(|layer| layer.protocol_id().as_str() == "udp")
+    else {
+        return false;
+    };
+    registry
+        .matcher(&udp.protocol_id())
+        .is_some_and(|matcher| matcher.matches(request, response).matched)
+}
+
+fn raw_payload(packet: &Packet) -> Option<Bytes> {
+    match packet
+        .iter()
+        .find(|layer| layer.protocol_id().as_str() == "raw")?
+        .field("bytes")?
+    {
+        FieldValue::Bytes(bytes) => Some(bytes),
+        _ => None,
+    }
+}

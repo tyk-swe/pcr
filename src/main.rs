@@ -3,6 +3,13 @@
 
 #![forbid(unsafe_code)]
 
+mod cli;
+mod cli_api;
+
+pub(crate) use cli_api::{
+    capture, client, error, net, output, packet, protocol, workflow, workflow_api,
+};
+
 fn main() -> std::process::ExitCode {
-    packetcraftr::run_cli_entrypoint()
+    cli::run_entrypoint()
 }

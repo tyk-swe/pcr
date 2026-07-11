@@ -7,6 +7,15 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use packetcraftr::{
+    capture::{Format as CaptureFormat, Frame, LinkType, Reader, Writer},
+    packet::{
+        build::{Builder, Context as BuildContext, Options as BuildOptions},
+        expression::{parse as parse_packet_expression, Options as ExpressionOptions},
+    },
+    protocol::builtin::registry as default_registry,
+};
+
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn binary() -> Command {
@@ -36,12 +45,11 @@ fn temp_path(label: &str) -> PathBuf {
 }
 
 fn write_capture(frames: &[&[u8]], malformed_tail: bool) -> PathBuf {
-    let mut writer =
-        packetcraftr::CaptureWriter::pcap(Vec::new(), packetcraftr::LinkType::ETHERNET).unwrap();
+    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
     for (index, bytes) in frames.iter().enumerate() {
-        let frame = packetcraftr::CapturedFrame::new(
+        let frame = Frame::new(
             UNIX_EPOCH + std::time::Duration::from_secs(index as u64),
-            packetcraftr::LinkType::ETHERNET,
+            LinkType::ETHERNET,
             bytes.to_vec(),
         )
         .unwrap();
@@ -56,12 +64,12 @@ fn write_capture(frames: &[&[u8]], malformed_tail: bool) -> PathBuf {
     path
 }
 
-fn write_link_capture(link_type: packetcraftr::LinkType, frames: &[&[u8]]) -> PathBuf {
-    let mut writer = packetcraftr::CaptureWriter::pcap(Vec::new(), link_type).unwrap();
+fn write_link_capture(link_type: LinkType, frames: &[&[u8]]) -> PathBuf {
+    let mut writer = Writer::pcap(Vec::new(), link_type).unwrap();
     for (index, bytes) in frames.iter().enumerate() {
         writer
             .write_frame(
-                &packetcraftr::CapturedFrame::new(
+                &Frame::new(
                     UNIX_EPOCH + std::time::Duration::from_millis(index as u64 * 10),
                     link_type,
                     bytes.to_vec(),
@@ -78,21 +86,17 @@ fn write_link_capture(link_type: packetcraftr::LinkType, frames: &[&[u8]]) -> Pa
 fn write_public_raw_capture() -> PathBuf {
     use std::sync::Arc;
 
-    let registry = Arc::new(packetcraftr::default_registry().unwrap());
-    let packet = packetcraftr::core::parse_packet_expression(
+    let registry = Arc::new(default_registry().unwrap());
+    let packet = parse_packet_expression(
         "ipv4(src=192.0.2.1,dst=8.8.8.8,identification=1)/udp(sport=40000,dport=9)/raw(text=hi)",
         &registry,
-        packetcraftr::ExpressionOptions::default(),
+        ExpressionOptions::default(),
     )
     .unwrap();
-    let built = packetcraftr::Builder::new(registry)
-        .build(
-            packet,
-            packetcraftr::BuildContext::default(),
-            packetcraftr::BuildOptions::default(),
-        )
+    let built = Builder::new(registry)
+        .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    write_link_capture(packetcraftr::LinkType::RAW, &[built.bytes.as_ref()])
+    write_link_capture(LinkType::RAW, &[built.bytes.as_ref()])
 }
 
 fn decode_output_hex(output: &[u8]) -> Vec<u8> {
@@ -222,7 +226,7 @@ fn exact_bytes_agree_across_json_raw_hex_ndjson_pcap_and_pcapng() {
     assert!(hex.status.success());
     assert_eq!(decode_output_hex(&hex.stdout), expected);
 
-    let path = write_link_capture(packetcraftr::LinkType::RAW, &[&expected]);
+    let path = write_link_capture(LinkType::RAW, &[&expected]);
     let read_hex = binary()
         .args(["--output", "hex", "read"])
         .arg(&path)
@@ -267,8 +271,7 @@ fn exact_bytes_agree_across_json_raw_hex_ndjson_pcap_and_pcapng() {
             "{format}: {}",
             String::from_utf8_lossy(&output.stderr)
         );
-        let mut reader =
-            packetcraftr::CaptureReader::new(std::io::Cursor::new(output.stdout)).unwrap();
+        let mut reader = Reader::new(std::io::Cursor::new(output.stdout)).unwrap();
         let frame = reader.next_frame().unwrap().unwrap();
         assert_eq!(frame.bytes.as_ref(), expected, "{format}");
         assert_eq!(frame.captured_length as usize, expected.len(), "{format}");
@@ -783,8 +786,8 @@ fn read_exposes_bounded_capture_file_writers() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let mut reader = packetcraftr::CaptureReader::new(std::io::Cursor::new(output.stdout)).unwrap();
-    assert_eq!(reader.format(), packetcraftr::CaptureFileFormat::PcapNg);
+    let mut reader = Reader::new(std::io::Cursor::new(output.stdout)).unwrap();
+    assert_eq!(reader.format(), CaptureFormat::PcapNg);
     assert_eq!(reader.next_frame().unwrap().unwrap().bytes.as_ref(), b"one");
     assert_eq!(reader.next_frame().unwrap().unwrap().bytes.as_ref(), b"two");
     assert!(reader.next_frame().unwrap().is_none());
@@ -826,7 +829,7 @@ fn empty_replay_is_a_typed_aggregate_without_live_side_effects() {
 
 #[test]
 fn replay_rejects_unsupported_roots_and_public_targets_before_interface_io() {
-    let unsupported = write_link_capture(packetcraftr::LinkType::NULL, &[b"null"]);
+    let unsupported = write_link_capture(LinkType::NULL, &[b"null"]);
     let output = binary()
         .args([
             "--output",
@@ -1039,7 +1042,7 @@ fn closed_stdout_is_cleanly_classified_for_every_output_family() {
     let bytes = vec![0u8; 1024 * 1024];
     let raw_path = temp_path("closed-stdout-raw");
     std::fs::write(&raw_path, &bytes).unwrap();
-    let capture_path = write_link_capture(packetcraftr::LinkType(147), &[&bytes]);
+    let capture_path = write_link_capture(LinkType(147), &[&bytes]);
 
     for format in ["json", "hex", "raw"] {
         let mut child = binary()

@@ -6,21 +6,25 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::{
-    scan, AuthorizedScanTarget, CapturedFrame, LinkType, ScanAddressFamily, ScanAuthorizationError,
-    ScanAuthorizer, ScanBatch, ScanBatchExecution, ScanClassification, ScanClock,
-    ScanExecutionError, ScanExecutor, ScanLimits, ScanProbeStatus, ScanRequest, ScanStats,
-    ScanTarget, ScanTransport,
+    capture::{Frame, LinkType},
+    protocol::{builtin::registry, network::Ipv4},
+    workflow::{
+        clock::Clock,
+        scan::{
+            run, Batch, Classification, Execution, ExecutionError, Executor, Limits, ProbeStatus,
+            Request, Transport,
+        },
+        target::{AuthorizationError, Authorized, Authorizer, Target},
+        AddressFamily, Stats,
+    },
 };
 
 struct LabAuthorizer;
 
-impl ScanAuthorizer for LabAuthorizer {
-    fn resolve_and_authorize(
-        &mut self,
-        target: &ScanTarget,
-    ) -> Result<AuthorizedScanTarget, ScanAuthorizationError> {
-        assert_eq!(target, &ScanTarget::Hostname("device.lab".to_owned()));
-        Ok(AuthorizedScanTarget {
+impl Authorizer for LabAuthorizer {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, AuthorizationError> {
+        assert_eq!(target, &Target::Hostname("device.lab".to_owned()));
+        Ok(Authorized {
             declared: "device.lab".to_owned(),
             addresses: vec![IpAddr::V4(Ipv4Addr::new(192, 168, 56, 10))],
         })
@@ -30,7 +34,7 @@ impl ScanAuthorizer for LabAuthorizer {
         &mut self,
         packets: u64,
         maximum_wire_bytes: u64,
-    ) -> Result<(), ScanAuthorizationError> {
+    ) -> Result<(), AuthorizationError> {
         assert_eq!(packets, 1);
         assert!(maximum_wire_bytes >= 40);
         Ok(())
@@ -39,26 +43,26 @@ impl ScanAuthorizer for LabAuthorizer {
 
 struct TimeoutExecutor;
 
-impl ScanExecutor for TimeoutExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+impl Executor for TimeoutExecutor {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, ExecutionError> {
         assert_eq!(batch.probes.len(), 1);
         let probe = &batch.probes[0];
         let mut packet = probe.packet();
-        packet.get_mut::<packetcraftr::Ipv4>().unwrap().source = Ipv4Addr::new(192, 168, 56, 1);
-        let sent = CapturedFrame::new(
+        packet.get_mut::<Ipv4>().unwrap().source = Ipv4Addr::new(192, 168, 56, 1);
+        let sent = Frame::new(
             UNIX_EPOCH + Duration::from_secs(1),
             LinkType::RAW,
             vec![0x45],
         )
         .unwrap();
-        Ok(ScanBatchExecution {
+        Ok(Execution {
             sent: vec![packet],
             sent_evidence: vec![sent],
             responses: Vec::new(),
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
-            stats: ScanStats {
+            stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: 40,
@@ -71,7 +75,7 @@ impl ScanExecutor for TimeoutExecutor {
 
 struct NoopClock;
 
-impl ScanClock for NoopClock {
+impl Clock for NoopClock {
     type Error = Infallible;
 
     fn sleep(&mut self, _delay: Duration) -> Result<(), Self::Error> {
@@ -81,18 +85,18 @@ impl ScanClock for NoopClock {
 
 #[test]
 fn downstream_code_can_inject_scan_authorization_execution_and_timing() {
-    let request = ScanRequest {
-        target: ScanTarget::Hostname("device.lab".to_owned()),
-        transport: ScanTransport::Tcp,
-        address_family: ScanAddressFamily::Ipv4,
+    let request = Request {
+        target: Target::Hostname("device.lab".to_owned()),
+        transport: Transport::Tcp,
+        address_family: AddressFamily::Ipv4,
         ports: vec![443],
         attempts: 1,
         timeout: Duration::from_millis(100),
         probes_per_second: Some(10),
-        limits: ScanLimits::default(),
+        limits: Limits::default(),
     };
-    let registry = packetcraftr::default_registry().unwrap();
-    let result = scan(
+    let registry = registry().unwrap();
+    let result = run(
         &request,
         &mut LabAuthorizer,
         &registry,
@@ -104,13 +108,7 @@ fn downstream_code_can_inject_scan_authorization_execution_and_timing() {
     assert_eq!(result.target, "device.lab");
     assert_eq!(result.endpoints.len(), 1);
     assert_eq!(result.endpoints[0].port, Some(443));
-    assert_eq!(
-        result.endpoints[0].classification,
-        ScanClassification::Timeout
-    );
-    assert_eq!(
-        result.endpoints[0].evidence[0].status,
-        ScanProbeStatus::Timeout
-    );
+    assert_eq!(result.endpoints[0].classification, Classification::Timeout);
+    assert_eq!(result.endpoints[0].evidence[0].status, ProbeStatus::Timeout);
     assert_eq!(result.stats.packets_completed, 1);
 }

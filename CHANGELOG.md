@@ -6,12 +6,24 @@
 
 - Reduced the repository to Rust code, tests, schemas, compact documentation,
   and one cross-platform CI workflow.
+- Consolidated the library and binary into one `packetcraftr` Cargo package,
+  removing the four internal packages.
+- Redesigned the Rust API around the canonical `packet`, `protocol`, `capture`,
+  `net`, `session`, `client`, `workflow`, `output`, and `error` namespaces. This
+  is an intentional breaking Rust API change.
+- Split packet capture, live networking, client, workflow, and output code by
+  responsibility and enforced the domain dependency direction in tests.
+- Kept CLI commands, flags, exit-code behavior, feature behavior, schemas,
+  serialized output, packet bytes, and runtime ordering unchanged.
 
 ### Removed
 
 - Removed release and qualification machinery, generated API snapshots,
   helper tooling, fixture provenance policy, duplicated package files, and
   redundant documentation.
+- Removed the internal package facades, flat root exports, legacy `core`,
+  `protocols`, `io`, and `tools` module paths, and the library-owned CLI entry
+  point.
 
 ## 0.2.0 - 2026-07-11
 

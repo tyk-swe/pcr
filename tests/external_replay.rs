@@ -6,19 +6,21 @@ use std::io::Cursor;
 use std::time::{Duration, SystemTime};
 
 use packetcraftr::{
-    replay_capture, CaptureReader, CaptureWriter, CapturedFrame, InterfaceId, IoSendReport,
-    LinkMode, LinkType, LiveIoError, ReplayAuthorizationError, ReplayAuthorizer, ReplayClock,
-    ReplayLimits, ReplayOptions, ReplayTiming, ReplayTransmission, ReplayTransmitter,
+    capture::{Frame, LinkType, Reader, Writer},
+    net::{interface::Id, link::Mode, transmit::Report, Error as LiveIoError},
+    workflow::{
+        clock::Clock as ReplayClock,
+        replay::{
+            run, AuthorizationError, Authorizer as ReplayAuthorizer, Limits, Options, Timing,
+            Transmission, Transmitter as ReplayTransmitter,
+        },
+    },
 };
 
 struct Authorizer;
 
 impl ReplayAuthorizer for Authorizer {
-    fn authorize(
-        &mut self,
-        _frame: &CapturedFrame,
-        _mode: LinkMode,
-    ) -> Result<(), ReplayAuthorizationError> {
+    fn authorize(&mut self, _frame: &Frame, _mode: Mode) -> Result<(), AuthorizationError> {
         Ok(())
     }
 }
@@ -28,22 +30,22 @@ struct Transmitter;
 impl ReplayTransmitter for Transmitter {
     fn validate_interface(
         &mut self,
-        interface: &InterfaceId,
-        _mode: LinkMode,
-        _frame: &CapturedFrame,
-    ) -> Result<InterfaceId, LiveIoError> {
+        interface: &Id,
+        _mode: Mode,
+        _frame: &Frame,
+    ) -> Result<Id, LiveIoError> {
         Ok(interface.clone())
     }
 
     fn transmit(
         &mut self,
-        interface: &InterfaceId,
-        _mode: LinkMode,
-        frame: &CapturedFrame,
-    ) -> Result<ReplayTransmission, LiveIoError> {
-        Ok(ReplayTransmission {
+        interface: &Id,
+        _mode: Mode,
+        frame: &Frame,
+    ) -> Result<Transmission, LiveIoError> {
+        Ok(Transmission {
             interface: interface.clone(),
-            report: IoSendReport {
+            report: Report {
                 bytes_sent: frame.bytes.len(),
                 wire_bytes: Some(frame.bytes.clone()),
             },
@@ -66,24 +68,24 @@ impl ReplayClock for Clock {
 #[test]
 fn downstream_code_can_inject_replay_policy_timing_and_transmission() {
     let original =
-        CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![0, 1, 2, 3]).unwrap();
-    let mut writer = CaptureWriter::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![0, 1, 2, 3]).unwrap();
+    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
     writer.write_frame(&original).unwrap();
-    let mut reader = CaptureReader::new(Cursor::new(writer.into_inner())).unwrap();
-    let options = ReplayOptions {
-        interface: InterfaceId {
+    let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+    let options = Options {
+        interface: Id {
             name: "injected0".to_owned(),
             index: 1,
         },
-        link_mode: LinkMode::Auto,
-        timing: ReplayTiming::Immediate,
-        limits: ReplayLimits::default(),
+        link_mode: Mode::Auto,
+        timing: Timing::Immediate,
+        limits: Limits::default(),
     };
     let mut authorizer = Authorizer;
     let mut transmitter = Transmitter;
     let mut clock = Clock::default();
     let mut evidence = Vec::new();
-    let summary = replay_capture(
+    let summary = run(
         &mut reader,
         &options,
         &mut authorizer,

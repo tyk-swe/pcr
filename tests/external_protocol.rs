@@ -6,15 +6,33 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
-use packetcraftr::core::{
-    parse_packet_expression, BuildContext, BuildOptions, CodecError, DecodedLayerValue,
-    Discriminator, EncodedLayer, FieldError, FieldKind, FieldSchema, FieldValue, Layer, LayerCodec,
-    LayerDecodeContext, LayerEncodeContext, LayerSchema, ProtocolId,
-};
 use packetcraftr::{
-    fuzz, BuildError, Builder, BuiltinProtocols, DecodeError, Dissector, Ethernet, ExpressionError,
-    ExpressionOptions, FuzzRequest, FuzzStrategy, FuzzTarget, Packet, ProtocolModule,
-    ProtocolRegistry, Raw, RegistryBuilder, RegistryError, WireValue,
+    packet::{
+        build::{Builder, Context as BuildContext, Error as BuildError, Options as BuildOptions},
+        codec::{
+            Codec as LayerCodec, DecodeContext as LayerDecodeContext, Decoded as DecodedLayerValue,
+            EncodeContext as LayerEncodeContext, Encoded as EncodedLayer, Error as CodecError,
+        },
+        decode::{Decoder as Dissector, Error as DecodeError},
+        expression::{
+            parse as parse_packet_expression, Error as ExpressionError,
+            Options as ExpressionOptions,
+        },
+        field::{
+            Error as FieldError, Kind as FieldKind, Schema as FieldSchema, Value as FieldValue,
+            Wire as WireValue,
+        },
+        layer::{Id as ProtocolId, Layer, Raw, Schema as LayerSchema},
+        registry::{
+            Builder as RegistryBuilder, Discriminator, Error as RegistryError,
+            Module as ProtocolModule, Registry as ProtocolRegistry,
+        },
+        Packet,
+    },
+    protocol::{builtin::Module as BuiltinProtocols, link::Ethernet},
+    workflow::fuzz::{
+        run as fuzz, Request as FuzzRequest, Strategy as FuzzStrategy, Target as FuzzTarget,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]

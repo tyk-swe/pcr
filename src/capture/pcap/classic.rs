@@ -1,0 +1,87 @@
+fn read_pcap_header<R: Read>(
+    reader: &mut R,
+    endianness: Endianness,
+    precision: TimestampPrecision,
+) -> Result<ReaderState, Error> {
+    let mut remaining = [0_u8; PCAP_GLOBAL_HEADER_LEN - 4];
+    read_exact_counted(reader, &mut remaining, "pcap global header")?;
+    let major = decode_u16(endianness, &remaining[0..2]);
+    let minor = decode_u16(endianness, &remaining[2..4]);
+    if (major, minor) != (2, 4) {
+        return Err(Error::UnsupportedVersion {
+            format: Format::Pcap,
+            major,
+            minor,
+        });
+    }
+    let snap_len = decode_u32(endianness, &remaining[12..16]);
+    // The classic-PCAP network word uses its low 16 bits for LINKTYPE and may
+    // carry standardized FCS metadata in the high bits. Do not misclassify a
+    // flagged Ethernet capture as an unknown 32-bit DLT.
+    let network_word = decode_u32(endianness, &remaining[16..20]);
+    let link_type = LinkType(network_word & 0xffff);
+    Ok(ReaderState::Pcap {
+        endianness,
+        precision,
+        snap_len,
+        link_type,
+    })
+}
+
+fn read_next_pcap_frame<R: Read>(
+    reader: &mut R,
+    endianness: Endianness,
+    precision: TimestampPrecision,
+    snap_len: u32,
+    link_type: LinkType,
+    max_size: usize,
+) -> Result<Option<Frame>, Error> {
+    let mut header = [0_u8; PCAP_RECORD_HEADER_LEN];
+    if !read_exact_or_eof(reader, &mut header, "pcap packet header")? {
+        return Ok(None);
+    }
+
+    let seconds = decode_u32(endianness, &header[0..4]);
+    let fraction = decode_u32(endianness, &header[4..8]);
+    let captured_length = decode_u32(endianness, &header[8..12]);
+    let original_length = decode_u32(endianness, &header[12..16]);
+    let denominator = match precision {
+        TimestampPrecision::Microseconds => 1_000_000,
+        TimestampPrecision::Nanoseconds => 1_000_000_000,
+    };
+    if fraction >= denominator {
+        return Err(Error::InvalidTimestampFraction {
+            fraction,
+            denominator,
+        });
+    }
+    validate_declared_lengths(captured_length, original_length, max_size, "pcap packet")?;
+    if snap_len != 0 && captured_length > snap_len {
+        return Err(Error::InvalidData {
+            format: Format::Pcap,
+            reason: "captured packet exceeds the file snap length",
+        });
+    }
+
+    let mut bytes = vec![0_u8; captured_length as usize];
+    read_exact_counted(reader, &mut bytes, "pcap packet data")?;
+    let nanoseconds = match precision {
+        TimestampPrecision::Microseconds => fraction * 1_000,
+        TimestampPrecision::Nanoseconds => fraction,
+    };
+    let timestamp = UNIX_EPOCH
+        .checked_add(Duration::new(u64::from(seconds), nanoseconds))
+        .ok_or(Error::TimestampOutOfRange {
+            format: Format::Pcap,
+        })?;
+
+    Ok(Some(Frame {
+        timestamp,
+        captured_length,
+        original_length,
+        link_type,
+        interface: None,
+        direction: None,
+        bytes: Bytes::from(bytes),
+    }))
+}

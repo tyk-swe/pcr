@@ -48,6 +48,9 @@ native requirements. JSON/YAML packet files use
 [`packetcraftr.packet/v1`](../schemas/packetcraftr.packet.v1.schema.json).
 Machine-readable results use
 [`packetcraftr.output/v1`](../schemas/packetcraftr.output.v1.schema.json).
+The package architecture does not alter command names, flags, exit-code
+behavior, packet bytes, field ordering, omission rules, or either versioned
+schema identifier.
 
 Supported protocol layers are Ethernet, VLAN (802.1Q and 802.1ad), ARP, IPv4,
 IPv6, IPv6 hop-by-hop/destination/fragment/SRH extensions, ICMPv4, ICMPv6,
@@ -57,29 +60,39 @@ malformed data. Capture roots include DLT/LINKTYPE 0, 1, 12, 101, 108, 113,
 
 ## Rust API
 
-Applications normally use the root `packetcraftr` crate. The workspace crates
-separate the packet model, protocols, I/O, and session stages but are not
-independent distribution units.
+The single `packetcraftr` package provides a library and binary. Its public Rust
+API is grouped by domain: `packet`, `protocol`, `capture`, `net`, `session`,
+`client`, `workflow`, `output`, and `error`. Types use concise names inside
+their owning namespace; for example, build options are
+`packet::build::Options` and an offline capture record is `capture::Frame`.
 
 ```rust
-use packetcraftr::{default_registry, BuildContext, BuildOptions, Builder, Packet, Raw};
 use std::sync::Arc;
 
-let registry = Arc::new(default_registry()?);
-let mut packet = Packet::new();
-packet.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
-let built = Builder::new(registry).build(
-    packet,
-    BuildContext::default(),
-    BuildOptions::default(),
+use packetcraftr::{
+    packet::{build, layer::Raw, Packet},
+    protocol,
+};
+
+let registry = Arc::new(protocol::builtin::registry()?);
+let mut value = Packet::new();
+value.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
+let built = build::Builder::new(registry).build(
+    value,
+    build::Context::default(),
+    build::Options::default(),
 )?;
 assert_eq!(built.bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef]);
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-`ProtocolRegistry::builder()` accepts application-defined codecs and matchers.
-I/O traits accept injected route, neighbor, capture, and transmission providers,
-so portable tests do not need platform handles or network privileges.
+Applications extend packet handling through `packet::codec::Codec`,
+`packet::registry::Module`, and `packet::matcher::Matcher`. The registry at
+`protocol::builtin::registry()` installs the built-in protocols in a
+deterministic order. Provider traits under `net::route`, `net::neighbor`,
+`net::capture`, and `net::transmit` support portable tests without platform
+handles or network privileges. Reassembly under `session::fragment` and
+`session::tcp` remains explicit and caller-owned.
 
 ## Safety
 
@@ -97,11 +110,11 @@ so portable tests do not need platform handles or network privileges.
 The CI-equivalent checks are:
 
 ```console
-cargo fmt --all -- --check
-cargo check --locked --workspace --all-targets --no-default-features
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
+cargo fmt -- --check
+cargo check --locked --all-targets --no-default-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
 ```
 
 All-feature Linux builds need the libpcap development package. The same checks
-run on Linux, macOS, and Windows in CI.
+run on Linux x86-64, macOS x86-64 and arm64, and Windows MSVC in CI.

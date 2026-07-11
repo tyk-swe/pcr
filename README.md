@@ -4,7 +4,8 @@
 
 PacketcraftR is a Rust library and CLI for building, dissecting, capturing, and
 testing network packets. Use live networking only on systems and networks you
-own or are authorized to test.
+own or are authorized to test. One Cargo package provides both the
+`packetcraftr` library and binary.
 
 ## Install
 
@@ -37,23 +38,40 @@ packetcraftr read traffic.pcapng --output ndjson
 Run `packetcraftr --help` for the full command surface.
 
 ```rust
-use packetcraftr::{Packet, Raw};
+use std::sync::Arc;
 
-let mut packet = Packet::new();
-packet.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
-assert_eq!(packet.get::<Raw>().unwrap().bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef]);
+use packetcraftr::{
+    packet::{build, layer::Raw, Packet},
+    protocol,
+};
+
+let registry = Arc::new(protocol::builtin::registry()?);
+let mut value = Packet::new();
+value.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
+let built = build::Builder::new(registry).build(
+    value,
+    build::Context::default(),
+    build::Options::default(),
+)?;
+assert_eq!(built.bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef]);
+# Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
 See the [manual](docs/README.md), [changelog](CHANGELOG.md), and versioned
 [packet](schemas/packetcraftr.packet.v1.schema.json) and
 [output](schemas/packetcraftr.output.v1.schema.json) schemas.
 
+The Rust API is organized into domain namespaces. This API redesign does not
+change CLI commands, flags, exit-code behavior, packet bytes, or serialized
+output contracts.
+
 ## Development
 
 ```console
-cargo fmt --all -- --check
-cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-cargo test --locked --workspace --all-features
+cargo fmt -- --check
+cargo check --locked --all-targets --no-default-features
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo test --locked --all-features
 ```
 
 Licensed under [AGPL-3.0-only](LICENSE).

@@ -8,9 +8,21 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use packetcraftr::{
-    default_registry, BsdNull, BuildContext, BuildOptions, Builder, CaptureByteOrder,
-    CaptureReader, CapturedFrame, DecodeOptions, Dissector, DocumentFormat, Ipv4, LinkType,
-    PacketDocument, Raw, Udp,
+    capture::{Frame as CapturedFrame, LinkType, Reader as CaptureReader},
+    packet::{
+        build::{Builder, Context as BuildContext, Options as BuildOptions},
+        decode::{Decoder as Dissector, Options as DecodeOptions},
+        diagnostic::Diagnostic,
+        document::{Format as DocumentFormat, Packet as PacketDocument},
+        layer::Raw,
+        Packet,
+    },
+    protocol::{
+        builtin::registry as default_registry,
+        capture::{BsdNull, ByteOrder as CaptureByteOrder},
+        network::Ipv4,
+        transport::Udp,
+    },
 };
 
 type FrameCase = (
@@ -30,14 +42,14 @@ fn fixture(relative: &str) -> Vec<u8> {
     .unwrap()
 }
 
-fn layer_names(packet: &packetcraftr::Packet) -> Vec<String> {
+fn layer_names(packet: &Packet) -> Vec<String> {
     packet
         .iter()
         .map(|layer| layer.protocol_id().as_str().to_owned())
         .collect()
 }
 
-fn diagnostic_codes(diagnostics: &[packetcraftr::Diagnostic]) -> Vec<String> {
+fn diagnostic_codes(diagnostics: &[Diagnostic]) -> Vec<String> {
     diagnostics
         .iter()
         .map(|diagnostic| diagnostic.code.clone())

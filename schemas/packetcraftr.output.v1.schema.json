@@ -3404,6 +3404,9 @@
         },
         "overflow_events": {
           "$ref": "#/$defs/uint64"
+        },
+        "receiver_dropped_frames": {
+          "$ref": "#/$defs/uint64"
         }
       },
       "additionalProperties": false

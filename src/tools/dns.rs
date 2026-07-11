@@ -2302,6 +2302,10 @@ fn add_dns_stats(total: &mut DnsStats, value: &DnsStats, attempt: u32) -> Result
     add!(total.capture.dropped_frames, value.capture.dropped_frames);
     add!(total.capture.dropped_bytes, value.capture.dropped_bytes);
     add!(total.capture.overflow_events, value.capture.overflow_events);
+    add!(
+        total.capture.receiver_dropped_frames,
+        value.capture.receiver_dropped_frames
+    );
     Ok(())
 }
 

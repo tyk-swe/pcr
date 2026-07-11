@@ -379,6 +379,11 @@ impl SharedCapture {
             total,
             "dropped frames",
         )?;
+        increment(
+            &mut state.statistics.receiver_dropped_frames,
+            total,
+            "receiver-dropped frames",
+        )?;
         Ok(())
     }
 }
@@ -748,7 +753,12 @@ mod tests {
             .unwrap();
         let statistics = shared.lock().unwrap().statistics;
         assert_eq!(statistics.dropped_frames, 3);
+        assert_eq!(statistics.receiver_dropped_frames, 3);
         assert_eq!(statistics.overflow_events, 0);
+        assert_eq!(
+            statistics.evidence_completeness(),
+            crate::io::CaptureEvidenceCompleteness::Incomplete
+        );
     }
 
     #[test]

@@ -1869,6 +1869,7 @@ fn add_execution_stats(
     add_capture!(dropped_frames);
     add_capture!(dropped_bytes);
     add_capture!(overflow_events);
+    add_capture!(receiver_dropped_frames);
     Ok(())
 }
 

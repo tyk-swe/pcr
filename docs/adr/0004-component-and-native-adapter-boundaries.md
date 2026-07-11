@@ -40,7 +40,7 @@ Dependencies may only point rightward/downward in this list; components never de
 
 `Layer2Frame` and `Layer3Frame` have checked constructors and private fields. `TransmissionFrame` selects one of them from a materialized `LinkMode`; `DispatchPacketIo` sends each variant only to the corresponding provider. An unresolved `Auto` mode or mismatched constructor is a typed error. The high-level client submits the exact already-built bytes and never asks a backend to infer or synthesize a different envelope.
 
-Provider contracts are exported from `packetcraftr::io` and the root. The historical `packetcraftr::client::*` provider paths remain compatibility reexports during the alpha. This lets XOD-43 extract modules into synchronized crates without changing ordinary root imports.
+Provider contracts are exported from `packetcraftr::io` and the root. The historical `packetcraftr::client::*` provider paths remained compatibility reexports only through the extraction checkpoint and were removed at the beta API freeze. Ordinary root imports remain unchanged; module-qualified callers migrate to the owning `packetcraftr::io` path.
 
 ### Unsafe and FFI policy
 

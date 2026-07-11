@@ -19,12 +19,12 @@ pub use pcap::{
     DEFAULT_PCAPNG_METADATA_BLOCK_LIMIT,
 };
 pub use provider::{
-    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
-    DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceInfo,
-    InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LiveIoError,
-    PacketIo, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider, SystemLayer2Io,
-    SystemLayer3Io, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    MAX_CAPTURE_TIMEOUT,
+    CaptureEvidenceCompleteness, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits,
+    CaptureSession, CaptureStatistics, DispatchPacketIo, ExchangeIo, InterfaceAddress,
+    InterfaceFlags, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io,
+    Layer3Frame, Layer3Io, LiveIoError, PacketIo, SystemCaptureProvider, SystemCaptureSession,
+    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, TransmissionFrame,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
 };
 pub use route::{
     DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute,

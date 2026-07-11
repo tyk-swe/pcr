@@ -251,9 +251,19 @@ where
     }
 }
 
-/// Backend capture counters. Received counters include frames delivered to the
-/// owned capture session; dropped counters describe frames/bytes lost before
-/// delivery, and overflow events count distinct queue-overflow observations.
+/// Whether delivered capture evidence is known to include every observed
+/// frame within the configured capture scope.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureEvidenceCompleteness {
+    Complete,
+    Incomplete,
+}
+
+/// Backend capture counters. Received counters include frames accepted by the
+/// owned capture session. Dropped counters describe frames/bytes lost before
+/// delivery; receiver drops are the subset reported by the native capture
+/// source, and overflow events count distinct bounded-queue observations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CaptureStatistics {
     pub received_frames: u64,
@@ -261,6 +271,12 @@ pub struct CaptureStatistics {
     pub dropped_frames: u64,
     pub dropped_bytes: u64,
     pub overflow_events: u64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub receiver_dropped_frames: u64,
+}
+
+const fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 impl CaptureStatistics {
@@ -281,12 +297,50 @@ impl CaptureStatistics {
                 message: "dropped bytes were reported without a dropped frame".to_owned(),
             });
         }
+        if self.receiver_dropped_frames > self.dropped_frames {
+            return Err(LiveIoError::InvalidCaptureStatistics {
+                message: "receiver-dropped frames exceed total dropped frames".to_owned(),
+            });
+        }
         Ok(self)
     }
 
     /// Returns whether the backend reported any drop or queue overflow.
     pub fn has_loss(self) -> bool {
-        self.dropped_frames != 0 || self.dropped_bytes != 0 || self.overflow_events != 0
+        self.dropped_frames != 0
+            || self.dropped_bytes != 0
+            || self.overflow_events != 0
+            || self.receiver_dropped_frames != 0
+    }
+
+    /// Returns the evidence-completeness state derived from all public loss
+    /// counters. Callers should not infer completeness from diagnostics.
+    pub fn evidence_completeness(self) -> CaptureEvidenceCompleteness {
+        if self.has_loss() {
+            CaptureEvidenceCompleteness::Incomplete
+        } else {
+            CaptureEvidenceCompleteness::Complete
+        }
+    }
+
+    /// Converts incomplete evidence into its typed queue-loss or receiver-loss
+    /// error. Complete statistics return `None`.
+    pub fn evidence_loss_error(self) -> Option<LiveIoError> {
+        if !self.has_loss() {
+            None
+        } else if self.overflow_events != 0 {
+            Some(LiveIoError::CaptureQueueOverflow {
+                dropped_frames: self.dropped_frames,
+                dropped_bytes: self.dropped_bytes,
+                overflow_events: self.overflow_events,
+            })
+        } else {
+            Some(LiveIoError::CaptureEvidenceLoss {
+                dropped_frames: self.dropped_frames,
+                dropped_bytes: self.dropped_bytes,
+                receiver_dropped_frames: self.receiver_dropped_frames,
+            })
+        }
     }
 }
 
@@ -525,6 +579,14 @@ pub enum LiveIoError {
         dropped_bytes: u64,
         overflow_events: u64,
     },
+    #[error(
+        "capture evidence is incomplete: {dropped_frames} frame(s) / {dropped_bytes} byte(s) dropped, including {receiver_dropped_frames} receiver drop(s)"
+    )]
+    CaptureEvidenceLoss {
+        dropped_frames: u64,
+        dropped_bytes: u64,
+        receiver_dropped_frames: u64,
+    },
     #[error("capture backend returned invalid statistics: {message}")]
     InvalidCaptureStatistics { message: String },
 }
@@ -582,6 +644,11 @@ impl ClassifiedError for LiveIoError {
                 FailureKind::Io,
                 Some("treat the capture as incomplete or explicitly select a lossy overflow policy with visible statistics"),
             ),
+            Self::CaptureEvidenceLoss { .. } => ErrorClassification::new(
+                "io.capture_evidence_loss",
+                FailureKind::Io,
+                Some("treat the capture as incomplete; inspect receiver-drop counters and reduce native capture pressure before retrying"),
+            ),
             Self::InvalidCaptureQueueLimit { .. } => ErrorClassification::new(
                 "cli.capture_limit",
                 FailureKind::Cli,
@@ -631,5 +698,35 @@ mod tests {
             }
         ));
         assert_eq!(error.classification().code, "cli.capture_timeout");
+    }
+
+    #[test]
+    fn capture_completeness_and_loss_source_are_typed() {
+        let receiver_loss = CaptureStatistics {
+            dropped_frames: 2,
+            receiver_dropped_frames: 2,
+            ..CaptureStatistics::default()
+        };
+        assert_eq!(
+            receiver_loss.validate().unwrap().evidence_completeness(),
+            CaptureEvidenceCompleteness::Incomplete
+        );
+        assert!(matches!(
+            receiver_loss.evidence_loss_error(),
+            Some(LiveIoError::CaptureEvidenceLoss {
+                receiver_dropped_frames: 2,
+                ..
+            })
+        ));
+
+        let invalid = CaptureStatistics {
+            dropped_frames: 1,
+            receiver_dropped_frames: 2,
+            ..CaptureStatistics::default()
+        };
+        assert!(matches!(
+            invalid.validate(),
+            Err(LiveIoError::InvalidCaptureStatistics { .. })
+        ));
     }
 }

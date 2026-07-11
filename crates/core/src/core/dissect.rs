@@ -9,7 +9,7 @@ use thiserror::Error;
 use super::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 use super::capture::{CaptureRecordError, CapturedFrame};
 use super::diagnostic::Diagnostic;
-use super::layer::{MalformedLayer, Padding, ProtocolId, Raw};
+use super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
 use super::layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout};
 use super::packet::Packet;
 use super::registry::{LayerDecodeContext, ProtocolRegistry};
@@ -48,6 +48,12 @@ pub enum DecodeError {
     CodecLayerMismatch {
         protocol: ProtocolId,
         actual: ProtocolId,
+    },
+    #[error("codec for {protocol} returned a layer that violates its reflective schema: {source}")]
+    InvalidLayer {
+        protocol: ProtocolId,
+        #[source]
+        source: FieldError,
     },
     #[error("invalid capture record: {0}")]
     InvalidCaptureRecord(#[from] CaptureRecordError),
@@ -210,6 +216,12 @@ impl Dissector {
                     actual: actual_protocol,
                 });
             }
+            decoded.layer.validate_required_fields().map_err(|source| {
+                DecodeError::InvalidLayer {
+                    protocol: actual_protocol.clone(),
+                    source,
+                }
+            })?;
             let binding_parent = actual_protocol;
             if decoded.consumed > current.len()
                 || decoded.payload_offset > current.len()

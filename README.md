@@ -16,7 +16,7 @@ This checkout contains the portable v0.2 kernel, passive native route providers,
 | --- | --- |
 | Ordered `Packet`, object-safe `Layer`, reflective schemas and field values | Available as an alpha API |
 | Immutable `ProtocolRegistry`, external codecs and deterministic bindings | Available as an alpha API |
-| Strict/permissive generic building, layouts, and diagnostics | Stable built-in protocol matrix implemented and invariant-tested; API freeze remains pending |
+| Strict/permissive generic building, layouts, and diagnostics | Stable built-in protocol matrix implemented and invariant-tested; beta Rust API candidate is frozen and diff-checked |
 | Bounded dissection with raw/malformed preservation | All declared codecs and capture roots covered by the stable matrix and authoritative corpus |
 | Runtime-neutral captured-frame records and offline capture I/O | Bounded streaming read/write and metadata-preserving PCAP/PCAPNG copy are available through the API and `read` |
 | Packet expressions and `packetcraftr.packet/v1` documents | Available with bounded JSON/YAML parsing |
@@ -53,7 +53,7 @@ strict/permissive   bounded
  diagnostics       diagnostics
 ```
 
-The emerging public façade is centered on:
+The beta-candidate public façade is centered on:
 
 - `Packet`, `Layer`, `LayerSchema`, `FieldSchema`, and `FieldValue` for typed and reflective editing.
 - `WireValue<T>` for dependent values that are automatic, exact, or deliberately raw.
@@ -76,7 +76,7 @@ assert_eq!(packet.get::<Raw>().unwrap().bytes.as_ref(), &[0xde, 0xad, 0xbe, 0xef
 
 External Rust crates can implement `Layer`, `LayerCodec`, and `ProtocolModule`, then register the module through a `RegistryBuilder`. Registration is compile-time Rust composition: v0.2 deliberately has no native dynamic-library plugin system and no global mutable registry.
 
-Native and injected networking providers implement platform-neutral contracts owned by `packetcraftr::io`: interface and route discovery, neighbor resolution, typed Layer 2/Layer 3 send, and owned capture. The root reexports those contracts, while their former `packetcraftr::client::*` paths remain alpha compatibility reexports. Checked `Layer2Frame` and `Layer3Frame` values keep Ethernet bytes away from raw Layer 3 adapters and vice versa. Native handles never enter the public traits.
+Native and injected networking providers implement platform-neutral contracts owned by `packetcraftr::io`: interface and route discovery, neighbor resolution, typed Layer 2/Layer 3 send, and owned capture. The root reexports those contracts; the alpha-only `packetcraftr::client::*` provider aliases were removed at the beta freeze. Checked `Layer2Frame` and `Layer3Frame` values keep Ethernet bytes away from raw Layer 3 adapters and vice versa. Native handles never enter the public traits. The complete [stable Rust API contract](docs/public-api.md) records ownership, bounds, errors, completeness, extension examples, and compatibility review.
 
 The repository is an acyclic Cargo workspace with synchronized, unpublished
 `packetcraftr-core`, `packetcraftr-protocols`, `packetcraftr-io`, and

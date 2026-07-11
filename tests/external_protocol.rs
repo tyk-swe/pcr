@@ -5,15 +5,17 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
+use bytes::Bytes;
 use packetcraftr::core::{
-    BuildContext, BuildOptions, CodecError, DecodedLayerValue, Discriminator, EncodedLayer,
-    FieldError, FieldKind, FieldSchema, FieldValue, Layer, LayerCodec, LayerDecodeContext,
-    LayerEncodeContext, LayerSchema, ProtocolId,
+    parse_packet_expression, BuildContext, BuildOptions, CodecError, DecodedLayerValue,
+    Discriminator, EncodedLayer, FieldError, FieldKind, FieldSchema, FieldValue, Layer, LayerCodec,
+    LayerDecodeContext, LayerEncodeContext, LayerSchema, ProtocolId,
 };
 use packetcraftr::{
-    fuzz, Builder, BuiltinProtocols, Dissector, Ethernet, FuzzRequest, FuzzStrategy, FuzzTarget,
-    Packet, ProtocolModule, ProtocolRegistry, Raw, RegistryBuilder, RegistryError, WireValue,
-    BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS, STABLE_WORKFLOW_PROTOCOLS,
+    fuzz, BuildError, Builder, BuiltinProtocols, DecodeError, Dissector, Ethernet, ExpressionError,
+    ExpressionOptions, FuzzRequest, FuzzStrategy, FuzzTarget, Packet, ProtocolModule,
+    ProtocolRegistry, Raw, RegistryBuilder, RegistryError, WireValue, BUILTIN_CAPTURE_ROOTS,
+    BUILTIN_PROTOCOLS, STABLE_WORKFLOW_PROTOCOLS,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -161,6 +163,87 @@ impl ProtocolModule for FooModule {
     }
 }
 
+#[derive(Clone, Debug)]
+struct MissingRequired;
+
+fn missing_required_schema() -> &'static LayerSchema {
+    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
+    static FIELDS: &[FieldSchema] = &[FieldSchema {
+        name: "value",
+        kind: FieldKind::Unsigned,
+        derived: false,
+        required: true,
+        description: "Required external fixture value",
+    }];
+    SCHEMA.get_or_init(|| LayerSchema {
+        protocol: ProtocolId::new("example.missing_required"),
+        name: "Missing required fixture",
+        fields: FIELDS,
+    })
+}
+
+impl Layer for MissingRequired {
+    fn schema(&self) -> &'static LayerSchema {
+        missing_required_schema()
+    }
+
+    fn clone_box(&self) -> Box<dyn Layer> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn field(&self, _name: &str) -> Option<FieldValue> {
+        None
+    }
+
+    fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
+        Err(FieldError::ReadOnly {
+            protocol: self.protocol_id(),
+            field: name.to_owned(),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct MissingRequiredCodec;
+
+impl LayerCodec for MissingRequiredCodec {
+    fn protocol_id(&self) -> ProtocolId {
+        ProtocolId::new("example.missing_required")
+    }
+
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        _payload: &[u8],
+        _context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, CodecError> {
+        Ok(EncodedLayer::header(Vec::new(), layer.clone_box()))
+    }
+
+    fn decode(
+        &self,
+        _input: &[u8],
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayerValue, CodecError> {
+        Ok(DecodedLayerValue::terminal(Box::new(MissingRequired), 0))
+    }
+
+    fn make_layer(
+        &self,
+        _fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, CodecError> {
+        Ok(Box::new(MissingRequired))
+    }
+}
+
 #[test]
 fn external_module_builds_and_decodes_ethernet_foo_raw() {
     let mut builder = ProtocolRegistry::builder();
@@ -231,6 +314,54 @@ fn external_reflective_fields_participate_in_bounded_fuzzing() {
         .all(|case| case.mutation.protocol == "example.foo"));
     assert!(result.cases.iter().any(|case| case.built.is_some()));
     assert!(result.cases.iter().any(|case| case.error.is_some()));
+}
+
+#[test]
+fn external_codec_factories_must_materialize_required_fields() {
+    let mut builder = ProtocolRegistry::builder();
+    builder.register_codec(MissingRequiredCodec).unwrap();
+    let registry = builder.build().unwrap();
+
+    let error = parse_packet_expression(
+        "example.missing_required()",
+        &registry,
+        ExpressionOptions::default(),
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        ExpressionError::Layer {
+            source: CodecError::Field(FieldError::MissingRequired { .. }),
+            ..
+        }
+    ));
+
+    let registry = Arc::new(registry);
+    let mut packet = Packet::new();
+    packet.push(MissingRequired);
+    assert!(matches!(
+        Builder::new(Arc::clone(&registry)).build(
+            packet,
+            BuildContext::default(),
+            BuildOptions::default()
+        ),
+        Err(BuildError::InvalidLayer {
+            source: FieldError::MissingRequired { .. },
+            ..
+        })
+    ));
+
+    assert!(matches!(
+        Dissector::new(registry).decode_with_root(
+            Bytes::new(),
+            ProtocolId::new("example.missing_required"),
+            Default::default()
+        ),
+        Err(DecodeError::InvalidLayer {
+            source: FieldError::MissingRequired { .. },
+            ..
+        })
+    ));
 }
 
 #[test]

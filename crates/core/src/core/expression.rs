@@ -91,8 +91,15 @@ pub fn parse_packet_expression(
             .make_layer(&fields)
             .map_err(|source| ExpressionError::Layer {
                 layer: layer_index,
-                name,
+                name: name.clone(),
                 source,
+            })?;
+        layer
+            .validate_required_fields()
+            .map_err(|source| ExpressionError::Layer {
+                layer: layer_index,
+                name,
+                source: CodecError::Field(source),
             })?;
         packet.push_boxed(layer);
     }

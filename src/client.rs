@@ -17,10 +17,12 @@ use crate::core::{
     Dissector, FieldValue, Packet, PacketTemplate, Padding, ProtocolRegistry, TemplateValues,
     DEFAULT_MAX_TEMPLATE_PACKETS,
 };
-use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
+use crate::error::{ClassifiedError, ErrorClassification, FailureCategory, FailureKind};
 use crate::io::{
-    CapturedFrame, MaterializedRoute, NeighborError, NeighborResolver, PlanError, PlanOptions,
-    PlannedRoute, RoutePlanner, RouteProvider,
+    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
+    ExchangeIo, IoSendReport, LiveIoError, MaterializedRoute, NeighborError, NeighborResolver,
+    PacketIo, PlanError, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
 };
 use crate::protocols::Ethernet;
 use crate::tools::{
@@ -31,17 +33,6 @@ use crate::tools::{
     ScanStats, ScanTarget, ScanTransport, TracerouteBatch, TracerouteBatchExecution,
     TracerouteExecutionError, TracerouteExecutor, TracerouteMatchedResponse, TracerouteStats,
     TracerouteStrategy,
-};
-
-// Compatibility surface: provider implementations historically imported these
-// contracts through `packetcraftr::client`. Their ownership is now `io`.
-pub use crate::io::{
-    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
-    DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceInfo,
-    InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io, LiveIoError,
-    PacketIo, SystemCaptureProvider, SystemCaptureSession, SystemInterfaceProvider, SystemLayer2Io,
-    SystemLayer3Io, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    MAX_CAPTURE_TIMEOUT,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -656,7 +647,9 @@ impl ClassifiedError for ClientError {
                 Some("set the explicit per-operation malformed-live opt-in in addition to policy approval"),
             ),
             Self::Io(error) => error.classification(),
-            Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
+            Self::OperationAndCaptureShutdown { operation, .. } => operation
+                .classification()
+                .with_category(FailureCategory::Cleanup),
             Self::HeterogeneousExchangeRoute => ErrorClassification::new(
                 "cli.heterogeneous_exchange_route",
                 FailureKind::Cli,
@@ -1394,20 +1387,19 @@ where
         let capture_statistics = capture.statistics().validate()?;
         if capture_statistics.has_loss() {
             if capture_limits.overflow_policy == CaptureOverflowPolicy::Fail {
-                return Err(LiveIoError::CaptureQueueOverflow {
-                    dropped_frames: capture_statistics.dropped_frames,
-                    dropped_bytes: capture_statistics.dropped_bytes,
-                    overflow_events: capture_statistics.overflow_events,
-                }
-                .into());
+                return Err(capture_statistics
+                    .evidence_loss_error()
+                    .expect("lossy capture statistics must produce a typed error")
+                    .into());
             }
             push_diagnostic_once(
                 &mut captured.diagnostics,
                 crate::core::Diagnostic::warning(
-                    "capture.queue_overflow",
+                    "capture.evidence_incomplete",
                     format!(
-                        "capture backend reported {} overflow event(s), {} dropped frame(s), and {} dropped byte(s) under {:?}",
+                        "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {:?}",
                         capture_statistics.overflow_events,
+                        capture_statistics.receiver_dropped_frames,
                         capture_statistics.dropped_frames,
                         capture_statistics.dropped_bytes,
                         capture_limits.overflow_policy,
@@ -2308,8 +2300,8 @@ mod tests {
     use super::*;
     use crate::core::{PacketTemplate, Raw, TemplateValues, WireValue};
     use crate::io::{
-        DestinationScope, InterfaceId, LinkCapability, LinkMode, LinkType, MacAddress,
-        RouteDecision,
+        CaptureProvider, DestinationScope, InterfaceId, LinkCapability, LinkMode, LinkType,
+        MacAddress, RouteDecision,
     };
     use crate::protocols::{
         default_registry, Ethernet, Ipv4, Ipv6, SegmentRoutingHeader, Udp, Vlan, Vlan8021ad,
@@ -3107,6 +3099,7 @@ mod tests {
             dropped_frames: 2,
             dropped_bytes: 128,
             overflow_events: 1,
+            receiver_dropped_frames: 0,
         };
 
         let error =
@@ -3129,8 +3122,28 @@ mod tests {
             assert!(result
                 .diagnostics
                 .iter()
-                .any(|diagnostic| diagnostic.code == "capture.queue_overflow"));
+                .any(|diagnostic| diagnostic.code == "capture.evidence_incomplete"));
         }
+    }
+
+    #[test]
+    fn receiver_loss_is_not_reported_as_queue_overflow() {
+        let statistics = CaptureStatistics {
+            dropped_frames: 3,
+            receiver_dropped_frames: 3,
+            ..CaptureStatistics::default()
+        };
+
+        let error =
+            exchange_with_capture_statistics(statistics, CaptureOverflowPolicy::Fail).unwrap_err();
+        assert!(matches!(
+            error,
+            ClientError::Io(LiveIoError::CaptureEvidenceLoss {
+                dropped_frames: 3,
+                receiver_dropped_frames: 3,
+                ..
+            })
+        ));
     }
 
     #[test]
@@ -3620,6 +3633,7 @@ mod tests {
                 },
             )
             .unwrap_err();
+        assert_eq!(error.classification().category, FailureCategory::Cleanup);
         assert!(matches!(
             error,
             ClientError::OperationAndCaptureShutdown {

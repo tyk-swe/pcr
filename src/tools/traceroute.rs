@@ -1180,6 +1180,10 @@ fn add_stats(
             &mut total.capture.overflow_events,
             batch.capture.overflow_events,
         ),
+        (
+            &mut total.capture.receiver_dropped_frames,
+            batch.capture.receiver_dropped_frames,
+        ),
     ] {
         *target = add_stat(*target, value, sequence)?;
     }

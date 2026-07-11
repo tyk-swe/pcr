@@ -171,6 +171,13 @@ impl PacketDocument {
                     protocol: layer.protocol.clone(),
                     source,
                 })?;
+            value
+                .validate_required_fields()
+                .map_err(|source| DocumentError::Layer {
+                    layer: index,
+                    protocol: layer.protocol.clone(),
+                    source: CodecError::Field(source),
+                })?;
             packet.push_boxed(value);
         }
         Ok(packet)

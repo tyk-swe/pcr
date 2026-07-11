@@ -135,6 +135,21 @@ jobs:
       - name: Enforce component, native dependency, and unsafe ownership
         run: bash scripts/check-architecture.sh
 
+  public-api:
+    name: Public Rust API baseline
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Build warning-free public documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --workspace --no-deps
+      - name: Compare the beta façade baseline
+        run: python3 scripts/check-public-api.py
+
   rustsec:
     name: RustSec advisory audit
     runs-on: ubuntu-24.04
@@ -245,6 +260,7 @@ jobs:
       - schemas
       - dependency-policy
       - architecture-policy
+      - public-api
       - rustsec
       - fixtures
     runs-on: ubuntu-24.04
@@ -258,5 +274,6 @@ jobs:
           test "${{ needs.schemas.result }}" = "success"
           test "${{ needs.dependency-policy.result }}" = "success"
           test "${{ needs.architecture-policy.result }}" = "success"
+          test "${{ needs.public-api.result }}" = "success"
           test "${{ needs.rustsec.result }}" = "success"
           test "${{ needs.fixtures.result }}" = "success"

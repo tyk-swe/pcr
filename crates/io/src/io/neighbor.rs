@@ -1157,6 +1157,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+    use crate::error::ClassifiedError;
     use crate::io::{
         CaptureDirection, InterfaceAddress, InterfaceFlags, IoSendReport, LiveIoError,
     };
@@ -1577,6 +1578,10 @@ mod tests {
             bounded,
         );
         let error = resolver.resolve_request(&request).unwrap_err();
+        assert_eq!(
+            error.classification().category,
+            crate::error::FailureCategory::Timeout
+        );
         let NeighborError::NotFound {
             attempts,
             captured,

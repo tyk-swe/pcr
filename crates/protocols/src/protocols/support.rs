@@ -456,12 +456,18 @@ mod tests {
                 "{} aliases",
                 support.protocol
             );
+            let constructed = codec.make_layer(&BTreeMap::new());
             assert_eq!(
-                codec.make_layer(&BTreeMap::new()).is_ok(),
+                constructed.is_ok(),
                 support.build,
                 "{} constructibility",
                 support.protocol
             );
+            if let Ok(layer) = constructed {
+                layer
+                    .validate_required_fields()
+                    .unwrap_or_else(|error| panic!("{} defaults: {error}", support.protocol));
+            }
             assert_eq!(
                 registry.matcher(&support.protocol.into()).is_some(),
                 support.matcher,

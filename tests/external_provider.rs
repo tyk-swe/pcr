@@ -160,13 +160,6 @@ fn route(mode: LinkMode) -> MaterializedRoute {
 }
 
 fn assert_exchange_provider<T: ExchangeIo>(_provider: &T) {}
-fn assert_compatibility_paths<T>(_provider: &T)
-where
-    T: packetcraftr::client::PacketIo
-        + packetcraftr::client::CaptureProvider
-        + packetcraftr::client::ExchangeIo,
-{
-}
 
 #[test]
 fn external_provider_uses_only_platform_neutral_contracts() {
@@ -177,9 +170,6 @@ fn external_provider_uses_only_platform_neutral_contracts() {
         packets: DispatchPacketIo::new(ExternalLayer2, ExternalLayer3),
     };
     assert_exchange_provider(&provider);
-    assert_compatibility_paths(&provider);
-    let _: packetcraftr::client::CaptureQueueLimits = CaptureQueueLimits::default();
-    let _: packetcraftr::client::SystemLayer3Io = packetcraftr::SystemLayer3Io;
     let target = "lab.example".parse::<LiveTarget>().unwrap();
     let resolved = TrafficPolicy {
         allow_hostname_resolution: true,

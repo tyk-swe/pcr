@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added deterministic bounded field-aware `fuzz`: offline-by-default reflective boundary/random/bit-flip/malformed mutation, direct case-index reproduction, finite shrink data and allocation/wire/evidence/duration limits, bounded build/dissection results, explicit live and malformed double opt-ins, complete traffic-policy preauthorization, capture-ready `Client::exchange` execution, and typed text/JSON/NDJSON evidence.
 - Completed the all-command output conformance pass: typed success/error goldens for all 14 commands, closed route/plan schemas, sequenced per-item and terminal stream failures, complete-frame parity across raw/hex/NDJSON/PCAP/PCAPNG, terminal-safe text, and broken-pipe coverage for every output family.
 - Extracted synchronized, unpublished core, protocol, I/O, and session implementation crates behind unchanged `packetcraftr` façade paths, with an enforced acyclic dependency graph and buildable GitHub Release workspace archives.
+- Added a warning-free public Rust API guide, compile-tested portable/live extension examples, semantic `FailureCategory` recovery classes, typed capture-evidence completeness and receiver-drop counters, and a rustdoc-derived beta façade baseline enforced in CI.
+- Public API baseline: `sha256:60bc9b70e0547c69f41d717943b7dd6f7d62171cce64ec4359ecfc6e784736b9` (reviewed for the v0.2 beta freeze).
 
 ### Changed
 
@@ -55,6 +57,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Aggregate JSON and streaming NDJSON are now distinct formats. Every NDJSON success or terminal-error record carries a frozen zero-based sequence, while aggregate envelopes cannot carry one; `build`, `dissect`, `read`, and `interfaces` now render exclusively from typed results.
 - Live CLI policy and limit validation now precedes resolver, route, neighbor, capture, or transmission work as applicable; capture and exchange retain readiness, loss, timeout, and cleanup evidence through the shared classified-error contract.
 - Exchange results retain timestamped exact sent-frame evidence; PCAPNG output preserves mixed raw-send and captured-response link types as separate interfaces, while classic PCAP rejects an unrepresentable mixed stream.
+- Froze `FieldSchema::required` as an after-defaults reflective invariant enforced for built-in and external codecs at construction, materialization, and decode boundaries; capture receiver loss is no longer misclassified as queue overflow.
 
 ### Fixed
 
@@ -77,6 +80,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - The v0.1 flag-heavy CLI, private fixed packet pipeline, and public `run_cli` façade.
 - The v0.1 rules engine, daemon, external-command actions, REPL, embedded Prometheus endpoint, and per-tool feature maze.
 - Legacy DNS/scan/traceroute/fuzz implementations that bypassed the shared packet, exchange, and session APIs.
+- Alpha-only provider reexports from `packetcraftr::client`; use the owning `packetcraftr::io` module or stable root reexports.
 
 ## 0.1.0
 

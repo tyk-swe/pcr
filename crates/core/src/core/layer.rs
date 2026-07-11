@@ -46,17 +46,32 @@ impl fmt::Display for ProtocolId {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FieldSchema {
+    /// Stable reflective field name used by documents, expressions, and
+    /// [`Layer::field`].
     pub name: &'static str,
+    /// Nominal typed value accepted by the field. Derived wire values may also
+    /// expose `"auto"` or raw bytes through [`FieldValue`].
     pub kind: FieldKind,
+    /// Whether the builder may derive this field from packet context.
     pub derived: bool,
+    /// Whether [`Layer::field`] must return a value after codec defaults have
+    /// been applied.
+    ///
+    /// This does not require callers to spell the field in an expression or
+    /// document. Codec factories may supply a default, but constructed,
+    /// materialized, and decoded layers must expose every required field.
     pub required: bool,
+    /// Human-readable field purpose.
     pub description: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct LayerSchema {
+    /// Stable protocol identifier.
     pub protocol: ProtocolId,
+    /// Human-readable protocol name.
     pub name: &'static str,
+    /// Ordered reflective fields.
     pub fields: &'static [FieldSchema],
 }
 
@@ -75,6 +90,8 @@ pub enum FieldError {
     OutOfRange { protocol: ProtocolId, field: String },
     #[error("field {field} on layer {protocol} cannot be edited reflectively")]
     ReadOnly { protocol: ProtocolId, field: String },
+    #[error("required field {field} is absent from layer {protocol} after defaults")]
+    MissingRequired { protocol: ProtocolId, field: String },
 }
 
 /// Object-safe packet layer interface used by built-in and external protocols.
@@ -85,6 +102,20 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn field(&self, name: &str) -> Option<FieldValue>;
     fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
+
+    /// Validates the stable required-field contract after codec defaults,
+    /// materialization, or decoding.
+    fn validate_required_fields(&self) -> Result<(), FieldError> {
+        for field in self.schema().fields.iter().filter(|field| field.required) {
+            if self.field(field.name).is_none() {
+                return Err(FieldError::MissingRequired {
+                    protocol: self.protocol_id(),
+                    field: field.name.to_owned(),
+                });
+            }
+        }
+        Ok(())
+    }
 
     fn protocol_id(&self) -> ProtocolId {
         self.schema().protocol.clone()

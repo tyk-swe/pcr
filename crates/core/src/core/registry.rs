@@ -155,6 +155,11 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
         context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError>;
 
+    /// Constructs one layer from caller-supplied reflective fields.
+    ///
+    /// Implementations may fill omitted fields with defaults. The returned
+    /// layer must satisfy [`Layer::validate_required_fields`]; the public
+    /// expression/document paths and the builder enforce that invariant.
     fn make_layer(
         &self,
         fields: &BTreeMap<String, FieldValue>,

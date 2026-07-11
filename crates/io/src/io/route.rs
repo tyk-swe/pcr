@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::core::{CapturedFrame, FieldValue, LinkType, Packet, ProtocolId};
-use crate::error::{ClassifiedError, ErrorClassification, FailureKind};
+use crate::error::{ClassifiedError, ErrorClassification, FailureCategory, FailureKind};
 
 use super::provider::{CaptureStatistics, LiveIoError};
 
@@ -844,13 +844,19 @@ pub enum NeighborError {
 impl ClassifiedError for NeighborError {
     fn classification(&self) -> ErrorClassification {
         match self {
-            Self::Io { source, .. } | Self::Cleanup { source, .. } => source.classification(),
-            Self::OperationAndCleanup { operation, .. } => operation.classification(),
+            Self::Io { source, .. } => source.classification(),
+            Self::Cleanup { source, .. } => source
+                .classification()
+                .with_category(FailureCategory::Cleanup),
+            Self::OperationAndCleanup { operation, .. } => operation
+                .classification()
+                .with_category(FailureCategory::Cleanup),
             Self::NotFound { .. } => ErrorClassification::new(
                 "io.neighbor_timeout",
                 FailureKind::Io,
                 Some("inspect the selected gateway, VLAN, and interface; the finite neighbor-resolution budget was exhausted"),
-            ),
+            )
+            .with_category(FailureCategory::Timeout),
             Self::Resolution { .. } => ErrorClassification::new(
                 "io.neighbor",
                 FailureKind::Io,

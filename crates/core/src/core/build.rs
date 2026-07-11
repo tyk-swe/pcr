@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::diagnostic::Diagnostic;
-use super::layer::{MalformedLayer, Padding, ProtocolId};
+use super::layer::{FieldError, MalformedLayer, Padding, ProtocolId};
 use super::layout::{ByteRange, LayerLayout, PacketLayout};
 use super::packet::Packet;
 use super::registry::{CodecError, LayerEncodeContext, ProtocolRegistry};
@@ -64,6 +64,13 @@ pub enum BuildError {
     PacketSizeLimit { actual: usize, limit: usize },
     #[error("no codec is registered for layer {protocol} at index {index}")]
     MissingCodec { index: usize, protocol: ProtocolId },
+    #[error("layer {protocol} at index {index} violates its reflective schema: {source}")]
+    InvalidLayer {
+        index: usize,
+        protocol: ProtocolId,
+        #[source]
+        source: FieldError,
+    },
     #[error("layer {parent} cannot contain adjacent layer {child}")]
     UnboundLayers {
         parent: ProtocolId,
@@ -149,6 +156,15 @@ impl Builder {
         }
 
         let mut diagnostics = Vec::new();
+        for (index, layer) in packet.iter().enumerate() {
+            layer
+                .validate_required_fields()
+                .map_err(|source| BuildError::InvalidLayer {
+                    index,
+                    protocol: layer.protocol_id(),
+                    source,
+                })?;
+        }
         self.validate_bindings(&packet, options.mode, &mut diagnostics)?;
 
         let mut materialized = packet.clone();
@@ -198,6 +214,14 @@ impl Builder {
             if actual != protocol {
                 return Err(BuildError::MaterializedProtocolMismatch { protocol, actual });
             }
+            encoded
+                .materialized
+                .validate_required_fields()
+                .map_err(|source| BuildError::InvalidLayer {
+                    index,
+                    protocol: encoded.materialized.protocol_id(),
+                    source,
+                })?;
 
             let total = encoded
                 .prefix

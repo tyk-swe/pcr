@@ -24,7 +24,8 @@ A reusable packet never contains an interface name, listener configuration, outp
 
 ## Command mapping
 
-The expressions below show the intended shape. Field spellings can still change before the beta freeze.
+The expressions below use the beta-candidate field spellings recorded by the
+public API and document-contract freeze.
 
 | v0.1 | v0.2 replacement |
 | --- | --- |
@@ -292,6 +293,30 @@ v0.1 exposed a `run_cli`-oriented façade and private fixed builders. v0.2 appli
 5. Consume typed results and non-exhaustive typed errors. `anyhow` is confined to CLI composition.
 
 Root `packetcraftr` reexports are the stable application import path even after internal component crates are extracted.
+
+Provider traits and values are owned by `packetcraftr::io` and are also
+available from the root. Alpha callers that used
+`packetcraftr::client::{PacketIo, CaptureProvider, CaptureSession, ...}` must
+change those imports to `packetcraftr::{...}` or `packetcraftr::io::{...}`.
+The `client` module now contains only high-level client, policy, target, and
+workflow contracts.
+
+`FieldSchema::required` is frozen as an after-defaults invariant: callers may
+omit a required field when the codec supplies a default, but every constructed,
+materialized, and decoded layer must reflect a value for it. External codecs
+that return a missing required field now fail with
+`FieldError::MissingRequired` at the factory, builder, or dissector boundary.
+
+`ErrorClassification` is now non-exhaustive and carries a
+`FailureCategory` in addition to the CLI-oriented `FailureKind`. Construct it
+with `ErrorClassification::new` rather than a struct literal. The category lets
+callers distinguish validation, capability, policy, timeout, runtime I/O,
+cleanup, and invariant handling without parsing a machine code or message.
+
+Capture loss is part of the result contract. `CaptureStatistics` separately
+reports `receiver_dropped_frames`, derives `CaptureEvidenceCompleteness`, and
+can produce a typed evidence-loss error. A native receiver drop is no longer
+reported as a queue overflow merely because the operation is fail-closed.
 
 Applications that need native Layer 2 route materialization can compose `SystemRouteProvider`, `SystemNeighborResolver`, and the typed native I/O providers. `RoutePlanner::plan` remains passive; `RoutePlanner::materialize` is the explicit boundary that may perform bounded ARP/NDP. Custom resolvers can continue implementing the legacy `NeighborResolver::resolve` method, while `resolve_request` receives interface-owned MAC/IP, next hop, VLAN, MTU, and link-type context and can return captured evidence.
 

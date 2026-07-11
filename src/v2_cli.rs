@@ -1472,18 +1472,19 @@ where
     let mut diagnostics = Vec::new();
     if statistics.has_loss() {
         if limits.overflow_policy == CaptureOverflowPolicy::Fail {
-            return Err(CliError::classified(LiveIoError::CaptureQueueOverflow {
-                dropped_frames: statistics.dropped_frames,
-                dropped_bytes: statistics.dropped_bytes,
-                overflow_events: statistics.overflow_events,
-            })
+            return Err(CliError::classified(
+                statistics
+                    .evidence_loss_error()
+                    .expect("lossy capture statistics must produce a typed error"),
+            )
             .at_sequence(frames));
         }
         diagnostics.push(crate::core::Diagnostic::warning(
-            "capture.queue_overflow",
+            "capture.evidence_incomplete",
             format!(
-                "capture backend reported {} overflow event(s), {} dropped frame(s), and {} dropped byte(s) under {:?}",
+                "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {:?}",
                 statistics.overflow_events,
+                statistics.receiver_dropped_frames,
                 statistics.dropped_frames,
                 statistics.dropped_bytes,
                 limits.overflow_policy

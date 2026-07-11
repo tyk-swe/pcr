@@ -26,6 +26,23 @@ pub enum FailureKind {
     Internal,
 }
 
+/// Stable semantic category for programmatic recovery and policy decisions.
+///
+/// Unlike [`FailureKind`], which controls the CLI exit-code family, this
+/// category distinguishes failures that share an exit code but require
+/// different handling (for example an I/O timeout versus cleanup failure).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureCategory {
+    Validation,
+    Capability,
+    Policy,
+    Timeout,
+    Io,
+    Cleanup,
+    Invariant,
+}
+
 impl FailureKind {
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -50,11 +67,14 @@ impl FailureKind {
     }
 }
 
-/// Deterministic machine code, CLI class, and operator guidance for an error.
+/// Deterministic machine code, CLI class, semantic category, and operator
+/// guidance for an error.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[non_exhaustive]
 pub struct ErrorClassification {
     pub code: &'static str,
     pub kind: FailureKind,
+    pub category: FailureCategory,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remediation: Option<&'static str>,
 }
@@ -68,8 +88,22 @@ impl ErrorClassification {
         Self {
             code,
             kind,
+            category: match kind {
+                FailureKind::Cli | FailureKind::Packet => FailureCategory::Validation,
+                FailureKind::Capability => FailureCategory::Capability,
+                FailureKind::Io => FailureCategory::Io,
+                FailureKind::Policy => FailureCategory::Policy,
+                FailureKind::Internal => FailureCategory::Invariant,
+            },
             remediation,
         }
+    }
+
+    /// Overrides the default semantic category while preserving the stable
+    /// machine code and CLI exit-code family.
+    pub const fn with_category(mut self, category: FailureCategory) -> Self {
+        self.category = category;
+        self
     }
 
     pub const fn exit_code(self) -> u8 {
@@ -101,5 +135,23 @@ mod tests {
         assert_eq!(FailureKind::Io.exit_code(), 5);
         assert_eq!(FailureKind::Policy.exit_code(), 6);
         assert_eq!(FailureKind::Internal.exit_code(), 70);
+    }
+
+    #[test]
+    fn classifications_separate_exit_family_from_recovery_category() {
+        let timeout = ErrorClassification::new("io.timeout", FailureKind::Io, None)
+            .with_category(FailureCategory::Timeout);
+        assert_eq!(timeout.kind, FailureKind::Io);
+        assert_eq!(timeout.category, FailureCategory::Timeout);
+        assert_eq!(timeout.exit_code(), EXIT_IO);
+
+        assert_eq!(
+            ErrorClassification::new("packet.invalid", FailureKind::Packet, None).category,
+            FailureCategory::Validation
+        );
+        assert_eq!(
+            ErrorClassification::new("internal.invariant", FailureKind::Internal, None).category,
+            FailureCategory::Invariant
+        );
     }
 }

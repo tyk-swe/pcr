@@ -20,6 +20,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+#![doc = include_str!("../docs/public-api.md")]
 #![warn(unreachable_pub)]
 #![forbid(unsafe_code)]
 
@@ -55,18 +56,18 @@ pub use core::{
     TemplateError, TemplateValues, WireValue,
 };
 pub use error::{
-    ClassifiedError, ErrorClassification, FailureKind, EXIT_CAPABILITY, EXIT_CLI, EXIT_INTERNAL,
-    EXIT_IO, EXIT_PACKET, EXIT_POLICY,
+    ClassifiedError, ErrorClassification, FailureCategory, FailureKind, EXIT_CAPABILITY, EXIT_CLI,
+    EXIT_INTERNAL, EXIT_IO, EXIT_PACKET, EXIT_POLICY,
 };
 pub use io::{
-    transcode_capture, ActiveNeighborResolver, CaptureDirection, CaptureError, CaptureFileFormat,
-    CaptureInterface, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureReader,
-    CaptureRecordError, CaptureSession, CaptureStatistics, CaptureStreamLimits,
-    CaptureTimestampResolution, CaptureTranscodeReport, CaptureWriter, CapturedFrame,
-    DestinationScope, DispatchPacketIo, ExchangeIo, InterfaceAddress, InterfaceFlags, InterfaceId,
-    InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, Layer3Frame, Layer3Io,
-    LinkCapability, LinkMode, LinkType, LiveIoError, MacAddress, MaterializedRoute,
-    NativeRouteError, NeighborError, NeighborRequest, NeighborResolution,
+    transcode_capture, ActiveNeighborResolver, CaptureDirection, CaptureError,
+    CaptureEvidenceCompleteness, CaptureFileFormat, CaptureInterface, CaptureOverflowPolicy,
+    CaptureProvider, CaptureQueueLimits, CaptureReader, CaptureRecordError, CaptureSession,
+    CaptureStatistics, CaptureStreamLimits, CaptureTimestampResolution, CaptureTranscodeReport,
+    CaptureWriter, CapturedFrame, DestinationScope, DispatchPacketIo, ExchangeIo, InterfaceAddress,
+    InterfaceFlags, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
+    Layer2Io, Layer3Frame, Layer3Io, LinkCapability, LinkMode, LinkType, LiveIoError, MacAddress,
+    MaterializedRoute, NativeRouteError, NeighborError, NeighborRequest, NeighborResolution,
     NeighborResolutionOptions, NeighborResolver, NeighborVlanKind, NeighborVlanTag, PacketIo,
     PcapEndianness, PlanError, PlanOptions, PlannedRoute, ReplayTiming, RouteDecision,
     RoutePlanner, RouteProvider, RouteSelectionReason, SystemCaptureProvider, SystemCaptureSession,

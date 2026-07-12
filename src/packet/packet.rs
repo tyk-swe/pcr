@@ -27,6 +27,7 @@ pub enum PacketError {
 #[derive(Clone, Default)]
 pub struct Packet {
     layers: Vec<Box<dyn Layer>>,
+    encoded_payload_lengths: Vec<Option<usize>>,
 }
 
 impl Packet {
@@ -37,11 +38,16 @@ impl Packet {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             layers: Vec::with_capacity(capacity),
+            encoded_payload_lengths: Vec::with_capacity(capacity),
         }
     }
 
     pub fn from_layers(layers: Vec<Box<dyn Layer>>) -> Self {
-        Self { layers }
+        let encoded_payload_lengths = vec![None; layers.len()];
+        Self {
+            layers,
+            encoded_payload_lengths,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -57,11 +63,13 @@ impl Packet {
         L: Layer + 'static,
     {
         self.layers.push(Box::new(layer));
+        self.invalidate_encoded_payload_lengths();
         self
     }
 
     pub fn push_boxed(&mut self, layer: Box<dyn Layer>) -> &mut Self {
         self.layers.push(layer);
+        self.invalidate_encoded_payload_lengths();
         self
     }
 
@@ -85,6 +93,7 @@ impl Packet {
         }
         self.shift_padding_for_insert(index);
         self.layers.insert(index, layer);
+        self.invalidate_encoded_payload_lengths();
         Ok(self)
     }
 
@@ -112,6 +121,7 @@ impl Packet {
         }
         let removed = self.layers.remove(index);
         self.shift_padding_for_remove(index);
+        self.invalidate_encoded_payload_lengths();
         Ok(removed)
     }
 
@@ -133,6 +143,7 @@ impl Packet {
             .get_mut(index)
             .ok_or(PacketError::IndexOutOfBounds { index, len })?;
         std::mem::swap(slot, &mut layer);
+        self.invalidate_encoded_payload_lengths();
         Ok(layer)
     }
 
@@ -143,6 +154,7 @@ impl Packet {
     }
 
     pub fn get_mut<T: Layer + 'static>(&mut self) -> Option<&mut T> {
+        self.invalidate_encoded_payload_lengths();
         self.layers
             .iter_mut()
             .find_map(|layer| layer.as_any_mut().downcast_mut::<T>())
@@ -155,6 +167,7 @@ impl Packet {
     }
 
     pub fn get_all_mut<T: Layer + 'static>(&mut self) -> impl Iterator<Item = &mut T> {
+        self.invalidate_encoded_payload_lengths();
         self.layers
             .iter_mut()
             .filter_map(|layer| layer.as_any_mut().downcast_mut::<T>())
@@ -170,6 +183,7 @@ impl Packet {
     }
 
     pub fn by_protocol_mut(&mut self, protocol: &ProtocolId) -> Option<&mut dyn Layer> {
+        self.invalidate_encoded_payload_lengths();
         for layer in &mut self.layers {
             if &layer.protocol_id() == protocol {
                 return Some(layer.as_mut());
@@ -192,6 +206,7 @@ impl Packet {
     }
 
     pub fn layer_mut(&mut self, index: usize) -> Option<&mut dyn Layer> {
+        self.invalidate_encoded_payload_lengths();
         match self.layers.get_mut(index) {
             Some(layer) => Some(layer.as_mut()),
             None => None,
@@ -208,6 +223,7 @@ impl Packet {
         field: &str,
         value: FieldValue,
     ) -> Result<(), PacketError> {
+        self.invalidate_encoded_payload_lengths();
         let layer =
             self.by_protocol_mut(protocol)
                 .ok_or_else(|| PacketError::ProtocolNotFound {
@@ -218,6 +234,7 @@ impl Packet {
     }
 
     pub fn normalize(&mut self) {
+        self.invalidate_encoded_payload_lengths();
         for layer in &mut self.layers {
             layer.normalize();
         }
@@ -240,6 +257,20 @@ impl Packet {
                 .iter()
                 .all(|field| left.field(field.name) == right.field(field.name))
         })
+    }
+
+    pub(crate) fn encoded_payload_length(&self, index: usize) -> Option<usize> {
+        self.encoded_payload_lengths.get(index).copied().flatten()
+    }
+
+    pub(crate) fn set_encoded_payload_lengths(&mut self, lengths: Vec<Option<usize>>) {
+        debug_assert_eq!(lengths.len(), self.layers.len());
+        self.encoded_payload_lengths = lengths;
+    }
+
+    fn invalidate_encoded_payload_lengths(&mut self) {
+        self.encoded_payload_lengths.clear();
+        self.encoded_payload_lengths.resize(self.layers.len(), None);
     }
 
     fn shift_padding_for_insert(&mut self, index: usize) {

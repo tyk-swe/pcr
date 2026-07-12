@@ -127,6 +127,28 @@ impl ResponseMatcher for ReverseTupleMatcher {
 }
 
 fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
+    if let Some(encoded_length) = packet.encoded_payload_length(tcp_layer_index) {
+        let trailing_padding = packet
+            .iter()
+            .skip(tcp_layer_index + 1)
+            .rev()
+            .take_while(|layer| layer.protocol_id().as_str() == "padding")
+            .filter(|layer| {
+                layer
+                    .field("outside_layer")
+                    .and_then(|value| value.as_u64())
+                    .and_then(|value| usize::try_from(value).ok())
+                    .is_none_or(|outside_layer| tcp_layer_index >= outside_layer)
+            })
+            .try_fold(0_usize, |total, layer| {
+                let FieldValue::Bytes(bytes) = layer.field("bytes")? else {
+                    return None;
+                };
+                total.checked_add(bytes.len())
+            })?;
+        return u32::try_from(encoded_length.checked_sub(trailing_padding)?).ok();
+    }
+
     let mut payload_length = 0_u32;
     for layer in packet.iter().skip(tcp_layer_index + 1) {
         match layer.protocol_id().as_str() {

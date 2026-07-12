@@ -170,6 +170,7 @@ impl Builder {
         let mut materialized = packet.clone();
         let mut bytes = Vec::new();
         let mut layouts: Vec<Option<LayerLayout>> = vec![None; packet.len()];
+        let mut encoded_payload_lengths = vec![None; packet.len()];
 
         for index in (0..packet.len()).rev() {
             let layer = packet
@@ -184,6 +185,7 @@ impl Builder {
                     protocol: protocol.clone(),
                 })?;
             let child = packet.layer(index + 1);
+            encoded_payload_lengths[index] = Some(bytes.len());
             let remaining_packet_bytes = options.max_packet_size.checked_sub(bytes.len()).ok_or(
                 BuildError::PacketSizeLimit {
                     actual: bytes.len(),
@@ -273,6 +275,7 @@ impl Builder {
         let layout = PacketLayout {
             layers: layouts.into_iter().flatten().collect(),
         };
+        materialized.set_encoded_payload_lengths(encoded_payload_lengths);
         let contains_malformed = materialized
             .iter()
             .any(|layer| layer.as_any().is::<MalformedLayer>());

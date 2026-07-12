@@ -1,6 +1,6 @@
 # PacketcraftR 0.2.0 bug report
 
-This public report covers commit `6d967c729e1eb317271467fba3abeafa27445034`, audited on 2026-07-12. It records 29 confirmed defects and engineering gaps. It does not claim that any item has been fixed.
+This public report covers commit `6d967c729e1eb317271467fba3abeafa27445034`, audited on 2026-07-12. It records 28 confirmed defects and engineering gaps. It does not claim that any item has been fixed. Stable issue identifiers were not renumbered after unsupported item BR-012 was removed.
 
 The canonical maintainer and auditor record is [`report.xml`](report.xml). That XML contains exact source-review provenance, commit-anchored locations, verification qualifications, and regression-test specifications. If this document and the XML differ, the XML controls.
 
@@ -10,13 +10,13 @@ The canonical maintainer and auditor record is [`report.xml`](report.xml). That 
 | --- | ---: |
 | Critical | 0 |
 | High | 3 |
-| Medium | 15 |
-| Low | 10 |
+| Medium | 13 |
+| Low | 11 |
 | Informational | 1 |
 
 Severity is based on supported defaults and the project's documented safety contracts. High denotes a supported-path safety-boundary bypass or memory-safety defect. Medium denotes material correctness, integrity, or availability impact, including safety defects with substantial preconditions. Low denotes narrow edge cases, non-default invariant failures, or limited API/interoperability defects. Informational denotes a verified control gap rather than a demonstrated vulnerability.
 
-All 29 mechanisms were independently traced in source. `cargo test --locked --all-features` passed all 337 tests under Rust 1.96.0, and the exact commit passed the four configured [GitHub Actions jobs](https://github.com/tyk-swe/pcr/actions/runs/29157517928). BR-025 and BR-027 were also reproduced at runtime. Platform-native and network-dependent impacts were not locally exercised unless stated below; passing tests do not cover the reported failure paths.
+All 28 retained mechanisms were independently traced in source. `cargo test --locked --all-features` passed all 337 tests under Rust 1.96.0, and the exact commit passed the four configured [GitHub Actions jobs](https://github.com/tyk-swe/pcr/actions/runs/29157517928). Targeted runtime checks reproduced BR-008, BR-010, BR-013, BR-016, BR-019 through BR-022, and BR-025 through BR-027. Platform-native and network-dependent impacts were not locally exercised unless stated below; passing tests do not cover the reported failure paths.
 
 ## High severity
 
@@ -63,7 +63,7 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 ### BR-006 — Response latency and timeout eligibility are measured at processing time instead of receive time
 
 - **Evidence:** `src/client/internal/exchange.rs:203-230` computes `sent_at.elapsed()` while processing a queued frame, and DNS later compares that inflated duration with its timeout.
-- **Condition and impact:** Queueing, scheduling, decoding, and matching delay inflate RTT and can invalidate a response captured before its deadline.
+- **Condition and impact:** Send-provider time, queueing, scheduling, decoding, and matching delay inflate RTT and can invalidate a response captured before its deadline.
 - **Remediation:** Carry a monotonic `received_at` from capture ingress, compute RTT from it, and expose processing delay separately if needed.
 - **Test:** Capture inside the deadline, delay consumption beyond it, and verify the original RTT and eligibility remain intact.
 
@@ -90,24 +90,17 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 
 ### BR-010 — A rejected PCAPNG frame can still mutate the output stream and interface table
 
-- **Evidence:** `src/capture/pcap/writer.rs:505-540,568-607` auto-creates and writes an IDB before snap-length, timestamp, and EPB-size validation. Frame-count and stream-byte limits are already checked earlier and are not part of this defect.
+- **Evidence:** `src/capture/pcap/writer.rs:505-540,568-607` auto-creates and writes an IDB before timestamp and EPB-size validation. Frame-count and stream-byte limits are checked earlier; snap-length cannot fail for an auto-created interface because its snap length is derived from the already-checked writer size limit.
 - **Condition and impact:** An invalid frame with a previously unseen link type can return an error after changing output bytes and interface numbering, so retries observe different state.
 - **Remediation:** Plan interface selection without mutation, validate the prospective frame completely, then commit the optional IDB and EPB.
-- **Test:** Verify output bytes and interface count remain unchanged after timestamp, snap-length, and EPB-size failures.
-
-### BR-012 — PCAPNG metadata bytes are not bounded by a meaningful aggregate budget
-
-- **Evidence:** `src/capture/pcap/models.rs:1-10` permits 4096 metadata blocks of up to 16 MiB each, while `src/capture/pcap/reader.rs:194-335` allocates complete block bodies without an aggregate metadata-byte charge.
-- **Condition and impact:** A very large or streaming input can force roughly 64 GiB of work before one packet or the count limit, far above the nominal capture stream budget.
-- **Remediation:** Add per-frame and stream-wide metadata-byte budgets, charge all metadata consistently, and skip unknown bodies through bounded scratch storage.
-- **Test:** Feed many large unknown blocks and verify rejection at the aggregate budget while still validating trailing block lengths.
+- **Test:** Verify output bytes and interface count remain unchanged after timestamp and EPB-size failures for previously unseen link types.
 
 ### BR-013 — TCP reassembly conflates distinct connection incarnations that reuse a four-tuple
 
 - **Evidence:** `src/session/tcp.rs:19-25,131-139` keys state only by addresses and ports and treats reopening an existing key as success without checking the new initial sequence.
 - **Condition and impact:** Tuple reuse before stale state expires can classify a new connection as retransmission, a huge gap, post-FIN data, or part of the previous stream.
 - **Remediation:** Track connection generation and SYN/FIN/RST lifecycle, replacing incompatible stale state while keeping retransmitted original SYNs idempotent.
-- **Test:** Reuse tuples before expiry, after FIN, after RST, and without a closing segment; separately test original-SYN retransmission.
+- **Test:** Reuse a tuple while incomplete state remains, including after an out-of-order FIN or a missed close; verify completed FIN/RST removal still permits reuse and original-SYN retransmission remains idempotent.
 
 ### BR-015 — The overall response timeout does not bound sending or unbounded zero-time capture drains
 
@@ -119,7 +112,7 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 ### BR-016 — Linux synchronous route lookup can panic when invoked inside a Tokio runtime
 
 - **Evidence:** `src/net/platform/linux.rs:143-160` creates a current-thread Tokio runtime and calls `Runtime::block_on` for a synchronous route operation.
-- **Condition and impact:** Calling the public synchronous route path from a thread already executing Tokio can panic instead of returning a route error. This was not locally reproduced.
+- **Condition and impact:** Calling the public synchronous route path from a thread already executing Tokio panics instead of returning a route error; this was reproduced on Linux with the all-features build.
 - **Remediation:** Expose an async route path or delegate synchronous work to a dedicated worker thread/runtime rather than nesting `block_on`.
 - **Test:** Invoke synchronous route lookup inside a Tokio task and exercise repeated concurrent calls without panic.
 - **Reference:** [Tokio `Runtime` documentation](https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html).
@@ -130,7 +123,7 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 - **Condition and impact:** An adapter whose family-specific indices differ can fail or misdirect constrained IPv6 route lookup. This was not reproduced on Windows.
 - **Remediation:** Preserve adapter LUID and both family indices, selecting the correct index from the route address family.
 - **Test:** Use a synthetic adapter with different indices and verify constrained routing and returned-route normalization for both families.
-- **References:** [IP_ADAPTER_ADDRESSES](https://learn.microsoft.com/en-us/windows/win32/api/iptypes/ns-iptypes-ip_adapter_addresses_xp) and [GetBestRoute2](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/getbestroute2).
+- **References:** [IP_ADAPTER_ADDRESSES](https://learn.microsoft.com/en-us/windows/win32/api/iptypes/ns-iptypes-ip_adapter_addresses_lh) and [GetBestRoute2](https://learn.microsoft.com/en-us/windows-hardware/drivers/network/getbestroute2).
 
 ### BR-018 — The default Windows feature profile lacks documented interface enumeration and is not tested
 
@@ -138,14 +131,6 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 - **Condition and impact:** A default Windows build advertises interface enumeration but cannot perform it, and the exact configuration remains outside CI.
 - **Remediation:** Implement default-profile Windows enumeration or document platform-specific defaults, and test default plus supported minimal feature combinations.
 - **Test:** Add a Windows default-feature smoke test for `system_interfaces` without treating all-features coverage as a substitute.
-
-### BR-019 — EDNS extended response codes are discarded and the model cannot represent them
-
-- **Evidence:** `src/workflow/dns/wire.rs:143-145,363-400` treats OPT generically and retains only the header's four RCODE bits; the model and output schemas cap the value at 15.
-- **Condition and impact:** Extended EDNS errors such as BADVERS can be emitted as `response_code=0` and `no_error`.
-- **Remediation:** Parse OPT explicitly, combine the extended and header RCODE fields into a `u16`, expose EDNS metadata, and update schema bounds to 4095.
-- **Test:** Cover BADVERS, mixed high/low RCODE bits, no OPT, duplicate OPT, malformed OPT, and unsupported versions.
-- **Reference:** [RFC 6891](https://www.rfc-editor.org/rfc/rfc6891).
 
 ### BR-021 — Removing the exact padding boundary silently changes protocol coverage semantics
 
@@ -161,7 +146,7 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 - **Evidence:** `src/capture/pcap/reader.rs:210-239,277-296` clears the section interface vector but validates `interface_base + interfaces.len()` against a limit documented as per-section.
 - **Condition and impact:** Multiple individually valid sections can be rejected only because their cumulative interface count exceeds the nominal per-section limit.
 - **Remediation:** Enforce the current-section limit with `interfaces.len()` and add a separately named total retained-interface limit, or explicitly redefine the existing contract.
-- **Test:** Parse multiple sections that remain individually within the limit but exceed it cumulatively.
+- **Test:** Parse multiple sections with a packet in each section so every per-read metadata count stays within its limit while the cumulative interface count exceeds it.
 
 ### BR-014 — Public SessionLimits can violate TCP serial-number half-space
 
@@ -170,12 +155,20 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 - **Remediation:** Validate TCP `max_bytes_per_flow < 2^31` at construction or every public entry point, independently documenting other quota semantics.
 - **Test:** Reject `2^31` and larger, accept the largest lower value, and retain documented zero and aggregate-budget behavior.
 
+### BR-019 — The public DNS decoder discards EDNS extended response codes
+
+- **Evidence:** `src/workflow/dns/wire.rs:44-68,95-104,143-145,175,228,363-400,680-717` exposes a general response decoder, emits no OPT in built-in queries, treats response OPT records generically, and retains only the header's four RCODE bits. `src/workflow/dns/model.rs:331-350,386` and `schemas/packetcraftr.output.v1.schema.json:1014-1018,1637-1641,2632-2636` cannot represent values above 15.
+- **Condition and impact:** The public response decoder can emit an externally supplied EDNS error such as BADVERS as `response_code=0` and `no_error`. The built-in query encoder does not emit OPT, and RFC 6891 prohibits a compliant responder from including OPT when the request lacks it, so ordinary built-in queries cannot trigger this defect.
+- **Remediation:** Parse OPT explicitly, combine the extended and header RCODE fields into a `u16`, expose EDNS metadata, and update schema bounds to 4095.
+- **Test:** Cover BADVERS and mixed high/low RCODE bits through direct decoder use, plus no OPT, duplicate OPT, malformed OPT, and unsupported versions.
+- **Reference:** [RFC 6891](https://www.rfc-editor.org/rfc/rfc6891).
+
 ### BR-020 — DNS wire labels are incorrectly restricted to printable ASCII without dot bytes
 
-- **Evidence:** `src/workflow/dns/wire.rs:270-360` applies presentation constraints to length-delimited wire labels and stores them in a lossy textual form.
+- **Evidence:** `src/workflow/dns/wire.rs:270-360` applies presentation constraints to length-delimited wire labels; its `String` model cannot represent arbitrary octet labels losslessly.
 - **Condition and impact:** Legal labels containing dot, NUL, high-bit octets, or other escaped bytes are rejected.
 - **Remediation:** Represent names as lossless byte labels, fold only ASCII letters for comparison, and escape bytes only during presentation.
-- **Test:** Decode and round-trip dot, NUL, high-bit, and backslash bytes while preserving ASCII-only case-insensitive comparison.
+- **Test:** Decode dot, NUL, high-bit, and backslash bytes without conflation, render them with escaping, and preserve ASCII-only case-insensitive comparison.
 - **Reference:** [RFC 1035](https://www.rfc-editor.org/rfc/rfc1035).
 
 ### BR-022 — Packet::structurally_eq is not symmetric for public Layer implementations
@@ -224,13 +217,13 @@ All 29 mechanisms were independently traced in source. `cargo test --locked --al
 ### BR-028 — Npcap drop aggregation aliases when an interval contains at least 2^32 combined drops
 
 - **Evidence:** `src/net/platform/npcap.rs:411-412` wrapping-adds two `u32` counters before `src/net/platform/live_capture.rs:360-369` computes a wrapping delta.
-- **Condition and impact:** Individual counter wraps remain exact while combined interval increments stay below `2^32`. At or above that total, aggregate loss is undercounted by one or more full wraps. This extreme Windows/Npcap condition was not reproduced.
+- **Condition and impact:** If each native counter advances by less than `2^32`, its individual wrapping delta is recoverable; when those two deltas sum to at least `2^32`, the current pre-sum loses exactly one `2^32` increment. Multiple wraps within either individual counter remain inherently unobservable. This extreme Windows/Npcap condition was not reproduced.
 - **Remediation:** Carry native counters separately, compute each wrapping delta, then sum into a widened accumulator.
 - **Test:** Prove a single component wrap below the aggregate boundary is exact, then cover totals equal to and greater than `2^32`.
 
 ## Informational
 
-### BR-029 — CI has no automated advisory, source, or license policy gate
+### BR-029 — The committed CI workflow has no advisory, source, or license policy gate
 
 - **Evidence:** `.github/workflows/ci.yml:24-32` runs formatting, checking, Clippy, and tests without a dependency-policy job; `Cargo.lock:474-475` contains transitive `paste` 1.0.15.
 - **Impact:** Maintenance, advisory, source, or license-policy regressions can enter the lockfile without an automated signal. This is not a demonstrated packetcraftr vulnerability.

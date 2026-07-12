@@ -2,21 +2,31 @@
   <metadata>
     <audit_date>2026-07-12</audit_date>
     <authority>This is the canonical, independently verified defect record for the audited revision. Supplied reviews are provenance; repository evidence and authoritative external contracts control where they differ.</authority>
-    <input_reviews count="4" issue_mapping_count="42" availability="supplied-during-refinement-not-embedded">
-      <review response="1" finding_count="11" issue_mapping_count="11" method="static-source-review" />
-      <review response="2" finding_count="8" issue_mapping_count="9" method="static-source-review" />
-      <review response="3" finding_count="8" issue_mapping_count="8" method="static-source-review" />
-      <review response="4" finding_count="14" issue_mapping_count="14" method="static-source-review" />
+    <input_reviews count="4" retained_issue_mapping_count="41" original_issue_mapping_count="42" availability="supplied-during-refinement-not-embedded">
+      <review response="1" finding_count="11" retained_issue_mapping_count="10" method="static-source-review" />
+      <review response="2" finding_count="8" retained_issue_mapping_count="9" method="static-source-review" />
+      <review response="3" finding_count="8" retained_issue_mapping_count="8" method="static-source-review" />
+      <review response="4" finding_count="14" retained_issue_mapping_count="14" method="static-source-review" />
     </input_reviews>
-    <unique_issue_count>29</unique_issue_count>
-    <merge_basis>Root-cause deduplication of the four supplied audit responses. Overlapping evidence, impacts, remediations, and locations were unioned. Distinct failure modes were retained separately.</merge_basis>
+    <unique_issue_count>28</unique_issue_count>
+    <merge_basis>Root-cause deduplication of the four supplied audit responses, followed by independent re-verification. Overlapping evidence, impacts, remediations, and locations were unioned. Distinct failure modes were retained separately. BR-012 was removed because the reader already enforces finite per-block and per-read metadata-count limits, its work is proportional to the supplied input, and the 256 MiB stream limit it was compared against is explicitly a captured-payload limit rather than a metadata budget.</merge_basis>
     <verification>
-      <issue_status status="confirmed" count="29" />
-      <source_claim_disposition confirmed_without_material_correction="25" confirmed_with_material_correction="4" rejected="0" />
-      <location_count checked="74" missing="0" invalid_range="0" />
+      <issue_status status="confirmed" count="28" />
+      <unique_issue_disposition confirmed_without_material_correction="23" confirmed_with_material_correction="5" rejected="1" />
+      <source_mapping_disposition retained_without_material_correction="34" retained_with_material_correction="7" rejected="1" />
+      <location_count checked="70" missing="0" invalid_range="0" />
       <local_toolchain command="cargo test --locked --all-features" rustc="1.96.0 (ac68faa20 2026-05-25)" result="passed" tests_passed="337" tests_failed="0" date="2026-07-12" />
-      <runtime_reproductions count="2">
+      <runtime_reproductions count="11">
+        <reproduction issue="BR-008" result="confirmed">A temporary public-API integration check opened base sequence 100, submitted sequence 90 with five payload bytes and FIN, and observed a Closed event.</reproduction>
+        <reproduction issue="BR-010" result="confirmed">A pre-epoch frame with a previously unseen link type returned TimestampOutOfRange after the PCAPNG output length had increased by one interface block.</reproduction>
+        <reproduction issue="BR-013" result="confirmed">A new SYN with a different initial sequence on a retained four-tuple remained attached to the old generation and did not emit its contiguous payload.</reproduction>
+        <reproduction issue="BR-016" result="confirmed">A public SystemRouteProvider lookup executed inside a current-thread Tokio runtime panicked at src/net/platform/linux.rs:153 with "Cannot start a runtime from within a runtime".</reproduction>
+        <reproduction issue="BR-019" result="confirmed">Direct use of the public decoder on a syntactically complete BADVERS response with OPT extended RCODE 1 produced response_code 0 and response_code_name no_error.</reproduction>
+        <reproduction issue="BR-020" result="confirmed">A response containing an answer-owner label with an embedded dot octet returned InvalidLabelData.</reproduction>
+        <reproduction issue="BR-021" result="confirmed">Removing the inner IPv4 boundary changed an enclosing IPv4 total length by exactly the four padding bytes compared with preserving the shifted boundary.</reproduction>
+        <reproduction issue="BR-022" result="confirmed">Two public custom layers with one shared ProtocolId and different schemas produced true in one structurally_eq direction and false in the other.</reproduction>
         <reproduction issue="BR-025" result="confirmed">target/debug/packetcraftr read -- --output=json extra exited with status 2 and emitted JSON, demonstrating post-terminator output-mode detection.</reproduction>
+        <reproduction issue="BR-026" result="confirmed">FuzzRequest::validate rejected first_case=u64::MAX and cases=1 with CaseIndexOverflow.</reproduction>
         <reproduction issue="BR-027" result="confirmed">Duration::try_from_secs_f64 returned Ok(0ns) for positive inputs 4.9e-10, 1e-20, and 1/f64::MAX under Rust 1.96.0.</reproduction>
       </runtime_reproductions>
       <ci commit="6d967c729e1eb317271467fba3abeafa27445034" result="passed" reference="ci-run">
@@ -25,7 +35,7 @@
         <job name="macos-x86_64" conclusion="success" />
         <job name="macos-arm64" conclusion="success" />
       </ci>
-      <scope_note>Every issue mechanism was independently traced in the audited source. Only BR-025 and BR-027 were additionally reproduced at runtime. Platform-native behavior and network-dependent impact were not executed locally unless an issue says otherwise.</scope_note>
+      <scope_note>Every retained issue mechanism was independently traced in the audited source. Eleven issues were additionally reproduced at runtime as listed above. Windows-native, macOS-native, and network-dependent impacts were not executed locally unless an issue says otherwise.</scope_note>
     </verification>
     <severity_rubric baseline="supported-defaults-and-documented-safety-contracts">
       <level name="critical">Catastrophic compromise or loss broadly reachable through default operation without substantial preconditions.</level>
@@ -38,6 +48,7 @@
       <canonical_artifact>report.xml</canonical_artifact>
       <public_disclosure derived_from="report.xml">report.md</public_disclosure>
       <location_semantics>Source locations are anchored to subject_commit, not to later revisions.</location_semantics>
+      <identifier_semantics>Stable BR identifiers are not renumbered when an unsupported issue is removed.</identifier_semantics>
     </canonical_contract>
     <deduplication_notes>
       <note>Sparse dense-range allocation and invalid SessionLimits were split because the former is an algorithmic preallocation defect and the latter is a configuration/serial-number invariant defect.</note>
@@ -51,7 +62,7 @@
       <reference id="rfc4291" title="RFC 4291: IP Version 6 Addressing Architecture" url="https://www.rfc-editor.org/rfc/rfc4291" />
       <reference id="apple-getifaddrs" title="Apple getifaddrs(3) manual" url="https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man3/getifaddrs.3.html" />
       <reference id="tokio-runtime" title="Tokio Runtime documentation" url="https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html" />
-      <reference id="microsoft-adapters" title="Microsoft IP_ADAPTER_ADDRESSES documentation" url="https://learn.microsoft.com/en-us/windows/win32/api/iptypes/ns-iptypes-ip_adapter_addresses_xp" />
+      <reference id="microsoft-adapters" title="Microsoft IP_ADAPTER_ADDRESSES documentation" url="https://learn.microsoft.com/en-us/windows/win32/api/iptypes/ns-iptypes-ip_adapter_addresses_lh" />
       <reference id="microsoft-getbestroute2" title="Microsoft GetBestRoute2 documentation" url="https://learn.microsoft.com/en-us/windows-hardware/drivers/network/getbestroute2" />
       <reference id="rfc6891" title="RFC 6891: Extension Mechanisms for DNS" url="https://www.rfc-editor.org/rfc/rfc6891" />
       <reference id="rfc1035" title="RFC 1035: Domain Names - Implementation and Specification" url="https://www.rfc-editor.org/rfc/rfc1035" />
@@ -63,8 +74,8 @@
   <severity_summary>
     <severity level="critical" count="0" />
     <severity level="high" count="3" />
-    <severity level="medium" count="15" />
-    <severity level="low" count="10" />
+    <severity level="medium" count="13" />
+    <severity level="low" count="11" />
     <severity level="informational" count="1" />
   </severity_summary>
   <issues>
@@ -244,7 +255,7 @@
         <precondition>Material inflation or rejection requires capture queue, scheduling, decoding, or matching delay.</precondition>
       </verification>
       <severity_rationale>This materially corrupts timing evidence and can reject on-time responses under load, but does not bypass traffic authorization.</severity_rationale>
-      <description>The client stores a monotonic send Instant but calculates latency later with sent_at.elapsed() when a queued frame is decoded and matched. The result includes capture backend queueing, scheduling, decoding, matching, and accumulator work. The existing capture timestamp is not used for the primary RTT value.</description>
+      <description>The client stores a monotonic Instant immediately before invoking the send provider but calculates latency later with sent_at.elapsed() when a queued frame is decoded and matched. The result includes send-provider time, capture backend queueing, scheduling, decoding, matching, and accumulator work. The existing capture timestamp is not used for the primary RTT value.</description>
       <impact>Reported RTT is inflated under backlog. More seriously, DNS can reject a response that was captured before its deadline but processed after the configured timeout; a busy queue may also hide an on-time frame until collection stops.</impact>
       <remediation>
         <step>Extend the captured-frame envelope with a monotonic received_at Instant recorded at backend dequeue or ingress, before decoding.</step>
@@ -298,6 +309,7 @@
       </locations>
       <verification>
         <method type="static-code-trace">Confirmed by tracing the documented base=100, sequence=90, payload-length=5 example through trimming, clamping, FIN offset calculation, and close detection.</method>
+        <method type="runtime-reproduction">A public-API integration check for that sequence produced a Closed event.</method>
         <precondition>A stale FIN and all associated payload must precede the retained capture base.</precondition>
       </verification>
       <severity_rationale>This can split or truncate a supported TCP reassembly stream and corrupt higher-level evidence.</severity_rationale>
@@ -355,20 +367,21 @@
         <location>src/capture/pcap/writer.rs:307-380,383-385,505-540,568-607</location>
       </locations>
       <verification>
-        <method type="static-code-trace">Confirmed that an unseen link type commits an IDB before snap-length, timestamp, and EPB-size validation.</method>
-        <source_correction>write_frame checks frame-count and stream-byte limits before select_interface. Those limits cannot produce this mutation and are excluded from the canonical claim and regression cases.</source_correction>
+        <method type="static-code-trace">Confirmed that an unseen link type commits an IDB before timestamp and EPB-size validation.</method>
+        <method type="runtime-reproduction">A pre-epoch frame returned TimestampOutOfRange after increasing the output length by one IDB.</method>
+        <source_correction>write_frame checks frame-count and stream-byte limits before select_interface. Those limits cannot produce this mutation. Snap-length validation is textually later, but it cannot fail for an auto-created interface because that interface uses the already-checked writer size limit as its snap length. All three are excluded from the canonical regression cases.</source_correction>
       </verification>
       <severity_rationale>A documented prevalidation contract is violated and failed writes observably change serialized output and retry state.</severity_rationale>
-      <description>The PCAPNG frame path calls select_interface before completing snap-length, timestamp, and Enhanced Packet Block size validation. When no interface matches, select_interface calls add_interface, immediately emits an Interface Description Block, and updates writer state. A later validation error therefore occurs after externally visible commit. Frame-count and stream-byte limits are checked earlier in write_frame and are not part of this defect.</description>
-      <impact>For example, a pre-Unix-epoch frame on a fresh writer can return TimestampOutOfRange while leaving an IDB in the stream and consuming interface ID 0. Retries see different state, repeated failures can consume limits, and write_frame violates its prevalidation/atomicity contract.</impact>
+      <description>The PCAPNG frame path calls select_interface before completing timestamp and Enhanced Packet Block size validation. When no interface matches, select_interface calls add_interface, immediately emits an Interface Description Block, and updates writer state. A later validation error therefore occurs after externally visible commit. Frame-count and stream-byte limits are checked earlier in write_frame. Although snap-length validation appears after interface selection, it cannot fail for the auto-created interface because that interface's snap length is the writer size limit already applied to the frame.</description>
+      <impact>For example, a pre-Unix-epoch frame on a fresh writer can return TimestampOutOfRange while leaving an IDB in the stream and consuming interface ID 0. A retry observes different state, and failures involving different previously unseen link types can shift later interface numbering or consume the interface limit. write_frame therefore violates its documented prevalidation contract.</impact>
       <remediation>
         <step>Split interface resolution into non-mutating planning and commit phases.</step>
-        <step>Validate prospective interface properties, timestamp representation, snap length, and block size before writing.</step>
+        <step>Validate prospective interface properties, timestamp representation, and block size before writing.</step>
         <step>Commit the optional IDB and EPB only after all non-I/O validation succeeds, or stage both blocks in a bounded temporary buffer.</step>
       </remediation>
       <regression_tests>
         <test>Submit an invalid frame with a previously unseen link type and assert output bytes and interface count are unchanged.</test>
-        <test>Cover timestamp, snap-length, and EPB-size failures.</test>
+        <test>Cover timestamp and EPB-size failures for previously unseen link types.</test>
       </regression_tests>
     </issue>
     <issue id="BR-011" status="confirmed" severity="low" category="capture-parsing-limits">
@@ -386,44 +399,15 @@
       </verification>
       <severity_rationale>This is a narrow multi-section interoperability and documentation-contract failure rather than an unsafe acceptance path.</severity_rationale>
       <description>A new section advances interface_base by the previous section's interface count and clears the current section vector. IDB validation nevertheless checks interface_base plus interfaces.len() against the limit. The implementation therefore applies a global cumulative namespace limit while the constant and documentation describe a per-section limit.</description>
-      <impact>A file containing, for example, 3000 interfaces in each of two sections exceeds the default 4096 limit even though neither section violates the documented constraint.</impact>
+      <impact>A file containing, for example, 3000 interfaces and a packet in each of two sections exceeds the default 4096 interface limit even though neither section violates the documented constraint and each call remains below the independent metadata-block limit.</impact>
       <remediation>
         <step>Use interfaces.len() for the current-section limit.</step>
         <step>Add a separate total-file interface limit for globally retained normalized metadata, or explicitly redefine and document the existing limit as cumulative.</step>
         <step>Align the error text and public API documentation with the chosen semantics.</step>
       </remediation>
       <regression_tests>
-        <test>Parse multiple sections that are individually under the limit but cumulatively over it.</test>
+        <test>Parse multiple sections with a packet in each section so every per-read metadata count remains in bounds while the sections are individually under the interface limit but cumulatively over it.</test>
         <test>Independently exercise any new global retained-interface limit.</test>
-      </regression_tests>
-    </issue>
-    <issue id="BR-012" status="confirmed" severity="medium" category="capture-parsing-limits">
-      <title>PCAPNG metadata bytes are not bounded by a meaningful aggregate budget</title>
-      <source_findings>
-        <source response="1" finding="7" reported_severity="medium" />
-      </source_findings>
-      <locations>
-        <location>src/capture/pcap/models.rs:1-10</location>
-        <location>src/capture/pcap/reader.rs:194-335</location>
-        <location>src/capture/pcap/pcapng.rs:19-46</location>
-        <location>src/capture/pcap/tests.rs:534-550</location>
-      </locations>
-      <verification>
-        <method type="static-code-trace">Confirmed independent 16 MiB per-block and 4096 metadata-block limits, full-body allocation, and the absence of an aggregate metadata-byte charge.</method>
-        <precondition>High resource consumption requires a very large or streaming PCAPNG input containing many maximum-size metadata blocks before a packet.</precondition>
-      </verification>
-      <severity_rationale>The default effective work ceiling can reach roughly 64 GiB in one read operation, violating the documented bounded-parser safety model, although comparable input volume is required.</severity_rationale>
-      <description>The reader limits individual block size and the number of metadata blocks before a frame, but not their aggregate bytes. With defaults of 4096 blocks and 16 MiB per block, a single next_frame call can process roughly 64 GiB before returning a frame or hitting the count limit. Ordinary and unknown blocks are read into full Vec allocations, while payload-oriented stream budgets do not charge these metadata bytes.</description>
-      <impact>Adversarial PCAPNG input can drive extreme allocation, copying, and I/O work that is several orders of magnitude above the nominal capture stream budget.</impact>
-      <remediation>
-        <step>Add max_metadata_bytes_per_frame and an aggregate stream metadata-byte budget.</step>
-        <step>Charge section headers, IDBs, unknown blocks, and other metadata consistently.</step>
-        <step>Skip unknown block bodies with a fixed-size scratch buffer while still validating the trailing block length.</step>
-        <step>Use a smaller separate budget for metadata that must be retained.</step>
-      </remediation>
-      <regression_tests>
-        <test>Feed many large unknown blocks before a frame and verify rejection at the aggregate metadata budget.</test>
-        <test>Verify skipped blocks still validate trailing lengths without full-body allocation.</test>
       </regression_tests>
     </issue>
     <issue id="BR-013" status="confirmed" severity="medium" category="tcp-reassembly">
@@ -437,6 +421,7 @@
       </locations>
       <verification>
         <method type="static-code-trace">Confirmed that FlowKey contains only addresses and ports and that open_flow treats an existing key as success without validating the new initial sequence.</method>
+        <method type="runtime-reproduction">A retained flow accepted a new SYN with a different initial sequence into the old generation and did not emit its otherwise-contiguous payload.</method>
         <precondition>A four-tuple must be reused before the previous generation expires or is otherwise removed.</precondition>
       </verification>
       <severity_rationale>This can materially corrupt or conflate supported TCP reassembly sessions during legitimate tuple reuse.</severity_rationale>
@@ -448,7 +433,8 @@
         <step>Keep retransmission of the original SYN idempotent and emit an observable replacement or eviction event when incomplete old state is discarded.</step>
       </remediation>
       <regression_tests>
-        <test>Reuse a tuple before idle expiration, after FIN, after RST, and without a closing segment.</test>
+        <test>Reuse a tuple before idle expiration while incomplete state remains, including after an out-of-order FIN and when the prior close was not captured.</test>
+        <test>Verify a completed contiguous FIN or RST removes state and permits ordinary tuple reuse.</test>
         <test>Verify retransmission of the original SYN does not create a new generation.</test>
       </regression_tests>
     </issue>
@@ -522,9 +508,9 @@
       </locations>
       <verification>
         <method type="static-code-trace">Confirmed construction of a current-thread runtime followed by Runtime::block_on in the synchronous Linux route path.</method>
+        <method type="runtime-reproduction">Calling the public SystemRouteProvider lookup inside a current-thread Tokio runtime panicked at the nested block_on.</method>
         <reference ref="tokio-runtime" />
         <precondition>The synchronous route API must be invoked on a thread currently executing a Tokio runtime.</precondition>
-        <limitation>The nested-runtime panic was not reproduced locally.</limitation>
       </verification>
       <severity_rationale>A normal public API composition on Linux can panic instead of returning a recoverable error.</severity_rationale>
       <description>The native-route adapter creates a new current-thread Tokio runtime and calls Runtime::block_on for each synchronous netlink operation. Calling this path from a thread already executing a Tokio task can trigger Tokio's nested-runtime/block_on panic.</description>
@@ -597,24 +583,25 @@
         <test>Keep all-features tests but do not use them as a substitute for default and minimal profiles.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-019" status="confirmed" severity="medium" category="dns-protocol">
-      <title>EDNS extended response codes are discarded and the model cannot represent them</title>
+    <issue id="BR-019" status="confirmed" severity="low" category="dns-protocol">
+      <title>The public DNS decoder discards EDNS extended response codes</title>
       <source_findings>
-        <source response="2" finding="5" reported_severity="medium" />
+        <source response="2" finding="5" reported_severity="medium" disposition="accepted-with-correction" />
       </source_findings>
       <locations>
-        <location>src/workflow/dns/wire.rs:143-145,175,204-206,228,363-400,519-522,680-717</location>
+        <location>src/workflow/dns/wire.rs:44-68,95-104,143-145,175,204-206,228,363-400,519-522,680-717</location>
         <location>src/workflow/dns/model.rs:331-350,386</location>
-        <location>schemas/packetcraftr.output.v1.schema.json:1014-1018,1637-1641</location>
+        <location>schemas/packetcraftr.output.v1.schema.json:1014-1018,1637-1641,2632-2636</location>
       </locations>
       <verification>
-        <method type="static-code-trace">Confirmed that OPT is decoded generically, only the header's low four RCODE bits are retained, and both model and output schema exclude values above 15.</method>
+        <method type="static-code-trace">Confirmed that the public complete-response decoder treats OPT generically, retains only the header's low four RCODE bits, and feeds a model and output schema that exclude values above 15. The built-in encoder sets the additional-record count to zero and emits no OPT.</method>
+        <method type="runtime-reproduction">Direct public-decoder use on a complete BADVERS response with OPT extended RCODE 1 produced response_code 0 and no_error.</method>
         <reference ref="rfc6891" />
-        <precondition>The response must use an EDNS extended RCODE, such as BADVERS.</precondition>
+        <precondition>The response must use an EDNS extended RCODE and come from direct decoder use with an externally generated EDNS query, a noncompliant responder, or future built-in EDNS support. The current built-in encoder does not emit OPT, and RFC 6891 prohibits a compliant responder from including OPT when the request lacks it.</precondition>
       </verification>
-      <severity_rationale>Standards-compliant DNS errors are materially misrepresented by a supported workflow and serialized contract.</severity_rationale>
-      <description>OPT resource records (type 41) fall through to the generic unknown-record representation. The decoder extracts only the four response-code bits in the DNS header, while EDNS stores the upper eight bits in the OPT TTL field. The response-code model is u8 and the output schemas cap it at 15, so the full 12-bit space cannot be represented. BADVERS (16), for example, can be emitted as response_code=0 and labeled no_error.</description>
-      <impact>Standards-compliant EDNS errors are misreported, which can cause incorrect diagnostics and workflow decisions.</impact>
+      <severity_rationale>The public decoder and serialized contract misrepresent externally supplied EDNS errors, but compliant responses to the current built-in non-EDNS query path cannot trigger the defect.</severity_rationale>
+      <description>OPT resource records (type 41) fall through to the generic unknown-record representation. The public decoder extracts only the four response-code bits in the DNS header, while EDNS stores the upper eight bits in the OPT TTL field. The response-code model is u8 and all three corresponding output-schema fields cap it at 15, so the full 12-bit space cannot be represented. BADVERS (16), for example, is emitted as response_code=0 and labeled no_error. The built-in query encoder always writes an additional-record count of zero and does not emit OPT.</description>
+      <impact>Direct decoder use on standards-compliant responses to externally generated EDNS queries can misreport errors, causing incorrect diagnostics. Ordinary responses to the current built-in query encoder are unaffected when responders comply with RFC 6891.</impact>
       <remediation>
         <step>Parse OPT as a dedicated pseudo-record and require the root owner name.</step>
         <step>Extract extended RCODE, EDNS version, flags, UDP payload size, and options.</step>
@@ -623,8 +610,8 @@
         <step>Define handling for duplicate OPT records, malformed records, and unsupported EDNS versions.</step>
       </remediation>
       <regression_tests>
-        <test>BADVERS with a zero header nibble.</test>
-        <test>A nonzero low nibble combined with nonzero extended bits.</test>
+        <test>Exercise direct decoder use with BADVERS and a zero header nibble.</test>
+        <test>Exercise direct decoder use with a nonzero low nibble combined with nonzero extended bits.</test>
         <test>No OPT, duplicate OPT, malformed OPT, and unsupported-version fixtures.</test>
       </regression_tests>
     </issue>
@@ -637,12 +624,13 @@
         <location>src/workflow/dns/wire.rs:270-360,346-358</location>
       </locations>
       <verification>
-        <method type="static-code-trace">Confirmed ASCII-graphic and no-dot validation in the length-delimited wire-label decoder and lossy String representation.</method>
+        <method type="static-code-trace">Confirmed ASCII-graphic and no-dot validation in the length-delimited wire-label decoder and a String model without a lossless arbitrary-octet representation.</method>
+        <method type="runtime-reproduction">A response with an embedded dot octet in an answer-owner label returned InvalidLabelData.</method>
         <reference ref="rfc1035" />
         <precondition>A response name must contain a legal wire octet that requires presentation escaping or is outside printable ASCII.</precondition>
       </verification>
       <severity_rationale>This is a standards-interoperability defect affecting unusual but valid DNS names, with limited broader impact.</severity_rationale>
-      <description>The DNS decoder rejects label bytes that are not ASCII graphic characters and rejects a literal dot byte. Those are presentation-format constraints, not wire-format constraints: labels are length-delimited octet strings, and dot is only a separator in text form.</description>
+      <description>The DNS decoder rejects label bytes that are not ASCII graphic characters and rejects a literal dot byte. Those are presentation-format constraints, not wire-format constraints: labels are length-delimited octet strings, and dot is only a separator in text form. The String-based name model cannot represent arbitrary octet labels losslessly without a defined escaping layer.</description>
       <impact>Structurally valid DNS responses can be rejected when an owner name or name-valued RDATA contains an embedded dot, NUL, non-ASCII octet, or another byte requiring presentation escaping.</impact>
       <remediation>
         <step>Represent decoded names losslessly as byte labels or a dedicated DnsName type.</step>
@@ -651,7 +639,7 @@
         <step>Allow the query-facing API to retain stricter hostname-like validation independently of response decoding.</step>
       </remediation>
       <regression_tests>
-        <test>Decode and round-trip labels containing dot, NUL, high-bit bytes, and backslash.</test>
+        <test>Decode labels containing dot, NUL, high-bit bytes, and backslash without conflation and render them with defined escaping.</test>
         <test>Verify ASCII-only case-insensitive comparison without altering other octets.</test>
       </regression_tests>
     </issue>
@@ -668,6 +656,7 @@
       </locations>
       <verification>
         <method type="static-code-trace">Confirmed that removing the exact outside_layer index changes it to None, whose downstream interpretation excludes padding from every dependent payload.</method>
+        <method type="runtime-reproduction">Removing the inner IPv4 boundary changed the enclosing IPv4 total length by the exact four-byte trailer size compared with retaining the shifted successor boundary.</method>
         <precondition>A packet must remove the exact boundary layer while a shifted successor should remain the first layer excluding the trailer.</precondition>
       </verification>
       <severity_rationale>The mutation can silently change emitted lengths, checksums, MTU calculations, and exact packet bytes in a supported packet-model operation.</severity_rationale>
@@ -693,6 +682,7 @@
       </locations>
       <verification>
         <method type="static-code-trace">Confirmed that structurally_eq compares matching protocol IDs and only fields exposed by the left-hand schema.</method>
+        <method type="runtime-reproduction">Public custom layers with one shared ProtocolId and different schemas compared true in one direction and false in the other.</method>
         <precondition>Two public external Layer implementations must share a ProtocolId while exposing different schemas.</precondition>
       </verification>
       <severity_rationale>The method violates equality symmetry, but the failure requires custom layer implementations with an unusual shared-identifier/schema mismatch.</severity_rationale>
@@ -720,9 +710,9 @@
         <method type="static-code-trace">Confirmed that duplicate detection checks only child identity, returns success, and leaves the earlier priority unchanged.</method>
         <precondition>A caller must rebind the same parent, discriminator, and child with a different priority.</precondition>
       </verification>
-      <severity_rationale>This is a narrow public API contract error that silently discards configuration but does not corrupt wire input or cross a safety boundary.</severity_rationale>
+      <severity_rationale>This is a narrow, silent public-API configuration inconsistency that does not corrupt wire input or cross a safety boundary.</severity_rationale>
       <description>Binding the same parent, discriminator, and child again returns success whenever the child is already present, regardless of whether the requested priority differs. Priority affects binding order and reverse discriminator selection, so the successful call does not reflect the resulting state.</description>
-      <impact>Modules attempting to override priority receive Ok while their configuration is discarded, leading to surprising build or dispatch order.</impact>
+      <impact>Callers that repeat a binding with a changed priority receive Ok although the earlier priority remains in effect, making composed-module ordering opaque and order-dependent.</impact>
       <remediation>
         <step>Treat only an exact child-and-priority duplicate as idempotent.</step>
         <step>For the same child with a different priority, update deterministically or return a dedicated conflict error.</step>
@@ -794,6 +784,7 @@
       </locations>
       <verification>
         <method type="static-code-trace">Confirmed that validation adds cases rather than cases minus one before the generation range is used.</method>
+        <method type="runtime-reproduction">FuzzRequest::validate returned CaseIndexOverflow for first_case=u64::MAX and cases=1.</method>
         <precondition>The requested final valid case range must touch u64::MAX.</precondition>
       </verification>
       <severity_rationale>This rejects a representable but extremely narrow edge case without affecting ordinary fuzz ranges.</severity_rationale>
@@ -850,9 +841,9 @@
         <precondition>At least 2^32 combined dropped and network-dropped events must accrue between two statistics samples.</precondition>
         <limitation>The required Npcap loss volume was not reproduced on Windows.</limitation>
       </verification>
-      <severity_rationale>The counter design can undercount by multiples of 2^32, but only after an extreme loss burst or sampling gap.</severity_rationale>
-      <description>Npcap reports dropped and network_dropped separately, but the adapter combines them with wrapping_add into one u32 counter before the generic capture layer computes a wrapping delta. The identity delta((a+b) mod 2^32) = (delta(a)+delta(b)) mod 2^32 means individual component wraps are handled correctly while the summed increments remain below 2^32. Once the combined interval delta reaches that modulus, the exported aggregate aliases and loses one or more full wraps.</description>
-      <impact>Receiver loss can be undercounted by multiples of 2^32 after an extreme loss interval, weakening operational diagnostics and overflow evidence.</impact>
+      <severity_rationale>The premature aggregation can lose a 2^32 increment even when both component deltas are individually recoverable, but only after an extreme loss burst or sampling gap.</severity_rationale>
+      <description>Npcap reports dropped and network_dropped separately, but the adapter combines them with wrapping_add into one u32 counter before the generic capture layer computes a wrapping delta. The identity delta((a+b) mod 2^32) = (delta(a)+delta(b)) mod 2^32 means individual component wraps are handled correctly while the summed increments remain below 2^32. If each component advances by less than 2^32 but their recoverable deltas sum to at least that modulus, the pre-summed value aliases and loses exactly one 2^32 increment. Multiple wraps within either component are independently unobservable from two u32 samples and are outside this narrower defect.</description>
+      <impact>Receiver loss can be undercounted by 2^32 after an extreme loss interval even when both individual counter deltas remain recoverable, weakening operational diagnostics and overflow evidence.</impact>
       <remediation>
         <step>Carry each native counter separately through the abstraction.</step>
         <step>Compute the wrapping delta of each component independently and sum the widened deltas afterward.</step>
@@ -864,7 +855,7 @@
       </regression_tests>
     </issue>
     <issue id="BR-029" status="confirmed" severity="informational" category="supply-chain-ci">
-      <title>CI has no automated advisory, source, or license policy gate</title>
+      <title>The committed CI workflow has no advisory, source, or license policy gate</title>
       <source_findings>
         <source response="4" finding="PC-14" reported_severity="informational" />
       </source_findings>

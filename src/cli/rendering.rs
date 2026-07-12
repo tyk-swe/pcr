@@ -96,6 +96,10 @@ fn spaced_hex(bytes: &[u8]) -> String {
     output
 }
 
+fn output_timestamp_text(timestamp: crate::output::OutputTimestamp) -> String {
+    format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds)
+}
+
 fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
     let rendered = serde_json::to_string_pretty(value)
         .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;

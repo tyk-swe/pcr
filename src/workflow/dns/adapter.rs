@@ -66,8 +66,10 @@ where
             ));
         }
         Ok(DnsExchangeExecution {
-            sent: sent.remove(0).packet,
-            sent_evidence: sent_evidence.remove(0),
+            sent: sent.pop().expect("validated one sent packet").packet,
+            sent_evidence: sent_evidence
+                .pop()
+                .expect("validated one sent evidence frame"),
             responses: responses
                 .into_iter()
                 .map(|response| DnsMatchedResponse {
@@ -78,13 +80,7 @@ where
             unsolicited,
             undecoded,
             diagnostics,
-            stats: Stats {
-                packets_attempted: stats.packets_attempted,
-                packets_completed: stats.packets_completed,
-                bytes: stats.bytes,
-                elapsed: stats.elapsed,
-                capture: stats.capture,
-            },
+            stats: Stats::from_client(stats),
         })
     }
 }

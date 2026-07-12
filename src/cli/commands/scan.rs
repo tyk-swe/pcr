@@ -248,10 +248,6 @@ fn render_scan_text(
     render_diagnostics_text(&diagnostics)
 }
 
-fn output_timestamp_text(timestamp: crate::output::OutputTimestamp) -> String {
-    format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds)
-}
-
 fn scan_classification_name(value: crate::output::scan::Classification) -> &'static str {
     match value {
         crate::output::scan::Classification::Open => "open",

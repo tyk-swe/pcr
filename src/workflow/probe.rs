@@ -11,14 +11,14 @@ use crate::packet::internal::{
 use crate::protocol::internal::Tcp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Transport {
+pub(super) enum Transport {
     Tcp,
     Udp,
     Icmp,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Correlation {
+pub(super) enum Correlation {
     TcpReset,
     TcpSynAck,
     TcpOther,
@@ -31,28 +31,28 @@ pub(crate) enum Correlation {
 }
 
 impl Correlation {
-    pub(crate) const fn is_direct_reply(self) -> bool {
+    pub(super) const fn is_direct_reply(self) -> bool {
         matches!(
             self,
             Self::TcpReset | Self::TcpSynAck | Self::TcpOther | Self::UdpReply | Self::IcmpReply
         )
     }
 
-    pub(crate) const fn is_network_failure(self) -> bool {
+    pub(super) const fn is_network_failure(self) -> bool {
         !self.is_direct_reply()
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Observation {
-    pub(crate) responder: IpAddr,
-    pub(crate) reason: &'static str,
-    pub(crate) correlation: Correlation,
+pub(super) struct Observation {
+    pub(super) responder: IpAddr,
+    pub(super) reason: &'static str,
+    pub(super) correlation: Correlation,
 }
 
 /// Correlates one decoded response with a request without assigning an
 /// operation-specific status. Corrupt and unrelated traffic returns `None`.
-pub(crate) fn observe(
+pub(super) fn observe(
     registry: &ProtocolRegistry,
     transport: Transport,
     request: &Packet,

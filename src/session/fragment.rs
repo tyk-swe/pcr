@@ -283,17 +283,13 @@ impl Reassembler {
                     .map(|_| key.clone())
             })
             .collect::<Vec<_>>();
-        expired.sort_by(|left, right| {
-            left.source
-                .to_string()
-                .cmp(&right.source.to_string())
-                .then_with(|| {
-                    left.destination
-                        .to_string()
-                        .cmp(&right.destination.to_string())
-                })
-                .then_with(|| left.identification.cmp(&right.identification))
-                .then_with(|| left.next_header.cmp(&right.next_header))
+        expired.sort_by_cached_key(|key| {
+            (
+                key.source.to_string(),
+                key.destination.to_string(),
+                key.identification,
+                key.next_header,
+            )
         });
         expired
             .into_iter()

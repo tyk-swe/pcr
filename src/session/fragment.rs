@@ -59,6 +59,8 @@ pub enum Event {
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
+    #[error("zero-length fragments are not accepted for reassembly")]
+    EmptyFragment,
     #[error("fragment range overflows its 32-bit offset")]
     OffsetOverflow,
     #[error("fragment datagram exceeds per-flow limit {limit} bytes")]
@@ -129,6 +131,9 @@ impl Reassembler {
     }
 
     pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Option<Event>, Error> {
+        if fragment.bytes.is_empty() {
+            return Err(Error::EmptyFragment);
+        }
         let end = fragment
             .offset
             .checked_add(u32::try_from(fragment.bytes.len()).map_err(|_| Error::OffsetOverflow)?)
@@ -185,16 +190,22 @@ impl Reassembler {
             }
         }
 
-        let (segments, stored_bytes, conflict) = merge_fragment(
+        let merge = plan_fragment_merge(
             &candidate.segments,
             fragment.offset,
             &fragment.bytes,
             self.overlap_policy,
         )?;
-        let added = stored_bytes.saturating_sub(candidate.stored_bytes);
+        let stored_bytes =
+            candidate
+                .stored_bytes
+                .checked_add(merge.added)
+                .ok_or(Error::AggregateByteLimit {
+                    limit: self.limits.max_aggregate_bytes,
+                })?;
         let aggregate =
             self.aggregate_bytes
-                .checked_add(added)
+                .checked_add(merge.added)
                 .ok_or(Error::AggregateByteLimit {
                     limit: self.limits.max_aggregate_bytes,
                 })?;
@@ -203,7 +214,7 @@ impl Reassembler {
                 limit: self.limits.max_aggregate_bytes,
             });
         }
-        let new_memory_charge = datagram_memory_charge_parts(stored_bytes, segments.len()).ok_or(
+        let new_memory_charge = datagram_memory_charge_parts(stored_bytes, merge.segments).ok_or(
             Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
             },
@@ -220,13 +231,22 @@ impl Reassembler {
                 limit: self.limits.max_aggregate_bytes,
             });
         }
+        let segments = merge_fragment(
+            &candidate.segments,
+            fragment.offset,
+            &fragment.bytes,
+            &merge,
+        )
+        .ok_or(Error::FlowByteLimit {
+            limit: self.limits.max_bytes_per_flow,
+        })?;
         self.aggregate_bytes = aggregate;
         self.aggregate_memory_charge = aggregate_memory_charge;
         candidate.segments = segments;
         candidate.stored_bytes = stored_bytes;
         candidate.fragments += 1;
         candidate.last_update = now;
-        candidate.had_conflict |= conflict;
+        candidate.had_conflict |= merge.conflict;
 
         let complete = candidate
             .final_length
@@ -329,62 +349,117 @@ fn datagram_memory_charge_parts(stored_bytes: usize, segments: usize) -> Option<
         .and_then(|metadata| metadata.checked_add(stored_bytes))
 }
 
-fn merge_fragment(
+#[derive(Clone, Copy, Debug)]
+struct FragmentMergePlan {
+    added: usize,
+    conflict: bool,
+    segments: usize,
+}
+
+fn plan_fragment_merge(
     existing: &BTreeMap<u32, Bytes>,
     offset: u32,
     fragment: &[u8],
     policy: OverlapPolicy,
-) -> Result<(BTreeMap<u32, Bytes>, usize, bool), Error> {
-    let existing_end = existing
-        .iter()
-        .map(|(start, bytes)| *start as usize + bytes.len())
-        .max()
-        .unwrap_or(0);
-    let new_end = offset as usize + fragment.len();
-    let length = existing_end.max(new_end);
-    let mut bytes = vec![0u8; length];
-    let mut present = vec![false; length];
-    for (start, value) in existing {
-        let start = *start as usize;
-        bytes[start..start + value.len()].copy_from_slice(value);
-        present[start..start + value.len()].fill(true);
-    }
+) -> Result<FragmentMergePlan, Error> {
+    debug_assert!(!fragment.is_empty());
+    let new_end = offset
+        .checked_add(u32::try_from(fragment.len()).map_err(|_| Error::OffsetOverflow)?)
+        .ok_or(Error::OffsetOverflow)?;
+    let mut overlap = 0usize;
+    let mut connected = 0usize;
     let mut conflict = false;
-    for (index, value) in fragment.iter().copied().enumerate() {
-        let position = offset as usize + index;
-        if present[position] {
-            if bytes[position] != value {
+    for (start, value) in existing {
+        let end = start
+            .checked_add(u32::try_from(value.len()).map_err(|_| Error::OffsetOverflow)?)
+            .ok_or(Error::OffsetOverflow)?;
+        if end >= offset && *start <= new_end {
+            connected += 1;
+        }
+        let overlap_start = (*start).max(offset);
+        let overlap_end = end.min(new_end);
+        if overlap_start < overlap_end {
+            let length = (overlap_end - overlap_start) as usize;
+            let existing_start = (overlap_start - *start) as usize;
+            let fragment_start = (overlap_start - offset) as usize;
+            overlap = overlap.checked_add(length).ok_or(Error::OffsetOverflow)?;
+            if value[existing_start..existing_start + length]
+                != fragment[fragment_start..fragment_start + length]
+            {
                 conflict = true;
                 if policy == OverlapPolicy::RejectConflicting {
+                    let mismatch = value[existing_start..existing_start + length]
+                        .iter()
+                        .zip(&fragment[fragment_start..fragment_start + length])
+                        .position(|(left, right)| left != right)
+                        .unwrap_or(0);
                     return Err(Error::ConflictingOverlap {
-                        offset: position as u32,
+                        offset: overlap_start + mismatch as u32,
                     });
                 }
             }
-        } else {
-            bytes[position] = value;
-            present[position] = true;
         }
+    }
+    Ok(FragmentMergePlan {
+        added: fragment
+            .len()
+            .checked_sub(overlap)
+            .ok_or(Error::OffsetOverflow)?,
+        conflict,
+        segments: existing
+            .len()
+            .checked_add(1)
+            .and_then(|count| count.checked_sub(connected))
+            .ok_or(Error::OffsetOverflow)?,
+    })
+}
+
+fn merge_fragment(
+    existing: &BTreeMap<u32, Bytes>,
+    offset: u32,
+    fragment: &[u8],
+    plan: &FragmentMergePlan,
+) -> Option<BTreeMap<u32, Bytes>> {
+    let new_end = offset.checked_add(u32::try_from(fragment.len()).ok()?)?;
+    let affected = existing
+        .iter()
+        .filter_map(|(start, bytes)| {
+            let end = start.checked_add(u32::try_from(bytes.len()).ok()?)?;
+            (end >= offset && *start <= new_end).then_some((*start, end, bytes.clone()))
+        })
+        .collect::<Vec<_>>();
+    let mut segments = existing.clone();
+    if affected.is_empty() {
+        segments.insert(offset, Bytes::copy_from_slice(fragment));
+        debug_assert_eq!(segments.len(), plan.segments);
+        return Some(segments);
     }
 
-    let mut segments = BTreeMap::new();
-    let mut stored = 0usize;
-    let mut cursor = 0usize;
-    while cursor < length {
-        while cursor < length && !present[cursor] {
-            cursor += 1;
-        }
-        if cursor == length {
-            break;
-        }
-        let start = cursor;
-        while cursor < length && present[cursor] {
-            cursor += 1;
-        }
-        stored += cursor - start;
-        segments.insert(start as u32, Bytes::copy_from_slice(&bytes[start..cursor]));
+    let union_start = affected
+        .iter()
+        .map(|(start, _, _)| *start)
+        .min()
+        .unwrap_or(offset)
+        .min(offset);
+    let union_end = affected
+        .iter()
+        .map(|(_, end, _)| *end)
+        .max()
+        .unwrap_or(new_end)
+        .max(new_end);
+    let mut bytes = vec![0u8; (union_end - union_start) as usize];
+    let fragment_start = (offset - union_start) as usize;
+    bytes[fragment_start..fragment_start + fragment.len()].copy_from_slice(fragment);
+    for (start, _, value) in &affected {
+        let relative = (*start - union_start) as usize;
+        // Existing bytes win under KeepFirst; RejectConflicting reached here
+        // only when the overlapping bytes were equal.
+        bytes[relative..relative + value.len()].copy_from_slice(value);
+        segments.remove(start);
     }
-    Ok((segments, stored, conflict))
+    segments.insert(union_start, Bytes::from(bytes));
+    debug_assert_eq!(segments.len(), plan.segments);
+    Some(segments)
 }
 
 fn is_complete(segments: &BTreeMap<u32, Bytes>, final_length: u32) -> bool {
@@ -585,5 +660,54 @@ mod tests {
         );
         assert_eq!(reassembler.aggregate_bytes(), 1);
         assert_eq!(reassembler.aggregate_memory_charge(), 193);
+    }
+
+    #[test]
+    fn empty_fragments_are_rejected_without_creating_state() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        assert_eq!(
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset: 0,
+                        more_fragments: false,
+                        bytes: Bytes::new(),
+                    },
+                    now,
+                )
+                .unwrap_err(),
+            Error::EmptyFragment
+        );
+        assert_eq!(reassembler.flow_count(), 0);
+    }
+
+    #[test]
+    fn sparse_aggregate_rejection_precedes_span_sized_scratch_allocation() {
+        let now = Instant::now();
+        let limits = Limits {
+            max_bytes_per_flow: 10_000_001,
+            max_aggregate_bytes: DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE,
+            ..Limits::default()
+        };
+        let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
+        assert_eq!(
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset: 10_000_000,
+                        more_fragments: true,
+                        bytes: Bytes::from_static(b"x"),
+                    },
+                    now,
+                )
+                .unwrap_err(),
+            Error::AggregateByteLimit {
+                limit: DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE
+            }
+        );
+        assert_eq!(reassembler.flow_count(), 0);
     }
 }

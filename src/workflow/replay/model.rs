@@ -42,18 +42,32 @@ impl ReplayTiming {
         match self {
             Self::Original => Ok(original),
             Self::Scaled(factor) if factor.is_finite() && factor > 0.0 => {
-                Duration::try_from_secs_f64(original.as_secs_f64() * factor).map_err(|_| {
+                let delay = Duration::try_from_secs_f64(original.as_secs_f64() * factor).map_err(|_| {
                     ReplayError::InvalidTiming {
                         mode: "scaled",
                         value: factor,
                     }
-                })
+                })?;
+                if !original.is_zero() && delay.is_zero() {
+                    return Err(ReplayError::InvalidTiming {
+                        mode: "scaled",
+                        value: factor,
+                    });
+                }
+                Ok(delay)
             }
             Self::FixedRate(rate) if rate.is_finite() && rate > 0.0 => {
-                Duration::try_from_secs_f64(1.0 / rate).map_err(|_| ReplayError::InvalidTiming {
+                let delay = Duration::try_from_secs_f64(1.0 / rate).map_err(|_| ReplayError::InvalidTiming {
                     mode: "fixed_rate",
                     value: rate,
-                })
+                })?;
+                if delay.is_zero() {
+                    return Err(ReplayError::InvalidTiming {
+                        mode: "fixed_rate",
+                        value: rate,
+                    });
+                }
+                Ok(delay)
             }
             Self::Immediate => Ok(Duration::ZERO),
             Self::Scaled(value) => Err(ReplayError::InvalidTiming {

@@ -120,10 +120,51 @@ pub enum DnsRecordData {
         strings: Vec<String>,
         strings_hex: Vec<String>,
     },
+    Opt {
+        edns: DnsEdnsOutput,
+    },
     Unknown {
         type_code: u16,
         rdata_hex: String,
     },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DnsEdnsOptionOutput {
+    pub code: u16,
+    pub data_hex: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DnsEdnsOutput {
+    pub udp_payload_size: u16,
+    pub extended_response_code: u8,
+    pub version: u8,
+    pub dnssec_ok: bool,
+    pub flags: u16,
+    pub options: Vec<DnsEdnsOptionOutput>,
+}
+
+impl From<DnsEdns> for DnsEdnsOutput {
+    fn from(value: DnsEdns) -> Self {
+        Self {
+            udp_payload_size: value.udp_payload_size,
+            extended_response_code: value.extended_response_code,
+            version: value.version,
+            dnssec_ok: value.dnssec_ok,
+            flags: value.flags,
+            options: value.options.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<DnsEdnsOption> for DnsEdnsOptionOutput {
+    fn from(value: DnsEdnsOption) -> Self {
+        Self {
+            code: value.code,
+            data_hex: compact_hex(&value.data),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -147,9 +188,11 @@ pub struct DnsCommandResult {
     pub transport: String,
     pub outcome: DnsOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_code: Option<u8>,
+    pub response_code: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_code_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edns: Option<DnsEdnsOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub authoritative: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -193,6 +236,7 @@ impl DnsCommandResult {
         let (
             response_code,
             response_code_name,
+            edns,
             authoritative,
             truncated,
             recursion_desired,
@@ -208,6 +252,7 @@ impl DnsCommandResult {
             (
                 Some(response.response_code),
                 Some(response.response_code_name().to_owned()),
+                response.edns.map(Into::into),
                 Some(response.authoritative),
                 Some(response.truncated),
                 Some(response.recursion_desired),
@@ -244,6 +289,7 @@ impl DnsCommandResult {
             )
         } else {
             (
+                None,
                 None,
                 None,
                 None,
@@ -310,6 +356,7 @@ impl DnsCommandResult {
                 outcome: outcome.into(),
                 response_code,
                 response_code_name,
+                edns,
                 authoritative,
                 truncated,
                 recursion_desired,
@@ -335,16 +382,22 @@ impl DnsRecordOutput {
         let data = match record.value {
             DnsRecordValue::A(address) => DnsRecordData::A { address },
             DnsRecordValue::Aaaa(address) => DnsRecordData::Aaaa { address },
-            DnsRecordValue::Cname(canonical_name) => DnsRecordData::Cname { canonical_name },
+            DnsRecordValue::Cname(canonical_name) => DnsRecordData::Cname {
+                canonical_name: canonical_name.to_string(),
+            },
             DnsRecordValue::Mx {
                 preference,
                 exchange,
             } => DnsRecordData::Mx {
                 preference,
-                exchange,
+                exchange: exchange.to_string(),
             },
-            DnsRecordValue::Ns(name_server) => DnsRecordData::Ns { name_server },
-            DnsRecordValue::Ptr(pointer) => DnsRecordData::Ptr { pointer },
+            DnsRecordValue::Ns(name_server) => DnsRecordData::Ns {
+                name_server: name_server.to_string(),
+            },
+            DnsRecordValue::Ptr(pointer) => DnsRecordData::Ptr {
+                pointer: pointer.to_string(),
+            },
             DnsRecordValue::Soa {
                 primary_name_server,
                 responsible_mailbox,
@@ -354,8 +407,8 @@ impl DnsRecordOutput {
                 expire,
                 minimum,
             } => DnsRecordData::Soa {
-                primary_name_server,
-                responsible_mailbox,
+                primary_name_server: primary_name_server.to_string(),
+                responsible_mailbox: responsible_mailbox.to_string(),
                 serial,
                 refresh,
                 retry,
@@ -371,7 +424,7 @@ impl DnsRecordOutput {
                 priority,
                 weight,
                 port,
-                target,
+                target: target.to_string(),
             },
             DnsRecordValue::Txt(strings) => DnsRecordData::Txt {
                 strings: strings
@@ -380,13 +433,14 @@ impl DnsRecordOutput {
                     .collect(),
                 strings_hex: strings.iter().map(|value| compact_hex(value)).collect(),
             },
+            DnsRecordValue::Opt(edns) => DnsRecordData::Opt { edns: edns.into() },
             DnsRecordValue::Unknown { type_code, rdata } => DnsRecordData::Unknown {
                 type_code,
                 rdata_hex: compact_hex(&rdata),
             },
         };
         Self {
-            owner: record.owner,
+            owner: record.owner.to_string(),
             class: record.class,
             ttl: record.ttl,
             data,
@@ -417,7 +471,7 @@ pub struct DnsAttemptOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<FrameOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_code: Option<u8>,
+    pub response_code: Option<u16>,
     pub reason: String,
 }
 
@@ -476,9 +530,11 @@ pub enum DnsStreamCommandResult {
         transport: String,
         outcome: DnsOutcome,
         #[serde(skip_serializing_if = "Option::is_none")]
-        response_code: Option<u8>,
+        response_code: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none")]
         response_code_name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        edns: Option<DnsEdnsOutput>,
         #[serde(skip_serializing_if = "Option::is_none")]
         authoritative: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]

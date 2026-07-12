@@ -69,11 +69,12 @@ pub mod support {
 #[allow(unused_imports)]
 pub(crate) mod internal {
     pub(crate) use super::builtin_impl::{
-        default_registry, Arp, BsdLoop, BsdNull, BuiltinProtocols, CaptureByteOrder,
-        CaptureRootByteOrder, CaptureRootSupport, DestinationOptions, Ethernet, HopByHop, Icmpv4,
-        Icmpv6, Ipv4, Ipv6, Ipv6Fragment, LinuxSll, LinuxSll2, ProtocolFallbackSupport,
-        ProtocolSupport, ProtocolSupportManifest, SegmentRoutingHeader, Tcp, Udp, Vlan, Vlan8021ad,
-        WorkflowProtocolSupport, BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS,
-        BUILTIN_PROTOCOL_SUPPORT, PROTOCOL_SUPPORT_SCHEMA_V1, STABLE_WORKFLOW_PROTOCOLS,
+        default_registry, ipv4_source_route_destinations, Arp, BsdLoop, BsdNull, BuiltinProtocols,
+        CaptureByteOrder, CaptureRootByteOrder, CaptureRootSupport, DestinationOptions, Ethernet,
+        HopByHop, Icmpv4, Icmpv6, Ipv4, Ipv4OptionsError, Ipv6, Ipv6Fragment, LinuxSll, LinuxSll2,
+        ProtocolFallbackSupport, ProtocolSupport, ProtocolSupportManifest, SegmentRoutingHeader,
+        Tcp, Udp, Vlan, Vlan8021ad, WorkflowProtocolSupport, BUILTIN_CAPTURE_ROOTS,
+        BUILTIN_PROTOCOLS, BUILTIN_PROTOCOL_SUPPORT, PROTOCOL_SUPPORT_SCHEMA_V1,
+        STABLE_WORKFLOW_PROTOCOLS,
     };
 }

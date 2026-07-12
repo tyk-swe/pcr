@@ -16,10 +16,10 @@ use crate::capture::{Frame, LinkType};
 
 use super::{
     CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
-    DestinationScope, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
-    Layer2Io, LinkCapability, LinkMode, LiveIoError, MacAddress, MaterializedRoute, NeighborError,
-    NeighborRequest, NeighborResolution, NeighborResolver, NeighborVlanKind, NeighborVlanTag,
-    PlannedRoute, RouteDecision, RouteSelectionReason, SystemCaptureProvider,
+    CapturedFrame, DestinationScope, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport,
+    Layer2Frame, Layer2Io, LinkCapability, LinkMode, LiveIoError, MacAddress, MaterializedRoute,
+    NeighborError, NeighborRequest, NeighborResolution, NeighborResolver, NeighborVlanKind,
+    NeighborVlanTag, PlannedRoute, RouteDecision, RouteSelectionReason, SystemCaptureProvider,
     SystemInterfaceProvider, SystemLayer2Io, MAX_NEIGHBOR_VLAN_TAGS,
 };
 

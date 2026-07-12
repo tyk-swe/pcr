@@ -1014,10 +1014,13 @@
         "response_code": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 15
+          "maximum": 4095
         },
         "response_code_name": {
           "type": "string"
+        },
+        "edns": {
+          "$ref": "#/$defs/dnsEdns"
         },
         "authoritative": {
           "type": "boolean"
@@ -1637,10 +1640,13 @@
             "response_code": {
               "type": "integer",
               "minimum": 0,
-              "maximum": 15
+              "maximum": 4095
             },
             "response_code_name": {
               "type": "string"
+            },
+            "edns": {
+              "$ref": "#/$defs/dnsEdns"
             },
             "authoritative": {
               "type": "boolean"
@@ -2632,7 +2638,7 @@
         "response_code": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 15
+          "maximum": 4095
         },
         "reason": {
           "type": "string",
@@ -2672,6 +2678,64 @@
       },
       "additionalProperties": false
     },
+    "dnsEdns": {
+      "type": "object",
+      "required": [
+        "udp_payload_size",
+        "extended_response_code",
+        "version",
+        "dnssec_ok",
+        "flags",
+        "options"
+      ],
+      "properties": {
+        "udp_payload_size": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "extended_response_code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255
+        },
+        "dnssec_ok": {
+          "type": "boolean"
+        },
+        "flags": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "code",
+              "data_hex"
+            ],
+            "properties": {
+              "code": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              },
+              "data_hex": {
+                "$ref": "#/$defs/hexBytes"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "dnsUndecoded": {
       "type": "object",
       "required": [
@@ -2699,12 +2763,12 @@
     "dnsRecord": {
       "type": "object",
       "required": [
-          "owner",
-          "class",
-          "ttl",
-          "type"
-        ],
-        "properties": {
+        "owner",
+        "class",
+        "ttl",
+        "type"
+      ],
+      "properties": {
           "owner": {
             "type": "string"
           },
@@ -2730,6 +2794,7 @@
               "soa",
               "srv",
               "txt",
+              "opt",
               "unknown"
             ]
           },
@@ -2821,9 +2886,26 @@
           },
           "rdata_hex": {
             "$ref": "#/$defs/hexBytes"
+          },
+          "edns": {
+            "$ref": "#/$defs/dnsEdns"
           }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "opt"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "edns"
+            ]
+          }
+        },
         {
           "if": {
             "properties": {

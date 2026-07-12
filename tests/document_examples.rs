@@ -524,6 +524,7 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
             outcome: DnsOutcome::Response,
             response_code: Some(0),
             response_code_name: Some("no_error".to_owned()),
+            edns: None,
             authoritative: Some(false),
             truncated: Some(false),
             recursion_desired: Some(true),

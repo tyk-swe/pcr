@@ -6,7 +6,7 @@
 #![forbid(unsafe_code)]
 
 use std::net::IpAddr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
@@ -346,14 +346,55 @@ impl CaptureStatistics {
 
 pub trait CaptureSession: Send {
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
-    fn wait_ready(&mut self) -> Result<(), LiveIoError>;
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError>;
     fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError>;
+    /// Returns the frame with a monotonic ingress marker. Implementations that
+    /// record ingress when the capture backend receives the frame should
+    /// override this method and return [`CapturedFrame::new`]. The compatibility
+    /// fallback deliberately leaves ingress time unavailable, which makes the
+    /// frame ineligible for freshness correlation and latency measurement.
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        self.next_frame(timeout)
+            .map(|frame| frame.map(CapturedFrame::without_ingress_time))
+    }
     /// Stop the receiver and join all capture work before returning. An error
     /// means the implementation could not confirm complete cleanup.
     fn shutdown(&mut self) -> Result<(), LiveIoError>;
     /// Returns cumulative backend counters, including queue loss that was not
     /// otherwise observable through delivered frames.
     fn statistics(&self) -> CaptureStatistics;
+}
+
+/// Capture evidence paired with an optional monotonic receive marker. Wall-clock
+/// packet time remains in [`Frame::timestamp`] for output; freshness and latency
+/// use `received_at` so clock precision and adjustment cannot reorder evidence.
+#[derive(Clone, Debug)]
+pub struct CapturedFrame {
+    pub frame: Frame,
+    /// Monotonic time recorded at capture ingress. `None` means the provider
+    /// cannot prove when the frame entered its capture path.
+    pub received_at: Option<Instant>,
+}
+
+impl CapturedFrame {
+    pub fn new(frame: Frame, received_at: Instant) -> Self {
+        Self {
+            frame,
+            received_at: Some(received_at),
+        }
+    }
+
+    /// Retains a frame from a provider that cannot report capture ingress time.
+    /// Such a frame is evidence, but cannot satisfy freshness correlation.
+    pub fn without_ingress_time(frame: Frame) -> Self {
+        Self {
+            frame,
+            received_at: None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -472,13 +513,21 @@ impl SystemCaptureSession {
 }
 
 impl CaptureSession for SystemCaptureSession {
-    fn wait_ready(&mut self) -> Result<(), LiveIoError> {
-        self.inner.wait_ready()
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+        self.inner.wait_ready(timeout)
     }
 
     fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
         validate_capture_timeout(timeout)?;
         self.inner.next_frame(timeout)
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        validate_capture_timeout(timeout)?;
+        self.inner.next_captured_frame(timeout)
     }
 
     fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -560,6 +609,8 @@ pub enum LiveIoError {
     Capture { message: String },
     #[error("capture did not become ready: {message}")]
     CaptureReadiness { message: String },
+    #[error("live operation deadline expired while {operation}")]
+    DeadlineExceeded { operation: &'static str },
     #[error("capture timeout {timeout:?} is invalid; maximum is {maximum:?}")]
     InvalidCaptureTimeout {
         timeout: Duration,
@@ -639,6 +690,11 @@ impl Classified for LiveIoError {
                 Kind::Io,
                 Some("fix capture startup before transmitting; capture-before-send readiness cannot be bypassed"),
             ),
+            Self::DeadlineExceeded { .. } => Classification::new(
+                "io.deadline_exceeded",
+                Kind::Io,
+                Some("increase the finite operation timeout or reduce readiness, send, and capture work"),
+            ),
             Self::CaptureQueueOverflow { .. } => Classification::new(
                 "io.capture_overflow",
                 Kind::Io,
@@ -686,6 +742,26 @@ impl Classified for LiveIoError {
 mod tests {
     use super::*;
 
+    struct FrameOnlyCapture(Option<Frame>);
+
+    impl CaptureSession for FrameOnlyCapture {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+            Ok(self.0.take())
+        }
+
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn statistics(&self) -> CaptureStatistics {
+            CaptureStatistics::default()
+        }
+    }
+
     #[test]
     fn capture_timeout_is_bounded_before_a_backend_wait() {
         assert!(validate_capture_timeout(MAX_CAPTURE_TIMEOUT).is_ok());
@@ -698,6 +774,24 @@ mod tests {
             }
         ));
         assert_eq!(error.classification().code, "cli.capture_timeout");
+    }
+
+    #[test]
+    fn frame_only_capture_fallback_has_no_fabricated_ingress_time() {
+        let frame = Frame::new(
+            std::time::SystemTime::UNIX_EPOCH,
+            LinkType::RAW,
+            Bytes::from_static(&[1]),
+        )
+        .unwrap();
+        let mut capture = FrameOnlyCapture(Some(frame));
+
+        let captured = capture
+            .next_captured_frame(Duration::ZERO)
+            .unwrap()
+            .unwrap();
+
+        assert!(captured.received_at.is_none());
     }
 
     #[test]

@@ -222,6 +222,123 @@ pub enum DnsSection {
     Additional,
 }
 
+/// A lossless DNS wire name. Labels retain their exact octets; DNS semantic
+/// equality folds ASCII letters only, and presentation escaping is deferred
+/// to [`fmt::Display`].
+#[derive(Clone, Debug, Eq)]
+pub struct DnsName {
+    labels: Vec<Bytes>,
+}
+
+impl DnsName {
+    fn root() -> Self {
+        Self { labels: Vec::new() }
+    }
+
+    fn from_canonical_ascii(value: &str) -> Self {
+        if value == "." {
+            return Self::root();
+        }
+        Self {
+            labels: value
+                .trim_end_matches('.')
+                .split('.')
+                .map(|label| Bytes::copy_from_slice(label.as_bytes()))
+                .collect(),
+        }
+    }
+
+    pub fn from_labels<I, B>(labels: I) -> Result<Self, DnsWireError>
+    where
+        I: IntoIterator<Item = B>,
+        B: Into<Bytes>,
+    {
+        let labels = labels.into_iter().map(Into::into).collect::<Vec<_>>();
+        let mut wire_length = 1usize;
+        for label in &labels {
+            if label.is_empty() || label.len() > 63 {
+                return Err(DnsWireError::InvalidName {
+                    message: "wire labels must contain 1..=63 octets".to_owned(),
+                });
+            }
+            wire_length = wire_length
+                .checked_add(label.len() + 1)
+                .ok_or(DnsWireError::NameTooLong)?;
+        }
+        if wire_length > 255 {
+            return Err(DnsWireError::NameTooLong);
+        }
+        Ok(Self { labels })
+    }
+
+    pub fn labels(&self) -> &[Bytes] {
+        &self.labels
+    }
+
+    fn is_root(&self) -> bool {
+        self.labels.is_empty()
+    }
+}
+
+impl PartialEq for DnsName {
+    fn eq(&self, other: &Self) -> bool {
+        self.labels.len() == other.labels.len()
+            && self.labels.iter().zip(&other.labels).all(|(left, right)| {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right.iter())
+                        .all(|(left, right)| left.eq_ignore_ascii_case(right))
+            })
+    }
+}
+
+impl fmt::Display for DnsName {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.labels.is_empty() {
+            return formatter.write_str(".");
+        }
+        for (label_index, label) in self.labels.iter().enumerate() {
+            if label_index != 0 {
+                formatter.write_str(".")?;
+            }
+            for byte in label {
+                if byte.is_ascii_graphic() && !matches!(*byte, b'.' | b'\\') {
+                    formatter.write_str(&char::from(*byte).to_string())?;
+                } else {
+                    write!(formatter, "\\{byte:03}")?;
+                }
+            }
+        }
+        formatter.write_str(".")
+    }
+}
+
+impl Serialize for DnsName {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DnsEdnsOption {
+    pub code: u16,
+    pub data: Bytes,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DnsEdns {
+    pub udp_payload_size: u16,
+    pub extended_response_code: u8,
+    pub version: u8,
+    pub dnssec_ok: bool,
+    pub flags: u16,
+    pub options: Vec<DnsEdnsOption>,
+}
+
 impl fmt::Display for DnsSection {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
@@ -236,16 +353,16 @@ impl fmt::Display for DnsSection {
 pub enum DnsRecordValue {
     A(Ipv4Addr),
     Aaaa(Ipv6Addr),
-    Cname(String),
+    Cname(DnsName),
     Mx {
         preference: u16,
-        exchange: String,
+        exchange: DnsName,
     },
-    Ns(String),
-    Ptr(String),
+    Ns(DnsName),
+    Ptr(DnsName),
     Soa {
-        primary_name_server: String,
-        responsible_mailbox: String,
+        primary_name_server: DnsName,
+        responsible_mailbox: DnsName,
         serial: u32,
         refresh: u32,
         retry: u32,
@@ -256,9 +373,10 @@ pub enum DnsRecordValue {
         priority: u16,
         weight: u16,
         port: u16,
-        target: String,
+        target: DnsName,
     },
     Txt(Vec<Bytes>),
+    Opt(DnsEdns),
     Unknown {
         type_code: u16,
         rdata: Bytes,
@@ -277,6 +395,7 @@ impl DnsRecordValue {
             Self::Txt(_) => 16,
             Self::Aaaa(_) => 28,
             Self::Srv { .. } => 33,
+            Self::Opt(_) => DNS_TYPE_OPT,
             Self::Unknown { type_code, .. } => *type_code,
         }
     }
@@ -292,11 +411,12 @@ impl DnsRecordValue {
             Self::Soa { .. } => "soa",
             Self::Srv { .. } => "srv",
             Self::Txt(_) => "txt",
+            Self::Opt(_) => "opt",
             Self::Unknown { .. } => "unknown",
         }
     }
 
-    fn referenced_name(&self) -> Option<&str> {
+    fn referenced_name(&self) -> Option<&DnsName> {
         match self {
             Self::Cname(value) | Self::Ns(value) => Some(value),
             Self::Mx { exchange, .. } => Some(exchange),
@@ -306,6 +426,7 @@ impl DnsRecordValue {
             | Self::Ptr(_)
             | Self::Soa { .. }
             | Self::Txt(_)
+            | Self::Opt(_)
             | Self::Unknown { .. } => None,
         }
     }
@@ -313,7 +434,7 @@ impl DnsRecordValue {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DnsRecord {
-    pub owner: String,
+    pub owner: DnsName,
     pub class: u16,
     pub ttl: u32,
     pub value: DnsRecordValue,
@@ -331,7 +452,8 @@ pub struct DnsRejectedRecord {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidatedDnsResponse {
     pub transaction_id: u16,
-    pub response_code: u8,
+    pub response_code: u16,
+    pub edns: Option<DnsEdns>,
     pub authoritative: bool,
     pub truncated: bool,
     pub recursion_desired: bool,
@@ -383,7 +505,7 @@ pub struct DnsAttemptEvidence {
     pub received_at: Option<SystemTime>,
     pub latency: Option<Duration>,
     pub response: Option<Frame>,
-    pub response_code: Option<u8>,
+    pub response_code: Option<u16>,
     pub reason: String,
 }
 

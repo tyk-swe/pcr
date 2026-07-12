@@ -12,7 +12,7 @@ unsafe_code = "deny"
 
 [features]
 default = ["live"]
-live = ["dep:pnet"]
+live = ["dep:pnet", "dep:windows"]
 native-route = [
     "dep:futures-util",
     "dep:libc",

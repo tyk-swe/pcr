@@ -47,7 +47,7 @@ pub(super) fn route(
         });
     }
     let interface_hint = interface_hint.cloned();
-    with_netlink(|handle| async move {
+    with_netlink(move |handle| async move {
         let message = route_request(destination, interface_hint.as_ref(), preferred_source);
         let mut replies = handle.route().get(message).execute();
         let reply = replies
@@ -143,21 +143,34 @@ pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, 
 #[cfg(feature = "native-route")]
 fn with_netlink<F, Fut, T>(operation: F) -> Result<T, NativeRouteError>
 where
-    F: FnOnce(Handle) -> Fut,
-    Fut: std::future::Future<Output = Result<T, NativeRouteError>>,
+    F: FnOnce(Handle) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    T: Send + 'static,
 {
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_io()
-        .build()
-        .map_err(|error| os_error("create Tokio netlink runtime", error))?;
-    runtime.block_on(async move {
-        let (connection, handle, _) =
-            new_connection().map_err(|error| os_error("open route netlink socket", error))?;
-        let connection = tokio::spawn(connection);
-        let result = operation(handle).await;
-        connection.abort();
-        result
-    })
+    // The public route API is synchronous. Run its private async netlink
+    // machinery on a dedicated thread so callers already inside any Tokio
+    // runtime never nest Runtime::block_on on that runtime's worker.
+    std::thread::Builder::new()
+        .name("packetcraftr-netlink".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_io()
+                .build()
+                .map_err(|error| os_error("create Tokio netlink runtime", error))?;
+            runtime.block_on(async move {
+                let (connection, handle, _) = new_connection()
+                    .map_err(|error| os_error("open route netlink socket", error))?;
+                let connection = tokio::spawn(connection);
+                let result = operation(handle).await;
+                connection.abort();
+                result
+            })
+        })
+        .map_err(|error| os_error("spawn netlink worker", error))?
+        .join()
+        .map_err(|_| NativeRouteError::InvalidResponse {
+            message: "Linux netlink worker panicked".to_owned(),
+        })?
 }
 
 #[cfg(feature = "native-route")]
@@ -333,5 +346,37 @@ mod tests {
             .unwrap();
         assert_eq!(ipv6.selection_reason, RouteSelectionReason::Local);
         assert!(ipv6.selected_address.is_some_and(|source| source.is_ipv6()));
+    }
+
+    #[test]
+    fn synchronous_lookup_is_safe_inside_tokio_and_across_concurrent_callers() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            tokio::spawn(async {
+                crate::net::SystemRouteProvider
+                    .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+        });
+
+        std::thread::scope(|scope| {
+            let workers = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        crate::net::SystemRouteProvider
+                            .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+                            .unwrap()
+                    })
+                })
+                .collect::<Vec<_>>();
+            for worker in workers {
+                worker.join().unwrap();
+            }
+        });
     }
 }

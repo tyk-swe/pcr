@@ -16,7 +16,7 @@ mod tests {
         ready: bool,
         sent: Vec<Bytes>,
         planned: Vec<PlannedRoute>,
-        frames: VecDeque<Frame>,
+        frames: VecDeque<CapturedFrame>,
         shutdowns: usize,
     }
 
@@ -45,6 +45,8 @@ mod tests {
     struct MockLayer2 {
         shared: Arc<MockShared>,
         responses: Arc<ResponseFactory>,
+        pre_send_responses: usize,
+        record_ingress_time: bool,
     }
 
     impl Layer2Io for MockLayer2 {
@@ -55,7 +57,21 @@ mod tests {
             assert!(state.ready, "capture must be ready before neighbor send");
             assert_eq!(frame.route().plan.mode, LinkMode::Layer2);
             state.sent.push(bytes.clone());
-            state.frames.extend(responses);
+            state
+                .frames
+                .extend(responses.into_iter().enumerate().map(|(index, frame)| {
+                    let now = Instant::now();
+                    let received_at = if index < self.pre_send_responses {
+                        now.checked_sub(Duration::from_secs(1)).unwrap_or(now)
+                    } else {
+                        now
+                    };
+                    if self.record_ingress_time {
+                        CapturedFrame::new(frame, received_at)
+                    } else {
+                        CapturedFrame::without_ingress_time(frame)
+                    }
+                }));
             self.shared.changed.notify_all();
             Ok(IoSendReport {
                 bytes_sent: bytes.len(),
@@ -84,13 +100,21 @@ mod tests {
     struct MockCaptureSession(Arc<MockShared>);
 
     impl CaptureSession for MockCaptureSession {
-        fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
             self.0.lock().ready = true;
             self.0.changed.notify_all();
             Ok(())
         }
 
         fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+            self.next_captured_frame(timeout)
+                .map(|captured| captured.map(|captured| captured.frame))
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<CapturedFrame>, LiveIoError> {
             let mut state = self.0.lock();
             if let Some(frame) = state.frames.pop_front() {
                 return Ok(Some(frame));
@@ -179,6 +203,47 @@ mod tests {
             MockLayer2 {
                 shared: Arc::clone(&shared),
                 responses,
+                pre_send_responses: 0,
+                record_ingress_time: true,
+            },
+            MockCaptureProvider(shared),
+            options,
+        )
+        .unwrap()
+    }
+
+    fn resolver_with_pre_send_responses(
+        shared: Arc<MockShared>,
+        responses: Arc<ResponseFactory>,
+        pre_send_responses: usize,
+        options: NeighborResolutionOptions,
+    ) -> ActiveNeighborResolver<MockInterfaces, MockLayer2, MockCaptureProvider> {
+        ActiveNeighborResolver::try_new(
+            MockInterfaces(interface()),
+            MockLayer2 {
+                shared: Arc::clone(&shared),
+                responses,
+                pre_send_responses,
+                record_ingress_time: true,
+            },
+            MockCaptureProvider(shared),
+            options,
+        )
+        .unwrap()
+    }
+
+    fn resolver_without_ingress_time(
+        shared: Arc<MockShared>,
+        responses: Arc<ResponseFactory>,
+        options: NeighborResolutionOptions,
+    ) -> ActiveNeighborResolver<MockInterfaces, MockLayer2, MockCaptureProvider> {
+        ActiveNeighborResolver::try_new(
+            MockInterfaces(interface()),
+            MockLayer2 {
+                shared: Arc::clone(&shared),
+                responses,
+                pre_send_responses: 0,
+                record_ingress_time: false,
             },
             MockCaptureProvider(shared),
             options,
@@ -297,6 +362,34 @@ mod tests {
         let cached = resolver.resolve_request(&request).unwrap();
         assert!(cached.cache_hit);
         assert_eq!(cached.attempts, 0);
+        assert_eq!(shared.lock().sent.len(), 1);
+    }
+
+    #[test]
+    fn arp_response_without_ingress_time_is_evidence_only() {
+        let request = request("192.0.2.7", "192.0.2.1");
+        let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
+        let response_request = request.clone();
+        let shared = Arc::new(MockShared::default());
+        let mut bounded = options();
+        bounded.max_attempts = 1;
+        bounded.attempt_timeout = Duration::from_millis(5);
+        let resolver = resolver_without_ingress_time(
+            Arc::clone(&shared),
+            Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
+            bounded,
+        );
+
+        let error = resolver.resolve_request(&request).unwrap_err();
+
+        assert!(matches!(
+            error,
+            NeighborError::NotFound {
+                attempts: 1,
+                captured,
+                ..
+            } if captured.len() == 1
+        ));
         assert_eq!(shared.lock().sent.len(), 1);
     }
 
@@ -454,7 +547,10 @@ mod tests {
         shared
             .lock()
             .frames
-            .push_back(arp_reply(&request, target_mac));
+            .push_back(CapturedFrame::new(
+                arp_reply(&request, target_mac),
+                Instant::now(),
+            ));
         let response_request = request.clone();
         let mut bounded = options();
         bounded.max_capture_queue_frames = 1;
@@ -475,6 +571,33 @@ mod tests {
             UNIX_EPOCH + Duration::from_secs(1)
         );
         assert!(resolution.evidence_truncated);
+        assert_eq!(shared.lock().sent.len(), 1);
+    }
+
+    #[test]
+    fn matching_frame_in_drain_to_send_race_is_evidence_only() {
+        let request = request("192.0.2.7", "192.0.2.1");
+        let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
+        let response_request = request.clone();
+        let shared = Arc::new(MockShared::default());
+        let mut bounded = options();
+        bounded.max_attempts = 1;
+        let resolver = resolver_with_pre_send_responses(
+            Arc::clone(&shared),
+            Arc::new(move |_| {
+                vec![
+                    arp_reply(&response_request, target_mac),
+                    arp_reply(&response_request, target_mac),
+                ]
+            }),
+            1,
+            bounded,
+        );
+
+        let resolution = resolver.resolve_request(&request).unwrap();
+        assert_eq!(resolution.mac_address, target_mac);
+        assert_eq!(resolution.attempts, 1);
+        assert_eq!(resolution.captured.len(), 2);
         assert_eq!(shared.lock().sent.len(), 1);
     }
 

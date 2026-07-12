@@ -3,6 +3,7 @@
 
 use std::any::Any;
 use std::collections::BTreeMap;
+use std::net::Ipv4Addr;
 use std::sync::{Arc, OnceLock};
 
 use bytes::Bytes;
@@ -29,7 +30,9 @@ use packetcraftr::{
         },
         Packet,
     },
-    protocol::{builtin::Module as BuiltinProtocols, link::Ethernet},
+    protocol::{
+        builtin::Module as BuiltinProtocols, link::Ethernet, network::Ipv4, transport::Tcp,
+    },
     workflow::fuzz::{
         run as fuzz, Request as FuzzRequest, Strategy as FuzzStrategy, Target as FuzzTarget,
     },
@@ -175,6 +178,7 @@ impl ProtocolModule for FooModule {
     fn register(&self, builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
         builder.register_codec(FooCodec)?;
         builder.bind("ethernet", 0x88b5, "example.foo", 200)?;
+        builder.bind("tcp", 0, "example.foo", 100)?;
         builder.bind("example.foo", 0, "raw", 0)?;
         Ok(())
     }
@@ -291,6 +295,60 @@ fn external_module_builds_and_decodes_ethernet_foo_raw() {
         decoded.packet.get::<Raw>().unwrap().bytes.as_ref(),
         &[0xaa, 0xbb]
     );
+}
+
+#[test]
+fn tcp_matcher_counts_an_external_protocol_payload() {
+    let mut registry_builder = ProtocolRegistry::builder();
+    registry_builder.module(&BuiltinProtocols).unwrap();
+    registry_builder.module(&FooModule).unwrap();
+    let registry = Arc::new(registry_builder.build().unwrap());
+    let client = Ipv4Addr::new(10, 0, 0, 1);
+    let server = Ipv4Addr::new(10, 0, 0, 2);
+
+    let mut request = Packet::new();
+    request
+        .push(Ipv4 {
+            source: client,
+            destination: server,
+            ..Ipv4::default()
+        })
+        .push(Tcp {
+            source_port: 40_000,
+            destination_port: 443,
+            sequence: 100,
+            flags: Tcp::SYN,
+            ..Tcp::default()
+        })
+        .push(Foo { value: 0x1234 });
+    let request = Builder::new(Arc::clone(&registry))
+        .build(request, BuildContext::default(), BuildOptions::default())
+        .unwrap()
+        .packet;
+
+    let response = |acknowledgment| {
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source: server,
+                destination: client,
+                ..Ipv4::default()
+            })
+            .push(Tcp {
+                source_port: 443,
+                destination_port: 40_000,
+                sequence: 500,
+                acknowledgment,
+                flags: Tcp::SYN | Tcp::ACK,
+                ..Tcp::default()
+            });
+        packet
+    };
+    let matcher = registry.matcher(&ProtocolId::new("tcp")).unwrap();
+
+    // The two encoded Foo bytes and SYN consume three sequence numbers.
+    assert!(matcher.matches(&request, &response(103)).matched);
+    assert!(!matcher.matches(&request, &response(101)).matched);
 }
 
 #[test]

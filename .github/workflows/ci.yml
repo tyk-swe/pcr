@@ -6,6 +6,19 @@ permissions:
   contents: read
 
 jobs:
+  dependency-policy:
+    name: dependency policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned cargo-deny
+        run: cargo install cargo-deny --locked --version 0.19.7
+      - name: Enforce the RUSTSEC-2024-0436 exception expiry
+        shell: bash
+        run: test "$(date -u +%F)" '<' '2026-10-12'
+      - name: Check advisories, licenses, sources, and bans
+        run: cargo deny check
+
   test:
     name: test (${{ matrix.platform }})
     strategy:
@@ -28,5 +41,8 @@ jobs:
       - if: runner.os == 'Linux'
         run: cargo fmt -- --check
       - run: cargo check --locked --all-targets --no-default-features
+      - run: cargo check --locked --all-targets
+      - if: runner.os == 'Windows'
+        run: cargo test --locked --lib
       - run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo test --locked --all-features

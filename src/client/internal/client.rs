@@ -187,6 +187,9 @@ where
     ) -> Result<ExchangeResult, ClientError> {
         let started = Instant::now();
         let capture_limits = options.validate()?;
+        let deadline = started
+            .checked_add(options.timeout)
+            .expect("validated bounded exchange timeout must fit Instant");
         let expansion_len = template
             .expansion_len()
             .map_err(|source| ClientError::Template {
@@ -273,35 +276,58 @@ where
             .expect("non-empty prepared exchange")
             .1
             .plan;
+        if deadline.checked_duration_since(Instant::now()).is_none() {
+            return Err(LiveIoError::DeadlineExceeded {
+                operation: "preparing the exchange",
+            }
+            .into());
+        }
         let mut capture = CaptureGuard::new(self.io.arm_capture(first_route, capture_limits)?);
-        if let Err(error) = capture.wait_ready() {
+        let readiness_timeout = match deadline.checked_duration_since(Instant::now()) {
+            Some(remaining) => remaining,
+            None => {
+                return Err(error_after_shutdown(
+                    &mut capture,
+                    LiveIoError::DeadlineExceeded {
+                        operation: "waiting for capture readiness",
+                    },
+                ))
+            }
+        };
+        if let Err(error) = capture.wait_ready(readiness_timeout) {
             return Err(error_after_shutdown(&mut capture, error));
         }
 
         let mut sent_at = Vec::with_capacity(prepared.len());
-        let mut sent_wall_time = Vec::with_capacity(prepared.len());
         let mut sent_evidence = Vec::with_capacity(prepared.len());
         let mut completed_sends = 0u64;
         let dissector = Dissector::new(Arc::clone(&self.registry));
         let mut captured = ExchangeAccumulator::new(prepared.len());
-        for (built, route) in &prepared {
-            loop {
-                let frame = match capture.next_frame(Duration::ZERO) {
-                    Ok(Some(frame)) => frame,
-                    Ok(None) => break,
-                    Err(error) => return Err(error_after_shutdown(&mut capture, error)),
-                };
-                captured.process(
-                    frame,
-                    ExchangeProcessContext {
-                        registry: &self.registry,
-                        dissector: &dissector,
-                        prepared: &prepared,
-                        sent_at: &sent_at,
-                        sent_wall_time: &sent_wall_time,
-                        options: &options,
+        for (send_index, (built, route)) in prepared.iter().enumerate() {
+            if let Err(error) = drain_available(
+                &mut capture,
+                deadline,
+                capture_limits.max_frames,
+                true,
+                &mut captured,
+                ExchangeProcessContext {
+                    registry: &self.registry,
+                    dissector: &dissector,
+                    prepared: &prepared,
+                    sent_at: &sent_at,
+                    deadline,
+                    options: &options,
+                },
+            ) {
+                return Err(error_after_shutdown(&mut capture, error));
+            }
+            if deadline.checked_duration_since(Instant::now()).is_none() {
+                return Err(error_after_shutdown(
+                    &mut capture,
+                    LiveIoError::DeadlineExceeded {
+                        operation: "sending exchange requests",
                     },
-                );
+                ));
             }
             let send_started = Instant::now();
             let send_wall_time = std::time::SystemTime::now();
@@ -338,38 +364,41 @@ where
                 }
             };
             sent_at.push(send_started);
-            sent_wall_time.push(send_wall_time);
             sent_evidence.push(evidence);
             completed_sends += 1;
-            loop {
-                let frame = match capture.next_frame(Duration::ZERO) {
-                    Ok(Some(frame)) => frame,
-                    Ok(None) => break,
-                    Err(error) => return Err(error_after_shutdown(&mut capture, error)),
-                };
-                captured.process(
-                    frame,
-                    ExchangeProcessContext {
-                        registry: &self.registry,
-                        dissector: &dissector,
-                        prepared: &prepared,
-                        sent_at: &sent_at,
-                        sent_wall_time: &sent_wall_time,
-                        options: &options,
+            if deadline.checked_duration_since(Instant::now()).is_none() {
+                return Err(error_after_shutdown(
+                    &mut capture,
+                    LiveIoError::DeadlineExceeded {
+                        operation: "sending exchange requests",
                     },
-                );
+                ));
+            }
+            if let Err(error) = drain_available(
+                &mut capture,
+                deadline,
+                capture_limits.max_frames,
+                send_index + 1 < prepared.len(),
+                &mut captured,
+                ExchangeProcessContext {
+                    registry: &self.registry,
+                    dissector: &dissector,
+                    prepared: &prepared,
+                    sent_at: &sent_at,
+                    deadline,
+                    options: &options,
+                },
+            ) {
+                return Err(error_after_shutdown(&mut capture, error));
             }
         }
 
-        let deadline = Instant::now()
-            .checked_add(options.timeout)
-            .expect("validated bounded exchange timeout must fit Instant");
         loop {
             let now = Instant::now();
             let Some(remaining) = deadline.checked_duration_since(now) else {
                 break;
             };
-            let frame = match capture.next_frame(remaining) {
+            let frame = match capture.next_captured_frame(remaining) {
                 Ok(Some(frame)) => frame,
                 Ok(None) => break,
                 Err(error) => {
@@ -383,10 +412,27 @@ where
                     dissector: &dissector,
                     prepared: &prepared,
                     sent_at: &sent_at,
-                    sent_wall_time: &sent_wall_time,
+                    deadline,
                     options: &options,
                 },
             );
+        }
+        if let Err(error) = drain_available(
+            &mut capture,
+            deadline,
+            capture_limits.max_frames,
+            false,
+            &mut captured,
+            ExchangeProcessContext {
+                registry: &self.registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                options: &options,
+            },
+        ) {
+            return Err(error_after_shutdown(&mut capture, error));
         }
         capture.shutdown()?;
         let capture_statistics = capture.statistics().validate()?;

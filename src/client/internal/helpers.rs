@@ -362,17 +362,17 @@ fn require_fixed_width_link_materialization(
 fn is_public(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => {
-            !(address.is_private()
+            address.is_multicast()
+                || !(address.is_private()
                 || address.is_loopback()
                 || address.is_link_local()
-                || address.is_multicast()
                 || address.is_unspecified()
                 || address.is_documentation())
         }
         IpAddr::V6(address) => {
-            !(address.is_loopback()
+            address.is_multicast()
+                || !(address.is_loopback()
                 || address.is_unspecified()
-                || address.is_multicast()
                 || address.is_unique_local()
                 || address.is_unicast_link_local()
                 || is_ipv6_documentation(address))

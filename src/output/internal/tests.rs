@@ -127,6 +127,7 @@ mod tests {
             response: Some(ValidatedDnsResponse {
                 transaction_id: 7,
                 response_code: 0,
+                edns: None,
                 authoritative: false,
                 truncated: false,
                 recursion_desired: true,
@@ -134,7 +135,11 @@ mod tests {
                 authenticated_data: false,
                 checking_disabled: false,
                 answers: vec![DnsRecord {
-                    owner: "txt.example.".to_owned(),
+                    owner: crate::workflow::dns::Name::from_labels([
+                        Bytes::from_static(b"txt"),
+                        Bytes::from_static(b"example"),
+                    ])
+                    .unwrap(),
                     class: 1,
                     ttl: 60,
                     value: DnsRecordValue::Txt(vec![exact]),

@@ -251,6 +251,234 @@ mod tests {
     }
 
     #[test]
+    fn wire_names_preserve_arbitrary_label_octets_and_escape_only_for_display() {
+        let cases: &[(&[u8], &str)] = &[
+            (b".", "\\046."),
+            (b"\0", "\\000."),
+            (&[0xff], "\\255."),
+            (b"\\", "\\092."),
+        ];
+        for (label, displayed) in cases {
+            let mut target = vec![label.len() as u8];
+            target.extend_from_slice(label);
+            target.push(0);
+            let message = fixture_response(
+                10,
+                0,
+                "name.example",
+                DnsQueryType::Cname,
+                &[FixtureRecord::in_class(
+                    "name.example",
+                    DnsQueryType::Cname.code(),
+                    target,
+                )],
+                &[],
+                &[],
+            );
+            let response = decode_dns_response(
+                &message,
+                "name.example",
+                DnsQueryType::Cname,
+                10,
+                DnsLimits::default(),
+            )
+            .unwrap();
+            let DnsRecordValue::Cname(name) = &response.answers[0].value else {
+                panic!("expected CNAME");
+            };
+            assert_eq!(name.labels(), &[Bytes::copy_from_slice(label)]);
+            assert_eq!(name.to_string(), *displayed);
+        }
+
+        let lower = DnsName::from_labels([Bytes::from_static(b"case")]).unwrap();
+        let upper = DnsName::from_labels([Bytes::from_static(b"CASE")]).unwrap();
+        let high = DnsName::from_labels([Bytes::from_static(&[0xc0])]).unwrap();
+        let different_high = DnsName::from_labels([Bytes::from_static(&[0xe0])]).unwrap();
+        assert_eq!(lower, upper);
+        assert_ne!(high, different_high);
+    }
+
+    #[test]
+    fn edns_extended_response_codes_and_metadata_are_validated() {
+        let opt = |extended: u8, version: u8, rdata: Vec<u8>| FixtureRecord {
+            owner: vec![0],
+            type_code: DNS_TYPE_OPT,
+            class: 1232,
+            ttl: (u32::from(extended) << 24) | (u32::from(version) << 16) | 0x8000,
+            rdata,
+        };
+        let message = fixture_response(
+            11,
+            0,
+            "edns.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[opt(1, 0, vec![0, 10, 0, 2, 0xaa, 0xbb])],
+        );
+        let response = decode_dns_response(
+            &message,
+            "edns.example",
+            DnsQueryType::A,
+            11,
+            DnsLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(response.response_code, 16);
+        assert_eq!(response.response_code_name(), "bad_version");
+        let edns = response.edns.unwrap();
+        assert_eq!(edns.udp_payload_size, 1232);
+        assert!(edns.dnssec_ok);
+        assert_eq!(edns.options[0].code, 10);
+        assert_eq!(edns.options[0].data.as_ref(), [0xaa, 0xbb]);
+
+        let mixed = fixture_response(
+            12,
+            2,
+            "edns.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[opt(1, 0, Vec::new())],
+        );
+        assert_eq!(
+            decode_dns_response(
+                &mixed,
+                "edns.example",
+                DnsQueryType::A,
+                12,
+                DnsLimits::default(),
+            )
+            .unwrap()
+            .response_code,
+            18
+        );
+
+        let no_opt = fixture_response(
+            13,
+            3,
+            "edns.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[],
+        );
+        let response = decode_dns_response(
+            &no_opt,
+            "edns.example",
+            DnsQueryType::A,
+            13,
+            DnsLimits::default(),
+        )
+        .unwrap();
+        assert_eq!(response.response_code, 3);
+        assert!(response.edns.is_none());
+
+        let duplicate = fixture_response(
+            14,
+            0,
+            "edns.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[opt(0, 0, Vec::new()), opt(0, 0, Vec::new())],
+        );
+        assert!(matches!(
+            decode_dns_response(
+                &duplicate,
+                "edns.example",
+                DnsQueryType::A,
+                14,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::DuplicateEdns)
+        ));
+
+        let malformed = fixture_response(
+            15,
+            0,
+            "edns.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[opt(0, 0, vec![0, 1, 0, 2, 0xff])],
+        );
+        assert!(matches!(
+            decode_dns_response(
+                &malformed,
+                "edns.example",
+                DnsQueryType::A,
+                15,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::InvalidEdns { .. })
+        ));
+
+        let unsupported = fixture_response(
+            16,
+            0,
+            "edns.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[opt(0, 1, Vec::new())],
+        );
+        assert!(matches!(
+            decode_dns_response(
+                &unsupported,
+                "edns.example",
+                DnsQueryType::A,
+                16,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::UnsupportedEdnsVersion { version: 1 })
+        ));
+
+        let misplaced_record = opt(0, 0, Vec::new());
+        let misplaced = fixture_response(
+            17,
+            0,
+            "edns.example",
+            DnsQueryType::A,
+            &[misplaced_record],
+            &[],
+            &[],
+        );
+        assert!(matches!(
+            decode_dns_response(
+                &misplaced,
+                "edns.example",
+                DnsQueryType::A,
+                17,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::InvalidEdns { .. })
+        ));
+
+        let mut non_root_record = opt(0, 0, Vec::new());
+        non_root_record.owner = wire_name("not-root.example");
+        let non_root = fixture_response(
+            18,
+            0,
+            "edns.example",
+            DnsQueryType::A,
+            &[],
+            &[],
+            &[non_root_record],
+        );
+        assert!(matches!(
+            decode_dns_response(
+                &non_root,
+                "edns.example",
+                DnsQueryType::A,
+                18,
+                DnsLimits::default(),
+            ),
+            Err(DnsWireError::InvalidEdns { .. })
+        ));
+    }
+
+    #[test]
     fn every_published_record_shape_decodes_to_typed_bounded_data() {
         let mut mx = 10u16.to_be_bytes().to_vec();
         mx.extend_from_slice(&wire_name("mail.example"));

@@ -67,11 +67,24 @@ output contracts.
 
 ## Development
 
+Core development checks are:
+
 ```console
 cargo fmt -- --check
 cargo check --locked --all-targets --no-default-features
+cargo check --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
 ```
+
+CI also enforces the dependency policy with pinned tooling:
+
+```console
+cargo install cargo-deny --locked --version 0.19.7
+cargo deny check
+```
+
+The temporary `RUSTSEC-2024-0436` exception in `deny.toml` expires on
+2026-10-12; CI requires it to be reviewed before then.
 
 Licensed under [AGPL-3.0-only](LICENSE).

@@ -30,8 +30,10 @@ The commands are:
 | Tools | `scan`, `traceroute`, `dns`, `fuzz` |
 | System discovery | `interfaces`, `routes` |
 
-Packet-taking commands accept one source: `--packet`, `--packet-file`, or
-standard input. Expressions compose layers with `/`:
+Commands that accept packet recipes require exactly one source: `--packet`,
+`--packet-file`, or non-empty piped standard input. `dissect` instead accepts
+`--hex`, `--file`, or raw standard input; `read` and `replay` take capture
+paths. Expressions compose layers with `/`:
 
 ```console
 packetcraftr build \
@@ -107,14 +109,21 @@ handles or network privileges. Reassembly under `session::fragment` and
 
 ## Development
 
-The CI-equivalent checks are:
+The core local checks are:
 
 ```console
 cargo fmt -- --check
 cargo check --locked --all-targets --no-default-features
+cargo check --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
 ```
 
-All-feature Linux builds need the libpcap development package. The same checks
-run on Linux x86-64, macOS x86-64 and arm64, and Windows MSVC in CI.
+CI also installs `cargo-deny` 0.19.7 and runs `cargo deny check`. The temporary
+`RUSTSEC-2024-0436` exception in `deny.toml` expires on 2026-10-12, and CI
+requires it to be reviewed before then.
+
+All-feature Linux builds need the libpcap development package. CI runs both
+feature-profile checks, Clippy, and all-feature tests on Linux x86-64, macOS
+x86-64 and arm64, and Windows MSVC. Formatting runs on Linux, while Windows
+also runs `cargo test --locked --lib`.

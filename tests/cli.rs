@@ -189,6 +189,17 @@ fn parse_error_output_detection_respects_the_end_of_options_marker() {
     assert!(option.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&option.stdout).unwrap();
     assert_eq!(value["error"]["kind"], "cli");
+
+    let command_shaped_positional = binary()
+        .args(["--output=json", "--", "scan"])
+        .output()
+        .unwrap();
+    assert_eq!(command_shaped_positional.status.code(), Some(2));
+    assert!(command_shaped_positional.stderr.is_empty());
+    let value: serde_json::Value =
+        serde_json::from_slice(&command_shaped_positional.stdout).unwrap();
+    assert!(value["command"].is_null());
+    assert_eq!(value["error"]["kind"], "cli");
 }
 
 #[test]

@@ -143,11 +143,13 @@ fn command_from_env() -> Option<CommandName> {
         ("interfaces", CommandName::Interfaces),
         ("routes", CommandName::Routes),
     ];
-    std::env::args().find_map(|argument| {
-        COMMANDS
-            .iter()
-            .find_map(|(name, command)| (*name == argument).then_some(*command))
-    })
+    std::env::args()
+        .take_while(|argument| argument != "--")
+        .find_map(|argument| {
+            COMMANDS
+                .iter()
+                .find_map(|(name, command)| (*name == argument).then_some(*command))
+        })
 }
 
 fn exit_code(code: u8) -> ExitCode {

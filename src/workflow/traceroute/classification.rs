@@ -51,46 +51,8 @@ fn packet_destination(packet: &Packet) -> Option<IpAddr> {
 }
 
 fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), TracerouteError> {
-    total.packets_attempted = add_stat(total.packets_attempted, batch.packets_attempted, sequence)?;
-    total.packets_completed = add_stat(total.packets_completed, batch.packets_completed, sequence)?;
-    total.bytes = add_stat(total.bytes, batch.bytes, sequence)?;
-    total.elapsed = total
-        .elapsed
-        .checked_add(batch.elapsed)
-        .ok_or(TracerouteError::StatisticsOverflow { sequence })?;
-    for (target, value) in [
-        (
-            &mut total.capture.received_frames,
-            batch.capture.received_frames,
-        ),
-        (
-            &mut total.capture.received_bytes,
-            batch.capture.received_bytes,
-        ),
-        (
-            &mut total.capture.dropped_frames,
-            batch.capture.dropped_frames,
-        ),
-        (
-            &mut total.capture.dropped_bytes,
-            batch.capture.dropped_bytes,
-        ),
-        (
-            &mut total.capture.overflow_events,
-            batch.capture.overflow_events,
-        ),
-        (
-            &mut total.capture.receiver_dropped_frames,
-            batch.capture.receiver_dropped_frames,
-        ),
-    ] {
-        *target = add_stat(*target, value, sequence)?;
-    }
-    Ok(())
-}
-
-fn add_stat(left: u64, right: u64, sequence: u64) -> Result<u64, TracerouteError> {
-    left.checked_add(right)
+    total
+        .checked_add(batch)
         .ok_or(TracerouteError::StatisticsOverflow { sequence })
 }
 

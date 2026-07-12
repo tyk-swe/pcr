@@ -3,7 +3,7 @@ pub struct ScanResponseClassification {
     pub classification: ScanClassification,
     pub responder: IpAddr,
     pub reason: &'static str,
-    pub(crate) correlation: Correlation,
+    pub(super) correlation: Correlation,
 }
 
 /// Pure response classifier used by the workflow and deterministic tests. A

@@ -19,18 +19,11 @@ fn worst_case_duration(live: FuzzLiveOptions, cases: usize) -> Result<Duration, 
 }
 
 fn rate_delay(rate: Option<u32>) -> Result<Duration, FuzzError> {
-    let Some(rate) = rate else {
-        return Ok(Duration::ZERO);
-    };
-    let nanos = 1_000_000_000_u64
-        .checked_add(u64::from(rate) - 1)
-        .map(|value| value / u64::from(rate))
-        .ok_or(FuzzError::InvalidLimit {
-            field: "cases_per_second",
-            value: u64::from(rate),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        })?;
-    Ok(Duration::from_nanos(nanos))
+    super::clock::rate_delay(1, rate).ok_or(FuzzError::InvalidLimit {
+        field: "cases_per_second",
+        value: u64::from(rate.unwrap_or_default()),
+        reason: "rate-delay arithmetic overflowed".to_owned(),
+    })
 }
 
 fn validate_execution(

@@ -243,20 +243,11 @@ fn worst_case_duration(
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, ScanError> {
-    let Some(rate) = rate else {
-        return Ok(Duration::ZERO);
-    };
-    let nanos = (probes as u128)
-        .checked_mul(1_000_000_000)
-        .and_then(|value| value.checked_add(u128::from(rate) - 1))
-        .map(|value| value / u128::from(rate))
-        .and_then(|value| u64::try_from(value).ok())
-        .ok_or(ScanError::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        })?;
-    Ok(Duration::from_nanos(nanos))
+    super::clock::rate_delay(probes, rate).ok_or(ScanError::InvalidLimit {
+        field: "probes_per_second",
+        value: u64::from(rate.unwrap_or_default()),
+        reason: "rate-delay arithmetic overflowed".to_owned(),
+    })
 }
 
 fn probe_packet(probe: &ScanProbe) -> Packet {
@@ -568,46 +559,8 @@ fn select_candidate<'a>(
 }
 
 fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), ScanError> {
-    total.packets_attempted = add_stat(total.packets_attempted, batch.packets_attempted, sequence)?;
-    total.packets_completed = add_stat(total.packets_completed, batch.packets_completed, sequence)?;
-    total.bytes = add_stat(total.bytes, batch.bytes, sequence)?;
-    total.elapsed = total
-        .elapsed
-        .checked_add(batch.elapsed)
-        .ok_or(ScanError::StatisticsOverflow { sequence })?;
-    for (target, value) in [
-        (
-            &mut total.capture.received_frames,
-            batch.capture.received_frames,
-        ),
-        (
-            &mut total.capture.received_bytes,
-            batch.capture.received_bytes,
-        ),
-        (
-            &mut total.capture.dropped_frames,
-            batch.capture.dropped_frames,
-        ),
-        (
-            &mut total.capture.dropped_bytes,
-            batch.capture.dropped_bytes,
-        ),
-        (
-            &mut total.capture.overflow_events,
-            batch.capture.overflow_events,
-        ),
-        (
-            &mut total.capture.receiver_dropped_frames,
-            batch.capture.receiver_dropped_frames,
-        ),
-    ] {
-        *target = add_stat(*target, value, sequence)?;
-    }
-    Ok(())
-}
-
-fn add_stat(left: u64, right: u64, sequence: u64) -> Result<u64, ScanError> {
-    left.checked_add(right)
+    total
+        .checked_add(batch)
         .ok_or(ScanError::StatisticsOverflow { sequence })
 }
 

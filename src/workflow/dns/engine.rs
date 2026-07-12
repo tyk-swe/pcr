@@ -558,18 +558,11 @@ fn dns_source_port(base: u16, attempt: u32) -> u16 {
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> Result<Duration, DnsError> {
-    let Some(rate) = rate else {
-        return Ok(Duration::ZERO);
-    };
-    let nanos = 1_000_000_000u64
-        .checked_add(u64::from(rate) - 1)
-        .map(|value| value / u64::from(rate))
-        .ok_or(DnsError::InvalidLimit {
-            field: "queries_per_second",
-            value: u64::from(rate),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        })?;
-    Ok(Duration::from_nanos(nanos))
+    super::clock::rate_delay(1, rate).ok_or(DnsError::InvalidLimit {
+        field: "queries_per_second",
+        value: u64::from(rate.unwrap_or_default()),
+        reason: "rate-delay arithmetic overflowed".to_owned(),
+    })
 }
 
 fn update_dns_fallback(outcome: &mut DnsOutcome, rank: &mut u8, candidate: DnsOutcome) {
@@ -638,30 +631,9 @@ impl DnsEvidenceBudget {
 }
 
 fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), DnsError> {
-    macro_rules! add {
-        ($left:expr, $right:expr) => {
-            $left = $left
-                .checked_add($right)
-                .ok_or(DnsError::StatisticsOverflow { attempt })?
-        };
-    }
-    add!(total.packets_attempted, value.packets_attempted);
-    add!(total.packets_completed, value.packets_completed);
-    add!(total.bytes, value.bytes);
-    total.elapsed = total
-        .elapsed
-        .checked_add(value.elapsed)
-        .ok_or(DnsError::StatisticsOverflow { attempt })?;
-    add!(total.capture.received_frames, value.capture.received_frames);
-    add!(total.capture.received_bytes, value.capture.received_bytes);
-    add!(total.capture.dropped_frames, value.capture.dropped_frames);
-    add!(total.capture.dropped_bytes, value.capture.dropped_bytes);
-    add!(total.capture.overflow_events, value.capture.overflow_events);
-    add!(
-        total.capture.receiver_dropped_frames,
-        value.capture.receiver_dropped_frames
-    );
-    Ok(())
+    total
+        .checked_add(value)
+        .ok_or(DnsError::StatisticsOverflow { attempt })
 }
 
 fn push_dns_diagnostic_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {

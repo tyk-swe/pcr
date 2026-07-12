@@ -16,7 +16,7 @@ pub enum AddressFamily {
 }
 
 impl AddressFamily {
-    pub(crate) fn accepts(self, address: IpAddr) -> bool {
+    pub(super) fn accepts(self, address: IpAddr) -> bool {
         match self {
             Self::Any => true,
             Self::Ipv4 => address.is_ipv4(),
@@ -24,7 +24,7 @@ impl AddressFamily {
         }
     }
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub(super) const fn label(self) -> &'static str {
         match self {
             Self::Any => "requested",
             Self::Ipv4 => "IPv4",

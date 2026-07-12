@@ -227,20 +227,11 @@ fn worst_case_duration(request: &TracerouteRequest) -> Result<Duration, Tracerou
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, TracerouteError> {
-    let Some(rate) = rate else {
-        return Ok(Duration::ZERO);
-    };
-    let nanos = (probes as u128)
-        .checked_mul(1_000_000_000)
-        .and_then(|value| value.checked_add(u128::from(rate) - 1))
-        .map(|value| value / u128::from(rate))
-        .and_then(|value| u64::try_from(value).ok())
-        .ok_or(TracerouteError::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        })?;
-    Ok(Duration::from_nanos(nanos))
+    super::clock::rate_delay(probes, rate).ok_or(TracerouteError::InvalidLimit {
+        field: "probes_per_second",
+        value: u64::from(rate.unwrap_or_default()),
+        reason: "rate-delay arithmetic overflowed".to_owned(),
+    })
 }
 
 fn probe_packet(probe: &TracerouteProbe) -> Packet {
@@ -302,7 +293,7 @@ fn probe_packet(probe: &TracerouteProbe) -> Packet {
     packet
 }
 
-pub(crate) fn traceroute_identity(sequence: u64) -> Bytes {
+fn traceroute_identity(sequence: u64) -> Bytes {
     let sequence = sequence as u16;
     Bytes::copy_from_slice(&[0x50, 0x54, (sequence >> 8) as u8, sequence as u8])
 }

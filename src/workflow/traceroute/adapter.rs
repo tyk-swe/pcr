@@ -106,13 +106,7 @@ where
             unsolicited,
             undecoded,
             diagnostics,
-            stats: Stats {
-                packets_attempted: stats.packets_attempted,
-                packets_completed: stats.packets_completed,
-                bytes: stats.bytes,
-                elapsed: stats.elapsed,
-                capture: stats.capture,
-            },
+            stats: Stats::from_client(stats),
         })
     }
 }

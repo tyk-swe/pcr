@@ -35,7 +35,11 @@ pub fn transcode<R: Read, W: Write>(
             output,
             endianness,
             reader.size_limit(),
-            reader.max_interfaces,
+            // Multiple input sections are normalized into one output
+            // section. Its interface table therefore needs the reader's
+            // aggregate retained-interface allowance, not the per-section
+            // allowance of any one source section.
+            reader.max_total_interfaces,
         )?,
     };
     writer.set_stream_limits(limits)?;

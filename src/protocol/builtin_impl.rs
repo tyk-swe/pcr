@@ -824,6 +824,71 @@ mod tests {
     }
 
     #[test]
+    fn missing_ipv6_child_with_link_padding_is_not_a_jumbogram() {
+        let registry = Arc::new(default_registry().unwrap());
+        let mut bytes = vec![0_u8; 14 + 40 + 6];
+        bytes[12..14].copy_from_slice(&0x86dd_u16.to_be_bytes());
+        bytes[14] = 0x60;
+        bytes[20] = 17;
+        bytes[21] = 64;
+
+        let decoded = Dissector::new(Arc::clone(&registry))
+            .decode_with_root(bytes.clone(), "ethernet".into(), DecodeOptions::default())
+            .unwrap();
+        assert!(decoded.packet.get::<Ipv6>().is_some());
+        assert!(decoded
+            .packet
+            .get::<crate::packet::internal::MalformedLayer>()
+            .is_some());
+        assert_eq!(
+            decoded.packet.get::<Padding>().unwrap().bytes,
+            Bytes::from_static(&[0; 6])
+        );
+
+        let rebuilt = Builder::new(registry)
+            .build(
+                decoded.packet,
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(rebuilt.bytes.as_ref(), bytes);
+    }
+
+    #[test]
+    fn zero_length_raw_ipv6_trailer_is_not_a_jumbogram_without_hop_by_hop() {
+        let registry = Arc::new(default_registry().unwrap());
+        let mut bytes = vec![0_u8; 43];
+        bytes[0] = 0x60;
+        bytes[6] = 59;
+        bytes[7] = 64;
+        bytes[40..].copy_from_slice(b"bad");
+
+        let decoded = Dissector::new(Arc::clone(&registry))
+            .decode_with_root(bytes.clone(), "ipv6".into(), DecodeOptions::default())
+            .unwrap();
+        assert!(decoded.packet.get::<Ipv6>().is_some());
+        assert_eq!(
+            decoded.packet.get::<Padding>().unwrap().outside_layer,
+            Some(0)
+        );
+        assert!(decoded
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "decode.trailing_malformed"));
+
+        let rebuilt = Builder::new(registry)
+            .build(
+                decoded.packet,
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(rebuilt.bytes.as_ref(), bytes);
+        assert!(rebuilt.requires_live_opt_in);
+    }
+
+    #[test]
     fn ipv4_known_answer_emits_rfc_checksum_vector() {
         let registry = Arc::new(default_registry().unwrap());
         let mut packet = Packet::new();

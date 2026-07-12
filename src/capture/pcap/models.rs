@@ -134,7 +134,7 @@ pub enum Error {
     TimestampOutOfRange { format: Format },
     #[error("timestamp fraction {fraction} is invalid for a denominator of {denominator}")]
     InvalidTimestampFraction { fraction: u32, denominator: u32 },
-    #[error("link type {link_type} cannot be represented in pcapng")]
+    #[error("link type {link_type} cannot be represented in a capture interface header")]
     LinkTypeOutOfRange { link_type: u32 },
     #[error("interface {interface} is not defined (the section has {available} interfaces)")]
     UndefinedInterface { interface: u32, available: usize },

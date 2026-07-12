@@ -73,24 +73,32 @@ where
                 value: u64::MAX,
                 reason: "wire-byte accounting overflowed".to_owned(),
             })?;
+        let address_bytes =
+            per_probe
+                .checked_mul(address_probes)
+                .ok_or(ScanError::InvalidLimit {
+                    field: "wire_bytes",
+                    value: u64::MAX,
+                    reason: "wire-byte accounting overflowed".to_owned(),
+                })?;
         total
-            .checked_add(per_probe.saturating_mul(address_probes))
+            .checked_add(address_bytes)
             .ok_or(ScanError::InvalidLimit {
                 field: "wire_bytes",
                 value: u64::MAX,
                 reason: "wire-byte accounting overflowed".to_owned(),
             })
     })?;
-    authorizer.authorize_operation(total_probes as u64, maximum_bytes)?;
-
-    let batches = build_batches(request, &addresses, &ports)?;
-    let worst_case = worst_case_duration(request, &batches)?;
+    let worst_case = worst_case_duration(request, addresses.len(), endpoints_per_address)?;
     if worst_case > request.limits.max_duration {
         return Err(ScanError::DurationLimit {
             actual: worst_case,
             limit: request.limits.max_duration,
         });
     }
+    authorizer.authorize_operation(total_probes as u64, maximum_bytes)?;
+
+    let batches = build_batches(request, &addresses, &ports)?;
 
     let endpoint_ports = if request.transport == ScanTransport::Icmp {
         vec![None]
@@ -213,22 +221,40 @@ fn build_batches(
 
 fn worst_case_duration(
     request: &ScanRequest,
-    batches: &[ScanBatch],
+    address_count: usize,
+    endpoints_per_address: usize,
 ) -> Result<Duration, ScanError> {
+    let batches_per_attempt = endpoints_per_address.div_ceil(request.limits.batch_size);
+    let batch_count = address_count
+        .checked_mul(request.attempts as usize)
+        .and_then(|count| count.checked_mul(batches_per_attempt))
+        .ok_or(ScanError::DurationLimit {
+            actual: Duration::MAX,
+            limit: request.limits.max_duration,
+        })?;
+    let batch_count_u32 = u32::try_from(batch_count).map_err(|_| ScanError::DurationLimit {
+        actual: Duration::MAX,
+        limit: request.limits.max_duration,
+    })?;
     let exchange_time =
         request
             .timeout
-            .checked_mul(batches.len() as u32)
+            .checked_mul(batch_count_u32)
             .ok_or(ScanError::DurationLimit {
                 actual: Duration::MAX,
                 limit: request.limits.max_duration,
             })?;
-    let delay = batches
-        .iter()
-        .take(batches.len().saturating_sub(1))
-        .try_fold(Duration::ZERO, |total, batch| {
+    let final_batch_size = endpoints_per_address % request.limits.batch_size;
+    let delay =
+        (0..batch_count.saturating_sub(1)).try_fold(Duration::ZERO, |total, batch_index| {
+            let position = batch_index % batches_per_attempt;
+            let probes = if position + 1 == batches_per_attempt && final_batch_size != 0 {
+                final_batch_size
+            } else {
+                request.limits.batch_size
+            };
             total
-                .checked_add(rate_delay(batch.probes.len(), request.probes_per_second)?)
+                .checked_add(rate_delay(probes, request.probes_per_second)?)
                 .ok_or(ScanError::DurationLimit {
                     actual: Duration::MAX,
                     limit: request.limits.max_duration,
@@ -334,6 +360,94 @@ fn validate_exchange_evidence(
             message: "matched response references a request outside the batch".to_owned(),
         });
     }
+    for (probe, (sent, evidence)) in batch
+        .probes
+        .iter()
+        .zip(exchange.sent.iter().zip(&exchange.sent_evidence))
+    {
+        if !sent_scan_probe_matches(probe, sent) {
+            return Err(ScanError::InvalidEvidence {
+                sequence: probe.sequence,
+                message: "sent packet does not preserve the scan destination and probe identity"
+                    .to_owned(),
+            });
+        }
+        evidence
+            .validate()
+            .map_err(|error| ScanError::InvalidEvidence {
+                sequence: probe.sequence,
+                message: format!("sent frame is invalid: {error}"),
+            })?;
+    }
+    let sent_bytes = exchange
+        .sent_evidence
+        .iter()
+        .try_fold(0_u64, |total, frame| {
+            total.checked_add(frame.bytes.len() as u64)
+        })
+        .ok_or_else(|| ScanError::InvalidEvidence {
+            sequence,
+            message: "sent frame byte accounting overflowed".to_owned(),
+        })?;
+    if exchange.stats.bytes != sent_bytes {
+        return Err(ScanError::InvalidEvidence {
+            sequence,
+            message: format!(
+                "successful exchange reported {} sent bytes for {sent_bytes} exact frame bytes",
+                exchange.stats.bytes
+            ),
+        });
+    }
+    for response in &exchange.responses {
+        validate_scan_decoded(sequence, "matched response", &response.response)?;
+        let sent_at = exchange.sent_evidence[response.request_index].timestamp;
+        let captured_latency = response
+            .response
+            .frame
+            .timestamp
+            .duration_since(sent_at)
+            .map_err(|_| ScanError::InvalidEvidence {
+                sequence,
+                message: "matched response predates its sent frame".to_owned(),
+            })?;
+        if captured_latency > batch.timeout {
+            return Err(ScanError::InvalidEvidence {
+                sequence,
+                message: format!(
+                    "matched response timestamp is {captured_latency:?} after its sent frame, exceeding timeout {:?}",
+                    batch.timeout
+                ),
+            });
+        }
+        if response.latency > batch.timeout {
+            return Err(ScanError::InvalidEvidence {
+                sequence,
+                message: format!(
+                    "matched response latency {:?} exceeds timeout {:?}",
+                    response.latency, batch.timeout
+                ),
+            });
+        }
+    }
+    for response in &exchange.unsolicited {
+        validate_scan_decoded(sequence, "unsolicited response", response)?;
+    }
+    for frame in &exchange.undecoded {
+        frame
+            .validate()
+            .map_err(|error| ScanError::InvalidEvidence {
+                sequence,
+                message: format!("undecoded frame is invalid: {error}"),
+            })?;
+    }
+    exchange
+        .stats
+        .capture
+        .validate()
+        .map_err(|error| ScanError::InvalidEvidence {
+            sequence,
+            message: format!("capture statistics are invalid: {error}"),
+        })?;
     if exchange.stats.packets_attempted != batch.probes.len() as u64
         || exchange.stats.packets_completed != batch.probes.len() as u64
     {
@@ -344,6 +458,107 @@ fn validate_exchange_evidence(
         });
     }
     Ok(())
+}
+
+fn validate_scan_decoded(
+    sequence: u64,
+    kind: &str,
+    decoded: &DecodedPacket,
+) -> Result<(), ScanError> {
+    decoded
+        .frame
+        .validate()
+        .map_err(|error| ScanError::InvalidEvidence {
+            sequence,
+            message: format!("{kind} frame is invalid: {error}"),
+        })?;
+    if decoded.original != decoded.frame.bytes {
+        return Err(ScanError::InvalidEvidence {
+            sequence,
+            message: format!("{kind} original bytes differ from its exact frame"),
+        });
+    }
+    Ok(())
+}
+
+fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
+    let network_protocol = if probe.address.is_ipv4() {
+        "ipv4"
+    } else {
+        "ipv6"
+    };
+    let transport_protocol = match probe.transport {
+        ScanTransport::Tcp => "tcp",
+        ScanTransport::Udp => "udp",
+        ScanTransport::Icmp if probe.address.is_ipv4() => "icmpv4",
+        ScanTransport::Icmp => "icmpv6",
+    };
+    if !scan_packet_shape_matches(sent, network_protocol, transport_protocol) {
+        return false;
+    }
+    let network_matches = match probe.address {
+        IpAddr::V4(destination) => {
+            sent.iter()
+                .filter(|layer| layer.protocol_id().as_str() == "ipv4")
+                .count()
+                == 1
+                && sent.get::<Ipv4>().is_some_and(|ipv4| {
+                    ipv4.destination == destination
+                        && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
+                })
+        }
+        IpAddr::V6(destination) => {
+            sent.iter()
+                .filter(|layer| layer.protocol_id().as_str() == "ipv6")
+                .count()
+                == 1
+                && sent.get::<Ipv6>().is_some_and(|ipv6| {
+                    ipv6.destination == destination
+                        && ipv6.flow_label == (probe.sequence as u32) & 0x000f_ffff
+                })
+        }
+    };
+    if !network_matches {
+        return false;
+    }
+    match probe.transport {
+        ScanTransport::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
+            tcp.destination_port == probe.port.expect("validated TCP scan port")
+                && tcp.sequence == probe.sequence as u32
+                && tcp.flags == Tcp::SYN
+        }),
+        ScanTransport::Udp => sent.get::<Udp>().is_some_and(|udp| {
+            udp.destination_port == probe.port.expect("validated UDP scan port")
+        }),
+        ScanTransport::Icmp => match probe.address {
+            IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
+                icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
+            }),
+            IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
+                icmp.icmp_type == 128
+                    && icmp.code == 0
+                    && icmp.body == icmp_identity(probe.sequence)
+            }),
+        },
+    }
+}
+
+fn scan_packet_shape_matches(sent: &Packet, network: &str, transport: &str) -> bool {
+    let protocols = sent
+        .iter()
+        .map(|layer| layer.protocol_id())
+        .collect::<Vec<_>>();
+    match protocols.as_slice() {
+        [actual_network, actual_transport] => {
+            actual_network.as_str() == network && actual_transport.as_str() == transport
+        }
+        [ethernet, actual_network, actual_transport] => {
+            ethernet.as_str() == "ethernet"
+                && actual_network.as_str() == network
+                && actual_transport.as_str() == transport
+        }
+        _ => false,
+    }
 }
 
 #[derive(Default)]
@@ -445,6 +660,7 @@ fn process_batch(
                         latency: Some(response.latency),
                     },
                     sent_frame.timestamp,
+                    batch.timeout,
                 );
             }
         }
@@ -460,6 +676,7 @@ fn process_batch(
                         latency: None,
                     },
                     sent_frame.timestamp,
+                    batch.timeout,
                 );
             }
         }
@@ -541,20 +758,48 @@ fn select_candidate<'a>(
     best: &mut Option<ResponseCandidate<'a>>,
     candidate: ResponseCandidate<'a>,
     sent_at: SystemTime,
+    timeout: Duration,
 ) {
-    if candidate
+    let within_deadline = candidate
         .decoded
         .frame
         .timestamp
         .duration_since(sent_at)
-        .is_err()
-    {
+        .is_ok_and(|captured_latency| {
+            captured_latency <= timeout
+                && candidate.latency.is_none_or(|latency| latency <= timeout)
+        });
+    if !within_deadline {
         return;
     }
-    if best.as_ref().is_none_or(|current| {
-        candidate.observation.classification.rank() > current.observation.classification.rank()
-    }) {
+    if best
+        .as_ref()
+        .is_none_or(|current| candidate_precedes(&candidate, current))
+    {
         *best = Some(candidate);
+    }
+}
+
+fn candidate_precedes(candidate: &ResponseCandidate<'_>, current: &ResponseCandidate<'_>) -> bool {
+    let candidate_rank = candidate.observation.classification.rank();
+    let current_rank = current.observation.classification.rank();
+    candidate_rank > current_rank
+        || (candidate_rank == current_rank
+            && (candidate.decoded.frame.timestamp < current.decoded.frame.timestamp
+                || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
+                    && (candidate.observation.responder < current.observation.responder
+                        || (candidate.observation.responder == current.observation.responder
+                            && (candidate.decoded.frame.bytes < current.decoded.frame.bytes
+                                || (candidate.decoded.frame.bytes
+                                    == current.decoded.frame.bytes
+                                    && preferred_latency(candidate.latency, current.latency))))))))
+}
+
+fn preferred_latency(candidate: Option<Duration>, current: Option<Duration>) -> bool {
+    match (candidate, current) {
+        (Some(candidate), Some(current)) => candidate < current,
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }
 

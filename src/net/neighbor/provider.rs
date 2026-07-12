@@ -191,9 +191,16 @@ where
                 })
             }
         };
-        statistics
+        let statistics = statistics
             .validate()
             .map_err(|error| map_io_error(request, "validating capture statistics", error))?;
+        if let Some(error) = statistics.evidence_loss_error() {
+            return Err(map_io_error(
+                request,
+                "checking capture completeness",
+                error,
+            ));
+        }
 
         let Some(mac_address) = outcome.mac_address else {
             return Err(NeighborError::NotFound {

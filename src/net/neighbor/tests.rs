@@ -18,6 +18,7 @@ mod tests {
         planned: Vec<PlannedRoute>,
         frames: VecDeque<CapturedFrame>,
         shutdowns: usize,
+        statistics: CaptureStatistics,
     }
 
     #[derive(Default)]
@@ -134,7 +135,7 @@ mod tests {
         }
 
         fn statistics(&self) -> CaptureStatistics {
-            CaptureStatistics::default()
+            self.0.lock().statistics
         }
     }
 
@@ -363,6 +364,42 @@ mod tests {
         assert!(cached.cache_hit);
         assert_eq!(cached.attempts, 0);
         assert_eq!(shared.lock().sent.len(), 1);
+    }
+
+    #[test]
+    fn receiver_loss_rejects_a_match_and_does_not_populate_the_cache() {
+        let request = request("192.0.2.7", "192.0.2.1");
+        let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
+        let response_request = request.clone();
+        let shared = Arc::new(MockShared::default());
+        shared.lock().statistics = CaptureStatistics {
+            dropped_frames: 1,
+            receiver_dropped_frames: 1,
+            ..CaptureStatistics::default()
+        };
+        let resolver = resolver(
+            Arc::clone(&shared),
+            Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
+            options(),
+        );
+
+        let error = resolver.resolve_request(&request).unwrap_err();
+        assert!(matches!(
+            error,
+            NeighborError::Io {
+                source: LiveIoError::CaptureEvidenceLoss {
+                    receiver_dropped_frames: 1,
+                    ..
+                },
+                ..
+            }
+        ));
+
+        // A lossy result must not be reused as if it were complete.
+        shared.lock().statistics = CaptureStatistics::default();
+        let resolution = resolver.resolve_request(&request).unwrap();
+        assert!(!resolution.cache_hit);
+        assert_eq!(shared.lock().sent.len(), 2);
     }
 
     #[test]

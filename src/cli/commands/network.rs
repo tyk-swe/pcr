@@ -135,6 +135,10 @@ fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
             },
         )
         .map_err(CliError::classified)?;
+    let capture_link_type = send_capture_link_type(
+        report.route.plan.mode,
+        report.route.plan.route.link_type,
+    )?;
     let (result, diagnostics, stats) =
         SendCommandResult::try_from_report(report).map_err(CliError::classified)?;
     match output {
@@ -162,7 +166,7 @@ fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
         OutputFormat::Pcap | OutputFormat::Pcapng => {
             let frame = Frame::new(
                 SystemTime::now(),
-                result.route.plan.route.link_type.into(),
+                capture_link_type,
                 result.frame.bytes().to_vec(),
             )
             .map_err(|source| CliError::new(3, source.to_string()))?;
@@ -173,6 +177,17 @@ fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
                 command: CommandName::Send,
                 format: output,
             },
+        )),
+    }
+}
+
+fn send_capture_link_type(mode: LinkMode, route_link_type: LinkType) -> Result<LinkType, CliError> {
+    match mode {
+        LinkMode::Layer2 => Ok(route_link_type),
+        LinkMode::Layer3 => Ok(LinkType::RAW),
+        LinkMode::Auto => Err(CliError::new(
+            70,
+            "send result retained an unresolved automatic link mode",
         )),
     }
 }

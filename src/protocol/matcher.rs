@@ -18,15 +18,6 @@ impl ReverseTupleMatcher {
 
 impl ResponseMatcher for ReverseTupleMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
-        let Some((request_source, request_destination)) = ip_tuple(request) else {
-            return MatchResult::no_match();
-        };
-        let Some((response_source, response_destination)) = ip_tuple(response) else {
-            return MatchResult::no_match();
-        };
-        if request_source != response_destination || request_destination != response_source {
-            return MatchResult::no_match();
-        }
         let Some((request_layer_index, request_layer)) = request
             .iter()
             .enumerate()
@@ -34,12 +25,26 @@ impl ResponseMatcher for ReverseTupleMatcher {
         else {
             return MatchResult::no_match();
         };
-        let Some(response_layer) = response
+        let Some((response_layer_index, response_layer)) = response
             .iter()
-            .find(|layer| layer.protocol_id().as_str() == self.protocol)
+            .enumerate()
+            .find(|(_, layer)| layer.protocol_id().as_str() == self.protocol)
         else {
             return MatchResult::no_match();
         };
+        let Some((request_source, request_destination)) =
+            ip_tuple_before(request, request_layer_index)
+        else {
+            return MatchResult::no_match();
+        };
+        let Some((response_source, response_destination)) =
+            ip_tuple_before(response, response_layer_index)
+        else {
+            return MatchResult::no_match();
+        };
+        if request_source != response_destination || request_destination != response_source {
+            return MatchResult::no_match();
+        }
         let ports = |layer: &dyn crate::packet::internal::Layer| {
             Some((
                 layer.field("source_port")?.as_u64()?,
@@ -195,27 +200,33 @@ impl EchoMatcher {
 
 impl ResponseMatcher for EchoMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
-        let Some((request_source, request_destination)) = ip_tuple(request) else {
+        let Some((request_layer_index, request_layer)) = request
+            .iter()
+            .enumerate()
+            .find(|(_, layer)| layer.protocol_id().as_str() == self.protocol)
+        else {
             return MatchResult::no_match();
         };
-        let Some((response_source, response_destination)) = ip_tuple(response) else {
+        let Some((response_layer_index, response_layer)) = response
+            .iter()
+            .enumerate()
+            .find(|(_, layer)| layer.protocol_id().as_str() == self.protocol)
+        else {
+            return MatchResult::no_match();
+        };
+        let Some((request_source, request_destination)) =
+            ip_tuple_before(request, request_layer_index)
+        else {
+            return MatchResult::no_match();
+        };
+        let Some((response_source, response_destination)) =
+            ip_tuple_before(response, response_layer_index)
+        else {
             return MatchResult::no_match();
         };
         if request_source != response_destination || request_destination != response_source {
             return MatchResult::no_match();
         }
-        let Some(request_layer) = request
-            .iter()
-            .find(|layer| layer.protocol_id().as_str() == self.protocol)
-        else {
-            return MatchResult::no_match();
-        };
-        let Some(response_layer) = response
-            .iter()
-            .find(|layer| layer.protocol_id().as_str() == self.protocol)
-        else {
-            return MatchResult::no_match();
-        };
         if request_layer.field("type").and_then(|value| value.as_u64()) != Some(self.request_type)
             || response_layer
                 .field("type")
@@ -248,35 +259,40 @@ impl ResponseMatcher for EchoMatcher {
     }
 }
 
-fn ip_tuple(packet: &Packet) -> Option<(IpAddr, IpAddr)> {
-    let (source, mut destination) = packet.iter().find_map(|layer| {
-        if !matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6") {
-            return None;
-        }
-        let source = match layer.field("source")? {
-            FieldValue::Ipv4(value) => IpAddr::V4(value),
-            FieldValue::Ipv6(value) => IpAddr::V6(value),
-            _ => return None,
-        };
-        let destination = match layer.field("destination")? {
-            FieldValue::Ipv4(value) => IpAddr::V4(value),
-            FieldValue::Ipv6(value) => IpAddr::V6(value),
-            _ => return None,
-        };
-        Some((source, destination))
-    })?;
-    if let Some(final_segment) = packet.iter().find_map(|layer| {
-        if layer.protocol_id().as_str() != "ipv6_srh" {
-            return None;
-        }
-        let FieldValue::List(segments) = layer.field("segments")? else {
-            return None;
-        };
-        segments.last().and_then(|segment| match segment {
-            FieldValue::Ipv6(value) => Some(IpAddr::V6(*value)),
-            _ => None,
+fn ip_tuple_before(packet: &Packet, upper_layer_index: usize) -> Option<(IpAddr, IpAddr)> {
+    let (network_layer_index, network_layer) = packet
+        .iter()
+        .enumerate()
+        .take(upper_layer_index)
+        .rev()
+        .find(|(_, layer)| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))?;
+    let source = match network_layer.field("source")? {
+        FieldValue::Ipv4(value) => IpAddr::V4(value),
+        FieldValue::Ipv6(value) => IpAddr::V6(value),
+        _ => return None,
+    };
+    let mut destination = match network_layer.field("destination")? {
+        FieldValue::Ipv4(value) => IpAddr::V4(value),
+        FieldValue::Ipv6(value) => IpAddr::V6(value),
+        _ => return None,
+    };
+    if let Some(final_segment) = packet
+        .iter()
+        .skip(network_layer_index + 1)
+        .take(upper_layer_index - network_layer_index - 1)
+        .find_map(|layer| {
+            if layer.protocol_id().as_str() != "ipv6_srh" {
+                return None;
+            }
+            let FieldValue::List(segments) = layer.field("segments")? else {
+                return None;
+            };
+            segments.last().and_then(|segment| match segment {
+                FieldValue::Ipv6(value) => Some(IpAddr::V6(*value)),
+                _ => None,
+            })
         })
-    }) {
+    {
         destination = final_segment;
     }
     Some((source, destination))
@@ -357,6 +373,60 @@ mod tests {
                 .matches(&request, &response)
                 .matched
         );
+    }
+
+    #[test]
+    fn reverse_tuple_uses_network_envelope_nearest_transport() {
+        let outer_source = address("2001:db8::1");
+        let outer_destination = address("2001:db8::2");
+        let inner_source = address("2001:db8:1::1");
+        let inner_destination = address("2001:db8:1::2");
+        let mut request = Packet::new();
+        request
+            .push(Ipv6 {
+                source: outer_source,
+                destination: outer_destination,
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_source,
+                destination: inner_destination,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 12_345,
+                destination_port: 9,
+                ..Udp::default()
+            });
+        let mut response = Packet::new();
+        response
+            // The outer tunnel endpoints are deliberately unrelated. The
+            // UDP response belongs to the encapsulated network envelope.
+            .push(Ipv6 {
+                source: address("2001:db8:ffff::1"),
+                destination: address("2001:db8:ffff::2"),
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_destination,
+                destination: inner_source,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 9,
+                destination_port: 12_345,
+                ..Udp::default()
+            });
+
+        assert!(
+            ReverseTupleMatcher::new("udp")
+                .matches(&request, &response)
+                .matched
+        );
+    }
+
+    fn address(value: &str) -> Ipv6Addr {
+        value.parse().unwrap()
     }
 
     fn tcp_packet(

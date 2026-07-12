@@ -140,6 +140,12 @@ impl<W: Write> Writer<W> {
             }
         };
         let snap_len = usize_to_u32_limit(snap_len)?;
+        if snap_len == 0 {
+            return Err(Error::InvalidData {
+                format: Format::Pcap,
+                reason: "snapshot length must be non-zero",
+            });
+        }
         write_pcap_header(&mut inner, endianness, precision, snap_len, link_type)?;
         Ok(Self {
             inner,
@@ -383,13 +389,6 @@ impl<W: Write> Writer<W> {
         if description.link_type.0 > u16::MAX as u32 {
             return Err(Error::LinkTypeOutOfRange {
                 link_type: description.link_type.0,
-            });
-        }
-        if description.snap_len as usize > self.max_size {
-            return Err(Error::SizeLimitExceeded {
-                kind: "pcapng interface snap length",
-                declared: u64::from(description.snap_len),
-                limit: self.max_size,
             });
         }
 

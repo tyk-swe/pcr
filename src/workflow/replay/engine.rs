@@ -127,6 +127,18 @@ where
         let transmission = transmitter
             .transmit(&concrete_interface, mode, &frame)
             .map_err(|source| ReplayError::Transmission { sequence, source })?;
+        if transmission.interface != concrete_interface {
+            return Err(ReplayError::InvalidEvidence {
+                sequence,
+                message: format!(
+                    "backend reported transmission on {} (index {}) after validating {} (index {})",
+                    transmission.interface.name,
+                    transmission.interface.index,
+                    concrete_interface.name,
+                    concrete_interface.index
+                ),
+            });
+        }
         validate_transmission_evidence(sequence, &frame, &transmission.report)?;
 
         frames_completed = frames_completed

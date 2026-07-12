@@ -132,6 +132,7 @@ mod tests {
         calls: usize,
         partial: bool,
         omit_evidence: bool,
+        wrong_interface: bool,
     }
 
     impl ReplayTransmitter for Transmitter {
@@ -152,7 +153,14 @@ mod tests {
         ) -> Result<ReplayTransmission, LiveIoError> {
             self.calls += 1;
             Ok(ReplayTransmission {
-                interface: _interface.clone(),
+                interface: if self.wrong_interface {
+                    InterfaceId {
+                        name: "other0".to_owned(),
+                        index: _interface.index + 1,
+                    }
+                } else {
+                    _interface.clone()
+                },
                 report: IoSendReport {
                     bytes_sent: if self.partial {
                         frame.bytes.len().saturating_sub(1)
@@ -451,6 +459,35 @@ mod tests {
                 ReplayError::Transmission { .. } | ReplayError::InvalidEvidence { .. }
             ));
         }
+    }
+
+    #[test]
+    fn transmission_interface_must_match_the_validated_interface() {
+        let mut reader = capture(LinkType::ETHERNET, &[(Duration::ZERO, &[1, 2])]);
+        let mut authorizer = Allow::default();
+        let mut transmitter = Transmitter {
+            wrong_interface: true,
+            ..Transmitter::default()
+        };
+        let mut emitted = false;
+        let error = replay_capture(
+            &mut reader,
+            &options(ReplayTiming::Immediate),
+            &mut authorizer,
+            &mut transmitter,
+            &mut Clock::default(),
+            |_| {
+                emitted = true;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ReplayError::InvalidEvidence { sequence: 0, .. }
+        ));
+        assert!(!emitted);
     }
 
     #[test]

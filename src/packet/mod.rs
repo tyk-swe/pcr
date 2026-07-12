@@ -104,7 +104,7 @@ pub mod expression {
 
     pub use super::expression_impl::{
         decode_hex, parse_packet_expression as parse, ExpressionError as Error,
-        ExpressionOptions as Options, DEFAULT_MAX_EXPRESSION_BYTES,
+        ExpressionOptions as Options, DEFAULT_MAX_EXPRESSION_BYTES, MAX_EXPRESSION_NESTING,
     };
 
     pub(crate) use super::expression_impl::{
@@ -186,7 +186,7 @@ pub(crate) mod internal {
     };
     pub(crate) use super::expression::{
         decode_hex, parse_packet_expression, ExpressionError, ExpressionOptions,
-        DEFAULT_MAX_EXPRESSION_BYTES,
+        DEFAULT_MAX_EXPRESSION_BYTES, MAX_EXPRESSION_NESTING,
     };
     pub(crate) use super::field::{FieldKind, FieldValue, WireValue};
     pub(crate) use super::layer::{

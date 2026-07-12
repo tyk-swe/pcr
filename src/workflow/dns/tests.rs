@@ -354,15 +354,7 @@ mod tests {
             18
         );
 
-        let no_opt = fixture_response(
-            13,
-            3,
-            "edns.example",
-            DnsQueryType::A,
-            &[],
-            &[],
-            &[],
-        );
+        let no_opt = fixture_response(13, 3, "edns.example", DnsQueryType::A, &[], &[], &[]);
         let response = decode_dns_response(
             &no_opt,
             "edns.example",
@@ -978,6 +970,109 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unsolicited_dns_response_after_the_deadline_remains_a_timeout() {
+        struct LateUnsolicitedExecutor {
+            payload: Bytes,
+        }
+
+        impl DnsExecutor for LateUnsolicitedExecutor {
+            fn execute(
+                &mut self,
+                exchange: &DnsExchange,
+            ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+                let mut execution = PayloadExecutor {
+                    payload: self.payload.clone(),
+                }
+                .execute(exchange)?;
+                let mut response = execution.responses.remove(0).response;
+                response.frame.timestamp =
+                    execution.sent_evidence.timestamp + exchange.timeout + Duration::from_nanos(1);
+                execution.unsolicited.push(response);
+                Ok(execution)
+            }
+        }
+
+        let payload = fixture_response(
+            77,
+            0,
+            "www.example.test",
+            DnsQueryType::A,
+            &[FixtureRecord::in_class(
+                "www.example.test",
+                1,
+                vec![192, 0, 2, 10],
+            )],
+            &[],
+            &[],
+        );
+        let result = dns(
+            &single_attempt_request(),
+            &mut LocalAuthorizer,
+            &default_registry().unwrap(),
+            &mut LateUnsolicitedExecutor {
+                payload: Bytes::from(payload),
+            },
+            &mut NoopClock,
+        )
+        .unwrap();
+
+        assert_eq!(result.outcome, DnsOutcome::Timeout);
+        assert_eq!(result.attempts[0].status, DnsAttemptStatus::Timeout);
+    }
+
+    #[test]
+    fn matched_response_timestamp_must_follow_its_sent_frame() {
+        struct PreSendMatchedExecutor {
+            payload: Bytes,
+        }
+
+        impl DnsExecutor for PreSendMatchedExecutor {
+            fn execute(
+                &mut self,
+                exchange: &DnsExchange,
+            ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+                let mut execution = PayloadExecutor {
+                    payload: self.payload.clone(),
+                }
+                .execute(exchange)?;
+                execution.responses[0].response.frame.timestamp = execution
+                    .sent_evidence
+                    .timestamp
+                    .checked_sub(Duration::from_nanos(1))
+                    .unwrap();
+                Ok(execution)
+            }
+        }
+
+        let payload = fixture_response(
+            77,
+            0,
+            "www.example.test",
+            DnsQueryType::A,
+            &[FixtureRecord::in_class(
+                "www.example.test",
+                1,
+                vec![192, 0, 2, 10],
+            )],
+            &[],
+            &[],
+        );
+        let error = dns(
+            &single_attempt_request(),
+            &mut LocalAuthorizer,
+            &default_registry().unwrap(),
+            &mut PreSendMatchedExecutor {
+                payload: Bytes::from(payload),
+            },
+            &mut NoopClock,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, DnsError::InvalidEvidence { .. }));
+        assert!(error.to_string().contains("predates its sent frame"));
+    }
+
     struct NoopClock;
 
     impl Clock for NoopClock {
@@ -1051,6 +1146,39 @@ mod tests {
                 },
             })
         }
+    }
+
+    #[test]
+    fn executor_cannot_underreport_exact_dns_wire_bytes() {
+        let query = encode_dns_query("www.example.test", DnsQueryType::A, 77, true).unwrap();
+        let probe = DnsProbe {
+            attempt: 1,
+            server_address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53)),
+            server_port: 53,
+            source_port: 50_000,
+            transaction_id: 77,
+            query_name: "www.example.test.".to_owned(),
+            query_type: DnsQueryType::A,
+            query,
+        };
+        let mut execution = TimeoutExecutor::default()
+            .execute(&DnsExchange {
+                probe: probe.clone(),
+                timeout: Duration::from_millis(10),
+                max_responses: 1,
+            })
+            .unwrap();
+        execution.stats.bytes = 0;
+
+        assert!(matches!(
+            validate_dns_execution(
+                &probe,
+                &execution,
+                DnsLimits::default(),
+                Duration::from_millis(10),
+            ),
+            Err(DnsError::InvalidEvidence { attempt: 1, .. })
+        ));
     }
 
     fn private_policy() -> TrafficPolicy {
@@ -1171,5 +1299,47 @@ mod tests {
         assert_eq!(error.classification().code, "policy.packet_limit");
         assert_eq!(resolver.calls.load(Ordering::SeqCst), 0);
         assert_eq!(executor.calls, 0);
+    }
+
+    #[test]
+    fn aggregate_duration_is_rejected_before_operation_authorization() {
+        struct CountingAuthorizer {
+            operation_calls: usize,
+        }
+
+        impl Authorizer for CountingAuthorizer {
+            fn resolve_and_authorize(
+                &mut self,
+                _target: &Target,
+            ) -> Result<Authorized, AuthorizationError> {
+                panic!("duration validation must precede resolution")
+            }
+
+            fn authorize_operation(
+                &mut self,
+                _packets: u64,
+                _maximum_wire_bytes: u64,
+            ) -> Result<(), AuthorizationError> {
+                self.operation_calls += 1;
+                Ok(())
+            }
+        }
+
+        let mut request = single_attempt_request();
+        request.attempts = 2;
+        request.timeout = Duration::from_millis(10);
+        request.limits.max_duration = Duration::from_millis(1);
+        let mut authorizer = CountingAuthorizer { operation_calls: 0 };
+        let error = dns(
+            &request,
+            &mut authorizer,
+            &default_registry().unwrap(),
+            &mut TimeoutExecutor::default(),
+            &mut NoopClock,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, DnsError::DurationLimit { .. }));
+        assert_eq!(authorizer.operation_calls, 0);
     }
 }

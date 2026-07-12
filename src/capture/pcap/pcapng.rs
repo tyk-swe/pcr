@@ -99,13 +99,28 @@ fn parse_interface_description(
     let snap_len = decode_u32(endianness, &body[4..8]);
     let mut timestamp_resolution = DEFAULT_TIMESTAMP_RESOLUTION;
     let mut timestamp_offset = 0_i64;
+    let mut saw_timestamp_resolution = false;
+    let mut saw_timestamp_offset = false;
     visit_options(
         &body[8..],
         endianness,
         "pcapng interface options",
         |code, value| {
             match code {
-                PCAPNG_OPTION_IF_TSRESOL if value.len() == 1 => {
+                PCAPNG_OPTION_IF_TSRESOL => {
+                    if saw_timestamp_resolution {
+                        return Err(Error::InvalidData {
+                            format: Format::PcapNg,
+                            reason: "if_tsresol option appears more than once",
+                        });
+                    }
+                    saw_timestamp_resolution = true;
+                    if value.len() != 1 {
+                        return Err(Error::InvalidData {
+                            format: Format::PcapNg,
+                            reason: "if_tsresol option must contain one byte",
+                        });
+                    }
                     let resolution = value[0];
                     timestamp_resolution = if resolution & 0x80 == 0 {
                         TimestampResolution::Decimal(resolution)
@@ -113,20 +128,21 @@ fn parse_interface_description(
                         TimestampResolution::Binary(resolution & 0x7f)
                     };
                 }
-                PCAPNG_OPTION_IF_TSRESOL => {
-                    return Err(Error::InvalidData {
-                        format: Format::PcapNg,
-                        reason: "if_tsresol option must contain one byte",
-                    });
-                }
-                PCAPNG_OPTION_IF_TSOFFSET if value.len() == 8 => {
-                    timestamp_offset = decode_i64(endianness, value);
-                }
                 PCAPNG_OPTION_IF_TSOFFSET => {
-                    return Err(Error::InvalidData {
-                        format: Format::PcapNg,
-                        reason: "if_tsoffset option must contain eight bytes",
-                    });
+                    if saw_timestamp_offset {
+                        return Err(Error::InvalidData {
+                            format: Format::PcapNg,
+                            reason: "if_tsoffset option appears more than once",
+                        });
+                    }
+                    saw_timestamp_offset = true;
+                    if value.len() != 8 {
+                        return Err(Error::InvalidData {
+                            format: Format::PcapNg,
+                            reason: "if_tsoffset option must contain eight bytes",
+                        });
+                    }
+                    timestamp_offset = decode_i64(endianness, value);
                 }
                 _ => {}
             }
@@ -246,6 +262,15 @@ fn parse_pcapng_packet_body(
         });
     }
     let actual_data_end = data_offset + captured_length as usize;
+    if body[actual_data_end..data_end]
+        .iter()
+        .any(|byte| *byte != 0)
+    {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "packet data padding is non-zero",
+        });
+    }
     let direction = parse_packet_direction(&body[data_end..], endianness)?;
     let timestamp = timestamp_from_ticks(
         timestamp_ticks,
@@ -308,6 +333,16 @@ fn parse_simple_packet(
             reason: "simple packet block length does not match its packet length",
         });
     }
+    let actual_data_end = 4 + captured_length as usize;
+    if body[actual_data_end..expected]
+        .iter()
+        .any(|byte| *byte != 0)
+    {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "simple packet data padding is non-zero",
+        });
+    }
     Ok(Frame {
         // A Simple Packet Block has no timestamp field.  UNIX_EPOCH is the
         // deterministic sentinel used by the raw capture record model.
@@ -326,12 +361,20 @@ fn parse_packet_direction(
     endianness: Endianness,
 ) -> Result<Option<Direction>, Error> {
     let mut direction = None;
+    let mut saw_flags = false;
     visit_options(
         options,
         endianness,
         "pcapng packet options",
         |code, value| {
             if code == PCAPNG_OPTION_EPB_FLAGS {
+                if saw_flags {
+                    return Err(Error::InvalidData {
+                        format: Format::PcapNg,
+                        reason: "packet flags option appears more than once",
+                    });
+                }
+                saw_flags = true;
                 if value.len() != 4 {
                     return Err(Error::InvalidData {
                         format: Format::PcapNg,
@@ -401,6 +444,15 @@ where
             });
         }
         visitor(code, &options[offset..offset + length])?;
+        if options[offset + length..end]
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "option padding is non-zero",
+            });
+        }
         offset = end;
     }
     Ok(())

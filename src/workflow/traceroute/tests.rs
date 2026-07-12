@@ -102,7 +102,7 @@ mod tests {
                     11,
                     0,
                     ipv4_udp_quote(&sent[0]),
-                    batch.probes[0].sequence + 2,
+                    batch.probes[0].sequence + 1,
                     Vec::new(),
                 )
             } else {
@@ -112,7 +112,7 @@ mod tests {
                     3,
                     3,
                     ipv4_udp_quote(&sent[0]),
-                    batch.probes[0].sequence + 2,
+                    batch.probes[0].sequence + 1,
                     Vec::new(),
                 )
             };
@@ -245,6 +245,118 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "traceroute.undecoded_limit"));
+    }
+
+    #[test]
+    fn executor_cannot_replace_the_authorized_traceroute_probe() {
+        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+        let operation = request(Target::Address(destination));
+        let batch = build_batches(&operation, destination).unwrap().remove(0);
+        let mut execution = UndecodedExecutor.execute(&batch).unwrap();
+        let mut layer2 = execution.sent[0].clone();
+        layer2
+            .insert(0, crate::protocol::internal::Ethernet::default())
+            .unwrap();
+        assert!(sent_traceroute_probe_matches(&batch.probes[0], &layer2));
+        layer2.push(crate::protocol::internal::Ethernet::default());
+        assert!(!sent_traceroute_probe_matches(&batch.probes[0], &layer2));
+        execution.stats.bytes = 0;
+        assert!(matches!(
+            validate_execution(&batch, &execution),
+            Err(TracerouteError::InvalidEvidence { sequence: 0, .. })
+        ));
+        execution.stats.bytes = execution.sent_evidence[0].bytes.len() as u64;
+        execution.sent[0].get_mut::<Ipv4>().unwrap().ttl += 1;
+
+        let error = validate_execution(&batch, &execution).unwrap_err();
+
+        assert!(matches!(
+            error,
+            TracerouteError::InvalidEvidence { sequence: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn unsolicited_hop_response_after_the_deadline_cannot_finish_the_trace() {
+        struct LateHopExecutor;
+
+        impl TracerouteExecutor for LateHopExecutor {
+            fn execute(
+                &mut self,
+                batch: &TracerouteBatch,
+            ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+                let mut execution = MixedHopExecutor.execute(batch)?;
+                for response in &mut execution.unsolicited {
+                    response.frame.timestamp += Duration::from_secs(1);
+                }
+                Ok(execution)
+            }
+        }
+
+        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+        let operation = request(Target::Address(destination));
+        let result = traceroute(
+            &operation,
+            &mut FixedAuthorizer {
+                address: destination,
+                operations: Vec::new(),
+            },
+            &default_registry().unwrap(),
+            &mut LateHopExecutor,
+            &mut NoopClock::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.completion, TracerouteCompletion::Timeout);
+        assert!(result
+            .hops
+            .iter()
+            .flat_map(|hop| &hop.probes)
+            .all(|probe| { probe.status == TracerouteProbeStatus::Timeout }));
+    }
+
+    #[test]
+    fn matched_response_timestamp_must_follow_its_sent_frame() {
+        struct PreSendMatchedExecutor;
+
+        impl TracerouteExecutor for PreSendMatchedExecutor {
+            fn execute(
+                &mut self,
+                batch: &TracerouteBatch,
+            ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+                let mut execution = MixedHopExecutor.execute(batch)?;
+                let mut response = execution.unsolicited.remove(0);
+                response.frame.timestamp = execution.sent_evidence[0]
+                    .timestamp
+                    .checked_sub(Duration::from_nanos(1))
+                    .unwrap();
+                execution.responses.push(TracerouteMatchedResponse {
+                    request_index: 0,
+                    response,
+                    latency: Duration::from_millis(1),
+                });
+                Ok(execution)
+            }
+        }
+
+        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+        let error = traceroute(
+            &request(Target::Address(destination)),
+            &mut FixedAuthorizer {
+                address: destination,
+                operations: Vec::new(),
+            },
+            &default_registry().unwrap(),
+            &mut PreSendMatchedExecutor,
+            &mut NoopClock::default(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            TracerouteError::InvalidEvidence { .. }
+        ));
+        assert!(error.to_string().contains("predates its sent frame"));
     }
 
     struct ScriptedResolver {

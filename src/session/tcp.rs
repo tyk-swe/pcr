@@ -173,6 +173,43 @@ impl Reassembler {
     }
 
     pub fn push(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
+        // Opening a previously unseen tuple (or replacing a tuple generation
+        // on SYN) mutates the table before payload validation. Preserve the
+        // prior entry and counters so a rejected first segment cannot leave
+        // an empty flow behind or discard an established generation.
+        let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
+        let changes_generation = (segment.syn || !self.flows.contains_key(&segment.flow))
+            && self
+                .flows
+                .get(&segment.flow)
+                .is_none_or(|state| state.base_sequence != first_payload_sequence);
+        let rollback = changes_generation.then(|| {
+            (
+                segment.flow.clone(),
+                self.flows.get(&segment.flow).cloned(),
+                self.aggregate_bytes,
+                self.aggregate_memory_charge,
+            )
+        });
+        let result = self.push_inner(segment, now);
+        if result.is_err() {
+            if let Some((flow, prior, aggregate_bytes, aggregate_memory_charge)) = rollback {
+                match prior {
+                    Some(state) => {
+                        self.flows.insert(flow, state);
+                    }
+                    None => {
+                        self.flows.remove(&flow);
+                    }
+                }
+                self.aggregate_bytes = aggregate_bytes;
+                self.aggregate_memory_charge = aggregate_memory_charge;
+            }
+        }
+        result
+    }
+
+    fn push_inner(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
         self.validate_limits()?;
         let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
         if segment.syn || !self.flows.contains_key(&segment.flow) {
@@ -935,6 +972,48 @@ mod tests {
             .iter()
             .any(|event| matches!(event, Event::Data { sequence: 100, .. })));
         assert_eq!(reassembler.aggregate_bytes(), 3);
+    }
+
+    #[test]
+    fn rejected_first_segment_does_not_leave_an_empty_flow() {
+        let now = Instant::now();
+        let limits = Limits {
+            max_bytes_per_flow: 4,
+            max_aggregate_bytes: 3,
+            ..Limits::default()
+        };
+        let mut reassembler = Reassembler::new(limits);
+
+        assert_eq!(
+            reassembler.push(segment(100, b"abcd"), now).unwrap_err(),
+            Error::AggregateByteLimit { limit: 3 }
+        );
+        assert_eq!(reassembler.aggregate_bytes(), 0);
+        assert_eq!(reassembler.aggregate_memory_charge(), 0);
+        assert!(reassembler.flush().is_empty());
+    }
+
+    #[test]
+    fn rejected_replacement_syn_restores_the_established_generation() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits {
+            max_bytes_per_flow: 4,
+            ..Limits::default()
+        });
+        reassembler.open_flow(flow(), 100, now).unwrap();
+        reassembler.push(segment(102, b"cd"), now).unwrap();
+
+        let mut replacement = segment(199, b"abcde");
+        replacement.syn = true;
+        assert_eq!(
+            reassembler.push(replacement, now).unwrap_err(),
+            Error::FlowByteLimit { limit: 4 }
+        );
+
+        let events = reassembler.push(segment(100, b"ab"), now).unwrap();
+        assert!(events.iter().any(
+            |event| matches!(event, Event::Data { sequence: 100, bytes, .. } if bytes.as_ref() == b"abcd")
+        ));
     }
 
     #[test]

@@ -97,7 +97,16 @@ fn spaced_hex(bytes: &[u8]) -> String {
 }
 
 fn output_timestamp_text(timestamp: crate::output::OutputTimestamp) -> String {
-    format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds)
+    if timestamp.unix_seconds >= 0 || timestamp.nanoseconds == 0 {
+        return format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds);
+    }
+
+    // OutputTimestamp uses the canonical floor-seconds representation, so
+    // (-3, 750_000_000) is -2.25 seconds rather than -3.75 seconds. Convert
+    // that pair to conventional signed decimal notation for human output.
+    let whole_seconds = -(timestamp.unix_seconds + 1);
+    let fractional = 1_000_000_000 - timestamp.nanoseconds;
+    format!("-{whole_seconds}.{fractional:09}")
 }
 
 fn emit_json(value: &impl Serialize) -> Result<(), CliError> {

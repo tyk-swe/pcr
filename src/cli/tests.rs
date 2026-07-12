@@ -226,6 +226,24 @@ mod tests {
     }
 
     #[test]
+    fn pre_epoch_timestamp_text_uses_conventional_signed_decimal_notation() {
+        assert_eq!(
+            output_timestamp_text(crate::output::OutputTimestamp {
+                unix_seconds: -3,
+                nanoseconds: 750_000_000,
+            }),
+            "-2.250000000"
+        );
+        assert_eq!(
+            output_timestamp_text(crate::output::OutputTimestamp {
+                unix_seconds: -1,
+                nanoseconds: 500_000_000,
+            }),
+            "-0.500000000"
+        );
+    }
+
+    #[test]
     fn per_item_tool_errors_retain_their_input_sequence() {
         let scan = scan_cli_error(ScanError::InvalidEvidence {
             sequence: 7,
@@ -429,6 +447,23 @@ mod tests {
         let error = encode_capture_file(OutputFormat::Pcap, [raw, ethernet]).unwrap_err();
         assert_eq!(error.code, 5);
         assert!(error.message.contains("link type"));
+    }
+
+    #[test]
+    fn send_capture_evidence_uses_the_transmission_boundary_link_type() {
+        assert_eq!(
+            send_capture_link_type(LinkMode::Layer2, LinkType::ETHERNET).unwrap(),
+            LinkType::ETHERNET
+        );
+        assert_eq!(
+            send_capture_link_type(LinkMode::Layer3, LinkType::ETHERNET).unwrap(),
+            LinkType::RAW
+        );
+        assert_eq!(
+            send_capture_link_type(LinkMode::Layer3, LinkType(147)).unwrap(),
+            LinkType::RAW
+        );
+        assert!(send_capture_link_type(LinkMode::Auto, LinkType::ETHERNET).is_err());
     }
 
     #[test]

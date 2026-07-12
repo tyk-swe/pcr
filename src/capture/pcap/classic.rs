@@ -15,6 +15,12 @@ fn read_pcap_header<R: Read>(
         });
     }
     let snap_len = decode_u32(endianness, &remaining[12..16]);
+    if snap_len == 0 {
+        return Err(Error::InvalidData {
+            format: Format::Pcap,
+            reason: "snapshot length must be non-zero",
+        });
+    }
     // The classic-PCAP network word uses its low 16 bits for LINKTYPE and may
     // carry standardized FCS metadata in the high bits. Do not misclassify a
     // flagged Ethernet capture as an unknown 32-bit DLT.

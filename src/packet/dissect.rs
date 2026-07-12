@@ -176,6 +176,10 @@ impl Dissector {
                 break;
             };
             let index = packet.len();
+            // Once an enclosing IP layer has established a network envelope,
+            // bytes outside a child's declared length are still covered by
+            // that IP packet and cannot be link-layer padding.
+            let allow_current_link_padding = allow_trailing_padding && network.is_none();
             let decoded = match codec.decode(
                 current,
                 &LayerDecodeContext {
@@ -183,7 +187,7 @@ impl Dissector {
                     layer_index: index,
                     absolute_offset,
                     verify_checksums: options.verify_checksums,
-                    allow_trailing_padding,
+                    allow_trailing_padding: allow_current_link_padding,
                     network,
                 },
             ) {
@@ -246,13 +250,13 @@ impl Dissector {
                     trailing_offset,
                     Bytes::copy_from_slice(&current[payload_end..]),
                     index,
-                    allow_trailing_padding,
+                    allow_current_link_padding,
                 ));
                 let message = format!(
                     "preserved {} byte(s) outside the declared length of {current_protocol}",
                     current.len() - payload_end
                 );
-                let diagnostic = if allow_trailing_padding {
+                let diagnostic = if allow_current_link_padding {
                     Diagnostic::info("decode.trailing_padding", message)
                 } else {
                     Diagnostic::warning("decode.trailing_malformed", message)
@@ -680,5 +684,46 @@ mod tests {
             ),
             Err(DecodeError::LayerLimit { limit: 0 })
         ));
+    }
+
+    #[test]
+    fn bytes_outside_udp_length_inside_ip_are_not_link_padding() {
+        let mut bytes = vec![0_u8; 14 + 20 + 8 + 4];
+        bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
+        let ip = 14;
+        bytes[ip] = 0x45;
+        bytes[ip + 2..ip + 4].copy_from_slice(&32_u16.to_be_bytes());
+        bytes[ip + 8] = 64;
+        bytes[ip + 9] = 17;
+        bytes[ip + 12..ip + 16].copy_from_slice(&[192, 0, 2, 1]);
+        bytes[ip + 16..ip + 20].copy_from_slice(&[198, 51, 100, 2]);
+        let udp = ip + 20;
+        bytes[udp..udp + 2].copy_from_slice(&1_u16.to_be_bytes());
+        bytes[udp + 2..udp + 4].copy_from_slice(&2_u16.to_be_bytes());
+        bytes[udp + 4..udp + 6].copy_from_slice(&8_u16.to_be_bytes());
+        bytes[udp + 8..udp + 12].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
+
+        let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
+        let frame =
+            Frame::new(std::time::SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap();
+        let decoded = Dissector::new(registry)
+            .decode(
+                frame,
+                DecodeOptions {
+                    verify_checksums: false,
+                    ..DecodeOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert!(decoded.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "decode.trailing_malformed"
+                && diagnostic.severity == crate::packet::diagnostic::DiagnosticSeverity::Warning
+                && diagnostic.layer == Some(2)
+        }));
+        assert!(!decoded
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "decode.trailing_padding"));
     }
 }

@@ -213,7 +213,7 @@ mod tests {
     }
 
     impl CaptureSession for FakeCapture {
-        fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
             self.events.lock().unwrap().push("ready");
             Ok(())
         }
@@ -223,7 +223,6 @@ mod tests {
             if sent || self.deliver_before_send {
                 let mut response = self.response.lock().unwrap().take();
                 if let Some(frame) = &mut response {
-                    frame.timestamp = std::time::SystemTime::now();
                     self.statistics.received_frames = self
                         .statistics
                         .received_frames
@@ -239,6 +238,14 @@ mod tests {
             } else {
                 Ok(None)
             }
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<CapturedFrame>, LiveIoError> {
+            self.next_frame(timeout)
+                .map(|frame| frame.map(|frame| CapturedFrame::new(frame, Instant::now())))
         }
 
         fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -271,6 +278,105 @@ mod tests {
     }
 
     #[derive(Clone)]
+    struct EndlessCaptureIo {
+        frame: Frame,
+        sends: Arc<AtomicUsize>,
+    }
+
+    impl PacketIo for EndlessCaptureIo {
+        fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            Ok(IoSendReport {
+                bytes_sent: frame.bytes().len(),
+                wire_bytes: Some(frame.bytes().clone()),
+            })
+        }
+    }
+
+    struct EndlessCapture(Frame);
+
+    impl CaptureSession for EndlessCapture {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+            Ok(Some(self.0.clone()))
+        }
+
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn statistics(&self) -> CaptureStatistics {
+            CaptureStatistics::default()
+        }
+    }
+
+    impl CaptureProvider for EndlessCaptureIo {
+        type Capture = EndlessCapture;
+
+        fn arm_capture(
+            &self,
+            _route: &PlannedRoute,
+            limits: CaptureQueueLimits,
+        ) -> Result<Self::Capture, LiveIoError> {
+            limits.validate()?;
+            Ok(EndlessCapture(self.frame.clone()))
+        }
+    }
+
+    #[derive(Clone)]
+    struct SlowSendIo {
+        delay: Duration,
+        sends: Arc<AtomicUsize>,
+    }
+
+    impl PacketIo for SlowSendIo {
+        fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(self.delay);
+            Ok(IoSendReport {
+                bytes_sent: frame.bytes().len(),
+                wire_bytes: Some(frame.bytes().clone()),
+            })
+        }
+    }
+
+    struct EmptyCapture;
+
+    impl CaptureSession for EmptyCapture {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+            Ok(None)
+        }
+
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn statistics(&self) -> CaptureStatistics {
+            CaptureStatistics::default()
+        }
+    }
+
+    impl CaptureProvider for SlowSendIo {
+        type Capture = EmptyCapture;
+
+        fn arm_capture(
+            &self,
+            _route: &PlannedRoute,
+            limits: CaptureQueueLimits,
+        ) -> Result<Self::Capture, LiveIoError> {
+            limits.validate()?;
+            Ok(EmptyCapture)
+        }
+    }
+
+    #[derive(Clone)]
     struct ReadinessAndShutdownFailIo(Arc<Mutex<Vec<&'static str>>>);
 
     impl PacketIo for ReadinessAndShutdownFailIo {
@@ -282,7 +388,7 @@ mod tests {
     struct ReadinessAndShutdownFailCapture(Arc<Mutex<Vec<&'static str>>>);
 
     impl CaptureSession for ReadinessAndShutdownFailCapture {
-        fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
             self.0.lock().unwrap().push("ready");
             Err(LiveIoError::CaptureReadiness {
                 message: "not ready".to_owned(),
@@ -321,7 +427,7 @@ mod tests {
     struct DropObservedCapture(Arc<AtomicUsize>);
 
     impl CaptureSession for DropObservedCapture {
-        fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
             Ok(())
         }
 
@@ -1079,7 +1185,7 @@ mod tests {
         let io = FakeIo {
             events: Arc::clone(&events),
             response: Arc::new(Mutex::new(Some(
-                Frame::new(std::time::SystemTime::now(), LinkType::IPV4, response_bytes).unwrap(),
+                Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response_bytes).unwrap(),
             ))),
             deliver_before_send: false,
             limits: Arc::clone(&limits),
@@ -1124,6 +1230,10 @@ mod tests {
             &[CaptureQueueLimits::default()]
         );
         assert_eq!(result.responses.len(), 1);
+        assert_eq!(
+            result.responses[0].response.frame.timestamp,
+            std::time::UNIX_EPOCH
+        );
         assert_eq!(result.sent_evidence.len(), 1);
         assert_eq!(result.sent_evidence[0].link_type, LinkType::RAW);
         assert_eq!(result.sent_evidence[0].bytes, result.sent[0].bytes);
@@ -1191,6 +1301,215 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "exchange.pre_send_frame"));
+    }
+
+    #[test]
+    fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
+        let registry = Arc::new(default_registry().unwrap());
+        let source = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 2);
+        let request = Builder::new(Arc::clone(&registry))
+            .build(
+                packet(source, destination, 12_345, 9),
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap();
+        let response = Builder::new(Arc::clone(&registry))
+            .build(
+                packet(destination, source, 9, 12_345),
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap();
+        let prepared = vec![(
+            request,
+            MaterializedRoute {
+                plan: PlannedRoute {
+                    route: route(LinkCapability::Layer3),
+                    mode: LinkMode::Layer3,
+                    lookup_destination: Some(IpAddr::V4(destination)),
+                    final_destination: Some(IpAddr::V4(destination)),
+                    visited_destinations: vec![IpAddr::V4(destination)],
+                    packet_source: Some(IpAddr::V4(source)),
+                    neighbor_source: Some(IpAddr::V4(source)),
+                    neighbor_target: Some(IpAddr::V4(destination)),
+                    destination_mac: None,
+                    source_mac: None,
+                    neighbor_vlan_tags: Vec::new(),
+                    synthesized_ethernet: false,
+                },
+                neighbor_resolution: None,
+            },
+        )];
+        let sent_at = vec![Instant::now()];
+        let received_at = sent_at[0]
+            .checked_add(Duration::from_millis(1))
+            .unwrap();
+        let deadline = sent_at[0]
+            .checked_add(Duration::from_millis(10))
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        assert!(Instant::now() > deadline);
+
+        let dissector = Dissector::new(Arc::clone(&registry));
+        let options = ExchangeOptions::default();
+        let mut accumulator = ExchangeAccumulator::new(1);
+        accumulator.process(
+            CapturedFrame::new(
+                Frame::new(
+                    std::time::UNIX_EPOCH,
+                    LinkType::IPV4,
+                    response.bytes.clone(),
+                )
+                .unwrap(),
+                received_at,
+            ),
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                options: &options,
+            },
+        );
+
+        assert_eq!(accumulator.responses.len(), 1);
+        assert_eq!(
+            accumulator.responses[0].latency,
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            accumulator.responses[0].response.frame.timestamp,
+            std::time::UNIX_EPOCH
+        );
+
+        let mut fallback = ExchangeAccumulator::new(1);
+        fallback.process(
+            CapturedFrame::without_ingress_time(
+                Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
+            ),
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                options: &options,
+            },
+        );
+        assert!(fallback.responses.is_empty());
+        assert_eq!(fallback.unsolicited.len(), 1);
+        assert!(fallback
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "capture.ingress_time_unavailable"));
+    }
+
+    #[test]
+    fn endless_zero_time_capture_drain_is_bounded_and_send_progresses() {
+        let sends = Arc::new(AtomicUsize::new(0));
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            FixedRoutes(route(LinkCapability::Layer3)),
+            CountingNeighbors::default(),
+            EndlessCaptureIo {
+                frame: Frame::new(
+                    std::time::UNIX_EPOCH,
+                    LinkType::IPV4,
+                    Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]),
+                )
+                .unwrap(),
+                sends: Arc::clone(&sends),
+            },
+            TrafficPolicy::default(),
+        );
+        let started = Instant::now();
+        let result = client
+            .exchange(
+                &PacketTemplate::new(packet(
+                    Ipv4Addr::new(10, 0, 0, 1),
+                    Ipv4Addr::new(10, 0, 0, 2),
+                    12_345,
+                    9,
+                )),
+                ExchangeOptions {
+                    send: SendOptions {
+                        plan: PlanOptions {
+                            link_mode: LinkMode::Layer3,
+                            ..PlanOptions::default()
+                        },
+                        ..SendOptions::default()
+                    },
+                    timeout: Duration::from_millis(50),
+                    max_capture_queue_frames: 1,
+                    max_unsolicited: 1,
+                    max_responses: 1,
+                    ..ExchangeOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.drain_limit"));
+    }
+
+    #[test]
+    fn slow_send_consumes_absolute_deadline_and_stops_later_requests() {
+        let sends = Arc::new(AtomicUsize::new(0));
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            FixedRoutes(route(LinkCapability::Layer3)),
+            CountingNeighbors::default(),
+            SlowSendIo {
+                delay: Duration::from_millis(150),
+                sends: Arc::clone(&sends),
+            },
+            TrafficPolicy::default(),
+        );
+        let template = PacketTemplate::new(packet(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+            12_345,
+            9,
+        ))
+        .axis(
+            1,
+            "source_port",
+            TemplateValues::UnsignedRange {
+                start: 12_345,
+                end_inclusive: 12_346,
+            },
+        );
+        let error = client
+            .exchange(
+                &template,
+                ExchangeOptions {
+                    send: SendOptions {
+                        plan: PlanOptions {
+                            link_mode: LinkMode::Layer3,
+                            ..PlanOptions::default()
+                        },
+                        ..SendOptions::default()
+                    },
+                    timeout: Duration::from_millis(100),
+                    ..ExchangeOptions::default()
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            error,
+            ClientError::Io(LiveIoError::DeadlineExceeded {
+                operation: "sending exchange requests"
+            })
+        ));
     }
 
     #[test]
@@ -1614,6 +1933,95 @@ mod tests {
                 if destination == IpAddr::V6(final_destination)
         ));
         assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn ipv4_source_routes_and_multicast_are_authorized_before_route_lookup() {
+        for option_type in [131, 137] {
+            let route_calls = Arc::new(AtomicUsize::new(0));
+            let mut request = packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12_345,
+                9,
+            );
+            request.get_mut::<Ipv4>().unwrap().options = Bytes::from(vec![
+                option_type,
+                7,
+                4,
+                8,
+                8,
+                8,
+                8,
+            ]);
+            let client = Client::new(
+                Arc::new(default_registry().unwrap()),
+                CountingRoutes {
+                    decision: route(LinkCapability::Layer3),
+                    calls: Arc::clone(&route_calls),
+                },
+                CountingNeighbors::default(),
+                RejectingPacketIo,
+                TrafficPolicy::default(),
+            );
+            assert!(matches!(
+                client.plan(&request, None, &PlanOptions::default()),
+                Err(ClientError::Policy(
+                    TrafficPolicyError::PublicDestination { destination }
+                )) if destination == IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
+            ));
+            assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+        }
+
+        for malformed in [
+            vec![131, 6, 4, 10, 0, 0],
+            vec![137, 7, 3, 10, 0, 0, 1],
+            vec![131, 7, 4, 10, 0],
+        ] {
+            let route_calls = Arc::new(AtomicUsize::new(0));
+            let mut request = packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12_345,
+                9,
+            );
+            request.get_mut::<Ipv4>().unwrap().options = Bytes::from(malformed);
+            let client = Client::new(
+                Arc::new(default_registry().unwrap()),
+                CountingRoutes {
+                    decision: route(LinkCapability::Layer3),
+                    calls: Arc::clone(&route_calls),
+                },
+                CountingNeighbors::default(),
+                RejectingPacketIo,
+                TrafficPolicy::default(),
+            );
+            assert!(matches!(
+                client.plan(&request, None, &PlanOptions::default()),
+                Err(ClientError::Policy(
+                    TrafficPolicyError::InvalidIpv4Options { .. }
+                ))
+            ));
+            assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+        }
+
+        let policy = TrafficPolicy::default();
+        for destination in [
+            IpAddr::V4(Ipv4Addr::new(232, 1, 2, 3)),
+            IpAddr::V6("ff0e::1234".parse().unwrap()),
+        ] {
+            assert_eq!(
+                policy.authorize_destination(destination),
+                Err(TrafficPolicyError::PublicDestination { destination })
+            );
+        }
+        let permissive = TrafficPolicy {
+            allow_public_destinations: true,
+            ..TrafficPolicy::default()
+        };
+        assert!(permissive
+            .authorize_destination(IpAddr::V6("ff0e::1234".parse().unwrap()))
+            .is_ok());
     }
 
     #[test]

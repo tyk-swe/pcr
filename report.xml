@@ -11,7 +11,9 @@
     <unique_issue_count>28</unique_issue_count>
     <merge_basis>Root-cause deduplication of the four supplied audit responses, followed by independent re-verification. Overlapping evidence, impacts, remediations, and locations were unioned. Distinct failure modes were retained separately. BR-012 was removed because the reader already enforces finite per-block and per-read metadata-count limits, its work is proportional to the supplied input, and the 256 MiB stream limit it was compared against is explicitly a captured-payload limit rather than a metadata budget.</merge_basis>
     <verification>
-      <issue_status status="confirmed" count="28" />
+      <issue_status status="confirmed" count="0" />
+      <issue_status status="fixed" count="28" />
+      <audit_finding_status status="confirmed-at-subject-commit" count="28" />
       <unique_issue_disposition confirmed_without_material_correction="23" confirmed_with_material_correction="5" rejected="1" />
       <source_mapping_disposition retained_without_material_correction="34" retained_with_material_correction="7" rejected="1" />
       <location_count checked="70" missing="0" invalid_range="0" />
@@ -36,6 +38,23 @@
         <job name="macos-arm64" conclusion="success" />
       </ci>
       <scope_note>Every retained issue mechanism was independently traced in the audited source. Eleven issues were additionally reproduced at runtime as listed above. Windows-native, macOS-native, and network-dependent impacts were not executed locally unless an issue says otherwise.</scope_note>
+      <remediation_progress date="2026-07-12" base_commit="896e53cd40f7782474d1c3a10351bb4225d7206e" fixed="28" open="0">
+        <fixed_issues>BR-001 BR-002 BR-003 BR-004 BR-005 BR-006 BR-007 BR-008 BR-009 BR-010 BR-011 BR-013 BR-014 BR-015 BR-016 BR-017 BR-018 BR-019 BR-020 BR-021 BR-022 BR-023 BR-024 BR-025 BR-026 BR-027 BR-028 BR-029</fixed_issues>
+        <open_issues />
+        <test command="cargo test --locked --all-features --lib" result="passed" tests_passed="279" tests_failed="0" />
+        <test command="cargo test --locked --all-features" result="passed" tests_passed="363" tests_failed="0" />
+        <test command="cargo test --locked --all-features --test cli parse_error_output_detection_respects_the_end_of_options_marker" result="passed" tests_passed="1" tests_failed="0" />
+        <test command="cargo clippy --locked --all-targets --no-default-features -- -D warnings" target="x86_64-unknown-linux-gnu" result="passed" />
+        <test command="cargo clippy --locked --all-targets -- -D warnings" target="x86_64-unknown-linux-gnu" result="passed" />
+        <test command="cargo clippy --locked --all-targets --all-features -- -D warnings" target="x86_64-unknown-linux-gnu" result="passed" />
+        <test command="cargo check --locked --all-targets --no-default-features" target="x86_64-unknown-linux-gnu" result="passed" />
+        <test command="cargo check --locked --all-targets" target="x86_64-unknown-linux-gnu" result="passed" />
+        <test command="cargo deny check" result="passed" />
+        <test command="cargo check --locked --target x86_64-pc-windows-msvc" result="passed" />
+        <test command="cargo check --locked --all-features --target x86_64-pc-windows-msvc" result="passed" />
+        <test command="cargo check --locked --all-features --target x86_64-apple-darwin" result="passed" />
+        <test command="cargo check --locked --all-features --target aarch64-apple-darwin" result="passed" />
+      </remediation_progress>
     </verification>
     <severity_rubric baseline="supported-defaults-and-documented-safety-contracts">
       <level name="critical">Catastrophic compromise or loss broadly reachable through default operation without substantial preconditions.</level>
@@ -79,7 +98,7 @@
     <severity level="informational" count="1" />
   </severity_summary>
   <issues>
-    <issue id="BR-001" status="confirmed" severity="high" category="traffic-policy">
+    <issue id="BR-001" status="fixed" severity="high" category="traffic-policy">
       <title>IPv4 LSRR/SSRR route addresses bypass destination authorization</title>
       <source_findings>
         <source response="1" finding="1" reported_severity="high" />
@@ -111,7 +130,7 @@
         <test>Cover malformed length, pointer, and truncated-address encodings.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-002" status="confirmed" severity="high" category="traffic-policy">
+    <issue id="BR-002" status="fixed" severity="high" category="traffic-policy">
       <title>Globally scoped multicast bypasses the public-destination restriction</title>
       <source_findings>
         <source response="1" finding="2" reported_severity="high" />
@@ -145,7 +164,7 @@
         <test>Assert rejection occurs before route planning or packet transmission.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-003" status="confirmed" severity="high" category="unsafe-platform-ffi">
+    <issue id="BR-003" status="fixed" severity="high" category="unsafe-platform-ffi">
       <title>macOS casts ifa_data to libc::if_data before validating the address family</title>
       <source_findings>
         <source response="2" finding="1" reported_severity="high" />
@@ -172,7 +191,7 @@
         <test>Add synthetic tests for AF_LINK and non-AF_LINK entries with different ifa_data layouts.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-004" status="confirmed" severity="medium" category="protocol-correlation">
+    <issue id="BR-004" status="fixed" severity="medium" category="protocol-correlation">
       <title>TCP traceroute replies can be destructively assigned to the wrong probe</title>
       <source_findings>
         <source response="2" finding="3" reported_severity="medium-high" />
@@ -205,7 +224,7 @@
         <test>Cover valid and invalid ACK-bearing and non-ACK RST responses.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-005" status="confirmed" severity="medium" category="timing-correlation">
+    <issue id="BR-005" status="fixed" severity="medium" category="timing-correlation">
       <title>Valid immediate captures can be rejected as pre-send because timestamp precision and clocks differ</title>
       <source_findings>
         <source response="3" finding="4" reported_severity="high" />
@@ -235,7 +254,7 @@
         <test>Cover wall-clock movement independently from monotonic time.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-006" status="confirmed" severity="medium" category="timing-latency">
+    <issue id="BR-006" status="fixed" severity="medium" category="timing-latency">
       <title>Response latency and timeout eligibility are measured at processing time instead of receive time</title>
       <source_findings>
         <source response="2" finding="6" reported_severity="medium" />
@@ -268,7 +287,7 @@
         <test>Verify processing delay is exposed separately if reported.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-007" status="confirmed" severity="medium" category="resource-exhaustion">
+    <issue id="BR-007" status="fixed" severity="medium" category="resource-exhaustion">
       <title>Sparse fragment and TCP ranges trigger dense scratch allocation before quota rejection</title>
       <source_findings>
         <source response="1" finding="4" reported_severity="medium-high" />
@@ -299,7 +318,7 @@
         <test>Cover repeated zero-length and one-byte inserts near the configured maximum offset.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-008" status="confirmed" severity="medium" category="tcp-reassembly">
+    <issue id="BR-008" status="fixed" severity="medium" category="tcp-reassembly">
       <title>A stale FIN entirely before the capture base can close an active TCP flow</title>
       <source_findings>
         <source response="1" finding="3" reported_severity="medium-high" />
@@ -326,7 +345,7 @@
         <test>Cover FIN exactly at the base and FIN after partially trimmed payload.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-009" status="confirmed" severity="medium" category="unsafe-platform-parsing">
+    <issue id="BR-009" status="fixed" severity="medium" category="unsafe-platform-parsing">
       <title>macOS route sockaddr parsing reads sa_family before validating record length</title>
       <source_findings>
         <source response="4" finding="PC-04" reported_severity="medium" disposition="accepted-with-correction" />
@@ -355,7 +374,7 @@
         <test>Exercise complete IPv4 and IPv6 records through the same safe byte-slice boundary.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-010" status="confirmed" severity="medium" category="capture-serialization">
+    <issue id="BR-010" status="fixed" severity="medium" category="capture-serialization">
       <title>A rejected PCAPNG frame can still mutate the output stream and interface table</title>
       <source_findings>
         <source response="1" finding="5" reported_severity="medium" disposition="accepted-with-correction" />
@@ -384,7 +403,7 @@
         <test>Cover timestamp and EPB-size failures for previously unseen link types.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-011" status="confirmed" severity="low" category="capture-parsing-limits">
+    <issue id="BR-011" status="fixed" severity="low" category="capture-parsing-limits">
       <title>The documented per-section PCAPNG interface limit is enforced cumulatively</title>
       <source_findings>
         <source response="1" finding="6" reported_severity="medium" />
@@ -410,7 +429,7 @@
         <test>Independently exercise any new global retained-interface limit.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-013" status="confirmed" severity="medium" category="tcp-reassembly">
+    <issue id="BR-013" status="fixed" severity="medium" category="tcp-reassembly">
       <title>TCP reassembly conflates distinct connection incarnations that reuse a four-tuple</title>
       <source_findings>
         <source response="2" finding="4" reported_severity="medium" />
@@ -438,7 +457,7 @@
         <test>Verify retransmission of the original SYN does not create a new generation.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-014" status="confirmed" severity="low" category="configuration-invariants">
+    <issue id="BR-014" status="fixed" severity="low" category="configuration-invariants">
       <title>Public SessionLimits can violate TCP serial-number half-space</title>
       <source_findings>
         <source response="2" finding="2 subfinding" reported_severity="not separately rated" disposition="accepted-with-correction" />
@@ -466,7 +485,7 @@
         <test>Accept the largest representable value below 2^31 and retain documented zero and aggregate-budget behavior.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-015" status="confirmed" severity="medium" category="deadline-control">
+    <issue id="BR-015" status="fixed" severity="medium" category="deadline-control">
       <title>The overall response timeout does not bound sending or unbounded zero-time capture drains</title>
       <source_findings>
         <source response="3" finding="6" reported_severity="medium" />
@@ -498,7 +517,7 @@
         <test>Verify per-request acceptance windows are deterministic across request order.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-016" status="confirmed" severity="medium" category="async-runtime">
+    <issue id="BR-016" status="fixed" severity="medium" category="async-runtime">
       <title>Linux synchronous route lookup can panic when invoked inside a Tokio runtime</title>
       <source_findings>
         <source response="4" finding="PC-03" reported_severity="medium" />
@@ -525,7 +544,7 @@
         <test>Exercise repeated concurrent lookups to verify worker/runtime lifecycle behavior.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-017" status="confirmed" severity="medium" category="windows-routing">
+    <issue id="BR-017" status="fixed" severity="medium" category="windows-routing">
       <title>Windows collapses distinct IPv4 and IPv6 adapter indices into one InterfaceId index</title>
       <source_findings>
         <source response="4" finding="PC-05" reported_severity="medium" />
@@ -553,7 +572,7 @@
         <test>Cover returned-route normalization for both families.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-018" status="confirmed" severity="medium" category="feature-gating-ci">
+    <issue id="BR-018" status="fixed" severity="medium" category="feature-gating-ci">
       <title>The default Windows feature profile lacks documented interface enumeration and is not tested</title>
       <source_findings>
         <source response="1" finding="10" reported_severity="medium" />
@@ -583,7 +602,7 @@
         <test>Keep all-features tests but do not use them as a substitute for default and minimal profiles.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-019" status="confirmed" severity="low" category="dns-protocol">
+    <issue id="BR-019" status="fixed" severity="low" category="dns-protocol">
       <title>The public DNS decoder discards EDNS extended response codes</title>
       <source_findings>
         <source response="2" finding="5" reported_severity="medium" disposition="accepted-with-correction" />
@@ -615,7 +634,7 @@
         <test>No OPT, duplicate OPT, malformed OPT, and unsupported-version fixtures.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-020" status="confirmed" severity="low" category="dns-protocol">
+    <issue id="BR-020" status="fixed" severity="low" category="dns-protocol">
       <title>DNS wire labels are incorrectly restricted to printable ASCII without dot bytes</title>
       <source_findings>
         <source response="2" finding="7" reported_severity="low-medium" />
@@ -643,7 +662,7 @@
         <test>Verify ASCII-only case-insensitive comparison without altering other octets.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-021" status="confirmed" severity="medium" category="packet-model">
+    <issue id="BR-021" status="fixed" severity="medium" category="packet-model">
       <title>Removing the exact padding boundary silently changes protocol coverage semantics</title>
       <source_findings>
         <source response="1" finding="8" reported_severity="medium" />
@@ -672,7 +691,7 @@
         <test>Remove the exact boundary and verify outer length/checksum coverage remains unchanged when UDP becomes the successor boundary.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-022" status="confirmed" severity="low" category="api-contract">
+    <issue id="BR-022" status="fixed" severity="low" category="api-contract">
       <title>Packet::structurally_eq is not symmetric for public Layer implementations</title>
       <source_findings>
         <source response="1" finding="9" reported_severity="medium" />
@@ -698,7 +717,7 @@
         <test>Assert symmetry, reflexivity, and expected transitivity cases.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-023" status="confirmed" severity="low" category="registry-api">
+    <issue id="BR-023" status="fixed" severity="low" category="registry-api">
       <title>Rebinding a registry child with a different priority silently ignores the new priority</title>
       <source_findings>
         <source response="1" finding="11" reported_severity="lower severity" />
@@ -722,7 +741,7 @@
         <test>Bind it with a different priority and verify either the documented update or explicit error.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-024" status="confirmed" severity="low" category="neighbor-discovery">
+    <issue id="BR-024" status="fixed" severity="low" category="neighbor-discovery">
       <title>A matching ARP/NDP frame can arrive before the request send and still satisfy discovery</title>
       <source_findings>
         <source response="4" finding="PC-10" reported_severity="low" />
@@ -748,7 +767,7 @@
         <test>Verify a matching frame received after send is accepted.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-025" status="confirmed" severity="low" category="cli-parsing">
+    <issue id="BR-025" status="fixed" severity="low" category="cli-parsing">
       <title>Parse-error output-mode detection ignores end-of-options semantics</title>
       <source_findings>
         <source response="3" finding="8" reported_severity="low" />
@@ -774,7 +793,7 @@
         <test>Verify an actual pre-terminator --output=json still selects JSON error output.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-026" status="confirmed" severity="low" category="fuzz-validation">
+    <issue id="BR-026" status="fixed" severity="low" category="fuzz-validation">
       <title>Fuzz case-range validation has an off-by-one overflow check</title>
       <source_findings>
         <source response="4" finding="PC-11" reported_severity="low" />
@@ -799,7 +818,7 @@
         <test>Reject (u64::MAX, 2) and other truly overflowing ranges.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-027" status="confirmed" severity="low" category="replay-timing">
+    <issue id="BR-027" status="fixed" severity="low" category="replay-timing">
       <title>Extremely small positive replay delays can round to zero and silently become immediate</title>
       <source_findings>
         <source response="4" finding="PC-12" reported_severity="low" />
@@ -826,7 +845,7 @@
         <test>Verify Immediate remains the only mode that intentionally returns zero.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-028" status="confirmed" severity="low" category="capture-statistics">
+    <issue id="BR-028" status="fixed" severity="low" category="capture-statistics">
       <title>Npcap drop aggregation aliases when an interval contains at least 2^32 combined drops</title>
       <source_findings>
         <source response="4" finding="PC-13" reported_severity="low" disposition="accepted-with-correction" />
@@ -854,7 +873,7 @@
         <test>Simulate combined increments equal to and greater than 2^32 and verify that separate widened deltas retain the full total.</test>
       </regression_tests>
     </issue>
-    <issue id="BR-029" status="confirmed" severity="informational" category="supply-chain-ci">
+    <issue id="BR-029" status="fixed" severity="informational" category="supply-chain-ci">
       <title>The committed CI workflow has no advisory, source, or license policy gate</title>
       <source_findings>
         <source response="4" finding="PC-14" reported_severity="informational" />

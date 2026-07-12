@@ -408,7 +408,8 @@ mod supported {
                 });
             }
             Ok(NativeCaptureStatistics {
-                dropped: statistics.dropped.wrapping_add(statistics.network_dropped),
+                dropped: statistics.dropped,
+                network_dropped: statistics.network_dropped,
                 interface_dropped: statistics.interface_dropped,
             })
         }

@@ -178,13 +178,18 @@ where
     F: FnMut(Frame, u64) -> Result<(), CliError>,
 {
     let started = Instant::now();
-    if let Err(source) = capture.wait_ready() {
-        let error = CliError::classified(source).at_sequence(0);
-        return Err(shutdown_after_error(&mut capture, error));
-    }
-    let deadline = Instant::now()
+    let deadline = started
         .checked_add(timeout)
         .expect("validated capture timeout must fit the monotonic clock");
+    if !timeout.is_zero() {
+        let readiness_timeout = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or(Duration::ZERO);
+        if let Err(source) = capture.wait_ready(readiness_timeout) {
+            let error = CliError::classified(source).at_sequence(0);
+            return Err(shutdown_after_error(&mut capture, error));
+        }
+    }
     let mut frames = 0_u64;
     let mut bytes = 0_u64;
     while frames < budget.max_frames {

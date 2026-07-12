@@ -5,7 +5,7 @@ fn canonical_query_name_from_wire(query: &[u8]) -> Option<String> {
     }
     decode_name(query, DNS_HEADER_BYTES, DnsLimits::default())
         .ok()
-        .map(|(name, _)| name)
+        .map(|(name, _)| name.to_string())
 }
 
 #[cfg(test)]

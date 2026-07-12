@@ -32,6 +32,7 @@ pub use capture_link::{BsdLoop, BsdNull, CaptureByteOrder, LinuxSll, LinuxSll2};
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 pub use icmp::{Icmpv4, Icmpv6};
 use icmp::{Icmpv4Codec, Icmpv6Codec};
+pub(crate) use ip::{ipv4_source_route_destinations, Ipv4OptionsError};
 pub use ip::{Ipv4, Ipv6};
 use ip::{Ipv4Codec, Ipv6Codec, RawIpCodec};
 pub use ipv6_ext::{DestinationOptions, HopByHop, Ipv6Fragment, SegmentRoutingHeader};

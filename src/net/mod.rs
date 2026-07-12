@@ -69,8 +69,8 @@ pub mod capture {
     pub use super::provider_impl::{
         CaptureEvidenceCompleteness as Completeness, CaptureOverflowPolicy as OverflowPolicy,
         CaptureProvider as Provider, CaptureQueueLimits as Limits, CaptureSession as Session,
-        CaptureStatistics as Statistics, SystemCaptureProvider as SystemProvider,
-        SystemCaptureSession as SystemSession,
+        CaptureStatistics as Statistics, CapturedFrame as Captured,
+        SystemCaptureProvider as SystemProvider, SystemCaptureSession as SystemSession,
     };
 }
 
@@ -146,11 +146,12 @@ pub(crate) use neighbor_impl::{
 #[allow(unused_imports)]
 pub(crate) use provider_impl::{
     CaptureEvidenceCompleteness, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits,
-    CaptureSession, CaptureStatistics, DispatchPacketIo, ExchangeIo, InterfaceAddress,
-    InterfaceFlags, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io,
-    Layer3Frame, Layer3Io, LiveIoError, PacketIo, SystemCaptureProvider, SystemCaptureSession,
-    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, TransmissionFrame,
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
+    CaptureSession, CaptureStatistics, CapturedFrame, DispatchPacketIo, ExchangeIo,
+    InterfaceAddress, InterfaceFlags, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
+    Layer2Io, Layer3Frame, Layer3Io, LiveIoError, PacketIo, SystemCaptureProvider,
+    SystemCaptureSession, SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io,
+    TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    MAX_CAPTURE_TIMEOUT,
 };
 #[allow(unused_imports)]
 pub(crate) use route_impl::{

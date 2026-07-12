@@ -392,10 +392,10 @@ impl RegistryBuilder {
             .bindings
             .entry((parent.clone(), Discriminator(discriminator)))
             .or_default();
-        if entries
-            .iter()
-            .any(|entry| entry.priority == priority && entry.child != child)
-        {
+        if entries.iter().any(|entry| {
+            (entry.priority == priority && entry.child != child)
+                || (entry.child == child && entry.priority != priority)
+        }) {
             return Err(RegistryError::BindingConflict {
                 parent,
                 discriminator,
@@ -484,5 +484,25 @@ impl RegistryBuilder {
             reverse_bindings,
             matchers: self.matchers,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rebinding_a_child_is_idempotent_only_at_the_same_priority() {
+        let mut builder = RegistryBuilder::new();
+        builder.bind("parent", 1, "child", 10).unwrap();
+        builder.bind("parent", 1, "child", 10).unwrap();
+        assert!(matches!(
+            builder.bind("parent", 1, "child", 20),
+            Err(RegistryError::BindingConflict {
+                discriminator: 1,
+                priority: 20,
+                ..
+            })
+        ));
     }
 }

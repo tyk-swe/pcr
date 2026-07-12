@@ -15,6 +15,10 @@ pub enum PacketError {
     IndexOutOfBounds { index: usize, len: usize },
     #[error("packet has no layer with protocol id {protocol}")]
     ProtocolNotFound { protocol: ProtocolId },
+    #[error(
+        "cannot remove layer {index}: padding coverage ends at that layer and no successor can preserve the boundary"
+    )]
+    PaddingBoundaryRemoval { index: usize },
     #[error(transparent)]
     Field(#[from] FieldError),
 }
@@ -90,6 +94,21 @@ impl Packet {
                 index,
                 len: self.layers.len(),
             });
+        }
+        let loses_exact_padding_boundary =
+            self.layers
+                .iter()
+                .enumerate()
+                .any(|(padding_index, layer)| {
+                    layer
+                        .as_any()
+                        .downcast_ref::<Padding>()
+                        .is_some_and(|padding| {
+                            padding.outside_layer == Some(index) && index + 1 >= padding_index
+                        })
+                });
+        if loses_exact_padding_boundary {
+            return Err(PacketError::PaddingBoundaryRemoval { index });
         }
         let removed = self.layers.remove(index);
         self.shift_padding_for_remove(index);
@@ -213,6 +232,9 @@ impl Packet {
             if left.protocol_id() != right.protocol_id() {
                 return false;
             }
+            if left.schema() != right.schema() {
+                return false;
+            }
             left.schema()
                 .fields
                 .iter()
@@ -240,7 +262,9 @@ impl Packet {
             };
             padding.outside_layer = match padding.outside_layer {
                 Some(outside_layer) if outside_layer > index => Some(outside_layer - 1),
-                Some(outside_layer) if outside_layer == index => None,
+                // The successor shifts into the removed layer's index and
+                // remains the first layer that excludes this padding.
+                Some(outside_layer) if outside_layer == index => Some(index),
                 value => value,
             };
         }
@@ -272,10 +296,51 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::any::Any;
+    use std::sync::OnceLock;
+
     use bytes::Bytes;
 
     use super::*;
-    use crate::packet::layer::{Padding, Raw};
+    use crate::packet::layer::{FieldSchema, LayerSchema, Padding, Raw};
+
+    #[derive(Clone, Debug)]
+    struct EmptyRaw;
+
+    impl Layer for EmptyRaw {
+        fn schema(&self) -> &'static LayerSchema {
+            static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
+            static FIELDS: &[FieldSchema] = &[];
+            SCHEMA.get_or_init(|| LayerSchema {
+                protocol: ProtocolId::new("raw"),
+                name: "Alternate Raw",
+                fields: FIELDS,
+            })
+        }
+
+        fn clone_box(&self) -> Box<dyn Layer> {
+            Box::new(self.clone())
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn field(&self, _name: &str) -> Option<FieldValue> {
+            None
+        }
+
+        fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
+            Err(FieldError::UnknownField {
+                protocol: self.protocol_id(),
+                field: name.to_owned(),
+            })
+        }
+    }
 
     #[test]
     fn packet_supports_arbitrary_repeated_typed_layers() {
@@ -330,5 +395,33 @@ mod tests {
         assert_eq!(packet.get::<Padding>().unwrap().outside_layer, Some(1));
         packet.remove(0).unwrap();
         assert_eq!(packet.get::<Padding>().unwrap().outside_layer, Some(0));
+    }
+
+    #[test]
+    fn removing_exact_padding_boundary_preserves_its_successor() {
+        let mut packet = Packet::new();
+        packet
+            .push(Raw::new(Bytes::from_static(b"outer")))
+            .push(Raw::new(Bytes::from_static(b"inner")))
+            .push(Padding::after_layer(Bytes::from_static(b"pad"), 0));
+
+        packet.remove(0).unwrap();
+        assert_eq!(packet.get::<Padding>().unwrap().outside_layer, Some(0));
+        assert!(matches!(
+            packet.remove(0),
+            Err(PacketError::PaddingBoundaryRemoval { index: 0 })
+        ));
+    }
+
+    #[test]
+    fn structural_equality_requires_the_same_canonical_schema_in_both_directions() {
+        let mut regular = Packet::new();
+        regular.push(Raw::new(Bytes::new()));
+        let mut alternate = Packet::new();
+        alternate.push(EmptyRaw);
+
+        assert!(!regular.structurally_eq(&alternate));
+        assert!(!alternate.structurally_eq(&regular));
+        assert!(regular.structurally_eq(&regular.clone()));
     }
 }

@@ -24,7 +24,10 @@ use crate::packet::internal::{
     BuiltPacket, DecodedPacket, Diagnostic, PacketDocument, PacketLayout,
 };
 use crate::workflow::{
-    dns::{Record as DnsRecord, RecordValue as DnsRecordValue, Result as DnsResult},
+    dns::{
+        Edns as DnsEdns, EdnsOption as DnsEdnsOption, Record as DnsRecord,
+        RecordValue as DnsRecordValue, Result as DnsResult,
+    },
     fuzz::Result as FuzzResult,
     replay::{FrameEvidence as ReplayFrameEvidence, Summary as ReplaySummary},
     scan::Result as ScanResult,

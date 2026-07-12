@@ -104,7 +104,15 @@ const fn exit_code_for_kind(kind: Kind) -> u8 {
 
 fn machine_format_from_env() -> Option<OutputFormat> {
     let arguments = std::env::args().collect::<Vec<_>>();
-    arguments.iter().enumerate().find_map(|(index, argument)| {
+    machine_format(&arguments)
+}
+
+fn machine_format(arguments: &[String]) -> Option<OutputFormat> {
+    arguments
+        .iter()
+        .take_while(|argument| argument.as_str() != "--")
+        .enumerate()
+        .find_map(|(index, argument)| {
         let value = if argument == "--output" {
             arguments.get(index + 1).map(String::as_str)
         } else {
@@ -115,7 +123,7 @@ fn machine_format_from_env() -> Option<OutputFormat> {
             "ndjson" => Some(OutputFormat::Ndjson),
             _ => None,
         }
-    })
+        })
 }
 
 fn command_from_env() -> Option<CommandName> {

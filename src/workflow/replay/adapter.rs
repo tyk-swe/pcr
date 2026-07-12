@@ -43,7 +43,18 @@ impl ReplayAuthorizer for SystemAuthorizer {
                 Vec::new(),
             ));
         }
-        let (wire_destinations, unsupported_routing) = replay_wire_policy(frame);
+        let (wire_destinations, unsupported_routing) =
+            replay_wire_policy(frame).map_err(|source| {
+                ReplayAuthorizationError::new(
+                    source.to_string(),
+                    Classification::new(
+                        "packet.replay_ipv4_options",
+                        Kind::Packet,
+                        Some("repair malformed IPv4 source-route options before live replay"),
+                    ),
+                    Vec::new(),
+                )
+            })?;
         for destination in wire_destinations {
             self.policy
                 .authorize_destination(destination)

@@ -16,12 +16,19 @@ impl<C: CaptureSession> CaptureGuard<C> {
 }
 
 impl<C: CaptureSession> CaptureSession for CaptureGuard<C> {
-    fn wait_ready(&mut self) -> Result<(), LiveIoError> {
-        self.inner.wait_ready()
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+        self.inner.wait_ready(timeout)
     }
 
     fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
         self.inner.next_frame(timeout)
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        self.inner.next_captured_frame(timeout)
     }
 
     fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -109,13 +116,45 @@ struct ExchangeAccumulator {
     response_counts: Vec<usize>,
 }
 
+#[derive(Clone, Copy)]
 struct ExchangeProcessContext<'a> {
     registry: &'a ProtocolRegistry,
     dissector: &'a Dissector,
     prepared: &'a [(BuiltPacket, MaterializedRoute)],
     sent_at: &'a [Instant],
-    sent_wall_time: &'a [std::time::SystemTime],
+    deadline: Instant,
     options: &'a ExchangeOptions,
+}
+
+fn drain_available<C: CaptureSession>(
+    capture: &mut CaptureGuard<C>,
+    deadline: Instant,
+    frame_limit: usize,
+    enforce_current_deadline: bool,
+    captured: &mut ExchangeAccumulator,
+    context: ExchangeProcessContext<'_>,
+) -> Result<(), LiveIoError> {
+    for _ in 0..frame_limit {
+        if enforce_current_deadline && deadline.checked_duration_since(Instant::now()).is_none() {
+            return Err(LiveIoError::DeadlineExceeded {
+                operation: "draining capture before all requests were sent",
+            });
+        }
+        let Some(frame) = capture.next_captured_frame(Duration::ZERO)? else {
+            return Ok(());
+        };
+        captured.process(frame, context);
+    }
+    push_diagnostic_once(
+        &mut captured.diagnostics,
+        crate::packet::internal::Diagnostic::warning(
+            "exchange.drain_limit",
+            format!(
+                "zero-time capture drain stopped after the bounded {frame_limit} frame(s)"
+            ),
+        ),
+    );
+    Ok(())
 }
 
 impl ExchangeAccumulator {
@@ -131,16 +170,16 @@ impl ExchangeAccumulator {
         }
     }
 
-    fn process(&mut self, frame: Frame, context: ExchangeProcessContext<'_>) {
+    fn process(&mut self, captured: CapturedFrame, context: ExchangeProcessContext<'_>) {
         let ExchangeProcessContext {
             registry,
             dissector,
             prepared,
             sent_at,
-            sent_wall_time,
+            deadline,
             options,
         } = context;
-        let frame_timestamp = frame.timestamp;
+        let CapturedFrame { frame, received_at } = captured;
         let raw_frame = frame.clone();
         let decoded = match dissector.decode(frame, options.decode.clone()) {
             Ok(decoded) => decoded,
@@ -172,9 +211,22 @@ impl ExchangeAccumulator {
             return;
         }
 
+        if received_at.is_none() {
+            push_diagnostic_once(
+                &mut self.diagnostics,
+                crate::packet::internal::Diagnostic::warning(
+                    "capture.ingress_time_unavailable",
+                    "a capture provider returned a frame without an ingress marker; the frame was retained but not correlated",
+                ),
+            );
+        }
+
         let mut matched: Option<(usize, crate::packet::internal::MatchResult)> = None;
         for (request_index, (request, _)) in prepared.iter().take(sent_at.len()).enumerate() {
-            if frame_timestamp < sent_wall_time[request_index] {
+            let Some(received_at) = received_at else {
+                continue;
+            };
+            if received_at < sent_at[request_index] || received_at > deadline {
                 continue;
             }
             let result = request
@@ -201,6 +253,7 @@ impl ExchangeAccumulator {
         }
 
         if let Some((request_index, _)) = matched {
+            let received_at = received_at.expect("only timestamped capture frames can match");
             if self.responses.len() >= options.max_responses {
                 push_diagnostic_once(
                     &mut self.diagnostics,
@@ -226,7 +279,7 @@ impl ExchangeAccumulator {
                 self.responses.push(MatchedResponse {
                     request_index,
                     response: decoded,
-                    latency: sent_at[request_index].elapsed(),
+                    latency: received_at.saturating_duration_since(sent_at[request_index]),
                 });
             }
         } else {

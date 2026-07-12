@@ -23,6 +23,7 @@ pub struct Reader<R> {
     interfaces: Vec<Interface>,
     max_size: usize,
     max_interfaces: usize,
+    max_total_interfaces: usize,
     max_metadata_blocks_per_frame: usize,
     finished: bool,
 }
@@ -49,9 +50,27 @@ impl<R: Read> Reader<R> {
     }
 
     pub fn with_resource_limits(
+        inner: R,
+        max_size: usize,
+        max_interfaces: usize,
+        max_metadata_blocks_per_frame: usize,
+    ) -> Result<Self, Error> {
+        Self::with_all_resource_limits(
+            inner,
+            max_size,
+            max_interfaces,
+            DEFAULT_TOTAL_INTERFACE_LIMIT,
+            max_metadata_blocks_per_frame,
+        )
+    }
+
+    /// Opens a capture with independent per-section and aggregate retained
+    /// interface limits.
+    pub fn with_all_resource_limits(
         mut inner: R,
         max_size: usize,
         max_interfaces: usize,
+        max_total_interfaces: usize,
         max_metadata_blocks_per_frame: usize,
     ) -> Result<Self, Error> {
         let mut magic = [0_u8; 4];
@@ -106,6 +125,11 @@ impl<R: Read> Reader<R> {
             }],
             ReaderState::PcapNg { .. } => Vec::new(),
         };
+        if interfaces.len() > max_total_interfaces {
+            return Err(Error::TotalInterfaceLimit {
+                limit: max_total_interfaces,
+            });
+        }
 
         Ok(Self {
             inner,
@@ -113,6 +137,7 @@ impl<R: Read> Reader<R> {
             interfaces,
             max_size,
             max_interfaces,
+            max_total_interfaces,
             max_metadata_blocks_per_frame,
             finished: false,
         })
@@ -278,17 +303,15 @@ impl<R: Read> Reader<R> {
                 PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
                     let description = parse_interface_description(body, endianness)?;
                     match &mut self.state {
-                        ReaderState::PcapNg {
-                            interfaces,
-                            interface_base,
-                            ..
-                        } => {
-                            if (*interface_base as usize)
-                                .checked_add(interfaces.len())
-                                .is_none_or(|count| count >= self.max_interfaces)
-                            {
+                        ReaderState::PcapNg { interfaces, .. } => {
+                            if interfaces.len() >= self.max_interfaces {
                                 return Err(Error::InterfaceLimit {
                                     limit: self.max_interfaces,
+                                });
+                            }
+                            if self.interfaces.len() >= self.max_total_interfaces {
+                                return Err(Error::TotalInterfaceLimit {
+                                    limit: self.max_total_interfaces,
                                 });
                             }
                             interfaces.push(description);

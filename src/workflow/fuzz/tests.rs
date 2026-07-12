@@ -80,6 +80,26 @@ mod tests {
     }
 
     #[test]
+    fn case_range_accepts_the_largest_single_index_without_off_by_one_overflow() {
+        let request = FuzzRequest {
+            first_case: u64::MAX,
+            cases: 1,
+            ..FuzzRequest::default()
+        };
+        assert!(request.validate().is_ok());
+
+        let request = FuzzRequest {
+            first_case: u64::MAX,
+            cases: 2,
+            ..FuzzRequest::default()
+        };
+        assert!(matches!(
+            request.validate(),
+            Err(FuzzError::CaseIndexOverflow)
+        ));
+    }
+
+    #[test]
     fn shrink_data_is_finite_deterministic_and_strictly_simpler() {
         let result = fuzz(
             &FuzzRequest {

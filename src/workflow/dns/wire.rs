@@ -103,6 +103,7 @@ pub fn decode_dns_response(
     limits: DnsLimits,
 ) -> Result<ValidatedDnsResponse, DnsWireError> {
     let query_name = canonical_query_name(query_name)?;
+    let expected_name = DnsName::from_canonical_ascii(&query_name);
     if message.len() < DNS_HEADER_BYTES {
         return Err(DnsWireError::MessageTooShort {
             actual: message.len(),
@@ -144,10 +145,10 @@ pub fn decode_dns_response(
     let authority_count = usize::from(read_u16(message, 8, "authority count")?);
     let additional_count = usize::from(read_u16(message, 10, "additional count")?);
     let (actual_name, mut offset) = decode_name(message, DNS_HEADER_BYTES, limits)?;
-    if actual_name != query_name {
+    if actual_name != expected_name {
         return Err(DnsWireError::QuestionNameMismatch {
             expected: query_name,
-            actual: actual_name,
+            actual: actual_name.to_string(),
         });
     }
     let actual_type = read_u16(message, offset, "question type")?;
@@ -172,7 +173,8 @@ pub fn decode_dns_response(
         // Do not decode or present possibly partial records as accepted facts.
         return Ok(ValidatedDnsResponse {
             transaction_id,
-            response_code: (flags & DNS_RCODE_MASK) as u8,
+            response_code: flags & DNS_RCODE_MASK,
+            edns: None,
             authoritative: flags & DNS_FLAG_AUTHORITATIVE != 0,
             truncated: true,
             recursion_desired: flags & DNS_FLAG_RECURSION_DESIRED != 0,
@@ -209,6 +211,37 @@ pub fn decode_dns_response(
             remaining: message.len() - next,
         });
     }
+    if answers
+        .iter()
+        .chain(&authorities)
+        .any(|record| matches!(record.value, DnsRecordValue::Opt(_)))
+    {
+        return Err(DnsWireError::InvalidEdns {
+            message: "OPT pseudo-record must appear only in the additional section".to_owned(),
+        });
+    }
+    let mut edns = None;
+    let mut non_opt_additionals = Vec::with_capacity(additionals.len());
+    for record in additionals {
+        match &record.value {
+            DnsRecordValue::Opt(value) => {
+                if !record.owner.is_root() {
+                    return Err(DnsWireError::InvalidEdns {
+                        message: "OPT owner name must be the root".to_owned(),
+                    });
+                }
+                if edns.replace(value.clone()).is_some() {
+                    return Err(DnsWireError::DuplicateEdns);
+                }
+            }
+            _ => non_opt_additionals.push(record),
+        }
+    }
+    let response_code = (edns
+        .as_ref()
+        .map_or(0, |edns| u16::from(edns.extended_response_code))
+        << 4)
+        | (flags & DNS_RCODE_MASK);
     let RelevantRecords {
         answers,
         authorities,
@@ -216,16 +249,17 @@ pub fn decode_dns_response(
         rejected_records,
         rejected_record_count,
     } = filter_relevant_records(
-        &query_name,
+        &expected_name,
         query_type,
         answers,
         authorities,
-        additionals,
+        non_opt_additionals,
         limits.max_rejected_records,
     );
     Ok(ValidatedDnsResponse {
         transaction_id,
-        response_code: (flags & DNS_RCODE_MASK) as u8,
+        response_code,
+        edns,
         authoritative: flags & DNS_FLAG_AUTHORITATIVE != 0,
         truncated: false,
         recursion_desired: flags & DNS_FLAG_RECURSION_DESIRED != 0,
@@ -271,7 +305,7 @@ fn decode_name(
     message: &[u8],
     offset: usize,
     limits: DnsLimits,
-) -> Result<(String, usize), DnsWireError> {
+) -> Result<(DnsName, usize), DnsWireError> {
     let mut cursor = offset;
     let mut resume = None;
     let mut labels = Vec::new();
@@ -323,12 +357,7 @@ fn decode_name(
         cursor += 1;
         if length == 0 {
             let next = resume.unwrap_or(cursor);
-            let name = if labels.is_empty() {
-                ".".to_owned()
-            } else {
-                format!("{}.", labels.join("."))
-            };
-            return Ok((name, next));
+            return Ok((DnsName { labels }, next));
         }
         let length = usize::from(length);
         if length > 63 {
@@ -343,19 +372,13 @@ fn decode_name(
                 offset: cursor,
             },
         )?;
-        if !label
-            .iter()
-            .all(|byte| byte.is_ascii_graphic() && *byte != b'.')
-        {
-            return Err(DnsWireError::InvalidLabelData { offset: cursor });
-        }
         wire_length = wire_length
             .checked_add(length + 1)
             .ok_or(DnsWireError::NameTooLong)?;
         if wire_length > 255 {
             return Err(DnsWireError::NameTooLong);
         }
-        labels.push(String::from_utf8_lossy(label).to_ascii_lowercase());
+        labels.push(Bytes::copy_from_slice(label));
         cursor += length;
     }
 }
@@ -382,13 +405,21 @@ fn decode_records(
                     field: "RDATA",
                     offset: rdata_offset,
                 })?;
-        let rdata = message
+        message
             .get(rdata_offset..rdata_end)
             .ok_or(DnsWireError::TruncatedField {
                 field: "RDATA",
                 offset: rdata_offset,
             })?;
-        let value = decode_rdata(message, type_code, rdata_offset, rdata_end, rdata, limits)?;
+        let value = decode_rdata(
+            message,
+            type_code,
+            class,
+            ttl,
+            rdata_offset,
+            rdata_end,
+            limits,
+        )?;
         records.push(DnsRecord {
             owner,
             class,
@@ -403,17 +434,24 @@ fn decode_records(
 fn decode_rdata(
     message: &[u8],
     type_code: u16,
+    class: u16,
+    ttl: u32,
     offset: usize,
     end: usize,
-    rdata: &[u8],
     limits: DnsLimits,
 ) -> Result<DnsRecordValue, DnsWireError> {
+    let rdata = message
+        .get(offset..end)
+        .ok_or(DnsWireError::TruncatedField {
+            field: "RDATA",
+            offset,
+        })?;
     let invalid = |message: &str| DnsWireError::InvalidRdata {
         record_type: type_code,
         offset,
         message: message.to_owned(),
     };
-    let exact_name = |start| -> Result<String, DnsWireError> {
+    let exact_name = |start| -> Result<DnsName, DnsWireError> {
         let (name, next) = decode_name(message, start, limits)?;
         if next != end {
             return Err(invalid("name does not consume the declared RDATA"));
@@ -516,11 +554,51 @@ fn decode_rdata(
                 target,
             })
         }
+        DNS_TYPE_OPT => decode_edns(class, ttl, rdata).map(DnsRecordValue::Opt),
         _ => Ok(DnsRecordValue::Unknown {
             type_code,
             rdata: Bytes::copy_from_slice(rdata),
         }),
     }
+}
+
+fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<DnsEdns, DnsWireError> {
+    let extended_response_code = (ttl >> 24) as u8;
+    let version = ((ttl >> 16) & 0xff) as u8;
+    if version != 0 {
+        return Err(DnsWireError::UnsupportedEdnsVersion { version });
+    }
+    let flags = ttl as u16;
+    let mut options = Vec::new();
+    let mut cursor = 0usize;
+    while cursor < rdata.len() {
+        let header = rdata
+            .get(cursor..cursor.saturating_add(4))
+            .ok_or_else(|| DnsWireError::InvalidEdns {
+                message: format!("option header is truncated at RDATA byte {cursor}"),
+            })?;
+        let code = u16::from_be_bytes([header[0], header[1]]);
+        let length = usize::from(u16::from_be_bytes([header[2], header[3]]));
+        cursor += 4;
+        let data = rdata
+            .get(cursor..cursor.saturating_add(length))
+            .ok_or_else(|| DnsWireError::InvalidEdns {
+                message: format!("option {code} data is truncated"),
+            })?;
+        options.push(DnsEdnsOption {
+            code,
+            data: Bytes::copy_from_slice(data),
+        });
+        cursor += length;
+    }
+    Ok(DnsEdns {
+        udp_payload_size: class,
+        extended_response_code,
+        version,
+        dnssec_ok: flags & 0x8000 != 0,
+        flags,
+        options,
+    })
 }
 
 struct RelevantRecords {
@@ -532,14 +610,14 @@ struct RelevantRecords {
 }
 
 fn filter_relevant_records(
-    query_name: &str,
+    query_name: &DnsName,
     query_type: DnsQueryType,
     answers: Vec<DnsRecord>,
     authorities: Vec<DnsRecord>,
     additionals: Vec<DnsRecord>,
     rejected_limit: usize,
 ) -> RelevantRecords {
-    let mut relevant_names = vec![query_name.to_owned()];
+    let mut relevant_names = vec![query_name.clone()];
     let mut accepted_answers = vec![false; answers.len()];
     let mut changed = true;
     while changed {
@@ -610,7 +688,7 @@ fn filter_relevant_records(
             rejected_records.push(DnsRejectedRecord {
                 section,
                 index,
-                owner: record.owner.clone(),
+                owner: record.owner.to_string(),
                 type_code: record.value.type_code(),
                 reason: reason.to_owned(),
             });
@@ -687,21 +765,28 @@ fn rejection_reason<'a>(record: &DnsRecord, default: &'a str) -> &'a str {
     }
 }
 
-fn push_unique(values: &mut Vec<String>, value: &str) {
+fn push_unique(values: &mut Vec<DnsName>, value: &DnsName) {
     if !values.iter().any(|existing| existing == value) {
         values.push(value.to_owned());
     }
 }
 
-fn is_same_or_ancestor(zone: &str, name: &str) -> bool {
-    zone == "."
-        || zone == name
-        || name
-            .strip_suffix(zone)
-            .is_some_and(|prefix| prefix.ends_with('.'))
+fn is_same_or_ancestor(zone: &DnsName, name: &DnsName) -> bool {
+    zone.is_root()
+        || (zone.labels.len() <= name.labels.len()
+            && zone
+                .labels
+                .iter()
+                .rev()
+                .zip(name.labels.iter().rev())
+                .all(|(left, right)| DnsName {
+                    labels: vec![left.clone()],
+                } == DnsName {
+                    labels: vec![right.clone()],
+                }))
 }
 
-pub const fn response_code_name(code: u8) -> &'static str {
+pub const fn response_code_name(code: u16) -> &'static str {
     match code {
         0 => "no_error",
         1 => "format_error",
@@ -714,6 +799,14 @@ pub const fn response_code_name(code: u8) -> &'static str {
         8 => "nx_rrset",
         9 => "not_authoritative",
         10 => "not_zone",
+        16 => "bad_version",
+        17 => "bad_key",
+        18 => "bad_time",
+        19 => "bad_mode",
+        20 => "bad_name",
+        21 => "bad_algorithm",
+        22 => "bad_truncation",
+        23 => "bad_cookie",
         _ => "unknown",
     }
 }

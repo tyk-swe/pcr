@@ -213,8 +213,10 @@ impl FuzzRequest {
                 reason: format!("at most {MAX_FUZZ_STRATEGIES} strategies may be selected"),
             });
         }
+        let final_case_offset = u64::try_from(self.cases - 1)
+            .map_err(|_| FuzzError::CaseIndexOverflow)?;
         self.first_case
-            .checked_add(self.cases as u64)
+            .checked_add(final_case_offset)
             .ok_or(FuzzError::CaseIndexOverflow)?;
         if self.build.max_packet_size == 0
             || self.build.max_packet_size > self.limits.max_packet_bytes

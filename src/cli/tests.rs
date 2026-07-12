@@ -17,7 +17,7 @@ mod tests {
     }
 
     impl CaptureSession for ScriptedCapture {
-        fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
             self.ready.take().unwrap_or(Ok(()))
         }
 
@@ -320,7 +320,9 @@ mod tests {
     #[test]
     fn zero_capture_window_is_a_clean_empty_timeout() {
         let capture = ScriptedCapture {
-            ready: Some(Ok(())),
+            ready: Some(Err(LiveIoError::CaptureReadiness {
+                message: "zero window must not wait for readiness".to_owned(),
+            })),
             frames: VecDeque::from([Err(LiveIoError::Capture {
                 message: "must not be observed".to_owned(),
             })]),

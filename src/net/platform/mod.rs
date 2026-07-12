@@ -137,7 +137,7 @@ pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     macos::interfaces().map_err(interface_error)
 }
 
-#[cfg(all(feature = "native-route", windows))]
+#[cfg(all(any(feature = "live", feature = "native-route"), windows))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     windows::interfaces().map_err(interface_error)
 }
@@ -147,13 +147,6 @@ pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     Ok(pnet_enumeration::interfaces())
 }
 
-#[cfg(all(not(feature = "native-route"), feature = "live", windows))]
-pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    Err(LiveIoError::Unsupported {
-        message: "Windows interface enumeration is unavailable in the portable profile; use a PacketcraftR build with the Windows native adapter when available (Npcap is required only for native Layer 2 capture and injection)".to_owned(),
-    })
-}
-
 #[cfg(all(not(feature = "native-route"), not(feature = "live")))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     Err(LiveIoError::Unsupported {
@@ -161,7 +154,13 @@ pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     })
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(any(
+    all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos")
+    ),
+    all(any(feature = "live", feature = "native-route"), windows)
+))]
 fn interface_error(error: NativeRouteError) -> LiveIoError {
     match error {
         NativeRouteError::Unsupported { message } => LiveIoError::Unsupported { message },
@@ -395,7 +394,7 @@ fn address_scope(address: IpAddr) -> u8 {
     }
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(feature = "native-route", not(windows)))]
 pub(super) fn find_interface(
     interfaces: Vec<InterfaceInfo>,
     requested: &InterfaceId,

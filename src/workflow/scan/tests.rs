@@ -487,7 +487,7 @@ mod tests {
                 source_port,
                 destination_port,
                 flags,
-                acknowledgment: if flags & (Tcp::SYN | Tcp::ACK) == (Tcp::SYN | Tcp::ACK) {
+                acknowledgment: if flags & Tcp::ACK != 0 {
                     1
                 } else {
                     0
@@ -865,7 +865,7 @@ mod tests {
     struct LifecycleCapture(Arc<Mutex<Vec<&'static str>>>);
 
     impl CaptureSession for LifecycleCapture {
-        fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
             self.0.lock().unwrap().push("ready");
             Ok(())
         }

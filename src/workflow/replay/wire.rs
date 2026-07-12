@@ -46,7 +46,9 @@ fn replay_ip_endpoints(bytes: &[u8]) -> Result<(IpAddr, IpAddr), LiveIoError> {
     }
 }
 
-fn replay_wire_policy(frame: &Frame) -> (Vec<IpAddr>, bool) {
+fn replay_wire_policy(
+    frame: &Frame,
+) -> Result<(Vec<IpAddr>, bool), crate::protocol::internal::Ipv4OptionsError> {
     let bytes = frame.bytes.as_ref();
     let (network_offset, protocol) = match frame.link_type.0 {
         12 | 101 => (0, bytes.first().map(|byte| byte >> 4).unwrap_or(0)),
@@ -74,52 +76,39 @@ fn replay_wire_policy(frame: &Frame) -> (Vec<IpAddr>, bool) {
     let mut destinations = Vec::new();
     let unsupported_routing = match protocol {
         4 => {
-            collect_ipv4_wire_destinations(bytes, network_offset, &mut destinations);
+            collect_ipv4_wire_destinations(bytes, network_offset, &mut destinations)?;
             false
         }
         6 => collect_ipv6_wire_destinations(bytes, network_offset, &mut destinations),
         _ => false,
     };
-    (destinations, unsupported_routing)
+    Ok((destinations, unsupported_routing))
 }
 
-fn collect_ipv4_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<IpAddr>) {
+fn collect_ipv4_wire_destinations(
+    bytes: &[u8],
+    offset: usize,
+    output: &mut Vec<IpAddr>,
+) -> Result<(), crate::protocol::internal::Ipv4OptionsError> {
     let Some(header) = bytes.get(offset..offset.saturating_add(20)) else {
-        return;
+        return Ok(());
     };
     output.push(IpAddr::V4(Ipv4Addr::new(
         header[16], header[17], header[18], header[19],
     )));
     let header_length = usize::from(header[0] & 0x0f).saturating_mul(4);
     if !(20..=60).contains(&header_length) {
-        return;
+        return Ok(());
     }
     let Some(header) = bytes.get(offset..offset.saturating_add(header_length)) else {
-        return;
+        return Ok(());
     };
-    let mut cursor = 20_usize;
-    while cursor < header.len() {
-        match header[cursor] {
-            0 => break,
-            1 => cursor += 1,
-            option => {
-                let Some(length) = header.get(cursor + 1).copied().map(usize::from) else {
-                    break;
-                };
-                if length < 2 || cursor.saturating_add(length) > header.len() {
-                    break;
-                }
-                if matches!(option, 131 | 137) && length >= 7 {
-                    for address in header[cursor + 3..cursor + length].chunks_exact(4) {
-                        output.push(IpAddr::V4(Ipv4Addr::new(
-                            address[0], address[1], address[2], address[3],
-                        )));
-                    }
-                }
-                cursor += length;
-            }
-        }
+    for destination in
+        crate::protocol::internal::ipv4_source_route_destinations(&header[20..])?
+    {
+        output.push(IpAddr::V4(destination));
     }
+    Ok(())
 }
 
 fn collect_ipv6_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<IpAddr>) -> bool {

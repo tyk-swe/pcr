@@ -338,6 +338,38 @@ mod tests {
     }
 
     #[test]
+    fn rejected_auto_interface_frame_leaves_pcapng_bytes_and_numbering_unchanged() {
+        let before_epoch = UNIX_EPOCH.checked_sub(Duration::from_nanos(1)).unwrap();
+        let mut timestamp_writer = Writer::pcapng(Vec::new()).unwrap();
+        let original_len = timestamp_writer.get_ref().len();
+        let invalid = frame(before_epoch, LinkType::ETHERNET, &[1]);
+        assert!(matches!(
+            timestamp_writer.write_frame(&invalid),
+            Err(Error::TimestampOutOfRange {
+                format: Format::PcapNg
+            })
+        ));
+        assert_eq!(timestamp_writer.get_ref().len(), original_len);
+        assert_eq!(timestamp_writer.add_interface(LinkType::LINUX_SLL).unwrap(), 0);
+
+        let mut size_writer =
+            Writer::pcapng_with_options(Vec::new(), Endianness::Little, 40).unwrap();
+        let original_len = size_writer.get_ref().len();
+        let mut invalid = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]);
+        invalid.direction = Some(Direction::Inbound);
+        assert!(matches!(
+            size_writer.write_frame(&invalid),
+            Err(Error::SizeLimitExceeded {
+                kind: "pcapng enhanced packet block",
+                declared: 48,
+                limit: 40
+            })
+        ));
+        assert_eq!(size_writer.get_ref().len(), original_len);
+        assert_eq!(size_writer.add_interface(LinkType::LINUX_SLL).unwrap(), 0);
+    }
+
+    #[test]
     fn pcapng_reader_bounds_interface_descriptions() {
         let mut writer = Writer::pcapng(Vec::new()).unwrap();
         writer.add_interface(LinkType::ETHERNET).unwrap();
@@ -425,12 +457,27 @@ mod tests {
 
         let mut bytes = first_writer.into_inner();
         bytes.extend_from_slice(&second_writer.into_inner());
-        let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+        let mut reader = Reader::with_limits(Cursor::new(bytes.clone()), DEFAULT_SIZE_LIMIT, 1)
+            .unwrap();
         assert_eq!(reader.next_frame().unwrap(), Some(first));
         let mut global_second = second;
         global_second.interface = Some(1);
         assert_eq!(reader.next_frame().unwrap(), Some(global_second));
         assert_eq!(reader.next_frame().unwrap(), None);
+
+        let mut total_limited = Reader::with_all_resource_limits(
+            Cursor::new(bytes),
+            DEFAULT_SIZE_LIMIT,
+            1,
+            1,
+            DEFAULT_METADATA_BLOCK_LIMIT,
+        )
+        .unwrap();
+        assert!(total_limited.next_frame().unwrap().is_some());
+        assert!(matches!(
+            total_limited.next_frame(),
+            Err(Error::TotalInterfaceLimit { limit: 1 })
+        ));
     }
 
     #[test]

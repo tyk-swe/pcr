@@ -14,8 +14,8 @@ use bytes::Bytes;
 use super::super::provider_impl::validate_capture_timeout;
 use crate::capture::{Frame, LinkType};
 use crate::net::{
-    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, InterfaceId,
-    LiveIoError,
+    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
+    InterfaceId, LiveIoError,
 };
 
 const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
@@ -30,6 +30,7 @@ pub(super) struct NativeCapturedPacket {
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct NativeCaptureStatistics {
     pub dropped: u32,
+    pub network_dropped: u32,
     pub interface_dropped: u32,
 }
 
@@ -101,10 +102,25 @@ impl NativeCaptureSession {
 }
 
 impl CaptureSession for NativeCaptureSession {
-    fn wait_ready(&mut self) -> Result<(), LiveIoError> {
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+        validate_capture_timeout(timeout)?;
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .expect("validated bounded capture timeout must fit Instant");
         let mut state = self.shared.lock()?;
         while !state.ready && !state.closed && state.error.is_none() {
-            state = self.shared.wait(state)?;
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                return Err(LiveIoError::CaptureReadiness {
+                    message: "capture readiness deadline expired".to_owned(),
+                });
+            };
+            let (next, timed_out) = self.shared.wait_timeout(state, remaining)?;
+            state = next;
+            if timed_out && !state.ready && !state.closed && state.error.is_none() {
+                return Err(LiveIoError::CaptureReadiness {
+                    message: "capture readiness deadline expired".to_owned(),
+                });
+            }
         }
         if let Some(error) = state.error.clone() {
             state.error_observed = true;
@@ -120,6 +136,14 @@ impl CaptureSession for NativeCaptureSession {
     }
 
     fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+        self.next_captured_frame(timeout)
+            .map(|captured| captured.map(|captured| captured.frame))
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         validate_capture_timeout(timeout)?;
         let deadline = Instant::now()
             .checked_add(timeout)
@@ -130,14 +154,14 @@ impl CaptureSession for NativeCaptureSession {
                 state.error_observed = true;
                 return Err(error);
             }
-            if let Some(frame) = state.queue.pop_front() {
+            if let Some(captured) = state.queue.pop_front() {
                 state.queued_bytes = state
                     .queued_bytes
-                    .checked_sub(frame.bytes.len())
+                    .checked_sub(captured.frame.bytes.len())
                     .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
                         message: "native capture queue byte accounting underflowed".to_owned(),
                     })?;
-                return Ok(Some(frame));
+                return Ok(Some(captured));
             }
             if state.closed || timeout.is_zero() {
                 return Ok(None);
@@ -223,15 +247,6 @@ impl SharedCapture {
         })
     }
 
-    fn wait<'a>(
-        &self,
-        state: MutexGuard<'a, CaptureState>,
-    ) -> Result<MutexGuard<'a, CaptureState>, LiveIoError> {
-        self.changed.wait(state).map_err(|_| LiveIoError::Capture {
-            message: "native capture readiness mutex was poisoned".to_owned(),
-        })
-    }
-
     fn wait_timeout<'a>(
         &self,
         state: MutexGuard<'a, CaptureState>,
@@ -275,9 +290,9 @@ impl SharedCapture {
         self.changed.notify_all();
     }
 
-    fn enqueue(&self, frame: Frame) -> Result<bool, LiveIoError> {
+    fn enqueue(&self, captured: CapturedFrame) -> Result<bool, LiveIoError> {
         let mut state = self.lock()?;
-        let frame_bytes = frame.bytes.len();
+        let frame_bytes = captured.frame.bytes.len();
         let would_exceed_frames = state.queue.len() >= self.limits.max_frames;
         let would_exceed_bytes = state
             .queued_bytes
@@ -326,7 +341,7 @@ impl SharedCapture {
                         };
                         state.queued_bytes = state
                             .queued_bytes
-                            .checked_sub(dropped.bytes.len())
+                            .checked_sub(dropped.frame.bytes.len())
                             .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
                                 message: "native capture queue byte accounting underflowed"
                                     .to_owned(),
@@ -334,7 +349,7 @@ impl SharedCapture {
                         increment(&mut state.statistics.dropped_frames, 1, "dropped frames")?;
                         increment(
                             &mut state.statistics.dropped_bytes,
-                            dropped.bytes.len() as u64,
+                            dropped.frame.bytes.len() as u64,
                             "dropped bytes",
                         )?;
                     }
@@ -352,7 +367,7 @@ impl SharedCapture {
             frame_bytes as u64,
             "received bytes",
         )?;
-        state.queue.push_back(frame);
+        state.queue.push_back(captured);
         self.changed.notify_one();
         Ok(false)
     }
@@ -363,14 +378,18 @@ impl SharedCapture {
         current: NativeCaptureStatistics,
     ) -> Result<(), LiveIoError> {
         let dropped = current.dropped.wrapping_sub(previous.dropped) as u64;
+        let network_dropped = current
+            .network_dropped
+            .wrapping_sub(previous.network_dropped) as u64;
         let interface_dropped = current
             .interface_dropped
             .wrapping_sub(previous.interface_dropped) as u64;
-        let total = dropped.checked_add(interface_dropped).ok_or_else(|| {
-            LiveIoError::InvalidCaptureStatistics {
+        let total = dropped
+            .checked_add(network_dropped)
+            .and_then(|total| total.checked_add(interface_dropped))
+            .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
                 message: "native receiver drop delta overflowed".to_owned(),
-            }
-        })?;
+            })?;
         if total == 0 {
             return Ok(());
         }
@@ -395,7 +414,7 @@ struct CaptureState {
     closed: bool,
     error_observed: bool,
     error: Option<LiveIoError>,
-    queue: VecDeque<Frame>,
+    queue: VecDeque<CapturedFrame>,
     queued_bytes: usize,
     statistics: CaptureStatistics,
 }
@@ -420,6 +439,7 @@ fn capture_worker(
     while !stop.load(Ordering::Acquire) {
         match source.next_event() {
             Ok(NativeCaptureEvent::Packet(packet)) => {
+                let received_at = Instant::now();
                 let mut frame = match Frame::try_with_lengths(
                     packet.timestamp,
                     link_type,
@@ -436,7 +456,7 @@ fn capture_worker(
                     }
                 };
                 frame.interface = Some(interface_index);
-                if let Err(error) = shared.enqueue(frame) {
+                if let Err(error) = shared.enqueue(CapturedFrame::new(frame, received_at)) {
                     shared.set_error(error);
                     return;
                 }
@@ -598,7 +618,7 @@ mod tests {
             },
             Arc::clone(&interrupts),
         );
-        session.wait_ready().unwrap();
+        session.wait_ready(Duration::from_secs(1)).unwrap();
         let frame = session.next_frame(Duration::from_secs(1)).unwrap().unwrap();
         assert_eq!(frame.interface, Some(7));
         assert_eq!(frame.bytes.as_ref(), &[1, 1, 1, 1]);
@@ -650,7 +670,7 @@ mod tests {
             },
             Arc::new(AtomicUsize::new(0)),
         );
-        session.wait_ready().unwrap();
+        session.wait_ready(Duration::from_secs(1)).unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
         let frame = loop {
             if session.statistics().dropped_frames == 1 {
@@ -677,7 +697,7 @@ mod tests {
             },
             Arc::new(AtomicUsize::new(0)),
         );
-        session.wait_ready().unwrap();
+        session.wait_ready(Duration::from_secs(1)).unwrap();
         let deadline = Instant::now() + Duration::from_secs(1);
         let frame = loop {
             if session.statistics().dropped_frames == 1 {
@@ -720,7 +740,7 @@ mod tests {
         )
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
-        let error = match session.wait_ready() {
+        let error = match session.wait_ready(Duration::from_secs(1)) {
             Err(error) => error,
             Ok(()) => loop {
                 match session.next_frame(Duration::from_millis(50)) {
@@ -748,6 +768,7 @@ mod tests {
                 NativeCaptureStatistics::default(),
                 NativeCaptureStatistics {
                     dropped: 2,
+                    network_dropped: 0,
                     interface_dropped: 1,
                 },
             )
@@ -760,6 +781,51 @@ mod tests {
             statistics.evidence_completeness(),
             crate::net::CaptureEvidenceCompleteness::Incomplete
         );
+    }
+
+    #[test]
+    fn native_drop_components_are_widened_before_aggregation() {
+        let shared = SharedCapture::new(CaptureQueueLimits {
+            max_frames: 1,
+            max_bytes: 4,
+            snap_length: 4,
+            overflow_policy: CaptureOverflowPolicy::Fail,
+        });
+        shared
+            .add_native_drops(
+                NativeCaptureStatistics::default(),
+                NativeCaptureStatistics {
+                    dropped: u32::MAX,
+                    network_dropped: 1,
+                    interface_dropped: 2,
+                },
+            )
+            .unwrap();
+        let statistics = shared.lock().unwrap().statistics;
+        assert_eq!(statistics.receiver_dropped_frames, (1_u64 << 32) + 2);
+        assert_eq!(statistics.dropped_frames, (1_u64 << 32) + 2);
+
+        let wrapped = SharedCapture::new(CaptureQueueLimits {
+            max_frames: 1,
+            max_bytes: 4,
+            snap_length: 4,
+            overflow_policy: CaptureOverflowPolicy::Fail,
+        });
+        wrapped
+            .add_native_drops(
+                NativeCaptureStatistics {
+                    dropped: u32::MAX - 1,
+                    network_dropped: 7,
+                    interface_dropped: 0,
+                },
+                NativeCaptureStatistics {
+                    dropped: 1,
+                    network_dropped: 9,
+                    interface_dropped: 0,
+                },
+            )
+            .unwrap();
+        assert_eq!(wrapped.lock().unwrap().statistics.dropped_frames, 5);
     }
 
     #[test]

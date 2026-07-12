@@ -2,6 +2,8 @@
 pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 /// Default maximum number of interface descriptions retained per PCAPNG section.
 pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
+/// Default maximum interface descriptions retained across all PCAPNG sections.
+pub const DEFAULT_TOTAL_INTERFACE_LIMIT: usize = 65_536;
 /// Default maximum metadata blocks consumed before one packet is returned.
 pub const DEFAULT_METADATA_BLOCK_LIMIT: usize = 4_096;
 /// Default maximum frames accepted by one streaming capture writer or copy.
@@ -138,6 +140,8 @@ pub enum Error {
     UndefinedInterface { interface: u32, available: usize },
     #[error("pcapng section exceeds the configured interface limit of {limit}")]
     InterfaceLimit { limit: usize },
+    #[error("pcapng stream exceeds the configured retained-interface limit of {limit}")]
+    TotalInterfaceLimit { limit: usize },
     #[error("pcapng stream exceeded {limit} metadata blocks before the next packet")]
     MetadataBlockLimit { limit: usize },
     #[error("frame link type {actual} does not match interface {interface} link type {expected}")]

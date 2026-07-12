@@ -45,6 +45,19 @@ mod tests {
             "invalid replay timing: invalid replay scaled value 0"
         );
         assert_eq!(error.classification().code, "cli.replay_limit");
+
+        assert!(ReplayTiming::FixedRate(f64::MAX)
+            .delay_between(previous, current)
+            .is_err());
+        assert!(ReplayTiming::Scaled(f64::MIN_POSITIVE)
+            .delay_between(previous, current)
+            .is_err());
+        assert_eq!(
+            ReplayTiming::Scaled(f64::MIN_POSITIVE)
+                .delay_between(previous, previous)
+                .unwrap(),
+            Duration::ZERO
+        );
     }
 
     #[test]
@@ -54,7 +67,7 @@ mod tests {
         ipv4[16..20].copy_from_slice(&[8, 8, 8, 8]);
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, ipv4).unwrap();
         assert_eq!(
-            replay_wire_policy(&frame).0,
+            replay_wire_policy(&frame).unwrap().0,
             [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
         );
         let registry = Arc::new(crate::protocol::internal::default_registry().unwrap());
@@ -75,7 +88,7 @@ mod tests {
                 unsupported[42] = 0;
             }
             let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, unsupported).unwrap();
-            assert!(replay_wire_policy(&frame).1);
+            assert!(replay_wire_policy(&frame).unwrap().1);
             let mut authorizer = SystemAuthorizer::new(
                 crate::client::policy::Policy::default(),
                 Arc::clone(&registry),

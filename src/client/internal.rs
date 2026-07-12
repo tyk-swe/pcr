@@ -15,9 +15,9 @@ use thiserror::Error;
 use crate::capture::Frame;
 use crate::error::{Category, Classification, Classified, Kind};
 use crate::net::{
-    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, ExchangeIo,
-    IoSendReport, LiveIoError, MaterializedRoute, NeighborError, NeighborResolver, PacketIo,
-    PlanError, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
+    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
+    ExchangeIo, IoSendReport, LiveIoError, MaterializedRoute, NeighborError, NeighborResolver,
+    PacketIo, PlanError, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
     DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
 };
 use crate::packet::internal::{

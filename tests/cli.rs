@@ -171,6 +171,27 @@ fn cli_help_parse_error_and_version_match_the_committed_goldens() {
 }
 
 #[test]
+fn parse_error_output_detection_respects_the_end_of_options_marker() {
+    let positional = binary()
+        .args(["read", "--", "--output=json", "extra"])
+        .output()
+        .unwrap();
+    assert_eq!(positional.status.code(), Some(2));
+    assert!(positional.stdout.is_empty());
+    assert!(!positional.stderr.is_empty());
+    assert!(serde_json::from_slice::<serde_json::Value>(&positional.stderr).is_err());
+
+    let option = binary()
+        .args(["--output=json", "read", "--unknown-option"])
+        .output()
+        .unwrap();
+    assert_eq!(option.status.code(), Some(2));
+    assert!(option.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&option.stdout).unwrap();
+    assert_eq!(value["error"]["kind"], "cli");
+}
+
+#[test]
 fn build_expression_emits_complete_frame_hex() {
     let output = binary()
         .args([

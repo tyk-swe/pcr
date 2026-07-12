@@ -127,6 +127,7 @@ impl NativeCaptureSource for PcapCaptureSource {
             .stats()
             .map(|statistics| NativeCaptureStatistics {
                 dropped: statistics.dropped,
+                network_dropped: 0,
                 interface_dropped: statistics.if_dropped,
             })
             .map_err(|error| LiveIoError::Capture {

@@ -33,6 +33,19 @@ impl TrafficPolicy {
     /// allowed to observe it.
     pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), TrafficPolicyError> {
         for layer in packet.iter() {
+            if layer.protocol_id().as_str() == "ipv4" {
+                if let Some(FieldValue::Bytes(options)) = layer.field("options") {
+                    let destinations = crate::protocol::internal::ipv4_source_route_destinations(
+                        &options,
+                    )
+                    .map_err(|source| TrafficPolicyError::InvalidIpv4Options {
+                        reason: source.to_string(),
+                    })?;
+                    for destination in destinations {
+                        self.authorize_destination(IpAddr::V4(destination))?;
+                    }
+                }
+            }
             match layer.field("destination") {
                 Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => {
                     self.authorize_destination(IpAddr::V4(value))?;

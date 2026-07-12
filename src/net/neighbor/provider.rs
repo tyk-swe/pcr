@@ -224,7 +224,7 @@ where
         capture: &mut S,
     ) -> Result<NeighborExchangeOutcome, NeighborError> {
         capture
-            .wait_ready()
+            .wait_ready(self.options.attempt_timeout)
             .map_err(|error| map_io_error(request, "waiting for capture readiness", error))?;
         let mut captured = Vec::new();
         let mut captured_bytes = 0usize;
@@ -232,13 +232,16 @@ where
 
         // Frames captured before the first request are evidence but cannot
         // satisfy this lookup.
-        while let Some(frame) = capture
-            .next_frame(Duration::ZERO)
-            .map_err(|error| map_io_error(request, "draining pre-request capture", error))?
-        {
-            validate_captured_frame(request, &frame, self.options.snap_length)?;
+        for _ in 0..self.options.max_capture_queue_frames {
+            let Some(captured_frame) = capture
+                .next_captured_frame(Duration::ZERO)
+                .map_err(|error| map_io_error(request, "draining pre-request capture", error))?
+            else {
+                break;
+            };
+            validate_captured_frame(request, &captured_frame.frame, self.options.snap_length)?;
             retain_evidence(
-                frame,
+                captured_frame.frame,
                 &self.options,
                 &mut captured,
                 &mut captured_bytes,
@@ -247,6 +250,7 @@ where
         }
 
         for attempt in 1..=self.options.max_attempts {
+            let send_started = Instant::now();
             let frame = Layer2Frame::try_new(request_bytes, route)
                 .map_err(|error| map_io_error(request, "constructing discovery frame", error))?;
             let report = self
@@ -255,17 +259,38 @@ where
                 .map_err(|error| map_io_error(request, "sending discovery request", error))?;
             validate_send_report(request, request_bytes, report)?;
 
-            let deadline = Instant::now()
+            let deadline = send_started
                 .checked_add(self.options.attempt_timeout)
                 .ok_or_else(|| invalid_configuration("attempt deadline overflowed".to_owned()))?;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-                let Some(frame) = capture.next_frame(remaining).map_err(|error| {
+                let Some(captured_frame) = capture.next_captured_frame(remaining).map_err(|error| {
                     map_io_error(request, "receiving discovery response", error)
                 })?
                 else {
                     break;
                 };
+                let CapturedFrame { frame, received_at } = captured_frame;
                 validate_captured_frame(request, &frame, self.options.snap_length)?;
+                let Some(received_at) = received_at else {
+                    retain_evidence(
+                        frame,
+                        &self.options,
+                        &mut captured,
+                        &mut captured_bytes,
+                        &mut evidence_truncated,
+                    )?;
+                    continue;
+                };
+                if received_at < send_started || received_at > deadline {
+                    retain_evidence(
+                        frame,
+                        &self.options,
+                        &mut captured,
+                        &mut captured_bytes,
+                        &mut evidence_truncated,
+                    )?;
+                    continue;
+                }
                 let response = match_neighbor_response(request, &frame)?;
                 if let Some(mac_address) = response {
                     retain_matching_evidence(

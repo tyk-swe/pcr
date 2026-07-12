@@ -99,7 +99,7 @@ impl Resolver for ExternalHostnameResolver {
 }
 
 impl CaptureSession for ExternalCapture {
-    fn wait_ready(&mut self) -> Result<(), Error> {
+    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
         Ok(())
     }
 

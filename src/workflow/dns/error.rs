@@ -43,6 +43,12 @@ pub enum DnsWireError {
     LabelTooLong { offset: usize, actual: usize },
     #[error("DNS label at byte {offset} contains unsupported non-ASCII/control data")]
     InvalidLabelData { offset: usize },
+    #[error("DNS response contains more than one EDNS OPT pseudo-record")]
+    DuplicateEdns,
+    #[error("DNS EDNS version {version} is unsupported")]
+    UnsupportedEdnsVersion { version: u8 },
+    #[error("DNS EDNS metadata is invalid: {message}")]
+    InvalidEdns { message: String },
     #[error("DNS name exceeds the 255-byte wire limit")]
     NameTooLong,
     #[error("DNS {record_type} RDATA at byte {offset} is invalid: {message}")]

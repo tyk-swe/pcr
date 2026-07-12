@@ -5,43 +5,60 @@
 //! supplies route/source selection and `GetAdaptersAddresses` supplies the
 //! portable interface snapshot. Neither API emits neighbor traffic.
 
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
 use std::mem::{align_of, size_of};
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[cfg(feature = "native-route")]
 use windows::Win32::Foundation::{
-    ERROR_ADDRESS_NOT_ASSOCIATED, ERROR_BUFFER_OVERFLOW, ERROR_HOST_UNREACHABLE,
-    ERROR_NETWORK_UNREACHABLE, ERROR_NOT_FOUND, ERROR_NO_DATA, NO_ERROR, WIN32_ERROR,
+    ERROR_ADDRESS_NOT_ASSOCIATED, ERROR_HOST_UNREACHABLE, ERROR_NETWORK_UNREACHABLE,
+    ERROR_NOT_FOUND, ERROR_NO_DATA,
 };
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
+use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR, WIN32_ERROR};
+#[cfg(any(feature = "live", feature = "native-route"))]
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetAdaptersAddresses, GetBestRoute2, GAA_FLAG_INCLUDE_PREFIX, GAA_FLAG_SKIP_ANYCAST,
-    GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, GET_ADAPTERS_ADDRESSES_FLAGS,
-    IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, IF_TYPE_PPP, IF_TYPE_SOFTWARE_LOOPBACK,
-    IP_ADAPTER_ADDRESSES_LH, IP_ADAPTER_NO_MULTICAST, MIB_IPFORWARD_ROW2,
+    GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER,
+    GAA_FLAG_SKIP_MULTICAST, GET_ADAPTERS_ADDRESSES_FLAGS, IF_TYPE_ETHERNET_CSMACD,
+    IF_TYPE_IEEE80211, IF_TYPE_PPP, IF_TYPE_SOFTWARE_LOOPBACK, IP_ADAPTER_ADDRESSES_LH,
+    IP_ADAPTER_NO_MULTICAST,
 };
 #[cfg(feature = "native-route")]
-use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+use windows::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
+#[cfg(any(feature = "live", feature = "native-route"))]
+use windows::Win32::NetworkManagement::Ndis::{IfOperStatusUp, NET_LUID_LH};
+#[cfg(any(feature = "live", feature = "native-route"))]
+use windows::Win32::Networking::WinSock::{
+    ADDRESS_FAMILY, AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
+};
 #[cfg(feature = "native-route")]
 use windows::Win32::Networking::WinSock::{
-    ADDRESS_FAMILY, AF_INET, AF_INET6, AF_UNSPEC, IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0,
-    SOCKADDR_IN, SOCKADDR_IN6, SOCKADDR_IN6_0, SOCKADDR_INET,
+    IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0, SOCKADDR_IN6_0, SOCKADDR_INET,
 };
 
 #[cfg(feature = "native-route")]
-use super::{find_interface, finish_route, interface_decision, NativeRouteSnapshot};
-#[cfg(feature = "native-route")]
+use super::{finish_route, interface_decision, NativeRouteSnapshot};
+#[cfg(any(feature = "live", feature = "native-route"))]
 use crate::capture::LinkType;
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
 use crate::net::{
     InterfaceAddress, InterfaceFlags, InterfaceId, InterfaceInfo, LinkCapability, MacAddress,
-    NativeRouteError, RouteDecision, RouteSelectionReason,
+    NativeRouteError,
 };
-
 #[cfg(feature = "native-route")]
+use crate::net::{RouteDecision, RouteSelectionReason};
+
+#[cfg(any(feature = "live", feature = "native-route"))]
 pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+    Ok(adapter_snapshots()?
+        .into_iter()
+        .map(|adapter| adapter.interface)
+        .collect())
+}
+
+#[cfg(any(feature = "live", feature = "native-route"))]
+fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, NativeRouteError> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0
             | GAA_FLAG_SKIP_ANYCAST.0
@@ -113,15 +130,16 @@ pub(super) fn route(
         });
     }
 
-    let available = interfaces()?;
+    let available = adapter_snapshots()?;
     let mut constrained_interface = interface_hint
-        .map(|requested| find_interface(available.clone(), requested))
+        .map(|requested| find_windows_adapter(&available, requested))
         .transpose()?;
     if let Some(source) = preferred_source {
         let source_interface = available
             .iter()
-            .find(|interface| {
-                interface
+            .find(|adapter| {
+                adapter
+                    .interface
                     .addresses
                     .iter()
                     .any(|assigned| assigned.address == source)
@@ -133,10 +151,12 @@ pub(super) fn route(
                     .map_or_else(|| "any interface".to_owned(), |hint| hint.name.clone()),
             })?;
         if let Some(requested) = &constrained_interface {
-            if requested.id != source_interface.id {
+            if requested.ipv4_index != source_interface.ipv4_index
+                || requested.ipv6_index != source_interface.ipv6_index
+            {
                 return Err(NativeRouteError::SourceUnavailable {
                     preferred_source: source,
-                    interface: requested.id.name.clone(),
+                    interface: requested.interface.id.name.clone(),
                 });
             }
         } else {
@@ -146,13 +166,8 @@ pub(super) fn route(
 
     let interface_index = constrained_interface
         .as_ref()
-        .map_or(0, |interface| interface.id.index);
-    let destination_address = encode_address(
-        destination,
-        constrained_interface
-            .as_ref()
-            .map_or(0, |interface| interface.id.index),
-    );
+        .map_or(0, |adapter| adapter_index_for(adapter, destination));
+    let destination_address = encode_address(destination, interface_index);
     let source_address = preferred_source.map(|source| encode_address(source, interface_index));
     let mut best_route = MIB_IPFORWARD_ROW2::default();
     let mut best_source = SOCKADDR_INET::default();
@@ -160,7 +175,9 @@ pub(super) fn route(
     // the duration of this synchronous IP Helper call.
     let result = unsafe {
         GetBestRoute2(
-            None,
+            constrained_interface
+                .as_ref()
+                .map(|adapter| &adapter.luid as *const NET_LUID_LH),
             interface_index,
             source_address.as_ref().map(|source| source as *const _),
             &destination_address,
@@ -186,16 +203,17 @@ pub(super) fn route(
     let selected_address =
         sockaddr_inet_ip(&best_source).filter(|address| !address.is_unspecified());
     let output_index = best_route.InterfaceIndex;
-    let mut interface = available
+    let adapter = available
         .iter()
-        .find(|interface| interface.id.index == output_index)
+        .find(|adapter| adapter_index_for(adapter, destination) == output_index)
         .cloned()
         .or_else(|| {
             selected_address.and_then(|source| {
                 available
                     .iter()
-                    .find(|interface| {
-                        interface
+                    .find(|adapter| {
+                        adapter
+                            .interface
                             .addresses
                             .iter()
                             .any(|assigned| assigned.address == source)
@@ -206,23 +224,23 @@ pub(super) fn route(
         .ok_or_else(|| NativeRouteError::InterfaceNotFound {
             name: constrained_interface.as_ref().map_or_else(
                 || format!("index-{output_index}"),
-                |interface| interface.id.name.clone(),
+                |adapter| adapter.interface.id.name.clone(),
             ),
             index: output_index,
         })?;
-    if constrained_interface.is_none() && interface.id.index != output_index {
-        // IPv4 and IPv6 interface indices can differ for the same adapter.
-        // The route decision always reports the exact index returned by IP
-        // Helper, while retaining the adapter's portable metadata.
-        interface.id.index = output_index;
-    }
+    let mut interface = adapter.interface;
+    // The route decision always reports the family-specific index returned by
+    // IP Helper while retaining the adapter's portable metadata.
+    interface.id.index = output_index;
+    let normalized_constraint = constrained_interface.as_ref().map(|adapter| InterfaceId {
+        name: adapter.interface.id.name.clone(),
+        index: adapter_index_for(adapter, destination),
+    });
     let next_hop =
         sockaddr_inet_ip(&best_route.NextHop).filter(|address| !address.is_unspecified());
     finish_route(
         destination,
-        constrained_interface
-            .as_ref()
-            .map(|interface| &interface.id),
+        normalized_constraint.as_ref(),
         preferred_source,
         NativeRouteSnapshot {
             interface,
@@ -242,13 +260,68 @@ pub(super) fn route(
 
 #[cfg(feature = "native-route")]
 pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, NativeRouteError> {
-    interface_decision(find_interface(interfaces()?, requested)?)
+    let adapters = adapter_snapshots()?;
+    interface_decision(find_windows_adapter(&adapters, requested)?.interface)
+}
+
+#[cfg(any(feature = "live", feature = "native-route"))]
+#[derive(Clone)]
+#[allow(dead_code)]
+struct WindowsAdapter {
+    interface: InterfaceInfo,
+    ipv4_index: u32,
+    ipv6_index: u32,
+    luid: NET_LUID_LH,
 }
 
 #[cfg(feature = "native-route")]
+fn adapter_index_for(adapter: &WindowsAdapter, destination: IpAddr) -> u32 {
+    if destination.is_ipv4() {
+        adapter.ipv4_index
+    } else {
+        adapter.ipv6_index
+    }
+}
+
+#[cfg(feature = "native-route")]
+fn find_windows_adapter(
+    adapters: &[WindowsAdapter],
+    requested: &InterfaceId,
+) -> Result<WindowsAdapter, NativeRouteError> {
+    if let Some(adapter) = adapters.iter().find(|adapter| {
+        adapter.interface.id.name == requested.name
+            && matches!(
+                requested.index,
+                index if index == adapter.interface.id.index
+                    || index == adapter.ipv4_index
+                    || index == adapter.ipv6_index
+            )
+    }) {
+        return Ok(adapter.clone());
+    }
+    if let Some(actual) = adapters.iter().find(|adapter| {
+        adapter.interface.id.name == requested.name
+            || requested.index == adapter.interface.id.index
+            || requested.index == adapter.ipv4_index
+            || requested.index == adapter.ipv6_index
+    }) {
+        return Err(NativeRouteError::InterfaceMismatch {
+            requested: requested.name.clone(),
+            requested_index: requested.index,
+            actual: actual.interface.id.name.clone(),
+            actual_index: actual.interface.id.index,
+        });
+    }
+    Err(NativeRouteError::InterfaceNotFound {
+        name: requested.name.clone(),
+        index: requested.index,
+    })
+}
+
+#[cfg(any(feature = "live", feature = "native-route"))]
 fn parse_adapters(
     head: *mut IP_ADAPTER_ADDRESSES_LH,
-) -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+) -> Result<Vec<WindowsAdapter>, NativeRouteError> {
     let mut interfaces = Vec::new();
     let mut current = head;
     for _ in 0..4096 {
@@ -285,29 +358,34 @@ fn parse_adapters(
             let loopback = adapter.IfType == IF_TYPE_SOFTWARE_LOOPBACK;
             let ethernet = matches!(adapter.IfType, IF_TYPE_ETHERNET_CSMACD | IF_TYPE_IEEE80211)
                 && mac_address.is_some();
-            interfaces.push(InterfaceInfo {
-                id: InterfaceId { name, index },
-                description,
-                mac_address,
-                addresses: parse_unicast_addresses(adapter.FirstUnicastAddress)?,
-                flags: InterfaceFlags {
-                    up: adapter.OperStatus == IfOperStatusUp,
-                    broadcast: ethernet,
-                    loopback,
-                    point_to_point: adapter.IfType == IF_TYPE_PPP,
-                    multicast: flags & IP_ADAPTER_NO_MULTICAST == 0,
+            interfaces.push(WindowsAdapter {
+                interface: InterfaceInfo {
+                    id: InterfaceId { name, index },
+                    description,
+                    mac_address,
+                    addresses: parse_unicast_addresses(adapter.FirstUnicastAddress)?,
+                    flags: InterfaceFlags {
+                        up: adapter.OperStatus == IfOperStatusUp,
+                        broadcast: ethernet,
+                        loopback,
+                        point_to_point: adapter.IfType == IF_TYPE_PPP,
+                        multicast: flags & IP_ADAPTER_NO_MULTICAST == 0,
+                    },
+                    mtu: (adapter.Mtu != 0).then_some(adapter.Mtu),
+                    capability: if ethernet {
+                        LinkCapability::Layer2And3
+                    } else {
+                        LinkCapability::Layer3
+                    },
+                    link_type: if ethernet {
+                        LinkType::ETHERNET
+                    } else {
+                        LinkType::RAW
+                    },
                 },
-                mtu: (adapter.Mtu != 0).then_some(adapter.Mtu),
-                capability: if ethernet {
-                    LinkCapability::Layer2And3
-                } else {
-                    LinkCapability::Layer3
-                },
-                link_type: if ethernet {
-                    LinkType::ETHERNET
-                } else {
-                    LinkType::RAW
-                },
+                ipv4_index,
+                ipv6_index: adapter.Ipv6IfIndex,
+                luid: adapter.Luid,
             });
         }
         current = adapter.Next;
@@ -317,7 +395,7 @@ fn parse_adapters(
     })
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
 fn parse_unicast_addresses(
     mut current: *mut windows::Win32::NetworkManagement::IpHelper::IP_ADAPTER_UNICAST_ADDRESS_LH,
 ) -> Result<Vec<InterfaceAddress>, NativeRouteError> {
@@ -345,7 +423,7 @@ fn parse_unicast_addresses(
     })
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
 fn wide_string(value: windows::core::PWSTR) -> Option<String> {
     if value.is_null() {
         return None;
@@ -355,7 +433,7 @@ fn wide_string(value: windows::core::PWSTR) -> Option<String> {
     unsafe { value.to_string().ok() }
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
 fn socket_address_ip(
     address: &windows::Win32::Networking::WinSock::SOCKET_ADDRESS,
 ) -> Option<IpAddr> {
@@ -445,7 +523,7 @@ fn sockaddr_inet_ip(address: &SOCKADDR_INET) -> Option<IpAddr> {
     }
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(any(feature = "live", feature = "native-route"))]
 fn win32_error(operation: &'static str, error: WIN32_ERROR) -> NativeRouteError {
     NativeRouteError::OperatingSystem {
         operation,
@@ -493,5 +571,61 @@ mod tests {
         assert_eq!(unsafe { global.Ipv6.Anonymous.sin6_scope_id }, 0);
         // SAFETY: each value was constructed with its IPv6 union member active.
         assert_eq!(unsafe { link_local.Ipv6.Anonymous.sin6_scope_id }, 42);
+    }
+
+    #[test]
+    fn family_specific_adapter_indices_are_preserved_and_selected() {
+        let adapter = WindowsAdapter {
+            interface: InterfaceInfo {
+                id: InterfaceId {
+                    name: "synthetic".to_owned(),
+                    index: 4,
+                },
+                description: None,
+                mac_address: None,
+                addresses: Vec::new(),
+                flags: InterfaceFlags::default(),
+                mtu: Some(1500),
+                capability: LinkCapability::Layer3,
+                link_type: LinkType::RAW,
+            },
+            ipv4_index: 4,
+            ipv6_index: 9,
+            luid: NET_LUID_LH::default(),
+        };
+        assert_eq!(
+            adapter_index_for(&adapter, IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            4
+        );
+        assert_eq!(
+            adapter_index_for(&adapter, IpAddr::V6(Ipv6Addr::LOCALHOST)),
+            9
+        );
+        assert_eq!(
+            find_windows_adapter(
+                std::slice::from_ref(&adapter),
+                &InterfaceId {
+                    name: "synthetic".to_owned(),
+                    index: 9,
+                },
+            )
+            .unwrap()
+            .ipv6_index,
+            9
+        );
+    }
+}
+
+#[cfg(all(test, feature = "live"))]
+mod default_profile_tests {
+    use super::*;
+
+    #[test]
+    fn default_live_profile_enumerates_windows_interfaces() {
+        let interfaces = interfaces().unwrap();
+        assert!(!interfaces.is_empty());
+        assert!(interfaces
+            .iter()
+            .all(|interface| interface.id.index != 0 && !interface.id.name.is_empty()));
     }
 }

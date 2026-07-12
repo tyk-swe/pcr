@@ -132,7 +132,8 @@ pub mod traceroute {
 pub mod dns {
     pub use super::internal::{
         DnsAttemptOutput as Attempt, DnsAttemptStatus as AttemptStatus, DnsCommandResult as Result,
-        DnsOutcome as Outcome, DnsRecordCommandResult as RecordResult, DnsRecordData as RecordData,
+        DnsEdnsOptionOutput as EdnsOption, DnsEdnsOutput as Edns, DnsOutcome as Outcome,
+        DnsRecordCommandResult as RecordResult, DnsRecordData as RecordData,
         DnsRecordOutput as Record, DnsRejectedRecordOutput as RejectedRecord,
         DnsSection as Section, DnsStreamCommandResult as Event, DnsUndecodedOutput as Undecoded,
     };

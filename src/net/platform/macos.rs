@@ -74,16 +74,6 @@ pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
                 });
                 interface.flags = interface_flags(flags);
 
-                if !entry.ifa_data.is_null() {
-                    // SAFETY: on Darwin, `ifa_data` for interface records
-                    // points to an `if_data` value for the lifetime of the
-                    // enclosing `ifaddrs` list.
-                    let data = unsafe { &*entry.ifa_data.cast::<libc::if_data>() };
-                    if data.ifi_mtu != 0 {
-                        interface.mtu = Some(data.ifi_mtu);
-                    }
-                }
-
                 if !entry.ifa_addr.is_null() {
                     // SAFETY: `ifa_addr` points to a sockaddr whose length is
                     // recorded in its first byte for the list lifetime.
@@ -91,7 +81,12 @@ pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
                     let length = usize::from(address.sa_len);
                     match i32::from(address.sa_family) {
                         libc::AF_INET | libc::AF_INET6 => {
-                            if let Some(ip) = sockaddr_ip(entry.ifa_addr, length) {
+                            // SAFETY: the live getifaddrs entry owns at least
+                            // the declared sockaddr bytes for this iteration.
+                            let bytes = unsafe {
+                                std::slice::from_raw_parts(entry.ifa_addr.cast::<u8>(), length)
+                            };
+                            if let Some(ip) = sockaddr_ip(bytes) {
                                 let prefix_length = if entry.ifa_netmask.is_null() {
                                     if ip.is_ipv4() {
                                         32
@@ -112,6 +107,9 @@ pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
                             }
                         }
                         libc::AF_LINK => {
+                            if let Some(mtu) = link_mtu(address.sa_family, entry.ifa_data) {
+                                interface.mtu = Some(mtu);
+                            }
                             interface.mac_address = link_address(entry.ifa_addr, length);
                             if interface.mac_address.is_some() && !interface.flags.loopback {
                                 interface.capability = LinkCapability::Layer2And3;
@@ -244,24 +242,32 @@ fn interface_flags(flags: libc::c_uint) -> InterfaceFlags {
 }
 
 #[cfg(feature = "native-route")]
-fn sockaddr_ip(address: *const libc::sockaddr, length: usize) -> Option<IpAddr> {
-    if address.is_null() {
+fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32> {
+    if i32::from(family) != libc::AF_LINK || data.is_null() {
         return None;
     }
-    // SAFETY: callers provide a live sockaddr. We check its recorded length
-    // before reading the family-specific representation.
-    let family = unsafe { (*address).sa_family };
+    // SAFETY: Darwin defines AF_LINK ifa_data as a live if_data object. The
+    // family gate above is the audited conversion boundary.
+    let data = unsafe { ptr::read_unaligned(data.cast::<libc::if_data>()) };
+    (data.ifi_mtu != 0).then_some(data.ifi_mtu)
+}
+
+#[cfg(feature = "native-route")]
+fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
+    // Darwin sockaddr starts with sa_len then sa_family. Never inspect the
+    // family until both bytes are present.
+    let family = *bytes.get(1)? as libc::sa_family_t;
     match i32::from(family) {
-        libc::AF_INET if length >= size_of::<libc::sockaddr_in>() => {
+        libc::AF_INET if bytes.len() >= size_of::<libc::sockaddr_in>() => {
             // SAFETY: family and length establish a complete sockaddr_in.
-            let value = unsafe { ptr::read_unaligned(address.cast::<libc::sockaddr_in>()) };
+            let value = unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<libc::sockaddr_in>()) };
             Some(IpAddr::V4(Ipv4Addr::from(
                 value.sin_addr.s_addr.to_ne_bytes(),
             )))
         }
-        libc::AF_INET6 if length >= size_of::<libc::sockaddr_in6>() => {
+        libc::AF_INET6 if bytes.len() >= size_of::<libc::sockaddr_in6>() => {
             // SAFETY: family and length establish a complete sockaddr_in6.
-            let value = unsafe { ptr::read_unaligned(address.cast::<libc::sockaddr_in6>()) };
+            let value = unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<libc::sockaddr_in6>()) };
             Some(IpAddr::V6(Ipv6Addr::from(value.sin6_addr.s6_addr)))
         }
         _ => None,
@@ -270,11 +276,14 @@ fn sockaddr_ip(address: *const libc::sockaddr, length: usize) -> Option<IpAddr> 
 
 #[cfg(feature = "native-route")]
 fn sockaddr_prefix(address: *const libc::sockaddr, ipv4: bool) -> Option<u8> {
-    let ip = sockaddr_ip(
-        address,
-        // SAFETY: the caller supplies a live sockaddr from `getifaddrs`.
-        usize::from(unsafe { (*address).sa_len }),
-    )?;
+    if address.is_null() {
+        return None;
+    }
+    // SAFETY: a live sockaddr always contains its leading length byte, and
+    // getifaddrs owns the declared record for this call.
+    let length = usize::from(unsafe { *address.cast::<u8>() });
+    let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
+    let ip = sockaddr_ip(bytes)?;
     match (ipv4, ip) {
         (true, IpAddr::V4(mask)) => Some(
             mask.octets()
@@ -485,6 +494,13 @@ fn parse_route_addresses(
             });
         };
         let length = usize::from(length_byte);
+        if length < 2 {
+            return Err(NativeRouteError::InvalidResponse {
+                message: format!(
+                    "macOS route response sockaddr index {index} is too short for sa_family: length={length}"
+                ),
+            });
+        }
         let stride = roundup(length);
         let Some(address_end) = offset.checked_add(length) else {
             return Err(NativeRouteError::InvalidResponse {
@@ -517,9 +533,7 @@ fn parse_route_addresses(
                 })
             }
         };
-        if length != 0 {
-            *slot = sockaddr_ip(bytes[offset..].as_ptr().cast::<libc::sockaddr>(), length);
-        }
+        *slot = sockaddr_ip(&bytes[offset..address_end]);
         offset = next_offset;
     }
     Ok(output)
@@ -613,5 +627,49 @@ mod tests {
         );
         assert_eq!(roundup(20), 20);
         assert_eq!(roundup(7), 8);
+    }
+
+    #[test]
+    fn sockaddr_parser_checks_two_byte_family_and_exact_family_sizes() {
+        assert_eq!(sockaddr_ip(&[]), None);
+        assert_eq!(sockaddr_ip(&[1]), None);
+        assert_eq!(sockaddr_ip(&[2, 0xff]), None);
+
+        for address in [
+            IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+            IpAddr::V6("2001:db8::1".parse().unwrap()),
+        ] {
+            let encoded = encode_sockaddr(address);
+            assert_eq!(sockaddr_ip(&encoded), Some(address));
+            assert_eq!(sockaddr_ip(&encoded[..encoded.len() - 1]), None);
+        }
+
+        for bytes in [vec![0], vec![1]] {
+            assert!(parse_route_addresses(&bytes, libc::RTA_DST).is_err());
+        }
+        assert!(parse_route_addresses(&[2, 0xff, 0, 0], libc::RTA_DST).is_ok());
+    }
+
+    #[test]
+    fn interface_mtu_data_is_interpreted_only_for_af_link() {
+        let differently_typed = 0x5a_u8;
+        assert_eq!(
+            link_mtu(
+                libc::AF_INET as libc::sa_family_t,
+                (&differently_typed as *const u8).cast(),
+            ),
+            None
+        );
+
+        // SAFETY: all-zero is a valid baseline for the synthetic C record.
+        let mut data: libc::if_data = unsafe { std::mem::zeroed() };
+        data.ifi_mtu = 1500;
+        assert_eq!(
+            link_mtu(
+                libc::AF_LINK as libc::sa_family_t,
+                (&data as *const libc::if_data).cast(),
+            ),
+            Some(1500)
+        );
     }
 }

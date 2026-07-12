@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn rejected_auto_interface_frame_leaves_pcapng_bytes_and_numbering_unchanged() {
-        let before_epoch = UNIX_EPOCH.checked_sub(Duration::from_nanos(1)).unwrap();
+        let before_epoch = UNIX_EPOCH.checked_sub(Duration::from_secs(1)).unwrap();
         let mut timestamp_writer = Writer::pcapng(Vec::new()).unwrap();
         let original_len = timestamp_writer.get_ref().len();
         let invalid = frame(before_epoch, LinkType::ETHERNET, &[1]);

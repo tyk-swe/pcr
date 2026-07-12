@@ -606,7 +606,7 @@ mod tests {
     }
 
     #[test]
-    fn native_snapshot_rejects_interface_mismatch_and_missing_interface() {
+    fn native_snapshot_rejects_interface_mismatch() {
         let requested = InterfaceId {
             name: "mock0".to_owned(),
             index: 99,
@@ -620,6 +620,11 @@ mod tests {
             ),
             Err(NativeRouteError::InterfaceMismatch { .. })
         ));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn find_interface_rejects_missing_interface() {
         assert_eq!(
             find_interface(
                 vec![interface()],

@@ -2,7 +2,7 @@
 mod tests {
     use std::collections::VecDeque;
     use std::sync::{Condvar, MutexGuard};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::UNIX_EPOCH;
 
     use super::*;
     use crate::capture::Direction;
@@ -708,9 +708,4 @@ mod tests {
         assert_eq!(checksum(&[&[0x12], &[0x34, 0x56], &[0x78]]), 0x9753);
     }
 
-    #[test]
-    fn captured_helper_uses_stable_timestamp() {
-        let frame = captured(Bytes::from_static(&[0; 14]), 7);
-        assert_eq!(frame.timestamp, SystemTime::UNIX_EPOCH);
-    }
 }

@@ -83,15 +83,13 @@ mod tests {
     fn query_construction_is_canonical_and_bounded() {
         let query = encode_dns_query("WWW.Example.TEST.", DnsQueryType::Aaaa, 0x5043, true)
             .expect("valid query");
-        assert_eq!(&query[..2], &[0x50, 0x43]);
         assert_eq!(
-            canonical_query_name_from_wire(&query).as_deref(),
-            Some("www.example.test.")
-        );
-        assert_eq!(query_type_from_wire(&query), Some(DnsQueryType::Aaaa));
-        assert_eq!(
-            read_u16(&query, 2, "flags").unwrap(),
-            DNS_FLAG_RECURSION_DESIRED
+            query.as_ref(),
+            &[
+                0x50, 0x43, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03,
+                b'w', b'w', b'w', 0x07, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 0x04, b't',
+                b'e', b's', b't', 0x00, 0x00, 0x1c, 0x00, 0x01,
+            ]
         );
         assert!(matches!(
             canonical_query_name("bad name.example"),

@@ -27,13 +27,18 @@ native-route = [
     "dep:tokio",
     "dep:windows",
 ]
-native-layer2 = ["live", "dep:libloading", "dep:pcap", "dep:windows"]
-native-layer3 = ["live", "dep:socket2", "dep:windows"]
+native-layer2 = ["live", "dep:libloading", "dep:pcap"]
+native-layer3 = ["live", "dep:socket2"]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-noyalib = { version = "0.0.15", features = ["compat-serde-yaml"] }
+noyalib = { version = "0.0.15", default-features = false, features = [
+    "compat-serde-yaml",
+    "fast-float",
+    "fast-int",
+    "std",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 thiserror = "2"

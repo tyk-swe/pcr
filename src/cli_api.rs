@@ -81,6 +81,7 @@ pub(crate) mod output {
     };
     pub(crate) use packetcraftr::output::contract::{
         Command as CommandName, Error as OutputContractError, Format as OutputFormat,
+        CONTRACTS as COMMAND_OUTPUT_CONTRACTS,
     };
     pub(crate) use packetcraftr::output::dissect::Result as DissectCommandResult;
     pub(crate) use packetcraftr::output::dns::{

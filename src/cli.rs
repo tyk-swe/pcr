@@ -43,6 +43,7 @@ use crate::output::{
     ReplayFrameCommandResult, RoutesCommandResult, ScanCommandResult, ScanStreamCommandResult,
     SendCommandResult, StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceProbeStatus,
     TraceResponseKind, TracerouteCommandResult, TracerouteStreamCommandResult,
+    COMMAND_OUTPUT_CONTRACTS,
 };
 use crate::packet::internal::{
     parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,

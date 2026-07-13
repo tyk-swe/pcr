@@ -139,21 +139,17 @@ pub mod exchange {
 // The implementation still uses its established vocabulary internally. These
 // aliases are crate-private so downstream users see only the canonical modules
 // above while the native implementation remains a mechanical, reviewable move.
-#[allow(unused_imports)]
-pub(crate) use neighbor_impl::{
-    ActiveNeighborResolver, NeighborResolutionOptions, SystemNeighborResolver,
-};
-#[allow(unused_imports)]
+#[cfg(feature = "native-layer3")]
+pub(crate) use provider_impl::Layer3Frame;
 pub(crate) use provider_impl::{
-    CaptureEvidenceCompleteness, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits,
-    CaptureSession, CaptureStatistics, CapturedFrame, DispatchPacketIo, ExchangeIo,
-    InterfaceAddress, InterfaceFlags, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
-    Layer2Io, Layer3Frame, Layer3Io, LiveIoError, PacketIo, SystemCaptureProvider,
-    SystemCaptureSession, SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io,
-    TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    MAX_CAPTURE_TIMEOUT,
+    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
+    CapturedFrame, DispatchPacketIo, ExchangeIo, InterfaceInfo, InterfaceProvider, IoSendReport,
+    Layer2Frame, Layer2Io, LiveIoError, PacketIo, SystemCaptureProvider, SystemInterfaceProvider,
+    SystemLayer2Io, SystemLayer3Io, TransmissionFrame, DEFAULT_CAPTURE_QUEUE_BYTES,
+    DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
 };
-#[allow(unused_imports)]
+#[cfg(any(test, feature = "native-route", all(windows, feature = "live")))]
+pub(crate) use provider_impl::{InterfaceAddress, InterfaceFlags};
 pub(crate) use route_impl::{
     DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute,
     NativeRouteError, NeighborError, NeighborRequest, NeighborResolution, NeighborResolver,

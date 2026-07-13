@@ -68,6 +68,5 @@ include!("dns/model.rs");
 include!("dns/error.rs");
 include!("dns/wire.rs");
 include!("dns/adapter.rs");
-include!("dns/test_helpers.rs");
 include!("dns/engine.rs");
 include!("dns/tests.rs");

@@ -783,7 +783,7 @@ mod tests {
         assert_eq!(statistics.overflow_events, 0);
         assert_eq!(
             statistics.evidence_completeness(),
-            crate::net::CaptureEvidenceCompleteness::Incomplete
+            crate::net::capture::Completeness::Incomplete
         );
     }
 

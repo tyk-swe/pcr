@@ -127,28 +127,13 @@ fn machine_format(arguments: &[String]) -> Option<OutputFormat> {
 }
 
 fn command_from_env() -> Option<CommandName> {
-    const COMMANDS: &[(&str, CommandName)] = &[
-        ("build", CommandName::Build),
-        ("dissect", CommandName::Dissect),
-        ("plan", CommandName::Plan),
-        ("send", CommandName::Send),
-        ("exchange", CommandName::Exchange),
-        ("capture", CommandName::Capture),
-        ("read", CommandName::Read),
-        ("replay", CommandName::Replay),
-        ("scan", CommandName::Scan),
-        ("traceroute", CommandName::Traceroute),
-        ("dns", CommandName::Dns),
-        ("fuzz", CommandName::Fuzz),
-        ("interfaces", CommandName::Interfaces),
-        ("routes", CommandName::Routes),
-    ];
     std::env::args()
         .take_while(|argument| argument != "--")
         .find_map(|argument| {
-            COMMANDS
+            COMMAND_OUTPUT_CONTRACTS
                 .iter()
-                .find_map(|(name, command)| (*name == argument).then_some(*command))
+                .map(|contract| contract.command)
+                .find(|command| command.as_str() == argument)
         })
 }
 

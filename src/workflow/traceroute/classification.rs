@@ -14,7 +14,7 @@ pub fn classify_traceroute_response(
     response: &DecodedPacket,
 ) -> Option<TracerouteResponseClassification> {
     let observation = probe::observe(registry, strategy.probe_transport(), request, response)?;
-    let destination = packet_destination(request)?;
+    let destination = packet_destination(request, strategy)?;
     let kind = match observation.correlation {
         Correlation::TimeExceeded => TracerouteResponseKind::Intermediate,
         correlation if correlation.is_direct_reply() => {
@@ -37,8 +37,30 @@ pub fn classify_traceroute_response(
     })
 }
 
-fn packet_destination(packet: &Packet) -> Option<IpAddr> {
-    packet.iter().find_map(|layer| {
+fn packet_destination(packet: &Packet, strategy: TracerouteStrategy) -> Option<IpAddr> {
+    let transport = match strategy {
+        TracerouteStrategy::Tcp => "tcp",
+        TracerouteStrategy::Udp => "udp",
+        TracerouteStrategy::Icmp
+            if packet
+                .iter()
+                .any(|layer| layer.protocol_id().as_str() == "icmpv4") =>
+        {
+            "icmpv4"
+        }
+        TracerouteStrategy::Icmp
+            if packet
+                .iter()
+                .any(|layer| layer.protocol_id().as_str() == "icmpv6") =>
+        {
+            "icmpv6"
+        }
+        TracerouteStrategy::Icmp => return None,
+    };
+    let transport_index = packet
+        .iter()
+        .position(|layer| layer.protocol_id().as_str() == transport)?;
+    packet.iter().take(transport_index).rev().find_map(|layer| {
         if !matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6") {
             return None;
         }

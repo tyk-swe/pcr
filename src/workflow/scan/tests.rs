@@ -519,7 +519,7 @@ mod tests {
     }
 
     #[test]
-    fn matched_response_timestamp_must_follow_its_sent_frame() {
+    fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
         struct PreSendMatchedExecutor;
 
         impl ScanExecutor for PreSendMatchedExecutor {
@@ -538,17 +538,18 @@ mod tests {
 
         let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
         operation.timeout = Duration::from_millis(10);
-        let error = scan(
+        let result = scan(
             &operation,
             &mut PolicyAuthorizer::new(&private_policy(), &ScriptedResolver::new([])),
             &default_registry().unwrap(),
             &mut PreSendMatchedExecutor,
             &mut NoopClock,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(error, ScanError::InvalidEvidence { .. }));
-        assert!(error.to_string().contains("predates its sent frame"));
+        let evidence = &result.endpoints[0].evidence[0];
+        assert_eq!(evidence.status, ScanProbeStatus::Response);
+        assert!(evidence.received_at.unwrap() < evidence.sent_at);
     }
 
     #[test]
@@ -835,6 +836,60 @@ mod tests {
             .classification,
             ScanClassification::Open
         );
+    }
+
+    #[test]
+    fn tunneled_direct_reply_reports_the_inner_responder() {
+        let registry = default_registry().unwrap();
+        let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
+        let inner_source: Ipv6Addr = "2001:db8:1::1".parse().unwrap();
+        let inner_destination: Ipv6Addr = "2001:db8:1::2".parse().unwrap();
+        let mut request = Packet::new();
+        request
+            .push(Ipv6 {
+                source: outer_source,
+                destination: outer_destination,
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_source,
+                destination: inner_destination,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 50_000,
+                destination_port: 53,
+                ..Udp::default()
+            });
+        let mut reply = Packet::new();
+        reply
+            .push(Ipv6 {
+                source: "2001:db8:ffff::1".parse().unwrap(),
+                destination: "2001:db8:ffff::2".parse().unwrap(),
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_destination,
+                destination: inner_source,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 53,
+                destination_port: 50_000,
+                ..Udp::default()
+            });
+
+        let classification = classify_scan_response(
+            &registry,
+            ScanTransport::Udp,
+            &request,
+            &decoded(reply, Vec::new()),
+        )
+        .unwrap();
+
+        assert_eq!(classification.classification, ScanClassification::Open);
+        assert_eq!(classification.responder, IpAddr::V6(inner_destination));
     }
 
     fn ipv4_quote(

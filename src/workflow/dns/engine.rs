@@ -349,13 +349,14 @@ fn consider_dns_candidate<'a>(
     timeout: Duration,
     limits: DnsLimits,
 ) {
-    let within_deadline = decoded
-        .frame
-        .timestamp
-        .duration_since(sent_at)
-        .is_ok_and(|captured_latency| {
-            captured_latency <= timeout && latency.is_none_or(|latency| latency <= timeout)
-        });
+    let within_deadline = match latency {
+        Some(latency) => latency <= timeout,
+        None => decoded
+            .frame
+            .timestamp
+            .duration_since(sent_at)
+            .is_ok_and(|captured_latency| captured_latency <= timeout),
+    };
     if !within_deadline {
         return;
     }
@@ -463,23 +464,6 @@ fn validate_dns_execution(
             return Err(DnsError::InvalidEvidence {
                 attempt,
                 message: "matched response original bytes differ from its exact frame".to_owned(),
-            });
-        }
-        let captured_latency = response
-            .response
-            .frame
-            .timestamp
-            .duration_since(execution.sent_evidence.timestamp)
-            .map_err(|_| DnsError::InvalidEvidence {
-                attempt,
-                message: "matched response predates its sent frame".to_owned(),
-            })?;
-        if captured_latency > timeout {
-            return Err(DnsError::InvalidEvidence {
-                attempt,
-                message: format!(
-                    "matched response timestamp is {captured_latency:?} after its sent frame, exceeding timeout {timeout:?}"
-                ),
             });
         }
         if response.latency > timeout {

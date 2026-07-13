@@ -316,7 +316,7 @@ mod tests {
     }
 
     #[test]
-    fn matched_response_timestamp_must_follow_its_sent_frame() {
+    fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
         struct PreSendMatchedExecutor;
 
         impl TracerouteExecutor for PreSendMatchedExecutor {
@@ -340,7 +340,7 @@ mod tests {
         }
 
         let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-        let error = traceroute(
+        let result = traceroute(
             &request(Target::Address(destination)),
             &mut FixedAuthorizer {
                 address: destination,
@@ -350,13 +350,11 @@ mod tests {
             &mut PreSendMatchedExecutor,
             &mut NoopClock::default(),
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(
-            error,
-            TracerouteError::InvalidEvidence { .. }
-        ));
-        assert!(error.to_string().contains("predates its sent frame"));
+        let evidence = &result.hops[0].probes[0];
+        assert_eq!(evidence.status, TracerouteProbeStatus::Response);
+        assert!(evidence.received_at.unwrap() < evidence.sent_at);
     }
 
     struct ScriptedResolver {
@@ -593,6 +591,60 @@ mod tests {
             .kind,
             TracerouteResponseKind::Intermediate
         );
+    }
+
+    #[test]
+    fn tunneled_direct_reply_reaches_the_inner_destination() {
+        let registry = default_registry().unwrap();
+        let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
+        let inner_source: Ipv6Addr = "2001:db8:1::1".parse().unwrap();
+        let inner_destination: Ipv6Addr = "2001:db8:1::2".parse().unwrap();
+        let mut request = Packet::new();
+        request
+            .push(Ipv6 {
+                source: outer_source,
+                destination: outer_destination,
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_source,
+                destination: inner_destination,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: TRACEROUTE_SOURCE_PORT,
+                destination_port: DEFAULT_TRACEROUTE_UDP_PORT,
+                ..Udp::default()
+            });
+        let mut reply = Packet::new();
+        reply
+            .push(Ipv6 {
+                source: "2001:db8:ffff::1".parse().unwrap(),
+                destination: "2001:db8:ffff::2".parse().unwrap(),
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_destination,
+                destination: inner_source,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: DEFAULT_TRACEROUTE_UDP_PORT,
+                destination_port: TRACEROUTE_SOURCE_PORT,
+                ..Udp::default()
+            });
+
+        let classification = classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &request,
+            &decoded_at(reply, 2, Vec::new()),
+        )
+        .unwrap();
+
+        assert_eq!(classification.kind, TracerouteResponseKind::DestinationReached);
+        assert_eq!(classification.responder, IpAddr::V6(inner_destination));
     }
 
     #[test]

@@ -33,6 +33,7 @@ fn canonical_packet_and_protocol_namespaces_are_downstream_usable() {
     packet.push(packet::layer::Raw::new(vec![0xde, 0xad]));
     let matched = packet::matcher::Matcher::matches(&NoMatch, &packet, &packet);
     assert!(!matched.matched);
+    assert!(packet::matcher::Matcher::responder(&NoMatch, &packet, &packet).is_none());
 
     let registry = protocol::builtin::registry().unwrap();
     assert!(registry.protocol_named("ethernet").is_some());

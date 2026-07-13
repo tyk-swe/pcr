@@ -1022,7 +1022,7 @@ mod tests {
     }
 
     #[test]
-    fn matched_response_timestamp_must_follow_its_sent_frame() {
+    fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
         struct PreSendMatchedExecutor {
             payload: Bytes,
         }
@@ -1058,7 +1058,7 @@ mod tests {
             &[],
             &[],
         );
-        let error = dns(
+        let result = dns(
             &single_attempt_request(),
             &mut LocalAuthorizer,
             &default_registry().unwrap(),
@@ -1067,10 +1067,10 @@ mod tests {
             },
             &mut NoopClock,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(matches!(error, DnsError::InvalidEvidence { .. }));
-        assert!(error.to_string().contains("predates its sent frame"));
+        assert_eq!(result.outcome, DnsOutcome::Response);
+        assert!(result.attempts[0].received_at.unwrap() < result.attempts[0].sent_at);
     }
 
     struct NoopClock;

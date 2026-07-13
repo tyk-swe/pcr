@@ -129,6 +129,13 @@ impl ResponseMatcher for ReverseTupleMatcher {
             MatchResult::no_match()
         }
     }
+
+    fn responder(&self, _request: &Packet, response: &Packet) -> Option<IpAddr> {
+        let response_layer_index = response
+            .iter()
+            .position(|layer| layer.protocol_id().as_str() == self.protocol)?;
+        ip_tuple_before(response, response_layer_index).map(|(source, _)| source)
+    }
 }
 
 fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
@@ -257,6 +264,13 @@ impl ResponseMatcher for EchoMatcher {
         }
         MatchResult::matched(100, "matching ICMP echo identifier and sequence")
     }
+
+    fn responder(&self, _request: &Packet, response: &Packet) -> Option<IpAddr> {
+        let response_layer_index = response
+            .iter()
+            .position(|layer| layer.protocol_id().as_str() == self.protocol)?;
+        ip_tuple_before(response, response_layer_index).map(|(source, _)| source)
+    }
 }
 
 fn ip_tuple_before(packet: &Packet, upper_layer_index: usize) -> Option<(IpAddr, IpAddr)> {
@@ -368,10 +382,11 @@ mod tests {
                 ..Udp::default()
             });
 
-        assert!(
-            ReverseTupleMatcher::new("udp")
-                .matches(&request, &response)
-                .matched
+        let matcher = ReverseTupleMatcher::new("udp");
+        assert!(matcher.matches(&request, &response).matched);
+        assert_eq!(
+            matcher.responder(&request, &response),
+            Some(IpAddr::V6(final_destination))
         );
     }
 
@@ -418,10 +433,11 @@ mod tests {
                 ..Udp::default()
             });
 
-        assert!(
-            ReverseTupleMatcher::new("udp")
-                .matches(&request, &response)
-                .matched
+        let matcher = ReverseTupleMatcher::new("udp");
+        assert!(matcher.matches(&request, &response).matched);
+        assert_eq!(
+            matcher.responder(&request, &response),
+            Some(IpAddr::V6(inner_destination))
         );
     }
 

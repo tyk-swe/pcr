@@ -367,25 +367,6 @@ fn validate_execution(
     }
     for response in &execution.responses {
         validate_traceroute_decoded(sequence, "matched response", &response.response)?;
-        let sent_at = execution.sent_evidence[response.request_index].timestamp;
-        let captured_latency = response
-            .response
-            .frame
-            .timestamp
-            .duration_since(sent_at)
-            .map_err(|_| TracerouteError::InvalidEvidence {
-                sequence,
-                message: "matched response predates its sent frame".to_owned(),
-            })?;
-        if captured_latency > batch.timeout {
-            return Err(TracerouteError::InvalidEvidence {
-                sequence,
-                message: format!(
-                    "matched response timestamp is {captured_latency:?} after its sent frame, exceeding timeout {:?}",
-                    batch.timeout
-                ),
-            });
-        }
         if response.latency > batch.timeout {
             return Err(TracerouteError::InvalidEvidence {
                 sequence,
@@ -734,15 +715,15 @@ fn select_candidate<'a>(
     sent_at: SystemTime,
     timeout: Duration,
 ) {
-    let within_deadline = candidate
-        .decoded
-        .frame
-        .timestamp
-        .duration_since(sent_at)
-        .is_ok_and(|captured_latency| {
-            captured_latency <= timeout
-                && candidate.latency.is_none_or(|latency| latency <= timeout)
-        });
+    let within_deadline = match candidate.latency {
+        Some(latency) => latency <= timeout,
+        None => candidate
+            .decoded
+            .frame
+            .timestamp
+            .duration_since(sent_at)
+            .is_ok_and(|captured_latency| captured_latency <= timeout),
+    };
     if !within_deadline {
         return;
     }

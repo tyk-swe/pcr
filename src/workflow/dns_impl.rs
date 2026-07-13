@@ -27,7 +27,9 @@ use crate::protocol::internal::{Ipv4, Ipv6, Udp};
 
 use super::clock::Clock;
 use super::evidence::{
-    EvidenceBudget, EvidenceBudgetError, preferred_latency, response_within_deadline,
+    EvidenceBudget, EvidenceBudgetError, checked_frame_bytes, checked_frame_count,
+    preferred_latency, response_within_deadline, validate_capture_statistics,
+    validate_decoded_frame, validate_frame,
 };
 use super::nonzero_ipv4_identification;
 use super::probe::{self, Transport as ProbeTransport};

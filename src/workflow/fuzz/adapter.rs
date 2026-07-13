@@ -125,13 +125,7 @@ where
                 .collect(),
             undecoded,
             diagnostics,
-            stats: FuzzExecutionStats {
-                packets_attempted: stats.packets_attempted,
-                packets_completed: stats.packets_completed,
-                bytes: stats.bytes,
-                elapsed: stats.elapsed,
-                capture: stats.capture,
-            },
+            stats: stats.into(),
         })
     }
 }

@@ -346,15 +346,15 @@ fn validate_exchange_evidence(
             message: "matched response references a request outside the batch".to_owned(),
         });
     }
-    let captured_frames = exchange
-        .responses
-        .len()
-        .checked_add(exchange.unsolicited.len())
-        .and_then(|count| count.checked_add(exchange.undecoded.len()))
-        .ok_or_else(|| ScanError::InvalidEvidence {
-            sequence,
-            message: "executor capture frame-count accounting overflowed".to_owned(),
-        })?;
+    let captured_frames = checked_frame_count(&[
+        exchange.responses.len(),
+        exchange.unsolicited.len(),
+        exchange.undecoded.len(),
+    ])
+    .ok_or_else(|| ScanError::InvalidEvidence {
+        sequence,
+        message: "executor capture frame-count accounting overflowed".to_owned(),
+    })?;
     if captured_frames > limits.max_evidence_frames {
         return Err(ScanError::InvalidEvidence {
             sequence,
@@ -364,22 +364,18 @@ fn validate_exchange_evidence(
             ),
         });
     }
-    let captured_bytes = exchange
-        .responses
-        .iter()
-        .map(|response| response.response.frame.bytes.len())
-        .chain(
-            exchange
-                .unsolicited
-                .iter()
-                .map(|response| response.frame.bytes.len()),
-        )
-        .chain(exchange.undecoded.iter().map(|frame| frame.bytes.len()))
-        .try_fold(0usize, |total, length| total.checked_add(length))
-        .ok_or_else(|| ScanError::InvalidEvidence {
-            sequence,
-            message: "executor capture byte accounting overflowed".to_owned(),
-        })?;
+    let captured_bytes = checked_frame_bytes(
+        exchange
+            .responses
+            .iter()
+            .map(|response| &response.response.frame)
+            .chain(exchange.unsolicited.iter().map(|response| &response.frame))
+            .chain(exchange.undecoded.iter()),
+    )
+    .ok_or_else(|| ScanError::InvalidEvidence {
+        sequence,
+        message: "executor capture byte accounting overflowed".to_owned(),
+    })?;
     if captured_bytes > limits.max_evidence_bytes {
         return Err(ScanError::InvalidEvidence {
             sequence,
@@ -401,23 +397,17 @@ fn validate_exchange_evidence(
                     .to_owned(),
             });
         }
-        evidence
-            .validate()
-            .map_err(|error| ScanError::InvalidEvidence {
-                sequence: probe.sequence,
-                message: format!("sent frame is invalid: {error}"),
-            })?;
+        validate_frame(evidence, "sent").map_err(|message| ScanError::InvalidEvidence {
+            sequence: probe.sequence,
+            message,
+        })?;
     }
-    let sent_bytes = exchange
-        .sent_evidence
-        .iter()
-        .try_fold(0_u64, |total, frame| {
-            total.checked_add(frame.bytes.len() as u64)
-        })
-        .ok_or_else(|| ScanError::InvalidEvidence {
+    let sent_bytes = checked_sent_frame_bytes(&exchange.sent_evidence).ok_or_else(|| {
+        ScanError::InvalidEvidence {
             sequence,
             message: "sent frame byte accounting overflowed".to_owned(),
-        })?;
+        }
+    })?;
     if exchange.stats.bytes != sent_bytes {
         return Err(ScanError::InvalidEvidence {
             sequence,
@@ -428,7 +418,8 @@ fn validate_exchange_evidence(
         });
     }
     for response in &exchange.responses {
-        validate_scan_decoded(sequence, "matched response", &response.response)?;
+        validate_decoded_frame(&response.response, "matched response")
+            .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
         if response.latency > batch.timeout {
             return Err(ScanError::InvalidEvidence {
                 sequence,
@@ -440,24 +431,15 @@ fn validate_exchange_evidence(
         }
     }
     for response in &exchange.unsolicited {
-        validate_scan_decoded(sequence, "unsolicited response", response)?;
+        validate_decoded_frame(response, "unsolicited response")
+            .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
     }
     for frame in &exchange.undecoded {
-        frame
-            .validate()
-            .map_err(|error| ScanError::InvalidEvidence {
-                sequence,
-                message: format!("undecoded frame is invalid: {error}"),
-            })?;
+        validate_frame(frame, "undecoded")
+            .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
     }
-    exchange
-        .stats
-        .capture
-        .validate()
-        .map_err(|error| ScanError::InvalidEvidence {
-            sequence,
-            message: format!("capture statistics are invalid: {error}"),
-        })?;
+    validate_capture_statistics(exchange.stats.capture)
+        .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
     if exchange.stats.packets_attempted != batch.probes.len() as u64
         || exchange.stats.packets_completed != batch.probes.len() as u64
     {
@@ -465,27 +447,6 @@ fn validate_exchange_evidence(
             sequence,
             message: "successful exchange statistics do not account for every scan probe"
                 .to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_scan_decoded(
-    sequence: u64,
-    kind: &str,
-    decoded: &DecodedPacket,
-) -> Result<(), ScanError> {
-    decoded
-        .frame
-        .validate()
-        .map_err(|error| ScanError::InvalidEvidence {
-            sequence,
-            message: format!("{kind} frame is invalid: {error}"),
-        })?;
-    if decoded.original != decoded.frame.bytes {
-        return Err(ScanError::InvalidEvidence {
-            sequence,
-            message: format!("{kind} original bytes differ from its exact frame"),
         });
     }
     Ok(())

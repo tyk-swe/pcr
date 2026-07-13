@@ -392,13 +392,8 @@ fn validate_dns_execution(
     timeout: Duration,
 ) -> Result<(), DnsError> {
     let attempt = probe.attempt;
-    execution
-        .sent_evidence
-        .validate()
-        .map_err(|error| DnsError::InvalidEvidence {
-            attempt,
-            message: format!("sent frame is invalid: {error}"),
-        })?;
+    validate_frame(&execution.sent_evidence, "sent")
+        .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
     let Some(network) = dns_network_envelope(&execution.sent) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
@@ -445,29 +440,11 @@ fn validate_dns_execution(
             ),
         });
     }
-    execution
-        .stats
-        .capture
-        .validate()
-        .map_err(|error| DnsError::InvalidEvidence {
-            attempt,
-            message: format!("capture statistics are invalid: {error}"),
-        })?;
+    validate_capture_statistics(execution.stats.capture)
+        .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
     for response in &execution.responses {
-        response
-            .response
-            .frame
-            .validate()
-            .map_err(|error| DnsError::InvalidEvidence {
-                attempt,
-                message: format!("matched response frame is invalid: {error}"),
-            })?;
-        if response.response.original != response.response.frame.bytes {
-            return Err(DnsError::InvalidEvidence {
-                attempt,
-                message: "matched response original bytes differ from its exact frame".to_owned(),
-            });
-        }
+        validate_decoded_frame(&response.response, "matched response")
+            .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
         if response.latency > timeout {
             return Err(DnsError::InvalidEvidence {
                 attempt,
@@ -479,38 +456,22 @@ fn validate_dns_execution(
         }
     }
     for response in &execution.unsolicited {
-        response
-            .frame
-            .validate()
-            .map_err(|error| DnsError::InvalidEvidence {
-                attempt,
-                message: format!("unsolicited response frame is invalid: {error}"),
-            })?;
-        if response.original != response.frame.bytes {
-            return Err(DnsError::InvalidEvidence {
-                attempt,
-                message: "unsolicited response original bytes differ from its exact frame"
-                    .to_owned(),
-            });
-        }
+        validate_decoded_frame(response, "unsolicited response")
+            .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
     }
     for frame in &execution.undecoded {
-        frame
-            .validate()
-            .map_err(|error| DnsError::InvalidEvidence {
-                attempt,
-                message: format!("undecoded frame is invalid: {error}"),
-            })?;
+        validate_frame(frame, "undecoded")
+            .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
     }
-    let frame_count = execution
-        .responses
-        .len()
-        .checked_add(execution.unsolicited.len())
-        .and_then(|count| count.checked_add(execution.undecoded.len()))
-        .ok_or_else(|| DnsError::InvalidEvidence {
-            attempt,
-            message: "executor frame-count accounting overflowed".to_owned(),
-        })?;
+    let frame_count = checked_frame_count(&[
+        execution.responses.len(),
+        execution.unsolicited.len(),
+        execution.undecoded.len(),
+    ])
+    .ok_or_else(|| DnsError::InvalidEvidence {
+        attempt,
+        message: "executor frame-count accounting overflowed".to_owned(),
+    })?;
     if frame_count > limits.max_evidence_frames {
         return Err(DnsError::InvalidEvidence {
             attempt,
@@ -520,22 +481,18 @@ fn validate_dns_execution(
             ),
         });
     }
-    let frame_bytes = execution
-        .responses
-        .iter()
-        .map(|response| response.response.frame.bytes.len())
-        .chain(
-            execution
-                .unsolicited
-                .iter()
-                .map(|response| response.frame.bytes.len()),
-        )
-        .chain(execution.undecoded.iter().map(|frame| frame.bytes.len()))
-        .try_fold(0usize, |total, length| total.checked_add(length))
-        .ok_or_else(|| DnsError::InvalidEvidence {
-            attempt,
-            message: "executor frame-byte accounting overflowed".to_owned(),
-        })?;
+    let frame_bytes = checked_frame_bytes(
+        execution
+            .responses
+            .iter()
+            .map(|response| &response.response.frame)
+            .chain(execution.unsolicited.iter().map(|response| &response.frame))
+            .chain(execution.undecoded.iter()),
+    )
+    .ok_or_else(|| DnsError::InvalidEvidence {
+        attempt,
+        message: "executor frame-byte accounting overflowed".to_owned(),
+    })?;
     if frame_bytes > limits.max_evidence_bytes {
         return Err(DnsError::InvalidEvidence {
             attempt,

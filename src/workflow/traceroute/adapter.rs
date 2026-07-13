@@ -106,7 +106,7 @@ where
             unsolicited,
             undecoded,
             diagnostics,
-            stats: Stats::from_client(stats),
+            stats: stats.into(),
         })
     }
 }

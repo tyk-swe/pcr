@@ -217,13 +217,7 @@ impl FuzzCommandResult {
                 })
             })
             .collect::<Result<Vec<_>, OutputContractError>>()?;
-        let operation_stats = OperationStats {
-            packets_attempted: stats.packets_attempted,
-            packets_completed: stats.packets_completed,
-            bytes: stats.bytes,
-            elapsed: stats.elapsed,
-            capture: stats.capture.into(),
-        };
+        let operation_stats = (&stats).into();
         Ok((
             Self {
                 seed,

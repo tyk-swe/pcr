@@ -17,8 +17,8 @@ pub struct Stats {
     pub capture: CaptureStatistics,
 }
 
-impl Stats {
-    pub(super) fn from_client(stats: crate::client::Stats) -> Self {
+impl From<crate::client::Stats> for Stats {
+    fn from(stats: crate::client::Stats) -> Self {
         Self {
             packets_attempted: stats.packets_attempted,
             packets_completed: stats.packets_completed,
@@ -27,7 +27,9 @@ impl Stats {
             capture: stats.capture,
         }
     }
+}
 
+impl Stats {
     pub(super) fn checked_add(&mut self, value: &Self) -> Option<()> {
         self.packets_attempted = self
             .packets_attempted

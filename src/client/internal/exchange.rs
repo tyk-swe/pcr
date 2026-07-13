@@ -116,11 +116,23 @@ struct ExchangeAccumulator {
     response_counts: Vec<usize>,
 }
 
+struct PlannedExchangePacket {
+    packet: Packet,
+    plan: PlannedRoute,
+    build_context: BuildContext,
+    preliminary_build: BuiltPacket,
+}
+
+struct PreparedExchangePacket {
+    built: BuiltPacket,
+    route: MaterializedRoute,
+}
+
 #[derive(Clone, Copy)]
 struct ExchangeProcessContext<'a> {
     registry: &'a ProtocolRegistry,
     dissector: &'a Dissector,
-    prepared: &'a [(BuiltPacket, MaterializedRoute)],
+    prepared: &'a [PreparedExchangePacket],
     sent_at: &'a [Instant],
     deadline: Instant,
     options: &'a ExchangeOptions,
@@ -128,14 +140,15 @@ struct ExchangeProcessContext<'a> {
 
 fn drain_available<C: CaptureSession>(
     capture: &mut CaptureGuard<C>,
-    deadline: Instant,
+    enforced_deadline: Option<Instant>,
     frame_limit: usize,
-    enforce_current_deadline: bool,
     captured: &mut ExchangeAccumulator,
     context: ExchangeProcessContext<'_>,
 ) -> Result<(), LiveIoError> {
     for _ in 0..frame_limit {
-        if enforce_current_deadline && deadline.checked_duration_since(Instant::now()).is_none() {
+        if enforced_deadline
+            .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
+        {
             return Err(LiveIoError::DeadlineExceeded {
                 operation: "draining capture before all requests were sent",
             });
@@ -149,9 +162,7 @@ fn drain_available<C: CaptureSession>(
         &mut captured.diagnostics,
         crate::packet::internal::Diagnostic::warning(
             "exchange.drain_limit",
-            format!(
-                "zero-time capture drain stopped after the bounded {frame_limit} frame(s)"
-            ),
+            format!("zero-time capture drain stopped after the bounded {frame_limit} frame(s)"),
         ),
     );
     Ok(())
@@ -222,18 +233,19 @@ impl ExchangeAccumulator {
         }
 
         let mut matched: Option<(usize, crate::packet::internal::MatchResult)> = None;
-        for (request_index, (request, _)) in prepared.iter().take(sent_at.len()).enumerate() {
+        for (request_index, prepared_request) in prepared.iter().take(sent_at.len()).enumerate() {
             let Some(received_at) = received_at else {
                 continue;
             };
             if received_at < sent_at[request_index] || received_at > deadline {
                 continue;
             }
-            let result = request
+            let result = prepared_request
+                .built
                 .packet
                 .iter()
                 .filter_map(|layer| registry.matcher(&layer.protocol_id()))
-                .map(|matcher| matcher.matches(&request.packet, &decoded.packet))
+                .map(|matcher| matcher.matches(&prepared_request.built.packet, &decoded.packet))
                 .filter(|result| result.matched)
                 .max_by_key(|result| result.confidence);
             let Some(result) = result else {

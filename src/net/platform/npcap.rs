@@ -48,6 +48,21 @@ mod supported {
     const PCAP_ERROR_PROMISC_PERM_DENIED: c_int = -11;
     const PCAP_ERROR_CAPTURE_NOTSUP: c_int = -13;
 
+    #[derive(Clone, Copy)]
+    enum PromiscuousMode {
+        Disabled,
+        Enabled,
+    }
+
+    impl PromiscuousMode {
+        const fn pcap_value(self) -> c_int {
+            match self {
+                Self::Disabled => 0,
+                Self::Enabled => 1,
+            }
+        }
+    }
+
     type PcapInit = unsafe extern "C" fn(c_uint, *mut c_char) -> c_int;
     type PcapCreate = unsafe extern "C" fn(*const c_char, *mut c_char) -> *mut c_void;
     type PcapSetInteger = unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
@@ -250,7 +265,7 @@ mod supported {
                 reason: "Npcap snap length exceeds i32",
             }
         })?;
-        let handle = open_handle(interface, snap_length, true)?;
+        let handle = open_handle(interface, snap_length, PromiscuousMode::Enabled)?;
         // SAFETY: handle is activated and live; pcap_datalink only reads its
         // negotiated link-layer type.
         let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
@@ -284,7 +299,7 @@ mod supported {
                 interface.name
             ),
         })?;
-        let handle = open_handle(interface, SEND_SNAPSHOT_LENGTH, false)?;
+        let handle = open_handle(interface, SEND_SNAPSHOT_LENGTH, PromiscuousMode::Disabled)?;
         // SAFETY: the byte slice remains valid for the synchronous call and
         // length is its exact checked c_int representation.
         let result = unsafe {
@@ -408,9 +423,9 @@ mod supported {
                 });
             }
             Ok(NativeCaptureStatistics {
-                dropped: statistics.dropped,
-                network_dropped: statistics.network_dropped,
-                interface_dropped: statistics.interface_dropped,
+                capture_dropped_frames: statistics.dropped,
+                network_dropped_frames: statistics.network_dropped,
+                interface_dropped_frames: statistics.interface_dropped,
             })
         }
     }
@@ -428,7 +443,7 @@ mod supported {
     fn open_handle(
         interface: &InterfaceId,
         snap_length: c_int,
-        promiscuous: bool,
+        promiscuous_mode: PromiscuousMode,
     ) -> Result<Arc<NpcapHandle>, LiveIoError> {
         let api = npcap_api()?;
         let device_name = npcap_device_name(interface)?;
@@ -456,7 +471,7 @@ mod supported {
             interface,
             "pcap_set_promisc",
             handle.api.pcap_set_promisc,
-            c_int::from(promiscuous),
+            promiscuous_mode.pcap_value(),
         )?;
         set_integer_option(
             &handle,

@@ -13,11 +13,11 @@ pub fn fuzz(
         diagnostics: Vec::new(),
         stats: FuzzStats {
             cases_generated: request.cases as u64,
-            cases_built: prepared.built_cases,
-            cases_rejected: request.cases as u64 - prepared.built_cases,
+            cases_built: prepared.built_case_count,
+            cases_rejected: request.cases as u64 - prepared.built_case_count,
             packets_attempted: request.cases as u64,
-            packets_completed: prepared.built_cases,
-            bytes: prepared.built_bytes,
+            packets_completed: prepared.built_case_count,
+            bytes: prepared.built_byte_count,
             ..FuzzStats::default()
         },
     })
@@ -124,8 +124,8 @@ where
 
     let mut stats = FuzzStats {
         cases_generated: request.cases as u64,
-        cases_built: prepared.built_cases,
-        cases_rejected: request.cases as u64 - prepared.built_cases,
+        cases_built: prepared.built_case_count,
+        cases_rejected: request.cases as u64 - prepared.built_case_count,
         ..FuzzStats::default()
     };
     let mut evidence = EvidenceBudget::default();
@@ -240,8 +240,8 @@ where
 
 struct PreparedFuzz {
     cases: Vec<FuzzCase>,
-    built_cases: u64,
-    built_bytes: u64,
+    built_case_count: u64,
+    built_byte_count: u64,
     preparation_elapsed: Duration,
 }
 
@@ -250,5 +250,5 @@ struct ResolvedField {
     target: FuzzTarget,
     protocol: String,
     kind: FieldKind,
-    derived: bool,
+    is_derived: bool,
 }

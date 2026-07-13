@@ -402,22 +402,22 @@ fn validate_dns_execution(
             attempt,
             message: format!("sent frame is invalid: {error}"),
         })?;
-    let Some((_, destination)) = dns_ip_tuple(&execution.sent) else {
+    let Some(network) = dns_network_envelope(&execution.sent) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
             message: "sent packet has no IPv4 or IPv6 tuple".to_owned(),
         });
     };
-    let Some((source_port, destination_port)) = dns_udp_ports(&execution.sent) else {
+    let Some(ports) = dns_udp_ports(&execution.sent) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
             message: "sent packet has no complete UDP tuple".to_owned(),
         });
     };
     if !dns_packet_shape_matches(&execution.sent, probe.server_address)
-        || destination != probe.server_address
-        || source_port != probe.source_port
-        || destination_port != probe.server_port
+        || network.destination != probe.server_address
+        || ports.source != probe.source_port
+        || ports.destination != probe.server_port
         || raw_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
     {
         return Err(DnsError::InvalidEvidence {
@@ -566,43 +566,48 @@ fn dns_packet_shape_matches(packet: &Packet, server: IpAddr) -> bool {
     }
 }
 
-fn dns_ip_tuple(packet: &Packet) -> Option<(IpAddr, IpAddr)> {
+fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
     let layer = packet
         .iter()
         .find(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))?;
     match layer.protocol_id().as_str() {
-        "ipv4" => Some((
-            IpAddr::V4(match layer.field("source")? {
+        "ipv4" => Some(NetworkEnvelope {
+            source: IpAddr::V4(match layer.field("source")? {
                 FieldValue::Ipv4(value) => value,
                 _ => return None,
             }),
-            IpAddr::V4(match layer.field("destination")? {
+            destination: IpAddr::V4(match layer.field("destination")? {
                 FieldValue::Ipv4(value) => value,
                 _ => return None,
             }),
-        )),
-        "ipv6" => Some((
-            IpAddr::V6(match layer.field("source")? {
+        }),
+        "ipv6" => Some(NetworkEnvelope {
+            source: IpAddr::V6(match layer.field("source")? {
                 FieldValue::Ipv6(value) => value,
                 _ => return None,
             }),
-            IpAddr::V6(match layer.field("destination")? {
+            destination: IpAddr::V6(match layer.field("destination")? {
                 FieldValue::Ipv6(value) => value,
                 _ => return None,
             }),
-        )),
+        }),
         _ => None,
     }
 }
 
-fn dns_udp_ports(packet: &Packet) -> Option<(u16, u16)> {
+struct UdpPorts {
+    source: u16,
+    destination: u16,
+}
+
+fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
     let udp = packet
         .iter()
         .find(|layer| layer.protocol_id().as_str() == "udp")?;
-    Some((
-        u16::try_from(udp.field("source_port")?.as_u64()?).ok()?,
-        u16::try_from(udp.field("destination_port")?.as_u64()?).ok()?,
-    ))
+    Some(UdpPorts {
+        source: u16::try_from(udp.field("source_port")?.as_u64()?).ok()?,
+        destination: u16::try_from(udp.field("destination_port")?.as_u64()?).ok()?,
+    })
 }
 
 fn dns_source_port(base: u16, attempt: u32) -> u16 {
@@ -641,8 +646,8 @@ fn update_dns_fallback(outcome: &mut DnsOutcome, rank: &mut u8, candidate: DnsOu
 
 #[derive(Default)]
 struct DnsEvidenceBudget {
-    frames: usize,
-    bytes: usize,
+    retained_frame_count: usize,
+    retained_byte_count: usize,
 }
 
 impl DnsEvidenceBudget {
@@ -652,7 +657,7 @@ impl DnsEvidenceBudget {
         limits: DnsLimits,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> bool {
-        let Some(frames) = self.frames.checked_add(1) else {
+        let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
             push_dns_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -662,7 +667,7 @@ impl DnsEvidenceBudget {
             );
             return false;
         };
-        let Some(bytes) = self.bytes.checked_add(frame.bytes.len()) else {
+        let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
             push_dns_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -672,7 +677,9 @@ impl DnsEvidenceBudget {
             );
             return false;
         };
-        if frames > limits.max_evidence_frames || bytes > limits.max_evidence_bytes {
+        if next_frame_count > limits.max_evidence_frames
+            || next_byte_count > limits.max_evidence_bytes
+        {
             push_dns_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -685,8 +692,8 @@ impl DnsEvidenceBudget {
             );
             return false;
         }
-        self.frames = frames;
-        self.bytes = bytes;
+        self.retained_frame_count = next_frame_count;
+        self.retained_byte_count = next_byte_count;
         true
     }
 }

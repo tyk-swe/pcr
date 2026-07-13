@@ -126,9 +126,9 @@ impl NativeCaptureSource for PcapCaptureSource {
         self.capture
             .stats()
             .map(|statistics| NativeCaptureStatistics {
-                dropped: statistics.dropped,
-                network_dropped: 0,
-                interface_dropped: statistics.if_dropped,
+                capture_dropped_frames: statistics.dropped,
+                network_dropped_frames: 0,
+                interface_dropped_frames: statistics.if_dropped,
             })
             .map_err(|error| LiveIoError::Capture {
                 message: format!("libpcap statistics failed: {error}"),

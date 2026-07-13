@@ -17,7 +17,7 @@ const DEFAULT_MAX_FRAGMENTS_PER_DATAGRAM: usize = 256;
 const DEFAULT_MAX_TCP_SEGMENTS_PER_FLOW: usize = 4_096;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Limits {
+pub struct ReassemblyLimits {
     pub max_flows: usize,
     pub max_bytes_per_flow: usize,
     pub max_aggregate_bytes: usize,
@@ -27,7 +27,7 @@ pub struct Limits {
     pub tcp_idle_expiry: Duration,
 }
 
-impl Default for Limits {
+impl Default for ReassemblyLimits {
     fn default() -> Self {
         Self {
             max_flows: DEFAULT_MAX_REASSEMBLY_FLOWS,
@@ -38,5 +38,30 @@ impl Default for Limits {
             fragment_expiry: Duration::from_secs(30),
             tcp_idle_expiry: Duration::from_secs(120),
         }
+    }
+}
+
+/// Backward-compatible name for [`ReassemblyLimits`].
+pub use ReassemblyLimits as Limits;
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    #[test]
+    fn preferred_public_reassembly_names_are_usable() {
+        let limits = super::ReassemblyLimits::default();
+        let reassembler =
+            super::fragment::Reassembler::new(limits, super::fragment::OverlapPolicy::default());
+        assert_eq!(reassembler.flow_count(), 0);
+
+        let key = super::fragment::DatagramKey {
+            source: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            destination: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            identification: 1,
+            next_header: 17,
+        };
+        let legacy_key: super::fragment::Key = key.clone();
+        assert_eq!(legacy_key, key);
     }
 }

@@ -43,19 +43,21 @@ impl ReplayAuthorizer for SystemAuthorizer {
                 Vec::new(),
             ));
         }
-        let (wire_destinations, unsupported_routing) =
-            replay_wire_policy(frame).map_err(|source| {
-                ReplayAuthorizationError::new(
-                    source.to_string(),
-                    Classification::new(
-                        "packet.replay_ipv4_options",
-                        Kind::Packet,
-                        Some("repair malformed IPv4 source-route options before live replay"),
-                    ),
-                    Vec::new(),
-                )
-            })?;
-        for destination in wire_destinations {
+        let ReplayWireDestinations {
+            addresses,
+            has_unsupported_routing_header,
+        } = replay_wire_destinations(frame).map_err(|source| {
+            ReplayAuthorizationError::new(
+                source.to_string(),
+                Classification::new(
+                    "packet.replay_ipv4_options",
+                    Kind::Packet,
+                    Some("repair malformed IPv4 source-route options before live replay"),
+                ),
+                Vec::new(),
+            )
+        })?;
+        for destination in addresses {
             self.policy
                 .authorize_destination(destination)
                 .map_err(|source| {
@@ -66,7 +68,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                     )
                 })?;
         }
-        if unsupported_routing {
+        if has_unsupported_routing_header {
             return Err(ReplayAuthorizationError::new(
                 "captured IPv6 packet uses an unsupported routing header",
                 Classification::new(
@@ -163,17 +165,17 @@ impl ReplayAuthorizer for SystemAuthorizer {
 /// Production replay transmitter backed by the system interface, route, and
 /// Layer 2/Layer 3 providers.
 pub struct SystemTransmitter {
-    resolved: Option<InterfaceInfo>,
-    packets: DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>,
-    routes: SystemRouteProvider,
+    validated_interface: Option<InterfaceInfo>,
+    packet_io: DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>,
+    route_provider: SystemRouteProvider,
 }
 
 impl SystemTransmitter {
     pub fn new() -> Self {
         Self {
-            resolved: None,
-            packets: DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
-            routes: SystemRouteProvider,
+            validated_interface: None,
+            packet_io: DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
+            route_provider: SystemRouteProvider,
         }
     }
 
@@ -183,7 +185,7 @@ impl SystemTransmitter {
         mode: LinkMode,
         frame: &Frame,
     ) -> Result<InterfaceId, LiveIoError> {
-        if self.resolved.is_none() {
+        if self.validated_interface.is_none() {
             let interfaces = SystemInterfaceProvider.interfaces()?;
             let selected = interfaces
                 .into_iter()
@@ -204,9 +206,9 @@ impl SystemTransmitter {
                     message: "selected interface is not up".to_owned(),
                 });
             }
-            self.resolved = Some(selected);
+            self.validated_interface = Some(selected);
         }
-        let selected = self.resolved.as_ref().expect("resolved above");
+        let selected = self.validated_interface.as_ref().expect("validated above");
         let supported = match mode {
             LinkMode::Layer2 => matches!(
                 selected.capability,
@@ -271,11 +273,11 @@ impl SystemTransmitter {
                 synthesized_ethernet: false,
             },
             LinkMode::Layer3 => {
-                let (source, destination) = replay_ip_endpoints(&frame.bytes)?;
+                let network = replay_network_envelope(&frame.bytes)?;
                 let route = self
-                    .routes
-                    .lookup_with_preferences(destination, Some(&interface.id), None)
-                    .map_err(|source| map_replay_route_error(&self.routes, source))?;
+                    .route_provider
+                    .lookup_with_preferences(network.destination, Some(&interface.id), None)
+                    .map_err(|source| map_replay_route_error(&self.route_provider, source))?;
                 if route.interface != interface.id {
                     return Err(LiveIoError::Device {
                         interface: interface.id.name.clone(),
@@ -300,10 +302,10 @@ impl SystemTransmitter {
                 PlannedRoute {
                     route,
                     mode,
-                    lookup_destination: Some(destination),
-                    final_destination: Some(destination),
-                    visited_destinations: vec![destination],
-                    packet_source: Some(source),
+                    lookup_destination: Some(network.destination),
+                    final_destination: Some(network.destination),
+                    visited_destinations: vec![network.destination],
+                    packet_source: Some(network.source),
                     neighbor_source: None,
                     neighbor_target: None,
                     destination_mac: None,
@@ -344,7 +346,7 @@ impl ReplayTransmitter for SystemTransmitter {
         frame: &Frame,
     ) -> Result<ReplayTransmission, LiveIoError> {
         let selected = self
-            .resolved
+            .validated_interface
             .as_ref()
             .filter(|selected| selected.id == *interface)
             .cloned()
@@ -354,7 +356,7 @@ impl ReplayTransmitter for SystemTransmitter {
             })?;
         let route = self.materialized_route(&selected, mode, frame)?;
         let report = self
-            .packets
+            .packet_io
             .send(TransmissionFrame::try_new(&frame.bytes, &route)?)?;
         Ok(ReplayTransmission {
             interface: selected.id,

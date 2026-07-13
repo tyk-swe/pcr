@@ -16,7 +16,7 @@ use crate::packet::internal::{
 use super::common::{
     aliased_fields, bytes, field_layout, impl_layer_boilerplate, invalid, make_layer, out_of_range,
     payload_without_padding, protocol, resolve_u16, set_wire_u16, transport_checksum, truncated,
-    unknown_field, wire_u16, wrong_layer, wrong_type,
+    unknown_field, wire_u16, wrong_layer, wrong_type, ValueExpectation,
 };
 use super::ip::encode_network;
 
@@ -150,8 +150,7 @@ impl LayerCodec for UdpCodec {
             "udp",
             "length",
             &layer.length,
-            expected_length,
-            true,
+            ValueExpectation::Required(expected_length),
             context.mode,
             &mut diagnostics,
         )?;
@@ -172,8 +171,11 @@ impl LayerCodec for UdpCodec {
             "udp",
             "checksum",
             &layer.checksum,
-            checksum_expected,
-            !ipv4_omitted,
+            if ipv4_omitted {
+                ValueExpectation::Suggested(checksum_expected)
+            } else {
+                ValueExpectation::Required(checksum_expected)
+            },
             context.mode,
             &mut diagnostics,
         )?;
@@ -551,8 +553,7 @@ impl LayerCodec for TcpCodec {
             "tcp",
             "checksum",
             &layer.checksum,
-            checksum_expected,
-            true,
+            ValueExpectation::Required(checksum_expected),
             context.mode,
             &mut diagnostics,
         )?;

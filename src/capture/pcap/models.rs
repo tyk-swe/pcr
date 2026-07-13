@@ -213,5 +213,3 @@ enum TimestampPrecision {
     Microseconds,
     Nanoseconds,
 }
-
-type InterfaceDescription = Interface;

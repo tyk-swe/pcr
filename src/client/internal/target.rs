@@ -75,6 +75,30 @@ impl FromStr for LiveTarget {
     }
 }
 
+/// IP protocol version used when selecting one address from a resolved target.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpVersion {
+    V4,
+    V6,
+}
+
+impl IpVersion {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::V4 => "IPv4",
+            Self::V6 => "IPv6",
+        }
+    }
+
+    const fn accepts(self, address: IpAddr) -> bool {
+        matches!(
+            (self, address),
+            (Self::V4, IpAddr::V4(_)) | (Self::V6, IpAddr::V6(_))
+        )
+    }
+}
+
 /// A target whose declared hostname and every selected address have passed the
 /// current traffic policy. Fields stay private so callers cannot forge this
 /// authorization token.
@@ -97,11 +121,17 @@ impl ResolvedTarget {
         self.addresses[0]
     }
 
-    pub fn address_for_family(&self, ipv4: bool) -> Option<IpAddr> {
+    pub fn address_for_version(&self, version: IpVersion) -> Option<IpAddr> {
         self.addresses
             .iter()
             .copied()
-            .find(|address| address.is_ipv4() == ipv4)
+            .find(|address| version.accepts(*address))
+    }
+
+    #[deprecated(note = "use address_for_version with IpVersion")]
+    pub fn address_for_family(&self, ipv4: bool) -> Option<IpAddr> {
+        let version = if ipv4 { IpVersion::V4 } else { IpVersion::V6 };
+        self.address_for_version(version)
     }
 }
 

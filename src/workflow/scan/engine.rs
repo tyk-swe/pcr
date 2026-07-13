@@ -588,8 +588,8 @@ fn scan_packet_shape_matches(sent: &Packet, network: &str, transport: &str) -> b
 
 #[derive(Default)]
 struct EvidenceBudget {
-    frames: usize,
-    bytes: usize,
+    retained_frame_count: usize,
+    retained_byte_count: usize,
 }
 
 impl EvidenceBudget {
@@ -599,7 +599,7 @@ impl EvidenceBudget {
         limits: ScanLimits,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> bool {
-        let Some(frames) = self.frames.checked_add(1) else {
+        let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
             push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -609,7 +609,7 @@ impl EvidenceBudget {
             );
             return false;
         };
-        let Some(bytes) = self.bytes.checked_add(frame.bytes.len()) else {
+        let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
             push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -619,7 +619,9 @@ impl EvidenceBudget {
             );
             return false;
         };
-        if frames > limits.max_evidence_frames || bytes > limits.max_evidence_bytes {
+        if next_frame_count > limits.max_evidence_frames
+            || next_byte_count > limits.max_evidence_bytes
+        {
             push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -632,8 +634,8 @@ impl EvidenceBudget {
             );
             return false;
         }
-        self.frames = frames;
-        self.bytes = bytes;
+        self.retained_frame_count = next_frame_count;
+        self.retained_byte_count = next_byte_count;
         true
     }
 }

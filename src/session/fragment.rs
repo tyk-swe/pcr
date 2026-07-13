@@ -9,22 +9,27 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(test)]
 use super::Limits;
+use super::ReassemblyLimits;
 
 const DATAGRAM_STATE_METADATA_CHARGE: usize = 128;
 const FRAGMENT_SEGMENT_METADATA_CHARGE: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Key {
+pub struct DatagramKey {
     pub source: IpAddr,
     pub destination: IpAddr,
     pub identification: u32,
     pub next_header: u8,
 }
 
+/// Backward-compatible name for [`DatagramKey`].
+pub use DatagramKey as Key;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fragment {
-    pub key: Key,
+    pub key: DatagramKey,
     /// Byte offset in the reassembled payload.
     pub offset: u32,
     pub more_fragments: bool,
@@ -40,7 +45,7 @@ pub enum OverlapPolicy {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Datagram {
-    pub key: Key,
+    pub key: DatagramKey,
     pub bytes: Bytes,
     pub fragment_count: usize,
     pub had_conflicting_overlap: bool,
@@ -50,7 +55,7 @@ pub struct Datagram {
 pub enum Event {
     Complete(Datagram),
     Expired {
-        key: Key,
+        key: DatagramKey,
         received_bytes: usize,
         fragment_count: usize,
     },
@@ -88,23 +93,23 @@ pub enum Error {
 struct DatagramState {
     segments: BTreeMap<u32, Bytes>,
     final_length: Option<u32>,
-    fragments: usize,
+    fragment_count: usize,
     stored_bytes: usize,
     last_update: Instant,
-    had_conflict: bool,
+    had_conflicting_overlap: bool,
 }
 
 #[derive(Debug)]
 pub struct Reassembler {
-    limits: Limits,
+    limits: ReassemblyLimits,
     overlap_policy: OverlapPolicy,
-    flows: HashMap<Key, DatagramState>,
+    flows: HashMap<DatagramKey, DatagramState>,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
 }
 
 impl Reassembler {
-    pub fn new(limits: Limits, overlap_policy: OverlapPolicy) -> Self {
+    pub fn new(limits: ReassemblyLimits, overlap_policy: OverlapPolicy) -> Self {
         Self {
             limits,
             overlap_policy,
@@ -114,7 +119,7 @@ impl Reassembler {
         }
     }
 
-    pub fn limits(&self) -> &Limits {
+    pub fn limits(&self) -> &ReassemblyLimits {
         &self.limits
     }
 
@@ -154,12 +159,12 @@ impl Reassembler {
         let mut candidate = existing_state.cloned().unwrap_or_else(|| DatagramState {
             segments: BTreeMap::new(),
             final_length: None,
-            fragments: 0,
+            fragment_count: 0,
             stored_bytes: 0,
             last_update: now,
-            had_conflict: false,
+            had_conflicting_overlap: false,
         });
-        if candidate.fragments >= self.limits.max_fragments_per_datagram {
+        if candidate.fragment_count >= self.limits.max_fragments_per_datagram {
             return Err(Error::FragmentLimit {
                 limit: self.limits.max_fragments_per_datagram,
             });
@@ -196,29 +201,26 @@ impl Reassembler {
             &fragment.bytes,
             self.overlap_policy,
         )?;
-        let stored_bytes =
-            candidate
-                .stored_bytes
-                .checked_add(merge.added)
-                .ok_or(Error::AggregateByteLimit {
-                    limit: self.limits.max_aggregate_bytes,
-                })?;
-        let aggregate =
-            self.aggregate_bytes
-                .checked_add(merge.added)
-                .ok_or(Error::AggregateByteLimit {
-                    limit: self.limits.max_aggregate_bytes,
-                })?;
+        let stored_bytes = candidate
+            .stored_bytes
+            .checked_add(merge.added_bytes)
+            .ok_or(Error::AggregateByteLimit {
+                limit: self.limits.max_aggregate_bytes,
+            })?;
+        let aggregate = self.aggregate_bytes.checked_add(merge.added_bytes).ok_or(
+            Error::AggregateByteLimit {
+                limit: self.limits.max_aggregate_bytes,
+            },
+        )?;
         if aggregate > self.limits.max_aggregate_bytes {
             return Err(Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
             });
         }
-        let new_memory_charge = datagram_memory_charge_parts(stored_bytes, merge.segments).ok_or(
-            Error::AggregateByteLimit {
+        let new_memory_charge = datagram_memory_charge_parts(stored_bytes, merge.segment_count)
+            .ok_or(Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
-            },
-        )?;
+            })?;
         let aggregate_memory_charge = self
             .aggregate_memory_charge
             .checked_sub(old_memory_charge)
@@ -244,9 +246,9 @@ impl Reassembler {
         self.aggregate_memory_charge = aggregate_memory_charge;
         candidate.segments = segments;
         candidate.stored_bytes = stored_bytes;
-        candidate.fragments += 1;
+        candidate.fragment_count += 1;
         candidate.last_update = now;
-        candidate.had_conflict |= merge.conflict;
+        candidate.had_conflicting_overlap |= merge.has_conflicting_overlap;
 
         let complete = candidate
             .final_length
@@ -265,8 +267,8 @@ impl Reassembler {
             return Ok(Some(Event::Complete(Datagram {
                 key: fragment.key,
                 bytes: Bytes::from(bytes),
-                fragment_count: candidate.fragments,
-                had_conflicting_overlap: candidate.had_conflict,
+                fragment_count: candidate.fragment_count,
+                had_conflicting_overlap: candidate.had_conflicting_overlap,
             })));
         }
         self.flows.insert(fragment.key, candidate);
@@ -301,7 +303,7 @@ impl Reassembler {
                 Some(Event::Expired {
                     key,
                     received_bytes: state.stored_bytes,
-                    fragment_count: state.fragments,
+                    fragment_count: state.fragment_count,
                 })
             })
             .collect()
@@ -324,7 +326,7 @@ impl Reassembler {
                 Some(Event::Expired {
                     key,
                     received_bytes: state.stored_bytes,
-                    fragment_count: state.fragments,
+                    fragment_count: state.fragment_count,
                 })
             })
             .collect();
@@ -338,8 +340,8 @@ fn datagram_memory_charge(state: &DatagramState) -> Option<usize> {
     datagram_memory_charge_parts(state.stored_bytes, state.segments.len())
 }
 
-fn datagram_memory_charge_parts(stored_bytes: usize, segments: usize) -> Option<usize> {
-    segments
+fn datagram_memory_charge_parts(stored_bytes: usize, segment_count: usize) -> Option<usize> {
+    segment_count
         .checked_mul(FRAGMENT_SEGMENT_METADATA_CHARGE)
         .and_then(|metadata| metadata.checked_add(DATAGRAM_STATE_METADATA_CHARGE))
         .and_then(|metadata| metadata.checked_add(stored_bytes))
@@ -347,9 +349,9 @@ fn datagram_memory_charge_parts(stored_bytes: usize, segments: usize) -> Option<
 
 #[derive(Clone, Copy, Debug)]
 struct FragmentMergePlan {
-    added: usize,
-    conflict: bool,
-    segments: usize,
+    added_bytes: usize,
+    has_conflicting_overlap: bool,
+    segment_count: usize,
 }
 
 fn plan_fragment_merge(
@@ -362,15 +364,15 @@ fn plan_fragment_merge(
     let new_end = offset
         .checked_add(u32::try_from(fragment.len()).map_err(|_| Error::OffsetOverflow)?)
         .ok_or(Error::OffsetOverflow)?;
-    let mut overlap = 0usize;
-    let mut connected = 0usize;
-    let mut conflict = false;
-    for (start, value) in existing {
+    let mut overlapping_bytes = 0usize;
+    let mut connected_segment_count = 0usize;
+    let mut has_conflicting_overlap = false;
+    for (start, existing_bytes) in existing {
         let end = start
-            .checked_add(u32::try_from(value.len()).map_err(|_| Error::OffsetOverflow)?)
+            .checked_add(u32::try_from(existing_bytes.len()).map_err(|_| Error::OffsetOverflow)?)
             .ok_or(Error::OffsetOverflow)?;
         if end >= offset && *start <= new_end {
-            connected += 1;
+            connected_segment_count += 1;
         }
         let overlap_start = (*start).max(offset);
         let overlap_end = end.min(new_end);
@@ -378,13 +380,15 @@ fn plan_fragment_merge(
             let length = (overlap_end - overlap_start) as usize;
             let existing_start = (overlap_start - *start) as usize;
             let fragment_start = (overlap_start - offset) as usize;
-            overlap = overlap.checked_add(length).ok_or(Error::OffsetOverflow)?;
-            if value[existing_start..existing_start + length]
+            overlapping_bytes = overlapping_bytes
+                .checked_add(length)
+                .ok_or(Error::OffsetOverflow)?;
+            if existing_bytes[existing_start..existing_start + length]
                 != fragment[fragment_start..fragment_start + length]
             {
-                conflict = true;
+                has_conflicting_overlap = true;
                 if policy == OverlapPolicy::RejectConflicting {
-                    let mismatch = value[existing_start..existing_start + length]
+                    let mismatch = existing_bytes[existing_start..existing_start + length]
                         .iter()
                         .zip(&fragment[fragment_start..fragment_start + length])
                         .position(|(left, right)| left != right)
@@ -397,15 +401,15 @@ fn plan_fragment_merge(
         }
     }
     Ok(FragmentMergePlan {
-        added: fragment
+        added_bytes: fragment
             .len()
-            .checked_sub(overlap)
+            .checked_sub(overlapping_bytes)
             .ok_or(Error::OffsetOverflow)?,
-        conflict,
-        segments: existing
+        has_conflicting_overlap,
+        segment_count: existing
             .len()
             .checked_add(1)
-            .and_then(|count| count.checked_sub(connected))
+            .and_then(|count| count.checked_sub(connected_segment_count))
             .ok_or(Error::OffsetOverflow)?,
     })
 }
@@ -427,7 +431,7 @@ fn merge_fragment(
     let mut segments = existing.clone();
     if affected.is_empty() {
         segments.insert(offset, Bytes::copy_from_slice(fragment));
-        debug_assert_eq!(segments.len(), plan.segments);
+        debug_assert_eq!(segments.len(), plan.segment_count);
         return Some(segments);
     }
 
@@ -454,7 +458,7 @@ fn merge_fragment(
         segments.remove(start);
     }
     segments.insert(union_start, Bytes::from(bytes));
-    debug_assert_eq!(segments.len(), plan.segments);
+    debug_assert_eq!(segments.len(), plan.segment_count);
     Some(segments)
 }
 
@@ -482,8 +486,8 @@ mod tests {
 
     use super::*;
 
-    fn key() -> Key {
-        Key {
+    fn key() -> DatagramKey {
+        DatagramKey {
             source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
             destination: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
             identification: 7,

@@ -14,9 +14,9 @@ pub trait Clock {
 
 /// Production wall-clock implementation.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct System;
+pub struct SystemClock;
 
-impl Clock for System {
+impl Clock for SystemClock {
     type Error = Infallible;
 
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
@@ -24,6 +24,9 @@ impl Clock for System {
         Ok(())
     }
 }
+
+/// Backward-compatible name for [`SystemClock`].
+pub use SystemClock as System;
 
 pub(super) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
     let Some(rate) = rate else {
@@ -51,5 +54,13 @@ mod tests {
     fn rate_delay_handles_disabled_and_invalid_rates() {
         assert_eq!(rate_delay(10, None), Some(Duration::ZERO));
         assert_eq!(rate_delay(1, Some(0)), None);
+    }
+
+    #[test]
+    fn preferred_public_clock_name_is_usable() {
+        let mut clock = crate::workflow::clock::SystemClock;
+        assert_eq!(clock.sleep(Duration::ZERO), Ok(()));
+
+        let _legacy_name: crate::workflow::clock::System = clock;
     }
 }

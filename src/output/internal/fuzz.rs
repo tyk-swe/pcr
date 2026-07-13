@@ -169,20 +169,20 @@ impl FuzzCommandResult {
             diagnostics,
             stats,
         } = result;
-        let cases = cases
+        let case_outputs = cases
             .into_iter()
             .map(|case| {
-                let frame = case
+                let built_frame = case
                     .built
                     .as_ref()
                     .map(|built| WireFrameOutput::new(built.bytes.clone()));
                 let requires_live_opt_in =
                     case.built.as_ref().map(|built| built.requires_live_opt_in);
-                let decoded = case
+                let decoded_packet = case
                     .decoded
                     .as_ref()
                     .map(|decoded| PacketDocument::from_packet(&decoded.packet));
-                let error = case.error.as_ref().map(|error| {
+                let output_error = case.error.as_ref().map(|error| {
                     OutputError::new(error.classification(), error.to_string(), error.causes())
                 });
                 Ok(FuzzCaseOutput {
@@ -192,11 +192,11 @@ impl FuzzCommandResult {
                     reproduction: case.reproduction.into(),
                     shrink_values: case.shrink_values,
                     recipe: PacketDocument::from_packet(&case.recipe),
-                    frame,
-                    decoded,
+                    frame: built_frame,
+                    decoded: decoded_packet,
                     requires_live_opt_in,
                     outcome: case.outcome.into(),
-                    error,
+                    error: output_error,
                     sent: case.sent.map(FrameOutput::try_from_frame).transpose()?,
                     responses: case
                         .responses
@@ -232,7 +232,7 @@ impl FuzzCommandResult {
                 cases_generated: stats.cases_generated,
                 cases_built: stats.cases_built,
                 cases_rejected: stats.cases_rejected,
-                cases,
+                cases: case_outputs,
             },
             diagnostics,
             operation_stats,

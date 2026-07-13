@@ -82,17 +82,19 @@ pub struct InterfacesCommandResult {
 
 impl InterfacesCommandResult {
     pub fn new(interfaces: Vec<InterfaceInfo>) -> Self {
-        let mut interfaces = interfaces
+        let mut interface_outputs = interfaces
             .into_iter()
             .map(InterfaceOutput::from)
             .collect::<Vec<_>>();
-        for interface in &mut interfaces {
+        for interface in &mut interface_outputs {
             interface.addresses.sort();
         }
-        interfaces.sort_by(|left, right| {
+        interface_outputs.sort_by(|left, right| {
             (left.index, left.name.as_str()).cmp(&(right.index, right.name.as_str()))
         });
-        Self { interfaces }
+        Self {
+            interfaces: interface_outputs,
+        }
     }
 }
 
@@ -481,14 +483,14 @@ impl ExchangeCommandResult {
             mut diagnostics,
             stats,
         } = result;
-        let sent = sent
+        let sent_frames = sent
             .into_iter()
             .map(|built| {
                 diagnostics.extend(built.diagnostics);
                 WireFrameOutput::new(built.bytes)
             })
             .collect();
-        let responses = responses
+        let response_outputs = responses
             .into_iter()
             .map(|response| {
                 Ok(ExchangeResponseOutput {
@@ -498,21 +500,21 @@ impl ExchangeCommandResult {
                 })
             })
             .collect::<Result<Vec<_>, OutputContractError>>()?;
-        let unsolicited = unsolicited
+        let unsolicited_outputs = unsolicited
             .into_iter()
             .map(DecodedFrameOutput::try_from_decoded)
             .collect::<Result<Vec<_>, _>>()?;
-        let undecoded = undecoded
+        let undecoded_frames = undecoded
             .into_iter()
             .map(FrameOutput::try_from_frame)
             .collect::<Result<Vec<_>, _>>()?;
         Ok((
             Self {
-                sent,
-                responses,
+                sent: sent_frames,
+                responses: response_outputs,
                 unanswered: unanswered.into_iter().map(|index| index as u64).collect(),
-                unsolicited,
-                undecoded,
+                unsolicited: unsolicited_outputs,
+                undecoded: undecoded_frames,
             },
             diagnostics,
             stats.into(),

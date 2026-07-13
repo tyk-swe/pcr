@@ -103,7 +103,7 @@ where
             .map_err(|source| TracerouteError::Execution { sequence, source })?;
         validate_execution(batch, &execution, request.limits)?;
         add_stats(&mut stats, &execution.stats, sequence)?;
-        let processed = process_batch(
+        let hop = process_batch(
             batch,
             execution,
             registry,
@@ -112,19 +112,19 @@ where
             &mut undecoded,
             &mut diagnostics,
         );
-        any_response |= processed
+        any_response |= hop
             .probes
             .iter()
             .any(|probe| probe.status == TracerouteProbeStatus::Response);
-        let reached = processed
+        let reached = hop
             .probes
             .iter()
             .any(|probe| probe.response_kind == Some(TracerouteResponseKind::DestinationReached));
-        let unreachable = processed
+        let unreachable = hop
             .probes
             .iter()
             .any(|probe| probe.response_kind == Some(TracerouteResponseKind::Unreachable));
-        hops.push(processed);
+        hops.push(hop);
         if reached {
             completion = TracerouteCompletion::DestinationReached;
             break;
@@ -161,7 +161,7 @@ where
 
 fn build_batches(
     request: &TracerouteRequest,
-    address: IpAddr,
+    destination: IpAddr,
 ) -> Result<Vec<TracerouteBatch>, TracerouteError> {
     let mut batches = Vec::with_capacity(request.hop_count());
     let mut sequence = 0_u64;
@@ -181,7 +181,7 @@ fn build_batches(
             };
             probes.push(TracerouteProbe {
                 sequence,
-                address,
+                address: destination,
                 strategy: request.strategy,
                 destination_port,
                 hop_limit,
@@ -561,8 +561,8 @@ fn traceroute_packet_shape_matches(sent: &Packet, network: &str, transport: &str
 
 #[derive(Default)]
 struct EvidenceBudget {
-    frames: usize,
-    bytes: usize,
+    retained_frame_count: usize,
+    retained_byte_count: usize,
 }
 
 impl EvidenceBudget {
@@ -572,7 +572,7 @@ impl EvidenceBudget {
         limits: TracerouteLimits,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> bool {
-        let Some(frames) = self.frames.checked_add(1) else {
+        let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
             push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -582,7 +582,7 @@ impl EvidenceBudget {
             );
             return false;
         };
-        let Some(bytes) = self.bytes.checked_add(frame.bytes.len()) else {
+        let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
             push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -592,7 +592,9 @@ impl EvidenceBudget {
             );
             return false;
         };
-        if frames > limits.max_evidence_frames || bytes > limits.max_evidence_bytes {
+        if next_frame_count > limits.max_evidence_frames
+            || next_byte_count > limits.max_evidence_bytes
+        {
             push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
@@ -605,8 +607,8 @@ impl EvidenceBudget {
             );
             return false;
         }
-        self.frames = frames;
-        self.bytes = bytes;
+        self.retained_frame_count = next_frame_count;
+        self.retained_byte_count = next_byte_count;
         true
     }
 }

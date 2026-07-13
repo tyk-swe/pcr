@@ -123,10 +123,10 @@ impl TracerouteCommandResult {
             diagnostics,
             stats,
         } = result;
-        let hops = hops
+        let hop_outputs = hops
             .into_iter()
             .map(|hop| {
-                let probes = hop
+                let probe_outputs = hop
                     .probes
                     .into_iter()
                     .map(|probe| {
@@ -156,11 +156,11 @@ impl TracerouteCommandResult {
                     .collect::<Result<Vec<_>, OutputContractError>>()?;
                 Ok(TraceHopOutput {
                     hop_limit: hop.hop_limit,
-                    probes,
+                    probes: probe_outputs,
                 })
             })
             .collect::<Result<Vec<_>, OutputContractError>>()?;
-        let undecoded = undecoded
+        let undecoded_outputs = undecoded
             .into_iter()
             .map(|evidence| {
                 Ok(TraceUndecodedOutput {
@@ -169,7 +169,7 @@ impl TracerouteCommandResult {
                 })
             })
             .collect::<Result<Vec<_>, OutputContractError>>()?;
-        let stats = OperationStats {
+        let operation_stats = OperationStats {
             packets_attempted: stats.packets_attempted,
             packets_completed: stats.packets_completed,
             bytes: stats.bytes,
@@ -183,12 +183,12 @@ impl TracerouteCommandResult {
                 destination,
                 strategy: strategy.to_string(),
                 destination_port,
-                hops,
-                undecoded,
+                hops: hop_outputs,
+                undecoded: undecoded_outputs,
                 completion: completion.into(),
             },
             diagnostics,
-            stats,
+            operation_stats,
         ))
     }
 }

@@ -79,8 +79,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         registry: Arc::clone(&registry),
         policy: policy.clone(),
         exchange,
-        interface,
-        interface_resolved: false,
+        interface: DeferredInterface::new(interface),
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyScanAuthorizer::new(&policy, &resolver);
@@ -119,18 +118,14 @@ struct CliScanExecutor {
     registry: Arc<crate::packet::internal::ProtocolRegistry>,
     policy: TrafficPolicy,
     exchange: ExchangeOptions,
-    interface: Option<String>,
-    interface_resolved: bool,
+    interface: DeferredInterface,
 }
 
 impl ScanExecutor for CliScanExecutor {
     fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
-        if !self.interface_resolved {
-            self.exchange.send.plan.interface =
-                resolve_interface(self.interface.take(), &SystemInterfaceProvider)
-                    .map_err(scan_execution_error_from_cli)?;
-            self.interface_resolved = true;
-        }
+        self.interface
+            .resolve_into(&mut self.exchange.send.plan)
+            .map_err(scan_execution_error_from_cli)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientScanExecutor::new(&client, self.exchange.clone()).execute(batch)
     }

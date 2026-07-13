@@ -67,7 +67,7 @@ mod tests {
         ipv4[16..20].copy_from_slice(&[8, 8, 8, 8]);
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, ipv4).unwrap();
         assert_eq!(
-            replay_wire_policy(&frame).unwrap().0,
+            replay_wire_destinations(&frame).unwrap().addresses,
             [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
         );
         let registry = Arc::new(crate::protocol::internal::default_registry().unwrap());
@@ -88,7 +88,11 @@ mod tests {
                 unsupported[42] = 0;
             }
             let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, unsupported).unwrap();
-            assert!(replay_wire_policy(&frame).unwrap().1);
+            assert!(
+                replay_wire_destinations(&frame)
+                    .unwrap()
+                    .has_unsupported_routing_header
+            );
             let mut authorizer = SystemAuthorizer::new(
                 crate::client::policy::Policy::default(),
                 Arc::clone(&registry),

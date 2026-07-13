@@ -7,7 +7,7 @@ enum ReaderState {
     },
     PcapNg {
         endianness: Endianness,
-        interfaces: Vec<InterfaceDescription>,
+        interfaces: Vec<Interface>,
         interface_base: u32,
     },
 }
@@ -105,7 +105,11 @@ impl<R: Read> Reader<R> {
                     interface_base: 0,
                 }
             }
-            magic => return Err(Error::UnrecognizedFormat { magic }),
+            unknown_magic => {
+                return Err(Error::UnrecognizedFormat {
+                    magic: unknown_magic,
+                });
+            }
         };
 
         let interfaces = match &state {
@@ -198,11 +202,11 @@ impl<R: Read> Reader<R> {
         };
 
         match result {
-            Ok(result) => {
-                if result.is_none() {
+            Ok(frame) => {
+                if frame.is_none() {
                     self.finished = true;
                 }
-                Ok(result)
+                Ok(frame)
             }
             Err(error) => {
                 self.finished = true;
@@ -219,7 +223,8 @@ impl<R: Read> Reader<R> {
     fn next_pcapng_frame(&mut self) -> Result<Option<Frame>, Error> {
         let mut metadata_blocks = 0usize;
         loop {
-            let (endianness, interfaces, interface_base) = match &self.state {
+            let (section_endianness, section_interfaces, section_interface_base) = match &self.state
+            {
                 ReaderState::PcapNg {
                     endianness,
                     interfaces,
@@ -267,8 +272,8 @@ impl<R: Read> Reader<R> {
                 continue;
             }
 
-            let block_type = decode_u32(endianness, &raw_header[..4]);
-            let block_length = decode_u32(endianness, &raw_header[4..8]);
+            let block_type = decode_u32(section_endianness, &raw_header[..4]);
+            let block_length = decode_u32(section_endianness, &raw_header[4..8]);
             validate_pcapng_block_length(block_length, self.max_size)?;
             let remaining =
                 usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
@@ -278,7 +283,7 @@ impl<R: Read> Reader<R> {
             read_exact_counted(&mut self.inner, &mut block, "pcapng block")?;
 
             let body_length = block.len() - 4;
-            let trailing_length = decode_u32(endianness, &block[body_length..]);
+            let trailing_length = decode_u32(section_endianness, &block[body_length..]);
             if trailing_length != block_length {
                 return Err(Error::BlockLengthMismatch {
                     leading: block_length,
@@ -301,7 +306,7 @@ impl<R: Read> Reader<R> {
 
             match block_type {
                 PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
-                    let description = parse_interface_description(body, endianness)?;
+                    let description = parse_interface_description(body, section_endianness)?;
                     match &mut self.state {
                         ReaderState::PcapNg { interfaces, .. } => {
                             if interfaces.len() >= self.max_interfaces {
@@ -323,9 +328,9 @@ impl<R: Read> Reader<R> {
                 PCAPNG_ENHANCED_PACKET_BLOCK => {
                     return parse_enhanced_packet(
                         body,
-                        endianness,
-                        interfaces,
-                        interface_base,
+                        section_endianness,
+                        section_interfaces,
+                        section_interface_base,
                         self.max_size,
                     )
                     .map(Some);
@@ -333,9 +338,9 @@ impl<R: Read> Reader<R> {
                 PCAPNG_PACKET_BLOCK => {
                     return parse_obsolete_packet(
                         body,
-                        endianness,
-                        interfaces,
-                        interface_base,
+                        section_endianness,
+                        section_interfaces,
+                        section_interface_base,
                         self.max_size,
                     )
                     .map(Some);
@@ -343,9 +348,9 @@ impl<R: Read> Reader<R> {
                 PCAPNG_SIMPLE_PACKET_BLOCK => {
                     return parse_simple_packet(
                         body,
-                        endianness,
-                        interfaces,
-                        interface_base,
+                        section_endianness,
+                        section_interfaces,
+                        section_interface_base,
                         self.max_size,
                     )
                     .map(Some);

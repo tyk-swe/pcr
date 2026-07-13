@@ -12,9 +12,9 @@ pub use internal::{Client, ClientError as Error, OperationStats as Stats};
 /// Live target resolution.
 pub mod target {
     pub use super::internal::{
-        Hostname, HostnameResolver as Resolver, LiveTarget as Target, ResolvedTarget as Resolved,
-        SystemHostnameResolver as SystemResolver, TargetResolutionError as Error,
-        DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_RESOLVED_ADDRESSES,
+        Hostname, HostnameResolver as Resolver, IpVersion, LiveTarget as Target,
+        ResolvedTarget as Resolved, SystemHostnameResolver as SystemResolver,
+        TargetResolutionError as Error, DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_RESOLVED_ADDRESSES,
     };
 }
 
@@ -34,4 +34,22 @@ pub mod exchange {
         ExchangeOptions as Options, ExchangeResult as Result, MatchedResponse as Response,
         DEFAULT_MAX_UNSOLICITED_FRAMES, MAX_EXCHANGE_TIMEOUT,
     };
+}
+
+#[cfg(test)]
+mod public_api_tests {
+    use super::policy::Policy;
+    use super::target::{IpVersion, SystemResolver, Target};
+
+    #[test]
+    fn resolved_target_exposes_typed_ip_version_selection() {
+        let address = "10.0.0.1".parse().unwrap();
+        let target = Target::Address(address);
+        let resolved = Policy::default()
+            .resolve_target(&target, &SystemResolver)
+            .unwrap();
+
+        assert_eq!(resolved.address_for_version(IpVersion::V4), Some(address));
+        assert_eq!(resolved.address_for_version(IpVersion::V6), None);
+    }
 }

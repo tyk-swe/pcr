@@ -3,20 +3,20 @@
 
 use std::net::IpAddr;
 
-use crate::packet::internal::{FieldValue, MatchResult, Packet, ResponseMatcher};
+use crate::packet::internal::{FieldValue, MatchResult, NetworkEnvelope, Packet, ResponseMatcher};
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReverseTupleMatcher {
+pub(crate) struct ReverseFlowMatcher {
     protocol: &'static str,
 }
 
-impl ReverseTupleMatcher {
+impl ReverseFlowMatcher {
     pub(crate) fn new(protocol: &'static str) -> Self {
         Self { protocol }
     }
 }
 
-impl ResponseMatcher for ReverseTupleMatcher {
+impl ResponseMatcher for ReverseFlowMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
         let Some((request_layer_index, request_layer)) = request
             .iter()
@@ -32,29 +32,40 @@ impl ResponseMatcher for ReverseTupleMatcher {
         else {
             return MatchResult::no_match();
         };
-        let Some((request_source, request_destination)) =
-            ip_tuple_before(request, request_layer_index)
+        let Some(request_endpoints) = network_endpoints_before(request, request_layer_index) else {
+            return MatchResult::no_match();
+        };
+        let Some(response_endpoints) = network_endpoints_before(response, response_layer_index)
         else {
             return MatchResult::no_match();
         };
-        let Some((response_source, response_destination)) =
-            ip_tuple_before(response, response_layer_index)
-        else {
-            return MatchResult::no_match();
-        };
-        if request_source != response_destination || request_destination != response_source {
+        if request_endpoints.source != response_endpoints.destination
+            || request_endpoints.destination != response_endpoints.source
+        {
             return MatchResult::no_match();
         }
-        let ports = |layer: &dyn crate::packet::internal::Layer| {
-            Some((
-                layer.field("source_port")?.as_u64()?,
-                layer.field("destination_port")?.as_u64()?,
-            ))
-        };
-        let Some((request_source_port, request_destination_port)) = ports(request_layer) else {
+        let Some(request_source_port) = request_layer
+            .field("source_port")
+            .and_then(|value| value.as_u64())
+        else {
             return MatchResult::no_match();
         };
-        let Some((response_source_port, response_destination_port)) = ports(response_layer) else {
+        let Some(request_destination_port) = request_layer
+            .field("destination_port")
+            .and_then(|value| value.as_u64())
+        else {
+            return MatchResult::no_match();
+        };
+        let Some(response_source_port) = response_layer
+            .field("source_port")
+            .and_then(|value| value.as_u64())
+        else {
+            return MatchResult::no_match();
+        };
+        let Some(response_destination_port) = response_layer
+            .field("destination_port")
+            .and_then(|value| value.as_u64())
+        else {
             return MatchResult::no_match();
         };
         if request_source_port == response_destination_port
@@ -134,7 +145,7 @@ impl ResponseMatcher for ReverseTupleMatcher {
         let response_layer_index = response
             .iter()
             .position(|layer| layer.protocol_id().as_str() == self.protocol)?;
-        ip_tuple_before(response, response_layer_index).map(|(source, _)| source)
+        network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
     }
 }
 
@@ -221,17 +232,16 @@ impl ResponseMatcher for EchoMatcher {
         else {
             return MatchResult::no_match();
         };
-        let Some((request_source, request_destination)) =
-            ip_tuple_before(request, request_layer_index)
+        let Some(request_endpoints) = network_endpoints_before(request, request_layer_index) else {
+            return MatchResult::no_match();
+        };
+        let Some(response_endpoints) = network_endpoints_before(response, response_layer_index)
         else {
             return MatchResult::no_match();
         };
-        let Some((response_source, response_destination)) =
-            ip_tuple_before(response, response_layer_index)
-        else {
-            return MatchResult::no_match();
-        };
-        if request_source != response_destination || request_destination != response_source {
+        if request_endpoints.source != response_endpoints.destination
+            || request_endpoints.destination != response_endpoints.source
+        {
             return MatchResult::no_match();
         }
         if request_layer.field("type").and_then(|value| value.as_u64()) != Some(self.request_type)
@@ -269,11 +279,11 @@ impl ResponseMatcher for EchoMatcher {
         let response_layer_index = response
             .iter()
             .position(|layer| layer.protocol_id().as_str() == self.protocol)?;
-        ip_tuple_before(response, response_layer_index).map(|(source, _)| source)
+        network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
     }
 }
 
-fn ip_tuple_before(packet: &Packet, upper_layer_index: usize) -> Option<(IpAddr, IpAddr)> {
+fn network_endpoints_before(packet: &Packet, upper_layer_index: usize) -> Option<NetworkEnvelope> {
     let (network_layer_index, network_layer) = packet
         .iter()
         .enumerate()
@@ -309,7 +319,10 @@ fn ip_tuple_before(packet: &Packet, upper_layer_index: usize) -> Option<(IpAddr,
     {
         destination = final_segment;
     }
-    Some((source, destination))
+    Some(NetworkEnvelope {
+        source,
+        destination,
+    })
 }
 
 #[cfg(test)]
@@ -382,7 +395,7 @@ mod tests {
                 ..Udp::default()
             });
 
-        let matcher = ReverseTupleMatcher::new("udp");
+        let matcher = ReverseFlowMatcher::new("udp");
         assert!(matcher.matches(&request, &response).matched);
         assert_eq!(
             matcher.responder(&request, &response),
@@ -433,7 +446,7 @@ mod tests {
                 ..Udp::default()
             });
 
-        let matcher = ReverseTupleMatcher::new("udp");
+        let matcher = ReverseFlowMatcher::new("udp");
         assert!(matcher.matches(&request, &response).matched);
         assert_eq!(
             matcher.responder(&request, &response),
@@ -475,7 +488,7 @@ mod tests {
         let client = Ipv4Addr::new(10, 0, 0, 1);
         let server = Ipv4Addr::new(10, 0, 0, 2);
         let request = tcp_packet(client, server, 100, 0, Tcp::SYN);
-        let matcher = ReverseTupleMatcher::new("tcp");
+        let matcher = ReverseFlowMatcher::new("tcp");
 
         let valid_syn_ack = tcp_packet(server, client, 500, 101, Tcp::SYN | Tcp::ACK);
         let wrong_syn_ack = tcp_packet(server, client, 500, 102, Tcp::SYN | Tcp::ACK);
@@ -498,7 +511,7 @@ mod tests {
         let server = Ipv4Addr::new(10, 0, 0, 2);
         let mut request = tcp_packet(client, server, u32::MAX - 2, 0, Tcp::SYN);
         request.push(Raw::new(Bytes::from_static(b"data")));
-        let matcher = ReverseTupleMatcher::new("tcp");
+        let matcher = ReverseFlowMatcher::new("tcp");
 
         // Four data bytes plus SYN consume five sequence numbers and wrap.
         let valid = tcp_packet(server, client, 500, 2, Tcp::SYN | Tcp::ACK);
@@ -516,7 +529,7 @@ mod tests {
             [100, 200, 300].map(|sequence| tcp_packet(client, server, sequence, 0, Tcp::SYN));
         let responses = [300, 100, 200]
             .map(|sequence| tcp_packet(server, client, 500, sequence + 1, Tcp::SYN | Tcp::ACK));
-        let matcher = ReverseTupleMatcher::new("tcp");
+        let matcher = ReverseFlowMatcher::new("tcp");
 
         for (response, expected_sequence) in responses.iter().zip([300, 100, 200]) {
             let matches = requests

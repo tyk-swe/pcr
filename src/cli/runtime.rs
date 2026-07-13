@@ -10,6 +10,33 @@ struct PreparedRouteRequest {
     policy: TrafficPolicy,
 }
 
+#[derive(Debug)]
+enum DeferredInterface {
+    Pending(String),
+    Resolved,
+}
+
+impl DeferredInterface {
+    fn new(selector: Option<String>) -> Self {
+        match selector {
+            Some(selector) => Self::Pending(selector),
+            None => Self::Resolved,
+        }
+    }
+
+    fn resolve_into(&mut self, options: &mut crate::net::PlanOptions) -> Result<(), CliError> {
+        let Self::Pending(selector) = self else {
+            return Ok(());
+        };
+        options.interface = resolve_interface(
+            Some(selector.clone()),
+            &SystemInterfaceProvider,
+        )?;
+        *self = Self::Resolved;
+        Ok(())
+    }
+}
+
 pub(crate) fn run_entrypoint() -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -35,7 +62,7 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                         Ok(()) => exit_code(code),
                         Err(write_error) => {
                             let _ = emit_stderr_error(&write_error.message);
-                            exit_code(write_error.code)
+                            exit_code(write_error.exit_code)
                         }
                     };
                 }
@@ -75,9 +102,9 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                 if matches!(output, OutputFormat::Json | OutputFormat::Ndjson) {
                     let _ = emit_stderr_error(&write_error.message);
                 }
-                return exit_code(write_error.code);
+                return exit_code(write_error.exit_code);
             }
-            exit_code(error.code)
+            exit_code(error.exit_code)
         }
     }
 }
@@ -127,9 +154,9 @@ fn run(cli: Cli) -> Result<(), CliError> {
     }
 }
 
-type SystemPackets = DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>;
-type SystemLiveIo = Composite<SystemPackets, SystemCaptureProvider>;
-type SystemClient = Client<SystemRouteProvider, SystemNeighborResolver, SystemLiveIo>;
+type SystemPacketIo = DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>;
+type SystemExchangeIo = Composite<SystemPacketIo, SystemCaptureProvider>;
+type SystemClient = Client<SystemRouteProvider, SystemNeighborResolver, SystemExchangeIo>;
 
 fn default_registry_arc() -> Result<Arc<crate::packet::internal::ProtocolRegistry>, CliError> {
     crate::protocol::internal::default_registry()
@@ -189,28 +216,30 @@ fn prepare_route_request(
 }
 
 fn resolve_live_destination(
-    value: Option<String>,
+    destination: Option<String>,
     packet: &Packet,
     policy: &TrafficPolicy,
 ) -> Result<Option<IpAddr>, CliError> {
-    let Some(value) = value else {
+    let Some(destination) = destination else {
         return Ok(None);
     };
-    let target = value.parse::<LiveTarget>().map_err(CliError::classified)?;
+    let target = destination
+        .parse::<LiveTarget>()
+        .map_err(CliError::classified)?;
     let resolved = policy
         .resolve_target(&target, &SystemHostnameResolver)
         .map_err(CliError::classified)?;
-    let family = packet
+    let ip_version = packet
         .iter()
         .find_map(|layer| match layer.protocol_id().as_str() {
-            "ipv4" => Some(true),
-            "ipv6" => Some(false),
+            "ipv4" => Some(IpVersion::V4),
+            "ipv6" => Some(IpVersion::V6),
             _ => None,
         });
-    match family {
-        Some(ipv4) => resolved.address_for_family(ipv4).map(Some).ok_or_else(|| {
+    match ip_version {
+        Some(version) => resolved.address_for_version(version).map(Some).ok_or_else(|| {
             CliError::classified(crate::client::target::Error::AddressFamilyUnavailable {
-                family: if ipv4 { "IPv4" } else { "IPv6" },
+                family: version.label(),
             })
         }),
         None => Ok(Some(resolved.selected_address())),

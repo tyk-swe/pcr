@@ -233,7 +233,7 @@ mod tests {
     fn bounded_input_rejects_an_unrepresentable_sentinel_limit() {
         let error = read_bounded_allow_empty(std::io::Cursor::new(Vec::<u8>::new()), usize::MAX)
             .unwrap_err();
-        assert_eq!(error.code, 70);
+        assert_eq!(error.exit_code, 70);
         assert!(error.message.contains("cannot be represented"));
     }
 
@@ -250,7 +250,7 @@ mod tests {
 
         for selector in ["", "0", "4294967296", "999999999999999999999999"] {
             let error = validate_interface_selector("test", Some(selector)).unwrap_err();
-            assert_eq!(error.code, 2, "{selector:?}");
+            assert_eq!(error.exit_code, 2, "{selector:?}");
         }
     }
 
@@ -307,14 +307,14 @@ mod tests {
         let capability = CliError::classified(crate::net::LiveIoError::Privilege {
             message: "permission denied".to_owned(),
         });
-        assert_eq!(capability.code, 4);
+        assert_eq!(capability.exit_code, 4);
         assert_eq!(capability.classification.code, "capability.privilege");
 
         let runtime = CliError::classified(crate::net::LiveIoError::PartialSend {
             expected: 10,
             actual: 9,
         });
-        assert_eq!(runtime.code, 5);
+        assert_eq!(runtime.exit_code, 5);
         assert_eq!(runtime.classification.code, "io.partial_send");
 
         let dual = CliError::classified(crate::client::Error::OperationAndCaptureShutdown {
@@ -408,7 +408,7 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error.code, 4);
+        assert_eq!(error.exit_code, 4);
         assert_eq!(error.classification.code, "capability.privilege");
         assert_eq!(error.sequence, Some(0));
         assert_eq!(error.causes.len(), 2);
@@ -445,7 +445,7 @@ mod tests {
         .unwrap_err();
 
         assert!(!emitted);
-        assert_eq!(error.code, 6);
+        assert_eq!(error.exit_code, 6);
         assert_eq!(error.classification.code, "policy.byte_limit");
         assert_eq!(error.sequence, Some(0));
     }
@@ -474,7 +474,7 @@ mod tests {
         assert!(reader.next_frame().unwrap().is_none());
 
         let error = encode_capture_file(OutputFormat::Pcap, [raw, ethernet]).unwrap_err();
-        assert_eq!(error.code, 5);
+        assert_eq!(error.exit_code, 5);
         assert!(error.message.contains("link type"));
     }
 

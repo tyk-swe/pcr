@@ -137,10 +137,7 @@ fn ethernet_prefix(
     frame
 }
 
-fn match_neighbor_response(
-    request: &NeighborRequest,
-    frame: &Frame,
-) -> Option<MacAddress> {
+fn match_neighbor_response(request: &NeighborRequest, frame: &Frame) -> Option<MacAddress> {
     if frame.link_type != LinkType::ETHERNET
         || frame
             .interface
@@ -308,25 +305,25 @@ fn match_neighbor_advertisement(
 }
 
 fn solicited_node_multicast(target: Ipv6Addr) -> Ipv6Addr {
-    let target = target.octets();
+    let target_octets = target.octets();
     let mut multicast = [0_u8; 16];
     multicast[0] = 0xff;
     multicast[1] = 0x02;
     multicast[11] = 0x01;
     multicast[12] = 0xff;
-    multicast[13..].copy_from_slice(&target[13..]);
+    multicast[13..].copy_from_slice(&target_octets[13..]);
     Ipv6Addr::from(multicast)
 }
 
 fn ipv6_multicast_mac(address: Ipv6Addr) -> MacAddress {
-    let address = address.octets();
+    let address_octets = address.octets();
     MacAddress([
         0x33,
         0x33,
-        address[12],
-        address[13],
-        address[14],
-        address[15],
+        address_octets[12],
+        address_octets[13],
+        address_octets[14],
+        address_octets[15],
     ])
 }
 

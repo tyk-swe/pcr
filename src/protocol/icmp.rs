@@ -16,6 +16,7 @@ use super::common::{
     bytes, checksum, ensure_encode_budget, field_layout, impl_layer_boilerplate, invalid,
     make_layer, out_of_range, payload_without_padding, protocol, resolve_u16, set_wire_u16,
     transport_checksum, truncated, unknown_field, wire_u16, wrong_layer, wrong_type,
+    ValueExpectation,
 };
 use super::ip::encode_network;
 
@@ -198,8 +199,7 @@ impl LayerCodec for Icmpv4Codec {
             "icmpv4",
             "checksum",
             &layer.checksum,
-            expected,
-            true,
+            ValueExpectation::Required(expected),
             context.mode,
             &mut diagnostics,
         )?;
@@ -296,8 +296,7 @@ impl LayerCodec for Icmpv6Codec {
             "icmpv6",
             "checksum",
             &layer.checksum,
-            expected,
-            true,
+            ValueExpectation::Required(expected),
             context.mode,
             &mut diagnostics,
         )?;

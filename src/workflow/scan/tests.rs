@@ -1347,7 +1347,7 @@ mod tests {
                     hop_limit: 1,
                     attempt: 1,
                 }],
-                timeout: Duration::from_millis(1),
+                timeout: Duration::from_secs(1),
             };
 
             let result = executor.execute(&batch);

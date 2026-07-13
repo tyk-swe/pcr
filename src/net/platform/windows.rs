@@ -314,7 +314,7 @@ impl BufferBounds {
     fn contains<T>(self, pointer: *const T) -> bool {
         let address = pointer as usize;
         !pointer.is_null()
-            && address % align_of::<T>() == 0
+            && address.is_multiple_of(align_of::<T>())
             && address >= self.start
             && address
                 .checked_add(size_of::<T>())
@@ -514,7 +514,9 @@ fn wide_string(
         return Ok(None);
     }
     let pointer = value.as_ptr();
-    if (pointer as usize) % align_of::<u16>() != 0 || !bounds.contains_bytes(pointer.cast(), 2) {
+    if !(pointer as usize).is_multiple_of(align_of::<u16>())
+        || !bounds.contains_bytes(pointer.cast(), 2)
+    {
         return Err(NativeRouteError::InvalidResponse {
             message: "Windows adapter string pointed outside its response buffer".to_owned(),
         });

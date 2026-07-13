@@ -37,13 +37,15 @@ jobs:
         with:
           path: |
             ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             fuzz/target
             fuzz/corpus
-          key: nightly-fuzz-${{ matrix.target }}-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
-          restore-keys: nightly-fuzz-${{ matrix.target }}-
+          key: nightly-fuzz-v2-${{ matrix.target }}-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: nightly-fuzz-v2-${{ matrix.target }}-
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup toolchain install nightly-2026-07-11 --profile minimal
       - run: cargo install cargo-fuzz --locked --version 0.13.2

@@ -24,10 +24,12 @@ jobs:
         with:
           path: |
             ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-tools-deny-${{ runner.os }}-0.19.7-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          key: cargo-tools-deny-v2-${{ runner.os }}-0.19.7-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.19.7
       - name: Enforce the RUSTSEC-2024-0436 exception expiry
@@ -87,12 +89,14 @@ jobs:
         with:
           path: |
             ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-quality-linux-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-quality-linux-1.96.0-
+          key: cargo-quality-linux-v2-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-quality-linux-v2-1.96.0-
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add rustfmt
       - run: cargo install cargo-hack --locked --version 0.6.45
@@ -117,11 +121,13 @@ jobs:
         with:
           path: |
             ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target/llvm-cov-target
-          key: cargo-coverage-linux-1.96.0-llvm-cov-0.8.6-${{ hashFiles('Cargo.lock') }}
+          key: cargo-coverage-linux-v2-1.96.0-llvm-cov-0.8.6-${{ hashFiles('Cargo.lock') }}
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add llvm-tools-preview
       - run: cargo install cargo-llvm-cov --locked --version 0.8.6
@@ -158,11 +164,13 @@ jobs:
         with:
           path: |
             ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             fuzz/target
-          key: cargo-fuzz-linux-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          key: cargo-fuzz-linux-v2-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup toolchain install nightly-2026-07-11 --profile minimal
       - run: cargo install cargo-fuzz --locked --version 0.13.2

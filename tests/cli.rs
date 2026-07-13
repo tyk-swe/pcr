@@ -996,21 +996,26 @@ fn replay_rejects_unsupported_roots_and_public_targets_before_interface_io() {
 
 #[cfg(all(windows, feature = "live", not(feature = "native-route")))]
 #[test]
-fn portable_windows_interfaces_reports_the_native_capability_boundary() {
+fn default_windows_interfaces_uses_ip_helper() {
     let output = binary()
         .args(["--output", "json", "interfaces"])
         .output()
         .unwrap();
 
-    assert_eq!(output.status.code(), Some(4));
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["status"], "error");
-    assert_eq!(value["error"]["kind"], "capability");
+    assert_eq!(value["status"], "success");
     assert_eq!(value["command"], "interfaces");
-    let message = value["error"]["message"].as_str().unwrap();
-    assert!(message.contains("portable profile"));
-    assert!(message.contains("Windows native adapter"));
-    assert!(message.contains("Npcap"));
+    let interfaces = value["result"]["interfaces"].as_array().unwrap();
+    assert!(!interfaces.is_empty());
+    assert!(interfaces.iter().all(|interface| {
+        interface["index"].as_u64().is_some_and(|index| index != 0)
+            && interface["mtu"].as_u64().is_some_and(|mtu| mtu != 0)
+    }));
 }
 
 #[cfg(all(windows, feature = "native-route"))]

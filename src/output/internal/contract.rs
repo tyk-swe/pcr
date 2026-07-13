@@ -1,7 +1,7 @@
 /// Version identifier emitted by every structured CLI record.
-pub const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
+pub const OUTPUT_SCHEMA_V2: &str = "packetcraftr.output/v2";
 
-/// CLI command identifier frozen into the v1 output schema.
+/// CLI command identifier frozen into the v2 output schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CommandName {
@@ -19,6 +19,7 @@ pub enum CommandName {
     Fuzz,
     Interfaces,
     Routes,
+    Doctor,
 }
 
 impl CommandName {
@@ -38,6 +39,7 @@ impl CommandName {
             Self::Fuzz => "fuzz",
             Self::Interfaces => "interfaces",
             Self::Routes => "routes",
+            Self::Doctor => "doctor",
         }
     }
 
@@ -45,7 +47,7 @@ impl CommandName {
     pub const fn formats(self) -> &'static [OutputFormat] {
         match self {
             Self::Build | Self::Dissect => BUILD_FORMATS,
-            Self::Plan | Self::Interfaces | Self::Routes => AGGREGATE_FORMATS,
+            Self::Plan | Self::Interfaces | Self::Routes | Self::Doctor => AGGREGATE_FORMATS,
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
             Self::Capture => CAPTURE_FORMATS,
@@ -178,7 +180,7 @@ const REPLAY_FORMATS: &[OutputFormat] = &[
 const TOOL_FORMATS: &[OutputFormat] =
     &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson];
 
-/// Complete v1 command/format matrix. Extending a command requires changing this table.
+/// Complete v2 command/format matrix. Extending a command requires changing this table.
 pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract {
         command: CommandName::Build,
@@ -236,6 +238,10 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
         command: CommandName::Routes,
         formats: AGGREGATE_FORMATS,
     },
+    CommandOutputContract {
+        command: CommandName::Doctor,
+        formats: AGGREGATE_FORMATS,
+    },
 ];
 
 /// Failure produced while enforcing the shared output contract.
@@ -273,10 +279,10 @@ impl fmt::Display for OutputContractError {
                 write!(formatter, "invalid captured frame for output: {message}")
             }
             Self::TimestampOutOfRange => {
-                formatter.write_str("capture timestamp is outside the signed v1 output range")
+                formatter.write_str("capture timestamp is outside the signed v2 output range")
             }
             Self::SequenceOverflow => {
-                formatter.write_str("NDJSON sequence exceeded the v1 unsigned 64-bit range")
+                formatter.write_str("NDJSON sequence exceeded the v2 unsigned 64-bit range")
             }
         }
     }

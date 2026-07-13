@@ -83,6 +83,7 @@ impl TemplateValues {
 
 #[derive(Clone, Debug)]
 struct TemplateAxis {
+    group: usize,
     layer: usize,
     field: String,
     values: TemplateValues,
@@ -92,6 +93,7 @@ struct TemplateAxis {
 pub struct PacketTemplate {
     base: Packet,
     axes: Vec<TemplateAxis>,
+    next_group: usize,
 }
 
 impl PacketTemplate {
@@ -99,6 +101,7 @@ impl PacketTemplate {
         Self {
             base,
             axes: Vec::new(),
+            next_group: 0,
         }
     }
 
@@ -109,27 +112,80 @@ impl PacketTemplate {
     #[must_use]
     pub fn axis(mut self, layer: usize, field: impl Into<String>, values: TemplateValues) -> Self {
         self.axes.push(TemplateAxis {
+            group: self.next_group,
             layer,
             field: field.into(),
             values,
         });
+        self.next_group += 1;
+        self
+    }
+
+    /// Adds fields that advance in lockstep instead of forming a Cartesian
+    /// product. Every values list in the group must have the same length.
+    #[must_use]
+    pub fn zip_axes<I, S>(mut self, axes: I) -> Self
+    where
+        I: IntoIterator<Item = (usize, S, TemplateValues)>,
+        S: Into<String>,
+    {
+        let group = self.next_group;
+        let start = self.axes.len();
+        self.axes
+            .extend(axes.into_iter().map(|(layer, field, values)| TemplateAxis {
+                group,
+                layer,
+                field: field.into(),
+                values,
+            }));
+        if self.axes.len() != start {
+            self.next_group += 1;
+        }
         self
     }
 
     pub fn expansion_len(&self) -> Result<usize, TemplateError> {
+        self.group_lengths()?
+            .into_iter()
+            .try_fold(1usize, |product, length| {
+                product
+                    .checked_mul(length)
+                    .ok_or(TemplateError::ExpansionOverflow)
+            })
+    }
+
+    fn group_lengths(&self) -> Result<Vec<usize>, TemplateError> {
         if self.axes.is_empty() {
-            return Ok(1);
+            return Ok(Vec::new());
         }
-        self.axes.iter().try_fold(1usize, |product, axis| {
+        let mut lengths = vec![None; self.next_group];
+        for axis in &self.axes {
             let length = axis.values.len().ok_or(TemplateError::ExpansionOverflow)?;
-            product
-                .checked_mul(length)
-                .ok_or(TemplateError::ExpansionOverflow)
-        })
+            match lengths[axis.group] {
+                Some(expected) if expected != length => {
+                    return Err(TemplateError::ZipLength {
+                        group: axis.group,
+                        expected,
+                        actual: length,
+                    });
+                }
+                Some(_) => {}
+                None => lengths[axis.group] = Some(length),
+            }
+        }
+        lengths
+            .into_iter()
+            .map(|length| length.ok_or(TemplateError::ExpansionOverflow))
+            .collect()
     }
 
     pub fn expand(&self, maximum: usize) -> Result<PacketTemplateIter<'_>, TemplateError> {
-        let total = self.expansion_len()?;
+        let group_lengths = self.group_lengths()?;
+        let total = group_lengths.iter().try_fold(1usize, |product, length| {
+            product
+                .checked_mul(*length)
+                .ok_or(TemplateError::ExpansionOverflow)
+        })?;
         if total > maximum {
             return Err(TemplateError::ExpansionLimit {
                 requested: total,
@@ -140,6 +196,7 @@ impl PacketTemplate {
             template: self,
             next_ordinal: 0,
             total,
+            group_lengths,
         })
     }
 }
@@ -148,6 +205,7 @@ pub struct PacketTemplateIter<'a> {
     template: &'a PacketTemplate,
     next_ordinal: usize,
     total: usize,
+    group_lengths: Vec<usize>,
 }
 
 impl Iterator for PacketTemplateIter<'_> {
@@ -160,16 +218,18 @@ impl Iterator for PacketTemplateIter<'_> {
         let ordinal = self.next_ordinal;
         self.next_ordinal += 1;
         let mut packet = self.template.base.clone();
+        let mut group_indices = Vec::with_capacity(self.group_lengths.len());
         let mut divisor = self.total;
-        for axis in &self.template.axes {
-            let Some(length) = axis.values.len() else {
-                return Some(Err(TemplateError::ExpansionOverflow));
-            };
+        for length in &self.group_lengths {
+            let length = *length;
             if length == 0 {
                 return None;
             }
             divisor /= length;
-            let index = (ordinal / divisor) % length;
+            group_indices.push((ordinal / divisor) % length);
+        }
+        for axis in &self.template.axes {
+            let index = group_indices[axis.group];
             let Some(value) = axis.values.value(index) else {
                 return Some(Err(TemplateError::ExpansionOverflow));
             };
@@ -205,6 +265,14 @@ pub enum TemplateError {
     ExpansionOverflow,
     #[error("template expands to {requested} packets, exceeding limit {limit}")]
     ExpansionLimit { requested: usize, limit: usize },
+    #[error(
+        "zipped template group {group} has mismatched lengths: expected {expected}, received {actual}"
+    )]
+    ZipLength {
+        group: usize,
+        expected: usize,
+        actual: usize,
+    },
     #[error("template layer index {index} is outside packet length {len}")]
     LayerIndex { index: usize, len: usize },
     #[error("could not set template field {field} on layer {layer}: {source}")]
@@ -263,5 +331,56 @@ mod tests {
 
         assert_eq!(template.expansion_len().unwrap(), 0);
         assert_eq!(template.expand(0).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn zipped_axes_advance_together_without_a_cartesian_product() {
+        let mut packet = Packet::new();
+        packet.push(Raw::new(Bytes::new()));
+        packet.push(Raw::new(Bytes::new()));
+        let template = PacketTemplate::new(packet).zip_axes([
+            (
+                0,
+                "bytes",
+                TemplateValues::Values(vec![
+                    FieldValue::Bytes(Bytes::from_static(b"a")),
+                    FieldValue::Bytes(Bytes::from_static(b"b")),
+                ]),
+            ),
+            (
+                1,
+                "bytes",
+                TemplateValues::Values(vec![
+                    FieldValue::Bytes(Bytes::from_static(b"1")),
+                    FieldValue::Bytes(Bytes::from_static(b"2")),
+                ]),
+            ),
+        ]);
+
+        assert_eq!(template.expansion_len().unwrap(), 2);
+        let pairs = template
+            .expand(2)
+            .unwrap()
+            .map(|packet| {
+                let packet = packet.unwrap();
+                (
+                    packet.iter().next().unwrap().field("bytes").unwrap(),
+                    packet.iter().nth(1).unwrap().field("bytes").unwrap(),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pairs,
+            [
+                (
+                    FieldValue::Bytes(Bytes::from_static(b"a")),
+                    FieldValue::Bytes(Bytes::from_static(b"1"))
+                ),
+                (
+                    FieldValue::Bytes(Bytes::from_static(b"b")),
+                    FieldValue::Bytes(Bytes::from_static(b"2"))
+                )
+            ]
+        );
     }
 }

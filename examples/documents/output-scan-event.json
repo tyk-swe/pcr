@@ -1,9 +1,9 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "scan",
   "mode": "stream",
-  "sequence": 0,
-  "status": "success",
+  "sequence": "1",
+  "status": "running",
   "result": {
     "event": "port",
     "target": "192.168.56.10",
@@ -21,7 +21,7 @@
           "status": "timeout",
           "classification": "timeout",
           "sent_at": {
-            "unix_seconds": 1770000000,
+            "unix_seconds": "1770000000",
             "nanoseconds": 0
           },
           "reason": "no checksum-valid, protocol-consistent response before the deadline"
@@ -29,5 +29,11 @@
       ]
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "item"
 }

@@ -31,7 +31,6 @@ use super::evidence::{
     preferred_latency, response_within_deadline, validate_capture_statistics,
     validate_decoded_frame, validate_frame,
 };
-use super::nonzero_ipv4_identification;
 use super::probe::{self, Transport as ProbeTransport};
 use super::scan_impl::MAX_SCAN_RATE;
 use super::target::{AuthorizationError, Authorizer, Target};

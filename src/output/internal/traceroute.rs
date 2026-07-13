@@ -1,4 +1,4 @@
-/// Output-v1 traceroute-probe status.
+/// Output-v2 traceroute-probe status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceProbeStatus {
@@ -15,7 +15,7 @@ impl From<crate::workflow::traceroute::ProbeStatus> for TraceProbeStatus {
     }
 }
 
-/// Output-v1 traceroute response classification.
+/// Output-v2 traceroute response classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceResponseKind {
@@ -36,7 +36,7 @@ impl From<crate::workflow::traceroute::ResponseKind> for TraceResponseKind {
     }
 }
 
-/// Output-v1 traceroute completion reason.
+/// Output-v2 traceroute completion reason.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraceCompletionReason {
@@ -59,6 +59,7 @@ impl From<crate::workflow::traceroute::Completion> for TraceCompletionReason {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TraceProbeOutput {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub sequence: u64,
     pub hop_limit: u8,
     pub attempt: u32,
@@ -74,7 +75,10 @@ pub struct TraceProbeOutput {
     pub sent_at: OutputTimestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<OutputTimestamp>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_duration"
+    )]
     pub latency: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<FrameOutput>,
@@ -87,10 +91,60 @@ pub struct TraceHopOutput {
     pub probes: Vec<TraceProbeOutput>,
 }
 
+impl TraceHopOutput {
+    pub fn try_from_hop(
+        hop: crate::workflow::traceroute::Hop,
+    ) -> Result<Self, OutputContractError> {
+        let probes = hop
+            .probes
+            .into_iter()
+            .map(|probe| {
+                Ok(TraceProbeOutput {
+                    sequence: probe.sequence,
+                    hop_limit: probe.hop_limit,
+                    attempt: probe.attempt,
+                    strategy: probe.strategy.to_string(),
+                    destination: probe.destination,
+                    destination_port: probe.destination_port,
+                    status: probe.status.into(),
+                    response_kind: probe.response_kind.map(Into::into),
+                    responder: probe.responder,
+                    sent_at: probe.sent_at.try_into()?,
+                    received_at: probe
+                        .received_at
+                        .map(OutputTimestamp::try_from)
+                        .transpose()?,
+                    latency: probe.latency,
+                    frame: probe
+                        .response
+                        .map(FrameOutput::try_from_frame)
+                        .transpose()?,
+                    reason: probe.reason,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        Ok(Self {
+            hop_limit: hop.hop_limit,
+            probes,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct TraceUndecodedOutput {
     pub hop_limit: u8,
     pub frame: FrameOutput,
+}
+
+impl TraceUndecodedOutput {
+    pub fn try_from_evidence(
+        evidence: crate::workflow::traceroute::UndecodedEvidence,
+    ) -> Result<Self, OutputContractError> {
+        Ok(Self {
+            hop_limit: evidence.hop_limit,
+            frame: FrameOutput::try_from_frame(evidence.frame)?,
+        })
+    }
 }
 
 /// Aggregate or streamed result of `traceroute`.

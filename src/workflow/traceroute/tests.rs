@@ -251,7 +251,14 @@ mod tests {
     fn executor_cannot_replace_the_authorized_traceroute_probe() {
         let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
         let operation = request(Target::Address(destination));
-        let batch = build_batches(&operation, destination).unwrap().remove(0);
+        let batch = build_batches(
+            &operation,
+            crate::operation::Id::default(),
+            Some(TRACEROUTE_SOURCE_PORT),
+            destination,
+        )
+        .unwrap()
+        .remove(0);
         let mut execution = UndecodedExecutor.execute(&batch).unwrap();
         let mut layer2 = execution.sent[0].clone();
         layer2
@@ -280,7 +287,14 @@ mod tests {
     fn executor_capture_evidence_must_stay_within_declared_traceroute_limits() {
         let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
         let operation = request(Target::Address(destination));
-        let batch = build_batches(&operation, destination).unwrap().remove(0);
+        let batch = build_batches(
+            &operation,
+            crate::operation::Id::default(),
+            Some(TRACEROUTE_SOURCE_PORT),
+            destination,
+        )
+        .unwrap()
+        .remove(0);
         let mut execution = UndecodedExecutor.execute(&batch).unwrap();
         execution.undecoded.push(frame_at(12));
         let limits = TracerouteLimits {
@@ -518,6 +532,8 @@ mod tests {
         let router = Ipv4Addr::new(10, 0, 0, 254);
         let mut request = TracerouteProbe {
             sequence: 0,
+            operation_id: crate::operation::Id::default(),
+            source_port: Some(TRACEROUTE_SOURCE_PORT),
             address: IpAddr::V4(remote),
             strategy: TracerouteStrategy::Udp,
             destination_port: Some(DEFAULT_TRACEROUTE_UDP_PORT),
@@ -600,6 +616,8 @@ mod tests {
         let router6: Ipv6Addr = "fd00::fe".parse().unwrap();
         let mut request6 = TracerouteProbe {
             sequence: 9,
+            operation_id: crate::operation::Id::default(),
+            source_port: Some(TRACEROUTE_SOURCE_PORT),
             address: IpAddr::V6(remote6),
             strategy: TracerouteStrategy::Udp,
             destination_port: Some(DEFAULT_TRACEROUTE_UDP_PORT + 9),
@@ -683,6 +701,8 @@ mod tests {
         let remote = Ipv4Addr::new(10, 0, 0, 9);
         let mut tcp_request = TracerouteProbe {
             sequence: 17,
+            operation_id: crate::operation::Id::default(),
+            source_port: Some(TRACEROUTE_SOURCE_PORT),
             address: IpAddr::V4(remote),
             strategy: TracerouteStrategy::Tcp,
             destination_port: Some(443),
@@ -692,6 +712,11 @@ mod tests {
         .packet();
         assert_eq!(tcp_request.get::<Ipv4>().unwrap().ttl, 7);
         tcp_request.get_mut::<Ipv4>().unwrap().source = local;
+        let expected_acknowledgment = tcp_request
+            .get::<Tcp>()
+            .unwrap()
+            .sequence
+            .wrapping_add(1);
         let mut tcp_reply = Packet::new();
         tcp_reply
             .push(Ipv4 {
@@ -703,7 +728,7 @@ mod tests {
                 source_port: 443,
                 destination_port: TRACEROUTE_SOURCE_PORT,
                 flags: Tcp::SYN | Tcp::ACK,
-                acknowledgment: 18,
+                acknowledgment: expected_acknowledgment,
                 ..Tcp::default()
             });
         assert_eq!(
@@ -722,6 +747,8 @@ mod tests {
         let remote6: Ipv6Addr = "fd00::9".parse().unwrap();
         let mut echo_request = TracerouteProbe {
             sequence: 23,
+            operation_id: crate::operation::Id::default(),
+            source_port: None,
             address: IpAddr::V6(remote6),
             strategy: TracerouteStrategy::Icmp,
             destination_port: None,
@@ -740,7 +767,16 @@ mod tests {
             })
             .push(Icmpv6 {
                 icmp_type: 129,
-                body: traceroute_identity(23),
+                body: traceroute_identity(&TracerouteProbe {
+                    sequence: 23,
+                    operation_id: crate::operation::Id::default(),
+                    source_port: None,
+                    address: IpAddr::V6(remote6),
+                    strategy: TracerouteStrategy::Icmp,
+                    destination_port: None,
+                    hop_limit: 9,
+                    attempt: 1,
+                }),
                 ..Icmpv6::default()
             });
         assert_eq!(

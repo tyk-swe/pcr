@@ -1,6 +1,18 @@
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum FuzzError {
+    #[error("fuzz operation failed at case {case_index}: {source}")]
+    Operation {
+        case_index: u64,
+        #[source]
+        source: crate::operation::Error,
+    },
+    #[error("fuzz event delivery failed at case {case_index}: {source}")]
+    Event {
+        case_index: u64,
+        #[source]
+        source: crate::operation::EventError,
+    },
     #[error("invalid fuzz limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -46,7 +58,9 @@ pub enum FuzzError {
 impl FuzzError {
     pub fn sequence(&self) -> Option<u64> {
         match self {
-            Self::Execution { case_index, .. }
+            Self::Operation { case_index, .. }
+            | Self::Event { case_index, .. }
+            | Self::Execution { case_index, .. }
             | Self::Clock { case_index, .. }
             | Self::InvalidEvidence { case_index, .. }
             | Self::StatisticsOverflow { case_index } => Some(*case_index),
@@ -58,6 +72,8 @@ impl FuzzError {
 impl Classified for FuzzError {
     fn classification(&self) -> Classification {
         match self {
+            Self::Operation { source, .. } => source.classification(),
+            Self::Event { source, .. } => source.classification(),
             Self::InvalidLimit { .. }
             | Self::InvalidStrategies
             | Self::CaseIndexOverflow
@@ -109,6 +125,8 @@ impl Classified for FuzzError {
 
     fn causes(&self) -> Vec<String> {
         match self {
+            Self::Operation { source, .. } => source.causes(),
+            Self::Event { source, .. } => source.causes(),
             Self::Authorization(error) => error.causes(),
             Self::Execution { source, .. } => source.causes(),
             _ => Vec::new(),

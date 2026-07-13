@@ -265,9 +265,20 @@ pub struct TracerouteResult {
     pub stats: Stats,
 }
 
+/// Progress emitted after one hop batch is classified.
+#[derive(Clone, Debug)]
+pub struct TracerouteEvent {
+    pub first_sequence: u64,
+    pub hop: TracerouteHopResult,
+    pub undecoded: Vec<TracerouteUndecodedEvidence>,
+    pub stats: Stats,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TracerouteProbe {
     pub sequence: u64,
+    pub operation_id: crate::operation::Id,
+    pub source_port: Option<u16>,
     pub address: IpAddr,
     pub strategy: TracerouteStrategy,
     pub destination_port: Option<u16>,

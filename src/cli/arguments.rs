@@ -14,6 +14,9 @@
 struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = CliOutputFormat::Text)]
     output: CliOutputFormat,
+    /// Reuse an exact 128-bit operation identity instead of OS entropy.
+    #[arg(long, global = true, value_name = "32_HEX")]
+    operation_id: Option<crate::operation::Id>,
     #[command(subcommand)]
     command: Command,
 }
@@ -80,6 +83,42 @@ enum Command {
     Fuzz(FuzzArgs),
     /// Enumerate passive interface-bound route decisions.
     Routes,
+    /// Diagnose passive platform readiness and optionally probe capture.
+    Doctor(DoctorArgs),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum CliDoctorCapability {
+    Interfaces,
+    Routes,
+    Layer2,
+    Layer3,
+    Capture,
+}
+
+impl CliDoctorCapability {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Interfaces => "interfaces",
+            Self::Routes => "routes",
+            Self::Layer2 => "layer2",
+            Self::Layer3 => "layer3",
+            Self::Capture => "capture",
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+struct DoctorArgs {
+    /// Restrict readiness checks and the optional probe to one interface.
+    #[arg(long, value_name = "NAME_OR_INDEX")]
+    interface: Option<String>,
+    /// Open, verify, and close a host-only filtered capture without transmitting.
+    #[arg(long)]
+    probe_capture: bool,
+    /// Require comma-separated capabilities to be ready.
+    #[arg(long, value_enum, value_delimiter = ',', value_name = "CAPABILITIES")]
+    require: Vec<CliDoctorCapability>,
 }
 
 #[derive(Debug, Args)]
@@ -646,12 +685,81 @@ struct CaptureLimitArgs {
     /// Aggregate retained/queued capture byte bound.
     #[arg(long, default_value_t = crate::net::DEFAULT_CAPTURE_QUEUE_BYTES)]
     max_captured_bytes: usize,
+    /// Independent aggregate raw-evidence retention ceiling.
+    #[arg(
+        long,
+        default_value_t = crate::net::DEFAULT_EVIDENCE_BYTES,
+        value_parser = parse_evidence_bytes
+    )]
+    max_evidence_bytes: usize,
     /// Maximum bytes retained from any one captured frame.
     #[arg(long, default_value_t = crate::capture::DEFAULT_SIZE_LIMIT)]
     snap_length: usize,
     /// Backend queue behavior when a configured bound is reached.
     #[arg(long, value_enum, default_value_t = CliCaptureOverflowPolicy::Fail)]
     overflow_policy: CliCaptureOverflowPolicy,
+    /// Capture all interface traffic or only host-visible traffic.
+    #[arg(long, value_enum, default_value_t = CliCaptureMode::Promiscuous)]
+    capture_mode: CliCaptureMode,
+    /// Derive and install a route-specific BPF expression.
+    #[arg(long, conflicts_with = "capture_filter")]
+    auto_filter: bool,
+    /// Install an exact bounded BPF expression before capture readiness.
+    #[arg(
+        long,
+        value_name = "BPF",
+        conflicts_with = "auto_filter",
+        value_parser = parse_capture_filter
+    )]
+    capture_filter: Option<String>,
+    /// Omit evidence that does not correlate with the active request.
+    #[arg(long)]
+    discard_unmatched: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CliCaptureMode {
+    #[default]
+    Promiscuous,
+    HostOnly,
+}
+
+impl From<CliCaptureMode> for CaptureMode {
+    fn from(value: CliCaptureMode) -> Self {
+        match value {
+            CliCaptureMode::Promiscuous => Self::Promiscuous,
+            CliCaptureMode::HostOnly => Self::HostOnly,
+        }
+    }
+}
+
+fn parse_capture_filter(value: &str) -> Result<String, String> {
+    if value.is_empty() {
+        return Err("capture filter cannot be empty".to_owned());
+    }
+    if value.len() > packetcraftr::net::capture::MAX_CAPTURE_FILTER_BYTES {
+        return Err(format!(
+            "capture filter exceeds {} UTF-8 bytes",
+            packetcraftr::net::capture::MAX_CAPTURE_FILTER_BYTES
+        ));
+    }
+    if value.as_bytes().contains(&0) {
+        return Err("capture filter cannot contain a NUL byte".to_owned());
+    }
+    Ok(value.to_owned())
+}
+
+fn parse_evidence_bytes(value: &str) -> Result<usize, String> {
+    let value = value
+        .parse::<usize>()
+        .map_err(|_| "evidence byte limit must be an unsigned integer".to_owned())?;
+    if value == 0 || value > crate::net::MAX_EVIDENCE_BYTES {
+        return Err(format!(
+            "evidence byte limit must be within 1..={}",
+            crate::net::MAX_EVIDENCE_BYTES
+        ));
+    }
+    Ok(value)
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -716,6 +824,25 @@ impl ReplayPolicyArgs {
 }
 
 impl CaptureLimitArgs {
+    fn capture_options(&self) -> CaptureOptions {
+        let filter = if self.auto_filter {
+            CaptureFilter::Auto
+        } else if let Some(expression) = &self.capture_filter {
+            CaptureFilter::Bpf(expression.clone())
+        } else {
+            CaptureFilter::Unfiltered
+        };
+        CaptureOptions {
+            mode: self.capture_mode.into(),
+            filter,
+            discard_unmatched: self.discard_unmatched,
+        }
+    }
+
+    const fn evidence_bytes(&self) -> usize {
+        self.max_evidence_bytes
+    }
+
     fn into_limits(self) -> CaptureQueueLimits {
         CaptureQueueLimits {
             max_frames: self.max_queue_frames,

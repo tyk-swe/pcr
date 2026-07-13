@@ -10,6 +10,26 @@ pub trait Clock {
     type Error: Error + Send + Sync + 'static;
 
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error>;
+
+    /// Cancellation-aware delay. Test clocks retain their deterministic sleep
+    /// behavior through this default; the system clock wakes immediately.
+    fn sleep_cancelled(
+        &mut self,
+        delay: Duration,
+        cancellation: &crate::operation::Cancellation,
+    ) -> Result<(), SleepError<Self::Error>> {
+        cancellation.check().map_err(SleepError::Cancelled)?;
+        self.sleep(delay).map_err(SleepError::Clock)?;
+        cancellation.check().map_err(SleepError::Cancelled)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SleepError<E: Error + 'static> {
+    #[error("{0}")]
+    Clock(E),
+    #[error("{0}")]
+    Cancelled(crate::operation::Error),
 }
 
 /// Production wall-clock implementation.
@@ -22,6 +42,14 @@ impl Clock for SystemClock {
     fn sleep(&mut self, delay: Duration) -> Result<(), Self::Error> {
         std::thread::sleep(delay);
         Ok(())
+    }
+
+    fn sleep_cancelled(
+        &mut self,
+        delay: Duration,
+        cancellation: &crate::operation::Cancellation,
+    ) -> Result<(), SleepError<Self::Error>> {
+        cancellation.wait(delay).map_err(SleepError::Cancelled)
     }
 }
 

@@ -27,6 +27,7 @@ pub mod capture;
 pub mod client;
 pub mod error;
 pub mod net;
+pub mod operation;
 pub mod output;
 pub mod packet;
 pub mod protocol;

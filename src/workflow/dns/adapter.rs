@@ -3,6 +3,8 @@
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
     options: crate::client::exchange::Options,
+    capture_options: crate::net::capture::Options,
+    operation: Option<crate::operation::Context>,
 }
 
 impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
@@ -10,7 +12,22 @@ impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
         client: &'a crate::client::Client<R, N, I>,
         options: crate::client::exchange::Options,
     ) -> Self {
-        Self { client, options }
+        Self {
+            client,
+            options,
+            capture_options: crate::net::capture::Options::default(),
+            operation: None,
+        }
+    }
+
+    pub fn with_capture_options(mut self, options: crate::net::capture::Options) -> Self {
+        self.capture_options = options;
+        self
+    }
+
+    pub fn with_operation_context(mut self, operation: crate::operation::Context) -> Self {
+        self.operation = Some(operation);
+        self
     }
 }
 
@@ -41,10 +58,22 @@ where
         options.max_responses = exchange.max_responses;
         options.max_unsolicited = options.max_unsolicited.min(exchange.max_responses);
         options.send.destination = Some(exchange.probe.server_address);
-        let result = self
-            .client
-            .exchange(&PacketTemplate::new(exchange.probe.packet()), options)
-            .map_err(|error| DnsExecutionError::classified(&error))?;
+        let template = PacketTemplate::new(exchange.probe.packet());
+        let result = match &self.operation {
+            Some(operation) => self.client.exchange_streaming(
+                &template,
+                options,
+                self.capture_options.clone(),
+                operation,
+                &mut |_| Ok(()),
+            ),
+            None => self.client.exchange_with_capture_options(
+                &template,
+                options,
+                self.capture_options.clone(),
+            ),
+        }
+        .map_err(|error| DnsExecutionError::classified(&error))?;
         let crate::client::exchange::Result {
             mut sent,
             mut sent_evidence,

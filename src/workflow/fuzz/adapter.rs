@@ -64,6 +64,8 @@ impl FuzzAuthorizer for PolicyAuthorizer<'_> {
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
     options: crate::client::exchange::Options,
+    capture_options: crate::net::capture::Options,
+    operation: Option<crate::operation::Context>,
 }
 
 impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
@@ -71,7 +73,22 @@ impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
         client: &'a crate::client::Client<R, N, I>,
         options: crate::client::exchange::Options,
     ) -> Self {
-        Self { client, options }
+        Self {
+            client,
+            options,
+            capture_options: crate::net::capture::Options::default(),
+            operation: None,
+        }
+    }
+
+    pub fn with_capture_options(mut self, options: crate::net::capture::Options) -> Self {
+        self.capture_options = options;
+        self
+    }
+
+    pub fn with_operation_context(mut self, operation: crate::operation::Context) -> Self {
+        self.operation = Some(operation);
+        self
     }
 }
 
@@ -89,10 +106,22 @@ where
         let mut options = self.options.clone();
         options.timeout = timeout;
         options.max_template_packets = 1;
-        let exchange = self
-            .client
-            .exchange(&PacketTemplate::new(case.packet.clone()), options)
-            .map_err(|error| FuzzExecutionError::classified(&error))?;
+        let template = PacketTemplate::new(case.packet.clone());
+        let exchange = match &self.operation {
+            Some(operation) => self.client.exchange_streaming(
+                &template,
+                options,
+                self.capture_options.clone(),
+                operation,
+                &mut |_| Ok(()),
+            ),
+            None => self.client.exchange_with_capture_options(
+                &template,
+                options,
+                self.capture_options.clone(),
+            ),
+        }
+        .map_err(|error| FuzzExecutionError::classified(&error))?;
         let crate::client::exchange::Result {
             mut sent,
             mut sent_evidence,

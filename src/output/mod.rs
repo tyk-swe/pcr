@@ -3,7 +3,7 @@
 
 //! Versioned structured-output contracts.
 //!
-//! The v1 vocabulary is deliberately scoped by responsibility and command. Types
+//! The v2 vocabulary is deliberately scoped by responsibility and command. Types
 //! in this module describe the serialized CLI contract; they are not aliases for
 //! workflow results intended to evolve independently.
 
@@ -15,7 +15,7 @@ mod internal;
 pub mod contract {
     pub use super::internal::{
         COMMAND_OUTPUT_CONTRACTS as CONTRACTS, CommandName as Command,
-        CommandOutputContract as CommandContract, OUTPUT_SCHEMA_V1 as SCHEMA_V1,
+        CommandOutputContract as CommandContract, OUTPUT_SCHEMA_V2 as SCHEMA_V2,
         OutputContractError as Error, OutputFormat as Format, OutputMode as Mode,
     };
 }
@@ -25,9 +25,10 @@ pub mod envelope {
     pub use super::internal::{
         AggregateErrorOutput as AggregateError, AggregateOutput as Aggregate, CaptureStats,
         DiagnosticOutput as Diagnostic, DiagnosticRangeOutput as DiagnosticRange,
-        DiagnosticSeverityOutput as DiagnosticSeverity, OperationStats as Stats,
-        OutputError as Error, OutputErrorKind as ErrorKind, StreamErrorRecord as StreamError,
-        StreamRecord as Stream,
+        DiagnosticSeverityOutput as DiagnosticSeverity, EnvelopeContext as Context,
+        OperationStats as Stats, OutputError as Error, OutputErrorCategory as ErrorCategory,
+        OutputErrorKind as ErrorKind, StreamErrorRecord as StreamError, StreamRecord as Stream,
+        ToolOutput as Tool, install_process_context,
     };
 }
 
@@ -36,6 +37,14 @@ pub mod frame {
     pub use super::internal::{
         DecodedFrameOutput as Decoded, FrameDirection as Direction, FrameOutput as Captured,
         OutputTimestamp as Timestamp, WireFrameOutput as Wire,
+    };
+}
+
+/// Output-v2 packet byte-layout representation.
+pub mod layout {
+    pub use super::internal::{
+        OutputByteRange as Range, OutputFieldLayout as Field, OutputLayerLayout as Layer,
+        OutputPacketLayout as Packet,
     };
 }
 
@@ -51,7 +60,10 @@ pub mod dissect {
 
 /// Offline-read and live-capture stream output.
 pub mod capture {
-    pub use super::internal::{CaptureFrameCommandResult as Event, ReadFrameCommandResult as Read};
+    pub use super::internal::{
+        CaptureFrameCommandResult as Event, ReadCompleteCommandResult as ReadComplete,
+        ReadFrameCommandResult as Read,
+    };
 }
 
 /// Structured network-operation output.
@@ -100,6 +112,13 @@ pub mod network {
     }
 }
 
+/// Structured passive and optionally probed environment diagnostics.
+pub mod doctor {
+    pub use super::internal::{
+        DoctorCapability as Capability, DoctorCommandResult as Result, DoctorReadiness as Readiness,
+    };
+}
+
 /// Structured capture-replay output.
 pub mod replay {
     pub use super::internal::{
@@ -143,7 +162,8 @@ pub mod dns {
 pub mod fuzz {
     pub use super::internal::{
         FuzzCaseOutcome as Outcome, FuzzCaseOutput as Case, FuzzCommandResult as Result,
-        FuzzMode as Mode, FuzzMutation as Mutation, FuzzReproduction as Reproduction,
-        FuzzStrategy as Strategy, FuzzStreamCommandResult as Event,
+        FuzzFieldValue as FieldValue, FuzzMode as Mode, FuzzMutation as Mutation,
+        FuzzReproduction as Reproduction, FuzzStrategy as Strategy,
+        FuzzStreamCommandResult as Event,
     };
 }

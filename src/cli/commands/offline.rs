@@ -32,7 +32,7 @@ fn run_build(arguments: BuildArgs, output: OutputFormat) -> Result<(), CliError>
             }
             Ok(())
         }
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex())),
         OutputFormat::Raw => write_raw(result.bytes()),
         OutputFormat::Json => emit_json(&AggregateOutput::success(
             CommandName::Build,
@@ -84,7 +84,7 @@ fn run_dissect(arguments: DissectArgs, output: OutputFormat) -> Result<(), CliEr
             }
             Ok(())
         }
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex())),
         OutputFormat::Raw => write_raw(result.bytes()),
         OutputFormat::Json => emit_json(&AggregateOutput::success(
             CommandName::Dissect,
@@ -132,6 +132,21 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
             .next_frame()
             .map_err(|source| CliError::classified(source).at_sequence(sequence))?
         else {
+            if output == OutputFormat::Ndjson {
+                emit_json_compact(
+                    &StreamRecord::success(
+                        CommandName::Read,
+                        sequence,
+                        ReadCompleteCommandResult {
+                            frames: sequence,
+                            bytes: captured_bytes,
+                        },
+                        Vec::new(),
+                    )
+                    .complete(CompletionReason::EndOfInput),
+                )
+                .map_err(|error| error.at_sequence(sequence))?;
+            }
             return Ok(());
         };
         let next_sequence = sequence.checked_add(1).ok_or_else(|| {
@@ -174,7 +189,7 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
                 result.frame.original_length,
                 spaced_hex(result.frame.bytes())
             ))?,
-            OutputFormat::Hex => write_stdout_line(format_args!("{}", result.frame.bytes_hex))?,
+            OutputFormat::Hex => write_stdout_line(format_args!("{}", result.frame.bytes_hex()))?,
             OutputFormat::Ndjson => emit_json_compact(&StreamRecord::success(
                 CommandName::Read,
                 sequence,

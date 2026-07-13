@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "replay",
   "mode": "aggregate",
   "status": "error",
@@ -8,7 +8,15 @@
     "kind": "cli",
     "message": "capture stream limits must be non-zero",
     "causes": [],
-    "remediation": "use finite non-zero capture frame, byte, packet, and interface limits"
+    "remediation": "use finite non-zero capture frame, byte, packet, and interface limits",
+    "category": "validation"
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

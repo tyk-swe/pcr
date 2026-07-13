@@ -4,8 +4,35 @@ pub fn fuzz(
     packet: Packet,
     registry: Arc<ProtocolRegistry>,
 ) -> Result<FuzzResult, FuzzError> {
+    let operation = crate::operation::Context::generate().map_err(|source| {
+        FuzzError::Operation {
+            case_index: request.first_case,
+            source,
+        }
+    })?;
+    fuzz_streaming(request, packet, registry, &operation, &mut |_| Ok(()))
+}
+
+/// Streaming offline fuzz entry point emitting each deterministic case.
+pub fn fuzz_streaming<S>(
+    request: &FuzzRequest,
+    packet: Packet,
+    registry: Arc<ProtocolRegistry>,
+    operation: &crate::operation::Context,
+    sink: &mut S,
+) -> Result<FuzzResult, FuzzError>
+where
+    S: crate::operation::EventSink<FuzzEvent>,
+{
+    operation
+        .cancellation()
+        .check()
+        .map_err(|source| FuzzError::Operation {
+            case_index: request.first_case,
+            source,
+        })?;
     let prepared = prepare(request, packet, registry)?;
-    Ok(FuzzResult {
+    let result = FuzzResult {
         mode: FuzzMode::Offline,
         seed: request.seed,
         first_case: request.first_case,
@@ -20,7 +47,25 @@ pub fn fuzz(
             bytes: prepared.built_byte_count,
             ..FuzzStats::default()
         },
-    })
+    };
+    for case in &result.cases {
+        operation
+            .cancellation()
+            .check()
+            .map_err(|source| FuzzError::Operation {
+                case_index: case.index,
+                source,
+            })?;
+        sink.emit(FuzzEvent {
+            case: case.clone(),
+            stats: result.stats.clone(),
+        })
+        .map_err(|source| FuzzError::Event {
+            case_index: case.index,
+            source,
+        })?;
+    }
+    Ok(result)
 }
 
 /// Generate and validate every case offline, authorize the complete campaign,
@@ -39,6 +84,53 @@ where
     E: FuzzExecutor,
     C: Clock,
 {
+    let operation = crate::operation::Context::generate().map_err(|source| {
+        FuzzError::Operation {
+            case_index: request.first_case,
+            source,
+        }
+    })?;
+    fuzz_live_streaming(
+        request,
+        live,
+        packet,
+        registry,
+        &operation,
+        authorizer,
+        executor,
+        clock,
+        &mut |_| Ok(()),
+    )
+}
+
+/// Streaming live fuzz entry point emitting each case after execution.
+// The live adapters are deliberately separate public seams so callers can
+// supply policy, execution, time, cancellation, and output independently.
+#[allow(clippy::too_many_arguments)]
+pub fn fuzz_live_streaming<A, E, C, S>(
+    request: &FuzzRequest,
+    live: FuzzLiveOptions,
+    packet: Packet,
+    registry: Arc<ProtocolRegistry>,
+    operation: &crate::operation::Context,
+    authorizer: &mut A,
+    executor: &mut E,
+    clock: &mut C,
+    sink: &mut S,
+) -> Result<FuzzResult, FuzzError>
+where
+    A: FuzzAuthorizer,
+    E: FuzzExecutor,
+    C: Clock,
+    S: crate::operation::EventSink<FuzzEvent>,
+{
+    operation
+        .cancellation()
+        .check()
+        .map_err(|source| FuzzError::Operation {
+            case_index: request.first_case,
+            source,
+        })?;
     let live = live.validate()?;
     let operation_started = Instant::now();
     let live_dissector = Dissector::new(Arc::clone(&registry));
@@ -131,14 +223,42 @@ where
     let mut evidence = EvidenceBudget::default();
     let mut operation_diagnostics = Vec::new();
     let mut scheduled_delay = Duration::ZERO;
+    for case in prepared.cases.iter().filter(|case| case.built.is_none()) {
+        sink.emit(FuzzEvent {
+            case: case.clone(),
+            stats: stats.clone(),
+        })
+        .map_err(|source| FuzzError::Event {
+            case_index: case.index,
+            source,
+        })?;
+    }
     for (ordinal, case_index) in built_indices.into_iter().enumerate() {
         let case = &mut prepared.cases[case_index];
+        operation
+            .cancellation()
+            .check()
+            .map_err(|source| FuzzError::Operation {
+                case_index: case.index,
+                source,
+            })?;
         if ordinal != 0 {
             let delay = rate_delay(live.cases_per_second)?;
-            clock.sleep(delay).map_err(|source| FuzzError::Clock {
-                case_index: case.index,
-                message: source.to_string(),
-            })?;
+            match clock.sleep_cancelled(delay, operation.cancellation()) {
+                Ok(()) => {}
+                Err(super::clock::SleepError::Clock(source)) => {
+                    return Err(FuzzError::Clock {
+                        case_index: case.index,
+                        message: source.to_string(),
+                    });
+                }
+                Err(super::clock::SleepError::Cancelled(source)) => {
+                    return Err(FuzzError::Operation {
+                        case_index: case.index,
+                        source,
+                    });
+                }
+            }
             scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
@@ -217,6 +337,14 @@ where
         } else {
             FuzzCaseOutcome::Timeout
         };
+        sink.emit(FuzzEvent {
+            case: case.clone(),
+            stats: stats.clone(),
+        })
+        .map_err(|source| FuzzError::Event {
+            case_index: case.index,
+            source,
+        })?;
     }
     stats.elapsed =
         stats

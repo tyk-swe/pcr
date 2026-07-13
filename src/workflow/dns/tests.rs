@@ -101,9 +101,15 @@ mod tests {
             canonical_query_name(&format!("{}.example", "a".repeat(64))),
             Err(DnsWireError::InvalidName { .. })
         ));
-        assert_eq!(dns_source_port(u16::MAX, 2), DNS_EPHEMERAL_SOURCE_PORT_BASE);
-        assert_eq!(dns_source_port(DNS_EPHEMERAL_SOURCE_PORT_BASE, 2), 49_153);
-        assert_eq!(dns_source_port(DNS_EPHEMERAL_SOURCE_PORT_BASE - 1, 2), 1);
+        assert_eq!(dns_source_port(u16::MAX, 2), u16::MAX);
+        assert_eq!(
+            dns_source_port(DNS_EPHEMERAL_SOURCE_PORT_BASE, 2),
+            DNS_EPHEMERAL_SOURCE_PORT_BASE
+        );
+        assert_eq!(
+            dns_source_port(DNS_EPHEMERAL_SOURCE_PORT_BASE - 1, 2),
+            DNS_EPHEMERAL_SOURCE_PORT_BASE - 1
+        );
     }
 
     #[test]
@@ -635,6 +641,7 @@ mod tests {
         let query = encode_dns_query("www.example", DnsQueryType::A, 42, true).unwrap();
         let probe = DnsProbe {
             attempt: 1,
+            operation_id: crate::operation::Id::default(),
             server_address: IpAddr::V4(server),
             server_port: 53,
             source_port: 50_000,
@@ -742,6 +749,7 @@ mod tests {
         let query_v6 = encode_dns_query("www.example", DnsQueryType::A, 44, true).unwrap();
         let probe_v6 = DnsProbe {
             attempt: 1,
+            operation_id: crate::operation::Id::default(),
             server_address: IpAddr::V6(server_v6),
             server_port: 53,
             source_port: 50_001,
@@ -1153,6 +1161,7 @@ mod tests {
         let query = encode_dns_query("www.example.test", DnsQueryType::A, 77, true).unwrap();
         let probe = DnsProbe {
             attempt: 1,
+            operation_id: crate::operation::Id::default(),
             server_address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53)),
             server_port: 53,
             source_port: 50_000,

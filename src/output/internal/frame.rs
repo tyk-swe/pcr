@@ -1,6 +1,7 @@
 /// Canonical signed Unix timestamp used by output records, including pre-epoch captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct OutputTimestamp {
+    #[serde(serialize_with = "serialize_i64_decimal")]
     pub unix_seconds: i64,
     pub nanoseconds: u32,
 }
@@ -43,7 +44,7 @@ impl OutputTimestamp {
             // A fractional instant before the epoch is represented with
             // floor seconds. `i64::MAX` seconds plus a fraction therefore
             // maps to `(i64::MIN, positive nanos)`, which is still inside the
-            // v1 signed-seconds range.
+            // v2 signed-seconds range.
             let unix_seconds = if seconds == i64::MAX as u64 {
                 i64::MIN
             } else {
@@ -58,11 +59,9 @@ impl OutputTimestamp {
 }
 
 /// Exact complete-frame bytes used by raw/hex/capture renderers.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WireFrameOutput {
-    #[serde(skip)]
     bytes: Bytes,
-    pub bytes_hex: String,
     pub length: u64,
 }
 
@@ -70,7 +69,6 @@ impl WireFrameOutput {
     pub fn new(bytes: impl Into<Bytes>) -> Self {
         let bytes = bytes.into();
         Self {
-            bytes_hex: compact_hex(&bytes),
             length: bytes.len() as u64,
             bytes,
         }
@@ -78,6 +76,25 @@ impl WireFrameOutput {
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    /// Generates exact hexadecimal bytes on demand without retaining a copy.
+    pub fn bytes_hex(&self) -> String {
+        compact_hex(&self.bytes)
+    }
+}
+
+impl Serialize for WireFrameOutput {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct as _;
+
+        let mut output = serializer.serialize_struct("WireFrameOutput", 2)?;
+        output.serialize_field("bytes_hex", &HexOutput(&self.bytes))?;
+        output.serialize_field("length", &self.length.to_string())?;
+        output.end()
     }
 }
 
@@ -100,19 +117,15 @@ impl From<crate::capture::Direction> for FrameDirection {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FrameOutput {
-    #[serde(skip)]
     bytes: Bytes,
     pub timestamp: OutputTimestamp,
     pub captured_length: u32,
     pub original_length: u32,
     pub link_type: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<FrameDirection>,
-    pub bytes_hex: String,
 }
 
 impl FrameOutput {
@@ -129,12 +142,39 @@ impl FrameOutput {
             link_type: frame.link_type.0,
             interface: frame.interface,
             direction: frame.direction.map(Into::into),
-            bytes_hex: compact_hex(&frame.bytes),
             bytes: frame.bytes,
         })
     }
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+
+    pub fn bytes_hex(&self) -> String {
+        compact_hex(&self.bytes)
+    }
+}
+
+impl Serialize for FrameOutput {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeStruct as _;
+
+        let fields = 6 + usize::from(self.interface.is_some()) + usize::from(self.direction.is_some());
+        let mut output = serializer.serialize_struct("FrameOutput", fields)?;
+        output.serialize_field("timestamp", &self.timestamp)?;
+        output.serialize_field("captured_length", &self.captured_length)?;
+        output.serialize_field("original_length", &self.original_length)?;
+        output.serialize_field("link_type", &self.link_type)?;
+        if let Some(interface) = self.interface {
+            output.serialize_field("interface", &interface)?;
+        }
+        if let Some(direction) = self.direction {
+            output.serialize_field("direction", &direction)?;
+        }
+        output.serialize_field("bytes_hex", &HexOutput(&self.bytes))?;
+        output.end()
     }
 }

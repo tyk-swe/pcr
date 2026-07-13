@@ -1,24 +1,24 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "replay",
   "mode": "stream",
-  "status": "success",
-  "sequence": 0,
+  "status": "running",
+  "sequence": "1",
   "result": {
-    "source_sequence": 0,
+    "source_sequence": "0",
     "interface": {
       "name": "lab0",
       "index": 2
     },
     "link_mode": "auto",
     "scheduled_delay": {
-      "secs": 0,
-      "nanos": 0
+      "seconds": "0",
+      "nanoseconds": 0
     },
-    "bytes_sent": 4,
+    "bytes_sent": "4",
     "frame": {
       "timestamp": {
-        "unix_seconds": 0,
+        "unix_seconds": "0",
         "nanoseconds": 0
       },
       "captured_length": 4,
@@ -28,5 +28,11 @@
     },
     "transmitted": true
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "item"
 }

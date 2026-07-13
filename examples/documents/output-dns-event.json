@@ -1,9 +1,9 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dns",
   "mode": "stream",
-  "sequence": 0,
-  "status": "success",
+  "sequence": "1",
+  "status": "running",
   "result": {
     "event": "attempt",
     "server": "resolver.lab",
@@ -16,11 +16,17 @@
       "source_port": 50000,
       "status": "timeout",
       "sent_at": {
-        "unix_seconds": 1770000000,
+        "unix_seconds": "1770000000",
         "nanoseconds": 0
       },
       "reason": "no checksum-valid, tuple-correlated DNS response before the deadline"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "item"
 }

@@ -1,6 +1,18 @@
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum TracerouteError {
+    #[error("traceroute operation failed at sequence {sequence}: {source}")]
+    Operation {
+        sequence: u64,
+        #[source]
+        source: crate::operation::Error,
+    },
+    #[error("traceroute event delivery failed at sequence {sequence}: {source}")]
+    Event {
+        sequence: u64,
+        #[source]
+        source: crate::operation::EventError,
+    },
     #[error("invalid traceroute limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -36,7 +48,9 @@ pub enum TracerouteError {
 impl TracerouteError {
     pub fn sequence(&self) -> Option<u64> {
         match self {
-            Self::Execution { sequence, .. }
+            Self::Operation { sequence, .. }
+            | Self::Event { sequence, .. }
+            | Self::Execution { sequence, .. }
             | Self::Clock { sequence, .. }
             | Self::InvalidEvidence { sequence, .. }
             | Self::StatisticsOverflow { sequence } => Some(*sequence),
@@ -48,6 +62,8 @@ impl TracerouteError {
 impl Classified for TracerouteError {
     fn classification(&self) -> Classification {
         match self {
+            Self::Operation { source, .. } => source.classification(),
+            Self::Event { source, .. } => source.classification(),
             Self::InvalidLimit { .. }
             | Self::InvalidPort { .. }
             | Self::InvalidTimeout { .. }
@@ -85,6 +101,8 @@ impl Classified for TracerouteError {
 
     fn causes(&self) -> Vec<String> {
         match self {
+            Self::Operation { source, .. } => source.causes(),
+            Self::Event { source, .. } => source.causes(),
             Self::Authorization(error) => error.causes(),
             Self::Execution { source, .. } => source.causes(),
             _ => Vec::new(),

@@ -1,0 +1,56 @@
+{
+  "schema": "packetcraftr.output/v2",
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "command": "doctor",
+  "mode": "aggregate",
+  "effective_request": {},
+  "status": "success",
+  "result": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu",
+    "platform": "linux-x86_64",
+    "compiled_features": [
+      "live",
+      "native",
+      "native-route",
+      "native-layer2",
+      "native-layer3"
+    ],
+    "interfaces": [],
+    "routes": [],
+    "capabilities": [
+      {
+        "name": "interfaces",
+        "status": "ready",
+        "detail": "interfaces were enumerated"
+      },
+      {
+        "name": "routes",
+        "status": "ready",
+        "detail": "routes were enumerated"
+      },
+      {
+        "name": "layer2",
+        "status": "ready",
+        "detail": "an up interface advertises layer2 readiness"
+      },
+      {
+        "name": "layer3",
+        "status": "ready",
+        "detail": "an up interface advertises layer3 readiness"
+      },
+      {
+        "name": "capture",
+        "status": "unverified",
+        "detail": "capture was not opened; pass --probe-capture to verify it"
+      }
+    ],
+    "capture_probe_attempted": false
+  },
+  "completion_reason": "completed",
+  "diagnostics": []
+}

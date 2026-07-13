@@ -1,21 +1,33 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/main/schemas/packetcraftr.output.v1.schema.json",
+  "$id": "https://raw.githubusercontent.com/tyk-swe/pcr/v0.3.0/schemas/packetcraftr.output.v2.schema.json",
   "$comment": "SPDX-License-Identifier: AGPL-3.0-only",
-  "title": "PacketcraftR CLI output envelope v1",
-  "description": "One typed aggregate JSON result or one independently valid NDJSON stream record.",
+  "title": "PacketcraftR CLI output envelope v2",
+  "description": "One aggregate JSON record or one independently valid NDJSON lifecycle record. The release-tagged identifier is immutable.",
   "oneOf": [
     {
       "$ref": "#/$defs/aggregateSuccess"
     },
     {
-      "$ref": "#/$defs/streamSuccess"
-    },
-    {
       "$ref": "#/$defs/aggregateError"
     },
     {
+      "$ref": "#/$defs/aggregateCancelled"
+    },
+    {
+      "$ref": "#/$defs/streamStart"
+    },
+    {
+      "$ref": "#/$defs/streamItem"
+    },
+    {
+      "$ref": "#/$defs/streamComplete"
+    },
+    {
       "$ref": "#/$defs/streamError"
+    },
+    {
+      "$ref": "#/$defs/streamCancelled"
     }
   ],
   "$defs": {
@@ -23,6 +35,8 @@
       "type": "object",
       "required": [
         "schema",
+        "tool",
+        "operation_id",
         "command",
         "mode",
         "status",
@@ -30,13 +44,16 @@
       ],
       "properties": {
         "schema": {
-          "const": "packetcraftr.output/v1"
+          "const": "packetcraftr.output/v2"
+        },
+        "tool": {
+          "$ref": "#/$defs/tool"
+        },
+        "operation_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$"
         },
         "command": {
-          "type": [
-            "string",
-            "null"
-          ],
           "enum": [
             null,
             "build",
@@ -52,31 +69,47 @@
             "dns",
             "fuzz",
             "interfaces",
-            "routes"
+            "routes",
+            "doctor"
           ]
         },
         "mode": {
-          "type": "string",
           "enum": [
             "aggregate",
             "stream"
           ]
         },
-        "status": {
-          "type": "string",
-          "enum": [
-            "success",
-            "error"
-          ]
-        },
         "sequence": {
           "$ref": "#/$defs/uint64"
+        },
+        "record": {
+          "enum": [
+            "start",
+            "item",
+            "complete",
+            "error",
+            "cancelled"
+          ]
+        },
+        "status": {
+          "enum": [
+            "running",
+            "success",
+            "error",
+            "cancelled"
+          ]
+        },
+        "effective_request": {
+          "type": "object"
         },
         "result": {
           "type": "object"
         },
         "error": {
           "$ref": "#/$defs/error"
+        },
+        "completion_reason": {
+          "$ref": "#/$defs/completionReason"
         },
         "diagnostics": {
           "type": "array",
@@ -95,9 +128,10 @@
           "$ref": "#/$defs/baseEnvelope"
         },
         {
-          "type": "object",
           "required": [
-            "result"
+            "effective_request",
+            "result",
+            "completion_reason"
           ],
           "properties": {
             "command": {
@@ -115,6 +149,11 @@
               {
                 "required": [
                   "sequence"
+                ]
+              },
+              {
+                "required": [
+                  "record"
                 ]
               },
               {
@@ -162,21 +201,164 @@
             },
             {
               "$ref": "#/$defs/routesSuccess"
+            },
+            {
+              "$ref": "#/$defs/doctorSuccess"
             }
           ]
         }
       ],
       "unevaluatedProperties": false
     },
-    "streamSuccess": {
+    "aggregateError": {
       "allOf": [
         {
           "$ref": "#/$defs/baseEnvelope"
         },
         {
-          "type": "object",
+          "required": [
+            "effective_request",
+            "error",
+            "completion_reason"
+          ],
+          "properties": {
+            "mode": {
+              "const": "aggregate"
+            },
+            "status": {
+              "const": "error"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "sequence"
+                ]
+              },
+              {
+                "required": [
+                  "record"
+                ]
+              },
+              {
+                "required": [
+                  "result"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "aggregateCancelled": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseEnvelope"
+        },
+        {
+          "required": [
+            "effective_request",
+            "error",
+            "completion_reason"
+          ],
+          "properties": {
+            "mode": {
+              "const": "aggregate"
+            },
+            "status": {
+              "const": "cancelled"
+            },
+            "completion_reason": {
+              "const": "cancelled"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "sequence"
+                ]
+              },
+              {
+                "required": [
+                  "record"
+                ]
+              },
+              {
+                "required": [
+                  "result"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "streamStart": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseEnvelope"
+        },
+        {
           "required": [
             "sequence",
+            "record",
+            "effective_request"
+          ],
+          "properties": {
+            "mode": {
+              "const": "stream"
+            },
+            "sequence": {
+              "const": "0"
+            },
+            "record": {
+              "const": "start"
+            },
+            "status": {
+              "const": "running"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "result"
+                ]
+              },
+              {
+                "required": [
+                  "error"
+                ]
+              },
+              {
+                "required": [
+                  "completion_reason"
+                ]
+              },
+              {
+                "required": [
+                  "stats"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "streamItem": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseEnvelope"
+        },
+        {
+          "required": [
+            "sequence",
+            "record",
             "result"
           ],
           "properties": {
@@ -186,13 +368,30 @@
             "mode": {
               "const": "stream"
             },
+            "record": {
+              "const": "item"
+            },
             "status": {
-              "const": "success"
+              "const": "running"
             }
           },
           "not": {
-            "required": [
-              "error"
+            "anyOf": [
+              {
+                "required": [
+                  "effective_request"
+                ]
+              },
+              {
+                "required": [
+                  "error"
+                ]
+              },
+              {
+                "required": [
+                  "completion_reason"
+                ]
+              }
             ]
           }
         },
@@ -227,38 +426,158 @@
       ],
       "unevaluatedProperties": false
     },
-    "aggregateError": {
+    "streamComplete": {
       "allOf": [
         {
           "$ref": "#/$defs/baseEnvelope"
         },
         {
-          "type": "object",
           "required": [
-            "error"
+            "sequence",
+            "record",
+            "result",
+            "completion_reason"
           ],
           "properties": {
+            "command": {
+              "type": "string"
+            },
             "mode": {
-              "const": "aggregate"
+              "const": "stream"
+            },
+            "record": {
+              "const": "complete"
             },
             "status": {
-              "const": "error"
+              "const": "success"
             }
           },
           "not": {
             "anyOf": [
               {
                 "required": [
-                  "sequence"
+                  "effective_request"
                 ]
               },
               {
                 "required": [
-                  "result"
+                  "error"
                 ]
               }
             ]
           }
+        },
+        {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/readCompleteSuccess"
+            },
+            {
+              "type": "object",
+              "required": [
+                "command",
+                "result"
+              ],
+              "properties": {
+                "command": {
+                  "const": "capture"
+                },
+                "result": {
+                  "$ref": "#/$defs/captureCompleteResult"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "command",
+                "result"
+              ],
+              "properties": {
+                "command": {
+                  "const": "exchange"
+                },
+                "result": {
+                  "$ref": "#/$defs/exchangeCompleteResult"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "command",
+                "result"
+              ],
+              "properties": {
+                "command": {
+                  "const": "replay"
+                },
+                "result": {
+                  "$ref": "#/$defs/replayResult"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "command",
+                "result"
+              ],
+              "properties": {
+                "command": {
+                  "const": "scan"
+                },
+                "result": {
+                  "$ref": "#/$defs/scanCompleteResult"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "command",
+                "result"
+              ],
+              "properties": {
+                "command": {
+                  "const": "traceroute"
+                },
+                "result": {
+                  "$ref": "#/$defs/tracerouteCompleteResult"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "command",
+                "result"
+              ],
+              "properties": {
+                "command": {
+                  "const": "dns"
+                },
+                "result": {
+                  "$ref": "#/$defs/dnsCompleteResult"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "command",
+                "result"
+              ],
+              "properties": {
+                "command": {
+                  "const": "fuzz"
+                },
+                "result": {
+                  "$ref": "#/$defs/fuzzCompleteResult"
+                }
+              }
+            }
+          ]
         }
       ],
       "unevaluatedProperties": false
@@ -269,27 +588,307 @@
           "$ref": "#/$defs/baseEnvelope"
         },
         {
-          "type": "object",
           "required": [
             "sequence",
-            "error"
+            "record",
+            "error",
+            "completion_reason"
           ],
           "properties": {
             "mode": {
               "const": "stream"
+            },
+            "record": {
+              "const": "error"
             },
             "status": {
               "const": "error"
             }
           },
           "not": {
-            "required": [
-              "result"
+            "anyOf": [
+              {
+                "required": [
+                  "effective_request"
+                ]
+              },
+              {
+                "required": [
+                  "result"
+                ]
+              },
+              {
+                "required": [
+                  "stats"
+                ]
+              }
             ]
           }
         }
       ],
       "unevaluatedProperties": false
+    },
+    "streamCancelled": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseEnvelope"
+        },
+        {
+          "required": [
+            "sequence",
+            "record",
+            "error",
+            "completion_reason"
+          ],
+          "properties": {
+            "mode": {
+              "const": "stream"
+            },
+            "record": {
+              "const": "cancelled"
+            },
+            "status": {
+              "const": "cancelled"
+            },
+            "completion_reason": {
+              "const": "cancelled"
+            }
+          },
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "effective_request"
+                ]
+              },
+              {
+                "required": [
+                  "result"
+                ]
+              },
+              {
+                "required": [
+                  "stats"
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tool": {
+      "type": "object",
+      "required": [
+        "version",
+        "build_target"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$"
+        },
+        "build_target": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "completionReason": {
+      "enum": [
+        "completed",
+        "end_of_input",
+        "timeout",
+        "limit_reached",
+        "destination_reached",
+        "cancelled"
+      ]
+    },
+    "error": {
+      "type": "object",
+      "required": [
+        "code",
+        "kind",
+        "category",
+        "message",
+        "causes"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "cli",
+            "packet",
+            "capability",
+            "io",
+            "policy",
+            "internal"
+          ]
+        },
+        "category": {
+          "enum": [
+            "validation",
+            "capability",
+            "policy",
+            "timeout",
+            "io",
+            "cleanup",
+            "invariant"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "causes": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "remediation": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    "diagnostic": {
+      "type": "object",
+      "required": [
+        "code",
+        "severity",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "severity": {
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "layer": {
+          "$ref": "#/$defs/uint64"
+        },
+        "field": {
+          "type": "string",
+          "minLength": 1
+        },
+        "range": {
+          "$ref": "#/$defs/byteRange"
+        }
+      },
+      "additionalProperties": false
+    },
+    "byteRange": {
+      "type": "object",
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "#/$defs/uint64"
+        },
+        "end": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "operationStats": {
+      "type": "object",
+      "required": [
+        "packets_attempted",
+        "packets_completed",
+        "bytes",
+        "elapsed",
+        "capture"
+      ],
+      "properties": {
+        "packets_attempted": {
+          "$ref": "#/$defs/uint64"
+        },
+        "packets_completed": {
+          "$ref": "#/$defs/uint64"
+        },
+        "bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "elapsed": {
+          "$ref": "#/$defs/duration"
+        },
+        "capture": {
+          "$ref": "#/$defs/captureStatistics"
+        }
+      },
+      "additionalProperties": false
+    },
+    "captureStatistics": {
+      "type": "object",
+      "required": [
+        "received_frames",
+        "received_bytes",
+        "dropped_frames",
+        "dropped_bytes",
+        "overflow_events"
+      ],
+      "properties": {
+        "received_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "received_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "dropped_frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "dropped_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "overflow_events": {
+          "$ref": "#/$defs/uint64"
+        },
+        "receiver_dropped_frames": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "duration": {
+      "type": "object",
+      "required": [
+        "seconds",
+        "nanoseconds"
+      ],
+      "properties": {
+        "seconds": {
+          "$ref": "#/$defs/uint64"
+        },
+        "nanoseconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 999999999
+        }
+      },
+      "additionalProperties": false
+    },
+    "uint64": {
+      "type": "string",
+      "pattern": "^(?:0|(?:[1-9][0-9]{0,18}|1[0-7][0-9]{18}|18[0-3][0-9]{17}|184[0-3][0-9]{16}|1844[0-5][0-9]{15}|18446[0-6][0-9]{14}|184467[0-3][0-9]{13}|1844674[0-3][0-9]{12}|184467440[0-6][0-9]{10}|1844674407[0-2][0-9]{9}|18446744073[0-6][0-9]{8}|1844674407370[0-8][0-9]{6}|18446744073709[0-4][0-9]{5}|184467440737095[0-4][0-9]{4}|18446744073709550[0-9]{3}|18446744073709551[0-5][0-9]{2}|1844674407370955160[0-9]{1}|1844674407370955161[0-4]|18446744073709551615))$"
     },
     "buildSuccess": {
       "type": "object",
@@ -343,7 +942,7 @@
           "const": "capture"
         },
         "result": {
-          "$ref": "#/$defs/captureStreamResult"
+          "$ref": "#/$defs/captureItemResult"
         }
       },
       "required": [
@@ -508,7 +1107,7 @@
           "const": "exchange"
         },
         "result": {
-          "$ref": "#/$defs/exchangeStreamResult"
+          "$ref": "#/$defs/exchangeItemResult"
         }
       },
       "required": [
@@ -523,7 +1122,7 @@
           "const": "replay"
         },
         "result": {
-          "$ref": "#/$defs/replayStreamResult"
+          "$ref": "#/$defs/replayFrameResult"
         }
       },
       "required": [
@@ -538,7 +1137,7 @@
           "const": "scan"
         },
         "result": {
-          "$ref": "#/$defs/scanStreamResult"
+          "$ref": "#/$defs/scanItemResult"
         }
       },
       "required": [
@@ -553,7 +1152,7 @@
           "const": "traceroute"
         },
         "result": {
-          "$ref": "#/$defs/tracerouteStreamResult"
+          "$ref": "#/$defs/tracerouteItemResult"
         }
       },
       "required": [
@@ -568,7 +1167,7 @@
           "const": "dns"
         },
         "result": {
-          "$ref": "#/$defs/dnsStreamResult"
+          "$ref": "#/$defs/dnsItemResult"
         }
       },
       "required": [
@@ -583,7 +1182,7 @@
           "const": "fuzz"
         },
         "result": {
-          "$ref": "#/$defs/fuzzCaseResult"
+          "$ref": "#/$defs/fuzzItemResult"
         }
       },
       "required": [
@@ -660,6 +1259,191 @@
         }
       },
       "additionalProperties": false
+    },
+    "captureItemResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/captureStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "frame"
+            }
+          }
+        }
+      ]
+    },
+    "captureCompleteResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/captureStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            }
+          }
+        }
+      ]
+    },
+    "exchangeItemResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/exchangeStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "enum": [
+                "sent",
+                "response",
+                "unanswered",
+                "unsolicited",
+                "undecoded"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "exchangeCompleteResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/exchangeStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            }
+          }
+        }
+      ]
+    },
+    "scanItemResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scanStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "enum": [
+                "port",
+                "undecoded"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "scanCompleteResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/scanStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            }
+          }
+        }
+      ]
+    },
+    "tracerouteItemResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tracerouteStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "enum": [
+                "hop",
+                "undecoded"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "tracerouteCompleteResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/tracerouteStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            }
+          }
+        }
+      ]
+    },
+    "dnsItemResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/dnsStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "enum": [
+                "attempt",
+                "record",
+                "rejected",
+                "undecoded"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "dnsCompleteResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/dnsStreamResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            }
+          }
+        }
+      ]
+    },
+    "fuzzItemResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/fuzzCaseResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "case"
+            }
+          }
+        }
+      ]
+    },
+    "fuzzCompleteResult": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/fuzzCaseResult"
+        },
+        {
+          "properties": {
+            "event": {
+              "const": "complete"
+            }
+          }
+        }
+      ]
     },
     "captureStreamResult": {
       "oneOf": [
@@ -1891,9 +2675,7 @@
       ],
       "properties": {
         "unix_seconds": {
-          "type": "integer",
-          "minimum": -9223372036854775808,
-          "maximum": 9223372036854775807
+          "$ref": "#/$defs/int64"
         },
         "nanoseconds": {
           "type": "integer",
@@ -2769,127 +3551,127 @@
         "type"
       ],
       "properties": {
-          "owner": {
+        "owner": {
+          "type": "string"
+        },
+        "class": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "ttl": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "a",
+            "aaaa",
+            "cname",
+            "mx",
+            "ns",
+            "ptr",
+            "soa",
+            "srv",
+            "txt",
+            "opt",
+            "unknown"
+          ]
+        },
+        "address": {
+          "type": "string"
+        },
+        "preference": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "exchange": {
+          "type": "string"
+        },
+        "canonical_name": {
+          "type": "string"
+        },
+        "name_server": {
+          "type": "string"
+        },
+        "pointer": {
+          "type": "string"
+        },
+        "primary_name_server": {
+          "type": "string"
+        },
+        "responsible_mailbox": {
+          "type": "string"
+        },
+        "serial": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "refresh": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "retry": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "expire": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "minimum": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "weight": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "target": {
+          "type": "string"
+        },
+        "strings": {
+          "type": "array",
+          "items": {
             "type": "string"
-          },
-          "class": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "ttl": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "a",
-              "aaaa",
-              "cname",
-              "mx",
-              "ns",
-              "ptr",
-              "soa",
-              "srv",
-              "txt",
-              "opt",
-              "unknown"
-            ]
-          },
-          "address": {
-            "type": "string"
-          },
-          "preference": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "exchange": {
-            "type": "string"
-          },
-          "canonical_name": {
-            "type": "string"
-          },
-          "name_server": {
-            "type": "string"
-          },
-          "pointer": {
-            "type": "string"
-          },
-          "primary_name_server": {
-            "type": "string"
-          },
-          "responsible_mailbox": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "refresh": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "retry": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "expire": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "minimum": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "priority": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "weight": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "port": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "target": {
-            "type": "string"
-          },
-          "strings": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "strings_hex": {
-            "type": "array",
-            "items": {
-              "$ref": "#/$defs/hexBytes"
-            }
-          },
-          "type_code": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "rdata_hex": {
-            "$ref": "#/$defs/hexBytes"
-          },
-          "edns": {
-            "$ref": "#/$defs/dnsEdns"
           }
+        },
+        "strings_hex": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hexBytes"
+          }
+        },
+        "type_code": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "rdata_hex": {
+          "$ref": "#/$defs/hexBytes"
+        },
+        "edns": {
+          "$ref": "#/$defs/dnsEdns"
+        }
       },
       "allOf": [
         {
@@ -3141,41 +3923,66 @@
       "allOf": [
         {
           "if": {
-            "required": ["outcome"],
+            "required": [
+              "outcome"
+            ],
             "properties": {
               "outcome": {
-                "enum": ["built", "sent", "response", "timeout"]
+                "enum": [
+                  "built",
+                  "sent",
+                  "response",
+                  "timeout"
+                ]
               }
             }
           },
           "then": {
-            "required": ["frame", "requires_live_opt_in"]
+            "required": [
+              "frame",
+              "requires_live_opt_in"
+            ]
           }
         },
         {
           "if": {
-            "required": ["outcome"],
+            "required": [
+              "outcome"
+            ],
             "properties": {
               "outcome": {
-                "enum": ["sent", "response", "timeout"]
+                "enum": [
+                  "sent",
+                  "response",
+                  "timeout"
+                ]
               }
             }
           },
           "then": {
-            "required": ["sent"]
+            "required": [
+              "sent"
+            ]
           }
         },
         {
           "if": {
-            "required": ["outcome"],
+            "required": [
+              "outcome"
+            ],
             "properties": {
               "outcome": {
-                "enum": ["rejected", "error"]
+                "enum": [
+                  "rejected",
+                  "error"
+                ]
               }
             }
           },
           "then": {
-            "required": ["error"]
+            "required": [
+              "error"
+            ]
           }
         }
       ],
@@ -3252,49 +4059,78 @@
       "oneOf": [
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "bool" },
-            "value": { "type": "boolean" }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": ["type", "value"],
-          "properties": {
-            "type": { "const": "unsigned" },
-            "value": { "$ref": "#/$defs/uint64" }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": ["type", "value"],
-          "properties": {
-            "type": { "const": "signed" },
+            "type": {
+              "const": "bool"
+            },
             "value": {
-              "type": "integer",
-              "minimum": -9223372036854775808,
-              "maximum": 9223372036854775807
+              "type": "boolean"
             }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "text" },
-            "value": { "type": "string" }
+            "type": {
+              "const": "unsigned"
+            },
+            "value": {
+              "$ref": "#/$defs/uint64"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "bytes" },
+            "type": {
+              "const": "signed"
+            },
+            "value": {
+              "$ref": "#/$defs/int64"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "bytes"
+            },
             "value": {
               "type": "array",
               "items": {
@@ -3308,27 +4144,48 @@
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "ipv4" },
-            "value": { "type": "string", "format": "ipv4" }
+            "type": {
+              "const": "ipv4"
+            },
+            "value": {
+              "type": "string",
+              "format": "ipv4"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "ipv6" },
-            "value": { "type": "string", "format": "ipv6" }
+            "type": {
+              "const": "ipv6"
+            },
+            "value": {
+              "type": "string",
+              "format": "ipv6"
+            }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "mac" },
+            "type": {
+              "const": "mac"
+            },
             "value": {
               "type": "array",
               "minItems": 6,
@@ -3344,197 +4201,335 @@
         },
         {
           "type": "object",
-          "required": ["type", "value"],
+          "required": [
+            "type",
+            "value"
+          ],
           "properties": {
-            "type": { "const": "list" },
+            "type": {
+              "const": "list"
+            },
             "value": {
               "type": "array",
-              "items": { "$ref": "#/$defs/fieldValue" }
+              "items": {
+                "$ref": "#/$defs/fieldValue"
+              }
             }
           },
           "additionalProperties": false
         }
       ]
     },
-    "error": {
-      "type": "object",
-      "required": [
-        "code",
-        "kind",
-        "message",
-        "causes"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "minLength": 1
-        },
-        "kind": {
-          "type": "string",
-          "enum": [
-            "cli",
-            "packet",
-            "capability",
-            "io",
-            "policy",
-            "internal"
-          ]
-        },
-        "message": {
-          "type": "string",
-          "minLength": 1
-        },
-        "causes": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "remediation": {
-          "type": "string",
-          "minLength": 1
-        }
-      },
-      "additionalProperties": false
-    },
-    "diagnostic": {
-      "type": "object",
-      "required": [
-        "code",
-        "severity",
-        "message"
-      ],
-      "properties": {
-        "code": {
-          "type": "string",
-          "minLength": 1
-        },
-        "severity": {
-          "type": "string",
-          "enum": [
-            "info",
-            "warning",
-            "error"
-          ]
-        },
-        "message": {
-          "type": "string"
-        },
-        "layer": {
-          "$ref": "#/$defs/uint64"
-        },
-        "field": {
-          "type": "string",
-          "minLength": 1
-        },
-        "range": {
-          "$ref": "#/$defs/byteRange"
-        }
-      },
-      "additionalProperties": false
-    },
-    "operationStats": {
-      "type": "object",
-      "required": [
-        "packets_attempted",
-        "packets_completed",
-        "bytes",
-        "elapsed",
-        "capture"
-      ],
-      "properties": {
-        "packets_attempted": {
-          "$ref": "#/$defs/uint64"
-        },
-        "packets_completed": {
-          "$ref": "#/$defs/uint64"
-        },
-        "bytes": {
-          "$ref": "#/$defs/uint64"
-        },
-        "elapsed": {
-          "$ref": "#/$defs/duration"
-        },
-        "capture": {
-          "$ref": "#/$defs/captureStatistics"
-        }
-      },
-      "additionalProperties": false
-    },
-    "captureStatistics": {
-      "type": "object",
-      "required": [
-        "received_frames",
-        "received_bytes",
-        "dropped_frames",
-        "dropped_bytes",
-        "overflow_events"
-      ],
-      "properties": {
-        "received_frames": {
-          "$ref": "#/$defs/uint64"
-        },
-        "received_bytes": {
-          "$ref": "#/$defs/uint64"
-        },
-        "dropped_frames": {
-          "$ref": "#/$defs/uint64"
-        },
-        "dropped_bytes": {
-          "$ref": "#/$defs/uint64"
-        },
-        "overflow_events": {
-          "$ref": "#/$defs/uint64"
-        },
-        "receiver_dropped_frames": {
-          "$ref": "#/$defs/uint64"
-        }
-      },
-      "additionalProperties": false
-    },
-    "duration": {
-      "type": "object",
-      "required": [
-        "secs",
-        "nanos"
-      ],
-      "properties": {
-        "secs": {
-          "$ref": "#/$defs/uint64"
-        },
-        "nanos": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 999999999
-        }
-      },
-      "additionalProperties": false
-    },
-    "byteRange": {
-      "type": "object",
-      "required": [
-        "start",
-        "end"
-      ],
-      "properties": {
-        "start": {
-          "$ref": "#/$defs/uint64"
-        },
-        "end": {
-          "$ref": "#/$defs/uint64"
-        }
-      },
-      "additionalProperties": false
-    },
     "hexBytes": {
       "type": "string",
       "pattern": "^(?:[0-9a-f]{2})*$"
     },
-    "uint64": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 18446744073709551615
+    "int64": {
+      "type": "string",
+      "pattern": "^(?:0|(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-6]|9223372036854775807)|-(?:[1-9][0-9]{0,17}|[1-8][0-9]{18}|9[0-1][0-9]{17}|92[0-1][0-9]{16}|922[0-2][0-9]{15}|9223[0-2][0-9]{14}|92233[0-6][0-9]{13}|922337[0-1][0-9]{12}|92233720[0-2][0-9]{10}|922337203[0-5][0-9]{9}|9223372036[0-7][0-9]{8}|92233720368[0-4][0-9]{7}|922337203685[0-3][0-9]{6}|9223372036854[0-6][0-9]{5}|92233720368547[0-6][0-9]{4}|922337203685477[0-4][0-9]{3}|9223372036854775[0-7][0-9]{2}|922337203685477580[0-7]|9223372036854775808))$"
+    },
+    "packetFieldValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "bool"
+            },
+            "value": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "unsigned"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 18446744073709551615
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "signed"
+            },
+            "value": {
+              "type": "integer",
+              "minimum": -9223372036854775808,
+              "maximum": 9223372036854775807
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "bytes"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "ipv4"
+            },
+            "value": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "ipv6"
+            },
+            "value": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "mac"
+            },
+            "value": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 255
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "list"
+            },
+            "value": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/packetFieldValue"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "readCompleteResult": {
+      "type": "object",
+      "required": [
+        "frames",
+        "bytes"
+      ],
+      "properties": {
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "bytes": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "readCompleteSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "read"
+        },
+        "result": {
+          "$ref": "#/$defs/readCompleteResult"
+        }
+      }
+    },
+    "doctorCapability": {
+      "type": "object",
+      "required": [
+        "name",
+        "status",
+        "detail"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "interfaces",
+            "routes",
+            "layer2",
+            "layer3",
+            "capture"
+          ]
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "not_built",
+            "unverified",
+            "unavailable"
+          ]
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "doctorResult": {
+      "type": "object",
+      "required": [
+        "version",
+        "build_target",
+        "platform",
+        "compiled_features",
+        "interfaces",
+        "routes",
+        "capabilities",
+        "capture_probe_attempted"
+      ],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "build_target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "platform": {
+          "type": "string",
+          "minLength": 1
+        },
+        "compiled_features": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "interfaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/interface"
+          }
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/routeDecision"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/doctorCapability"
+          },
+          "minItems": 5,
+          "maxItems": 5
+        },
+        "capture_probe_attempted": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "doctorSuccess": {
+      "type": "object",
+      "required": [
+        "command",
+        "result"
+      ],
+      "properties": {
+        "command": {
+          "const": "doctor"
+        },
+        "result": {
+          "$ref": "#/$defs/doctorResult"
+        }
+      }
     }
   }
 }

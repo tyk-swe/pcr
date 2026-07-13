@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "traceroute",
   "mode": "aggregate",
   "status": "error",
@@ -8,7 +8,26 @@
     "kind": "policy",
     "message": "traceroute authorization failed: traffic policy denies public destination 8.8.8.8",
     "causes": [],
-    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+    "remediation": "explicitly authorize public destinations only for networks you are permitted to test",
+    "category": "policy"
   },
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "code": "capture.promiscuous_unfiltered",
+      "severity": "warning",
+      "message": "promiscuous capture is active without a BPF filter; unrelated interface traffic may be observed"
+    },
+    {
+      "code": "traffic.unthrottled",
+      "severity": "warning",
+      "message": "no active rate ceiling is configured; packets may be sent as quickly as bounded workflow batches complete"
+    }
+  ],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

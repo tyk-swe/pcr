@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "dns",
   "mode": "aggregate",
   "status": "success",
@@ -41,13 +41,13 @@
     "rejected_records": [
       {
         "section": "additional",
-        "index": 0,
+        "index": "0",
         "owner": "unrelated.example.test.",
         "type_code": 1,
         "reason": "additional record is not IN-class address glue referenced by accepted data"
       }
     ],
-    "rejected_record_count": 1,
+    "rejected_record_count": "1",
     "attempts": [
       {
         "attempt": 1,
@@ -55,16 +55,16 @@
         "source_port": 50000,
         "status": "response",
         "sent_at": {
-          "unix_seconds": 1770000000,
+          "unix_seconds": "1770000000",
           "nanoseconds": 0
         },
         "received_at": {
-          "unix_seconds": 1770000000,
+          "unix_seconds": "1770000000",
           "nanoseconds": 5000000
         },
         "latency": {
-          "secs": 0,
-          "nanos": 5000000
+          "seconds": "0",
+          "nanoseconds": 5000000
         },
         "response_code": 0,
         "reason": "validated DNS response with code no_error"
@@ -74,19 +74,26 @@
   },
   "diagnostics": [],
   "stats": {
-    "packets_attempted": 1,
-    "packets_completed": 1,
-    "bytes": 58,
+    "packets_attempted": "1",
+    "packets_completed": "1",
+    "bytes": "58",
     "elapsed": {
-      "secs": 0,
-      "nanos": 5000000
+      "seconds": "0",
+      "nanoseconds": 5000000
     },
     "capture": {
-      "received_frames": 1,
-      "received_bytes": 96,
-      "dropped_frames": 0,
-      "dropped_bytes": 0,
-      "overflow_events": 0
+      "received_frames": "1",
+      "received_bytes": "96",
+      "dropped_frames": "0",
+      "dropped_bytes": "0",
+      "overflow_events": "0"
     }
-  }
+  },
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

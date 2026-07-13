@@ -67,9 +67,10 @@ pub mod transmit {
 /// Owned live-capture sessions and bounded queue configuration.
 pub mod capture {
     pub use super::provider_impl::{
-        CaptureEvidenceCompleteness as Completeness, CaptureOverflowPolicy as OverflowPolicy,
+        CaptureEvidenceCompleteness as Completeness, CaptureFilter as Filter, CaptureMode as Mode,
+        CaptureOptions as Options, CaptureOverflowPolicy as OverflowPolicy,
         CaptureProvider as Provider, CaptureQueueLimits as Limits, CaptureSession as Session,
-        CaptureStatistics as Statistics, CapturedFrame as Captured,
+        CaptureStatistics as Statistics, CapturedFrame as Captured, MAX_CAPTURE_FILTER_BYTES,
         SystemCaptureProvider as SystemProvider, SystemCaptureSession as SystemSession,
     };
 }
@@ -77,7 +78,8 @@ pub mod capture {
 /// Composition contracts for capture-before-send exchanges.
 pub mod exchange {
     use super::provider_impl::{
-        CaptureProvider, CaptureQueueLimits, IoSendReport, LiveIoError, PacketIo, TransmissionFrame,
+        CaptureOptions, CaptureProvider, CaptureQueueLimits, IoSendReport, LiveIoError, PacketIo,
+        TransmissionFrame,
     };
     use super::route_impl::PlannedRoute;
 
@@ -133,6 +135,16 @@ pub mod exchange {
         ) -> Result<Self::Capture, LiveIoError> {
             self.capture.arm_capture(route, limits)
         }
+
+        fn arm_capture_with_options(
+            &self,
+            route: &PlannedRoute,
+            limits: CaptureQueueLimits,
+            options: CaptureOptions,
+        ) -> Result<Self::Capture, LiveIoError> {
+            self.capture
+                .arm_capture_with_options(route, limits, options)
+        }
     }
 }
 
@@ -141,14 +153,16 @@ pub mod exchange {
 // above while the native implementation remains a mechanical, reviewable move.
 #[cfg(all(test, feature = "native-layer2"))]
 pub(crate) use provider_impl::CaptureEvidenceCompleteness;
+#[cfg(any(test, feature = "native-layer2"))]
+pub(crate) use provider_impl::CaptureMode;
 #[cfg(feature = "native-layer3")]
 pub(crate) use provider_impl::Layer3Frame;
 pub(crate) use provider_impl::{
-    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
-    CapturedFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DispatchPacketIo,
-    ExchangeIo, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, LiveIoError,
-    MAX_CAPTURE_TIMEOUT, PacketIo, SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io,
-    SystemLayer3Io, TransmissionFrame,
+    CaptureOptions, CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession,
+    CaptureStatistics, CapturedFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    DispatchPacketIo, ExchangeIo, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame,
+    Layer2Io, LiveIoError, MAX_CAPTURE_TIMEOUT, PacketIo, SystemCaptureProvider,
+    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, TransmissionFrame,
 };
 #[cfg(any(feature = "native-route", all(feature = "live", windows), test))]
 pub(crate) use provider_impl::{InterfaceAddress, InterfaceFlags};

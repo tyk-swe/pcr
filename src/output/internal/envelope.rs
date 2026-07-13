@@ -1,4 +1,4 @@
-/// Stable structured error carried by aggregate and streaming envelopes.
+/// Stable structured error kind carried by aggregate and streaming envelopes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum OutputErrorKind {
@@ -36,10 +36,38 @@ impl From<Kind> for OutputErrorKind {
     }
 }
 
+/// Recovery category independent of the CLI exit-code family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputErrorCategory {
+    Validation,
+    Capability,
+    Policy,
+    Timeout,
+    Io,
+    Cleanup,
+    Invariant,
+}
+
+impl From<Category> for OutputErrorCategory {
+    fn from(value: Category) -> Self {
+        match value {
+            Category::Validation => Self::Validation,
+            Category::Capability => Self::Capability,
+            Category::Policy => Self::Policy,
+            Category::Timeout => Self::Timeout,
+            Category::Io => Self::Io,
+            Category::Cleanup => Self::Cleanup,
+            Category::Invariant => Self::Invariant,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct OutputError {
     pub code: String,
     pub kind: OutputErrorKind,
+    pub category: OutputErrorCategory,
     pub message: String,
     pub causes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -55,6 +83,7 @@ impl OutputError {
         Self {
             code: classification.code.to_owned(),
             kind: classification.kind.into(),
+            category: classification.category.into(),
             message: message.into(),
             causes,
             remediation: classification.remediation.map(str::to_owned),
@@ -66,15 +95,96 @@ impl OutputError {
     }
 }
 
-/// Output-v1 live-capture counters.
+/// Tool identity embedded into every structured record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ToolOutput {
+    pub version: &'static str,
+    pub build_target: &'static str,
+}
+
+impl Default for ToolOutput {
+    fn default() -> Self {
+        Self {
+            version: env!("CARGO_PKG_VERSION"),
+            build_target: env!("PACKETCRAFTR_BUILD_TARGET"),
+        }
+    }
+}
+
+/// Operation metadata supplied by the CLI or an embedding application.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct EnvelopeContext {
+    pub operation_id: OperationId,
+    pub effective_request: serde_json::Value,
+    pub diagnostics: Vec<DiagnosticOutput>,
+}
+
+impl EnvelopeContext {
+    pub fn new(operation_id: OperationId, effective_request: serde_json::Value) -> Self {
+        Self {
+            operation_id,
+            effective_request,
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_diagnostics(mut self, diagnostics: Vec<Diagnostic>) -> Self {
+        self.diagnostics = diagnostics.into_iter().map(Into::into).collect();
+        self
+    }
+}
+
+impl Default for EnvelopeContext {
+    fn default() -> Self {
+        Self {
+            operation_id: OperationId::from_bytes([0; 16]),
+            effective_request: serde_json::json!({}),
+            diagnostics: Vec::new(),
+        }
+    }
+}
+
+static PROCESS_ENVELOPE_CONTEXT: std::sync::OnceLock<EnvelopeContext> =
+    std::sync::OnceLock::new();
+static PROCESS_STREAM_SEQUENCE: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(1);
+
+/// Installs the single operation context used by the CLI process.
+pub fn install_process_context(context: EnvelopeContext) -> Result<(), EnvelopeContext> {
+    PROCESS_ENVELOPE_CONTEXT.set(context)
+}
+
+fn process_context() -> EnvelopeContext {
+    PROCESS_ENVELOPE_CONTEXT.get().cloned().unwrap_or_default()
+}
+
+fn stream_sequence(sequence: u64) -> u64 {
+    if PROCESS_ENVELOPE_CONTEXT.get().is_some() {
+        PROCESS_STREAM_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    } else {
+        sequence
+    }
+}
+
+/// Output-v2 live-capture counters.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct CaptureStats {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub received_frames: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub received_bytes: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub dropped_frames: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub dropped_bytes: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub overflow_events: u64,
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(
+        default,
+        skip_serializing_if = "is_zero",
+        serialize_with = "serialize_u64_decimal"
+    )]
     pub receiver_dropped_frames: u64,
 }
 
@@ -95,12 +205,16 @@ impl From<crate::net::capture::Statistics> for CaptureStats {
     }
 }
 
-/// Output-v1 operation statistics carried by structured envelopes.
+/// Output-v2 operation statistics carried by structured envelopes.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct OperationStats {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub packets_attempted: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub packets_completed: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub bytes: u64,
+    #[serde(serialize_with = "serialize_duration")]
     pub elapsed: Duration,
     pub capture: CaptureStats,
 }
@@ -141,7 +255,6 @@ impl From<&crate::workflow::fuzz::Stats> for OperationStats {
     }
 }
 
-/// Output-v1 diagnostic severity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticSeverityOutput {
@@ -160,10 +273,11 @@ impl From<crate::packet::internal::DiagnosticSeverity> for DiagnosticSeverityOut
     }
 }
 
-/// Output-v1 byte range used by diagnostics.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct DiagnosticRangeOutput {
+    #[serde(serialize_with = "serialize_usize_decimal")]
     pub start: usize,
+    #[serde(serialize_with = "serialize_usize_decimal")]
     pub end: usize,
 }
 
@@ -176,13 +290,15 @@ impl From<crate::packet::internal::ByteRange> for DiagnosticRangeOutput {
     }
 }
 
-/// Output-v1 diagnostic record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DiagnosticOutput {
     pub code: String,
     pub severity: DiagnosticSeverityOutput,
     pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_usize_decimal"
+    )]
     pub layer: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field: Option<String>,
@@ -208,16 +324,21 @@ impl From<Diagnostic> for DiagnosticOutput {
 enum OutputPayload<T> {
     Success { result: T },
     Error { error: OutputError },
+    Cancelled { error: OutputError },
 }
 
-/// One aggregate JSON success or error. Its type cannot carry a stream sequence.
+/// One aggregate JSON success or error.
 #[derive(Clone, Debug, Serialize)]
 pub struct AggregateOutput<T> {
     schema: &'static str,
+    tool: ToolOutput,
+    operation_id: OperationId,
     command: Option<CommandName>,
     mode: OutputMode,
+    effective_request: serde_json::Value,
     #[serde(flatten)]
     payload: OutputPayload<T>,
+    completion_reason: CompletionReason,
     diagnostics: Vec<DiagnosticOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stats: Option<OperationStats>,
@@ -225,25 +346,63 @@ pub struct AggregateOutput<T> {
 
 impl<T> AggregateOutput<T> {
     pub fn success(command: CommandName, result: T, diagnostics: Vec<Diagnostic>) -> Self {
+        let context = process_context();
+        let mut output_diagnostics = context.diagnostics;
+        output_diagnostics.extend(diagnostics.into_iter().map(DiagnosticOutput::from));
         Self {
-            schema: OUTPUT_SCHEMA_V1,
+            schema: OUTPUT_SCHEMA_V2,
+            tool: ToolOutput::default(),
+            operation_id: context.operation_id,
             command: Some(command),
             mode: OutputMode::Aggregate,
+            effective_request: context.effective_request,
             payload: OutputPayload::Success { result },
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            completion_reason: CompletionReason::Completed,
+            diagnostics: output_diagnostics,
             stats: None,
         }
     }
 
     pub fn error(command: Option<CommandName>, error: OutputError) -> Self {
+        let context = process_context();
         Self {
-            schema: OUTPUT_SCHEMA_V1,
+            schema: OUTPUT_SCHEMA_V2,
+            tool: ToolOutput::default(),
+            operation_id: context.operation_id,
             command,
             mode: OutputMode::Aggregate,
+            effective_request: context.effective_request,
             payload: OutputPayload::Error { error },
-            diagnostics: Vec::new(),
+            completion_reason: CompletionReason::Completed,
+            diagnostics: context.diagnostics,
             stats: None,
         }
+    }
+
+
+    pub fn cancelled(command: Option<CommandName>, error: OutputError) -> Self {
+        let mut output = Self::error(command, error);
+        let error = match output.payload {
+            OutputPayload::Error { error } => error,
+            _ => unreachable!("error constructor always creates an error payload"),
+        };
+        output.payload = OutputPayload::Cancelled { error };
+        output.completion_reason = CompletionReason::Cancelled;
+        output
+    }
+
+    #[must_use]
+    pub fn with_context(mut self, context: &EnvelopeContext) -> Self {
+        self.operation_id = context.operation_id;
+        self.effective_request = context.effective_request.clone();
+        self.diagnostics = context.diagnostics.clone();
+        self
+    }
+
+    #[must_use]
+    pub fn with_completion_reason(mut self, reason: CompletionReason) -> Self {
+        self.completion_reason = reason;
+        self
     }
 
     #[must_use]
@@ -259,18 +418,47 @@ impl<T> AggregateOutput<T> {
     }
 }
 
-/// Aggregate error envelope with no unused success-result type parameter.
 pub type AggregateErrorOutput = AggregateOutput<()>;
 
-/// One independently valid NDJSON success or terminal-error record.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum StreamRecordKind {
+    Start,
+    Item,
+    Complete,
+    Error,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum StreamStatus {
+    Running,
+    Success,
+    Error,
+    Cancelled,
+}
+
+/// One independently valid NDJSON lifecycle record.
 #[derive(Clone, Debug, Serialize)]
 pub struct StreamRecord<T> {
     schema: &'static str,
+    tool: ToolOutput,
+    operation_id: OperationId,
     command: Option<CommandName>,
     mode: OutputMode,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     sequence: u64,
-    #[serde(flatten)]
-    payload: OutputPayload<T>,
+    record: StreamRecordKind,
+    status: StreamStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    effective_request: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<OutputError>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    completion_reason: Option<CompletionReason>,
     diagnostics: Vec<DiagnosticOutput>,
     #[serde(skip_serializing_if = "Option::is_none")]
     stats: Option<OperationStats>,
@@ -283,27 +471,66 @@ impl<T> StreamRecord<T> {
         result: T,
         diagnostics: Vec<Diagnostic>,
     ) -> Self {
+        let context = process_context();
         Self {
-            schema: OUTPUT_SCHEMA_V1,
+            schema: OUTPUT_SCHEMA_V2,
+            tool: ToolOutput::default(),
+            operation_id: context.operation_id,
             command: Some(command),
             mode: OutputMode::Stream,
-            sequence,
-            payload: OutputPayload::Success { result },
+            sequence: stream_sequence(sequence),
+            record: StreamRecordKind::Item,
+            status: StreamStatus::Running,
+            effective_request: None,
+            result: Some(result),
+            error: None,
+            completion_reason: None,
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
             stats: None,
         }
     }
 
     pub fn error(command: Option<CommandName>, sequence: u64, error: OutputError) -> Self {
+        let context = process_context();
         Self {
-            schema: OUTPUT_SCHEMA_V1,
+            schema: OUTPUT_SCHEMA_V2,
+            tool: ToolOutput::default(),
+            operation_id: context.operation_id,
             command,
             mode: OutputMode::Stream,
-            sequence,
-            payload: OutputPayload::Error { error },
-            diagnostics: Vec::new(),
+            sequence: stream_sequence(sequence),
+            record: StreamRecordKind::Error,
+            status: StreamStatus::Error,
+            effective_request: None,
+            result: None,
+            error: Some(error),
+            completion_reason: Some(CompletionReason::Completed),
+            diagnostics: context.diagnostics.clone(),
             stats: None,
         }
+    }
+
+    pub fn cancelled(command: Option<CommandName>, sequence: u64, error: OutputError) -> Self {
+        Self {
+            record: StreamRecordKind::Cancelled,
+            status: StreamStatus::Cancelled,
+            completion_reason: Some(CompletionReason::Cancelled),
+            ..Self::error(command, sequence, error)
+        }
+    }
+
+    #[must_use]
+    pub fn complete(mut self, reason: CompletionReason) -> Self {
+        self.record = StreamRecordKind::Complete;
+        self.status = StreamStatus::Success;
+        self.completion_reason = Some(reason);
+        self
+    }
+
+    #[must_use]
+    pub fn with_context(mut self, context: &EnvelopeContext) -> Self {
+        self.operation_id = context.operation_id;
+        self
     }
 
     #[must_use]
@@ -319,5 +546,25 @@ impl<T> StreamRecord<T> {
     }
 }
 
-/// Terminal NDJSON error record with no unused success-result type parameter.
+impl StreamRecord<()> {
+    pub fn start(command: Option<CommandName>, context: &EnvelopeContext) -> Self {
+        Self {
+            schema: OUTPUT_SCHEMA_V2,
+            tool: ToolOutput::default(),
+            operation_id: context.operation_id,
+            command,
+            mode: OutputMode::Stream,
+            sequence: 0,
+            record: StreamRecordKind::Start,
+            status: StreamStatus::Running,
+            effective_request: Some(context.effective_request.clone()),
+            result: None,
+            error: None,
+            completion_reason: None,
+            diagnostics: context.diagnostics.clone(),
+            stats: None,
+        }
+    }
+}
+
 pub type StreamErrorRecord = StreamRecord<()>;

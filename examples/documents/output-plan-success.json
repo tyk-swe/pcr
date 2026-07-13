@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "plan",
   "mode": "aggregate",
   "status": "success",
@@ -10,7 +10,14 @@
           "name": "lab0",
           "index": 2
         },
-        "source_mac": [2, 0, 0, 0, 0, 1],
+        "source_mac": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
         "selected_address": "192.168.56.2",
         "preferred_source": null,
         "next_hop": "192.168.56.1",
@@ -23,12 +30,28 @@
       "mode": "layer2",
       "lookup_destination": "192.168.56.9",
       "final_destination": "192.168.56.9",
-      "visited_destinations": ["192.168.56.9"],
+      "visited_destinations": [
+        "192.168.56.9"
+      ],
       "packet_source": "192.168.56.2",
       "neighbor_source": "192.168.56.2",
       "neighbor_target": "192.168.56.1",
-      "destination_mac": [2, 0, 0, 0, 0, 2],
-      "source_mac": [2, 0, 0, 0, 0, 1],
+      "destination_mac": [
+        2,
+        0,
+        0,
+        0,
+        0,
+        2
+      ],
+      "source_mac": [
+        2,
+        0,
+        0,
+        0,
+        0,
+        1
+      ],
       "neighbor_vlan_tags": [
         {
           "kind": "ieee8021_q",
@@ -40,5 +63,12 @@
       "synthesized_ethernet": true
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

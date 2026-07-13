@@ -1,15 +1,29 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "capture",
   "mode": "stream",
-  "sequence": 0,
+  "sequence": "1",
   "status": "error",
   "error": {
     "code": "policy.public_destination",
     "kind": "policy",
     "message": "traffic policy denies public destination 8.8.8.8",
     "causes": [],
-    "remediation": "explicitly authorize public destinations only for networks you are permitted to test"
+    "remediation": "explicitly authorize public destinations only for networks you are permitted to test",
+    "category": "policy"
   },
-  "diagnostics": []
+  "diagnostics": [
+    {
+      "code": "capture.promiscuous_unfiltered",
+      "severity": "warning",
+      "message": "promiscuous capture is active without a BPF filter; unrelated interface traffic may be observed"
+    }
+  ],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "error",
+  "completion_reason": "completed"
 }

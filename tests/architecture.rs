@@ -6,22 +6,41 @@ use std::path::{Path, PathBuf};
 
 const DOMAINS: &[(&str, &[&str])] = &[
     ("error", &[]),
+    ("operation", &["error"]),
     ("capture", &["error"]),
     ("packet", &["capture"]),
     ("protocol", &["packet", "capture"]),
     ("session", &[]),
     ("net", &["packet", "capture", "error"]),
-    ("client", &["packet", "protocol", "capture", "net", "error"]),
+    (
+        "client",
+        &["packet", "protocol", "capture", "net", "operation", "error"],
+    ),
     (
         "workflow",
         &[
-            "client", "packet", "protocol", "capture", "session", "net", "error",
+            "client",
+            "packet",
+            "protocol",
+            "capture",
+            "session",
+            "net",
+            "operation",
+            "error",
         ],
     ),
     (
         "output",
         &[
-            "workflow", "client", "packet", "protocol", "capture", "session", "net", "error",
+            "workflow",
+            "client",
+            "packet",
+            "protocol",
+            "capture",
+            "session",
+            "net",
+            "operation",
+            "error",
         ],
     ),
 ];

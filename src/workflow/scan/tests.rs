@@ -389,10 +389,12 @@ mod tests {
             let local = Ipv4Addr::new(10, 0, 0, 1);
             let remote = Ipv4Addr::new(10, 0, 0, 2);
             let latency = Duration::from_millis(4);
-            let mut response = decoded(
-                tcp_packet(remote, local, 80, 50_000, Tcp::SYN | Tcp::ACK),
-                Vec::new(),
-            );
+            let sent = result.sent[0].get::<Tcp>().unwrap();
+            let mut response_packet =
+                tcp_packet(remote, local, 80, sent.source_port, Tcp::SYN | Tcp::ACK);
+            response_packet.get_mut::<Tcp>().unwrap().acknowledgment =
+                sent.sequence.wrapping_add(1);
+            let mut response = decoded(response_packet, Vec::new());
             response.frame.timestamp = result.sent_evidence[0].timestamp + latency;
             result.responses.push(ScanMatchedResponse {
                 request_index: 0,
@@ -557,6 +559,8 @@ mod tests {
         let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
         let batch = build_batches(
             &operation,
+            crate::operation::Id::from_bytes([0; 16]),
+            Some(50_000),
             &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
             &[Some(80)],
         )
@@ -591,6 +595,8 @@ mod tests {
         let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
         let batch = build_batches(
             &operation,
+            crate::operation::Id::from_bytes([0; 16]),
+            Some(50_000),
             &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
             &[Some(80)],
         )
@@ -676,17 +682,19 @@ mod tests {
                 batch: &ScanBatch,
             ) -> Result<ScanBatchExecution, ScanExecutionError> {
                 let mut execution = self.0.execute(batch)?;
+                let sent = execution.sent[0].get::<Tcp>().unwrap();
+                let destination_port = sent.source_port;
+                let acknowledgment = sent.sequence.wrapping_add(1);
                 let reply = || {
-                    decoded(
-                        tcp_packet(
-                            Ipv4Addr::new(10, 0, 0, 2),
-                            Ipv4Addr::new(10, 0, 0, 1),
-                            80,
-                            50_000,
-                            Tcp::SYN | Tcp::ACK,
-                        ),
-                        Vec::new(),
-                    )
+                    let mut packet = tcp_packet(
+                        Ipv4Addr::new(10, 0, 0, 2),
+                        Ipv4Addr::new(10, 0, 0, 1),
+                        80,
+                        destination_port,
+                        Tcp::SYN | Tcp::ACK,
+                    );
+                    packet.get_mut::<Tcp>().unwrap().acknowledgment = acknowledgment;
+                    decoded(packet, Vec::new())
                 };
                 let mut later = reply();
                 later.frame.timestamp =
@@ -1259,6 +1267,8 @@ mod tests {
             let batch = ScanBatch {
                 probes: vec![ScanProbe {
                     sequence: 0,
+                    operation_id: crate::operation::Id::from_bytes([0; 16]),
+                    source_port: Some(50_000),
                     address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     transport: ScanTransport::Tcp,
                     port: Some(443),
@@ -1301,6 +1311,7 @@ mod tests {
             let exchange = DnsExchange {
                 probe: DnsProbe {
                     attempt: 1,
+                    operation_id: crate::operation::Id::default(),
                     server_address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     server_port: 53,
                     source_port: 50_000,
@@ -1347,6 +1358,8 @@ mod tests {
             let batch = TracerouteBatch {
                 probes: vec![TracerouteProbe {
                     sequence: 0,
+                    operation_id: crate::operation::Id::default(),
+                    source_port: Some(49_152),
                     address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     strategy: TracerouteStrategy::Udp,
                     destination_port: Some(33_434),
@@ -1396,6 +1409,8 @@ mod tests {
                 probes: (0_u64..2)
                     .map(|sequence| TracerouteProbe {
                         sequence,
+                        operation_id: crate::operation::Id::default(),
+                        source_port: (strategy != TracerouteStrategy::Icmp).then_some(49_152),
                         address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                         strategy,
                         destination_port: match strategy {
@@ -1414,6 +1429,10 @@ mod tests {
             assert_eq!(result.sent.len(), 2);
             assert_eq!(result.sent[0].get::<Ipv4>().unwrap().ttl, 4);
             assert_eq!(result.sent[1].get::<Ipv4>().unwrap().ttl, 4);
+            assert_ne!(
+                result.sent[0].get::<Ipv4>().unwrap().identification,
+                result.sent[1].get::<Ipv4>().unwrap().identification,
+            );
             let field = match strategy {
                 TracerouteStrategy::Udp => "destination_port",
                 TracerouteStrategy::Tcp => "sequence",
@@ -1455,6 +1474,8 @@ mod tests {
         let batch = TracerouteBatch {
             probes: vec![TracerouteProbe {
                 sequence: 0,
+                operation_id: crate::operation::Id::default(),
+                source_port: Some(49_152),
                 address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                 strategy: TracerouteStrategy::Udp,
                 destination_port: Some(33_434),

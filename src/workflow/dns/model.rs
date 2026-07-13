@@ -531,9 +531,18 @@ pub struct DnsResult {
     pub stats: Stats,
 }
 
+/// Progress emitted after one DNS attempt and its evidence are classified.
+#[derive(Clone, Debug)]
+pub struct DnsEvent {
+    pub attempt: DnsAttemptEvidence,
+    pub undecoded: Vec<DnsUndecodedEvidence>,
+    pub stats: Stats,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DnsProbe {
     pub attempt: u32,
+    pub operation_id: crate::operation::Id,
     pub server_address: IpAddr,
     pub server_port: u16,
     pub source_port: u16,
@@ -550,14 +559,20 @@ impl DnsProbe {
             IpAddr::V4(destination) => {
                 packet.push(Ipv4 {
                     destination,
-                    identification: nonzero_ipv4_identification(u64::from(self.attempt)),
+                    identification: self.operation_id.derive_nonzero_u16(
+                        "dns.ipv4.identification",
+                        u64::from(self.attempt),
+                    ),
                     ..Ipv4::default()
                 });
             }
             IpAddr::V6(destination) => {
                 packet.push(Ipv6 {
                     destination,
-                    flow_label: u32::from(self.transaction_id),
+                    flow_label: self
+                        .operation_id
+                        .derive_u32("dns.ipv6.flow_label", u64::from(self.attempt))
+                        & 0x000f_ffff,
                     ..Ipv6::default()
                 });
             }

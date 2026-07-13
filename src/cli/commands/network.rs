@@ -161,7 +161,7 @@ fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
         OutputFormat::Json => emit_json(
             &AggregateOutput::success(CommandName::Send, result, diagnostics).with_stats(stats),
         ),
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.frame.bytes_hex)),
+        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.frame.bytes_hex())),
         OutputFormat::Raw => write_raw(result.frame.bytes()),
         OutputFormat::Pcap | OutputFormat::Pcapng => {
             let frame = Frame::new(

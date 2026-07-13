@@ -3,6 +3,8 @@
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
     options: crate::client::exchange::Options,
+    capture_options: crate::net::capture::Options,
+    operation: Option<crate::operation::Context>,
 }
 
 impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
@@ -10,7 +12,22 @@ impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
         client: &'a crate::client::Client<R, N, I>,
         options: crate::client::exchange::Options,
     ) -> Self {
-        Self { client, options }
+        Self {
+            client,
+            options,
+            capture_options: crate::net::capture::Options::default(),
+            operation: None,
+        }
+    }
+
+    pub fn with_capture_options(mut self, options: crate::net::capture::Options) -> Self {
+        self.capture_options = options;
+        self
+    }
+
+    pub fn with_operation_context(mut self, operation: crate::operation::Context) -> Self {
+        self.operation = Some(operation);
+        self
     }
 }
 
@@ -50,30 +67,68 @@ where
 
         let mut template = PacketTemplate::new(first.packet());
         if batch.probes.len() > 1 {
-            let ports = batch
-                .probes
-                .iter()
-                .map(|probe| {
-                    probe
-                        .port
-                        .map(|port| FieldValue::Unsigned(u64::from(port)))
-                        .ok_or_else(|| {
-                            invalid_client_execution(
-                                "portless probes cannot form a multi-packet batch",
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            template = template.axis(1, "destination_port", TemplateValues::Values(ports));
+            let values = |layer: usize, field: &'static str| {
+                batch
+                    .probes
+                    .iter()
+                    .map(|probe| {
+                        probe
+                            .packet()
+                            .iter()
+                            .nth(layer)
+                            .and_then(|packet_layer| packet_layer.field(field))
+                            .ok_or_else(|| {
+                                invalid_client_execution(format!(
+                                    "{} probe has no {field} correlation field",
+                                    probe.transport
+                                ))
+                            })
+                    })
+                    .collect::<Result<Vec<FieldValue>, _>>()
+            };
+            let network_field = if first.address.is_ipv4() {
+                "identification"
+            } else {
+                "flow_label"
+            };
+            let mut axes = vec![(
+                0,
+                network_field,
+                TemplateValues::Values(values(0, network_field)?),
+            )];
+            axes.push((
+                1,
+                "destination_port",
+                TemplateValues::Values(values(1, "destination_port")?),
+            ));
+            if first.transport == ScanTransport::Tcp {
+                axes.push((
+                    1,
+                    "sequence",
+                    TemplateValues::Values(values(1, "sequence")?),
+                ));
+            }
+            template = template.zip_axes(axes);
         }
         let mut options = self.options.clone();
         options.timeout = batch.timeout;
         options.max_template_packets = batch.probes.len();
         options.send.destination = Some(first.address);
-        let exchange = self
-            .client
-            .exchange(&template, options)
-            .map_err(|error| ScanExecutionError::classified(&error))?;
+        let exchange = match &self.operation {
+            Some(operation) => self.client.exchange_streaming(
+                &template,
+                options,
+                self.capture_options.clone(),
+                operation,
+                &mut |_| Ok(()),
+            ),
+            None => self.client.exchange_with_capture_options(
+                &template,
+                options,
+                self.capture_options.clone(),
+            ),
+        }
+        .map_err(|error| ScanExecutionError::classified(&error))?;
         let crate::client::exchange::Result {
             sent,
             sent_evidence,

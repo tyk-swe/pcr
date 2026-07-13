@@ -1,4 +1,4 @@
-/// Output-v1 fuzz execution mode.
+/// Output-v2 fuzz execution mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FuzzMode {
@@ -15,7 +15,7 @@ impl From<crate::workflow::fuzz::Mode> for FuzzMode {
     }
 }
 
-/// Output-v1 fuzz case outcome.
+/// Output-v2 fuzz case outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FuzzCaseOutcome {
@@ -40,7 +40,7 @@ impl From<crate::workflow::fuzz::CaseOutcome> for FuzzCaseOutcome {
     }
 }
 
-/// Output-v1 fuzz mutation strategy.
+/// Output-v2 fuzz mutation strategy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FuzzStrategy {
@@ -78,15 +78,52 @@ impl From<crate::workflow::fuzz::Strategy> for FuzzStrategy {
     }
 }
 
-/// Output-v1 description of one deterministic field mutation.
+/// Output-v2 reflective value. Packet-document v1 retains its established
+/// representation, while fuzz metadata renders 64-bit integers as decimals.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum FuzzFieldValue {
+    Bool(bool),
+    Unsigned(String),
+    Signed(String),
+    Text(String),
+    Bytes(Vec<u8>),
+    Ipv4(Ipv4Addr),
+    Ipv6(Ipv6Addr),
+    Mac([u8; 6]),
+    List(Vec<FuzzFieldValue>),
+}
+
+impl From<crate::packet::internal::FieldValue> for FuzzFieldValue {
+    fn from(value: crate::packet::internal::FieldValue) -> Self {
+        match value {
+            crate::packet::internal::FieldValue::Bool(value) => Self::Bool(value),
+            crate::packet::internal::FieldValue::Unsigned(value) => {
+                Self::Unsigned(value.to_string())
+            }
+            crate::packet::internal::FieldValue::Signed(value) => Self::Signed(value.to_string()),
+            crate::packet::internal::FieldValue::Text(value) => Self::Text(value),
+            crate::packet::internal::FieldValue::Bytes(value) => Self::Bytes(value.to_vec()),
+            crate::packet::internal::FieldValue::Ipv4(value) => Self::Ipv4(value),
+            crate::packet::internal::FieldValue::Ipv6(value) => Self::Ipv6(value),
+            crate::packet::internal::FieldValue::Mac(value) => Self::Mac(value),
+            crate::packet::internal::FieldValue::List(value) => {
+                Self::List(value.into_iter().map(Into::into).collect())
+            }
+        }
+    }
+}
+
+/// Output-v2 description of one deterministic field mutation.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FuzzMutation {
+    #[serde(serialize_with = "serialize_usize_decimal")]
     pub layer: usize,
     pub protocol: String,
     pub field: String,
     pub strategy: FuzzStrategy,
-    pub original: crate::packet::internal::FieldValue,
-    pub value: crate::packet::internal::FieldValue,
+    pub original: FuzzFieldValue,
+    pub value: FuzzFieldValue,
 }
 
 impl From<crate::workflow::fuzz::Mutation> for FuzzMutation {
@@ -96,17 +133,20 @@ impl From<crate::workflow::fuzz::Mutation> for FuzzMutation {
             protocol: value.protocol,
             field: value.field,
             strategy: value.strategy.into(),
-            original: value.original,
-            value: value.value,
+            original: value.original.into(),
+            value: value.value.into(),
         }
     }
 }
 
-/// Output-v1 deterministic reproduction coordinates.
+/// Output-v2 deterministic reproduction coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct FuzzReproduction {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub operation_seed: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub case_index: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub case_seed: u64,
 }
 
@@ -122,11 +162,13 @@ impl From<crate::workflow::fuzz::Reproduction> for FuzzReproduction {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FuzzCaseOutput {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub index: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub seed: u64,
     pub mutation: FuzzMutation,
     pub reproduction: FuzzReproduction,
-    pub shrink_values: Vec<crate::packet::internal::FieldValue>,
+    pub shrink_values: Vec<FuzzFieldValue>,
     pub recipe: PacketDocument,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<WireFrameOutput>,
@@ -145,14 +187,71 @@ pub struct FuzzCaseOutput {
     pub diagnostics: Vec<DiagnosticOutput>,
 }
 
+impl FuzzCaseOutput {
+    pub fn try_from_case(
+        case: crate::workflow::fuzz::Case,
+    ) -> Result<Self, OutputContractError> {
+        let frame = case
+            .built
+            .as_ref()
+            .map(|built| WireFrameOutput::new(built.bytes.clone()));
+        let requires_live_opt_in = case
+            .built
+            .as_ref()
+            .map(|built| built.requires_live_opt_in);
+        let decoded = case
+            .decoded
+            .as_ref()
+            .map(|decoded| PacketDocument::from_packet(&decoded.packet));
+        let error = case.error.as_ref().map(|error| {
+            OutputError::new(error.classification(), error.to_string(), error.causes())
+        });
+        Ok(Self {
+            index: case.index,
+            seed: case.seed,
+            mutation: case.mutation.into(),
+            reproduction: case.reproduction.into(),
+            shrink_values: case.shrink_values.into_iter().map(Into::into).collect(),
+            recipe: PacketDocument::from_packet(&case.recipe),
+            frame,
+            decoded,
+            requires_live_opt_in,
+            outcome: case.outcome.into(),
+            error,
+            sent: case.sent.map(FrameOutput::try_from_frame).transpose()?,
+            responses: case
+                .responses
+                .into_iter()
+                .map(FrameOutput::try_from_frame)
+                .collect::<Result<Vec<_>, _>>()?,
+            unmatched: case
+                .unmatched
+                .into_iter()
+                .map(FrameOutput::try_from_frame)
+                .collect::<Result<Vec<_>, _>>()?,
+            undecoded: case
+                .undecoded
+                .into_iter()
+                .map(FrameOutput::try_from_frame)
+                .collect::<Result<Vec<_>, _>>()?,
+            diagnostics: case.diagnostics.into_iter().map(Into::into).collect(),
+        })
+    }
+}
+
 /// Aggregate or streamed result of `fuzz`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct FuzzCommandResult {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub seed: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub first_case: u64,
     pub mode: FuzzMode,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub cases_generated: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub cases_built: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub cases_rejected: u64,
     pub cases: Vec<FuzzCaseOutput>,
 }
@@ -190,7 +289,7 @@ impl FuzzCommandResult {
                     seed: case.seed,
                     mutation: case.mutation.into(),
                     reproduction: case.reproduction.into(),
-                    shrink_values: case.shrink_values,
+                    shrink_values: case.shrink_values.into_iter().map(Into::into).collect(),
                     recipe: PacketDocument::from_packet(&case.recipe),
                     frame: built_frame,
                     decoded: decoded_packet,
@@ -239,15 +338,21 @@ impl FuzzCommandResult {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum FuzzStreamCommandResult {
     Case {
+        #[serde(serialize_with = "serialize_u64_decimal")]
         operation_seed: u64,
         case: Box<FuzzCaseOutput>,
     },
     Complete {
+        #[serde(serialize_with = "serialize_u64_decimal")]
         operation_seed: u64,
+        #[serde(serialize_with = "serialize_u64_decimal")]
         first_case: u64,
         mode: FuzzMode,
+        #[serde(serialize_with = "serialize_u64_decimal")]
         cases_generated: u64,
+        #[serde(serialize_with = "serialize_u64_decimal")]
         cases_built: u64,
+        #[serde(serialize_with = "serialize_u64_decimal")]
         cases_rejected: u64,
     },
 }

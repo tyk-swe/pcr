@@ -454,8 +454,10 @@ impl DecodedFrameOutput {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct ExchangeResponseOutput {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub request_index: u64,
     pub response: DecodedFrameOutput,
+    #[serde(serialize_with = "serialize_duration")]
     pub latency: Duration,
 }
 
@@ -464,6 +466,7 @@ pub struct ExchangeResponseOutput {
 pub struct ExchangeCommandResult {
     pub sent: Vec<WireFrameOutput>,
     pub responses: Vec<ExchangeResponseOutput>,
+    #[serde(serialize_with = "serialize_u64_vec_decimal")]
     pub unanswered: Vec<u64>,
     pub unsolicited: Vec<DecodedFrameOutput>,
     pub undecoded: Vec<FrameOutput>,
@@ -527,15 +530,19 @@ impl ExchangeCommandResult {
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum ExchangeStreamCommandResult {
     Sent {
+        #[serde(serialize_with = "serialize_u64_decimal")]
         request_index: u64,
         frame: WireFrameOutput,
     },
     Response {
+        #[serde(serialize_with = "serialize_u64_decimal")]
         request_index: u64,
         response: DecodedFrameOutput,
+        #[serde(serialize_with = "serialize_duration")]
         latency: Duration,
     },
     Unanswered {
+        #[serde(serialize_with = "serialize_u64_decimal")]
         request_index: u64,
     },
     Unsolicited {
@@ -545,6 +552,7 @@ pub enum ExchangeStreamCommandResult {
         frame: FrameOutput,
     },
     Complete {
+        #[serde(serialize_with = "serialize_u64_vec_decimal")]
         unanswered: Vec<u64>,
     },
 }

@@ -1,11 +1,11 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "build",
   "mode": "aggregate",
   "status": "success",
   "result": {
     "bytes_hex": "deadbeef",
-    "length": 4,
+    "length": "4",
     "packet": {
       "schema": "packetcraftr.packet/v1",
       "layers": [
@@ -14,7 +14,12 @@
           "fields": {
             "bytes": {
               "type": "bytes",
-              "value": [222, 173, 190, 239]
+              "value": [
+                222,
+                173,
+                190,
+                239
+              ]
             }
           }
         }
@@ -23,18 +28,18 @@
     "layout": {
       "layers": [
         {
-          "index": 0,
+          "index": "0",
           "protocol": "raw",
           "range": {
-            "start": 0,
-            "end": 4
+            "start": "0",
+            "end": "4"
           },
           "fields": [
             {
               "name": "bytes",
               "range": {
-                "start": 0,
-                "end": 4
+                "start": "0",
+                "end": "4"
               }
             }
           ]
@@ -43,5 +48,12 @@
     },
     "requires_live_opt_in": false
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

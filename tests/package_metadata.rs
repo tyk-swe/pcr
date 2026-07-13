@@ -41,6 +41,19 @@ fn metadata_reports_one_package_and_no_internal_path_dependencies() {
 
     let package = &packages[0];
     assert_eq!(package["name"], "packetcraftr");
+    assert_eq!(package["version"], "0.3.0");
+    assert_eq!(package["license"], "AGPL-3.0-only");
+    assert_eq!(package["rust_version"], "1.96");
+    assert_eq!(package["readme"], "README.md");
+    assert!(package["publish"].is_null());
+    assert_eq!(
+        package["features"]["default"],
+        serde_json::json!(["native"])
+    );
+    assert_eq!(
+        package["features"]["native"],
+        serde_json::json!(["native-route", "native-layer2", "native-layer3"])
+    );
     assert_eq!(members[0], package["id"]);
 
     let path_dependencies: Vec<_> = package["dependencies"]
@@ -73,6 +86,38 @@ fn metadata_reports_one_package_and_no_internal_path_dependencies() {
             "the package must provide its packetcraftr {kind} target"
         );
     }
+}
+
+#[test]
+fn release_documents_and_immutable_schemas_are_packaged() {
+    let root = repository_root();
+    for path in [
+        "README.md",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "docs/operator-library-manual.md",
+        "docs/migration-output-v1-v2.md",
+        "docs/RELEASING.md",
+        "schemas/packetcraftr.packet.v1.schema.json",
+        "schemas/packetcraftr.output.v2.schema.json",
+    ] {
+        assert!(
+            root.join(path).is_file(),
+            "required release file is missing: {path}"
+        );
+    }
+    assert!(
+        !root
+            .join("schemas/packetcraftr.output.v1.schema.json")
+            .exists(),
+        "output-v1 schema must not remain in the 0.3 package"
+    );
+    let schema = std::fs::read_to_string(root.join("schemas/packetcraftr.output.v2.schema.json"))
+        .expect("output-v2 schema should be readable");
+    assert!(schema.contains("/v0.3.0/schemas/packetcraftr.output.v2.schema.json"));
 }
 
 #[test]

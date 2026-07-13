@@ -1,12 +1,12 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "send",
   "mode": "aggregate",
   "status": "success",
   "result": {
     "frame": {
       "bytes_hex": "deadbeef",
-      "length": 4
+      "length": "4"
     },
     "route": {
       "plan": {
@@ -15,7 +15,14 @@
             "name": "lab0",
             "index": 2
           },
-          "source_mac": [2, 0, 0, 0, 0, 1],
+          "source_mac": [
+            2,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
           "selected_address": "192.168.56.2",
           "preferred_source": null,
           "next_hop": "192.168.56.1",
@@ -28,12 +35,28 @@
         "mode": "layer2",
         "lookup_destination": "192.168.56.9",
         "final_destination": "192.168.56.9",
-        "visited_destinations": ["192.168.56.9"],
+        "visited_destinations": [
+          "192.168.56.9"
+        ],
         "packet_source": "192.168.56.2",
         "neighbor_source": "192.168.56.2",
         "neighbor_target": "192.168.56.1",
-        "destination_mac": [2, 0, 0, 0, 0, 2],
-        "source_mac": [2, 0, 0, 0, 0, 1],
+        "destination_mac": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          2
+        ],
+        "source_mac": [
+          2,
+          0,
+          0,
+          0,
+          0,
+          1
+        ],
         "neighbor_vlan_tags": [
           {
             "kind": "ieee8021_q",
@@ -48,19 +71,26 @@
   },
   "diagnostics": [],
   "stats": {
-    "packets_attempted": 1,
-    "packets_completed": 1,
-    "bytes": 4,
+    "packets_attempted": "1",
+    "packets_completed": "1",
+    "bytes": "4",
     "elapsed": {
-      "secs": 0,
-      "nanos": 0
+      "seconds": "0",
+      "nanoseconds": 0
     },
     "capture": {
-      "received_frames": 0,
-      "received_bytes": 0,
-      "dropped_frames": 0,
-      "dropped_bytes": 0,
-      "overflow_events": 0
+      "received_frames": "0",
+      "received_bytes": "0",
+      "dropped_frames": "0",
+      "dropped_bytes": "0",
+      "overflow_events": "0"
     }
-  }
+  },
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

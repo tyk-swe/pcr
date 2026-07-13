@@ -25,7 +25,7 @@ fn external_commands_can_reuse_typed_aggregate_and_stream_contracts() {
     let stream = Stream::success(Command::Read, 0, result, Vec::new());
     let stream = serde_json::to_value(stream).unwrap();
     assert_eq!(stream["mode"], "stream");
-    assert_eq!(stream["sequence"], 0);
+    assert_eq!(stream["sequence"], "0");
     assert_eq!(stream["result"]["frame"]["bytes_hex"], "dead");
 }
 
@@ -43,5 +43,6 @@ fn canonical_output_modules_expose_concise_serializable_contracts() {
     assert_serializable::<packetcraftr::output::scan::Result>();
     assert_serializable::<packetcraftr::output::traceroute::Event>();
     assert_serializable::<packetcraftr::output::dns::Result>();
+    assert_serializable::<packetcraftr::output::doctor::Result>();
     assert_serializable::<packetcraftr::output::fuzz::Event>();
 }

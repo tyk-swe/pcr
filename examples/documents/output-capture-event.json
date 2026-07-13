@@ -1,14 +1,14 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "capture",
   "mode": "stream",
-  "status": "success",
-  "sequence": 0,
+  "status": "running",
+  "sequence": "1",
   "result": {
     "event": "frame",
     "frame": {
       "timestamp": {
-        "unix_seconds": 1783555200,
+        "unix_seconds": "1783555200",
         "nanoseconds": 125000000
       },
       "captured_length": 4,
@@ -27,19 +27,25 @@
     }
   ],
   "stats": {
-    "packets_attempted": 1,
-    "packets_completed": 1,
-    "bytes": 4,
+    "packets_attempted": "1",
+    "packets_completed": "1",
+    "bytes": "4",
     "elapsed": {
-      "secs": 0,
-      "nanos": 250000
+      "seconds": "0",
+      "nanoseconds": 250000
     },
     "capture": {
-      "received_frames": 1,
-      "received_bytes": 4,
-      "dropped_frames": 0,
-      "dropped_bytes": 0,
-      "overflow_events": 0
+      "received_frames": "1",
+      "received_bytes": "4",
+      "dropped_frames": "0",
+      "dropped_bytes": "0",
+      "overflow_events": "0"
     }
-  }
+  },
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "item"
 }

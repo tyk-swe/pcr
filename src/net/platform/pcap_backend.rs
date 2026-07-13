@@ -13,13 +13,17 @@ use super::live_capture::{
     NativeCaptureStatistics, NativeCapturedPacket, system_time,
 };
 use crate::capture::LinkType;
-use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};
+use crate::net::{
+    CaptureMode, CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError,
+};
 
 const READ_TIMEOUT_MILLIS: i32 = 50;
 
 pub(super) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
+    mode: CaptureMode,
+    filter: Option<&str>,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     let snap_length =
         i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
@@ -30,11 +34,18 @@ pub(super) fn open_capture(
     let mut capture = Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?
         .snaplen(snap_length)
-        .promisc(true)
+        .promisc(mode == CaptureMode::Promiscuous)
         .timeout(READ_TIMEOUT_MILLIS)
         .immediate_mode(true)
         .open()
         .map_err(|error| map_open_error(interface, error))?;
+    if let Some(expression) = filter {
+        capture
+            .filter(expression, true)
+            .map_err(|error| LiveIoError::CaptureFilter {
+                message: format!("libpcap rejected the filter on {}: {error}", interface.name),
+            })?;
+    }
     let datalink = capture.get_datalink().0;
     let link_type =
         u32::try_from(datalink)

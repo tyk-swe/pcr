@@ -31,7 +31,8 @@ pub mod send {
 /// Multi-packet capture-ready exchange contracts.
 pub mod exchange {
     pub use super::internal::{
-        DEFAULT_MAX_UNSOLICITED_FRAMES, ExchangeOptions as Options, ExchangeResult as Result,
+        DEFAULT_EVIDENCE_BYTES, DEFAULT_MAX_UNSOLICITED_FRAMES, ExchangeEvent as Event,
+        ExchangeOptions as Options, ExchangeResult as Result, MAX_EVIDENCE_BYTES,
         MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response,
     };
 }

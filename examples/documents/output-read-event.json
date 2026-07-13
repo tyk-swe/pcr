@@ -1,13 +1,13 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "read",
   "mode": "stream",
-  "status": "success",
-  "sequence": 0,
+  "status": "running",
+  "sequence": "1",
   "result": {
     "frame": {
       "timestamp": {
-        "unix_seconds": 0,
+        "unix_seconds": "0",
         "nanoseconds": 0
       },
       "captured_length": 4,
@@ -16,5 +16,11 @@
       "bytes_hex": "deadbeef"
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "item"
 }

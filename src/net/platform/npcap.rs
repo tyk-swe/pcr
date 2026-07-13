@@ -4,7 +4,9 @@
 //! Runtime-loaded Npcap adapter for Windows.
 
 use super::live_capture::NativeCaptureParts;
-use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};
+use crate::net::{
+    CaptureMode, CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError,
+};
 
 #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
 mod supported {
@@ -31,7 +33,9 @@ mod supported {
         NativeCaptureStatistics, NativeCapturedPacket, system_time,
     };
     use crate::capture::LinkType;
-    use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};
+    use crate::net::{
+        CaptureMode, CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError,
+    };
 
     const NPCAP_DEPENDENCY: &str = "Npcap 1.88 runtime";
     const PCAP_ERROR_BUFFER_SIZE: usize = 256;
@@ -71,6 +75,10 @@ mod supported {
     type PcapNextEx =
         unsafe extern "C" fn(*mut c_void, *mut *mut PcapPacketHeader, *mut *const c_uchar) -> c_int;
     type PcapSendPacket = unsafe extern "C" fn(*mut c_void, *const c_uchar, c_int) -> c_int;
+    type PcapCompile =
+        unsafe extern "C" fn(*mut c_void, *mut BpfProgram, *const c_char, c_int, c_uint) -> c_int;
+    type PcapSetFilter = unsafe extern "C" fn(*mut c_void, *mut BpfProgram) -> c_int;
+    type PcapFreeCode = unsafe extern "C" fn(*mut BpfProgram);
     type PcapStats = unsafe extern "C" fn(*mut c_void, *mut PcapStatistics) -> c_int;
     type PcapBreakLoop = unsafe extern "C" fn(*mut c_void);
     type PcapGetError = unsafe extern "C" fn(*mut c_void) -> *mut c_char;
@@ -89,6 +97,21 @@ mod supported {
         timestamp: PcapTimeval,
         captured_length: c_uint,
         original_length: c_uint,
+    }
+
+    #[repr(C)]
+    struct BpfProgram {
+        instruction_count: c_uint,
+        instructions: *mut c_void,
+    }
+
+    impl Default for BpfProgram {
+        fn default() -> Self {
+            Self {
+                instruction_count: 0,
+                instructions: std::ptr::null_mut(),
+            }
+        }
     }
 
     // Npcap's Windows ABI extends the portable three-counter pcap_stat with
@@ -118,6 +141,9 @@ mod supported {
         pcap_datalink: PcapDatalink,
         pcap_next_ex: PcapNextEx,
         pcap_sendpacket: PcapSendPacket,
+        pcap_compile: PcapCompile,
+        pcap_setfilter: PcapSetFilter,
+        pcap_freecode: PcapFreeCode,
         pcap_stats: PcapStats,
         pcap_breakloop: PcapBreakLoop,
         pcap_geterr: PcapGetError,
@@ -173,6 +199,14 @@ mod supported {
             let pcap_sendpacket =
                 unsafe { load_symbol::<PcapSendPacket>(&library, b"pcap_sendpacket\0")? };
             // SAFETY: see the ABI note above.
+            let pcap_compile = unsafe { load_symbol::<PcapCompile>(&library, b"pcap_compile\0")? };
+            // SAFETY: see the ABI note above.
+            let pcap_setfilter =
+                unsafe { load_symbol::<PcapSetFilter>(&library, b"pcap_setfilter\0")? };
+            // SAFETY: see the ABI note above.
+            let pcap_freecode =
+                unsafe { load_symbol::<PcapFreeCode>(&library, b"pcap_freecode\0")? };
+            // SAFETY: see the ABI note above.
             let pcap_stats = unsafe { load_symbol::<PcapStats>(&library, b"pcap_stats\0")? };
             // SAFETY: see the ABI note above.
             let pcap_breakloop =
@@ -208,6 +242,9 @@ mod supported {
                 pcap_datalink,
                 pcap_next_ex,
                 pcap_sendpacket,
+                pcap_compile,
+                pcap_setfilter,
+                pcap_freecode,
                 pcap_stats,
                 pcap_breakloop,
                 pcap_geterr,
@@ -257,6 +294,8 @@ mod supported {
     pub(super) fn open_capture(
         interface: &InterfaceId,
         limits: CaptureQueueLimits,
+        mode: CaptureMode,
+        filter: Option<&str>,
     ) -> Result<NativeCaptureParts, LiveIoError> {
         let snap_length = c_int::try_from(limits.snap_length).map_err(|_| {
             LiveIoError::InvalidCaptureQueueLimit {
@@ -265,7 +304,14 @@ mod supported {
                 reason: "Npcap snap length exceeds i32",
             }
         })?;
-        let handle = open_handle(interface, snap_length, PromiscuousMode::Enabled)?;
+        let promiscuous_mode = match mode {
+            CaptureMode::Promiscuous => PromiscuousMode::Enabled,
+            CaptureMode::HostOnly => PromiscuousMode::Disabled,
+        };
+        let handle = open_handle(interface, snap_length, promiscuous_mode)?;
+        if let Some(expression) = filter {
+            install_filter(&handle, interface, expression)?;
+        }
         // SAFETY: handle is activated and live; pcap_datalink only reads its
         // negotiated link-layer type.
         let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
@@ -289,6 +335,52 @@ mod supported {
             interface: interface.clone(),
             link_type,
         })
+    }
+
+    fn install_filter(
+        handle: &NpcapHandle,
+        interface: &InterfaceId,
+        expression: &str,
+    ) -> Result<(), LiveIoError> {
+        let expression =
+            CString::new(expression).map_err(|_| LiveIoError::InvalidCaptureFilter {
+                message: "custom BPF expression contains a NUL byte".to_owned(),
+            })?;
+        let mut program = BpfProgram::default();
+        // SAFETY: the activated handle and NUL-terminated expression remain
+        // live, and program is writable according to the Npcap ABI.
+        let compiled = unsafe {
+            (handle.api.pcap_compile)(
+                handle.raw.as_ptr(),
+                &mut program,
+                expression.as_ptr(),
+                1,
+                c_uint::MAX,
+            )
+        };
+        if compiled != 0 {
+            return Err(LiveIoError::CaptureFilter {
+                message: format!(
+                    "Npcap rejected the filter on {}: {}",
+                    interface.name,
+                    handle.error_message()
+                ),
+            });
+        }
+        // SAFETY: pcap_compile initialized program for this handle.
+        let installed = unsafe { (handle.api.pcap_setfilter)(handle.raw.as_ptr(), &mut program) };
+        // SAFETY: program was initialized by pcap_compile and is freed once.
+        unsafe { (handle.api.pcap_freecode)(&mut program) };
+        if installed != 0 {
+            return Err(LiveIoError::CaptureFilter {
+                message: format!(
+                    "Npcap could not install the filter on {}: {}",
+                    interface.name,
+                    handle.error_message()
+                ),
+            });
+        }
+        Ok(())
     }
 
     pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
@@ -745,14 +837,16 @@ mod supported {
 pub(super) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
+    mode: CaptureMode,
+    filter: Option<&str>,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
     {
-        supported::open_capture(interface, limits)
+        supported::open_capture(interface, limits, mode, filter)
     }
     #[cfg(not(all(target_arch = "x86_64", target_env = "msvc")))]
     {
-        let _ = (interface, limits);
+        let _ = (interface, limits, mode, filter);
         Err(LiveIoError::Unsupported {
             message: "native Windows Layer 2 I/O supports only x86_64-pc-windows-msvc".to_owned(),
         })

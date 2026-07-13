@@ -1,9 +1,9 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "traceroute",
   "mode": "stream",
-  "sequence": 0,
-  "status": "success",
+  "sequence": "1",
+  "status": "running",
   "result": {
     "event": "hop",
     "target": "router.lab",
@@ -12,7 +12,7 @@
       "hop_limit": 1,
       "probes": [
         {
-          "sequence": 0,
+          "sequence": "0",
           "hop_limit": 1,
           "attempt": 1,
           "strategy": "udp",
@@ -22,21 +22,27 @@
           "response_kind": "intermediate",
           "responder": "192.168.56.1",
           "sent_at": {
-            "unix_seconds": 1770000000,
+            "unix_seconds": "1770000000",
             "nanoseconds": 0
           },
           "received_at": {
-            "unix_seconds": 1770000000,
+            "unix_seconds": "1770000000",
             "nanoseconds": 4000000
           },
           "latency": {
-            "secs": 0,
-            "nanos": 4000000
+            "seconds": "0",
+            "nanoseconds": 4000000
           },
           "reason": "ICMPv4 time exceeded before reaching the endpoint"
         }
       ]
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "item"
 }

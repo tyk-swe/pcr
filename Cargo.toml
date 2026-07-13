@@ -1,13 +1,19 @@
 [package]
 name = "packetcraftr"
-version = "0.2.0"
+version = "0.3.0"
 description = "Rust library and CLI for building, dissecting, capturing, and testing network packets"
 edition = "2024"
 resolver = "2"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
 repository = "https://github.com/tyk-swe/pcr"
-publish = false
+homepage = "https://github.com/tyk-swe/pcr"
+documentation = "https://docs.rs/packetcraftr"
+readme = "README.md"
+keywords = ["network", "packet", "pcap", "security", "cli"]
+categories = ["command-line-utilities", "network-programming"]
+publish = true
+build = "build.rs"
 
 [lints.rust]
 unsafe_code = "deny"
@@ -19,8 +25,9 @@ unsafe_op_in_unsafe_fn = "deny"
 overflow-checks = true
 
 [features]
-default = ["live"]
+default = ["native"]
 live = ["dep:pnet_datalink", "dep:windows"]
+native = ["native-route", "native-layer2", "native-layer3"]
 native-route = [
     "dep:futures-util",
     "dep:libc",
@@ -35,6 +42,7 @@ native-layer3 = ["live", "dep:socket2", "dep:windows"]
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
+getrandom = "0.3"
 noyalib = { version = "0.0.15", features = ["compat-serde-yaml"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
@@ -42,6 +50,7 @@ thiserror = "2"
 
 [target.'cfg(not(windows))'.dependencies]
 pnet_datalink = { version = "0.35", default-features = false, features = ["std"], optional = true }
+signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }
@@ -56,6 +65,7 @@ pcap = { version = "2.4", default-features = false, optional = true }
 socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
+ctrlc = "3"
 libloading = { version = "0.9", default-features = false, features = ["std"], optional = true }
 socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 windows = { version = "0.62", default-features = false, features = [

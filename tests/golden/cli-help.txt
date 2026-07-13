@@ -18,12 +18,16 @@ Commands:
   dns         Run a structured DNS operation
   fuzz        Run bounded field-aware packet fuzzing
   routes      Enumerate passive interface-bound route decisions
+  doctor      Diagnose passive platform readiness and optionally probe capture
   help        Print this message or the help of the given subcommand(s)
 
 Options:
       --output <OUTPUT>
           [default: text]
           [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
 
   -h, --help
           Print help (see a summary with '-h')
@@ -37,11 +41,12 @@ Build exact packet bytes from an expression or document
 Usage: packetcraftr build [OPTIONS]
 
 Options:
-      --output <OUTPUT>     [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-      --packet <PACKET>     One-off layer expression
-      --packet-file <PATH>  Versioned JSON/YAML packet document
-      --mode <MODE>         [default: strict] [possible values: strict, permissive]
-  -h, --help                Print help
+      --output <OUTPUT>        [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+      --packet <PACKET>        One-off layer expression
+      --operation-id <32_HEX>  Reuse an exact 128-bit operation identity instead of OS entropy
+      --packet-file <PATH>     Versioned JSON/YAML packet document
+      --mode <MODE>            [default: strict] [possible values: strict, permissive]
+  -h, --help                   Print help
 
 ===== packetcraftr dissect --help =====
 Decode a frame with bounded, registry-driven dissection
@@ -52,6 +57,7 @@ Options:
       --hex <HEX>              Whole-frame hexadecimal bytes
       --output <OUTPUT>        [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --file <PATH>            File containing raw frame bytes
+      --operation-id <32_HEX>  Reuse an exact 128-bit operation identity instead of OS entropy
       --link-type <LINK_TYPE>  Open numeric DLT/link type (defaults to Ethernet/DLT 1) [default: 1]
   -h, --help                   Print help
 
@@ -70,6 +76,8 @@ Options:
           [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --max-bytes <MAX_BYTES>
           Maximum aggregate captured payload bytes read or copied [default: 268435456]
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --max-frame-bytes <MAX_FRAME_BYTES>
           Maximum bytes accepted from any one captured frame or PCAPNG block [default: 16777216]
       --max-interfaces <MAX_INTERFACES>
@@ -83,8 +91,9 @@ Enumerate local interfaces
 Usage: packetcraftr interfaces [OPTIONS]
 
 Options:
-      --output <OUTPUT>  [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-  -h, --help             Print help
+      --output <OUTPUT>        [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+      --operation-id <32_HEX>  Reuse an exact 128-bit operation identity instead of OS entropy
+  -h, --help                   Print help
 
 ===== packetcraftr plan --help =====
 Passively select route, source, MTU, and link mode
@@ -96,6 +105,8 @@ Options:
           [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
           One-off layer expression
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --packet-file <PATH>
           Versioned JSON/YAML packet document
       --destination <ADDRESS_OR_HOSTNAME>
@@ -131,6 +142,8 @@ Options:
           [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
           One-off layer expression
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --packet-file <PATH>
           Versioned JSON/YAML packet document
       --destination <ADDRESS_OR_HOSTNAME>
@@ -170,6 +183,8 @@ Options:
           [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
           One-off layer expression
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --packet-file <PATH>
           Versioned JSON/YAML packet document
       --destination <ADDRESS_OR_HOSTNAME>
@@ -206,10 +221,20 @@ Options:
           Aggregate backend capture-queue frame bound [default: 4096]
       --max-captured-bytes <MAX_CAPTURED_BYTES>
           Aggregate retained/queued capture byte bound [default: 268435456]
+      --max-evidence-bytes <MAX_EVIDENCE_BYTES>
+          Independent aggregate raw-evidence retention ceiling [default: 16777216]
       --snap-length <SNAP_LENGTH>
           Maximum bytes retained from any one captured frame [default: 16777216]
       --overflow-policy <OVERFLOW_POLICY>
           Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+      --capture-mode <CAPTURE_MODE>
+          Capture all interface traffic or only host-visible traffic [default: promiscuous] [possible values: promiscuous, host-only]
+      --auto-filter
+          Derive and install a route-specific BPF expression
+      --capture-filter <BPF>
+          Install an exact bounded BPF expression before capture readiness
+      --discard-unmatched
+          Omit evidence that does not correlate with the active request
   -h, --help
           Print help
 
@@ -223,6 +248,8 @@ Options:
           [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
           One-off layer expression
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --packet-file <PATH>
           Versioned JSON/YAML packet document
       --destination <ADDRESS_OR_HOSTNAME>
@@ -251,10 +278,20 @@ Options:
           Aggregate backend capture-queue frame bound [default: 4096]
       --max-captured-bytes <MAX_CAPTURED_BYTES>
           Aggregate retained/queued capture byte bound [default: 268435456]
+      --max-evidence-bytes <MAX_EVIDENCE_BYTES>
+          Independent aggregate raw-evidence retention ceiling [default: 16777216]
       --snap-length <SNAP_LENGTH>
           Maximum bytes retained from any one captured frame [default: 16777216]
       --overflow-policy <OVERFLOW_POLICY>
           Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+      --capture-mode <CAPTURE_MODE>
+          Capture all interface traffic or only host-visible traffic [default: promiscuous] [possible values: promiscuous, host-only]
+      --auto-filter
+          Derive and install a route-specific BPF expression
+      --capture-filter <BPF>
+          Install an exact bounded BPF expression before capture readiness
+      --discard-unmatched
+          Omit evidence that does not correlate with the active request
   -h, --help
           Print help
 
@@ -273,6 +310,8 @@ Options:
           [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --link-mode <LINK_MODE>
           Automatic, Layer 2, or raw Layer 3 replay intent [default: auto] [possible values: auto, layer2, layer3]
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --timing <TIMING>
           Preserve captured intervals or send immediately [default: original] [possible values: original, immediate]
       --speed <SPEED>
@@ -313,6 +352,8 @@ Options:
           TCP SYN, UDP, or ICMP echo probes [default: tcp] [possible values: tcp, udp, icmp]
       --family <FAMILY>
           Select all authorized addresses or only one IP family [default: any] [possible values: any, ipv4, ipv6]
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --ports <PORTS>...
           Comma-separated TCP/UDP destination ports; omitted for ICMP
       --attempts <ATTEMPTS>
@@ -341,10 +382,20 @@ Options:
           Aggregate backend capture-queue frame bound [default: 4096]
       --max-captured-bytes <MAX_CAPTURED_BYTES>
           Aggregate retained/queued capture byte bound [default: 268435456]
+      --max-evidence-bytes <MAX_EVIDENCE_BYTES>
+          Independent aggregate raw-evidence retention ceiling [default: 16777216]
       --snap-length <SNAP_LENGTH>
           Maximum bytes retained from any one captured frame [default: 16777216]
       --overflow-policy <OVERFLOW_POLICY>
           Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+      --capture-mode <CAPTURE_MODE>
+          Capture all interface traffic or only host-visible traffic [default: promiscuous] [possible values: promiscuous, host-only]
+      --auto-filter
+          Derive and install a route-specific BPF expression
+      --capture-filter <BPF>
+          Install an exact bounded BPF expression before capture readiness
+      --discard-unmatched
+          Omit evidence that does not correlate with the active request
       --allow-public-destinations
           Deliberately authorize globally routable destinations
       --allow-hostname-resolution
@@ -375,6 +426,8 @@ Options:
           UDP, ICMP echo, or TCP SYN probes [default: udp] [possible values: udp, icmp, tcp]
       --family <FAMILY>
           Select the first authorized address or only one IP family [default: any] [possible values: any, ipv4, ipv6]
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --port <PORT>
           UDP base destination port or fixed TCP destination port
       --first-hop <FIRST_HOP>
@@ -403,10 +456,20 @@ Options:
           Aggregate backend capture-queue frame bound [default: 4096]
       --max-captured-bytes <MAX_CAPTURED_BYTES>
           Aggregate retained/queued capture byte bound [default: 268435456]
+      --max-evidence-bytes <MAX_EVIDENCE_BYTES>
+          Independent aggregate raw-evidence retention ceiling [default: 16777216]
       --snap-length <SNAP_LENGTH>
           Maximum bytes retained from any one captured frame [default: 16777216]
       --overflow-policy <OVERFLOW_POLICY>
           Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+      --capture-mode <CAPTURE_MODE>
+          Capture all interface traffic or only host-visible traffic [default: promiscuous] [possible values: promiscuous, host-only]
+      --auto-filter
+          Derive and install a route-specific BPF expression
+      --capture-filter <BPF>
+          Install an exact bounded BPF expression before capture readiness
+      --discard-unmatched
+          Omit evidence that does not correlate with the active request
       --allow-public-destinations
           Deliberately authorize globally routable destinations
       --allow-hostname-resolution
@@ -438,6 +501,8 @@ Options:
           DNS question type [default: a] [possible values: a, aaaa, cname, mx, ns, ptr, soa, srv, txt, any]
       --family <FAMILY>
           Select the first authorized server address or one IP family [default: any] [possible values: any, ipv4, ipv6]
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --port <PORT>
           DNS server UDP port [default: 53]
       --transaction-id <TRANSACTION_ID>
@@ -478,10 +543,20 @@ Options:
           Aggregate backend capture-queue frame bound [default: 4096]
       --max-captured-bytes <MAX_CAPTURED_BYTES>
           Aggregate retained/queued capture byte bound [default: 268435456]
+      --max-evidence-bytes <MAX_EVIDENCE_BYTES>
+          Independent aggregate raw-evidence retention ceiling [default: 16777216]
       --snap-length <SNAP_LENGTH>
           Maximum bytes retained from any one captured frame [default: 16777216]
       --overflow-policy <OVERFLOW_POLICY>
           Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+      --capture-mode <CAPTURE_MODE>
+          Capture all interface traffic or only host-visible traffic [default: promiscuous] [possible values: promiscuous, host-only]
+      --auto-filter
+          Derive and install a route-specific BPF expression
+      --capture-filter <BPF>
+          Install an exact bounded BPF expression before capture readiness
+      --discard-unmatched
+          Omit evidence that does not correlate with the active request
       --allow-public-destinations
           Deliberately authorize globally routable destinations
       --allow-hostname-resolution
@@ -507,6 +582,8 @@ Options:
           [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
           One-off layer expression
+      --operation-id <32_HEX>
+          Reuse an exact 128-bit operation identity instead of OS entropy
       --packet-file <PATH>
           Versioned JSON/YAML packet document
       --seed <SEED>
@@ -553,10 +630,20 @@ Options:
           Aggregate backend capture-queue frame bound [default: 4096]
       --max-captured-bytes <MAX_CAPTURED_BYTES>
           Aggregate retained/queued capture byte bound [default: 268435456]
+      --max-evidence-bytes <MAX_EVIDENCE_BYTES>
+          Independent aggregate raw-evidence retention ceiling [default: 16777216]
       --snap-length <SNAP_LENGTH>
           Maximum bytes retained from any one captured frame [default: 16777216]
       --overflow-policy <OVERFLOW_POLICY>
           Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+      --capture-mode <CAPTURE_MODE>
+          Capture all interface traffic or only host-visible traffic [default: promiscuous] [possible values: promiscuous, host-only]
+      --auto-filter
+          Derive and install a route-specific BPF expression
+      --capture-filter <BPF>
+          Install an exact bounded BPF expression before capture readiness
+      --discard-unmatched
+          Omit evidence that does not correlate with the active request
       --allow-public-destinations
           Deliberately authorize globally routable destinations
       --allow-hostname-resolution
@@ -578,5 +665,19 @@ Enumerate passive interface-bound route decisions
 Usage: packetcraftr routes [OPTIONS]
 
 Options:
-      --output <OUTPUT>  [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-  -h, --help             Print help
+      --output <OUTPUT>        [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+      --operation-id <32_HEX>  Reuse an exact 128-bit operation identity instead of OS entropy
+  -h, --help                   Print help
+
+===== packetcraftr doctor --help =====
+Diagnose passive platform readiness and optionally probe capture
+
+Usage: packetcraftr doctor [OPTIONS]
+
+Options:
+      --interface <NAME_OR_INDEX>  Restrict readiness checks and the optional probe to one interface
+      --output <OUTPUT>            [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+      --operation-id <32_HEX>      Reuse an exact 128-bit operation identity instead of OS entropy
+      --probe-capture              Open, verify, and close a host-only filtered capture without transmitting
+      --require <CAPABILITIES>     Require comma-separated capabilities to be ready [possible values: interfaces, routes, layer2, layer3, capture]
+  -h, --help                       Print help

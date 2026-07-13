@@ -30,7 +30,6 @@ use super::evidence::{
     checked_sent_frame_bytes, preferred_latency, response_within_deadline,
     validate_capture_statistics, validate_decoded_frame, validate_frame,
 };
-use super::nonzero_ipv4_identification;
 use super::probe::{self, Correlation, Transport as ProbeTransport};
 use super::scan_impl::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
 use super::target::{AuthorizationError, Authorizer, Target};
@@ -49,6 +48,7 @@ pub const MAX_TRACEROUTE_DURATION: Duration = MAX_CAPTURE_TIMEOUT;
 // The deliberately conservative value makes complete byte-policy approval
 // possible before any route, capture, neighbor, or send side effect.
 const MAX_TRACEROUTE_PROBE_BYTES: u64 = 14 + 40 + 20;
+#[cfg(test)]
 const TRACEROUTE_SOURCE_PORT: u16 = 49_152;
 
 include!("traceroute/model.rs");

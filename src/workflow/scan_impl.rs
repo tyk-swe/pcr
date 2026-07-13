@@ -31,7 +31,6 @@ use super::evidence::{
     checked_sent_frame_bytes, preferred_latency, response_within_deadline,
     validate_capture_statistics, validate_decoded_frame, validate_frame,
 };
-use super::nonzero_ipv4_identification;
 use super::probe::Correlation;
 use super::target::{AuthorizationError, Authorizer, Target};
 use super::{AddressFamily, Stats, push_diagnostic_once};

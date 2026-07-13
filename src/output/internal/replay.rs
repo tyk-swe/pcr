@@ -74,9 +74,13 @@ pub struct ReplayCommandResult {
     pub timing: ReplayTimingOutput,
     pub requested_interface: ReplayInterfaceOutput,
     pub requested_link_mode: ReplayLinkMode,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub frames_attempted: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub frames_completed: u64,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub bytes_completed: u64,
+    #[serde(serialize_with = "serialize_duration")]
     pub scheduled_duration: Duration,
     pub frames: Vec<ReplayFrameCommandResult>,
 }
@@ -105,10 +109,13 @@ impl ReplayCommandResult {
 /// One frame record produced by streaming `replay` output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ReplayFrameCommandResult {
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub source_sequence: u64,
     pub interface: ReplayInterfaceOutput,
     pub link_mode: ReplayLinkMode,
+    #[serde(serialize_with = "serialize_duration")]
     pub scheduled_delay: Duration,
+    #[serde(serialize_with = "serialize_u64_decimal")]
     pub bytes_sent: u64,
     pub frame: FrameOutput,
     pub transmitted: bool,

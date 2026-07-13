@@ -34,15 +34,30 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         LiveTarget::Address(address) => ScanTarget::Address(address),
         LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
     };
+    let capture_options = limits.capture_options();
+    let evidence_bytes = limits.evidence_bytes();
     let queue_limits = limits.into_limits();
+    let generated_source_port = if source_port.is_none() {
+        Some(
+            current_operation()
+                .reserve_port("dns.udp.source_port", crate::operation::Transport::Udp)
+                .map_err(CliError::classified)?,
+        )
+    } else {
+        None
+    };
     let request = DnsRequest {
         server,
         address_family: family.into(),
         server_port: port,
-        source_port: source_port.unwrap_or_else(generated_dns_source_port),
+        source_port: source_port.or(generated_source_port).expect("explicit or generated port"),
         query_name: name,
         query_type: query_type.into(),
-        transaction_id: transaction_id.unwrap_or_else(generated_dns_transaction_id),
+        transaction_id: transaction_id.unwrap_or_else(|| {
+            current_operation()
+                .id()
+                .derive_u16("dns.transaction_id", 0)
+        }),
         recursion_desired: !no_recursion,
         attempts,
         timeout: Duration::from_millis(timeout_ms),
@@ -55,7 +70,7 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
             max_txt_bytes,
             max_rejected_records,
             max_evidence_frames: queue_limits.max_frames,
-            max_evidence_bytes: queue_limits.max_bytes,
+            max_evidence_bytes: evidence_bytes,
             max_undecoded,
             max_duration: Duration::from_millis(max_duration_ms),
         },
@@ -83,6 +98,7 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         max_responses: queue_limits.max_frames,
         max_capture_queue_frames: queue_limits.max_frames,
         max_captured_bytes: queue_limits.max_bytes,
+        max_evidence_bytes: evidence_bytes,
         capture_overflow_policy: queue_limits.overflow_policy,
         decode: DecodeOptions::default(),
     };
@@ -93,17 +109,64 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         registry: Arc::clone(&registry),
         policy: policy.clone(),
         exchange,
+        capture_options,
         interface: DeferredInterface::new(interface),
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyDnsAuthorizer::new(&policy, &resolver);
     let mut clock = SystemClock;
-    let result = dns(
+    let stream_server = request.server.to_string();
+    let stream_server_port = request.server_port;
+    let stream_query_name = request.query_name.clone();
+    let stream_query_type = request.query_type.to_string();
+    let stream_enabled = output == OutputFormat::Ndjson;
+    let mut stream_sequence = 0_u64;
+    let mut sink = |event: DnsEvent| {
+        if !stream_enabled {
+            return Ok(());
+        }
+        let evidence = DnsAttemptOutput::try_from_evidence(event.attempt)
+            .map_err(|source| crate::operation::EventError::new(source.to_string()))?;
+        emit_json_compact(&StreamRecord::success(
+            CommandName::Dns,
+            stream_sequence,
+            DnsStreamCommandResult::Attempt {
+                server: stream_server.clone(),
+                server_port: stream_server_port,
+                query_name: stream_query_name.clone(),
+                query_type: stream_query_type.clone(),
+                evidence,
+            },
+            Vec::new(),
+        ))
+        .map_err(|source| crate::operation::EventError::new(source.message))?;
+        stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
+            crate::operation::EventError::new("DNS output sequence overflowed")
+        })?;
+        for evidence in event.undecoded {
+            let evidence = DnsUndecodedOutput::try_from_evidence(evidence)
+                .map_err(|source| crate::operation::EventError::new(source.to_string()))?;
+            emit_json_compact(&StreamRecord::success(
+                CommandName::Dns,
+                stream_sequence,
+                DnsStreamCommandResult::Undecoded { evidence },
+                Vec::new(),
+            ))
+            .map_err(|source| crate::operation::EventError::new(source.message))?;
+            stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
+                crate::operation::EventError::new("DNS output sequence overflowed")
+            })?;
+        }
+        Ok(())
+    };
+    let result = dns_streaming(
         &request,
+        current_operation(),
         &mut authorizer,
         &registry,
         &mut executor,
         &mut clock,
+        &mut sink,
     )
     .map_err(dns_cli_error)?;
     let (result, diagnostics, stats) =
@@ -113,7 +176,12 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         OutputFormat::Json => emit_json(
             &AggregateOutput::success(CommandName::Dns, result, diagnostics).with_stats(stats),
         ),
-        OutputFormat::Ndjson => render_dns_stream(result, diagnostics, stats),
+        OutputFormat::Ndjson => {
+            let mut result = result;
+            result.attempts.clear();
+            result.undecoded.clear();
+            render_dns_stream(result, diagnostics, stats, stream_sequence)
+        }
         _ => Err(CliError::classified(
             OutputContractError::UnsupportedFormat {
                 command: CommandName::Dns,
@@ -123,33 +191,11 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
     }
 }
 
-fn generated_dns_transaction_id() -> u16 {
-    let bytes = generated_dns_entropy().to_le_bytes();
-    u16::from_le_bytes([bytes[0], bytes[1]])
-}
-
-fn generated_dns_source_port() -> u16 {
-    const WIDTH: u16 = u16::MAX - crate::workflow_api::DNS_EPHEMERAL_SOURCE_PORT_BASE + 1;
-    let offset = u16::try_from(generated_dns_entropy() % u64::from(WIDTH))
-        .expect("ephemeral source-port offset is bounded to u16");
-    crate::workflow_api::DNS_EPHEMERAL_SOURCE_PORT_BASE + offset
-}
-
-fn generated_dns_entropy() -> u64 {
-    let time = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let mut hasher = RandomState::new().build_hasher();
-    hasher.write_u128(time);
-    hasher.write_u32(std::process::id());
-    hasher.finish()
-}
-
 struct CliDnsExecutor {
     registry: Arc<crate::packet::internal::ProtocolRegistry>,
     policy: TrafficPolicy,
     exchange: ExchangeOptions,
+    capture_options: CaptureOptions,
     interface: DeferredInterface,
 }
 
@@ -164,7 +210,10 @@ impl DnsExecutor for CliDnsExecutor {
                 DnsExecutionError::new(error.message, error.classification, error.causes)
             })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        ClientDnsExecutor::new(&client, self.exchange.clone()).execute(exchange)
+        ClientDnsExecutor::new(&client, self.exchange.clone())
+            .with_capture_options(self.capture_options.clone())
+            .with_operation_context(current_operation().clone())
+            .execute(exchange)
     }
 }
 
@@ -299,6 +348,7 @@ fn render_dns_stream(
     result: DnsCommandResult,
     diagnostics: Vec<crate::packet::internal::Diagnostic>,
     stats: crate::output::envelope::Stats,
+    mut sequence: u64,
 ) -> Result<(), CliError> {
     let DnsCommandResult {
         server,
@@ -326,7 +376,6 @@ fn render_dns_stream(
         attempts,
         undecoded,
     } = result;
-    let mut sequence = 0_u64;
     for evidence in attempts {
         emit_dns_record(
             &mut sequence,
@@ -376,6 +425,11 @@ fn render_dns_stream(
             DnsStreamCommandResult::Undecoded { evidence },
         )?;
     }
+    let terminal_reason = if outcome == DnsOutcome::Timeout {
+        CompletionReason::Timeout
+    } else {
+        CompletionReason::Completed
+    };
     emit_json_compact(
         &StreamRecord::success(
             CommandName::Dns,
@@ -402,6 +456,7 @@ fn render_dns_stream(
             },
             diagnostics,
         )
+        .complete(terminal_reason)
         .with_stats(stats),
     )
     .map_err(|error| error.at_sequence(sequence))

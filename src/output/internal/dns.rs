@@ -1,4 +1,4 @@
-/// Output-v1 DNS section.
+/// Output-v2 DNS section.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsSection {
@@ -27,7 +27,7 @@ impl fmt::Display for DnsSection {
     }
 }
 
-/// Output-v1 DNS attempt status.
+/// Output-v2 DNS attempt status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsAttemptStatus {
@@ -52,7 +52,7 @@ impl From<crate::workflow::dns::AttemptStatus> for DnsAttemptStatus {
     }
 }
 
-/// Output-v1 DNS terminal outcome.
+/// Output-v2 DNS terminal outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsOutcome {
@@ -209,6 +209,7 @@ pub struct DnsCommandResult {
     pub authorities: Vec<DnsRecordOutput>,
     pub additionals: Vec<DnsRecordOutput>,
     pub rejected_records: Vec<DnsRejectedRecordOutput>,
+    #[serde(serialize_with = "serialize_usize_decimal")]
     pub rejected_record_count: usize,
     pub attempts: Vec<DnsAttemptOutput>,
     pub undecoded: Vec<DnsUndecodedOutput>,
@@ -449,6 +450,7 @@ impl DnsRecordOutput {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsRejectedRecordOutput {
     pub section: DnsSection,
+    #[serde(serialize_with = "serialize_usize_decimal")]
     pub index: usize,
     pub owner: String,
     pub type_code: u16,
@@ -464,7 +466,10 @@ pub struct DnsAttemptOutput {
     pub sent_at: OutputTimestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<OutputTimestamp>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_duration"
+    )]
     pub latency: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<FrameOutput>,
@@ -473,10 +478,46 @@ pub struct DnsAttemptOutput {
     pub reason: String,
 }
 
+impl DnsAttemptOutput {
+    pub fn try_from_evidence(
+        evidence: crate::workflow::dns::AttemptEvidence,
+    ) -> Result<Self, OutputContractError> {
+        Ok(Self {
+            attempt: evidence.attempt,
+            server_address: evidence.server_address,
+            source_port: evidence.source_port,
+            status: evidence.status.into(),
+            sent_at: evidence.sent_at.try_into()?,
+            received_at: evidence
+                .received_at
+                .map(OutputTimestamp::try_from)
+                .transpose()?,
+            latency: evidence.latency,
+            frame: evidence
+                .response
+                .map(FrameOutput::try_from_frame)
+                .transpose()?,
+            response_code: evidence.response_code,
+            reason: evidence.reason,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct DnsUndecodedOutput {
     pub attempt: u32,
     pub frame: FrameOutput,
+}
+
+impl DnsUndecodedOutput {
+    pub fn try_from_evidence(
+        evidence: crate::workflow::dns::UndecodedEvidence,
+    ) -> Result<Self, OutputContractError> {
+        Ok(Self {
+            attempt: evidence.attempt,
+            frame: FrameOutput::try_from_frame(evidence.frame)?,
+        })
+    }
 }
 
 /// One typed record produced by streaming `dns` output.
@@ -545,6 +586,7 @@ pub enum DnsStreamCommandResult {
         authenticated_data: Option<bool>,
         #[serde(skip_serializing_if = "Option::is_none")]
         checking_disabled: Option<bool>,
+        #[serde(serialize_with = "serialize_usize_decimal")]
         rejected_record_count: usize,
     },
 }

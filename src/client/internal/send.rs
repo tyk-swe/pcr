@@ -19,6 +19,10 @@ pub struct SendReport {
 #[non_exhaustive]
 pub enum ClientError {
     #[error(transparent)]
+    Operation(#[from] crate::operation::Error),
+    #[error(transparent)]
+    Event(#[from] crate::operation::EventError),
+    #[error(transparent)]
     Target(#[from] TargetResolutionError),
     #[error(transparent)]
     Plan(#[from] PlanError),
@@ -37,6 +41,16 @@ pub enum ClientError {
     #[error("{operation}; capture shutdown also failed: {shutdown}")]
     OperationAndCaptureShutdown {
         operation: LiveIoError,
+        shutdown: LiveIoError,
+    },
+    #[error("{operation}; capture shutdown also failed: {shutdown}")]
+    OperationCancellationAndCaptureShutdown {
+        operation: crate::operation::Error,
+        shutdown: LiveIoError,
+    },
+    #[error("{operation}; capture shutdown also failed: {shutdown}")]
+    EventAndCaptureShutdown {
+        operation: crate::operation::EventError,
         shutdown: LiveIoError,
     },
     #[error("exchange packets selected different interfaces or link modes")]
@@ -61,6 +75,8 @@ pub enum ClientError {
 impl Classified for ClientError {
     fn classification(&self) -> Classification {
         match self {
+            Self::Operation(error) => error.classification(),
+            Self::Event(error) => error.classification(),
             Self::Target(error) => error.classification(),
             Self::Plan(error) => error.classification(),
             Self::Neighbor(error) => error.classification(),
@@ -82,6 +98,12 @@ impl Classified for ClientError {
             ),
             Self::Io(error) => error.classification(),
             Self::OperationAndCaptureShutdown { operation, .. } => operation
+                .classification()
+                .with_category(Category::Cleanup),
+            Self::OperationCancellationAndCaptureShutdown { operation, .. } => operation
+                .classification()
+                .with_category(Category::Cleanup),
+            Self::EventAndCaptureShutdown { operation, .. } => operation
                 .classification()
                 .with_category(Category::Cleanup),
             Self::HeterogeneousExchangeRoute => Classification::new(
@@ -114,12 +136,22 @@ impl Classified for ClientError {
 
     fn causes(&self) -> Vec<String> {
         match self {
+            Self::Operation(error) => error.causes(),
+            Self::Event(error) => error.causes(),
             Self::Target(error) => error.causes(),
             Self::Plan(error) => error.causes(),
             Self::Neighbor(error) => error.causes(),
             Self::Policy(error) => error.causes(),
             Self::Io(error) => error.causes(),
             Self::OperationAndCaptureShutdown {
+                operation,
+                shutdown,
+            } => vec![operation.to_string(), shutdown.to_string()],
+            Self::OperationCancellationAndCaptureShutdown {
+                operation,
+                shutdown,
+            } => vec![operation.to_string(), shutdown.to_string()],
+            Self::EventAndCaptureShutdown {
                 operation,
                 shutdown,
             } => vec![operation.to_string(), shutdown.to_string()],

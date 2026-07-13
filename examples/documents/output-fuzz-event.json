@@ -1,31 +1,49 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "fuzz",
   "mode": "stream",
-  "sequence": 0,
-  "status": "success",
+  "sequence": "1",
+  "status": "running",
   "result": {
     "event": "case",
-    "operation_seed": 1,
+    "operation_seed": "1",
     "case": {
-      "index": 0,
-      "seed": 5206558337466748783,
+      "index": "0",
+      "seed": "5206558337466748783",
       "mutation": {
-        "layer": 0,
+        "layer": "0",
         "protocol": "raw",
         "field": "bytes",
         "strategy": "bit_flip",
-        "original": { "type": "bytes", "value": [0] },
-        "value": { "type": "bytes", "value": [4] }
+        "original": {
+          "type": "bytes",
+          "value": [
+            0
+          ]
+        },
+        "value": {
+          "type": "bytes",
+          "value": [
+            4
+          ]
+        }
       },
       "reproduction": {
-        "operation_seed": 1,
-        "case_index": 0,
-        "case_seed": 5206558337466748783
+        "operation_seed": "1",
+        "case_index": "0",
+        "case_seed": "5206558337466748783"
       },
       "shrink_values": [
-        { "type": "bytes", "value": [] },
-        { "type": "bytes", "value": [0] }
+        {
+          "type": "bytes",
+          "value": []
+        },
+        {
+          "type": "bytes",
+          "value": [
+            0
+          ]
+        }
       ],
       "recipe": {
         "schema": "packetcraftr.packet/v1",
@@ -33,12 +51,20 @@
           {
             "protocol": "raw",
             "fields": {
-              "bytes": { "type": "bytes", "value": [4] }
+              "bytes": {
+                "type": "bytes",
+                "value": [
+                  4
+                ]
+              }
             }
           }
         ]
       },
-      "frame": { "bytes_hex": "04", "length": 1 },
+      "frame": {
+        "bytes_hex": "04",
+        "length": "1"
+      },
       "requires_live_opt_in": false,
       "outcome": "built",
       "responses": [],
@@ -53,5 +79,11 @@
       ]
     }
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "item"
 }

@@ -3,8 +3,12 @@ mod tests {
     use super::*;
     use crate::workflow::{
         dns::{
-            Outcome as DomainDnsOutcome, QueryType as DnsQueryType, Record as DnsRecord,
-            RecordValue as DnsRecordValue, Transport as DnsTransport,
+            AttemptEvidence as DnsAttemptEvidence, AttemptStatus as DomainDnsAttemptStatus,
+            Edns as DomainDnsEdns, EdnsOption as DomainDnsEdnsOption,
+            Name as DomainDnsName, Outcome as DomainDnsOutcome, QueryType as DnsQueryType,
+            Record as DnsRecord, RecordValue as DnsRecordValue,
+            RejectedRecord as DomainDnsRejectedRecord, Section as DomainDnsSection,
+            Transport as DnsTransport, UndecodedEvidence as DnsUndecodedEvidence,
             ValidatedResponse as ValidatedDnsResponse,
         },
         scan::{
@@ -31,7 +35,7 @@ mod tests {
             OutputFormat::Pcap,
             OutputFormat::Pcapng,
         ];
-        assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 14);
+        assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 15);
         for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
             assert!(!contract.formats.is_empty());
             assert_eq!(contract.formats, contract.command.formats());
@@ -95,7 +99,7 @@ mod tests {
     }
 
     #[test]
-    fn workflow_enums_convert_to_output_owned_v1_spellings() {
+    fn workflow_enums_convert_to_output_owned_v2_spellings() {
         assert_eq!(
             serde_json::to_value(ScanClassification::from(
                 crate::workflow::scan::Classification::Filtered,
@@ -150,7 +154,176 @@ mod tests {
         );
         let value = serde_json::to_value(stream).unwrap();
         assert_eq!(value["mode"], "stream");
-        assert_eq!(value["sequence"], 7);
+        assert_eq!(value["sequence"], "7");
+    }
+
+    #[test]
+    fn envelope_error_categories_and_complete_lifecycle_records_are_explicit() {
+        let kinds = [
+            Kind::Cli,
+            Kind::Packet,
+            Kind::Capability,
+            Kind::Io,
+            Kind::Policy,
+            Kind::Internal,
+        ];
+        assert_eq!(
+            kinds
+                .into_iter()
+                .map(|kind| OutputErrorKind::from(kind).as_str())
+                .collect::<Vec<_>>(),
+            ["cli", "packet", "capability", "io", "policy", "internal"]
+        );
+        let categories = [
+            Category::Validation,
+            Category::Capability,
+            Category::Policy,
+            Category::Timeout,
+            Category::Io,
+            Category::Cleanup,
+            Category::Invariant,
+        ];
+        assert_eq!(
+            categories
+                .into_iter()
+                .map(|category| serde_json::to_value(OutputErrorCategory::from(category)).unwrap())
+                .collect::<Vec<_>>(),
+            [
+                serde_json::json!("validation"),
+                serde_json::json!("capability"),
+                serde_json::json!("policy"),
+                serde_json::json!("timeout"),
+                serde_json::json!("io"),
+                serde_json::json!("cleanup"),
+                serde_json::json!("invariant"),
+            ]
+        );
+
+        let context = EnvelopeContext::new(
+            OperationId::from_bytes([9; 16]),
+            serde_json::json!({"normalized": true}),
+        )
+        .with_diagnostics(vec![Diagnostic::warning("test.context", "context warning")]);
+        let classified = crate::net::LiveIoError::DeadlineExceeded {
+            operation: "test output",
+        };
+        let error = OutputError::classified(&classified);
+        assert_eq!(error.category, OutputErrorCategory::Timeout);
+
+        let aggregate = AggregateErrorOutput::error(Some(CommandName::Capture), error.clone())
+            .with_context(&context)
+            .with_completion_reason(CompletionReason::Timeout)
+            .with_stats(OperationStats::default())
+            .with_diagnostics(vec![Diagnostic::warning(
+                "test.aggregate",
+                "aggregate warning",
+            )]);
+        let aggregate = serde_json::to_value(aggregate).unwrap();
+        assert_eq!(aggregate["operation_id"], OperationId::from_bytes([9; 16]).to_string());
+        assert_eq!(aggregate["completion_reason"], "timeout");
+        assert_eq!(aggregate["error"]["category"], "timeout");
+        assert_eq!(aggregate["stats"]["packets_attempted"], "0");
+
+        let cancelled = serde_json::to_value(
+            AggregateErrorOutput::cancelled(Some(CommandName::Capture), error.clone())
+                .with_context(&context),
+        )
+        .unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+        assert_eq!(cancelled["completion_reason"], "cancelled");
+
+        let start = serde_json::to_value(StreamRecord::<()>::start(
+            Some(CommandName::Capture),
+            &context,
+        ))
+        .unwrap();
+        assert_eq!(start["record"], "start");
+        assert_eq!(start["effective_request"]["normalized"], true);
+
+        let complete = serde_json::to_value(
+            StreamRecord::success(
+                CommandName::Capture,
+                1,
+                serde_json::json!({"frames": "0"}),
+                Vec::new(),
+            )
+            .complete(CompletionReason::EndOfInput)
+            .with_context(&context)
+            .with_stats(OperationStats::default())
+            .with_diagnostics(vec![Diagnostic::warning(
+                "test.complete",
+                "complete warning",
+            )]),
+        )
+        .unwrap();
+        assert_eq!(complete["record"], "complete");
+        assert_eq!(complete["completion_reason"], "end_of_input");
+
+        let terminal_error = serde_json::to_value(StreamErrorRecord::error(
+            Some(CommandName::Capture),
+            2,
+            error.clone(),
+        ))
+        .unwrap();
+        assert_eq!(terminal_error["record"], "error");
+        let terminal_cancelled = serde_json::to_value(StreamErrorRecord::cancelled(
+            Some(CommandName::Capture),
+            3,
+            error,
+        ))
+        .unwrap();
+        assert_eq!(terminal_cancelled["record"], "cancelled");
+    }
+
+    #[test]
+    fn command_and_format_spellings_cover_the_frozen_contract() {
+        assert_eq!(
+            COMMAND_OUTPUT_CONTRACTS
+                .iter()
+                .map(|contract| contract.command.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "build",
+                "dissect",
+                "plan",
+                "send",
+                "exchange",
+                "capture",
+                "read",
+                "replay",
+                "scan",
+                "traceroute",
+                "dns",
+                "fuzz",
+                "interfaces",
+                "routes",
+                "doctor",
+            ]
+        );
+        let formats = [
+            OutputFormat::Text,
+            OutputFormat::Json,
+            OutputFormat::Ndjson,
+            OutputFormat::Hex,
+            OutputFormat::Raw,
+            OutputFormat::Pcap,
+            OutputFormat::Pcapng,
+        ];
+        assert_eq!(
+            formats
+                .into_iter()
+                .map(|format| (format.as_str(), format.mode()))
+                .collect::<Vec<_>>(),
+            [
+                ("text", None),
+                ("json", Some(OutputMode::Aggregate)),
+                ("ndjson", Some(OutputMode::Stream)),
+                ("hex", None),
+                ("raw", None),
+                ("pcap", None),
+                ("pcapng", None),
+            ]
+        );
     }
 
     #[test]
@@ -208,6 +381,190 @@ mod tests {
         let json = serde_json::to_string(&output).unwrap();
         assert!(!json.contains('\x1b'));
         assert!(json.contains("\\u001b"));
+    }
+
+    #[test]
+    fn dns_output_preserves_every_typed_record_and_evidence_shape() {
+        let name = |label: &'static [u8]| {
+            DomainDnsName::from_labels([Bytes::from_static(label)]).unwrap()
+        };
+        let owner = name(b"example");
+        let edns = DomainDnsEdns {
+            udp_payload_size: 1232,
+            extended_response_code: 1,
+            version: 0,
+            dnssec_ok: true,
+            flags: 0x8000,
+            options: vec![DomainDnsEdnsOption {
+                code: 15,
+                data: Bytes::from_static(&[0xde, 0xad]),
+            }],
+        };
+        let values = vec![
+            DnsRecordValue::A("192.0.2.1".parse().unwrap()),
+            DnsRecordValue::Aaaa("2001:db8::1".parse().unwrap()),
+            DnsRecordValue::Cname(name(b"canonical")),
+            DnsRecordValue::Mx {
+                preference: 10,
+                exchange: name(b"mail"),
+            },
+            DnsRecordValue::Ns(name(b"nameserver")),
+            DnsRecordValue::Ptr(name(b"pointer")),
+            DnsRecordValue::Soa {
+                primary_name_server: name(b"primary"),
+                responsible_mailbox: name(b"mailbox"),
+                serial: 1,
+                refresh: 2,
+                retry: 3,
+                expire: 4,
+                minimum: 5,
+            },
+            DnsRecordValue::Srv {
+                priority: 1,
+                weight: 2,
+                port: 443,
+                target: name(b"service"),
+            },
+            DnsRecordValue::Txt(vec![Bytes::from_static(b"text")]),
+            DnsRecordValue::Opt(edns.clone()),
+            DnsRecordValue::Unknown {
+                type_code: 65_000,
+                rdata: Bytes::from_static(&[0xca, 0xfe]),
+            },
+        ];
+        let records = values
+            .into_iter()
+            .map(|value| DnsRecord {
+                owner: owner.clone(),
+                class: 1,
+                ttl: 60,
+                value,
+            })
+            .collect::<Vec<_>>();
+        let response_frame = Frame::new(
+            UNIX_EPOCH + Duration::from_secs(2),
+            crate::capture::LinkType::RAW,
+            vec![0x45],
+        )
+        .unwrap();
+        let result = DnsResult {
+            server: "192.0.2.53".to_owned(),
+            server_port: 53,
+            resolved_addresses: vec!["192.0.2.53".parse().unwrap()],
+            query_name: "example.".to_owned(),
+            query_type: DnsQueryType::A,
+            transaction_id: 9,
+            transport: DnsTransport::Udp,
+            outcome: DomainDnsOutcome::Truncated,
+            response: Some(ValidatedDnsResponse {
+                transaction_id: 9,
+                response_code: 0,
+                edns: Some(edns),
+                authoritative: true,
+                truncated: true,
+                recursion_desired: true,
+                recursion_available: false,
+                authenticated_data: true,
+                checking_disabled: false,
+                answers: records,
+                authorities: Vec::new(),
+                additionals: Vec::new(),
+                rejected_records: vec![
+                    DomainDnsRejectedRecord {
+                        section: DomainDnsSection::Answer,
+                        index: 0,
+                        owner: "answer.example.".to_owned(),
+                        type_code: 1,
+                        reason: "answer rejected".to_owned(),
+                    },
+                    DomainDnsRejectedRecord {
+                        section: DomainDnsSection::Authority,
+                        index: 1,
+                        owner: "authority.example.".to_owned(),
+                        type_code: 2,
+                        reason: "authority rejected".to_owned(),
+                    },
+                    DomainDnsRejectedRecord {
+                        section: DomainDnsSection::Additional,
+                        index: 2,
+                        owner: "additional.example.".to_owned(),
+                        type_code: 41,
+                        reason: "additional rejected".to_owned(),
+                    },
+                ],
+                rejected_record_count: 3,
+            }),
+            attempts: vec![DnsAttemptEvidence {
+                attempt: 1,
+                server_address: "192.0.2.53".parse().unwrap(),
+                source_port: 50_000,
+                status: DomainDnsAttemptStatus::Truncated,
+                sent_at: UNIX_EPOCH + Duration::from_secs(1),
+                received_at: Some(UNIX_EPOCH + Duration::from_secs(2)),
+                latency: Some(Duration::from_secs(1)),
+                response: Some(response_frame.clone()),
+                response_code: Some(0),
+                reason: "truncated response".to_owned(),
+            }],
+            undecoded: vec![DnsUndecodedEvidence {
+                attempt: 1,
+                frame: response_frame,
+            }],
+            diagnostics: Vec::new(),
+            stats: WorkflowStats::default(),
+        };
+
+        let (output, _, _) = DnsCommandResult::try_from_dns(result).unwrap();
+        let output = serde_json::to_value(output).unwrap();
+        assert_eq!(
+            output["answers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|record| record["type"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "a", "aaaa", "cname", "mx", "ns", "ptr", "soa", "srv", "txt", "opt",
+                "unknown",
+            ]
+        );
+        assert_eq!(output["answers"][9]["edns"]["options"][0]["data_hex"], "dead");
+        assert_eq!(output["answers"][10]["rdata_hex"], "cafe");
+        assert_eq!(output["attempts"][0]["status"], "truncated");
+        assert_eq!(output["undecoded"][0]["attempt"], 1);
+        assert_eq!(
+            output["rejected_records"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|record| record["section"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["answer", "authority", "additional"]
+        );
+
+        for section in [DnsSection::Answer, DnsSection::Authority, DnsSection::Additional] {
+            assert_eq!(section.to_string(), serde_json::to_value(section).unwrap());
+        }
+        for status in [
+            DomainDnsAttemptStatus::Response,
+            DomainDnsAttemptStatus::Truncated,
+            DomainDnsAttemptStatus::Timeout,
+            DomainDnsAttemptStatus::Unrelated,
+            DomainDnsAttemptStatus::DecodeFailure,
+            DomainDnsAttemptStatus::NetworkFailure,
+        ] {
+            let _: DnsAttemptStatus = status.into();
+        }
+        for outcome in [
+            DomainDnsOutcome::Response,
+            DomainDnsOutcome::Truncated,
+            DomainDnsOutcome::Timeout,
+            DomainDnsOutcome::Unrelated,
+            DomainDnsOutcome::DecodeFailure,
+            DomainDnsOutcome::NetworkFailure,
+        ] {
+            let _: DnsOutcome = outcome.into();
+        }
     }
 
     #[test]
@@ -310,7 +667,7 @@ mod tests {
         assert!(value["result"]["ports"][0]["evidence"][0]
             .get("received_at")
             .is_none());
-        assert_eq!(value["stats"]["packets_completed"], 1);
+        assert_eq!(value["stats"]["packets_completed"], "1");
     }
 
     #[test]
@@ -364,16 +721,29 @@ mod tests {
         )
         .unwrap();
         assert_eq!(value["result"]["destination"], "192.168.56.10");
-        assert_eq!(value["result"]["hops"][0]["probes"][0]["sequence"], 0);
+        assert_eq!(value["result"]["hops"][0]["probes"][0]["sequence"], "0");
         assert_eq!(
             value["result"]["hops"][0]["probes"][0]["response_kind"],
             "intermediate"
         );
         assert_eq!(
-            value["result"]["hops"][0]["probes"][0]["latency"]["nanos"],
+            value["result"]["hops"][0]["probes"][0]["latency"]["nanoseconds"],
             4_000_000
         );
         assert_eq!(value["result"]["completion"], "maximum_hops");
-        assert_eq!(value["stats"]["packets_completed"], 1);
+        assert_eq!(value["stats"]["packets_completed"], "1");
+    }
+
+    #[test]
+    fn fuzz_reflective_integers_are_decimal_strings_outside_packet_v1() {
+        let value = FuzzFieldValue::from(crate::packet::internal::FieldValue::List(vec![
+            crate::packet::internal::FieldValue::Unsigned(u64::MAX),
+            crate::packet::internal::FieldValue::Signed(i64::MIN),
+        ]));
+        let value = serde_json::to_value(value).unwrap();
+
+        assert_eq!(value["type"], "list");
+        assert_eq!(value["value"][0]["value"], u64::MAX.to_string());
+        assert_eq!(value["value"][1]["value"], i64::MIN.to_string());
     }
 }

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "interfaces",
   "mode": "aggregate",
   "status": "success",
@@ -10,7 +10,9 @@
         "index": 2,
         "description": "isolated test interface",
         "mac": "02:00:00:00:00:01",
-        "addresses": ["192.168.56.2/24"],
+        "addresses": [
+          "192.168.56.2/24"
+        ],
         "flags": {
           "up": true,
           "broadcast": true,
@@ -24,5 +26,12 @@
       }
     ]
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

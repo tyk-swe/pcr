@@ -82,6 +82,18 @@ impl DnsWireError {
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum DnsError {
+    #[error("DNS operation failed on attempt {attempt}: {source}")]
+    Operation {
+        attempt: u32,
+        #[source]
+        source: crate::operation::Error,
+    },
+    #[error("DNS event delivery failed on attempt {attempt}: {source}")]
+    Event {
+        attempt: u32,
+        #[source]
+        source: crate::operation::EventError,
+    },
     #[error("invalid DNS limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -121,7 +133,9 @@ pub enum DnsError {
 impl DnsError {
     pub fn sequence(&self) -> Option<u64> {
         match self {
-            Self::Execution { attempt, .. }
+            Self::Operation { attempt, .. }
+            | Self::Event { attempt, .. }
+            | Self::Execution { attempt, .. }
             | Self::Clock { attempt, .. }
             | Self::InvalidEvidence { attempt, .. }
             | Self::StatisticsOverflow { attempt } => Some(u64::from(attempt.saturating_sub(1))),
@@ -133,6 +147,8 @@ impl DnsError {
 impl Classified for DnsError {
     fn classification(&self) -> Classification {
         match self {
+            Self::Operation { source, .. } => source.classification(),
+            Self::Event { source, .. } => source.classification(),
             Self::InvalidLimit { .. }
             | Self::InvalidPort
             | Self::InvalidSourcePort
@@ -176,6 +192,8 @@ impl Classified for DnsError {
 
     fn causes(&self) -> Vec<String> {
         match self {
+            Self::Operation { source, .. } => source.causes(),
+            Self::Event { source, .. } => source.causes(),
             Self::Authorization(error) => error.causes(),
             Self::Execution { source, .. } => source.causes(),
             _ => Vec::new(),

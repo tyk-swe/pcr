@@ -1,4 +1,8 @@
 pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
+/// Default exact capture evidence retained by aggregate exchange results.
+pub const DEFAULT_EVIDENCE_BYTES: usize = 16 * 1024 * 1024;
+/// Hard ceiling for aggregate exact capture evidence.
+pub const MAX_EVIDENCE_BYTES: usize = DEFAULT_CAPTURE_QUEUE_BYTES;
 pub const MAX_EXCHANGE_TIMEOUT: Duration = MAX_CAPTURE_TIMEOUT;
 
 struct CaptureGuard<C: CaptureSession> {
@@ -55,6 +59,10 @@ pub struct ExchangeOptions {
     /// undecodable capture traffic.
     pub max_capture_queue_frames: usize,
     pub max_captured_bytes: usize,
+    /// Independent ceiling for exact captured bytes retained in an aggregate
+    /// result. The backend queue may be larger so classification can continue
+    /// after evidence retention stops.
+    pub max_evidence_bytes: usize,
     pub capture_overflow_policy: CaptureOverflowPolicy,
     pub decode: DecodeOptions,
 }
@@ -69,6 +77,7 @@ impl Default for ExchangeOptions {
             max_responses: DEFAULT_MAX_UNSOLICITED_FRAMES,
             max_capture_queue_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
             max_captured_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,
+            max_evidence_bytes: DEFAULT_EVIDENCE_BYTES,
             capture_overflow_policy: CaptureOverflowPolicy::Fail,
             decode: DecodeOptions::default(),
         }
@@ -98,6 +107,19 @@ pub struct ExchangeResult {
     pub undecoded: Vec<Frame>,
     pub diagnostics: Vec<crate::packet::internal::Diagnostic>,
     pub stats: OperationStats,
+}
+
+/// Incremental exchange evidence emitted as transmission succeeds and capture
+/// classification completes.
+#[derive(Clone, Debug)]
+pub enum ExchangeEvent {
+    Sent {
+        request_index: usize,
+        frame: Frame,
+    },
+    Response(MatchedResponse),
+    Unsolicited(DecodedPacket),
+    Undecoded(Frame),
 }
 
 struct ExchangeAccumulator {
@@ -138,8 +160,14 @@ fn drain_available<C: CaptureSession>(
     frame_limit: usize,
     captured: &mut ExchangeAccumulator,
     context: ExchangeProcessContext<'_>,
+    cancellation: &crate::operation::Cancellation,
 ) -> Result<(), LiveIoError> {
     for _ in 0..frame_limit {
+        if cancellation.is_cancelled() {
+            return Err(LiveIoError::Capture {
+                message: "operation cancellation requested while draining capture".to_owned(),
+            });
+        }
         if enforced_deadline
             .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
         {
@@ -260,6 +288,8 @@ impl ExchangeAccumulator {
 
         if let Some((request_index, _)) = matched {
             let received_at = received_at.expect("only timestamped capture frames can match");
+            self.response_counts[request_index] =
+                self.response_counts[request_index].saturating_add(1);
             if self.responses.len() >= options.max_responses {
                 push_diagnostic_once(
                     &mut self.diagnostics,
@@ -278,10 +308,9 @@ impl ExchangeAccumulator {
                 &mut self.retained_bytes,
                 decoded.original.len(),
                 options.max_capture_queue_frames,
-                options.max_captured_bytes,
+                options.max_evidence_bytes,
                 &mut self.diagnostics,
             ) {
-                self.response_counts[request_index] += 1;
                 self.responses.push(MatchedResponse {
                     request_index,
                     response: decoded,
@@ -321,7 +350,7 @@ impl ExchangeAccumulator {
             &mut self.retained_bytes,
             decoded.original.len(),
             options.max_capture_queue_frames,
-            options.max_captured_bytes,
+            options.max_evidence_bytes,
             &mut self.diagnostics,
         ) {
             self.unsolicited.push(decoded);
@@ -347,7 +376,7 @@ impl ExchangeAccumulator {
             &mut self.retained_bytes,
             frame.bytes.len(),
             options.max_capture_queue_frames,
-            options.max_captured_bytes,
+            options.max_evidence_bytes,
             &mut self.diagnostics,
         ) {
             self.undecoded.push(frame);

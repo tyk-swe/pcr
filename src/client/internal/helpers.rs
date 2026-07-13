@@ -14,6 +14,12 @@ impl ExchangeOptions {
                 message: "must be greater than zero".to_owned(),
             });
         }
+        if self.max_evidence_bytes == 0 || self.max_evidence_bytes > MAX_EVIDENCE_BYTES {
+            return Err(ClientError::InvalidExchangeOption {
+                field: "max_evidence_bytes",
+                message: format!("must be within 1..={MAX_EVIDENCE_BYTES}"),
+            });
+        }
         for (field, value) in [
             ("max_responses", self.max_responses),
             ("max_unsolicited", self.max_unsolicited),
@@ -114,6 +120,32 @@ fn error_after_shutdown<C: CaptureSession>(
     }
 }
 
+fn operation_error_after_shutdown<C: CaptureSession>(
+    capture: &mut CaptureGuard<C>,
+    operation: crate::operation::Error,
+) -> ClientError {
+    match capture.shutdown() {
+        Ok(()) => ClientError::Operation(operation),
+        Err(shutdown) => ClientError::OperationCancellationAndCaptureShutdown {
+            operation,
+            shutdown,
+        },
+    }
+}
+
+fn event_error_after_shutdown<C: CaptureSession>(
+    capture: &mut CaptureGuard<C>,
+    operation: crate::operation::EventError,
+) -> ClientError {
+    match capture.shutdown() {
+        Ok(()) => ClientError::Event(operation),
+        Err(shutdown) => ClientError::EventAndCaptureShutdown {
+            operation,
+            shutdown,
+        },
+    }
+}
+
 fn push_diagnostic_once(
     diagnostics: &mut Vec<crate::packet::internal::Diagnostic>,
     diagnostic: crate::packet::internal::Diagnostic,
@@ -139,7 +171,7 @@ fn reserve_capture_evidence(
             diagnostics,
             crate::packet::internal::Diagnostic::warning(
                 "exchange.capture_frame_limit",
-                "retained capture frame accounting overflowed; frame was not retained",
+                "evidence_complete=false: retained capture frame accounting overflowed; frame was not retained",
             ),
         );
         return false;
@@ -150,7 +182,7 @@ fn reserve_capture_evidence(
             crate::packet::internal::Diagnostic::warning(
                 "exchange.capture_frame_limit",
                 format!(
-                    "aggregate retained capture frame limit {frame_limit} reached; later frames were not retained"
+                    "evidence_complete=false: aggregate retained capture frame limit {frame_limit} reached; later frames were not retained"
                 ),
             ),
         );
@@ -161,7 +193,7 @@ fn reserve_capture_evidence(
             diagnostics,
             crate::packet::internal::Diagnostic::warning(
                 "exchange.capture_byte_limit",
-                "retained capture byte accounting overflowed; frame was not retained",
+                "evidence_complete=false: retained capture byte accounting overflowed; frame was not retained",
             ),
         );
         return false;
@@ -172,7 +204,7 @@ fn reserve_capture_evidence(
             crate::packet::internal::Diagnostic::warning(
                 "exchange.capture_byte_limit",
                 format!(
-                    "retained capture byte limit {byte_limit} reached; later frames were not retained"
+                    "evidence_complete=false: retained capture byte limit {byte_limit} reached; later frames were not retained"
                 ),
             ),
         );

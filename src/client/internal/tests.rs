@@ -8,9 +8,10 @@ mod tests {
 
     use super::*;
     use crate::capture::LinkType;
+    use crate::net::capture::Filter as CaptureFilter;
     use crate::net::{
-        CaptureProvider, DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress,
-        RouteDecision,
+        CaptureMode, CaptureProvider, DestinationScope, InterfaceId, LinkCapability, LinkMode,
+        MacAddress, RouteDecision,
     };
     use crate::packet::internal::{PacketTemplate, Raw, TemplateValues, WireValue};
     use crate::protocol::internal::{
@@ -781,6 +782,9 @@ mod tests {
         assert!(diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "exchange.capture_frame_limit"));
+        assert!(diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.message.contains("evidence_complete=false")));
     }
 
     #[test]
@@ -920,6 +924,14 @@ mod tests {
                 timeout: MAX_EXCHANGE_TIMEOUT + Duration::from_nanos(1),
                 ..ExchangeOptions::default()
             },
+            ExchangeOptions {
+                max_evidence_bytes: 0,
+                ..ExchangeOptions::default()
+            },
+            ExchangeOptions {
+                max_evidence_bytes: MAX_EVIDENCE_BYTES + 1,
+                ..ExchangeOptions::default()
+            },
         ] {
             assert!(matches!(
                 client.exchange(&template, options),
@@ -929,6 +941,79 @@ mod tests {
         assert_eq!(route_calls.load(Ordering::SeqCst), 0);
         assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
         assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn capture_filter_validation_and_legacy_provider_rejection_precede_send() {
+        let route_calls = Arc::new(AtomicUsize::new(0));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let io = FakeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        };
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            CountingRoutes {
+                decision: route(LinkCapability::Layer3),
+                calls: Arc::clone(&route_calls),
+            },
+            CountingNeighbors::default(),
+            io,
+            TrafficPolicy::default(),
+        );
+        let template = PacketTemplate::new(packet(
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 2),
+            12_345,
+            9,
+        ));
+        let exchange = ExchangeOptions {
+            send: SendOptions {
+                plan: PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    ..PlanOptions::default()
+                },
+                ..SendOptions::default()
+            },
+            ..ExchangeOptions::default()
+        };
+
+        let invalid = client
+            .exchange_with_capture_options(
+                &template,
+                exchange.clone(),
+                CaptureOptions {
+                    filter: CaptureFilter::Bpf(String::new()),
+                    ..CaptureOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            invalid,
+            ClientError::Io(LiveIoError::InvalidCaptureFilter { .. })
+        ));
+        assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+        assert!(events.lock().unwrap().is_empty());
+
+        let unsupported = client
+            .exchange_with_capture_options(
+                &template,
+                exchange,
+                CaptureOptions {
+                    mode: CaptureMode::HostOnly,
+                    ..CaptureOptions::default()
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            unsupported,
+            ClientError::Io(LiveIoError::UnsupportedCaptureOptions)
+        ));
+        assert!(!events.lock().unwrap().contains(&"send"));
+        assert!(!events.lock().unwrap().contains(&"arm"));
     }
 
     #[test]
@@ -1390,6 +1475,37 @@ mod tests {
             accumulator.responses[0].response.frame.timestamp,
             std::time::UNIX_EPOCH
         );
+
+        let evidence_limited_options = ExchangeOptions {
+            max_evidence_bytes: 1,
+            ..ExchangeOptions::default()
+        };
+        let mut evidence_limited = ExchangeAccumulator::new(1);
+        evidence_limited.process(
+            CapturedFrame::new(
+                Frame::new(
+                    std::time::UNIX_EPOCH,
+                    LinkType::IPV4,
+                    response.bytes.clone(),
+                )
+                .unwrap(),
+                received_at,
+            ),
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                options: &evidence_limited_options,
+            },
+        );
+        assert!(evidence_limited.responses.is_empty());
+        assert_eq!(evidence_limited.response_counts, [1]);
+        assert!(evidence_limited
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.capture_byte_limit"));
 
         let mut fallback = ExchangeAccumulator::new(1);
         fallback.process(

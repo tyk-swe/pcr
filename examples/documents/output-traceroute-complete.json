@@ -1,8 +1,8 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "traceroute",
   "mode": "stream",
-  "sequence": 2,
+  "sequence": "2",
   "status": "success",
   "result": {
     "event": "complete",
@@ -17,19 +17,26 @@
   },
   "diagnostics": [],
   "stats": {
-    "packets_attempted": 3,
-    "packets_completed": 3,
-    "bytes": 126,
+    "packets_attempted": "3",
+    "packets_completed": "3",
+    "bytes": "126",
     "elapsed": {
-      "secs": 1,
-      "nanos": 15000000
+      "seconds": "1",
+      "nanoseconds": 15000000
     },
     "capture": {
-      "received_frames": 2,
-      "received_bytes": 8,
-      "dropped_frames": 0,
-      "dropped_bytes": 0,
-      "overflow_events": 0
+      "received_frames": "2",
+      "received_bytes": "8",
+      "dropped_frames": "0",
+      "dropped_bytes": "0",
+      "overflow_events": "0"
     }
-  }
+  },
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "complete",
+  "completion_reason": "destination_reached"
 }

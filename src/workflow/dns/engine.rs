@@ -14,6 +14,46 @@ where
     E: DnsExecutor,
     C: Clock,
 {
+    let operation = crate::operation::Context::generate().map_err(|source| {
+        DnsError::Operation {
+            attempt: 0,
+            source,
+        }
+    })?;
+    dns_streaming(
+        request,
+        &operation,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut |_| Ok(()),
+    )
+}
+
+/// Streaming DNS entry point emitting one event per classified attempt.
+pub fn dns_streaming<A, E, C, S>(
+    request: &DnsRequest,
+    operation: &crate::operation::Context,
+    authorizer: &mut A,
+    registry: &ProtocolRegistry,
+    executor: &mut E,
+    clock: &mut C,
+    sink: &mut S,
+) -> Result<DnsResult, DnsError>
+where
+    A: Authorizer,
+    E: DnsExecutor,
+    C: Clock,
+    S: crate::operation::EventSink<DnsEvent>,
+{
+    operation
+        .cancellation()
+        .check()
+        .map_err(|source| DnsError::Operation {
+            attempt: 0,
+            source,
+        })?;
     let query_name = request.validate()?;
     let query = encode_dns_query(
         &query_name,
@@ -78,11 +118,23 @@ where
     let mut scheduled_delay = Duration::ZERO;
 
     for attempt in 1..=request.attempts {
+        operation
+            .cancellation()
+            .check()
+            .map_err(|source| DnsError::Operation { attempt, source })?;
         if attempt != 1 {
-            clock.sleep(delay).map_err(|source| DnsError::Clock {
-                attempt,
-                message: source.to_string(),
-            })?;
+            match clock.sleep_cancelled(delay, operation.cancellation()) {
+                Ok(()) => {}
+                Err(super::clock::SleepError::Clock(source)) => {
+                    return Err(DnsError::Clock {
+                        attempt,
+                        message: source.to_string(),
+                    });
+                }
+                Err(super::clock::SleepError::Cancelled(source)) => {
+                    return Err(DnsError::Operation { attempt, source });
+                }
+            }
             scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
@@ -118,6 +170,7 @@ where
         let source_port = dns_source_port(request.source_port, attempt);
         let probe = DnsProbe {
             attempt,
+            operation_id: operation.id(),
             server_address,
             server_port: request.server_port,
             source_port,
@@ -287,6 +340,7 @@ where
             DnsAttemptStatus::Response | DnsAttemptStatus::Truncated
         );
         result.attempts.push(evidence);
+        let undecoded_start = result.undecoded.len();
         // Correlated response evidence has priority over ambient undecodable
         // frames under the one operation-wide retention budget.
         for frame in execution.undecoded {
@@ -314,6 +368,16 @@ where
                     .push(DnsUndecodedEvidence { attempt, frame });
             }
         }
+        sink.emit(DnsEvent {
+            attempt: result
+                .attempts
+                .last()
+                .expect("classified DNS attempt was retained")
+                .clone(),
+            undecoded: result.undecoded[undecoded_start..].to_vec(),
+            stats: result.stats.clone(),
+        })
+        .map_err(|source| DnsError::Event { attempt, source })?;
         if terminal {
             break;
         }
@@ -550,16 +614,8 @@ fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
 }
 
 fn dns_source_port(base: u16, attempt: u32) -> u16 {
-    let (range_start, width) = if base >= DNS_EPHEMERAL_SOURCE_PORT_BASE {
-        (
-            u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE),
-            u32::from(u16::MAX) - u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE) + 1,
-        )
-    } else {
-        (1, u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE) - 1)
-    };
-    let offset = attempt.saturating_sub(1) % width;
-    (range_start + (u32::from(base) - range_start + offset) % width) as u16
+    let _ = attempt;
+    base
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> Result<Duration, DnsError> {
@@ -599,13 +655,13 @@ fn retain_dns_evidence(
     };
     let message = match error {
         EvidenceBudgetError::FrameCountOverflow => {
-            "DNS evidence frame accounting overflowed; later frames were omitted".to_owned()
+            "evidence_complete=false: DNS evidence frame accounting overflowed; later frames were omitted".to_owned()
         }
         EvidenceBudgetError::ByteCountOverflow => {
-            "DNS evidence byte accounting overflowed; later frames were omitted".to_owned()
+            "evidence_complete=false: DNS evidence byte accounting overflowed; later frames were omitted".to_owned()
         }
         EvidenceBudgetError::LimitExceeded => format!(
-            "DNS evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+            "evidence_complete=false: DNS evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
             limits.max_evidence_frames, limits.max_evidence_bytes
         ),
     };

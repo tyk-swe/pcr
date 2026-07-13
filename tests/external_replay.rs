@@ -8,11 +8,12 @@ use std::time::{Duration, SystemTime};
 use packetcraftr::{
     capture::{Frame, LinkType, Reader, Writer},
     net::{Error as LiveIoError, interface::Id, link::Mode, transmit::Report},
+    operation::{Context as OperationContext, Id as OperationId},
     workflow::{
         clock::Clock as ReplayClock,
         replay::{
             AuthorizationError, Authorizer as ReplayAuthorizer, Limits, Options, Timing,
-            Transmission, Transmitter as ReplayTransmitter, run,
+            Transmission, Transmitter as ReplayTransmitter, execute, prepare,
         },
     },
 };
@@ -84,17 +85,30 @@ fn downstream_code_can_inject_replay_policy_timing_and_transmission() {
     let mut authorizer = Authorizer;
     let mut transmitter = Transmitter;
     let mut clock = Clock::default();
-    let mut evidence = Vec::new();
-    let summary = run(
+    let operation = OperationContext::new(OperationId::from_bytes([7; 16]));
+    let plan = prepare(
         &mut reader,
         &options,
+        &operation,
         &mut authorizer,
         &mut transmitter,
+    )
+    .unwrap();
+    let mut source = reader.into_inner();
+    source.set_position(0);
+    let mut reader = Reader::new(source).unwrap();
+    let mut evidence = Vec::new();
+    let mut sink = |frame| {
+        evidence.push(frame);
+        Ok(())
+    };
+    let summary = execute(
+        &mut reader,
+        &plan,
+        &operation,
+        &mut transmitter,
         &mut clock,
-        |frame| {
-            evidence.push(frame);
-            Ok(())
-        },
+        &mut sink,
     )
     .unwrap();
 

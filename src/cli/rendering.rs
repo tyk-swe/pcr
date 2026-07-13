@@ -94,14 +94,21 @@ fn encode_capture_file(
 }
 
 fn spaced_hex(bytes: &[u8]) -> String {
-    let mut output = String::with_capacity(bytes.len().saturating_mul(3));
-    for (index, byte) in bytes.iter().enumerate() {
+    const HUMAN_PREVIEW_BYTES: usize = 128;
+    let preview = &bytes[..bytes.len().min(HUMAN_PREVIEW_BYTES)];
+    let mut output = String::with_capacity(preview.len().saturating_mul(3).saturating_add(32));
+    for (index, byte) in preview.iter().enumerate() {
         use std::fmt::Write as _;
         if index != 0 {
             output.push(' ');
         }
         let _ = write!(output, "{byte:02x}");
     }
+    if bytes.len() > preview.len() {
+        output.push_str(" …");
+    }
+    use std::fmt::Write as _;
+    let _ = write!(output, " ({} bytes)", bytes.len());
     output
 }
 
@@ -119,15 +126,29 @@ fn output_timestamp_text(timestamp: crate::output::OutputTimestamp) -> String {
 }
 
 fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
-    let rendered = serde_json::to_string_pretty(value)
-        .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
-    write_machine_line(&rendered)
+    let mut stdout = io::stdout().lock();
+    serde_json::to_writer_pretty(&mut stdout, value).map_err(json_output_error)?;
+    stdout
+        .write_all(b"\n")
+        .and_then(|()| stdout.flush())
+        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
 }
 
 fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> {
-    let rendered = serde_json::to_string(value)
-        .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
-    write_machine_line(&rendered)
+    let mut stdout = io::stdout().lock();
+    serde_json::to_writer(&mut stdout, value).map_err(json_output_error)?;
+    stdout
+        .write_all(b"\n")
+        .and_then(|()| stdout.flush())
+        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+}
+
+fn json_output_error(source: serde_json::Error) -> CliError {
+    if source.is_io() {
+        CliError::new(5, format!("write stdout failed: {source}"))
+    } else {
+        CliError::new(70, format!("serialize output failed: {source}"))
+    }
 }
 
 fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {

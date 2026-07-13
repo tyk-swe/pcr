@@ -39,6 +39,7 @@ fn run_capture(arguments: CaptureArgs, output: OutputFormat) -> Result<(), CliEr
     } = arguments;
     let timeout = Duration::from_millis(timeout_ms);
     validate_capture_window(timeout)?;
+    let capture_options = limits.capture_options();
     let limits = limits
         .into_limits()
         .validate()
@@ -54,7 +55,7 @@ fn run_capture(arguments: CaptureArgs, output: OutputFormat) -> Result<(), CliEr
     match output {
         OutputFormat::Text => {
             let capture = SystemCaptureProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with_options(&route, limits, capture_options.clone())
                 .map_err(CliError::classified)?;
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
                 let frame = FrameOutput::try_from_frame(frame).map_err(CliError::classified)?;
@@ -74,17 +75,17 @@ fn run_capture(arguments: CaptureArgs, output: OutputFormat) -> Result<(), CliEr
         }
         OutputFormat::Hex => {
             let capture = SystemCaptureProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with_options(&route, limits, capture_options.clone())
                 .map_err(CliError::classified)?;
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, _| {
                 let frame = FrameOutput::try_from_frame(frame).map_err(CliError::classified)?;
-                write_stdout_line(format_args!("{}", frame.bytes_hex))
+                write_stdout_line(format_args!("{}", frame.bytes_hex()))
             })?;
             render_diagnostics_stderr(&outcome.diagnostics)
         }
         OutputFormat::Ndjson => {
             let capture = SystemCaptureProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with_options(&route, limits, capture_options.clone())
                 .map_err(CliError::classified)?;
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
                 let frame = FrameOutput::try_from_frame(frame).map_err(CliError::classified)?;
@@ -104,6 +105,7 @@ fn run_capture(arguments: CaptureArgs, output: OutputFormat) -> Result<(), CliEr
                     CaptureFrameCommandResult::Complete { frames: sequence },
                     outcome.diagnostics,
                 )
+                .complete(CompletionReason::Timeout)
                 .with_stats(outcome.stats),
             )
             .map_err(|error| error.at_sequence(sequence))
@@ -111,7 +113,7 @@ fn run_capture(arguments: CaptureArgs, output: OutputFormat) -> Result<(), CliEr
         OutputFormat::Pcap | OutputFormat::Pcapng => {
             let format = capture_file_format(output)?;
             let mut capture = SystemCaptureProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with_options(&route, limits, capture_options.clone())
                 .map_err(CliError::classified)?;
             let stdout = io::stdout();
             let mut writer = match Writer::with_limit(
@@ -181,10 +183,15 @@ where
     let deadline = started
         .checked_add(timeout)
         .expect("validated capture timeout must fit the monotonic clock");
+    current_operation()
+        .cancellation()
+        .check()
+        .map_err(CliError::classified)?;
     if !timeout.is_zero() {
         let readiness_timeout = deadline
             .checked_duration_since(Instant::now())
-            .unwrap_or(Duration::ZERO);
+            .unwrap_or(Duration::ZERO)
+            .min(Duration::from_secs(1));
         if let Err(source) = capture.wait_ready(readiness_timeout) {
             let error = CliError::classified(source).at_sequence(0);
             return Err(shutdown_after_error(&mut capture, error));
@@ -193,6 +200,12 @@ where
     let mut frames = 0_u64;
     let mut bytes = 0_u64;
     while frames < budget.max_frames {
+        if let Err(source) = current_operation().cancellation().check() {
+            return Err(shutdown_after_error(
+                &mut capture,
+                CliError::classified(source).at_sequence(frames),
+            ));
+        }
         let now = Instant::now();
         let Some(remaining) = deadline.checked_duration_since(now) else {
             break;
@@ -200,8 +213,10 @@ where
         if remaining.is_zero() {
             break;
         }
-        let frame = match capture.next_frame(remaining) {
+        let wait = remaining.min(Duration::from_millis(100));
+        let frame = match capture.next_frame(wait) {
             Ok(Some(frame)) => frame,
+            Ok(None) if wait < remaining => continue,
             Ok(None) => break,
             Err(source) => {
                 let error = CliError::classified(source).at_sequence(frames);
@@ -342,6 +357,8 @@ fn run_exchange(arguments: ExchangeArgs, output: OutputFormat) -> Result<(), Cli
         mode,
         allow_permissive_live,
     } = send;
+    let capture_options = limits.capture_options();
+    let evidence_bytes = limits.evidence_bytes();
     let limits = limits.into_limits();
     let mut options = ExchangeOptions {
         timeout: Duration::from_millis(timeout_ms),
@@ -350,6 +367,7 @@ fn run_exchange(arguments: ExchangeArgs, output: OutputFormat) -> Result<(), Cli
         max_unsolicited,
         max_capture_queue_frames: limits.max_frames,
         max_captured_bytes: limits.max_bytes,
+        max_evidence_bytes: evidence_bytes,
         capture_overflow_policy: limits.overflow_policy,
         ..ExchangeOptions::default()
     };
@@ -369,9 +387,45 @@ fn run_exchange(arguments: ExchangeArgs, output: OutputFormat) -> Result<(), Cli
         allow_permissive_live,
     };
     let client = system_client(Arc::clone(&registry), request.policy);
+    let stream_enabled = output == OutputFormat::Ndjson;
+    let mut stream_sequence = 0_u64;
+    let mut sink = |event: ClientExchangeEvent| {
+        if !stream_enabled {
+            return Ok(());
+        }
+        if let ClientExchangeEvent::Sent {
+            request_index,
+            frame,
+        } = event
+        {
+            let request_index = u64::try_from(request_index).map_err(|_| {
+                crate::operation::EventError::new("exchange request index overflowed")
+            })?;
+            emit_json_compact(&StreamRecord::success(
+                CommandName::Exchange,
+                stream_sequence,
+                ExchangeStreamCommandResult::Sent {
+                    request_index,
+                    frame: WireFrameOutput::new(frame.bytes),
+                },
+                Vec::new(),
+            ))
+            .map_err(|source| crate::operation::EventError::new(source.message))?;
+            stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
+                crate::operation::EventError::new("exchange output sequence overflowed")
+            })?;
+        }
+        Ok(())
+    };
     let result = client
-        .exchange(&PacketTemplate::new(request.packet), options)
-        .map_err(CliError::classified)?;
+        .exchange_streaming(
+            &PacketTemplate::new(request.packet),
+            options,
+            capture_options,
+            current_operation(),
+            &mut sink,
+        )
+        .map_err(|error| CliError::classified(error).at_sequence(stream_sequence))?;
 
     if matches!(output, OutputFormat::Pcap | OutputFormat::Pcapng) {
         let frames = result
@@ -410,7 +464,11 @@ fn run_exchange(arguments: ExchangeArgs, output: OutputFormat) -> Result<(), Cli
         OutputFormat::Json => emit_json(
             &AggregateOutput::success(CommandName::Exchange, result, diagnostics).with_stats(stats),
         ),
-        OutputFormat::Ndjson => render_exchange_stream(result, diagnostics, stats),
+        OutputFormat::Ndjson => {
+            let mut result = result;
+            result.sent.clear();
+            render_exchange_stream(result, diagnostics, stats, stream_sequence)
+        }
         _ => Err(CliError::classified(
             OutputContractError::UnsupportedFormat {
                 command: CommandName::Exchange,
@@ -424,6 +482,7 @@ fn render_exchange_stream(
     result: ExchangeCommandResult,
     diagnostics: Vec<crate::packet::internal::Diagnostic>,
     stats: crate::output::envelope::Stats,
+    mut sequence: u64,
 ) -> Result<(), CliError> {
     let ExchangeCommandResult {
         sent,
@@ -432,7 +491,6 @@ fn render_exchange_stream(
         unsolicited,
         undecoded,
     } = result;
-    let mut sequence = 0_u64;
     for (request_index, frame) in sent.into_iter().enumerate() {
         let request_index = u64::try_from(request_index)
             .map_err(|_| CliError::classified(OutputContractError::SequenceOverflow))?;
@@ -481,6 +539,7 @@ fn render_exchange_stream(
             ExchangeStreamCommandResult::Complete { unanswered },
             diagnostics,
         )
+        .complete(CompletionReason::Completed)
         .with_stats(stats),
     )
     .map_err(|error| error.at_sequence(sequence))

@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "replay",
   "mode": "aggregate",
   "status": "success",
@@ -11,14 +11,21 @@
       "index": 2
     },
     "requested_link_mode": "auto",
-    "frames_attempted": 0,
-    "frames_completed": 0,
-    "bytes_completed": 0,
+    "frames_attempted": "0",
+    "frames_completed": "0",
+    "bytes_completed": "0",
     "scheduled_duration": {
-      "secs": 0,
-      "nanos": 0
+      "seconds": "0",
+      "nanoseconds": 0
     },
     "frames": []
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

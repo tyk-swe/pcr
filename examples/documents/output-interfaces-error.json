@@ -1,15 +1,23 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "interfaces",
   "mode": "stream",
-  "sequence": 0,
+  "sequence": "1",
   "status": "error",
   "error": {
     "code": "cli.output_format",
     "kind": "cli",
     "message": "interfaces does not support ndjson output; choose text, json",
     "causes": [],
-    "remediation": "choose one of the formats listed for this command"
+    "remediation": "choose one of the formats listed for this command",
+    "category": "validation"
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "error",
+  "completion_reason": "completed"
 }

@@ -79,6 +79,13 @@ impl CliError {
             self.causes.push(operation);
         }
         self.causes.push(cleanup.to_string());
+        self.classification = Classification::new(
+            "io.capture_cleanup",
+            Kind::Io,
+            Some("confirm that the capture worker and native handle have stopped before retrying"),
+        )
+        .with_category(crate::error::Category::Cleanup);
+        self.exit_code = exit_code_for_kind(Kind::Io);
         self
     }
 
@@ -142,6 +149,7 @@ fn command_from_env() -> Option<CommandName> {
         ("fuzz", CommandName::Fuzz),
         ("interfaces", CommandName::Interfaces),
         ("routes", CommandName::Routes),
+        ("doctor", CommandName::Doctor),
     ];
     std::env::args()
         .take_while(|argument| argument != "--")

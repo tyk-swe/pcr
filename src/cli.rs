@@ -3,10 +3,8 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::hash_map::RandomState;
 use std::fs::File;
-use std::hash::{BuildHasher, Hasher};
-use std::io::{self, IsTerminal, Read, Write};
+use std::io::{self, IsTerminal, Read, Seek, SeekFrom, Write};
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -19,7 +17,7 @@ use serde::Serialize;
 use crate::capture::{Format, Frame, Limits, LinkType, Reader, Writer, transcode};
 use crate::client::{
     Client,
-    exchange::Options as ExchangeOptions,
+    exchange::{Event as ClientExchangeEvent, Options as ExchangeOptions},
     policy::{Error as TrafficPolicyError, Policy as TrafficPolicy},
     send::Options as SendOptions,
     target::{IpVersion, SystemResolver as SystemHostnameResolver, Target as LiveTarget},
@@ -28,21 +26,26 @@ use crate::error::{Classification, Classified, Kind};
 use crate::net::capture::Provider as _;
 use crate::net::exchange::Composite;
 use crate::net::{
-    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, DispatchPacketIo, InterfaceId,
-    InterfaceProvider, LinkMode, LiveIoError, RouteProvider, SystemCaptureProvider,
-    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemNeighborResolver,
-    SystemRouteProvider,
+    CaptureFilter, CaptureMode, CaptureOptions, CaptureOverflowPolicy, CaptureQueueLimits,
+    CaptureSession, DispatchPacketIo, InterfaceId, InterfaceInfo, InterfaceProvider,
+    LinkCapability, LinkMode, LiveIoError, PlannedRoute, RouteDecision, RouteProvider,
+    SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io,
+    SystemNeighborResolver, SystemRouteProvider,
 };
+use crate::operation::CompletionReason;
 use crate::output::{
     AggregateErrorOutput, AggregateOutput, BuildCommandResult, CaptureFrameCommandResult,
-    CommandName, DissectCommandResult, DnsAttemptStatus, DnsCommandResult, DnsOutcome,
-    DnsRecordOutput, DnsSection, DnsStreamCommandResult, ExchangeCommandResult,
-    ExchangeStreamCommandResult, FrameOutput, FuzzCaseOutcome, FuzzCommandResult, FuzzMode,
-    FuzzStreamCommandResult, InterfacesCommandResult, OutputContractError, OutputError,
-    OutputFormat, PlanCommandResult, ReadFrameCommandResult, ReplayCommandResult,
-    ReplayFrameCommandResult, RoutesCommandResult, ScanCommandResult, ScanStreamCommandResult,
-    SendCommandResult, StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceProbeStatus,
-    TraceResponseKind, TracerouteCommandResult, TracerouteStreamCommandResult,
+    CommandName, DissectCommandResult, DnsAttemptOutput, DnsAttemptStatus, DnsCommandResult,
+    DnsOutcome, DnsRecordOutput, DnsSection, DnsStreamCommandResult, DnsUndecodedOutput,
+    DoctorCapabilityOutput, DoctorCommandResult, DoctorReadiness, EnvelopeContext,
+    ExchangeCommandResult, ExchangeStreamCommandResult, FrameOutput, FuzzCaseOutcome,
+    FuzzCaseOutput, FuzzCommandResult, FuzzMode, FuzzStreamCommandResult, InterfacesCommandResult,
+    OutputContractError, OutputError, OutputFormat, PlanCommandResult, ReadCompleteCommandResult,
+    ReadFrameCommandResult, ReplayCommandResult, ReplayFrameCommandResult, RoutesCommandResult,
+    ScanCommandResult, ScanPortOutput, ScanStreamCommandResult, SendCommandResult,
+    StreamErrorRecord, StreamRecord, TraceCompletionReason, TraceHopOutput, TraceProbeStatus,
+    TraceResponseKind, TraceUndecodedOutput, TracerouteCommandResult,
+    TracerouteStreamCommandResult, WireFrameOutput, install_process_context,
 };
 use crate::packet::internal::{
     BuildContext, BuildMode, BuildOptions, Builder, DEFAULT_MAX_DOCUMENT_BYTES,
@@ -67,14 +70,15 @@ use crate::workflow::traceroute::{
     PolicyAuthorizer as TrafficPolicyTracerouteAuthorizer,
 };
 use crate::workflow_api::{
-    AddressFamily, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor,
-    DnsLimits, DnsQueryType, DnsRequest, FuzzCaseExecution, FuzzError, FuzzExecutionCase,
-    FuzzExecutionError, FuzzExecutor, FuzzLimits, FuzzLiveOptions, FuzzRequest, FuzzStrategy,
-    FuzzTarget, ReplayError, ReplayLimits, ReplayOptions, ScanBatch, ScanBatchExecution, ScanError,
-    ScanExecutionError, ScanExecutor, ScanLimits, ScanRequest, ScanTarget, ScanTransport,
-    SystemClock, TracerouteBatch, TracerouteBatchExecution, TracerouteError,
-    TracerouteExecutionError, TracerouteExecutor, TracerouteLimits, TracerouteRequest,
-    TracerouteStrategy, dns, fuzz, fuzz_live, replay_capture, scan, traceroute,
+    AddressFamily, DnsError, DnsEvent, DnsExchange, DnsExchangeExecution, DnsExecutionError,
+    DnsExecutor, DnsLimits, DnsQueryType, DnsRequest, FuzzCaseExecution, FuzzError, FuzzEvent,
+    FuzzExecutionCase, FuzzExecutionError, FuzzExecutor, FuzzLimits, FuzzLiveOptions, FuzzRequest,
+    FuzzStrategy, FuzzTarget, ReplayError, ReplayLimits, ReplayOptions, ScanBatch,
+    ScanBatchExecution, ScanError, ScanEvent, ScanExecutionError, ScanExecutor, ScanLimits,
+    ScanRequest, ScanTarget, ScanTransport, SystemClock, TracerouteBatch, TracerouteBatchExecution,
+    TracerouteError, TracerouteEvent, TracerouteExecutionError, TracerouteExecutor,
+    TracerouteLimits, TracerouteRequest, TracerouteStrategy, dns_streaming, execute_replay,
+    fuzz_live_streaming, fuzz_streaming, prepare_replay, scan_streaming, traceroute_streaming,
 };
 
 include!("cli/arguments.rs");
@@ -92,5 +96,6 @@ include!("cli/commands/traceroute.rs");
 include!("cli/commands/offline.rs");
 include!("cli/commands/replay.rs");
 include!("cli/commands/interfaces.rs");
+include!("cli/commands/doctor.rs");
 
 include!("cli/tests.rs");

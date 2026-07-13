@@ -27,6 +27,8 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         LiveTarget::Address(address) => ScanTarget::Address(address),
         LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
     };
+    let capture_options = limits.capture_options();
+    let evidence_bytes = limits.evidence_bytes();
     let queue_limits = limits.into_limits();
     let scan_limits = ScanLimits {
         max_ports,
@@ -34,7 +36,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         batch_size,
         max_duration: Duration::from_millis(max_duration_ms),
         max_evidence_frames: queue_limits.max_frames,
-        max_evidence_bytes: queue_limits.max_bytes,
+        max_evidence_bytes: evidence_bytes,
         max_undecoded,
     };
     scan_limits.validate().map_err(scan_cli_error)?;
@@ -69,6 +71,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         max_responses: queue_limits.max_frames,
         max_capture_queue_frames: queue_limits.max_frames,
         max_captured_bytes: queue_limits.max_bytes,
+        max_evidence_bytes: evidence_bytes,
         capture_overflow_policy: queue_limits.overflow_policy,
         decode: DecodeOptions::default(),
     };
@@ -79,17 +82,62 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         registry: Arc::clone(&registry),
         policy: policy.clone(),
         exchange,
+        capture_options,
         interface: DeferredInterface::new(interface),
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyScanAuthorizer::new(&policy, &resolver);
     let mut clock = SystemClock;
-    let result = scan(
+    let stream_target = request.target.to_string();
+    let stream_enabled = output == OutputFormat::Ndjson;
+    let mut stream_sequence = 0_u64;
+    let mut sink = |event: ScanEvent| {
+        if !stream_enabled {
+            return Ok(());
+        }
+        for endpoint in event.endpoints {
+            let resolved_address = endpoint.address;
+            let port = ScanPortOutput::try_from_endpoint(endpoint)
+                .map_err(|source| crate::operation::EventError::new(source.to_string()))?;
+            emit_json_compact(&StreamRecord::success(
+                CommandName::Scan,
+                stream_sequence,
+                ScanStreamCommandResult::Port {
+                    target: stream_target.clone(),
+                    resolved_address,
+                    port,
+                },
+                Vec::new(),
+            ))
+            .map_err(|source| crate::operation::EventError::new(source.message))?;
+            stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
+                crate::operation::EventError::new("scan output sequence overflowed")
+            })?;
+        }
+        for evidence in event.undecoded {
+            let frame = FrameOutput::try_from_frame(evidence)
+                .map_err(|source| crate::operation::EventError::new(source.to_string()))?;
+            emit_json_compact(&StreamRecord::success(
+                CommandName::Scan,
+                stream_sequence,
+                ScanStreamCommandResult::Undecoded { frame },
+                Vec::new(),
+            ))
+            .map_err(|source| crate::operation::EventError::new(source.message))?;
+            stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
+                crate::operation::EventError::new("scan output sequence overflowed")
+            })?;
+        }
+        Ok(())
+    };
+    let result = scan_streaming(
         &request,
+        current_operation(),
         &mut authorizer,
         &registry,
         &mut executor,
         &mut clock,
+        &mut sink,
     )
     .map_err(scan_cli_error)?;
     let (result, diagnostics, stats) =
@@ -100,7 +148,20 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         OutputFormat::Json => emit_json(
             &AggregateOutput::success(CommandName::Scan, result, diagnostics).with_stats(stats),
         ),
-        OutputFormat::Ndjson => render_scan_stream(result, diagnostics, stats),
+        OutputFormat::Ndjson => emit_json_compact(
+            &StreamRecord::success(
+                CommandName::Scan,
+                stream_sequence,
+                ScanStreamCommandResult::Complete {
+                    target: result.target,
+                    resolved_addresses: result.resolved_addresses,
+                },
+                diagnostics,
+            )
+            .complete(CompletionReason::Completed)
+            .with_stats(stats),
+        )
+        .map_err(|error| error.at_sequence(stream_sequence)),
         _ => Err(CliError::classified(
             OutputContractError::UnsupportedFormat {
                 command: CommandName::Scan,
@@ -118,6 +179,7 @@ struct CliScanExecutor {
     registry: Arc<crate::packet::internal::ProtocolRegistry>,
     policy: TrafficPolicy,
     exchange: ExchangeOptions,
+    capture_options: CaptureOptions,
     interface: DeferredInterface,
 }
 
@@ -129,7 +191,10 @@ impl ScanExecutor for CliScanExecutor {
                 ScanExecutionError::new(error.message, error.classification, error.causes)
             })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        ClientScanExecutor::new(&client, self.exchange.clone()).execute(batch)
+        ClientScanExecutor::new(&client, self.exchange.clone())
+            .with_capture_options(self.capture_options.clone())
+            .with_operation_context(current_operation().clone())
+            .execute(batch)
     }
 }
 
@@ -240,65 +305,4 @@ fn scan_probe_status_name(value: crate::output::scan::ProbeStatus) -> &'static s
         crate::output::scan::ProbeStatus::Response => "response",
         crate::output::scan::ProbeStatus::Timeout => "timeout",
     }
-}
-
-fn render_scan_stream(
-    result: ScanCommandResult,
-    diagnostics: Vec<crate::packet::internal::Diagnostic>,
-    stats: crate::output::envelope::Stats,
-) -> Result<(), CliError> {
-    let ScanCommandResult {
-        target,
-        resolved_addresses,
-        ports,
-        undecoded,
-    } = result;
-    let mut sequence = 0_u64;
-    for port in ports {
-        let resolved_address = port
-            .evidence
-            .first()
-            .map(|evidence| evidence.destination)
-            .ok_or_else(|| {
-                CliError::new(70, "scan endpoint has no attempt evidence").at_sequence(sequence)
-            })?;
-        emit_scan_record(
-            &mut sequence,
-            ScanStreamCommandResult::Port {
-                target: target.clone(),
-                resolved_address,
-                port,
-            },
-        )?;
-    }
-    for frame in undecoded {
-        emit_scan_record(&mut sequence, ScanStreamCommandResult::Undecoded { frame })?;
-    }
-    emit_json_compact(
-        &StreamRecord::success(
-            CommandName::Scan,
-            sequence,
-            ScanStreamCommandResult::Complete {
-                target,
-                resolved_addresses,
-            },
-            diagnostics,
-        )
-        .with_stats(stats),
-    )
-    .map_err(|error| error.at_sequence(sequence))
-}
-
-fn emit_scan_record(sequence: &mut u64, result: ScanStreamCommandResult) -> Result<(), CliError> {
-    emit_json_compact(&StreamRecord::success(
-        CommandName::Scan,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|error| error.at_sequence(*sequence))?;
-    *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(OutputContractError::SequenceOverflow).at_sequence(*sequence)
-    })?;
-    Ok(())
 }

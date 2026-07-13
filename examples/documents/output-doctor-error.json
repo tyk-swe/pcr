@@ -1,0 +1,22 @@
+{
+  "schema": "packetcraftr.output/v2",
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "command": "doctor",
+  "mode": "aggregate",
+  "effective_request": {},
+  "status": "error",
+  "error": {
+    "code": "capability.doctor_required",
+    "kind": "capability",
+    "category": "capability",
+    "message": "required doctor capability capture is unverified",
+    "causes": [],
+    "remediation": "install the required native support or correct the selected device, then retry"
+  },
+  "completion_reason": "completed",
+  "diagnostics": []
+}

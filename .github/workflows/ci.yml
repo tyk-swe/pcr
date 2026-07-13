@@ -186,3 +186,42 @@ jobs:
           -- -runs=1000 -seed=12648430 -timeout=5 -rss_limit_mb=2048
           -max_len=${{ matrix.max_len }}
           -dict=fuzz/dictionaries/${{ matrix.target }}.dict
+
+  semver:
+    name: Frozen 0.3 public API
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - id: baseline
+        name: Detect published qualification baseline
+        shell: bash
+        run: |
+          if git rev-parse --verify --quiet v0.3.0^{commit} >/dev/null; then
+            echo 'available=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'available=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check Rust public API against v0.3.0
+        if: steps.baseline.outputs.available == 'true'
+        uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+        with:
+          baseline-rev: v0.3.0
+      - name: Check frozen CLI and output contracts
+        if: steps.baseline.outputs.available == 'true'
+        run: >-
+          git diff --exit-code v0.3.0 --
+          schemas/packetcraftr.output.v2.schema.json
+          tests/golden/cli-help.txt
+
+  rss:
+    name: Release-binary RSS ceilings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev time
+      - run: cargo build --release --locked
+      - run: bash scripts/rss-gate.sh target/release/packetcraftr

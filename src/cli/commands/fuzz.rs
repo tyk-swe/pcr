@@ -39,6 +39,8 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
                 .map_err(|source| CliError::new(2, source.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    let capture_options = limits.capture_options();
+    let evidence_bytes = limits.evidence_bytes();
     let queue_limits = limits.into_limits();
     let build_mode = match mode {
         CliBuildMode::Strict => BuildMode::Strict,
@@ -63,11 +65,35 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             max_list_items,
             max_shrink_steps,
             max_evidence_frames: queue_limits.max_frames,
-            max_evidence_bytes: queue_limits.max_bytes,
+            max_evidence_bytes: evidence_bytes,
             max_duration: Duration::from_millis(max_duration_ms),
         },
     };
     request.validate().map_err(fuzz_cli_error)?;
+    let stream_enabled = output == OutputFormat::Ndjson;
+    let stream_seed = request.seed;
+    let mut stream_sequence = 0_u64;
+    let mut sink = |event: FuzzEvent| {
+        if !stream_enabled {
+            return Ok(());
+        }
+        let case = FuzzCaseOutput::try_from_case(event.case)
+            .map_err(|source| crate::operation::EventError::new(source.to_string()))?;
+        emit_json_compact(&StreamRecord::success(
+            CommandName::Fuzz,
+            stream_sequence,
+            FuzzStreamCommandResult::Case {
+                operation_seed: stream_seed,
+                case: Box::new(case),
+            },
+            Vec::new(),
+        ))
+        .map_err(|source| crate::operation::EventError::new(source.message))?;
+        stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
+            crate::operation::EventError::new("fuzz output sequence overflowed")
+        })?;
+        Ok(())
+    };
 
     let result = if live {
         let policy = policy.into_policy();
@@ -90,6 +116,7 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             max_responses: queue_limits.max_frames,
             max_capture_queue_frames: queue_limits.max_frames,
             max_captured_bytes: queue_limits.max_bytes,
+            max_evidence_bytes: evidence_bytes,
             capture_overflow_policy: queue_limits.overflow_policy,
             decode: DecodeOptions::default(),
         };
@@ -99,11 +126,12 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             registry: Arc::clone(&registry),
             policy: policy.clone(),
             exchange,
+            capture_options,
             interface: DeferredInterface::new(interface),
         };
         let mut authorizer = TrafficPolicyFuzzAuthorizer::new(&policy);
         let mut clock = SystemClock;
-        fuzz_live(
+        fuzz_live_streaming(
             &request,
             FuzzLiveOptions {
                 timeout: Duration::from_millis(timeout_ms),
@@ -113,15 +141,24 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             },
             packet,
             registry,
+            current_operation(),
             &mut authorizer,
             &mut executor,
             &mut clock,
+            &mut sink,
         )
         .map_err(fuzz_cli_error)?
     } else {
         // This branch intentionally never validates or resolves the live
         // interface and never constructs a native client.
-        fuzz(&request, packet, registry).map_err(fuzz_cli_error)?
+        fuzz_streaming(
+            &request,
+            packet,
+            registry,
+            current_operation(),
+            &mut sink,
+        )
+        .map_err(fuzz_cli_error)?
     };
     let (result, diagnostics, stats) =
         FuzzCommandResult::try_from_fuzz(result).map_err(CliError::classified)?;
@@ -130,7 +167,11 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
         OutputFormat::Json => emit_json(
             &AggregateOutput::success(CommandName::Fuzz, result, diagnostics).with_stats(stats),
         ),
-        OutputFormat::Ndjson => render_fuzz_stream(result, diagnostics, stats),
+        OutputFormat::Ndjson => {
+            let mut result = result;
+            result.cases.clear();
+            render_fuzz_stream(result, diagnostics, stats, stream_sequence)
+        }
         _ => Err(CliError::classified(
             OutputContractError::UnsupportedFormat {
                 command: CommandName::Fuzz,
@@ -144,6 +185,7 @@ struct CliFuzzExecutor {
     registry: Arc<crate::packet::internal::ProtocolRegistry>,
     policy: TrafficPolicy,
     exchange: ExchangeOptions,
+    capture_options: CaptureOptions,
     interface: DeferredInterface,
 }
 
@@ -159,7 +201,10 @@ impl FuzzExecutor for CliFuzzExecutor {
                 FuzzExecutionError::new(error.message, error.classification, error.causes)
             })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        ClientFuzzExecutor::new(&client, self.exchange.clone()).execute(case, timeout)
+        ClientFuzzExecutor::new(&client, self.exchange.clone())
+            .with_capture_options(self.capture_options.clone())
+            .with_operation_context(current_operation().clone())
+            .execute(case, timeout)
     }
 }
 
@@ -254,6 +299,7 @@ fn render_fuzz_stream(
     result: FuzzCommandResult,
     diagnostics: Vec<crate::packet::internal::Diagnostic>,
     stats: crate::output::envelope::Stats,
+    mut sequence: u64,
 ) -> Result<(), CliError> {
     let FuzzCommandResult {
         seed,
@@ -264,7 +310,6 @@ fn render_fuzz_stream(
         cases_rejected,
         cases,
     } = result;
-    let mut sequence = 0_u64;
     for case in cases {
         emit_fuzz_record(
             &mut sequence,
@@ -288,6 +333,7 @@ fn render_fuzz_stream(
             },
             diagnostics,
         )
+        .complete(CompletionReason::Completed)
         .with_stats(stats),
     )
     .map_err(|error| error.at_sequence(sequence))

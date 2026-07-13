@@ -1,0 +1,120 @@
+name: 0.3 qualification
+
+on:
+  schedule:
+    - cron: "9 5 * * *"
+  workflow_dispatch:
+    inputs:
+      enforce_30_days:
+        description: Enforce every 1.0 promotion prerequisite
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: qualification-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  attestations: read
+  contents: read
+  issues: read
+
+jobs:
+  qualify:
+    name: Daily qualification evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - run: sudo apt-get update && sudo apt-get install --yes jq libpcap-dev time
+      - run: cargo test --release --locked --all-features
+      - run: cargo build --release --locked
+      - run: bash scripts/rss-gate.sh target/release/packetcraftr
+      - name: Require the latest scheduled fuzz and native campaigns
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          for workflow in fuzz.yml native-linux.yml; do
+            run=$(gh run list --workflow "$workflow" --branch main --event schedule \
+              --limit 1 --json conclusion,createdAt)
+            test "$(jq -r '.[0].conclusion // ""' <<<"$run")" = success
+            created_at=$(jq -r '.[0].createdAt // ""' <<<"$run")
+            test -n "$created_at"
+            age_seconds=$(($(date -u +%s) - $(date -u -d "$created_at" +%s)))
+            test "$age_seconds" -ge 0
+            test "$age_seconds" -le 172800
+          done
+      - name: Reject open P0 or P1 defects
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          test "$(gh issue list --state open --label P0 --limit 1 --json number --jq length)" -eq 0
+          test "$(gh issue list --state open --label P1 --limit 1 --json number --jq length)" -eq 0
+      - name: Verify frozen contracts against 0.3.0
+        shell: bash
+        run: |
+          git rev-parse --verify v0.3.0^{commit} >/dev/null
+          git diff --exit-code v0.3.0 -- \
+            schemas/packetcraftr.packet.v1.schema.json \
+            schemas/packetcraftr.output.v2.schema.json \
+            tests/golden/cli-help.txt
+      - name: Verify published archives, checksums, and attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view v0.3.0 >/dev/null
+          mkdir release-verification
+          gh release download v0.3.0 --dir release-verification \
+            --pattern '*.tar.gz' --pattern '*.zip' --pattern '*.sha256'
+          cd release-verification
+          for target in \
+            x86_64-unknown-linux-gnu \
+            x86_64-apple-darwin \
+            aarch64-apple-darwin; do
+            test -f "packetcraftr-0.3.0-${target}.tar.gz"
+            test -f "packetcraftr-0.3.0-${target}.tar.gz.sha256"
+          done
+          test -f packetcraftr-0.3.0-x86_64-pc-windows-msvc.zip
+          test -f packetcraftr-0.3.0-x86_64-pc-windows-msvc.zip.sha256
+          for checksum in *.sha256; do sha256sum --check "$checksum"; done
+          for archive in *.tar.gz *.zip; do
+            gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref refs/tags/v0.3.0
+            gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" \
+              --source-ref refs/tags/v0.3.0 \
+              --predicate-type https://cyclonedx.org/bom
+          done
+      - name: Enforce 30-day promotion window
+        if: inputs.enforce_30_days == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/qualification.yml/runs?status=success&per_page=100" \
+            > qualification-runs.json
+          python3 scripts/verify-qualification.py qualification-runs.json
+          ! rg -q 'RUSTSEC-2024-0436' deny.toml
+      - name: Record qualification day
+        shell: bash
+        run: |
+          jq -n \
+            --arg date "$(date -u +%F)" \
+            --arg commit "$GITHUB_SHA" \
+            --arg run "$GITHUB_RUN_ID" \
+            '{date: $date, commit: $commit, run_id: $run, status: "passed"}' \
+            > qualification-day.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: qualification-${{ github.run_id }}
+          path: qualification-day.json
+          retention-days: 40

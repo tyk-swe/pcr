@@ -22,6 +22,20 @@ fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
 }
 
+fn ndjson_records(bytes: &[u8]) -> Vec<serde_json::Value> {
+    bytes
+        .split(|byte| *byte == b'\n')
+        .filter(|line| !line.is_empty())
+        .map(|line| serde_json::from_slice(line).unwrap())
+        .collect()
+}
+
+fn ndjson_terminal(bytes: &[u8]) -> serde_json::Value {
+    ndjson_records(bytes)
+        .pop()
+        .expect("NDJSON output must contain a terminal record")
+}
+
 fn normalize_cli_text(bytes: &[u8]) -> String {
     let text = String::from_utf8(bytes.to_vec())
         .unwrap()
@@ -126,6 +140,7 @@ fn cli_help_parse_error_and_version_match_the_committed_goldens() {
         "dns",
         "fuzz",
         "routes",
+        "doctor",
     ];
 
     let mut sections = Vec::with_capacity(COMMANDS.len() + 1);
@@ -273,7 +288,9 @@ fn exact_bytes_agree_across_json_raw_hex_ndjson_pcap_and_pcapng() {
         .output()
         .unwrap();
     assert!(ndjson.status.success());
-    let record: serde_json::Value = serde_json::from_slice(&ndjson.stdout).unwrap();
+    let records = ndjson_records(&ndjson.stdout);
+    assert_eq!(records[0]["record"], "start");
+    let record = &records[1];
     assert_eq!(
         decode_output_hex(
             record["result"]["frame"]["bytes_hex"]
@@ -351,7 +368,7 @@ fn packet_document_build_dissect_capture_read_pipeline_is_exact() {
     );
     assert!(dissected.stderr.is_empty());
     let value: serde_json::Value = serde_json::from_slice(&dissected.stdout).unwrap();
-    assert_eq!(value["schema"], "packetcraftr.output/v1");
+    assert_eq!(value["schema"], "packetcraftr.output/v2");
     assert_eq!(value["status"], "success");
     assert_eq!(
         decode_output_hex(value["result"]["bytes_hex"].as_str().unwrap().as_bytes()),
@@ -391,9 +408,12 @@ fn packet_document_build_dissect_capture_read_pipeline_is_exact() {
             String::from_utf8_lossy(&ndjson.stderr)
         );
         assert!(ndjson.stderr.is_empty());
-        let record: serde_json::Value = serde_json::from_slice(&ndjson.stdout).unwrap();
-        assert_eq!(record["schema"], "packetcraftr.output/v1");
-        assert_eq!(record["sequence"], 0);
+        let records = ndjson_records(&ndjson.stdout);
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0]["record"], "start");
+        let record = &records[1];
+        assert_eq!(record["schema"], "packetcraftr.output/v2");
+        assert_eq!(record["sequence"], "1");
         assert_eq!(
             decode_output_hex(
                 record["result"]["frame"]["bytes_hex"]
@@ -416,7 +436,7 @@ fn json_build_uses_versioned_success_envelope() {
 
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["schema"], "packetcraftr.output/v1");
+    assert_eq!(value["schema"], "packetcraftr.output/v2");
     assert_eq!(value["command"], "build");
     assert_eq!(value["mode"], "aggregate");
     assert_eq!(value["status"], "success");
@@ -438,7 +458,7 @@ fn interfaces_command_succeeds_end_to_end_on_supported_unix_profiles() {
         String::from_utf8_lossy(&output.stderr)
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["schema"], "packetcraftr.output/v1");
+    assert_eq!(value["schema"], "packetcraftr.output/v2");
     assert_eq!(value["command"], "interfaces");
     assert_eq!(value["status"], "success");
     assert!(value["result"]["interfaces"].is_array());
@@ -466,6 +486,23 @@ fn unavailable_live_command_uses_capability_exit_code_and_json_error() {
     assert_eq!(value["mode"], "aggregate");
     assert_eq!(value["error"]["kind"], "capability");
     assert_eq!(value["command"], "send");
+}
+
+#[test]
+fn doctor_required_unverified_capability_uses_capability_exit_family() {
+    let output = binary()
+        .args(["--output", "json", "doctor", "--require", "capture"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(4));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["schema"], "packetcraftr.output/v2");
+    assert_eq!(value["command"], "doctor");
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["error"]["kind"], "capability");
+    assert_eq!(value["error"]["code"], "capability.doctor_required");
 }
 
 #[test]
@@ -523,8 +560,8 @@ fn scan_policy_and_request_errors_precede_resolver_route_and_live_io() {
         .output()
         .unwrap();
     assert_eq!(public.status.code(), Some(6));
-    let value: serde_json::Value = serde_json::from_slice(&public.stdout).unwrap();
-    assert_eq!(value["sequence"], 0);
+    let value = ndjson_terminal(&public.stdout);
+    assert_eq!(value["sequence"], "1");
     assert_eq!(value["error"]["code"], "policy.public_destination");
 
     let invalid = binary()
@@ -568,8 +605,8 @@ fn traceroute_policy_and_request_errors_precede_resolver_route_and_live_io() {
         .output()
         .unwrap();
     assert_eq!(public.status.code(), Some(6));
-    let value: serde_json::Value = serde_json::from_slice(&public.stdout).unwrap();
-    assert_eq!(value["sequence"], 0);
+    let value = ndjson_terminal(&public.stdout);
+    assert_eq!(value["sequence"], "1");
     assert_eq!(value["error"]["code"], "policy.public_destination");
 
     let invalid = binary()
@@ -614,8 +651,8 @@ fn dns_policy_and_request_errors_precede_resolver_route_and_live_io() {
         .output()
         .unwrap();
     assert_eq!(public.status.code(), Some(6));
-    let value: serde_json::Value = serde_json::from_slice(&public.stdout).unwrap();
-    assert_eq!(value["sequence"], 0);
+    let value = ndjson_terminal(&public.stdout);
+    assert_eq!(value["sequence"], "1");
     assert_eq!(value["error"]["code"], "policy.public_destination");
 
     let invalid = binary()
@@ -788,8 +825,8 @@ fn send_budget_and_output_contracts_precede_route_or_live_io() {
         .output()
         .unwrap();
     assert_eq!(format.status.code(), Some(2));
-    let value: serde_json::Value = serde_json::from_slice(&format.stdout).unwrap();
-    assert_eq!(value["sequence"], 0);
+    let value = ndjson_terminal(&format.stdout);
+    assert_eq!(value["sequence"], "1");
     assert_eq!(value["error"]["code"], "cli.output_format");
 }
 
@@ -808,8 +845,8 @@ fn invalid_capture_and_exchange_limits_precede_packet_policy() {
         .output()
         .unwrap();
     assert_eq!(capture.status.code(), Some(2));
-    let value: serde_json::Value = serde_json::from_slice(&capture.stdout).unwrap();
-    assert_eq!(value["sequence"], 0);
+    let value = ndjson_terminal(&capture.stdout);
+    assert_eq!(value["sequence"], "1");
     assert_eq!(value["error"]["code"], "cli.capture_limit");
 
     let exchange = binary()
@@ -945,9 +982,9 @@ fn empty_replay_is_a_typed_aggregate_without_live_side_effects() {
     );
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["command"], "replay");
-    assert_eq!(value["result"]["frames_attempted"], 0);
-    assert_eq!(value["result"]["frames_completed"], 0);
-    assert_eq!(value["result"]["bytes_completed"], 0);
+    assert_eq!(value["result"]["frames_attempted"], "0");
+    assert_eq!(value["result"]["frames_completed"], "0");
+    assert_eq!(value["result"]["bytes_completed"], "0");
     assert_eq!(
         value["result"]["requested_interface"]["name"],
         "definitely-missing-interface"
@@ -1117,17 +1154,22 @@ fn piped_stdin_cannot_be_silently_ignored_by_an_explicit_recipe() {
 }
 
 #[test]
-fn cli_parse_errors_requested_as_ndjson_are_sequence_zero_records() {
+fn cli_parse_errors_requested_as_ndjson_emit_start_then_terminal_error() {
     let output = binary()
         .args(["--output", "ndjson", "build", "--unknown-option"])
         .output()
         .unwrap();
 
     assert_eq!(output.status.code(), Some(2));
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let records = ndjson_records(&output.stdout);
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["record"], "start");
+    assert_eq!(records[0]["sequence"], "0");
+    let value = &records[1];
     assert_eq!(value["command"], "build");
     assert_eq!(value["mode"], "stream");
-    assert_eq!(value["sequence"], 0);
+    assert_eq!(value["sequence"], "1");
+    assert_eq!(value["record"], "error");
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["kind"], "cli");
 }
@@ -1147,21 +1189,19 @@ fn read_ndjson_success_records_have_frozen_sequences() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let records = output
-        .stdout
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(records.len(), 2);
+    let records = ndjson_records(&output.stdout);
+    assert_eq!(records.len(), 4);
     for (sequence, record) in records.iter().enumerate() {
         assert_eq!(record["command"], "read");
         assert_eq!(record["mode"], "stream");
-        assert_eq!(record["sequence"], sequence as u64);
-        assert_eq!(record["status"], "success");
+        assert_eq!(record["sequence"], sequence.to_string());
     }
-    assert_eq!(records[0]["result"]["frame"]["bytes_hex"], "0001");
-    assert_eq!(records[1]["result"]["frame"]["bytes_hex"], "020304");
+    assert_eq!(records[0]["record"], "start");
+    assert_eq!(records[0]["status"], "running");
+    assert_eq!(records[1]["result"]["frame"]["bytes_hex"], "0001");
+    assert_eq!(records[2]["result"]["frame"]["bytes_hex"], "020304");
+    assert_eq!(records[3]["record"], "complete");
+    assert_eq!(records[3]["status"], "success");
 }
 
 #[test]
@@ -1175,18 +1215,16 @@ fn read_ndjson_terminal_errors_use_the_next_unused_sequence() {
     std::fs::remove_file(path).unwrap();
 
     assert_eq!(output.status.code(), Some(3));
-    let records = output
-        .stdout
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
-        .collect::<Vec<_>>();
-    assert_eq!(records.len(), 2);
-    assert_eq!(records[0]["status"], "success");
-    assert_eq!(records[0]["sequence"], 0);
-    assert_eq!(records[1]["status"], "error");
-    assert_eq!(records[1]["sequence"], 1);
-    assert_eq!(records[1]["error"]["kind"], "packet");
+    let records = ndjson_records(&output.stdout);
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["record"], "start");
+    assert_eq!(records[0]["sequence"], "0");
+    assert_eq!(records[1]["record"], "item");
+    assert_eq!(records[1]["sequence"], "1");
+    assert_eq!(records[2]["status"], "error");
+    assert_eq!(records[2]["record"], "error");
+    assert_eq!(records[2]["sequence"], "2");
+    assert_eq!(records[2]["error"]["kind"], "packet");
 }
 
 #[test]

@@ -1,0 +1,15 @@
+{
+  "schema": "packetcraftr.output/v2",
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "command": "read",
+  "mode": "stream",
+  "sequence": "0",
+  "record": "start",
+  "status": "running",
+  "effective_request": {},
+  "diagnostics": []
+}

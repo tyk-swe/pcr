@@ -1,5 +1,5 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "scan",
   "mode": "aggregate",
   "status": "success",
@@ -22,7 +22,7 @@
             "status": "timeout",
             "classification": "timeout",
             "sent_at": {
-              "unix_seconds": 1770000000,
+              "unix_seconds": "1770000000",
               "nanoseconds": 0
             },
             "reason": "no checksum-valid, protocol-consistent response before the deadline"
@@ -34,19 +34,26 @@
   },
   "diagnostics": [],
   "stats": {
-    "packets_attempted": 1,
-    "packets_completed": 1,
-    "bytes": 40,
+    "packets_attempted": "1",
+    "packets_completed": "1",
+    "bytes": "40",
     "elapsed": {
-      "secs": 1,
-      "nanos": 0
+      "seconds": "1",
+      "nanoseconds": 0
     },
     "capture": {
-      "received_frames": 0,
-      "received_bytes": 0,
-      "dropped_frames": 0,
-      "dropped_bytes": 0,
-      "overflow_events": 0
+      "received_frames": "0",
+      "received_bytes": "0",
+      "dropped_frames": "0",
+      "dropped_bytes": "0",
+      "overflow_events": "0"
     }
-  }
+  },
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "effective_request": {},
+  "completion_reason": "completed"
 }

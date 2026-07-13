@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::capture::{DEFAULT_SIZE_LIMIT, Frame, LinkType};
-use crate::error::{Classification, Classified, Kind};
+use crate::error::{Category, Classification, Classified, Kind};
 
 use super::{InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute, PlannedRoute};
 
@@ -23,6 +23,8 @@ pub(crate) const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
 pub(crate) const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
 /// Maximum blocking wait accepted by an owned capture session.
 pub(crate) const MAX_CAPTURE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+/// Maximum UTF-8 bytes accepted from a custom BPF expression.
+pub const MAX_CAPTURE_FILTER_BYTES: usize = 4_096;
 
 /// One address assigned to an interface, without any operating-system type in
 /// the public provider boundary.
@@ -406,6 +408,78 @@ pub enum CaptureOverflowPolicy {
     DropOldest,
 }
 
+/// Native interface visibility requested for an owned capture session.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureMode {
+    #[default]
+    Promiscuous,
+    HostOnly,
+}
+
+/// Packet selection installed by the native backend before readiness.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "expression")]
+pub enum CaptureFilter {
+    #[default]
+    Unfiltered,
+    Auto,
+    Bpf(String),
+}
+
+/// Capture behavior independent of bounded queue allocation.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CaptureOptions {
+    pub mode: CaptureMode,
+    pub filter: CaptureFilter,
+    pub discard_unmatched: bool,
+}
+
+impl CaptureOptions {
+    pub fn validate(self) -> Result<Self, LiveIoError> {
+        if let CaptureFilter::Bpf(expression) = &self.filter {
+            if expression.is_empty() {
+                return Err(LiveIoError::InvalidCaptureFilter {
+                    message: "custom BPF expression cannot be empty".to_owned(),
+                });
+            }
+            if expression.len() > MAX_CAPTURE_FILTER_BYTES {
+                return Err(LiveIoError::InvalidCaptureFilter {
+                    message: format!(
+                        "custom BPF expression contains {} bytes; maximum is {MAX_CAPTURE_FILTER_BYTES}",
+                        expression.len()
+                    ),
+                });
+            }
+            if expression.as_bytes().contains(&0) {
+                return Err(LiveIoError::InvalidCaptureFilter {
+                    message: "custom BPF expression contains a NUL byte".to_owned(),
+                });
+            }
+        }
+        Ok(self)
+    }
+
+    #[cfg(feature = "native-layer2")]
+    pub(crate) fn expression(&self, route: &PlannedRoute) -> Result<Option<String>, LiveIoError> {
+        match &self.filter {
+            CaptureFilter::Unfiltered => Ok(None),
+            CaptureFilter::Bpf(expression) => Ok(Some(expression.clone())),
+            CaptureFilter::Auto => route
+                .final_destination
+                .or(route.lookup_destination)
+                .or(route.route.selected_address)
+                .map(|address| format!("host {address}"))
+                .map(Some)
+                .ok_or_else(|| LiveIoError::InvalidCaptureFilter {
+                    message:
+                        "automatic capture filtering requires a route destination or selected address"
+                            .to_owned(),
+                }),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CaptureQueueLimits {
     pub max_frames: usize,
@@ -498,6 +572,22 @@ pub trait CaptureProvider: Send + Sync {
         route: &PlannedRoute,
         limits: CaptureQueueLimits,
     ) -> Result<Self::Capture, LiveIoError>;
+
+    /// Additive options seam. Existing providers remain valid for the broad
+    /// default and reject non-default behavior before performing side effects.
+    fn arm_capture_with_options(
+        &self,
+        route: &PlannedRoute,
+        limits: CaptureQueueLimits,
+        options: CaptureOptions,
+    ) -> Result<Self::Capture, LiveIoError> {
+        let options = options.validate()?;
+        if options == CaptureOptions::default() {
+            self.arm_capture(route, limits)
+        } else {
+            Err(LiveIoError::UnsupportedCaptureOptions)
+        }
+    }
 }
 
 /// Owned native capture session. The native handle and capture worker remain
@@ -552,7 +642,16 @@ impl CaptureProvider for SystemCaptureProvider {
         route: &PlannedRoute,
         limits: CaptureQueueLimits,
     ) -> Result<Self::Capture, LiveIoError> {
-        super::platform::system_capture(route, limits).map(SystemCaptureSession::new)
+        self.arm_capture_with_options(route, limits, CaptureOptions::default())
+    }
+
+    fn arm_capture_with_options(
+        &self,
+        route: &PlannedRoute,
+        limits: CaptureQueueLimits,
+        options: CaptureOptions,
+    ) -> Result<Self::Capture, LiveIoError> {
+        super::platform::system_capture(route, limits, options).map(SystemCaptureSession::new)
     }
 }
 
@@ -607,6 +706,12 @@ pub enum LiveIoError {
     InvalidTransmissionFrame { message: String },
     #[error("capture failed: {message}")]
     Capture { message: String },
+    #[error("capture provider does not support the requested mode or filter options")]
+    UnsupportedCaptureOptions,
+    #[error("capture filter is invalid: {message}")]
+    InvalidCaptureFilter { message: String },
+    #[error("capture filter could not be installed: {message}")]
+    CaptureFilter { message: String },
     #[error("capture did not become ready: {message}")]
     CaptureReadiness { message: String },
     #[error("live operation deadline expired while {operation}")]
@@ -651,6 +756,11 @@ impl Classified for LiveIoError {
                 Some(
                     "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",
                 ),
+            ),
+            Self::UnsupportedCaptureOptions => Classification::new(
+                "capability.capture_options",
+                Kind::Capability,
+                Some("use the broad default or a provider that implements capture options"),
             ),
             Self::MissingDependency { .. } => Classification::new(
                 "capability.missing_dependency",
@@ -699,6 +809,11 @@ impl Classified for LiveIoError {
                     "inspect the capture device state and native backend diagnostic before retrying",
                 ),
             ),
+            Self::CaptureFilter { .. } => Classification::new(
+                "io.capture_filter",
+                Kind::Io,
+                Some("repair the BPF expression for this interface and link type"),
+            ),
             Self::CaptureReadiness { .. } => Classification::new(
                 "io.capture_readiness",
                 Kind::Io,
@@ -712,7 +827,8 @@ impl Classified for LiveIoError {
                 Some(
                     "increase the finite operation timeout or reduce readiness, send, and capture work",
                 ),
-            ),
+            )
+            .with_category(Category::Timeout),
             Self::CaptureQueueOverflow { .. } => Classification::new(
                 "io.capture_overflow",
                 Kind::Io,
@@ -733,6 +849,11 @@ impl Classified for LiveIoError {
                 Some(
                     "use non-zero capture limits whose snap length fits the aggregate byte ceiling",
                 ),
+            ),
+            Self::InvalidCaptureFilter { .. } => Classification::new(
+                "cli.capture_filter",
+                Kind::Cli,
+                Some("use a non-empty BPF expression within the documented byte limit"),
             ),
             Self::InvalidCaptureTimeout { .. } => Classification::new(
                 "cli.capture_timeout",

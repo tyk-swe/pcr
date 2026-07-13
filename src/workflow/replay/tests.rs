@@ -517,4 +517,70 @@ mod tests {
         .unwrap_err();
         assert!(matches!(error, ReplayError::Capture { sequence: 1, .. }));
     }
+
+    #[test]
+    fn two_pass_preflight_rejects_a_malformed_tail_before_any_send() {
+        let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        writer
+            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![1]).unwrap())
+            .unwrap();
+        let mut bytes = writer.into_inner();
+        bytes.extend_from_slice(&[0_u8; 8]);
+        let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+        let operation = crate::operation::Context::new(crate::operation::Id::from_bytes([7; 16]));
+        let mut authorizer = Allow::default();
+        let mut transmitter = Transmitter::default();
+
+        let error = prepare_replay(
+            &mut reader,
+            &options(ReplayTiming::Immediate),
+            &operation,
+            &mut authorizer,
+            &mut transmitter,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ReplayError::Capture { sequence: 1, .. }));
+        assert_eq!(authorizer.calls, 1);
+        assert_eq!(transmitter.calls, 0);
+    }
+
+    #[test]
+    fn two_pass_execution_detects_changed_frame_identity_before_send() {
+        let operation = crate::operation::Context::new(crate::operation::Id::from_bytes([9; 16]));
+        let mut prepared_reader = capture(
+            LinkType::ETHERNET,
+            &[(Duration::from_secs(1), &[1, 2, 3])],
+        );
+        let mut authorizer = Allow::default();
+        let mut transmitter = Transmitter::default();
+        let plan = prepare_replay(
+            &mut prepared_reader,
+            &options(ReplayTiming::Immediate),
+            &operation,
+            &mut authorizer,
+            &mut transmitter,
+        )
+        .unwrap();
+        let mut changed_reader = capture(
+            LinkType::ETHERNET,
+            &[(Duration::from_secs(1), &[1, 2, 4])],
+        );
+
+        let error = execute_replay(
+            &mut changed_reader,
+            &plan,
+            &operation,
+            &mut transmitter,
+            &mut Clock::default(),
+            &mut |_| Ok(()),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ReplayError::InvalidEvidence { sequence: 0, .. }
+        ));
+        assert_eq!(transmitter.calls, 0);
+    }
 }

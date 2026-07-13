@@ -162,6 +162,48 @@ pub struct ReplaySummary {
     pub scheduled_duration: Duration,
 }
 
+/// Validated replay manifest containing only bounded per-frame identities and
+/// scheduling metadata, never a second copy of captured frame bytes.
+#[derive(Clone, Debug)]
+pub struct ReplayPlan {
+    source_format: Format,
+    timing: ReplayTiming,
+    frames: Vec<PreparedReplayFrame>,
+    bytes: u64,
+    scheduled_duration: Duration,
+}
+
+impl ReplayPlan {
+    pub fn summary(&self) -> ReplaySummary {
+        ReplaySummary {
+            source_format: self.source_format,
+            timing: self.timing,
+            frames_attempted: self.frames.len() as u64,
+            frames_completed: 0,
+            bytes_completed: 0,
+            scheduled_duration: self.scheduled_duration,
+        }
+    }
+
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    pub const fn byte_count(&self) -> u64 {
+        self.bytes
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PreparedReplayFrame {
+    identity: u64,
+    source_interface_id: Option<u32>,
+    capture_interface: Interface,
+    interface: InterfaceId,
+    mode: LinkMode,
+    delay: Duration,
+}
+
 /// Policy decision returned before a replay transmitter can observe a frame.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReplayAuthorizationError {

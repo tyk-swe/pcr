@@ -13,6 +13,47 @@ where
     E: ScanExecutor,
     C: Clock,
 {
+    let operation = crate::operation::Context::generate().map_err(|source| {
+        ScanError::Operation {
+            sequence: 0,
+            source,
+        }
+    })?;
+    scan_streaming(
+        request,
+        &operation,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut |_| Ok(()),
+    )
+}
+
+/// Streaming scan entry point. Events are delivered after every classified
+/// batch, so a later failure cannot invalidate earlier emitted evidence.
+pub fn scan_streaming<A, E, C, S>(
+    request: &ScanRequest,
+    operation: &crate::operation::Context,
+    authorizer: &mut A,
+    registry: &ProtocolRegistry,
+    executor: &mut E,
+    clock: &mut C,
+    sink: &mut S,
+) -> Result<ScanResult, ScanError>
+where
+    A: Authorizer,
+    E: ScanExecutor,
+    C: Clock,
+    S: crate::operation::EventSink<ScanEvent>,
+{
+    operation
+        .cancellation()
+        .check()
+        .map_err(|source| ScanError::Operation {
+            sequence: 0,
+            source,
+        })?;
     let ports = request.validate()?;
     // Implementations must perform declared-target authorization before DNS
     // and authorize every answer before anything below constructs a ScanProbe.
@@ -88,12 +129,38 @@ where
     }
     authorizer.authorize_operation(total_probes as u64, maximum_bytes)?;
 
+    let source_port = match request.transport {
+        ScanTransport::Tcp => Some(
+            operation
+                .reserve_port("scan.tcp.source_port", crate::operation::Transport::Tcp)
+                .map_err(|source| ScanError::Operation {
+                    sequence: 0,
+                    source,
+                })?,
+        ),
+        ScanTransport::Udp => Some(
+            operation
+                .reserve_port("scan.udp.source_port", crate::operation::Transport::Udp)
+                .map_err(|source| ScanError::Operation {
+                    sequence: 0,
+                    source,
+                })?,
+        ),
+        ScanTransport::Icmp => None,
+    };
+
     let endpoint_ports = if request.transport == ScanTransport::Icmp {
         vec![None]
     } else {
         ports.iter().copied().map(Some).collect()
     };
-    let batches = build_batches(request, &addresses, &endpoint_ports)?;
+    let batches = build_batches(
+        request,
+        operation.id(),
+        source_port,
+        &addresses,
+        &endpoint_ports,
+    )?;
 
     let endpoints = addresses
         .iter()
@@ -118,15 +185,27 @@ where
 
     for (batch_index, batch) in batches.iter().enumerate() {
         let sequence = batch.probes[0].sequence;
+        operation
+            .cancellation()
+            .check()
+            .map_err(|source| ScanError::Operation { sequence, source })?;
         if batch_index != 0 {
             let delay = rate_delay(
                 batches[batch_index - 1].probes.len(),
                 request.probes_per_second,
             )?;
-            clock.sleep(delay).map_err(|source| ScanError::Clock {
-                sequence,
-                message: source.to_string(),
-            })?;
+            match clock.sleep_cancelled(delay, operation.cancellation()) {
+                Ok(()) => {}
+                Err(super::clock::SleepError::Clock(source)) => {
+                    return Err(ScanError::Clock {
+                        sequence,
+                        message: source.to_string(),
+                    });
+                }
+                Err(super::clock::SleepError::Cancelled(source)) => {
+                    return Err(ScanError::Operation { sequence, source });
+                }
+            }
             scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
@@ -140,6 +219,7 @@ where
             .map_err(|source| ScanError::Execution { sequence, source })?;
         validate_exchange_evidence(batch, &exchange, request.limits)?;
         add_stats(&mut stats, &exchange.stats, sequence)?;
+        let undecoded_start = output.undecoded.len();
         process_batch(
             batch,
             exchange,
@@ -147,6 +227,30 @@ where
             request.limits,
             &mut output,
         );
+        let mut endpoints = Vec::new();
+        for probe in &batch.probes {
+            if endpoints.iter().any(|endpoint: &ScanEndpointResult| {
+                endpoint.address == probe.address
+                    && endpoint.transport == probe.transport
+                    && endpoint.port == probe.port
+            }) {
+                continue;
+            }
+            if let Some(endpoint) = output.endpoints.iter().find(|endpoint| {
+                endpoint.address == probe.address
+                    && endpoint.transport == probe.transport
+                    && endpoint.port == probe.port
+            }) {
+                endpoints.push(endpoint.clone());
+            }
+        }
+        sink.emit(ScanEvent {
+            first_sequence: sequence,
+            endpoints,
+            undecoded: output.undecoded[undecoded_start..].to_vec(),
+            stats: stats.clone(),
+        })
+        .map_err(|source| ScanError::Event { sequence, source })?;
     }
     stats.elapsed =
         stats
@@ -168,6 +272,8 @@ where
 
 fn build_batches(
     request: &ScanRequest,
+    operation_id: crate::operation::Id,
+    source_port: Option<u16>,
     addresses: &[IpAddr],
     endpoint_ports: &[Option<u16>],
 ) -> Result<Vec<ScanBatch>, ScanError> {
@@ -181,6 +287,8 @@ fn build_batches(
                     .map(|port| {
                         let probe = ScanProbe {
                             sequence,
+                            operation_id,
+                            source_port,
                             address: *address,
                             transport: request.transport,
                             port: *port,
@@ -267,21 +375,27 @@ fn probe_packet(probe: &ScanProbe) -> Packet {
         IpAddr::V4(destination) => {
             packet.push(Ipv4 {
                 destination,
-                identification: nonzero_ipv4_identification(probe.sequence),
+                identification: probe
+                    .operation_id
+                    .derive_nonzero_u16("scan.ipv4.identification", probe.sequence),
                 ..Ipv4::default()
             });
             match probe.transport {
                 ScanTransport::Tcp => packet.push(Tcp {
+                    source_port: probe.source_port.expect("generated TCP source port"),
                     destination_port: probe.port.expect("validated TCP scan port"),
-                    sequence: probe.sequence as u32,
+                    sequence: probe
+                        .operation_id
+                        .derive_u32("scan.tcp.sequence", probe.sequence),
                     ..Tcp::default()
                 }),
                 ScanTransport::Udp => packet.push(Udp {
+                    source_port: probe.source_port.expect("generated UDP source port"),
                     destination_port: probe.port.expect("validated UDP scan port"),
                     ..Udp::default()
                 }),
                 ScanTransport::Icmp => packet.push(Icmpv4 {
-                    body: icmp_identity(probe.sequence),
+                    body: icmp_identity(probe),
                     ..Icmpv4::default()
                 }),
             };
@@ -289,21 +403,28 @@ fn probe_packet(probe: &ScanProbe) -> Packet {
         IpAddr::V6(destination) => {
             packet.push(Ipv6 {
                 destination,
-                flow_label: (probe.sequence as u32) & 0x000f_ffff,
+                flow_label: probe
+                    .operation_id
+                    .derive_u32("scan.ipv6.flow_label", probe.sequence)
+                    & 0x000f_ffff,
                 ..Ipv6::default()
             });
             match probe.transport {
                 ScanTransport::Tcp => packet.push(Tcp {
+                    source_port: probe.source_port.expect("generated TCP source port"),
                     destination_port: probe.port.expect("validated TCP scan port"),
-                    sequence: probe.sequence as u32,
+                    sequence: probe
+                        .operation_id
+                        .derive_u32("scan.tcp.sequence", probe.sequence),
                     ..Tcp::default()
                 }),
                 ScanTransport::Udp => packet.push(Udp {
+                    source_port: probe.source_port.expect("generated UDP source port"),
                     destination_port: probe.port.expect("validated UDP scan port"),
                     ..Udp::default()
                 }),
                 ScanTransport::Icmp => packet.push(Icmpv6 {
-                    body: icmp_identity(probe.sequence),
+                    body: icmp_identity(probe),
                     ..Icmpv6::default()
                 }),
             };
@@ -312,9 +433,11 @@ fn probe_packet(probe: &ScanProbe) -> Packet {
     packet
 }
 
-fn icmp_identity(sequence: u64) -> Bytes {
-    let sequence = sequence as u16;
-    Bytes::copy_from_slice(&[0x50, 0x43, (sequence >> 8) as u8, sequence as u8])
+fn icmp_identity(probe: &ScanProbe) -> Bytes {
+    let identity = probe
+        .operation_id
+        .derive_u32("scan.icmp.identity", probe.sequence);
+    Bytes::copy_from_slice(&identity.to_be_bytes())
 }
 
 fn validate_exchange_evidence(
@@ -475,7 +598,11 @@ fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
                 == 1
                 && sent.get::<Ipv4>().is_some_and(|ipv4| {
                     ipv4.destination == destination
-                        && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
+                        && ipv4.identification
+                            == probe.operation_id.derive_nonzero_u16(
+                                "scan.ipv4.identification",
+                                probe.sequence,
+                            )
                 })
         }
         IpAddr::V6(destination) => {
@@ -485,7 +612,11 @@ fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
                 == 1
                 && sent.get::<Ipv6>().is_some_and(|ipv6| {
                     ipv6.destination == destination
-                        && ipv6.flow_label == (probe.sequence as u32) & 0x000f_ffff
+                        && ipv6.flow_label
+                            == probe
+                                .operation_id
+                                .derive_u32("scan.ipv6.flow_label", probe.sequence)
+                                & 0x000f_ffff
                 })
         }
     };
@@ -494,21 +625,26 @@ fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
     }
     match probe.transport {
         ScanTransport::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
-            tcp.destination_port == probe.port.expect("validated TCP scan port")
-                && tcp.sequence == probe.sequence as u32
+            tcp.source_port == probe.source_port.expect("generated TCP source port")
+                && tcp.destination_port == probe.port.expect("validated TCP scan port")
+                && tcp.sequence
+                    == probe
+                        .operation_id
+                        .derive_u32("scan.tcp.sequence", probe.sequence)
                 && tcp.flags == Tcp::SYN
         }),
         ScanTransport::Udp => sent.get::<Udp>().is_some_and(|udp| {
-            udp.destination_port == probe.port.expect("validated UDP scan port")
+            udp.source_port == probe.source_port.expect("generated UDP source port")
+                && udp.destination_port == probe.port.expect("validated UDP scan port")
         }),
         ScanTransport::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
-                icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe.sequence)
+                icmp.icmp_type == 8 && icmp.code == 0 && icmp.body == icmp_identity(probe)
             }),
             IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
                 icmp.icmp_type == 128
                     && icmp.code == 0
-                    && icmp.body == icmp_identity(probe.sequence)
+                    && icmp.body == icmp_identity(probe)
             }),
         },
     }
@@ -530,13 +666,13 @@ fn retain_scan_evidence(
     };
     let message = match error {
         EvidenceBudgetError::FrameCountOverflow => {
-            "scan evidence frame accounting overflowed; later frames were omitted".to_owned()
+            "evidence_complete=false: scan evidence frame accounting overflowed; later frames were omitted".to_owned()
         }
         EvidenceBudgetError::ByteCountOverflow => {
-            "scan evidence byte accounting overflowed; later frames were omitted".to_owned()
+            "evidence_complete=false: scan evidence byte accounting overflowed; later frames were omitted".to_owned()
         }
         EvidenceBudgetError::LimitExceeded => format!(
-            "scan evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+            "evidence_complete=false: scan evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
             limits.max_evidence_frames, limits.max_evidence_bytes
         ),
     };

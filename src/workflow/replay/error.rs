@@ -2,6 +2,18 @@
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ReplayError {
+    #[error("replay operation failed at source frame {sequence}: {source}")]
+    Operation {
+        sequence: u64,
+        #[source]
+        source: crate::operation::Error,
+    },
+    #[error("replay event delivery failed at source frame {sequence}: {source}")]
+    Event {
+        sequence: u64,
+        #[source]
+        source: crate::operation::EventError,
+    },
     #[error("invalid replay limit {field}={value}: {reason}")]
     InvalidLimit {
         field: &'static str,
@@ -92,7 +104,9 @@ impl ReplayError {
 
     pub fn sequence(&self) -> Option<u64> {
         match self {
-            Self::Capture { sequence, .. }
+            Self::Operation { sequence, .. }
+            | Self::Event { sequence, .. }
+            | Self::Capture { sequence, .. }
             | Self::FrameLimit { sequence, .. }
             | Self::ByteLimit { sequence, .. }
             | Self::FrameSizeLimit { sequence, .. }
@@ -113,6 +127,8 @@ impl ReplayError {
 impl Classified for ReplayError {
     fn classification(&self) -> Classification {
         match self {
+            Self::Operation { source, .. } => source.classification(),
+            Self::Event { source, .. } => source.classification(),
             Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
             | Self::InvalidTiming { .. } => {
@@ -164,6 +180,8 @@ impl Classified for ReplayError {
 
     fn causes(&self) -> Vec<String> {
         match self {
+            Self::Operation { source, .. } => source.causes(),
+            Self::Event { source, .. } => source.causes(),
             Self::Authorization { source, .. } => source.causes(),
             Self::Transmission { source, .. } => source.causes(),
             Self::Capture { source, .. } => vec![source.to_string()],

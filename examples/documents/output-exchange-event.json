@@ -1,12 +1,22 @@
 {
-  "schema": "packetcraftr.output/v1",
+  "schema": "packetcraftr.output/v2",
   "command": "exchange",
   "mode": "stream",
   "status": "success",
-  "sequence": 3,
+  "sequence": "3",
   "result": {
     "event": "complete",
-    "unanswered": [1, 2]
+    "unanswered": [
+      "1",
+      "2"
+    ]
   },
-  "diagnostics": []
+  "diagnostics": [],
+  "tool": {
+    "version": "0.3.0",
+    "build_target": "x86_64-unknown-linux-gnu"
+  },
+  "operation_id": "00000000000000000000000000000000",
+  "record": "complete",
+  "completion_reason": "completed"
 }

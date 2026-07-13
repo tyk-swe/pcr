@@ -247,9 +247,20 @@ pub struct ScanResult {
     pub stats: Stats,
 }
 
+/// Progress emitted after one capture-ready scan batch is classified.
+#[derive(Clone, Debug)]
+pub struct ScanEvent {
+    pub first_sequence: u64,
+    pub endpoints: Vec<ScanEndpointResult>,
+    pub undecoded: Vec<Frame>,
+    pub stats: Stats,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanProbe {
     pub sequence: u64,
+    pub operation_id: crate::operation::Id,
+    pub source_port: Option<u16>,
     pub address: IpAddr,
     pub transport: ScanTransport,
     pub port: Option<u16>,

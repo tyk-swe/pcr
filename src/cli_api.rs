@@ -10,7 +10,7 @@
 
 #![forbid(unsafe_code)]
 
-pub(crate) use packetcraftr::{capture, client, error, workflow};
+pub(crate) use packetcraftr::{capture, client, error, operation, workflow};
 
 pub(crate) mod packet {
     pub(crate) mod internal {
@@ -50,16 +50,19 @@ pub(crate) mod net {
     #[cfg(test)]
     pub(crate) use packetcraftr::net::capture::Statistics as CaptureStatistics;
     pub(crate) use packetcraftr::net::capture::{
-        Limits as CaptureQueueLimits, OverflowPolicy as CaptureOverflowPolicy,
+        Filter as CaptureFilter, Limits as CaptureQueueLimits, Mode as CaptureMode,
+        Options as CaptureOptions, OverflowPolicy as CaptureOverflowPolicy,
         Session as CaptureSession, SystemProvider as SystemCaptureProvider,
     };
     pub(crate) use packetcraftr::net::interface::{
-        Id as InterfaceId, Provider as InterfaceProvider, SystemProvider as SystemInterfaceProvider,
+        Id as InterfaceId, Info as InterfaceInfo, Provider as InterfaceProvider,
+        SystemProvider as SystemInterfaceProvider,
     };
-    pub(crate) use packetcraftr::net::link::Mode as LinkMode;
+    pub(crate) use packetcraftr::net::link::{Capability as LinkCapability, Mode as LinkMode};
     pub(crate) use packetcraftr::net::neighbor::SystemResolver as SystemNeighborResolver;
     pub(crate) use packetcraftr::net::route::{
-        Options as PlanOptions, Provider as RouteProvider, SystemProvider as SystemRouteProvider,
+        Decision as RouteDecision, Options as PlanOptions, Plan as PlannedRoute,
+        Provider as RouteProvider, SystemProvider as SystemRouteProvider,
     };
     pub(crate) use packetcraftr::net::transmit::{
         Dispatch as DispatchPacketIo, SystemLayer2 as SystemLayer2Io,
@@ -71,6 +74,9 @@ pub(crate) mod net {
     // provider validates the resulting public `capture::Limits` values.
     pub(crate) const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
     pub(crate) const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
+    pub(crate) const DEFAULT_EVIDENCE_BYTES: usize =
+        packetcraftr::client::exchange::DEFAULT_EVIDENCE_BYTES;
+    pub(crate) const MAX_EVIDENCE_BYTES: usize = packetcraftr::client::exchange::MAX_EVIDENCE_BYTES;
     pub(crate) const MAX_CAPTURE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 }
 
@@ -78,27 +84,34 @@ pub(crate) mod output {
     pub(crate) use packetcraftr::output::build::Result as BuildCommandResult;
     pub(crate) use packetcraftr::output::capture::{
         Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult,
+        ReadComplete as ReadCompleteCommandResult,
     };
     pub(crate) use packetcraftr::output::contract::{
         Command as CommandName, Error as OutputContractError, Format as OutputFormat,
     };
     pub(crate) use packetcraftr::output::dissect::Result as DissectCommandResult;
     pub(crate) use packetcraftr::output::dns::{
-        AttemptStatus as DnsAttemptStatus, Event as DnsStreamCommandResult, Outcome as DnsOutcome,
-        Record as DnsRecordOutput, Result as DnsCommandResult, Section as DnsSection,
+        Attempt as DnsAttemptOutput, AttemptStatus as DnsAttemptStatus,
+        Event as DnsStreamCommandResult, Outcome as DnsOutcome, Record as DnsRecordOutput,
+        Result as DnsCommandResult, Section as DnsSection, Undecoded as DnsUndecodedOutput,
+    };
+    pub(crate) use packetcraftr::output::doctor::{
+        Capability as DoctorCapabilityOutput, Readiness as DoctorReadiness,
+        Result as DoctorCommandResult,
     };
     pub(crate) use packetcraftr::output::envelope::{
-        Aggregate as AggregateOutput, AggregateError as AggregateErrorOutput, Error as OutputError,
-        Stream as StreamRecord, StreamError as StreamErrorRecord,
+        Aggregate as AggregateOutput, AggregateError as AggregateErrorOutput,
+        Context as EnvelopeContext, Error as OutputError, Stream as StreamRecord,
+        StreamError as StreamErrorRecord, install_process_context,
     };
     #[cfg(test)]
     pub(crate) use packetcraftr::output::frame;
     pub(crate) use packetcraftr::output::frame::{
-        Captured as FrameOutput, Timestamp as OutputTimestamp,
+        Captured as FrameOutput, Timestamp as OutputTimestamp, Wire as WireFrameOutput,
     };
     pub(crate) use packetcraftr::output::fuzz::{
-        Event as FuzzStreamCommandResult, Mode as FuzzMode, Outcome as FuzzCaseOutcome,
-        Result as FuzzCommandResult,
+        Case as FuzzCaseOutput, Event as FuzzStreamCommandResult, Mode as FuzzMode,
+        Outcome as FuzzCaseOutcome, Result as FuzzCommandResult,
     };
     pub(crate) use packetcraftr::output::network::exchange::{
         Event as ExchangeStreamCommandResult, Result as ExchangeCommandResult,
@@ -111,12 +124,12 @@ pub(crate) mod output {
         Frame as ReplayFrameCommandResult, Result as ReplayCommandResult,
     };
     pub(crate) use packetcraftr::output::scan::{
-        Event as ScanStreamCommandResult, Result as ScanCommandResult,
+        Event as ScanStreamCommandResult, Port as ScanPortOutput, Result as ScanCommandResult,
     };
     pub(crate) use packetcraftr::output::traceroute::{
         Completion as TraceCompletionReason, Event as TracerouteStreamCommandResult,
-        ProbeStatus as TraceProbeStatus, ResponseKind as TraceResponseKind,
-        Result as TracerouteCommandResult,
+        Hop as TraceHopOutput, ProbeStatus as TraceProbeStatus, ResponseKind as TraceResponseKind,
+        Result as TracerouteCommandResult, Undecoded as TraceUndecodedOutput,
     };
     pub(crate) use packetcraftr::output::{envelope, network, scan};
 }
@@ -126,38 +139,41 @@ pub(crate) mod workflow_api {
     pub(crate) use packetcraftr::workflow::clock::System as SystemClock;
 
     pub(crate) use packetcraftr::workflow::dns::{
-        Error as DnsError, Exchange as DnsExchange, Execution as DnsExchangeExecution,
-        ExecutionError as DnsExecutionError, Executor as DnsExecutor, Limits as DnsLimits,
-        QueryType as DnsQueryType, Request as DnsRequest, run as dns,
+        Error as DnsError, Event as DnsEvent, Exchange as DnsExchange,
+        Execution as DnsExchangeExecution, ExecutionError as DnsExecutionError,
+        Executor as DnsExecutor, Limits as DnsLimits, QueryType as DnsQueryType,
+        Request as DnsRequest, run_streaming as dns_streaming,
     };
     pub(crate) use packetcraftr::workflow::fuzz::{
-        Error as FuzzError, Execution as FuzzCaseExecution, ExecutionCase as FuzzExecutionCase,
-        ExecutionError as FuzzExecutionError, Executor as FuzzExecutor, Limits as FuzzLimits,
-        LiveOptions as FuzzLiveOptions, Request as FuzzRequest, Strategy as FuzzStrategy,
-        Target as FuzzTarget, run as fuzz, run_live as fuzz_live,
+        Error as FuzzError, Event as FuzzEvent, Execution as FuzzCaseExecution,
+        ExecutionCase as FuzzExecutionCase, ExecutionError as FuzzExecutionError,
+        Executor as FuzzExecutor, Limits as FuzzLimits, LiveOptions as FuzzLiveOptions,
+        Request as FuzzRequest, Strategy as FuzzStrategy, Target as FuzzTarget,
+        run_live_streaming as fuzz_live_streaming, run_streaming as fuzz_streaming,
     };
     pub(crate) use packetcraftr::workflow::replay::{
         Error as ReplayError, FrameEvidence as ReplayFrameEvidence, Limits as ReplayLimits,
-        Options as ReplayOptions, Summary as ReplaySummary, run as replay_capture,
+        Options as ReplayOptions, Summary as ReplaySummary, execute as execute_replay,
+        prepare as prepare_replay,
     };
     pub(crate) use packetcraftr::workflow::scan::{
-        Batch as ScanBatch, Error as ScanError, Execution as ScanBatchExecution,
-        ExecutionError as ScanExecutionError, Executor as ScanExecutor, Limits as ScanLimits,
-        Request as ScanRequest, Transport as ScanTransport, run as scan,
+        Batch as ScanBatch, Error as ScanError, Event as ScanEvent,
+        Execution as ScanBatchExecution, ExecutionError as ScanExecutionError,
+        Executor as ScanExecutor, Limits as ScanLimits, Request as ScanRequest,
+        Transport as ScanTransport, run_streaming as scan_streaming,
     };
     pub(crate) use packetcraftr::workflow::target::Target as ScanTarget;
     pub(crate) use packetcraftr::workflow::traceroute::{
-        Batch as TracerouteBatch, Error as TracerouteError, Execution as TracerouteBatchExecution,
-        ExecutionError as TracerouteExecutionError, Executor as TracerouteExecutor,
-        Limits as TracerouteLimits, Request as TracerouteRequest, Strategy as TracerouteStrategy,
-        run as traceroute,
+        Batch as TracerouteBatch, Error as TracerouteError, Event as TracerouteEvent,
+        Execution as TracerouteBatchExecution, ExecutionError as TracerouteExecutionError,
+        Executor as TracerouteExecutor, Limits as TracerouteLimits, Request as TracerouteRequest,
+        Strategy as TracerouteStrategy, run_streaming as traceroute_streaming,
     };
 
     pub(crate) use packetcraftr::workflow::dns::{
         DEFAULT_DNS_ATTEMPTS, DEFAULT_DNS_SERVER_PORT, DEFAULT_MAX_DNS_NAME_POINTERS,
         DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES, DEFAULT_MAX_DNS_TXT_STRINGS,
-        DEFAULT_MAX_REJECTED_DNS_RECORDS, DEFAULT_MAX_UNDECODED_DNS_FRAMES,
-        DNS_EPHEMERAL_SOURCE_PORT_BASE, MAX_DNS_MESSAGE_BYTES,
+        DEFAULT_MAX_REJECTED_DNS_RECORDS, DEFAULT_MAX_UNDECODED_DNS_FRAMES, MAX_DNS_MESSAGE_BYTES,
     };
     pub(crate) use packetcraftr::workflow::fuzz::{
         DEFAULT_FUZZ_CASES, DEFAULT_MAX_FUZZ_CASES, DEFAULT_MAX_FUZZ_FIELD_BYTES,

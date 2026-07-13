@@ -1,4 +1,4 @@
-/// Output-v1 scan classification.
+/// Output-v2 scan classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanClassification {
@@ -23,7 +23,7 @@ impl From<crate::workflow::scan::Classification> for ScanClassification {
     }
 }
 
-/// Output-v1 scan-probe status.
+/// Output-v2 scan-probe status.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanProbeStatus {
@@ -55,7 +55,10 @@ pub struct ProbeEvidenceOutput {
     pub sent_at: OutputTimestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<OutputTimestamp>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "serialize_optional_duration"
+    )]
     pub latency: Option<Duration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub frame: Option<FrameOutput>,
@@ -68,6 +71,50 @@ pub struct ScanPortOutput {
     pub transport: String,
     pub classification: ScanClassification,
     pub evidence: Vec<ProbeEvidenceOutput>,
+}
+
+impl ScanPortOutput {
+    pub fn try_from_endpoint(
+        endpoint: crate::workflow::scan::Endpoint,
+    ) -> Result<Self, OutputContractError> {
+        let protocol = match (endpoint.transport, endpoint.address) {
+            (crate::workflow::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
+            (crate::workflow::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
+            _ => endpoint.transport.as_str(),
+        };
+        let evidence = endpoint
+            .evidence
+            .into_iter()
+            .map(|evidence| {
+                Ok(ProbeEvidenceOutput {
+                    protocol: protocol.to_owned(),
+                    destination: endpoint.address,
+                    destination_port: endpoint.port,
+                    attempt: evidence.attempt,
+                    status: evidence.status.into(),
+                    classification: evidence.classification.into(),
+                    responder: evidence.responder,
+                    sent_at: evidence.sent_at.try_into()?,
+                    received_at: evidence
+                        .received_at
+                        .map(OutputTimestamp::try_from)
+                        .transpose()?,
+                    latency: evidence.latency,
+                    frame: evidence
+                        .response
+                        .map(FrameOutput::try_from_frame)
+                        .transpose()?,
+                    reason: evidence.reason,
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        Ok(Self {
+            port: endpoint.port.unwrap_or(0),
+            transport: endpoint.transport.to_string(),
+            classification: endpoint.classification.into(),
+            evidence,
+        })
+    }
 }
 
 /// Aggregate or streamed result of `scan`.

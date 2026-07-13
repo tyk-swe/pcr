@@ -19,6 +19,7 @@ use packetcraftr::{
             SelectionReason as RouteSelectionReason,
         },
     },
+    operation::CompletionReason,
     output::{
         capture::{Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult},
         contract::{CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName},
@@ -71,6 +72,27 @@ fn example(name: &str) -> PathBuf {
 
 fn json_file(name: &str) -> serde_json::Value {
     serde_json::from_slice(&fs::read(example(name)).unwrap()).unwrap()
+}
+
+fn normalize_process_context(mut value: serde_json::Value) -> serde_json::Value {
+    if let Some(operation_id) = value.get_mut("operation_id") {
+        *operation_id = serde_json::json!("00000000000000000000000000000000");
+    }
+    if let Some(effective_request) = value.get_mut("effective_request") {
+        *effective_request = serde_json::json!({});
+    }
+    if let Some(build_target) = value.pointer_mut("/tool/build_target") {
+        *build_target = serde_json::json!("test-target");
+    }
+    value
+}
+
+fn assert_fixture(actual: serde_json::Value, name: &str) {
+    assert_eq!(
+        normalize_process_context(actual),
+        normalize_process_context(json_file(name)),
+        "{name}"
+    );
 }
 
 fn route_decision() -> RouteDecision {
@@ -169,9 +191,13 @@ fn packet_document_examples_build_through_the_public_cli() {
             String::from_utf8_lossy(&output.stderr)
         );
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(value["schema"], "packetcraftr.output/v1", "{name}");
+        assert_eq!(value["schema"], "packetcraftr.output/v2", "{name}");
         assert_eq!(value["status"], "success", "{name}");
-        assert_eq!(value["result"]["length"], expected_length, "{name}");
+        assert_eq!(
+            value["result"]["length"],
+            expected_length.to_string(),
+            "{name}"
+        );
     }
 }
 
@@ -184,7 +210,7 @@ fn published_build_success_output_matches_the_cli() {
 
     assert!(output.status.success());
     let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(actual, json_file("output-build-success.json"));
+    assert_fixture(actual, "output-build-success.json");
 }
 
 #[test]
@@ -196,7 +222,7 @@ fn published_build_error_output_matches_the_cli() {
 
     assert_eq!(output.status.code(), Some(3));
     let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(actual, json_file("output-build-error.json"));
+    assert_fixture(actual, "output-build-error.json");
 }
 
 #[test]
@@ -216,7 +242,7 @@ fn published_dissect_success_output_matches_the_cli() {
 
     assert!(output.status.success());
     let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(actual, json_file("output-dissect-success.json"));
+    assert_fixture(actual, "output-dissect-success.json");
 }
 
 #[test]
@@ -228,9 +254,9 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         },
         Vec::new(),
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(plan).unwrap(),
-        json_file("output-plan-success.json")
+        "output-plan-success.json",
     );
 
     let routes = AggregateOutput::success(
@@ -240,9 +266,9 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         },
         Vec::new(),
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(routes).unwrap(),
-        json_file("output-routes-success.json")
+        "output-routes-success.json",
     );
 
     let interfaces = AggregateOutput::success(
@@ -268,9 +294,9 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         },
         Vec::new(),
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(interfaces).unwrap(),
-        json_file("output-interfaces-success.json")
+        "output-interfaces-success.json",
     );
 
     let send = AggregateOutput::success(
@@ -285,9 +311,9 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         Vec::new(),
     )
     .with_stats(operation_stats());
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(send).unwrap(),
-        json_file("output-send-success.json")
+        "output-send-success.json",
     );
 
     let exchange = AggregateOutput::success(
@@ -302,9 +328,9 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
         Vec::new(),
     )
     .with_stats(operation_stats());
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(exchange).unwrap(),
-        json_file("output-exchange-success.json")
+        "output-exchange-success.json",
     );
 }
 
@@ -312,18 +338,18 @@ fn published_route_and_live_success_outputs_match_typed_contracts() {
 fn published_read_and_replay_stream_events_match_typed_contracts() {
     let read = StreamRecord::success(
         CommandName::Read,
-        0,
+        1,
         ReadFrameCommandResult::try_from_frame(exact_frame()).unwrap(),
         Vec::new(),
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(read).unwrap(),
-        json_file("output-read-event.json")
+        "output-read-event.json",
     );
 
     let replay = StreamRecord::success(
         CommandName::Replay,
-        0,
+        1,
         ReplayFrameCommandResult {
             source_sequence: 0,
             interface: InterfaceId {
@@ -339,9 +365,9 @@ fn published_read_and_replay_stream_events_match_typed_contracts() {
         },
         Vec::new(),
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(replay).unwrap(),
-        json_file("output-replay-event.json")
+        "output-replay-event.json",
     );
 }
 
@@ -387,9 +413,9 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
         elapsed: std::time::Duration::from_secs(1),
         capture: CaptureStatistics::default(),
     });
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(scan).unwrap(),
-        json_file("output-scan-success.json")
+        "output-scan-success.json",
     );
 
     let mut response_frame = CapturedFrame::new(
@@ -507,9 +533,9 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
             ..CaptureStatistics::default()
         },
     });
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(traceroute).unwrap(),
-        json_file("output-traceroute-success.json")
+        "output-traceroute-success.json",
     );
 
     let dns = AggregateOutput::success(
@@ -586,9 +612,9 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
             ..CaptureStatistics::default()
         },
     });
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(dns).unwrap(),
-        json_file("output-dns-success.json")
+        "output-dns-success.json",
     );
 }
 
@@ -597,7 +623,7 @@ fn published_scan_stream_outputs_match_typed_contracts() {
     let destination = "192.168.56.10".parse().unwrap();
     let event = StreamRecord::success(
         CommandName::Scan,
-        0,
+        1,
         ScanStreamCommandResult::Port {
             target: "192.168.56.10".to_owned(),
             resolved_address: destination,
@@ -627,20 +653,21 @@ fn published_scan_stream_outputs_match_typed_contracts() {
         },
         Vec::new(),
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(event).unwrap(),
-        json_file("output-scan-event.json")
+        "output-scan-event.json",
     );
 
     let complete = StreamRecord::success(
         CommandName::Scan,
-        1,
+        2,
         ScanStreamCommandResult::Complete {
             target: "192.168.56.10".to_owned(),
             resolved_addresses: vec![destination],
         },
         Vec::new(),
     )
+    .complete(CompletionReason::Completed)
     .with_stats(OperationStats {
         packets_attempted: 1,
         packets_completed: 1,
@@ -648,9 +675,9 @@ fn published_scan_stream_outputs_match_typed_contracts() {
         elapsed: std::time::Duration::from_secs(1),
         capture: CaptureStatistics::default(),
     });
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(complete).unwrap(),
-        json_file("output-scan-complete.json")
+        "output-scan-complete.json",
     );
 }
 
@@ -659,7 +686,7 @@ fn published_traceroute_stream_outputs_match_typed_contracts() {
     let destination = "192.168.56.10".parse().unwrap();
     let event = StreamRecord::success(
         CommandName::Traceroute,
-        0,
+        1,
         TracerouteStreamCommandResult::Hop {
             target: "router.lab".to_owned(),
             destination,
@@ -691,9 +718,9 @@ fn published_traceroute_stream_outputs_match_typed_contracts() {
         },
         Vec::new(),
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(event).unwrap(),
-        json_file("output-traceroute-event.json")
+        "output-traceroute-event.json",
     );
 
     let complete = StreamRecord::success(
@@ -709,6 +736,7 @@ fn published_traceroute_stream_outputs_match_typed_contracts() {
         },
         Vec::new(),
     )
+    .complete(CompletionReason::DestinationReached)
     .with_stats(OperationStats {
         packets_attempted: 3,
         packets_completed: 3,
@@ -720,9 +748,9 @@ fn published_traceroute_stream_outputs_match_typed_contracts() {
             ..CaptureStatistics::default()
         },
     });
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(complete).unwrap(),
-        json_file("output-traceroute-complete.json")
+        "output-traceroute-complete.json",
     );
 }
 
@@ -832,12 +860,17 @@ fn published_error_outputs_match_every_command_cli_path() {
     for (command, exit_code, arguments) in cases {
         let output = binary().args(*arguments).output().unwrap();
         assert_eq!(output.status.code(), Some(*exit_code), "{command}");
-        let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(
-            actual,
-            json_file(&format!("output-{command}-error.json")),
-            "{command}"
-        );
+        let actual = if arguments.contains(&"ndjson") {
+            output
+                .stdout
+                .split(|byte| *byte == b'\n')
+                .rfind(|line| !line.is_empty())
+                .map(|line| serde_json::from_slice::<serde_json::Value>(line).unwrap())
+                .expect("structured failures must emit a terminal record")
+        } else {
+            serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+        };
+        assert_fixture(actual, &format!("output-{command}-error.json"));
     }
 }
 
@@ -850,11 +883,12 @@ fn published_exchange_stream_event_matches_the_typed_contract() {
             unanswered: vec![1, 2],
         },
         Vec::new(),
-    );
+    )
+    .complete(CompletionReason::Completed);
 
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(event).unwrap(),
-        json_file("output-exchange-event.json")
+        "output-exchange-event.json",
     );
 }
 
@@ -872,7 +906,7 @@ fn published_capture_stream_event_matches_the_typed_contract() {
     frame.direction = Some(CaptureDirection::Inbound);
     let event = StreamRecord::success(
         CommandName::Capture,
-        0,
+        1,
         CaptureFrameCommandResult::Frame {
             frame: FrameOutput::try_from_frame(frame).unwrap(),
         },
@@ -893,9 +927,9 @@ fn published_capture_stream_event_matches_the_typed_contract() {
         },
     });
 
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(event).unwrap(),
-        json_file("output-capture-event.json")
+        "output-capture-event.json",
     );
 }
 
@@ -903,7 +937,7 @@ fn published_capture_stream_event_matches_the_typed_contract() {
 fn published_dns_stream_outputs_match_typed_contracts() {
     let event = StreamRecord::success(
         CommandName::Dns,
-        0,
+        1,
         DnsStreamCommandResult::Attempt {
             server: "resolver.lab".to_owned(),
             server_port: 53,
@@ -929,9 +963,9 @@ fn published_dns_stream_outputs_match_typed_contracts() {
         Vec::new(),
     );
 
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(event).unwrap(),
-        json_file("output-dns-event.json")
+        "output-dns-event.json",
     );
 
     let complete = StreamRecord::success(
@@ -962,6 +996,7 @@ fn published_dns_stream_outputs_match_typed_contracts() {
         },
         Vec::new(),
     )
+    .complete(CompletionReason::Completed)
     .with_stats(OperationStats {
         packets_attempted: 2,
         packets_completed: 2,
@@ -973,9 +1008,9 @@ fn published_dns_stream_outputs_match_typed_contracts() {
             ..CaptureStatistics::default()
         },
     });
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(complete).unwrap(),
-        json_file("output-dns-complete.json")
+        "output-dns-complete.json",
     );
 }
 
@@ -1004,9 +1039,9 @@ fn published_fuzz_outputs_match_the_deterministic_offline_cli() {
         "{}",
         String::from_utf8_lossy(&aggregate.stderr)
     );
-    assert_eq!(
+    assert_fixture(
         serde_json::from_slice::<serde_json::Value>(&aggregate.stdout).unwrap(),
-        json_file("output-fuzz-success.json")
+        "output-fuzz-success.json",
     );
 
     let stream = binary()
@@ -1033,9 +1068,10 @@ fn published_fuzz_outputs_match_the_deterministic_offline_cli() {
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();
-    assert_eq!(records.len(), 2);
-    assert_eq!(records[0], json_file("output-fuzz-event.json"));
-    assert_eq!(records[1], json_file("output-fuzz-complete.json"));
+    assert_eq!(records.len(), 3);
+    assert_eq!(records[0]["record"], "start");
+    assert_fixture(records[1].clone(), "output-fuzz-event.json");
+    assert_fixture(records[2].clone(), "output-fuzz-complete.json");
 }
 
 #[test]
@@ -1058,8 +1094,8 @@ fn published_replay_output_matches_the_typed_contract() {
     );
     let output = AggregateOutput::success(CommandName::Replay, result, Vec::new());
 
-    assert_eq!(
+    assert_fixture(
         serde_json::to_value(output).unwrap(),
-        json_file("output-replay-success.json")
+        "output-replay-success.json",
     );
 }

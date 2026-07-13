@@ -215,7 +215,7 @@ mod tests {
     #[test]
     fn whole_frame_hex_is_not_truncated() {
         let bytes = (0u8..=255).collect::<Vec<_>>();
-        assert_eq!(crate::output::frame::Wire::new(bytes).bytes_hex.len(), 512);
+        assert_eq!(crate::output::frame::Wire::new(bytes).bytes_hex().len(), 512);
     }
 
     #[test]
@@ -317,6 +317,12 @@ mod tests {
         assert_eq!(runtime.exit_code, 5);
         assert_eq!(runtime.classification.code, "io.partial_send");
 
+        let timeout = CliError::classified(crate::net::LiveIoError::DeadlineExceeded {
+            operation: "test deadline",
+        });
+        assert_eq!(timeout.exit_code, 5);
+        assert_eq!(timeout.classification.category, crate::error::Category::Timeout);
+
         let dual = CliError::classified(crate::client::Error::OperationAndCaptureShutdown {
             operation: crate::net::LiveIoError::Send {
                 message: "send failed".to_owned(),
@@ -408,8 +414,9 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(error.exit_code, 4);
-        assert_eq!(error.classification.code, "capability.privilege");
+        assert_eq!(error.exit_code, 5);
+        assert_eq!(error.classification.code, "io.capture_cleanup");
+        assert_eq!(error.classification.category, crate::error::Category::Cleanup);
         assert_eq!(error.sequence, Some(0));
         assert_eq!(error.causes.len(), 2);
         assert!(error.causes[1].contains("did not join"));
@@ -537,6 +544,116 @@ mod tests {
                 timestamp_resolution: crate::capture::TimestampResolution::Binary(10),
                 timestamp_offset: -1,
             }
+        );
+    }
+
+    struct DoctorProbeCapture {
+        shutdown: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl CaptureSession for DoctorProbeCapture {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+            Ok(())
+        }
+
+        fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+            panic!("doctor readiness probe must not retain capture traffic")
+        }
+
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            self.shutdown
+                .store(true, std::sync::atomic::Ordering::Release);
+            Ok(())
+        }
+
+        fn statistics(&self) -> crate::net::CaptureStatistics {
+            crate::net::CaptureStatistics::default()
+        }
+    }
+
+    struct DoctorProbeProvider {
+        options: Arc<std::sync::Mutex<Option<CaptureOptions>>>,
+        shutdown: Arc<std::sync::atomic::AtomicBool>,
+        sends: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl crate::net::capture::Provider for DoctorProbeProvider {
+        type Capture = DoctorProbeCapture;
+
+        fn arm_capture(
+            &self,
+            _route: &PlannedRoute,
+            _limits: CaptureQueueLimits,
+        ) -> Result<Self::Capture, LiveIoError> {
+            panic!("doctor must use the options-aware capture boundary")
+        }
+
+        fn arm_capture_with_options(
+            &self,
+            _route: &PlannedRoute,
+            _limits: CaptureQueueLimits,
+            options: CaptureOptions,
+        ) -> Result<Self::Capture, LiveIoError> {
+            *self.options.lock().unwrap() = Some(options);
+            Ok(DoctorProbeCapture {
+                shutdown: Arc::clone(&self.shutdown),
+            })
+        }
+    }
+
+    impl packetcraftr::net::transmit::Sender for DoctorProbeProvider {
+        fn send(
+            &self,
+            frame: packetcraftr::net::transmit::Frame<'_>,
+        ) -> Result<packetcraftr::net::transmit::Report, LiveIoError> {
+            self.sends
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            Ok(packetcraftr::net::transmit::Report {
+                bytes_sent: frame.bytes().len(),
+                wire_bytes: Some(frame.bytes().clone()),
+            })
+        }
+    }
+
+    #[test]
+    fn doctor_capture_probe_is_filtered_host_only_and_never_transmits() {
+        let options = Arc::new(std::sync::Mutex::new(None));
+        let shutdown = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sends = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let provider = DoctorProbeProvider {
+            options: Arc::clone(&options),
+            shutdown: Arc::clone(&shutdown),
+            sends: Arc::clone(&sends),
+        };
+        let decision = RouteDecision {
+            interface: InterfaceId {
+                name: "doctor0".to_owned(),
+                index: 7,
+            },
+            source_mac: Some(packetcraftr::net::link::MacAddress([2, 0, 0, 0, 0, 1])),
+            selected_address: Some("192.0.2.1".parse().unwrap()),
+            preferred_source: Some("192.0.2.1".parse().unwrap()),
+            next_hop: None,
+            selection_reason: packetcraftr::net::route::SelectionReason::InterfaceOnly,
+            destination_scope: packetcraftr::net::route::Scope::Private,
+            mtu: 1500,
+            capability: LinkCapability::Layer2,
+            link_type: LinkType::ETHERNET,
+        };
+        let route = doctor_probe_route(None, &[decision]).unwrap();
+        let operation = crate::operation::Context::new(crate::operation::Id::from_bytes([3; 16]));
+
+        probe_doctor_capture_with_provider(&provider, route, &operation).unwrap();
+
+        assert_eq!(sends.load(std::sync::atomic::Ordering::Acquire), 0);
+        assert!(shutdown.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(
+            *options.lock().unwrap(),
+            Some(CaptureOptions {
+                mode: CaptureMode::HostOnly,
+                filter: CaptureFilter::Bpf("ip or ip6".to_owned()),
+                discard_unmatched: true,
+            })
         );
     }
 }

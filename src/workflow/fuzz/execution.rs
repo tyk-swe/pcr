@@ -191,7 +191,7 @@ fn retain_evidence(
             Diagnostic::warning(
                 "fuzz.evidence_limit",
                 format!(
-                    "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+                    "evidence_complete=false: fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
                     limits.max_evidence_frames, limits.max_evidence_bytes
                 ),
             ),

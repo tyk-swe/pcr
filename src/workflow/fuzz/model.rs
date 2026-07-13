@@ -388,6 +388,13 @@ pub struct FuzzResult {
     pub stats: FuzzStats,
 }
 
+/// Progress emitted for each generated or executed fuzz case.
+#[derive(Clone, Debug)]
+pub struct FuzzEvent {
+    pub case: FuzzCase,
+    pub stats: FuzzStats,
+}
+
 #[derive(Clone, Debug)]
 pub struct FuzzExecutionCase {
     pub index: u64,

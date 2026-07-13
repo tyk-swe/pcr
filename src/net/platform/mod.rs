@@ -42,14 +42,27 @@ use super::route_impl::{RouteSelectionReason, classify_destination};
 pub(super) fn system_capture(
     route: &super::route_impl::PlannedRoute,
     limits: super::provider_impl::CaptureQueueLimits,
+    options: super::provider_impl::CaptureOptions,
 ) -> Result<Box<dyn super::provider_impl::CaptureSession>, LiveIoError> {
     // Reject invalid bounds before opening a device or allocating native
     // resources. NativeCaptureSession validates again at its ownership seam.
     let validated_limits = limits.validate()?;
+    let options = options.validate()?;
+    let expression = options.expression(route)?;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let parts = pcap_backend::open_capture(&route.route.interface, validated_limits)?;
+    let parts = pcap_backend::open_capture(
+        &route.route.interface,
+        validated_limits,
+        options.mode,
+        expression.as_deref(),
+    )?;
     #[cfg(windows)]
-    let parts = npcap::open_capture(&route.route.interface, validated_limits)?;
+    let parts = npcap::open_capture(
+        &route.route.interface,
+        validated_limits,
+        options.mode,
+        expression.as_deref(),
+    )?;
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     return Err(LiveIoError::Unsupported {
         message: "native Layer 2 capture is unsupported on this target".to_owned(),
@@ -65,7 +78,9 @@ pub(super) fn system_capture(
 pub(super) fn system_capture(
     _route: &super::route_impl::PlannedRoute,
     _limits: super::provider_impl::CaptureQueueLimits,
+    options: super::provider_impl::CaptureOptions,
 ) -> Result<Box<dyn super::provider_impl::CaptureSession>, LiveIoError> {
+    options.validate()?;
     Err(LiveIoError::Unsupported {
         message: "enable the native-layer2 feature for native packet capture".to_owned(),
     })

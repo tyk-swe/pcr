@@ -82,31 +82,54 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
     let mut transmitter = ReplaySystemTransmitter::new();
     let mut clock = SystemClock;
     let started = Instant::now();
+    let plan = prepare_replay(
+        &mut reader,
+        &options,
+        current_operation(),
+        &mut authorizer,
+        &mut transmitter,
+    )
+    .map_err(replay_cli_error)?;
+    let mut file = reader.into_inner();
+    file.seek(SeekFrom::Start(0)).map_err(|source| {
+        CliError::new(
+            5,
+            format!("rewind {} failed: {source}", arguments.path.display()),
+        )
+    })?;
+    let mut reader = Reader::with_limits(file, arguments.max_frame_bytes, arguments.max_interfaces)
+        .map_err(CliError::classified)?;
 
     match output {
         OutputFormat::Text => {
-            let summary = replay_capture(
+            let mut sink = |evidence: crate::workflow_api::ReplayFrameEvidence| {
+                let sequence = evidence.source_sequence;
+                let result = ReplayFrameCommandResult::try_from_evidence(evidence)
+                    .map_err(|source| crate::operation::EventError::new(source.to_string()))?;
+                write_stdout_line(format_args!(
+                    "{}: sent {} bytes via {} (index {}, {:?}) dlt={} {}",
+                    result.source_sequence,
+                    result.bytes_sent,
+                    result.interface.name,
+                    result.interface.index,
+                    result.link_mode,
+                    result.frame.link_type,
+                    spaced_hex(result.frame.bytes())
+                ))
+                .map_err(|source| {
+                    crate::operation::EventError::new(format!(
+                        "source frame {sequence}: {}",
+                        source.message
+                    ))
+                })
+            };
+            let summary = execute_replay(
                 &mut reader,
-                &options,
-                &mut authorizer,
+                &plan,
+                current_operation(),
                 &mut transmitter,
                 &mut clock,
-                |evidence| {
-                    let sequence = evidence.source_sequence;
-                    let result = ReplayFrameCommandResult::try_from_evidence(evidence)
-                        .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
-                    write_stdout_line(format_args!(
-                        "{}: sent {} bytes via {} (index {}, {:?}) dlt={} {}",
-                        result.source_sequence,
-                        result.bytes_sent,
-                        result.interface.name,
-                        result.interface.index,
-                        result.link_mode,
-                        result.frame.link_type,
-                        spaced_hex(result.frame.bytes())
-                    ))
-                    .map_err(|source| ReplayError::output(result.source_sequence, source.message))
-                },
+                &mut sink,
             )
             .map_err(replay_cli_error)?;
             write_stdout_line(format_args!(
@@ -115,20 +138,13 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
             ))
         }
         OutputFormat::Json => {
-            let mut frames = Vec::new();
-            let summary = replay_capture(
+            let summary = execute_replay(
                 &mut reader,
-                &options,
-                &mut authorizer,
+                &plan,
+                current_operation(),
                 &mut transmitter,
                 &mut clock,
-                |evidence| {
-                    let sequence = evidence.source_sequence;
-                    let result = ReplayFrameCommandResult::try_from_evidence(evidence)
-                        .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
-                    frames.push(result);
-                    Ok(())
-                },
+                &mut |_| Ok(()),
             )
             .map_err(replay_cli_error)?;
             let stats = replay_stats(&summary, started.elapsed());
@@ -136,7 +152,7 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
                 summary,
                 requested_interface,
                 options.link_mode,
-                frames,
+                Vec::new(),
             );
             emit_json(
                 &AggregateOutput::success(CommandName::Replay, result, Vec::new())
@@ -144,24 +160,25 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
             )
         }
         OutputFormat::Ndjson => {
-            let summary = replay_capture(
+            let mut sink = |evidence: crate::workflow_api::ReplayFrameEvidence| {
+                let sequence = evidence.source_sequence;
+                let result = ReplayFrameCommandResult::try_from_evidence(evidence)
+                    .map_err(|source| crate::operation::EventError::new(source.to_string()))?;
+                emit_json_compact(&StreamRecord::success(
+                    CommandName::Replay,
+                    sequence,
+                    result,
+                    Vec::new(),
+                ))
+                .map_err(|source| crate::operation::EventError::new(source.message))
+            };
+            let summary = execute_replay(
                 &mut reader,
-                &options,
-                &mut authorizer,
+                &plan,
+                current_operation(),
                 &mut transmitter,
                 &mut clock,
-                |evidence| {
-                    let sequence = evidence.source_sequence;
-                    let result = ReplayFrameCommandResult::try_from_evidence(evidence)
-                        .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
-                    emit_json_compact(&StreamRecord::success(
-                        CommandName::Replay,
-                        sequence,
-                        result,
-                        Vec::new(),
-                    ))
-                    .map_err(|source| ReplayError::output(sequence, source.message))
-                },
+                &mut sink,
             )
             .map_err(replay_cli_error)?;
             let sequence = summary.frames_completed;
@@ -174,6 +191,7 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
             );
             emit_json_compact(
                 &StreamRecord::success(CommandName::Replay, sequence, result, Vec::new())
+                    .complete(CompletionReason::EndOfInput)
                     .with_stats(stats),
             )
             .map_err(|error| error.at_sequence(sequence))
@@ -189,15 +207,17 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
                 arguments.max_interfaces,
             )?;
             let mut interfaces = Vec::<ReplayInterfaceMapping>::new();
-            replay_capture(
+            let mut sink = |evidence: crate::workflow_api::ReplayFrameEvidence| {
+                write_replay_capture_evidence(&mut writer, format, &mut interfaces, evidence)
+                    .map_err(|source| crate::operation::EventError::new(source.to_string()))
+            };
+            execute_replay(
                 &mut reader,
-                &options,
-                &mut authorizer,
+                &plan,
+                current_operation(),
                 &mut transmitter,
                 &mut clock,
-                |evidence| {
-                    write_replay_capture_evidence(&mut writer, format, &mut interfaces, evidence)
-                },
+                &mut sink,
             )
             .map_err(replay_cli_error)?;
             writer.flush().map_err(CliError::classified)

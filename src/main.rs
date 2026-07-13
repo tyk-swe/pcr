@@ -7,7 +7,7 @@ mod cli;
 mod cli_api;
 
 pub(crate) use cli_api::{
-    capture, client, error, net, output, packet, protocol, workflow, workflow_api,
+    capture, client, error, net, operation, output, packet, protocol, workflow, workflow_api,
 };
 
 fn main() -> std::process::ExitCode {

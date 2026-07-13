@@ -13,6 +13,47 @@ where
     E: TracerouteExecutor,
     C: Clock,
 {
+    let operation = crate::operation::Context::generate().map_err(|source| {
+        TracerouteError::Operation {
+            sequence: 0,
+            source,
+        }
+    })?;
+    traceroute_streaming(
+        request,
+        &operation,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut |_| Ok(()),
+    )
+}
+
+/// Streaming traceroute entry point. One event is delivered after each hop is
+/// classified, preserving earlier evidence if a later hop fails.
+pub fn traceroute_streaming<A, E, C, S>(
+    request: &TracerouteRequest,
+    operation: &crate::operation::Context,
+    authorizer: &mut A,
+    registry: &ProtocolRegistry,
+    executor: &mut E,
+    clock: &mut C,
+    sink: &mut S,
+) -> Result<TracerouteResult, TracerouteError>
+where
+    A: Authorizer,
+    E: TracerouteExecutor,
+    C: Clock,
+    S: crate::operation::EventSink<TracerouteEvent>,
+{
+    operation
+        .cancellation()
+        .check()
+        .map_err(|source| TracerouteError::Operation {
+            sequence: 0,
+            source,
+        })?;
     request.validate()?;
     let resolved = authorizer.resolve_and_authorize(&request.target)?;
     let mut resolved_addresses = Vec::with_capacity(resolved.addresses.len());
@@ -66,7 +107,32 @@ where
         })?;
     authorizer.authorize_operation(total_probes as u64, maximum_wire_bytes)?;
 
-    let batches = build_batches(request, destination)?;
+    let source_port = match request.strategy {
+        TracerouteStrategy::Tcp => Some(
+            operation
+                .reserve_port(
+                    "traceroute.tcp.source_port",
+                    crate::operation::Transport::Tcp,
+                )
+                .map_err(|source| TracerouteError::Operation {
+                    sequence: 0,
+                    source,
+                })?,
+        ),
+        TracerouteStrategy::Udp => Some(
+            operation
+                .reserve_port(
+                    "traceroute.udp.source_port",
+                    crate::operation::Transport::Udp,
+                )
+                .map_err(|source| TracerouteError::Operation {
+                    sequence: 0,
+                    source,
+                })?,
+        ),
+        TracerouteStrategy::Icmp => None,
+    };
+    let batches = build_batches(request, operation.id(), source_port, destination)?;
     let mut hops = Vec::with_capacity(batches.len());
     let mut undecoded = Vec::new();
     let mut diagnostics = Vec::new();
@@ -78,17 +144,27 @@ where
 
     for (batch_index, batch) in batches.iter().enumerate() {
         let sequence = batch.probes[0].sequence;
+        operation
+            .cancellation()
+            .check()
+            .map_err(|source| TracerouteError::Operation { sequence, source })?;
         if batch_index != 0 {
             let delay = rate_delay(
                 batches[batch_index - 1].probes.len(),
                 request.probes_per_second,
             )?;
-            clock
-                .sleep(delay)
-                .map_err(|source| TracerouteError::Clock {
-                    sequence,
-                    message: source.to_string(),
-                })?;
+            match clock.sleep_cancelled(delay, operation.cancellation()) {
+                Ok(()) => {}
+                Err(super::clock::SleepError::Clock(source)) => {
+                    return Err(TracerouteError::Clock {
+                        sequence,
+                        message: source.to_string(),
+                    });
+                }
+                Err(super::clock::SleepError::Cancelled(source)) => {
+                    return Err(TracerouteError::Operation { sequence, source });
+                }
+            }
             scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
@@ -103,6 +179,7 @@ where
             .map_err(|source| TracerouteError::Execution { sequence, source })?;
         validate_execution(batch, &execution, request.limits)?;
         add_stats(&mut stats, &execution.stats, sequence)?;
+        let undecoded_start = undecoded.len();
         let hop = process_batch(
             batch,
             execution,
@@ -124,6 +201,13 @@ where
             .probes
             .iter()
             .any(|probe| probe.response_kind == Some(TracerouteResponseKind::Unreachable));
+        sink.emit(TracerouteEvent {
+            first_sequence: sequence,
+            hop: hop.clone(),
+            undecoded: undecoded[undecoded_start..].to_vec(),
+            stats: stats.clone(),
+        })
+        .map_err(|source| TracerouteError::Event { sequence, source })?;
         hops.push(hop);
         if reached {
             completion = TracerouteCompletion::DestinationReached;
@@ -161,6 +245,8 @@ where
 
 fn build_batches(
     request: &TracerouteRequest,
+    operation_id: crate::operation::Id,
+    source_port: Option<u16>,
     destination: IpAddr,
 ) -> Result<Vec<TracerouteBatch>, TracerouteError> {
     let mut batches = Vec::with_capacity(request.hop_count());
@@ -181,6 +267,8 @@ fn build_batches(
             };
             probes.push(TracerouteProbe {
                 sequence,
+                operation_id,
+                source_port,
                 address: destination,
                 strategy: request.strategy,
                 destination_port,
@@ -241,24 +329,29 @@ fn probe_packet(probe: &TracerouteProbe) -> Packet {
             packet.push(Ipv4 {
                 destination,
                 ttl: probe.hop_limit,
-                identification: nonzero_ipv4_identification(probe.sequence),
+                identification: probe.operation_id.derive_nonzero_u16(
+                    "traceroute.ipv4.identification",
+                    probe.sequence,
+                ),
                 ..Ipv4::default()
             });
             match probe.strategy {
                 TracerouteStrategy::Udp => packet.push(Udp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
+                    source_port: probe.source_port.expect("generated UDP source port"),
                     destination_port: probe.destination_port.expect("validated UDP port"),
                     ..Udp::default()
                 }),
                 TracerouteStrategy::Tcp => packet.push(Tcp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
+                    source_port: probe.source_port.expect("generated TCP source port"),
                     destination_port: probe.destination_port.expect("validated TCP port"),
-                    sequence: probe.sequence as u32,
+                    sequence: probe
+                        .operation_id
+                        .derive_u32("traceroute.tcp.sequence", probe.sequence),
                     flags: Tcp::SYN,
                     ..Tcp::default()
                 }),
                 TracerouteStrategy::Icmp => packet.push(Icmpv4 {
-                    body: traceroute_identity(probe.sequence),
+                    body: traceroute_identity(probe),
                     ..Icmpv4::default()
                 }),
             };
@@ -267,24 +360,29 @@ fn probe_packet(probe: &TracerouteProbe) -> Packet {
             packet.push(Ipv6 {
                 destination,
                 hop_limit: probe.hop_limit,
-                flow_label: (probe.sequence as u32) & 0x000f_ffff,
+                flow_label: probe
+                    .operation_id
+                    .derive_u32("traceroute.ipv6.flow_label", probe.sequence)
+                    & 0x000f_ffff,
                 ..Ipv6::default()
             });
             match probe.strategy {
                 TracerouteStrategy::Udp => packet.push(Udp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
+                    source_port: probe.source_port.expect("generated UDP source port"),
                     destination_port: probe.destination_port.expect("validated UDP port"),
                     ..Udp::default()
                 }),
                 TracerouteStrategy::Tcp => packet.push(Tcp {
-                    source_port: TRACEROUTE_SOURCE_PORT,
+                    source_port: probe.source_port.expect("generated TCP source port"),
                     destination_port: probe.destination_port.expect("validated TCP port"),
-                    sequence: probe.sequence as u32,
+                    sequence: probe
+                        .operation_id
+                        .derive_u32("traceroute.tcp.sequence", probe.sequence),
                     flags: Tcp::SYN,
                     ..Tcp::default()
                 }),
                 TracerouteStrategy::Icmp => packet.push(Icmpv6 {
-                    body: traceroute_identity(probe.sequence),
+                    body: traceroute_identity(probe),
                     ..Icmpv6::default()
                 }),
             };
@@ -293,9 +391,11 @@ fn probe_packet(probe: &TracerouteProbe) -> Packet {
     packet
 }
 
-fn traceroute_identity(sequence: u64) -> Bytes {
-    let sequence = sequence as u16;
-    Bytes::copy_from_slice(&[0x50, 0x54, (sequence >> 8) as u8, sequence as u8])
+fn traceroute_identity(probe: &TracerouteProbe) -> Bytes {
+    let identity = probe
+        .operation_id
+        .derive_u32("traceroute.icmp.identity", probe.sequence);
+    Bytes::copy_from_slice(&identity.to_be_bytes())
 }
 
 fn validate_execution(
@@ -457,7 +557,11 @@ fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool
                 == 1
                 && sent.get::<Ipv4>().is_some_and(|ipv4| {
                     ipv4.destination == destination
-                        && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
+                        && ipv4.identification
+                            == probe.operation_id.derive_nonzero_u16(
+                                "traceroute.ipv4.identification",
+                                probe.sequence,
+                            )
                         && ipv4.ttl == probe.hop_limit
                 })
         }
@@ -468,7 +572,11 @@ fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool
                 == 1
                 && sent.get::<Ipv6>().is_some_and(|ipv6| {
                     ipv6.destination == destination
-                        && ipv6.flow_label == (probe.sequence as u32) & 0x000f_ffff
+                        && ipv6.flow_label
+                            == probe
+                                .operation_id
+                                .derive_u32("traceroute.ipv6.flow_label", probe.sequence)
+                                & 0x000f_ffff
                         && ipv6.hop_limit == probe.hop_limit
                 })
         }
@@ -478,25 +586,28 @@ fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool
     }
     match probe.strategy {
         TracerouteStrategy::Udp => sent.get::<Udp>().is_some_and(|udp| {
-            udp.source_port == TRACEROUTE_SOURCE_PORT
+            udp.source_port == probe.source_port.expect("generated UDP source port")
                 && udp.destination_port == probe.destination_port.expect("validated UDP port")
         }),
         TracerouteStrategy::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
-            tcp.source_port == TRACEROUTE_SOURCE_PORT
+            tcp.source_port == probe.source_port.expect("generated TCP source port")
                 && tcp.destination_port == probe.destination_port.expect("validated TCP port")
-                && tcp.sequence == probe.sequence as u32
+                && tcp.sequence
+                    == probe
+                        .operation_id
+                        .derive_u32("traceroute.tcp.sequence", probe.sequence)
                 && tcp.flags == Tcp::SYN
         }),
         TracerouteStrategy::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
                 icmp.icmp_type == 8
                     && icmp.code == 0
-                    && icmp.body == traceroute_identity(probe.sequence)
+                    && icmp.body == traceroute_identity(probe)
             }),
             IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
                 icmp.icmp_type == 128
                     && icmp.code == 0
-                    && icmp.body == traceroute_identity(probe.sequence)
+                    && icmp.body == traceroute_identity(probe)
             }),
         },
     }
@@ -518,13 +629,13 @@ fn retain_traceroute_evidence(
     };
     let message = match error {
         EvidenceBudgetError::FrameCountOverflow => {
-            "traceroute evidence frame accounting overflowed; later frames were omitted".to_owned()
+            "evidence_complete=false: traceroute evidence frame accounting overflowed; later frames were omitted".to_owned()
         }
         EvidenceBudgetError::ByteCountOverflow => {
-            "traceroute evidence byte accounting overflowed; later frames were omitted".to_owned()
+            "evidence_complete=false: traceroute evidence byte accounting overflowed; later frames were omitted".to_owned()
         }
         EvidenceBudgetError::LimitExceeded => format!(
-            "traceroute evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+            "evidence_complete=false: traceroute evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
             limits.max_evidence_frames, limits.max_evidence_bytes
         ),
     };

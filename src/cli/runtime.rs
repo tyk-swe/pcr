@@ -10,6 +10,21 @@ struct PreparedRouteRequest {
     policy: TrafficPolicy,
 }
 
+static PROCESS_OPERATION: std::sync::OnceLock<crate::operation::Context> =
+    std::sync::OnceLock::new();
+
+fn current_operation() -> &'static crate::operation::Context {
+    #[cfg(test)]
+    return PROCESS_OPERATION.get_or_init(|| {
+        crate::operation::Context::new(crate::operation::Id::from_bytes([0; 16]))
+    });
+
+    #[cfg(not(test))]
+    PROCESS_OPERATION
+        .get()
+        .expect("CLI operation context is installed before command dispatch")
+}
+
 #[derive(Debug)]
 enum DeferredInterface {
     Pending(String),
@@ -44,18 +59,26 @@ pub(crate) fn run_entrypoint() -> ExitCode {
             let code = if error.use_stderr() { 2 } else { 0 };
             if code != 0
                 && let Some(output) = machine_format_from_env() {
+                    let context = best_effort_envelope_context(None);
+                    let _ = install_process_context(context.clone());
                     let message = error.to_string();
                     let error = CliError::new(code, message);
                     let emitted = match output {
-                        OutputFormat::Json => emit_json(&AggregateErrorOutput::error(
+                        OutputFormat::Json => emit_json(
+                            &AggregateErrorOutput::error(command_from_env(), error.output_error())
+                                .with_context(&context),
+                        ),
+                        OutputFormat::Ndjson => emit_json_compact(&StreamRecord::<()>::start(
                             command_from_env(),
-                            error.output_error(),
-                        )),
-                        OutputFormat::Ndjson => emit_json_compact(&StreamErrorRecord::error(
-                            command_from_env(),
-                            0,
-                            error.output_error(),
-                        )),
+                            &context,
+                        ))
+                        .and_then(|()| {
+                            emit_json_compact(&StreamErrorRecord::error(
+                                command_from_env(),
+                                0,
+                                error.output_error(),
+                            ))
+                        }),
                         _ => unreachable!("machine_format_from_env returns structured formats"),
                     };
                     return match emitted {
@@ -82,20 +105,99 @@ pub(crate) fn run_entrypoint() -> ExitCode {
     };
     let output = OutputFormat::from(cli.output);
     let command = cli.command.name();
+    let operation_id = match cli.operation_id {
+        Some(operation_id) => operation_id,
+        None => match crate::operation::Id::generate() {
+            Ok(operation_id) => operation_id,
+            Err(source) => {
+                let error = CliError::classified(source);
+                let context = best_effort_envelope_context(Some(crate::operation::Id::default()));
+                let _ = install_process_context(context.clone());
+                let emitted = match output {
+                    OutputFormat::Json => emit_json(
+                        &AggregateErrorOutput::error(Some(command), error.output_error())
+                            .with_context(&context),
+                    ),
+                    OutputFormat::Ndjson => emit_json_compact(&StreamRecord::<()>::start(
+                        Some(command),
+                        &context,
+                    ))
+                    .and_then(|()| {
+                        emit_json_compact(&StreamErrorRecord::error(
+                            Some(command),
+                            0,
+                            error.output_error(),
+                        ))
+                    }),
+                    _ => emit_stderr_error(&error.message),
+                };
+                return match emitted {
+                    Ok(()) => exit_code(error.exit_code),
+                    Err(write_error) => exit_code(write_error.exit_code),
+                };
+            }
+        },
+    };
+    let warnings = operator_warnings(&cli.command);
+    let operation = crate::operation::Context::new(operation_id);
+    if PROCESS_OPERATION.set(operation).is_err() {
+        let _ = emit_stderr_error("operation context was already initialized");
+        return exit_code(70);
+    }
+    let context = best_effort_envelope_context(Some(operation_id)).with_diagnostics(warnings.clone());
+    if install_process_context(context.clone()).is_err() {
+        let _ = emit_stderr_error("structured output context was already initialized");
+        return exit_code(70);
+    }
+    let cancellation = current_operation().cancellation().clone();
+    if let Err(error) = install_signal_handlers(cancellation.clone()) {
+        let _ = emit_stderr_error(&error.message);
+        return exit_code(error.exit_code);
+    }
+    if output == OutputFormat::Ndjson
+        && let Err(error) = emit_json_compact(&StreamRecord::<()>::start(Some(command), &context))
+    {
+        let _ = emit_stderr_error(&error.message);
+        return exit_code(error.exit_code);
+    }
+    if !matches!(output, OutputFormat::Json | OutputFormat::Ndjson) {
+        for warning in &warnings {
+            if let Err(error) = emit_stderr_message(&format!(
+                "warning: {}: {}",
+                warning.code, warning.message
+            )) {
+                return exit_code(error.exit_code);
+            }
+        }
+    }
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            let emitted = match output {
-                OutputFormat::Json => emit_json(&AggregateErrorOutput::error(
-                    Some(command),
-                    error.output_error(),
-                )),
-                OutputFormat::Ndjson => emit_json_compact(&StreamErrorRecord::error(
+            let cancelled = cancellation.reason();
+            let cleanup_failed = error.classification.category == crate::error::Category::Cleanup
+                && error.classification.code != "operation.cancelled";
+            let emitted = match (output, cancelled.filter(|_| !cleanup_failed)) {
+                (OutputFormat::Json, Some(_)) => emit_json(
+                    &AggregateErrorOutput::cancelled(Some(command), error.output_error())
+                        .with_context(&context),
+                ),
+                (OutputFormat::Ndjson, Some(_)) => {
+                    emit_json_compact(&StreamErrorRecord::cancelled(
+                        Some(command),
+                        error.sequence.unwrap_or(0),
+                        error.output_error(),
+                    ))
+                }
+                (OutputFormat::Json, None) => emit_json(
+                    &AggregateErrorOutput::error(Some(command), error.output_error())
+                        .with_context(&context),
+                ),
+                (OutputFormat::Ndjson, None) => emit_json_compact(&StreamErrorRecord::error(
                     Some(command),
                     error.sequence.unwrap_or(0),
                     error.output_error(),
                 )),
-                _ => emit_stderr_error(&error.message),
+                (_, _) => emit_stderr_error(&error.message),
             };
             if let Err(write_error) = emitted {
                 if matches!(output, OutputFormat::Json | OutputFormat::Ndjson) {
@@ -103,9 +205,106 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                 }
                 return exit_code(write_error.exit_code);
             }
-            exit_code(error.exit_code)
+            exit_code(
+                cancelled
+                    .filter(|_| !cleanup_failed)
+                    .map_or(error.exit_code, crate::operation::CancellationReason::exit_code),
+            )
         }
     }
+}
+
+fn operator_warnings(command: &Command) -> Vec<crate::packet::internal::Diagnostic> {
+    let mut warnings = Vec::new();
+    let capture = match command {
+        Command::Capture(arguments) => Some(&arguments.limits),
+        Command::Exchange(arguments) => Some(&arguments.limits),
+        Command::Scan(arguments) => Some(&arguments.limits),
+        Command::Traceroute(arguments) => Some(&arguments.limits),
+        Command::Dns(arguments) => Some(&arguments.limits),
+        Command::Fuzz(arguments) if arguments.live => Some(&arguments.limits),
+        _ => None,
+    };
+    if capture.is_some_and(|limits| {
+        matches!(limits.capture_mode, CliCaptureMode::Promiscuous)
+            && !limits.auto_filter
+            && limits.capture_filter.is_none()
+    }) {
+        warnings.push(crate::packet::internal::Diagnostic::warning(
+            "capture.promiscuous_unfiltered",
+            "promiscuous capture is active without a BPF filter; unrelated interface traffic may be observed",
+        ));
+    }
+
+    let unthrottled = match command {
+        Command::Scan(arguments) => {
+            arguments.rate.is_none()
+                && usize::try_from(arguments.attempts)
+                    .ok()
+                    .and_then(|attempts| attempts.checked_mul(arguments.ports.len().max(1)))
+                    .is_some_and(|count| count > 1)
+        }
+        Command::Traceroute(arguments) => {
+            arguments.rate.is_none()
+                && u32::from(arguments.max_hops.saturating_sub(arguments.first_hop))
+                    .saturating_add(1)
+                    .saturating_mul(arguments.attempts)
+                    > 1
+        }
+        Command::Dns(arguments) => arguments.rate.is_none() && arguments.attempts > 1,
+        Command::Fuzz(arguments) => arguments.live && arguments.rate.is_none() && arguments.cases > 1,
+        _ => false,
+    };
+    if unthrottled {
+        warnings.push(crate::packet::internal::Diagnostic::warning(
+            "traffic.unthrottled",
+            "no active rate ceiling is configured; packets may be sent as quickly as bounded workflow batches complete",
+        ));
+    }
+    warnings
+}
+
+fn best_effort_envelope_context(operation_id: Option<crate::operation::Id>) -> EnvelopeContext {
+    EnvelopeContext::new(
+        operation_id.unwrap_or_default(),
+        serde_json::json!({
+            "arguments": std::env::args().skip(1).collect::<Vec<_>>()
+        }),
+    )
+}
+
+#[cfg(not(windows))]
+fn install_signal_handlers(
+    cancellation: crate::operation::Cancellation,
+) -> Result<(), CliError> {
+    use signal_hook::consts::signal::{SIGINT, SIGTERM};
+
+    let mut signals = signal_hook::iterator::Signals::new([SIGINT, SIGTERM])
+        .map_err(|source| CliError::new(70, format!("install signal handlers failed: {source}")))?;
+    std::thread::Builder::new()
+        .name("packetcraftr-signals".to_owned())
+        .spawn(move || {
+            if let Some(signal) = signals.forever().next() {
+                let reason = if signal == SIGTERM {
+                    crate::operation::CancellationReason::Terminate
+                } else {
+                    crate::operation::CancellationReason::Interrupt
+                };
+                cancellation.cancel(reason);
+            }
+        })
+        .map(|_| ())
+        .map_err(|source| CliError::new(70, format!("start signal handler failed: {source}")))
+}
+
+#[cfg(windows)]
+fn install_signal_handlers(
+    cancellation: crate::operation::Cancellation,
+) -> Result<(), CliError> {
+    ctrlc::set_handler(move || {
+        cancellation.cancel(crate::operation::CancellationReason::Interrupt);
+    })
+    .map_err(|source| CliError::new(70, format!("install signal handler failed: {source}")))
 }
 
 impl Command {
@@ -125,6 +324,7 @@ impl Command {
             Self::Dns(_) => CommandName::Dns,
             Self::Fuzz(_) => CommandName::Fuzz,
             Self::Routes => CommandName::Routes,
+            Self::Doctor(_) => CommandName::Doctor,
         }
     }
 }
@@ -150,6 +350,7 @@ fn run(cli: Cli) -> Result<(), CliError> {
         Command::Dns(arguments) => run_dns(arguments, output),
         Command::Fuzz(arguments) => run_fuzz(arguments, output),
         Command::Routes => run_routes(output),
+        Command::Doctor(arguments) => run_doctor(arguments, output),
     }
 }
 

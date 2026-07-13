@@ -15,10 +15,11 @@ use thiserror::Error;
 use crate::capture::Frame;
 use crate::error::{Category, Classification, Classified, Kind};
 use crate::net::{
-    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo, IoSendReport,
-    LiveIoError, MAX_CAPTURE_TIMEOUT, MaterializedRoute, NeighborError, NeighborResolver, PacketIo,
-    PlanError, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
+    CaptureOptions, CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics,
+    CapturedFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo,
+    IoSendReport, LiveIoError, MAX_CAPTURE_TIMEOUT, MaterializedRoute, NeighborError,
+    NeighborResolver, PacketIo, PlanError, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider,
+    TransmissionFrame,
 };
 use crate::packet::internal::{
     BuildContext, BuildError, BuildOptions, Builder, BuiltPacket, DEFAULT_MAX_TEMPLATE_PACKETS,

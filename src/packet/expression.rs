@@ -81,12 +81,11 @@ pub fn parse_packet_expression(
             maximum: MAX_EXPRESSION_NESTING,
         });
     }
-    let segments = split_top_level(input, '/')?;
-    if segments.len() > options.max_layers {
-        return Err(ExpressionError::LayerLimit {
-            limit: options.max_layers,
-        });
-    }
+    // Enforce the layer ceiling while scanning instead of first collecting
+    // every slash-delimited slice. Otherwise a delimiter-heavy expression
+    // can amplify a small byte budget into a much larger temporary vector
+    // even when the caller allows only a handful of layers.
+    let segments = split_top_level_bounded(input, '/', Some(options.max_layers))?;
     let mut packet = Packet::with_capacity(segments.len());
     for (layer_index, segment) in segments.into_iter().enumerate() {
         let (name, fields) = parse_layer(segment, layer_index, options.max_nesting)?;
@@ -317,6 +316,14 @@ fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, ExpressionError
 }
 
 fn split_top_level(input: &str, delimiter: char) -> Result<Vec<&str>, ExpressionError> {
+    split_top_level_bounded(input, delimiter, None)
+}
+
+fn split_top_level_bounded(
+    input: &str,
+    delimiter: char,
+    maximum_parts: Option<usize>,
+) -> Result<Vec<&str>, ExpressionError> {
     let mut result = Vec::new();
     let mut start = 0usize;
     let mut quoted = false;
@@ -360,6 +367,11 @@ fn split_top_level(input: &str, delimiter: char) -> Result<Vec<&str>, Expression
                     })?;
             }
             _ if character == delimiter && paren_depth == 0 && list_depth == 0 => {
+                if let Some(maximum) =
+                    maximum_parts.filter(|maximum| result.len() >= maximum.saturating_sub(1))
+                {
+                    return Err(ExpressionError::LayerLimit { limit: maximum });
+                }
                 result.push(&input[start..offset]);
                 start = offset + character.len_utf8();
             }
@@ -371,6 +383,9 @@ fn split_top_level(input: &str, delimiter: char) -> Result<Vec<&str>, Expression
             offset: input.len(),
             message: "unterminated quote or delimiter".to_owned(),
         });
+    }
+    if let Some(maximum) = maximum_parts.filter(|maximum| result.len() >= *maximum) {
+        return Err(ExpressionError::LayerLimit { limit: maximum });
     }
     result.push(&input[start..]);
     Ok(result)
@@ -512,5 +527,31 @@ mod tests {
                 maximum: MAX_EXPRESSION_NESTING,
             } if value == MAX_EXPRESSION_NESTING + 1
         ));
+    }
+
+    #[test]
+    fn layer_limit_is_enforced_during_expression_splitting() {
+        let registry = ProtocolRegistry::builder().build().unwrap();
+        let error = parse_packet_expression(
+            "raw()/raw()/raw()",
+            &registry,
+            ExpressionOptions {
+                max_layers: 1,
+                ..ExpressionOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, ExpressionError::LayerLimit { limit: 1 }));
+
+        let error = parse_packet_expression(
+            "raw()",
+            &registry,
+            ExpressionOptions {
+                max_layers: 0,
+                ..ExpressionOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, ExpressionError::LayerLimit { limit: 0 }));
     }
 }

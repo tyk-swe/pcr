@@ -262,17 +262,46 @@ mod tests {
         assert!(!sent_traceroute_probe_matches(&batch.probes[0], &layer2));
         execution.stats.bytes = 0;
         assert!(matches!(
-            validate_execution(&batch, &execution),
+            validate_execution(&batch, &execution, operation.limits),
             Err(TracerouteError::InvalidEvidence { sequence: 0, .. })
         ));
         execution.stats.bytes = execution.sent_evidence[0].bytes.len() as u64;
         execution.sent[0].get_mut::<Ipv4>().unwrap().ttl += 1;
 
-        let error = validate_execution(&batch, &execution).unwrap_err();
+        let error = validate_execution(&batch, &execution, operation.limits).unwrap_err();
 
         assert!(matches!(
             error,
             TracerouteError::InvalidEvidence { sequence: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn executor_capture_evidence_must_stay_within_declared_traceroute_limits() {
+        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+        let operation = request(Target::Address(destination));
+        let batch = build_batches(&operation, destination).unwrap().remove(0);
+        let mut execution = UndecodedExecutor.execute(&batch).unwrap();
+        execution.undecoded.push(frame_at(12));
+        let limits = TracerouteLimits {
+            max_evidence_frames: 2,
+            ..operation.limits
+        };
+        assert!(matches!(
+            validate_execution(&batch, &execution, limits),
+            Err(TracerouteError::InvalidEvidence { sequence: 0, .. })
+        ));
+
+        execution.undecoded = vec![
+            Frame::new(UNIX_EPOCH, crate::capture::LinkType::RAW, vec![0x45, 0]).unwrap(),
+        ];
+        let limits = TracerouteLimits {
+            max_evidence_bytes: 1,
+            ..operation.limits
+        };
+        assert!(matches!(
+            validate_execution(&batch, &execution, limits),
+            Err(TracerouteError::InvalidEvidence { sequence: 0, .. })
         ));
     }
 

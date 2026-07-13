@@ -224,8 +224,8 @@ fn resolve_interface<I: InterfaceProvider>(
     let Some(selector) = selector else {
         return Ok(None);
     };
+    let requested_index = validate_interface_selector("route", Some(&selector))?;
     let interfaces = provider.interfaces().map_err(CliError::classified)?;
-    let requested_index = selector.parse::<u32>().ok();
     interfaces
         .into_iter()
         .find(|interface| {
@@ -241,4 +241,38 @@ fn resolve_interface<I: InterfaceProvider>(
                 message: "no interface matches the requested name or index".to_owned(),
             })
         })
+}
+
+/// Validates an optional interface selector without consulting a platform
+/// provider. Decimal selectors are always indexes: zero and values outside
+/// the public `u32` index domain must not fall back to interface-name lookup.
+fn validate_interface_selector(
+    command: &str,
+    selector: Option<&str>,
+) -> Result<Option<u32>, CliError> {
+    let Some(selector) = selector else {
+        return Ok(None);
+    };
+    if selector.is_empty() {
+        return Err(CliError::new(
+            2,
+            format!("{command} interface cannot be empty"),
+        ));
+    }
+    if !selector.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Ok(None);
+    }
+    let index = selector.parse::<u32>().map_err(|_| {
+        CliError::new(
+            2,
+            format!("{command} interface index must be within 1..={}", u32::MAX),
+        )
+    })?;
+    if index == 0 {
+        return Err(CliError::new(
+            2,
+            format!("{command} interface index must be non-zero"),
+        ));
+    }
+    Ok(Some(index))
 }

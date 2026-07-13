@@ -568,17 +568,51 @@ mod tests {
         assert!(!sent_scan_probe_matches(&batch.probes[0], &layer2));
         execution.stats.bytes = 0;
         assert!(matches!(
-            validate_exchange_evidence(&batch, &execution),
+            validate_exchange_evidence(&batch, &execution, operation.limits),
             Err(ScanError::InvalidEvidence { sequence: 0, .. })
         ));
         execution.stats.bytes = execution.sent_evidence[0].bytes.len() as u64;
         execution.sent[0].get_mut::<Ipv4>().unwrap().destination = Ipv4Addr::new(10, 0, 0, 99);
 
-        let error = validate_exchange_evidence(&batch, &execution).unwrap_err();
+        let error =
+            validate_exchange_evidence(&batch, &execution, operation.limits).unwrap_err();
 
         assert!(matches!(
             error,
             ScanError::InvalidEvidence { sequence: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn executor_capture_evidence_must_stay_within_declared_scan_limits() {
+        let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        let batch = build_batches(&operation, &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))], &[80])
+            .unwrap()
+            .remove(0);
+        let mut execution = TimeoutExecutor::new().execute(&batch).unwrap();
+        execution.undecoded = vec![
+            Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0xff]).unwrap(),
+            Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0xfe]).unwrap(),
+        ];
+        let limits = ScanLimits {
+            max_evidence_frames: 1,
+            ..operation.limits
+        };
+        assert!(matches!(
+            validate_exchange_evidence(&batch, &execution, limits),
+            Err(ScanError::InvalidEvidence { sequence: 0, .. })
+        ));
+
+        execution.undecoded = vec![
+            Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0xff, 0xfe]).unwrap(),
+        ];
+        let limits = ScanLimits {
+            max_evidence_bytes: 1,
+            ..operation.limits
+        };
+        assert!(matches!(
+            validate_exchange_evidence(&batch, &execution, limits),
+            Err(ScanError::InvalidEvidence { sequence: 0, .. })
         ));
     }
 

@@ -140,6 +140,13 @@ fn timestamp_to_ticks(
             format: Format::PcapNg,
         });
     }
+    // Zero ticks are representable independently of the resolution's
+    // denominator. This also keeps writing symmetric with
+    // `timestamp_from_ticks`, which accepts zero for decimal exponents whose
+    // denominator is too large for u128.
+    if seconds == 0 && nanoseconds == 0 {
+        return Ok(0);
+    }
     let denominator = match resolution {
         TimestampResolution::Decimal(exponent) => 10_u128.checked_pow(u32::from(exponent)),
         TimestampResolution::Binary(exponent) => 1_u128.checked_shl(u32::from(exponent)),

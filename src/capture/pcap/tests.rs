@@ -634,6 +634,26 @@ mod tests {
     }
 
     #[test]
+    fn zero_tick_timestamp_round_trips_at_an_unbounded_decimal_denominator() {
+        let mut writer = Writer::pcapng(Vec::new()).unwrap();
+        writer
+            .add_interface_description(Interface {
+                link_type: LinkType::ETHERNET,
+                snap_len: 64,
+                timestamp_resolution: TimestampResolution::Decimal(127),
+                timestamp_offset: 0,
+            })
+            .unwrap();
+        let mut original = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]);
+        original.interface = Some(0);
+        writer.write_frame(&original).unwrap();
+
+        let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+        assert_eq!(reader.next_frame().unwrap(), Some(original));
+        assert_eq!(reader.next_frame().unwrap(), None);
+    }
+
+    #[test]
     fn pcapng_block_limit_is_checked_before_allocation() {
         let writer = Writer::pcapng(Vec::new()).unwrap();
         let mut bytes = writer.into_inner();
@@ -675,6 +695,17 @@ mod tests {
         let mut interface_writer = Writer::pcapng(Vec::new()).unwrap();
         interface_writer.add_interface(LinkType::ETHERNET).unwrap();
         let interface_bytes = interface_writer.into_inner();
+
+        let mut bad_interface_reserved = interface_bytes.clone();
+        bad_interface_reserved[38] = 1;
+        let mut reader = Reader::new(Cursor::new(bad_interface_reserved)).unwrap();
+        assert!(matches!(
+            reader.next_frame(),
+            Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "interface description reserved field is non-zero",
+            })
+        ));
 
         let mut bad_option_padding = interface_bytes.clone();
         bad_option_padding[49] = 1;
@@ -718,6 +749,20 @@ mod tests {
             Err(Error::InvalidData {
                 format: Format::PcapNg,
                 reason: "packet data padding is non-zero",
+            })
+        ));
+    }
+
+    #[test]
+    fn pcapng_rejects_impossible_negative_section_length() {
+        let mut bytes = Writer::pcapng(Vec::new()).unwrap().into_inner();
+        bytes[16..24].copy_from_slice(&(-2_i64).to_le_bytes());
+
+        assert!(matches!(
+            Reader::new(Cursor::new(bytes)),
+            Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "section length is negative but is not the unknown-length sentinel",
             })
         ));
     }

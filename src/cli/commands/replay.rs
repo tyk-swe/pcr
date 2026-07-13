@@ -30,13 +30,7 @@ fn replay_timing(arguments: &ReplayArgs) -> Result<ReplayTiming, CliError> {
 }
 
 fn requested_replay_interface(selector: &str) -> Result<InterfaceId, CliError> {
-    if selector.is_empty() {
-        return Err(CliError::new(2, "replay interface cannot be empty"));
-    }
-    let index = selector.parse::<u32>().unwrap_or(0);
-    if selector.bytes().all(|byte| byte.is_ascii_digit()) && index == 0 {
-        return Err(CliError::new(2, "replay interface index must be non-zero"));
-    }
+    let index = validate_interface_selector("replay", Some(selector))?.unwrap_or(0);
     Ok(InterfaceId {
         name: selector.to_owned(),
         index,

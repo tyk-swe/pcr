@@ -635,12 +635,24 @@ struct SrhRoute {
 }
 
 fn srh_route(packet: &Packet) -> Result<Option<SrhRoute>, PlanError> {
-    let Some(layer) = packet.iter().find(|layer| {
-        if !matches!(layer.protocol_id().as_str(), "ipv6_srh" | "srh") {
-            return false;
+    // Only an SRH in the outer IPv6 extension chain affects the native route.
+    // An SRH following a second IP header belongs to an encapsulated packet
+    // and must not redirect the outer transmission.
+    let mut outer_ipv6 = false;
+    let mut layer = None;
+    for candidate in packet.iter() {
+        match candidate.protocol_id().as_str() {
+            "ipv4" if !outer_ipv6 => return Ok(None),
+            "ipv6" if !outer_ipv6 => outer_ipv6 = true,
+            "ipv4" | "ipv6" if outer_ipv6 => break,
+            "ipv6_srh" | "srh" if outer_ipv6 => {
+                layer = Some(candidate);
+                break;
+            }
+            _ => {}
         }
-        true
-    }) else {
+    }
+    let Some(layer) = layer else {
         return Ok(None);
     };
     let Some(FieldValue::List(values)) = layer.field("segments") else {

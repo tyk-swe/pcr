@@ -145,7 +145,7 @@ where
         let exchange = executor
             .execute(batch)
             .map_err(|source| ScanError::Execution { sequence, source })?;
-        validate_exchange_evidence(batch, &exchange)?;
+        validate_exchange_evidence(batch, &exchange, request.limits)?;
         add_stats(&mut stats, &exchange.stats, sequence)?;
         process_batch(
             batch,
@@ -335,6 +335,7 @@ fn icmp_identity(sequence: u64) -> Bytes {
 fn validate_exchange_evidence(
     batch: &ScanBatch,
     exchange: &ScanBatchExecution,
+    limits: ScanLimits,
 ) -> Result<(), ScanError> {
     let sequence = batch.probes[0].sequence;
     if exchange.sent.len() != batch.probes.len()
@@ -358,6 +359,49 @@ fn validate_exchange_evidence(
         return Err(ScanError::InvalidEvidence {
             sequence,
             message: "matched response references a request outside the batch".to_owned(),
+        });
+    }
+    let captured_frames = exchange
+        .responses
+        .len()
+        .checked_add(exchange.unsolicited.len())
+        .and_then(|count| count.checked_add(exchange.undecoded.len()))
+        .ok_or_else(|| ScanError::InvalidEvidence {
+            sequence,
+            message: "executor capture frame-count accounting overflowed".to_owned(),
+        })?;
+    if captured_frames > limits.max_evidence_frames {
+        return Err(ScanError::InvalidEvidence {
+            sequence,
+            message: format!(
+                "executor returned {captured_frames} captured frames beyond max_evidence_frames={}",
+                limits.max_evidence_frames
+            ),
+        });
+    }
+    let captured_bytes = exchange
+        .responses
+        .iter()
+        .map(|response| response.response.frame.bytes.len())
+        .chain(
+            exchange
+                .unsolicited
+                .iter()
+                .map(|response| response.frame.bytes.len()),
+        )
+        .chain(exchange.undecoded.iter().map(|frame| frame.bytes.len()))
+        .try_fold(0usize, |total, length| total.checked_add(length))
+        .ok_or_else(|| ScanError::InvalidEvidence {
+            sequence,
+            message: "executor capture byte accounting overflowed".to_owned(),
+        })?;
+    if captured_bytes > limits.max_evidence_bytes {
+        return Err(ScanError::InvalidEvidence {
+            sequence,
+            message: format!(
+                "executor returned {captured_bytes} captured bytes beyond max_evidence_bytes={}",
+                limits.max_evidence_bytes
+            ),
         });
     }
     for (probe, (sent, evidence)) in batch

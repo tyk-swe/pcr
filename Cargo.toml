@@ -9,6 +9,12 @@ publish = false
 
 [lints.rust]
 unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+
+[profile.release]
+# Packet offsets, lengths, and accounting must fail closed in optimized builds
+# just as they do in development and CI profiles.
+overflow-checks = true
 
 [features]
 default = ["live"]

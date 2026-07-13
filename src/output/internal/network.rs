@@ -82,9 +82,17 @@ pub struct InterfacesCommandResult {
 
 impl InterfacesCommandResult {
     pub fn new(interfaces: Vec<InterfaceInfo>) -> Self {
-        Self {
-            interfaces: interfaces.into_iter().map(InterfaceOutput::from).collect(),
+        let mut interfaces = interfaces
+            .into_iter()
+            .map(InterfaceOutput::from)
+            .collect::<Vec<_>>();
+        for interface in &mut interfaces {
+            interface.addresses.sort();
         }
+        interfaces.sort_by(|left, right| {
+            (left.index, left.name.as_str()).cmp(&(right.index, right.name.as_str()))
+        });
+        Self { interfaces }
     }
 }
 

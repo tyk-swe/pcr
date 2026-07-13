@@ -222,11 +222,13 @@ impl<T> AggregateOutput<T> {
         }
     }
 
+    #[must_use]
     pub fn with_stats(mut self, stats: OperationStats) -> Self {
         self.stats = Some(stats);
         self
     }
 
+    #[must_use]
     pub fn with_diagnostics(mut self, diagnostics: Vec<Diagnostic>) -> Self {
         self.diagnostics = diagnostics.into_iter().map(Into::into).collect();
         self
@@ -280,11 +282,13 @@ impl<T> StreamRecord<T> {
         }
     }
 
+    #[must_use]
     pub fn with_stats(mut self, stats: OperationStats) -> Self {
         self.stats = Some(stats);
         self
     }
 
+    #[must_use]
     pub fn with_diagnostics(mut self, diagnostics: Vec<Diagnostic>) -> Self {
         self.diagnostics = diagnostics.into_iter().map(Into::into).collect();
         self

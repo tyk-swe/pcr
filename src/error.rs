@@ -79,6 +79,7 @@ impl Classification {
 
     /// Overrides the default semantic category while preserving the stable
     /// machine code and CLI exit-code family.
+    #[must_use]
     pub const fn with_category(mut self, category: Category) -> Self {
         self.category = category;
         self

@@ -140,19 +140,17 @@ fn ethernet_prefix(
 fn match_neighbor_response(
     request: &NeighborRequest,
     frame: &Frame,
-) -> Result<Option<MacAddress>, NeighborError> {
+) -> Option<MacAddress> {
     if frame.link_type != LinkType::ETHERNET
         || frame
             .interface
             .is_some_and(|index| index != request.interface.index)
     {
-        return Ok(None);
+        return None;
     }
-    let Some(ethernet) = parse_ethernet(&frame.bytes)? else {
-        return Ok(None);
-    };
+    let ethernet = parse_ethernet(&frame.bytes)?;
     if ethernet.destination != request.interface_mac || ethernet.vlan_tags != request.vlan_tags {
-        return Ok(None);
+        return None;
     }
     match (
         request.interface_source,
@@ -165,7 +163,7 @@ fn match_neighbor_response(
         (IpAddr::V6(source), IpAddr::V6(target), ETHERTYPE_IPV6) => {
             match_neighbor_advertisement(source, target, ethernet)
         }
-        _ => Ok(None),
+        _ => None,
     }
 }
 
@@ -177,9 +175,9 @@ struct EthernetView<'a> {
     payload: &'a [u8],
 }
 
-fn parse_ethernet(bytes: &[u8]) -> Result<Option<EthernetView<'_>>, NeighborError> {
+fn parse_ethernet(bytes: &[u8]) -> Option<EthernetView<'_>> {
     if bytes.len() < ETHERNET_HEADER_LENGTH {
-        return Ok(None);
+        return None;
     }
     let mut destination = [0; 6];
     destination.copy_from_slice(&bytes[..6]);
@@ -190,11 +188,9 @@ fn parse_ethernet(bytes: &[u8]) -> Result<Option<EthernetView<'_>>, NeighborErro
     let mut vlan_tags = Vec::new();
     while matches!(ether_type, ETHERTYPE_VLAN | ETHERTYPE_SERVICE_VLAN) {
         if vlan_tags.len() >= MAX_NEIGHBOR_VLAN_TAGS {
-            return Ok(None);
+            return None;
         }
-        let Some(header) = bytes.get(offset..offset + VLAN_HEADER_LENGTH) else {
-            return Ok(None);
-        };
+        let header = bytes.get(offset..offset + VLAN_HEADER_LENGTH)?;
         let tci = u16::from_be_bytes([header[0], header[1]]);
         vlan_tags.push(NeighborVlanTag {
             kind: if ether_type == ETHERTYPE_SERVICE_VLAN {
@@ -209,13 +205,13 @@ fn parse_ethernet(bytes: &[u8]) -> Result<Option<EthernetView<'_>>, NeighborErro
         ether_type = u16::from_be_bytes([header[2], header[3]]);
         offset += VLAN_HEADER_LENGTH;
     }
-    Ok(Some(EthernetView {
+    Some(EthernetView {
         destination: MacAddress(destination),
         source: MacAddress(source),
         vlan_tags,
         ether_type,
         payload: &bytes[offset..],
-    }))
+    })
 }
 
 fn match_arp_response(
@@ -223,12 +219,10 @@ fn match_arp_response(
     source: Ipv4Addr,
     target: Ipv4Addr,
     ethernet: EthernetView<'_>,
-) -> Result<Option<MacAddress>, NeighborError> {
-    let Some(arp) = ethernet.payload.get(..ARP_PAYLOAD_LENGTH) else {
-        return Ok(None);
-    };
+) -> Option<MacAddress> {
+    let arp = ethernet.payload.get(..ARP_PAYLOAD_LENGTH)?;
     if arp[..8] != [0, 1, 0x08, 0, 6, 4, 0, 2] {
-        return Ok(None);
+        return None;
     }
     let mut sender_mac = [0; 6];
     sender_mac.copy_from_slice(&arp[8..14]);
@@ -243,34 +237,32 @@ fn match_arp_response(
         || ethernet.source != sender_mac
         || !is_unicast_mac(sender_mac)
     {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(sender_mac))
+    Some(sender_mac)
 }
 
 fn match_neighbor_advertisement(
     interface_source: Ipv6Addr,
     target: Ipv6Addr,
     ethernet: EthernetView<'_>,
-) -> Result<Option<MacAddress>, NeighborError> {
+) -> Option<MacAddress> {
     if ethernet.payload.len() < IPV6_HEADER_LENGTH {
-        return Ok(None);
+        return None;
     }
     let ipv6 = ethernet.payload;
     if ipv6[0] >> 4 != 6 || ipv6[6] != IPV6_NEXT_HEADER_ICMP || ipv6[7] != 255 {
-        return Ok(None);
+        return None;
     }
     let payload_length = usize::from(u16::from_be_bytes([ipv6[4], ipv6[5]]));
-    let Some(icmp) = ipv6.get(IPV6_HEADER_LENGTH..IPV6_HEADER_LENGTH + payload_length) else {
-        return Ok(None);
-    };
+    let icmp = ipv6.get(IPV6_HEADER_LENGTH..IPV6_HEADER_LENGTH + payload_length)?;
     if icmp.len() < 24
         || icmp[0] != NEIGHBOR_ADVERTISEMENT_TYPE
         || icmp[1] != 0
         || u32::from_be_bytes([icmp[4], icmp[5], icmp[6], icmp[7]]) & SOLICITED_ADVERTISEMENT_FLAG
             == 0
     {
-        return Ok(None);
+        return None;
     }
     let source = ipv6_address(&ipv6[8..24]);
     let destination = ipv6_address(&ipv6[24..40]);
@@ -282,43 +274,37 @@ fn match_neighbor_advertisement(
         || advertised_target.is_multicast()
         || icmpv6_checksum(source, destination, icmp) != 0
     {
-        return Ok(None);
+        return None;
     }
 
     let mut option_offset = 24;
     let mut target_mac = None;
     while option_offset < icmp.len() {
-        let Some(header) = icmp.get(option_offset..option_offset + 2) else {
-            return Ok(None);
-        };
+        let header = icmp.get(option_offset..option_offset + 2)?;
         let option_length = usize::from(header[1]) * 8;
         if option_length == 0 {
-            return Ok(None);
+            return None;
         }
-        let Some(option) = icmp.get(option_offset..option_offset + option_length) else {
-            return Ok(None);
-        };
+        let option = icmp.get(option_offset..option_offset + option_length)?;
         if header[0] == TARGET_LINK_LAYER_OPTION {
             if option_length != 8 {
-                return Ok(None);
+                return None;
             }
             let mut mac = [0; 6];
             mac.copy_from_slice(&option[2..8]);
             let mac = MacAddress(mac);
             if target_mac.is_some_and(|existing| existing != mac) {
-                return Ok(None);
+                return None;
             }
             target_mac = Some(mac);
         }
         option_offset += option_length;
     }
-    let Some(target_mac) = target_mac else {
-        return Ok(None);
-    };
+    let target_mac = target_mac?;
     if target_mac != ethernet.source || !is_unicast_mac(target_mac) {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(target_mac))
+    Some(target_mac)
 }
 
 fn solicited_node_multicast(target: Ipv6Addr) -> Ipv6Addr {

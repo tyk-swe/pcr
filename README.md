@@ -9,7 +9,8 @@ own or are authorized to test. One Cargo package provides both the
 
 ## Install
 
-Rust 1.96 is required. The portable build has no native networking dependency:
+Rust 1.96 is the minimum supported version. The repository pins Rust 1.97 for
+development. The portable build has no native networking dependency:
 
 ```console
 cargo install --locked --path . --no-default-features
@@ -70,7 +71,7 @@ output contracts.
 Core development checks are:
 
 ```console
-cargo fmt -- --check
+cargo fmt --all -- --check
 cargo check --locked --all-targets --no-default-features
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -80,7 +81,7 @@ cargo test --locked --all-features
 CI also enforces the dependency policy with pinned tooling:
 
 ```console
-cargo install cargo-deny --locked --version 0.19.7
+cargo install cargo-deny --locked --version 0.20.2
 cargo deny check
 ```
 

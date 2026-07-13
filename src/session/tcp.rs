@@ -26,6 +26,7 @@ pub struct FlowKey {
 }
 
 impl FlowKey {
+    #[must_use]
     pub fn reverse(&self) -> Self {
         Self {
             source: self.destination,

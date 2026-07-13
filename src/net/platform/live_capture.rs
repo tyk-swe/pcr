@@ -266,6 +266,7 @@ impl SharedCapture {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.ready = true;
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -278,6 +279,7 @@ impl SharedCapture {
             state.error = Some(error);
         }
         state.closed = true;
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -287,6 +289,7 @@ impl SharedCapture {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         state.closed = true;
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -368,6 +371,7 @@ impl SharedCapture {
             "received bytes",
         )?;
         state.queue.push_back(captured);
+        drop(state);
         self.changed.notify_one();
         Ok(false)
     }

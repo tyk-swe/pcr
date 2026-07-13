@@ -139,9 +139,16 @@ pub mod exchange {
 // The implementation still uses its established vocabulary internally. These
 // aliases are crate-private so downstream users see only the canonical modules
 // above while the native implementation remains a mechanical, reviewable move.
-#[cfg(all(test, feature = "native-layer2"))]
+#[cfg(all(
+    test,
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(crate) use provider_impl::CaptureEvidenceCompleteness;
-#[cfg(feature = "native-layer3")]
+#[cfg(all(
+    feature = "native-layer3",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(crate) use provider_impl::Layer3Frame;
 pub(crate) use provider_impl::{
     CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
@@ -150,7 +157,14 @@ pub(crate) use provider_impl::{
     MAX_CAPTURE_TIMEOUT, PacketIo, SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io,
     SystemLayer3Io, TransmissionFrame,
 };
-#[cfg(any(feature = "native-route", all(feature = "live", windows), test))]
+#[cfg(any(
+    all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos", windows)
+    ),
+    all(feature = "live", windows),
+    test
+))]
 pub(crate) use provider_impl::{InterfaceAddress, InterfaceFlags};
 pub(crate) use route_impl::{
     DestinationScope, InterfaceId, LinkCapability, LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress,

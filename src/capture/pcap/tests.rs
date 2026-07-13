@@ -480,6 +480,55 @@ mod tests {
     }
 
     #[test]
+    fn pcapng_default_interface_constructor_validates_before_writing() {
+        let mut undersized = vec![0xaa];
+        {
+            let result = Writer::with_limits(
+                &mut undersized,
+                Format::PcapNg,
+                LinkType::ETHERNET,
+                31,
+                DEFAULT_INTERFACE_LIMIT,
+            );
+            assert!(matches!(
+                result,
+                Err(Error::SizeLimitExceeded {
+                    kind: "pcapng interface description",
+                    declared: 32,
+                    limit: 31,
+                })
+            ));
+        }
+        assert_eq!(undersized, [0xaa]);
+
+        let mut no_interfaces = Vec::new();
+        {
+            let result = Writer::with_limits(
+                &mut no_interfaces,
+                Format::PcapNg,
+                LinkType::ETHERNET,
+                64,
+                0,
+            );
+            assert!(matches!(result, Err(Error::InterfaceLimit { limit: 0 })));
+        }
+        assert!(no_interfaces.is_empty());
+
+        let mut invalid_link_type = Vec::new();
+        {
+            let result = Writer::with_limits(
+                &mut invalid_link_type,
+                Format::PcapNg,
+                LinkType(u32::from(u16::MAX) + 1),
+                64,
+                DEFAULT_INTERFACE_LIMIT,
+            );
+            assert!(matches!(result, Err(Error::LinkTypeOutOfRange { .. })));
+        }
+        assert!(invalid_link_type.is_empty());
+    }
+
+    #[test]
     fn pcapng_writer_emits_standard_section_and_interface_headers() {
         let mut writer = Writer::pcapng(Vec::new()).unwrap();
         writer.add_interface(LinkType::ETHERNET).unwrap();
@@ -691,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn pcapng_rejects_nonzero_alignment_padding_and_duplicate_singletons() {
+    fn pcapng_ignores_reserved_fields_and_rejects_bad_padding_and_duplicate_singletons() {
         let mut interface_writer = Writer::pcapng(Vec::new()).unwrap();
         interface_writer.add_interface(LinkType::ETHERNET).unwrap();
         let interface_bytes = interface_writer.into_inner();
@@ -699,13 +748,8 @@ mod tests {
         let mut bad_interface_reserved = interface_bytes.clone();
         bad_interface_reserved[38] = 1;
         let mut reader = Reader::new(Cursor::new(bad_interface_reserved)).unwrap();
-        assert!(matches!(
-            reader.next_frame(),
-            Err(Error::InvalidData {
-                format: Format::PcapNg,
-                reason: "interface description reserved field is non-zero",
-            })
-        ));
+        assert_eq!(reader.next_frame().unwrap(), None);
+        assert_eq!(reader.interfaces().len(), 1);
 
         let mut bad_option_padding = interface_bytes.clone();
         bad_option_padding[49] = 1;
@@ -763,6 +807,24 @@ mod tests {
             Err(Error::InvalidData {
                 format: Format::PcapNg,
                 reason: "section length is negative but is not the unknown-length sentinel",
+            })
+        ));
+    }
+
+    #[test]
+    fn pcapng_accepts_compatible_minor_version_two_and_rejects_unaligned_section_length() {
+        let mut compatible = Writer::pcapng(Vec::new()).unwrap().into_inner();
+        compatible[14..16].copy_from_slice(&2_u16.to_le_bytes());
+        let mut reader = Reader::new(Cursor::new(compatible)).unwrap();
+        assert_eq!(reader.next_frame().unwrap(), None);
+
+        let mut unaligned = Writer::pcapng(Vec::new()).unwrap().into_inner();
+        unaligned[16..24].copy_from_slice(&1_i64.to_le_bytes());
+        assert!(matches!(
+            Reader::new(Cursor::new(unaligned)),
+            Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "section length is not a multiple of four",
             })
         ));
     }

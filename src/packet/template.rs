@@ -6,9 +6,9 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+use super::Packet;
 use super::field::FieldValue;
 use super::layer::FieldError;
-use super::Packet;
 
 pub const DEFAULT_MAX_TEMPLATE_PACKETS: usize = 10_000;
 

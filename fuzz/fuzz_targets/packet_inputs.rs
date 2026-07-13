@@ -6,7 +6,7 @@ use libfuzzer_sys::fuzz_target;
 use packetcraftr::packet::{
     build::{Builder, Context as BuildContext, Options as BuildOptions},
     document::{Format, Packet as PacketDocument},
-    expression::{parse, Options as ExpressionOptions},
+    expression::{Options as ExpressionOptions, parse},
 };
 use packetcraftr::protocol::builtin::registry;
 

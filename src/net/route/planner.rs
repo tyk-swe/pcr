@@ -162,14 +162,12 @@ impl RoutePlanner {
 
         if let (Some(preferred_source), Some(lookup_destination)) =
             (options.preferred_source, lookup_destination)
-        {
-            if preferred_source.is_ipv4() != lookup_destination.is_ipv4() {
+            && preferred_source.is_ipv4() != lookup_destination.is_ipv4() {
                 return Err(PlanError::PreferredSourceFamilyMismatch {
                     preferred_source,
                     destination: lookup_destination,
                 });
             }
-        }
 
         if final_destination.is_none() && (has_ip || options.link_mode == LinkMode::Layer3) {
             return Err(PlanError::MissingDestination);
@@ -204,8 +202,8 @@ impl RoutePlanner {
                     })?
             }
         };
-        if let Some(requested) = &options.interface {
-            if route.interface != *requested {
+        if let Some(requested) = &options.interface
+            && route.interface != *requested {
                 return Err(PlanError::InterfaceMismatch {
                     requested: requested.name.clone(),
                     requested_index: requested.index,
@@ -213,9 +211,8 @@ impl RoutePlanner {
                     selected_index: route.interface.index,
                 });
             }
-        }
-        if let Some(requested) = options.preferred_source {
-            if route.selected_address != Some(requested)
+        if let Some(requested) = options.preferred_source
+            && route.selected_address != Some(requested)
                 && route.preferred_source != Some(requested)
             {
                 return Err(PlanError::PreferredSourceNotSelected {
@@ -223,7 +220,6 @@ impl RoutePlanner {
                     selected: route.selected_address.or(route.preferred_source),
                 });
             }
-        }
 
         let mode = match options.link_mode {
             LinkMode::Layer3 => LinkMode::Layer3,
@@ -247,13 +243,12 @@ impl RoutePlanner {
                     .or(route.selected_address)
             })
             .flatten();
-        if let (Some(source), Some(final_destination)) = (packet_source, final_destination) {
-            if source.is_ipv4() != final_destination.is_ipv4() {
+        if let (Some(source), Some(final_destination)) = (packet_source, final_destination)
+            && source.is_ipv4() != final_destination.is_ipv4() {
                 return Err(PlanError::SourceFamilyMismatch {
                     destination: final_destination,
                 });
             }
-        }
         if has_ip && packet_source.is_none() {
             return Err(PlanError::MissingPacketSource);
         }

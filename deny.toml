@@ -22,9 +22,11 @@ allow = [
     "AGPL-3.0-only",
     "ISC",
     "MIT",
-    "NCSA",
     "Unicode-3.0",
     "Zlib",
+]
+exceptions = [
+    { allow = ["NCSA"], crate = "libfuzzer-sys@0.4.13" },
 ]
 
 [bans]

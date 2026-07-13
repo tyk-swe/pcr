@@ -94,11 +94,10 @@ fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
             .checked_sub(outside_network)?
             .checked_sub(start)
     });
-    if let Some(actual) = network_length {
-        if actual > mtu as usize {
+    if let Some(actual) = network_length
+        && actual > mtu as usize {
             return Err(ClientError::PacketExceedsMtu { actual, mtu });
         }
-    }
     Ok(())
 }
 

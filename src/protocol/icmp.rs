@@ -13,10 +13,9 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    bytes, checksum, ensure_encode_budget, field_layout, impl_layer_boilerplate, invalid,
-    make_layer, out_of_range, payload_without_padding, protocol, resolve_u16, set_wire_u16,
-    transport_checksum, truncated, unknown_field, wire_u16, wrong_layer, wrong_type,
-    ValueExpectation,
+    ValueExpectation, bytes, checksum, ensure_encode_budget, field_layout, impl_layer_boilerplate,
+    invalid, make_layer, out_of_range, payload_without_padding, protocol, resolve_u16,
+    set_wire_u16, transport_checksum, truncated, unknown_field, wire_u16, wrong_layer, wrong_type,
 };
 use super::ip::encode_network;
 
@@ -138,7 +137,7 @@ macro_rules! impl_icmp_layer {
                             u8::try_from(value).map_err(|_| out_of_range($schema(), name))?
                     }
                     ("checksum", value) => {
-                        return set_wire_u16(&mut self.checksum, $schema(), name, value)
+                        return set_wire_u16(&mut self.checksum, $schema(), name, value);
                     }
                     ("body", value) => {
                         self.body =
@@ -322,15 +321,14 @@ impl LayerCodec for Icmpv6Codec {
             return Err(truncated("icmpv6", ICMP_MIN_LEN, input.len()));
         }
         let mut diagnostics = Vec::new();
-        if context.verify_checksums {
-            if let Some(network) = context.network {
-                if transport_checksum(network, 58, input)? != 0 {
-                    diagnostics.push(
-                        Diagnostic::warning("decode.icmpv6_checksum", "ICMPv6 checksum mismatch")
-                            .at_field("checksum"),
-                    );
-                }
-            }
+        if context.verify_checksums
+            && let Some(network) = context.network
+            && transport_checksum(network, 58, input)? != 0
+        {
+            diagnostics.push(
+                Diagnostic::warning("decode.icmpv6_checksum", "ICMPv6 checksum mismatch")
+                    .at_field("checksum"),
+            );
         }
         Ok(DecodedLayerValue {
             layer: Box::new(Icmpv6 {

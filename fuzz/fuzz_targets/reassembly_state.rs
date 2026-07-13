@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::session::{fragment, tcp, Limits};
+use packetcraftr::session::{Limits, fragment, tcp};
 
 fuzz_target!(|data: &[u8]| {
     let limits = Limits {

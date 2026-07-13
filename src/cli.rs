@@ -16,13 +16,13 @@ use std::time::{Duration, Instant, SystemTime};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde::Serialize;
 
-use crate::capture::{transcode, Format, Frame, Limits, LinkType, Reader, Writer};
+use crate::capture::{Format, Frame, Limits, LinkType, Reader, Writer, transcode};
 use crate::client::{
+    Client,
     exchange::Options as ExchangeOptions,
     policy::{Error as TrafficPolicyError, Policy as TrafficPolicy},
     send::Options as SendOptions,
     target::{IpVersion, SystemResolver as SystemHostnameResolver, Target as LiveTarget},
-    Client,
 };
 use crate::error::{Classification, Classified, Kind};
 use crate::net::capture::Provider as _;
@@ -45,9 +45,9 @@ use crate::output::{
     TraceResponseKind, TracerouteCommandResult, TracerouteStreamCommandResult,
 };
 use crate::packet::internal::{
-    parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,
-    Dissector, DocumentFormat, ExpressionOptions, Packet, PacketDocument, PacketTemplate,
-    DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_NESTING, DEFAULT_MAX_LAYERS,
+    BuildContext, BuildMode, BuildOptions, Builder, DEFAULT_MAX_DOCUMENT_BYTES,
+    DEFAULT_MAX_DOCUMENT_NESTING, DEFAULT_MAX_LAYERS, DecodeOptions, Dissector, DocumentFormat,
+    ExpressionOptions, Packet, PacketDocument, PacketTemplate, parse_packet_expression,
 };
 use crate::workflow::dns::{
     ClientExecutor as ClientDnsExecutor, PolicyAuthorizer as TrafficPolicyDnsAuthorizer,
@@ -67,14 +67,14 @@ use crate::workflow::traceroute::{
     PolicyAuthorizer as TrafficPolicyTracerouteAuthorizer,
 };
 use crate::workflow_api::{
-    dns, fuzz, fuzz_live, replay_capture, scan, traceroute, AddressFamily, DnsError, DnsExchange,
-    DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsLimits, DnsQueryType, DnsRequest,
-    FuzzCaseExecution, FuzzError, FuzzExecutionCase, FuzzExecutionError, FuzzExecutor, FuzzLimits,
-    FuzzLiveOptions, FuzzRequest, FuzzStrategy, FuzzTarget, ReplayError, ReplayLimits,
-    ReplayOptions, ScanBatch, ScanBatchExecution, ScanError, ScanExecutionError, ScanExecutor,
-    ScanLimits, ScanRequest, ScanTarget, ScanTransport, SystemClock, TracerouteBatch,
-    TracerouteBatchExecution, TracerouteError, TracerouteExecutionError, TracerouteExecutor,
-    TracerouteLimits, TracerouteRequest, TracerouteStrategy,
+    AddressFamily, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor,
+    DnsLimits, DnsQueryType, DnsRequest, FuzzCaseExecution, FuzzError, FuzzExecutionCase,
+    FuzzExecutionError, FuzzExecutor, FuzzLimits, FuzzLiveOptions, FuzzRequest, FuzzStrategy,
+    FuzzTarget, ReplayError, ReplayLimits, ReplayOptions, ScanBatch, ScanBatchExecution, ScanError,
+    ScanExecutionError, ScanExecutor, ScanLimits, ScanRequest, ScanTarget, ScanTransport,
+    SystemClock, TracerouteBatch, TracerouteBatchExecution, TracerouteError,
+    TracerouteExecutionError, TracerouteExecutor, TracerouteLimits, TracerouteRequest,
+    TracerouteStrategy, dns, fuzz, fuzz_live, replay_capture, scan, traceroute,
 };
 
 include!("cli/arguments.rs");

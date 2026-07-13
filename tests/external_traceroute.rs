@@ -10,13 +10,13 @@ use packetcraftr::{
     net::capture::Statistics as CaptureStatistics,
     protocol::{builtin::registry, network::Ipv4},
     workflow::{
+        AddressFamily, Stats,
         clock::Clock,
         target::{AuthorizationError, Authorized, Authorizer, Target},
         traceroute::{
-            run, Batch, Completion, Execution, ExecutionError, Executor, Limits, ProbeStatus,
-            Request, Strategy,
+            Batch, Completion, Execution, ExecutionError, Executor, Limits, ProbeStatus, Request,
+            Strategy, run,
         },
-        AddressFamily, Stats,
     },
 };
 
@@ -52,12 +52,14 @@ impl Executor for TimeoutExecutor {
             .map(|probe| probe.packet())
             .collect::<Vec<_>>();
         sent[0].get_mut::<Ipv4>().unwrap().source = Ipv4Addr::new(192, 168, 56, 1);
-        let sent_evidence = vec![Frame::new(
-            UNIX_EPOCH + Duration::from_secs(1),
-            LinkType::RAW,
-            vec![0x45],
-        )
-        .unwrap()];
+        let sent_evidence = vec![
+            Frame::new(
+                UNIX_EPOCH + Duration::from_secs(1),
+                LinkType::RAW,
+                vec![0x45],
+            )
+            .unwrap(),
+        ];
         Ok(Execution {
             sent,
             sent_evidence,

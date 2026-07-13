@@ -14,9 +14,9 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    aliased_fields, bytes, field_layout, impl_layer_boilerplate, invalid, make_layer, out_of_range,
-    payload_without_padding, protocol, resolve_u16, set_wire_u16, transport_checksum, truncated,
-    unknown_field, wire_u16, wrong_layer, wrong_type, ValueExpectation,
+    ValueExpectation, aliased_fields, bytes, field_layout, impl_layer_boilerplate, invalid,
+    make_layer, out_of_range, payload_without_padding, protocol, resolve_u16, set_wire_u16,
+    transport_checksum, truncated, unknown_field, wire_u16, wrong_layer, wrong_type,
 };
 use super::ip::encode_network;
 
@@ -106,10 +106,10 @@ impl Layer for Udp {
             }
             ("length", value) => return set_wire_u16(&mut self.length, udp_schema(), name, value),
             ("checksum", value) => {
-                return set_wire_u16(&mut self.checksum, udp_schema(), name, value)
+                return set_wire_u16(&mut self.checksum, udp_schema(), name, value);
             }
             ("source_port" | "destination_port", _) => {
-                return Err(wrong_type(udp_schema(), name, "unsigned"))
+                return Err(wrong_type(udp_schema(), name, "unsigned"));
             }
             _ => return Err(unknown_field(udp_schema(), name)),
         }
@@ -218,24 +218,24 @@ impl LayerCodec for UdpCodec {
         }
         let checksum_value = u16::from_be_bytes([input[6], input[7]]);
         let mut diagnostics = Vec::new();
-        if context.verify_checksums {
-            if let Some(network) = context.network {
-                if checksum_value == 0 {
-                    if matches!(network.source, IpAddr::V6(_)) {
-                        diagnostics.push(
-                            Diagnostic::warning(
-                                "decode.udp_checksum",
-                                "zero UDP checksum is invalid for IPv6",
-                            )
-                            .at_field("checksum"),
-                        );
-                    }
-                } else if transport_checksum(network, 17, &input[..length])? != 0 {
+        if context.verify_checksums
+            && let Some(network) = context.network
+        {
+            if checksum_value == 0 {
+                if matches!(network.source, IpAddr::V6(_)) {
                     diagnostics.push(
-                        Diagnostic::warning("decode.udp_checksum", "UDP checksum mismatch")
-                            .at_field("checksum"),
+                        Diagnostic::warning(
+                            "decode.udp_checksum",
+                            "zero UDP checksum is invalid for IPv6",
+                        )
+                        .at_field("checksum"),
                     );
                 }
+            } else if transport_checksum(network, 17, &input[..length])? != 0 {
+                diagnostics.push(
+                    Diagnostic::warning("decode.udp_checksum", "UDP checksum mismatch")
+                        .at_field("checksum"),
+                );
             }
         }
         let payload_len = length - UDP_LEN;
@@ -458,7 +458,7 @@ impl Layer for Tcp {
                 self.window = u16::try_from(value).map_err(|_| out_of_range(tcp_schema(), name))?
             }
             ("checksum", value) => {
-                return set_wire_u16(&mut self.checksum, tcp_schema(), name, value)
+                return set_wire_u16(&mut self.checksum, tcp_schema(), name, value);
             }
             ("urgent_pointer", FieldValue::Unsigned(value)) => {
                 self.urgent_pointer =
@@ -604,15 +604,14 @@ impl LayerCodec for TcpCodec {
                 .at_field("reserved_bits"),
             );
         }
-        if context.verify_checksums {
-            if let Some(network) = context.network {
-                if transport_checksum(network, 6, input)? != 0 {
-                    diagnostics.push(
-                        Diagnostic::warning("decode.tcp_checksum", "TCP checksum mismatch")
-                            .at_field("checksum"),
-                    );
-                }
-            }
+        if context.verify_checksums
+            && let Some(network) = context.network
+            && transport_checksum(network, 6, input)? != 0
+        {
+            diagnostics.push(
+                Diagnostic::warning("decode.tcp_checksum", "TCP checksum mismatch")
+                    .at_field("checksum"),
+            );
         }
         let payload_len = input.len() - header_len;
         Ok(DecodedLayerValue {

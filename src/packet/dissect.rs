@@ -8,12 +8,12 @@ use thiserror::Error;
 
 use crate::capture::{Error as CaptureError, Frame, LinkType};
 
+use super::Packet;
 use super::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 use super::diagnostic::Diagnostic;
 use super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
 use super::layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout};
 use super::registry::{LayerDecodeContext, ProtocolRegistry};
-use super::Packet;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodeOptions {
@@ -716,9 +716,11 @@ mod tests {
                 && diagnostic.severity == crate::packet::diagnostic::DiagnosticSeverity::Warning
                 && diagnostic.layer == Some(2)
         }));
-        assert!(!decoded
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "decode.trailing_padding"));
+        assert!(
+            !decoded
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "decode.trailing_padding")
+        );
     }
 }

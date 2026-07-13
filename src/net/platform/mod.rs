@@ -34,9 +34,9 @@ mod raw_ip;
 mod windows;
 
 use super::provider_impl::{InterfaceInfo, LiveIoError};
-#[cfg(feature = "native-route")]
-use super::route_impl::{classify_destination, RouteSelectionReason};
 use super::route_impl::{InterfaceId, NativeRouteError, RouteDecision};
+#[cfg(feature = "native-route")]
+use super::route_impl::{RouteSelectionReason, classify_destination};
 
 #[cfg(feature = "native-layer2")]
 pub(super) fn system_capture(
@@ -223,6 +223,22 @@ fn interface_error(error: NativeRouteError) -> LiveIoError {
     }
 }
 
+#[cfg(feature = "native-route")]
+fn validate_preferred_source_family(
+    destination: IpAddr,
+    preferred_source: Option<IpAddr>,
+) -> Result<(), NativeRouteError> {
+    if let Some(source) = preferred_source
+        && source.is_ipv4() != destination.is_ipv4()
+    {
+        return Err(NativeRouteError::SourceFamilyMismatch {
+            preferred_source: source,
+            destination,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(all(feature = "native-route", target_os = "linux"))]
 pub(super) fn system_route(
     destination: IpAddr,
@@ -313,24 +329,18 @@ pub(super) fn finish_route(
     if let Some(hint) = interface_hint {
         validate_interface_hint(hint, &snapshot.interface.id)?;
     }
-    if let Some(source) = preferred_source {
-        if source.is_ipv4() != destination.is_ipv4() {
-            return Err(NativeRouteError::SourceFamilyMismatch {
-                preferred_source: source,
-                destination,
-            });
-        }
-        if !snapshot
+    validate_preferred_source_family(destination, preferred_source)?;
+    if let Some(source) = preferred_source
+        && !snapshot
             .interface
             .addresses
             .iter()
             .any(|assigned| assigned.address == source)
-        {
-            return Err(NativeRouteError::SourceUnavailable {
-                preferred_source: source,
-                interface: snapshot.interface.id.name.clone(),
-            });
-        }
+    {
+        return Err(NativeRouteError::SourceUnavailable {
+            preferred_source: source,
+            interface: snapshot.interface.id.name.clone(),
+        });
     }
 
     if snapshot

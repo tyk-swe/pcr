@@ -255,13 +255,12 @@ where
                 }
                 .into());
             }
-            if let Some(first_packet) = planned_packets.first() {
-                if first_packet.plan.route.interface != plan.route.interface
-                    || first_packet.plan.mode != plan.mode
+            if let Some(first_packet) = planned_packets.first()
+                && (first_packet.plan.route.interface != plan.route.interface
+                    || first_packet.plan.mode != plan.mode)
                 {
                     return Err(ClientError::HeterogeneousExchangeRoute);
                 }
-            }
             planned_packets.push(PlannedExchangePacket {
                 packet: packet_to_send,
                 plan,

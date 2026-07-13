@@ -8,7 +8,7 @@ use super::super::{InterfaceId, LinkCapability, MacAddress};
 use crate::capture::LinkType;
 
 pub(super) fn interfaces() -> Vec<InterfaceInfo> {
-    pnet::datalink::interfaces()
+    pnet_datalink::interfaces()
         .into_iter()
         .map(|interface| {
             let flags = InterfaceFlags {

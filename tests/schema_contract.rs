@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use jsonschema::Validator;
 use packetcraftr::packet::document::{Format, Packet as PacketDocument};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

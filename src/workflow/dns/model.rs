@@ -201,15 +201,14 @@ impl DnsRequest {
                 maximum: MAX_CAPTURE_TIMEOUT,
             });
         }
-        if let Some(rate) = self.queries_per_second {
-            if rate == 0 || rate > MAX_SCAN_RATE {
+        if let Some(rate) = self.queries_per_second
+            && (rate == 0 || rate > MAX_SCAN_RATE) {
                 return Err(DnsError::InvalidLimit {
                     field: "queries_per_second",
                     value: u64::from(rate),
                     reason: format!("must be within 1..={MAX_SCAN_RATE}"),
                 });
             }
-        }
         canonical_query_name(&self.query_name).map_err(DnsError::Query)
     }
 }

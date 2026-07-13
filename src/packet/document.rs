@@ -8,9 +8,9 @@ use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::Packet;
 use super::field::FieldValue;
 use super::registry::{CodecError, ProtocolRegistry};
-use super::Packet;
 
 pub const PACKET_DOCUMENT_SCHEMA_V1: &str = "packetcraftr.packet/v1";
 pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;

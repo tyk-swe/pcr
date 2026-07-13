@@ -7,9 +7,9 @@
 - Simplified neighbor-response parsing and capture evidence retention, released
   capture queue locks before notifying waiters, and marked builder-style return
   values as must-use.
-- Refreshed direct and locked dependencies, moved the development toolchain to
-  Rust 1.97 while retaining an explicit Rust 1.96 minimum-version check, and
-  updated pinned CI actions and tools.
+- Refreshed direct and locked dependencies, adopted the Rust 2024 edition,
+  moved the development toolchain to Rust 1.97 while retaining an explicit
+  Rust 1.96 minimum-version check, and updated pinned CI actions and tools.
 - Made nightly fuzz corpus caching persist new inputs across runs and aligned
   the development documentation with the checks CI actually runs.
 - Reduced the repository to Rust code, tests, schemas, compact documentation,

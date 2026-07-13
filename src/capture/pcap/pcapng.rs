@@ -180,18 +180,17 @@ fn parse_enhanced_packet(
             reason: "enhanced packet block is shorter than 20 bytes",
         });
     }
-    let interface_id = decode_u32(endianness, &body[0..4]);
-    let timestamp = (u64::from(decode_u32(endianness, &body[4..8])) << 32)
-        | u64::from(decode_u32(endianness, &body[8..12]));
-    let captured_length = decode_u32(endianness, &body[12..16]);
-    let original_length = decode_u32(endianness, &body[16..20]);
+    let header = PacketHeader {
+        interface_id: decode_u32(endianness, &body[0..4]),
+        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])) << 32)
+            | u64::from(decode_u32(endianness, &body[8..12])),
+        captured_length: decode_u32(endianness, &body[12..16]),
+        original_length: decode_u32(endianness, &body[16..20]),
+    };
     parse_pcapng_packet_body(
         body,
         20,
-        interface_id,
-        timestamp,
-        captured_length,
-        original_length,
+        header,
         endianness,
         interfaces,
         interface_base,
@@ -212,18 +211,17 @@ fn parse_obsolete_packet(
             reason: "packet block is shorter than 20 bytes",
         });
     }
-    let interface_id = u32::from(decode_u16(endianness, &body[0..2]));
-    let timestamp = (u64::from(decode_u32(endianness, &body[4..8])) << 32)
-        | u64::from(decode_u32(endianness, &body[8..12]));
-    let captured_length = decode_u32(endianness, &body[12..16]);
-    let original_length = decode_u32(endianness, &body[16..20]);
+    let header = PacketHeader {
+        interface_id: u32::from(decode_u16(endianness, &body[0..2])),
+        timestamp_ticks: (u64::from(decode_u32(endianness, &body[4..8])) << 32)
+            | u64::from(decode_u32(endianness, &body[8..12])),
+        captured_length: decode_u32(endianness, &body[12..16]),
+        original_length: decode_u32(endianness, &body[16..20]),
+    };
     parse_pcapng_packet_body(
         body,
         20,
-        interface_id,
-        timestamp,
-        captured_length,
-        original_length,
+        header,
         endianness,
         interfaces,
         interface_base,
@@ -231,19 +229,28 @@ fn parse_obsolete_packet(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-fn parse_pcapng_packet_body(
-    body: &[u8],
-    data_offset: usize,
+struct PacketHeader {
     interface_id: u32,
     timestamp_ticks: u64,
     captured_length: u32,
     original_length: u32,
+}
+
+fn parse_pcapng_packet_body(
+    body: &[u8],
+    data_offset: usize,
+    header: PacketHeader,
     endianness: Endianness,
     interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
 ) -> Result<Frame, Error> {
+    let PacketHeader {
+        interface_id,
+        timestamp_ticks,
+        captured_length,
+        original_length,
+    } = header;
     validate_declared_lengths(captured_length, original_length, max_size, "pcapng packet")?;
     let interface = interfaces
         .get(interface_id as usize)

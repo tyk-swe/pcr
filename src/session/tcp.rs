@@ -141,10 +141,10 @@ impl Reassembler {
         now: Instant,
     ) -> Result<(), Error> {
         self.validate_limits()?;
-        if let Some(existing) = self.flows.get(&flow) {
-            if existing.base_sequence == first_payload_sequence {
-                return Ok(());
-            }
+        if let Some(existing) = self.flows.get(&flow)
+            && existing.base_sequence == first_payload_sequence
+        {
+            return Ok(());
         }
         if let Some(stale) = self.flows.remove(&flow) {
             self.aggregate_bytes = self
@@ -195,19 +195,19 @@ impl Reassembler {
             )
         });
         let push_result = self.push_inner(segment, now);
-        if push_result.is_err() {
-            if let Some((flow, prior, aggregate_bytes, aggregate_memory_charge)) = rollback {
-                match prior {
-                    Some(state) => {
-                        self.flows.insert(flow, state);
-                    }
-                    None => {
-                        self.flows.remove(&flow);
-                    }
+        if push_result.is_err()
+            && let Some((flow, prior, aggregate_bytes, aggregate_memory_charge)) = rollback
+        {
+            match prior {
+                Some(state) => {
+                    self.flows.insert(flow, state);
                 }
-                self.aggregate_bytes = aggregate_bytes;
-                self.aggregate_memory_charge = aggregate_memory_charge;
+                None => {
+                    self.flows.remove(&flow);
+                }
             }
+            self.aggregate_bytes = aggregate_bytes;
+            self.aggregate_memory_charge = aggregate_memory_charge;
         }
         push_result
     }
@@ -298,12 +298,12 @@ impl Reassembler {
                 return Err(Error::BeyondFinalSequence { final_offset });
             }
         }
-        if let Some(fin_offset) = incoming_fin_offset {
-            if candidate.next_offset > fin_offset {
-                return Err(Error::BeyondFinalSequence {
-                    final_offset: fin_offset,
-                });
-            }
+        if let Some(fin_offset) = incoming_fin_offset
+            && candidate.next_offset > fin_offset
+        {
+            return Err(Error::BeyondFinalSequence {
+                final_offset: fin_offset,
+            });
         }
         if offset > window_end || remaining_end > window_end {
             return Err(Error::FlowByteLimit {
@@ -338,17 +338,16 @@ impl Reassembler {
                 limit: self.limits.max_tcp_segments_per_flow,
             });
         }
-        if let Some(fin_offset) = incoming_fin_offset {
-            if candidate.pending.iter().any(|(start, bytes)| {
+        if let Some(fin_offset) = incoming_fin_offset
+            && (candidate.pending.iter().any(|(start, bytes)| {
                 start
                     .checked_add(bytes.len() as u64)
                     .is_none_or(|end| end > fin_offset)
-            }) || remaining_end > fin_offset
-            {
-                return Err(Error::BeyondFinalSequence {
-                    final_offset: fin_offset,
-                });
-            }
+            }) || remaining_end > fin_offset)
+        {
+            return Err(Error::BeyondFinalSequence {
+                final_offset: fin_offset,
+            });
         }
         let initial_history_capacity = self.limits.max_bytes_per_flow.saturating_sub(pending_bytes);
         let final_pending_bytes = pending_bytes.saturating_sub(merge.emitted_segment_bytes);
@@ -561,16 +560,14 @@ impl Reassembler {
             let Some(state) = self.flows.remove(&key) else {
                 continue;
             };
-            if let Some((&next, _)) = state.pending.first_key_value() {
-                if next > state.next_offset {
-                    events.push(Event::Gap {
-                        flow: key.clone(),
-                        expected_sequence: state
-                            .base_sequence
-                            .wrapping_add(state.next_offset as u32),
-                        next_sequence: state.base_sequence.wrapping_add(next as u32),
-                    });
-                }
+            if let Some((&next, _)) = state.pending.first_key_value()
+                && next > state.next_offset
+            {
+                events.push(Event::Gap {
+                    flow: key.clone(),
+                    expected_sequence: state.base_sequence.wrapping_add(state.next_offset as u32),
+                    next_sequence: state.base_sequence.wrapping_add(next as u32),
+                });
             }
             let retained_bytes = retained_bytes(&state).unwrap_or(0);
             self.aggregate_bytes = self.aggregate_bytes.saturating_sub(retained_bytes);
@@ -807,10 +804,12 @@ mod tests {
         let now = Instant::now();
         let mut reassembler = Reassembler::new(Limits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
-        assert!(reassembler
-            .push(segment(103, b"def"), now)
-            .unwrap()
-            .is_empty());
+        assert!(
+            reassembler
+                .push(segment(103, b"def"), now)
+                .unwrap()
+                .is_empty()
+        );
         let events = reassembler.push(segment(100, b"abc"), now).unwrap();
         let data = events
             .into_iter()
@@ -837,9 +836,11 @@ mod tests {
                 ..
             }
         )));
-        assert!(!events
-            .iter()
-            .any(|event| matches!(event, Event::Data { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Data { .. }))
+        );
     }
 
     #[test]
@@ -859,9 +860,11 @@ mod tests {
                 ..
             }
         )));
-        assert!(!events
-            .iter()
-            .any(|event| matches!(event, Event::Data { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Data { .. }))
+        );
     }
 
     #[test]
@@ -894,9 +897,11 @@ mod tests {
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(100, b"abc"), now).unwrap();
         let events = reassembler.push(segment(99, b"z"), now).unwrap();
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, Event::Retransmission { bytes: 1, .. })));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Retransmission { bytes: 1, .. }))
+        );
     }
 
     #[test]
@@ -910,11 +915,13 @@ mod tests {
         reassembler.open_flow(flow(), 100, now).unwrap();
 
         for (sequence, payload) in [(100, b"abcd"), (104, b"efgh"), (108, b"ijkl")] {
-            assert!(reassembler
-                .push(segment(sequence, payload), now)
-                .unwrap()
-                .iter()
-                .any(|event| matches!(event, Event::Data { .. })));
+            assert!(
+                reassembler
+                    .push(segment(sequence, payload), now)
+                    .unwrap()
+                    .iter()
+                    .any(|event| matches!(event, Event::Data { .. }))
+            );
         }
         assert_eq!(reassembler.aggregate_bytes(), 4);
         assert_eq!(reassembler.aggregate_memory_charge(), 4);
@@ -973,9 +980,11 @@ mod tests {
         assert_eq!(reassembler.aggregate_memory_charge(), 0);
 
         let events = reassembler.push(segment(100, b"abc"), now).unwrap();
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, Event::Data { sequence: 100, .. })));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Data { sequence: 100, .. }))
+        );
         assert_eq!(reassembler.aggregate_bytes(), 3);
     }
 
@@ -1108,24 +1117,30 @@ mod tests {
         let mut stale = segment(90, b"12345");
         stale.fin = true;
         let events = reassembler.push(stale, now).unwrap();
-        assert!(!events
-            .iter()
-            .any(|event| matches!(event, Event::Closed { .. })));
-        assert!(reassembler
-            .push(segment(103, b"d"), now)
-            .unwrap()
-            .iter()
-            .any(|event| matches!(event, Event::Data { sequence: 103, .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Closed { .. }))
+        );
+        assert!(
+            reassembler
+                .push(segment(103, b"d"), now)
+                .unwrap()
+                .iter()
+                .any(|event| matches!(event, Event::Data { sequence: 103, .. }))
+        );
 
         let mut exact = Reassembler::new(Limits::default());
         exact.open_flow(flow(), 100, now).unwrap();
         let mut at_base = segment(90, b"0123456789");
         at_base.fin = true;
-        assert!(exact
-            .push(at_base, now)
-            .unwrap()
-            .iter()
-            .any(|event| matches!(event, Event::Closed { reset: false, .. })));
+        assert!(
+            exact
+                .push(at_base, now)
+                .unwrap()
+                .iter()
+                .any(|event| matches!(event, Event::Closed { reset: false, .. }))
+        );
 
         let mut partial = Reassembler::new(Limits::default());
         partial.open_flow(flow(), 100, now).unwrap();
@@ -1135,9 +1150,11 @@ mod tests {
         assert!(events.iter().any(
             |event| matches!(event, Event::Data { sequence: 100, bytes, .. } if bytes.as_ref() == b"cd")
         ));
-        assert!(events
-            .iter()
-            .any(|event| matches!(event, Event::Closed { reset: false, .. })));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::Closed { reset: false, .. }))
+        );
     }
 
     #[test]
@@ -1164,9 +1181,11 @@ mod tests {
         assert!(events.iter().any(
             |event| matches!(event, Event::Data { sequence: 1000, bytes, .. } if bytes.as_ref() == b"new")
         ));
-        assert!(!events
-            .iter()
-            .any(|event| matches!(event, Event::Retransmission { .. })));
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::Retransmission { .. }))
+        );
     }
 
     #[test]

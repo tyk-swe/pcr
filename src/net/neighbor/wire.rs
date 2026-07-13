@@ -146,7 +146,9 @@ fn match_neighbor_response(request: &NeighborRequest, frame: &Frame) -> Option<M
         return None;
     }
     let ethernet = parse_ethernet(&frame.bytes)?;
-    if ethernet.destination != request.interface_mac || ethernet.vlan_tags != request.vlan_tags {
+    if (ethernet.destination != request.interface_mac)
+        || (ethernet.vlan_tags != request.vlan_tags)
+    {
         return None;
     }
     match (

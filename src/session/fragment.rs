@@ -169,10 +169,10 @@ impl Reassembler {
                 limit: self.limits.max_fragments_per_datagram,
             });
         }
-        if let Some(final_length) = candidate.final_length {
-            if end > final_length {
-                return Err(Error::BeyondFinalLength { final_length });
-            }
+        if let Some(final_length) = candidate.final_length
+            && end > final_length
+        {
+            return Err(Error::BeyondFinalLength { final_length });
         }
         if !fragment.more_fragments {
             match candidate.final_length {
@@ -499,18 +499,20 @@ mod tests {
     fn out_of_order_fragments_reassemble() {
         let now = Instant::now();
         let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
-        assert!(reassembler
-            .push(
-                Fragment {
-                    key: key(),
-                    offset: 3,
-                    more_fragments: false,
-                    bytes: Bytes::from_static(b"def"),
-                },
-                now,
-            )
-            .unwrap()
-            .is_none());
+        assert!(
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset: 3,
+                        more_fragments: false,
+                        bytes: Bytes::from_static(b"def"),
+                    },
+                    now,
+                )
+                .unwrap()
+                .is_none()
+        );
         let event = reassembler
             .push(
                 Fragment {

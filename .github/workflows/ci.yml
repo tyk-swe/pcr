@@ -29,12 +29,14 @@ jobs:
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
             ~/.cargo/git/db
-          key: cargo-tools-deny-v3-${{ runner.os }}-1.97.0-0.20.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          key: cargo-tools-deny-v3-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-0.20.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
       - name: Enforce the RUSTSEC-2024-0436 exception expiry
         shell: bash
         run: test "$(date -u +%F)" '<' '2026-10-12'
+      - name: Check fuzz lockfile freshness
+        run: cargo metadata --manifest-path fuzz/Cargo.toml --locked --format-version 1 > /dev/null
       - name: Check root dependency policy
         run: cargo deny check
       - name: Check fuzz dependency policy
@@ -65,8 +67,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-test-${{ matrix.platform }}-1.97.0-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-test-${{ matrix.platform }}-1.97.0-
+          key: cargo-test-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-test-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml') }}-
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add clippy rustfmt
@@ -95,8 +97,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-quality-linux-v3-1.97.0-msrv-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-quality-linux-v3-1.97.0-msrv-1.96.0-
+          key: cargo-quality-linux-v3-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-quality-linux-v3-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup toolchain install 1.96.0 --profile minimal
       - run: rustup component add rustfmt
@@ -130,7 +132,7 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target/llvm-cov-target
-          key: cargo-coverage-linux-v3-1.97.0-llvm-cov-0.8.7-${{ hashFiles('Cargo.lock') }}
+          key: cargo-coverage-linux-v3-${{ hashFiles('rust-toolchain.toml') }}-llvm-cov-0.8.7-${{ hashFiles('Cargo.lock') }}
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add llvm-tools-preview
       - run: cargo install cargo-llvm-cov --locked --version 0.8.7

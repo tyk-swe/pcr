@@ -50,18 +50,18 @@ pub mod icmp {
 pub mod builtin {
     //! Deterministic built-in protocol registration.
 
-    pub use super::builtin_impl::{default_registry as registry, BuiltinProtocols as Module};
+    pub use super::builtin_impl::{BuiltinProtocols as Module, default_registry as registry};
 }
 
 pub mod support {
     //! Versioned built-in capability information.
 
     pub use super::builtin_impl::{
+        BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOL_SUPPORT, BUILTIN_PROTOCOLS,
         CaptureRootByteOrder as CaptureByteOrder, CaptureRootSupport as CaptureRoot,
-        ProtocolFallbackSupport as Fallback, ProtocolSupport as Protocol,
-        ProtocolSupportManifest as Manifest, WorkflowProtocolSupport as Workflow,
-        BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS, BUILTIN_PROTOCOL_SUPPORT,
-        PROTOCOL_SUPPORT_SCHEMA_V1, STABLE_WORKFLOW_PROTOCOLS,
+        PROTOCOL_SUPPORT_SCHEMA_V1, ProtocolFallbackSupport as Fallback,
+        ProtocolSupport as Protocol, ProtocolSupportManifest as Manifest,
+        STABLE_WORKFLOW_PROTOCOLS, WorkflowProtocolSupport as Workflow,
     };
 }
 
@@ -69,10 +69,10 @@ pub mod support {
 pub(crate) mod internal {
     #[cfg(test)]
     pub(crate) use super::builtin_impl::{
-        default_registry, Arp, SegmentRoutingHeader, Vlan, Vlan8021ad,
+        Arp, SegmentRoutingHeader, Vlan, Vlan8021ad, default_registry,
     };
     pub(crate) use super::builtin_impl::{
-        ipv4_source_route_destinations, Ethernet, Icmpv4, Icmpv6, Ipv4, Ipv4OptionsError, Ipv6,
-        Tcp, Udp,
+        Ethernet, Icmpv4, Icmpv6, Ipv4, Ipv4OptionsError, Ipv6, Tcp, Udp,
+        ipv4_source_route_destinations,
     };
 }

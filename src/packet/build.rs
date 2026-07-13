@@ -9,11 +9,11 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::Packet;
 use super::diagnostic::Diagnostic;
 use super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
 use super::layout::{ByteRange, LayerLayout, PacketLayout};
 use super::registry::{CodecError, LayerEncodeContext, ProtocolRegistry};
-use super::Packet;
 
 pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_LAYERS: usize = 64;

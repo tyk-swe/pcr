@@ -629,12 +629,11 @@ fn filter_relevant_records(
             let type_code = record.value.type_code();
             if type_code == DnsQueryType::Cname.code() {
                 accepted_answers[index] = true;
-                if let DnsRecordValue::Cname(target) = &record.value {
-                    if !relevant_names.contains(target) {
+                if let DnsRecordValue::Cname(target) = &record.value
+                    && !relevant_names.contains(target) {
                         relevant_names.push(target.clone());
                         changed = true;
                     }
-                }
             } else if query_type == DnsQueryType::Any || type_code == query_type.code() {
                 accepted_answers[index] = true;
             }
@@ -658,18 +657,16 @@ fn filter_relevant_records(
         }
     }
     for (index, record) in answers.iter().enumerate() {
-        if accepted_answers[index] {
-            if let Some(name) = record.value.referenced_name() {
+        if accepted_answers[index]
+            && let Some(name) = record.value.referenced_name() {
                 push_unique(&mut references, name);
             }
-        }
     }
     for (index, record) in authorities.iter().enumerate() {
-        if accepted_authorities[index] {
-            if let Some(name) = record.value.referenced_name() {
+        if accepted_authorities[index]
+            && let Some(name) = record.value.referenced_name() {
                 push_unique(&mut references, name);
             }
-        }
     }
     let accepted_additionals = additionals
         .iter()

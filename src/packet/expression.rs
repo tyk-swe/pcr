@@ -8,9 +8,9 @@ use std::str::FromStr;
 use bytes::Bytes;
 use thiserror::Error;
 
+use super::Packet;
 use super::field::FieldValue;
 use super::registry::{CodecError, ProtocolRegistry};
-use super::Packet;
 
 pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
 /// Absolute recursive list nesting accepted by the expression parser.

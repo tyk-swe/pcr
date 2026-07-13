@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock};
 use bytes::Bytes;
 use packetcraftr::{
     packet::{
+        Packet,
         build::{Builder, Context as BuildContext, Error as BuildError, Options as BuildOptions},
         codec::{
             Codec as LayerCodec, DecodeContext as LayerDecodeContext, Decoded as DecodedLayerValue,
@@ -16,8 +17,8 @@ use packetcraftr::{
         },
         decode::{Decoder as Dissector, Error as DecodeError},
         expression::{
-            parse as parse_packet_expression, Error as ExpressionError,
-            Options as ExpressionOptions,
+            Error as ExpressionError, Options as ExpressionOptions,
+            parse as parse_packet_expression,
         },
         field::{
             Error as FieldError, Kind as FieldKind, Schema as FieldSchema, Value as FieldValue,
@@ -28,13 +29,12 @@ use packetcraftr::{
             Builder as RegistryBuilder, Discriminator, Error as RegistryError,
             Module as ProtocolModule, Registry as ProtocolRegistry,
         },
-        Packet,
     },
     protocol::{
         builtin::Module as BuiltinProtocols, link::Ethernet, network::Ipv4, transport::Tcp,
     },
     workflow::fuzz::{
-        run as fuzz, Request as FuzzRequest, Strategy as FuzzStrategy, Target as FuzzTarget,
+        Request as FuzzRequest, Strategy as FuzzStrategy, Target as FuzzTarget, run as fuzz,
     },
 };
 
@@ -383,10 +383,12 @@ fn external_reflective_fields_participate_in_bounded_fuzzing() {
     )
     .unwrap();
     assert_eq!(result.cases.len(), 16);
-    assert!(result
-        .cases
-        .iter()
-        .all(|case| case.mutation.protocol == "example.foo"));
+    assert!(
+        result
+            .cases
+            .iter()
+            .all(|case| case.mutation.protocol == "example.foo")
+    );
     assert!(result.cases.iter().any(|case| case.built.is_some()));
     assert!(result.cases.iter().any(|case| case.error.is_some()));
 }

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 #[cfg(feature = "native-route")]
 use std::ffi::CStr;
 #[cfg(feature = "native-route")]
-use std::mem::{size_of, MaybeUninit};
+use std::mem::{MaybeUninit, size_of};
 #[cfg(feature = "native-route")]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[cfg(feature = "native-route")]
@@ -24,7 +24,10 @@ use std::time::Duration;
 use socket2::{Domain, Socket, Type};
 
 #[cfg(feature = "native-route")]
-use super::{find_interface, finish_route, interface_decision, NativeRouteSnapshot};
+use super::{
+    NativeRouteSnapshot, find_interface, finish_route, interface_decision,
+    validate_preferred_source_family,
+};
 #[cfg(feature = "native-route")]
 use crate::capture::LinkType;
 #[cfg(feature = "native-route")]
@@ -88,11 +91,7 @@ pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
                             };
                             if let Some(ip) = sockaddr_ip(bytes) {
                                 let prefix_length = if entry.ifa_netmask.is_null() {
-                                    if ip.is_ipv4() {
-                                        32
-                                    } else {
-                                        128
-                                    }
+                                    if ip.is_ipv4() { 32 } else { 128 }
                                 } else {
                                     sockaddr_prefix(entry.ifa_netmask, ip)
                                         .unwrap_or(if ip.is_ipv4() { 32 } else { 128 })
@@ -132,12 +131,7 @@ pub(super) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<RouteDecision, NativeRouteError> {
-    if preferred_source.is_some_and(|source| source.is_ipv4() != destination.is_ipv4()) {
-        return Err(NativeRouteError::SourceFamilyMismatch {
-            preferred_source: preferred_source.expect("checked source"),
-            destination,
-        });
-    }
+    validate_preferred_source_family(destination, preferred_source)?;
 
     let available = interfaces()?;
     let mut constrained_interface = interface_hint
@@ -530,7 +524,7 @@ fn parse_route_addresses(
                         "macOS route response contained an invalid sockaddr at index {index}: offset={offset} length={length} stride={stride} bytes={}",
                         bytes.len()
                     ),
-                })
+                });
             }
         };
         *slot = sockaddr_ip(&bytes[offset..address_end]);

@@ -277,10 +277,10 @@ impl Packet {
             let Some(padding) = layer.as_any_mut().downcast_mut::<Padding>() else {
                 continue;
             };
-            if let Some(outside_layer) = &mut padding.outside_layer {
-                if *outside_layer >= index {
-                    *outside_layer = outside_layer.saturating_add(1);
-                }
+            if let Some(outside_layer) = &mut padding.outside_layer
+                && *outside_layer >= index
+            {
+                *outside_layer = outside_layer.saturating_add(1);
             }
         }
     }

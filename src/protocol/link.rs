@@ -12,10 +12,10 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    aliased_fields, expected_discriminator, field_layout, impl_layer_boilerplate, invalid, ipv4,
-    mac, make_layer, out_of_range, protocol, resolve_u16, resolve_u8, set_wire_u16, set_wire_u8,
-    truncated, unknown_field, validate_auto_raw_discriminator, validate_raw_child_discriminator,
-    wire_u16, wire_u8, wrong_layer, wrong_type, ValueExpectation,
+    ValueExpectation, aliased_fields, expected_discriminator, field_layout, impl_layer_boilerplate,
+    invalid, ipv4, mac, make_layer, out_of_range, protocol, resolve_u8, resolve_u16, set_wire_u8,
+    set_wire_u16, truncated, unknown_field, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, wire_u8, wire_u16, wrong_layer, wrong_type,
 };
 
 const ETHERNET_LEN: usize = 14;
@@ -94,7 +94,7 @@ impl Layer for Ethernet {
                     mac(&value).ok_or_else(|| wrong_type(ethernet_schema(), name, "mac address"))?
             }
             ("ether_type", value) => {
-                return set_wire_u16(&mut self.ether_type, ethernet_schema(), name, value)
+                return set_wire_u16(&mut self.ether_type, ethernet_schema(), name, value);
             }
             _ => return Err(unknown_field(ethernet_schema(), name)),
         }
@@ -340,10 +340,10 @@ macro_rules! impl_vlan_layer {
                             .ok_or_else(|| out_of_range($schema(), name))?;
                     }
                     ("ether_type", value) => {
-                        return set_wire_u16(&mut self.ether_type, $schema(), name, value)
+                        return set_wire_u16(&mut self.ether_type, $schema(), name, value);
                     }
                     ("priority" | "vlan_id", _) => {
-                        return Err(wrong_type($schema(), name, "unsigned"))
+                        return Err(wrong_type($schema(), name, "unsigned"));
                     }
                     ("drop_eligible", _) => return Err(wrong_type($schema(), name, "bool")),
                     _ => return Err(unknown_field($schema(), name)),
@@ -730,10 +730,10 @@ impl Layer for Arp {
                     u16::try_from(value).map_err(|_| out_of_range(arp_schema(), name))?
             }
             ("hardware_len", value) => {
-                return set_wire_u8(&mut self.hardware_len, arp_schema(), name, value)
+                return set_wire_u8(&mut self.hardware_len, arp_schema(), name, value);
             }
             ("protocol_len", value) => {
-                return set_wire_u8(&mut self.protocol_len, arp_schema(), name, value)
+                return set_wire_u8(&mut self.protocol_len, arp_schema(), name, value);
             }
             ("operation", FieldValue::Unsigned(value)) => {
                 self.operation =
@@ -756,7 +756,7 @@ impl Layer for Arp {
                     ipv4(&value).ok_or_else(|| wrong_type(arp_schema(), name, "ipv4"))?
             }
             ("hardware_type" | "protocol_type" | "operation", _) => {
-                return Err(wrong_type(arp_schema(), name, "unsigned"))
+                return Err(wrong_type(arp_schema(), name, "unsigned"));
             }
             _ => return Err(unknown_field(arp_schema(), name)),
         }

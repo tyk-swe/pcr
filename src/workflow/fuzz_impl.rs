@@ -19,17 +19,18 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::clock::Clock;
+use super::evidence::EvidenceBudget;
 use super::push_diagnostic_once;
 use crate::capture::{Frame, LinkType};
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
-    CaptureStatistics, ExchangeIo, NeighborResolver, RouteProvider, DEFAULT_CAPTURE_QUEUE_BYTES,
-    DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
+    CaptureStatistics, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo,
+    MAX_CAPTURE_TIMEOUT, NeighborResolver, RouteProvider,
 };
 use crate::packet::internal::{
-    BuildContext, BuildOptions, Builder, BuiltPacket, DecodeOptions, DecodedPacket, Diagnostic,
-    Dissector, FieldKind, FieldValue, Packet, PacketTemplate, ProtocolRegistry,
-    DEFAULT_MAX_PACKET_SIZE, DEFAULT_MAX_TEMPLATE_PACKETS,
+    BuildContext, BuildOptions, Builder, BuiltPacket, DEFAULT_MAX_PACKET_SIZE,
+    DEFAULT_MAX_TEMPLATE_PACKETS, DecodeOptions, DecodedPacket, Diagnostic, Dissector, FieldKind,
+    FieldValue, Packet, PacketTemplate, ProtocolRegistry,
 };
 
 pub const DEFAULT_FUZZ_CASES: usize = 64;

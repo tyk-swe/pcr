@@ -89,9 +89,9 @@ pub mod document {
     //! Versioned packet documents.
 
     pub use super::document_impl::{
-        DocumentError as Error, DocumentFormat as Format, LayerDocument as Layer,
-        PacketDocument as Packet, DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_NESTING,
-        MAX_DOCUMENT_NESTING, PACKET_DOCUMENT_SCHEMA_V1,
+        DEFAULT_MAX_DOCUMENT_BYTES, DEFAULT_MAX_DOCUMENT_NESTING, DocumentError as Error,
+        DocumentFormat as Format, LayerDocument as Layer, MAX_DOCUMENT_NESTING,
+        PACKET_DOCUMENT_SCHEMA_V1, PacketDocument as Packet,
     };
 
     pub(crate) use super::document_impl::PacketDocument;
@@ -101,8 +101,8 @@ pub mod expression {
     //! Compact packet expressions.
 
     pub use super::expression_impl::{
-        decode_hex, parse_packet_expression as parse, ExpressionError as Error,
-        ExpressionOptions as Options, DEFAULT_MAX_EXPRESSION_BYTES, MAX_EXPRESSION_NESTING,
+        DEFAULT_MAX_EXPRESSION_BYTES, ExpressionError as Error, ExpressionOptions as Options,
+        MAX_EXPRESSION_NESTING, decode_hex, parse_packet_expression as parse,
     };
 }
 
@@ -110,8 +110,8 @@ pub mod template {
     //! Bounded packet templates.
 
     pub use super::template_impl::{
-        PacketTemplate as Template, PacketTemplateIter as Iter, TemplateError as Error,
-        TemplateValues as Values, DEFAULT_MAX_TEMPLATE_PACKETS,
+        DEFAULT_MAX_TEMPLATE_PACKETS, PacketTemplate as Template, PacketTemplateIter as Iter,
+        TemplateError as Error, TemplateValues as Values,
     };
 
     pub(crate) use super::template_impl::{PacketTemplate, TemplateValues};
@@ -157,6 +157,7 @@ pub mod matcher {
 /// Flat implementation vocabulary used only while composing the library's domains.
 /// It is deliberately unavailable to downstream crates.
 pub(crate) mod internal {
+    pub(crate) use super::Packet;
     pub(crate) use super::build::{
         BuildContext, BuildError, BuildMode, BuildOptions, Builder, BuiltPacket,
         DEFAULT_MAX_PACKET_SIZE,
@@ -172,7 +173,7 @@ pub(crate) mod internal {
     pub(crate) use super::expression::decode_hex;
     #[cfg(test)]
     pub(crate) use super::expression::{
-        parse as parse_packet_expression, Options as ExpressionOptions,
+        Options as ExpressionOptions, parse as parse_packet_expression,
     };
     pub(crate) use super::field::{FieldKind, FieldValue, WireValue};
     pub(crate) use super::layer::{
@@ -185,7 +186,6 @@ pub(crate) mod internal {
         Module as ProtocolModule, Registry as ProtocolRegistry,
     };
     pub(crate) use super::template::{
-        PacketTemplate, TemplateValues, DEFAULT_MAX_TEMPLATE_PACKETS,
+        DEFAULT_MAX_TEMPLATE_PACKETS, PacketTemplate, TemplateValues,
     };
-    pub(crate) use super::Packet;
 }

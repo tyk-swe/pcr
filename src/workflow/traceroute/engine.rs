@@ -541,61 +541,39 @@ fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool
     }
 }
 
-#[derive(Default)]
-struct EvidenceBudget {
-    retained_frame_count: usize,
-    retained_byte_count: usize,
-}
-
-impl EvidenceBudget {
-    fn retain(
-        &mut self,
-        frame: &Frame,
-        limits: TracerouteLimits,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> bool {
-        let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "traceroute.evidence_limit",
-                    "traceroute evidence frame accounting overflowed; later frames were omitted",
-                ),
-            );
-            return false;
-        };
-        let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "traceroute.evidence_limit",
-                    "traceroute evidence byte accounting overflowed; later frames were omitted",
-                ),
-            );
-            return false;
-        };
-        if next_frame_count > limits.max_evidence_frames
-            || next_byte_count > limits.max_evidence_bytes
-        {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "traceroute.evidence_limit",
-                    format!(
-                        "traceroute evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-                        limits.max_evidence_frames, limits.max_evidence_bytes
-                    ),
-                ),
-            );
-            return false;
+fn retain_traceroute_evidence(
+    budget: &mut EvidenceBudget,
+    frame: &Frame,
+    limits: TracerouteLimits,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let error = match budget.retain(
+        frame,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+    ) {
+        Ok(()) => return true,
+        Err(error) => error,
+    };
+    let message = match error {
+        EvidenceBudgetError::FrameCountOverflow => {
+            "traceroute evidence frame accounting overflowed; later frames were omitted".to_owned()
         }
-        self.retained_frame_count = next_frame_count;
-        self.retained_byte_count = next_byte_count;
-        true
-    }
+        EvidenceBudgetError::ByteCountOverflow => {
+            "traceroute evidence byte accounting overflowed; later frames were omitted".to_owned()
+        }
+        EvidenceBudgetError::LimitExceeded => format!(
+            "traceroute evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+            limits.max_evidence_frames, limits.max_evidence_bytes
+        ),
+    };
+    push_diagnostic_once(
+        diagnostics,
+        Diagnostic::warning("traceroute.evidence_limit", message),
+    );
+    false
 }
 
-#[allow(clippy::too_many_arguments)]
 fn process_batch(
     batch: &TracerouteBatch,
     execution: TracerouteBatchExecution,
@@ -668,8 +646,12 @@ fn process_batch(
             let latency = candidate
                 .latency
                 .or_else(|| received_at.duration_since(sent_frame.timestamp).ok());
-            let response = evidence_budget
-                .retain(&candidate.decoded.frame, limits, diagnostics)
+            let response = retain_traceroute_evidence(
+                evidence_budget,
+                &candidate.decoded.frame,
+                limits,
+                diagnostics,
+            )
                 .then(|| candidate.decoded.frame.clone());
             TracerouteProbeEvidence {
                 sequence: probe.sequence,
@@ -724,7 +706,7 @@ fn process_batch(
             );
             break;
         }
-        if evidence_budget.retain(&frame, limits, diagnostics) {
+        if retain_traceroute_evidence(evidence_budget, &frame, limits, diagnostics) {
             undecoded.push(TracerouteUndecodedEvidence { hop_limit, frame });
         }
     }
@@ -743,16 +725,12 @@ fn select_candidate<'a>(
     sent_at: SystemTime,
     timeout: Duration,
 ) {
-    let within_deadline = match candidate.latency {
-        Some(latency) => latency <= timeout,
-        None => candidate
-            .decoded
-            .frame
-            .timestamp
-            .duration_since(sent_at)
-            .is_ok_and(|captured_latency| captured_latency <= timeout),
-    };
-    if !within_deadline {
+    if !response_within_deadline(
+        candidate.latency,
+        candidate.decoded.frame.timestamp,
+        sent_at,
+        timeout,
+    ) {
         return;
     }
     if best
@@ -778,16 +756,8 @@ fn traceroute_candidate_precedes(
                             && (candidate.decoded.frame.bytes < current.decoded.frame.bytes
                                 || (candidate.decoded.frame.bytes
                                     == current.decoded.frame.bytes
-                                    && traceroute_preferred_latency(
+                                    && preferred_latency(
                                         candidate.latency,
                                         current.latency,
                                     ))))))))
-}
-
-fn traceroute_preferred_latency(candidate: Option<Duration>, current: Option<Duration>) -> bool {
-    match (candidate, current) {
-        (Some(candidate), Some(current)) => candidate < current,
-        (Some(_), None) => true,
-        (None, _) => false,
-    }
 }

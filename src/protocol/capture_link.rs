@@ -876,7 +876,7 @@ mod tests {
         BuildContext, BuildOptions, Builder, DecodeOptions, Dissector, Packet, PacketDocument,
     };
     use crate::packet::layer::Raw;
-    use crate::protocol::internal::{default_registry, Ipv4, Ipv6};
+    use crate::protocol::internal::{Ipv4, Ipv6, default_registry};
 
     fn ipv4_bytes() -> Vec<u8> {
         let registry = Arc::new(default_registry().unwrap());
@@ -915,18 +915,22 @@ mod tests {
             address_length: 9,
             ..LinuxSll::default()
         });
-        assert!(builder
-            .build(sll, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            builder
+                .build(sll, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
 
         let mut sll2 = Packet::new();
         sll2.push(LinuxSll2 {
             address_length: 9,
             ..LinuxSll2::default()
         });
-        assert!(builder
-            .build(sll2, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            builder
+                .build(sll2, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -1018,9 +1022,11 @@ mod tests {
             ..Ipv6::default()
         });
 
-        assert!(Builder::new(registry)
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            Builder::new(registry)
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]

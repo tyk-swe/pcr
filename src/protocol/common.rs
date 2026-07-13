@@ -510,9 +510,9 @@ pub(crate) fn validate_raw_child_discriminator(
     }
 
     let message = match actual {
-        Some(actual) => format!(
-            "discriminator {discriminator} selects registered layer {bound}, not {actual}"
-        ),
+        Some(actual) => {
+            format!("discriminator {discriminator} selects registered layer {bound}, not {actual}")
+        }
         None => format!(
             "discriminator {discriminator} selects registered layer {bound}, but that layer is absent"
         ),

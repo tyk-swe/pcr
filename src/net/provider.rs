@@ -12,7 +12,7 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::capture::{Frame, LinkType, DEFAULT_SIZE_LIMIT};
+use crate::capture::{DEFAULT_SIZE_LIMIT, Frame, LinkType};
 use crate::error::{Classification, Classified, Kind};
 
 use super::{InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute, PlannedRoute};
@@ -648,22 +648,30 @@ impl Classified for LiveIoError {
             Self::Unsupported { .. } => Classification::new(
                 "capability.unsupported",
                 Kind::Capability,
-                Some("enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically"),
+                Some(
+                    "enable and configure the requested native capability; PacketcraftR will not change transmission modes automatically",
+                ),
             ),
             Self::MissingDependency { .. } => Classification::new(
                 "capability.missing_dependency",
                 Kind::Capability,
-                Some("install the named native dependency from its trusted platform source and retry"),
+                Some(
+                    "install the named native dependency from its trusted platform source and retry",
+                ),
             ),
             Self::Privilege { .. } => Classification::new(
                 "capability.privilege",
                 Kind::Capability,
-                Some("grant the minimum raw-socket or capture permission required by the selected platform adapter"),
+                Some(
+                    "grant the minimum raw-socket or capture permission required by the selected platform adapter",
+                ),
             ),
             Self::InterfaceDiscovery { .. } => Classification::new(
                 "io.interface_discovery",
                 Kind::Io,
-                Some("inspect the operating-system interface state and retry with an available interface"),
+                Some(
+                    "inspect the operating-system interface state and retry with an available interface",
+                ),
             ),
             Self::Device { .. } => Classification::new(
                 "io.device",
@@ -673,42 +681,58 @@ impl Classified for LiveIoError {
             Self::Send { .. } => Classification::new(
                 "io.send",
                 Kind::Io,
-                Some("inspect the selected route, interface state, and platform socket restrictions before retrying"),
+                Some(
+                    "inspect the selected route, interface state, and platform socket restrictions before retrying",
+                ),
             ),
             Self::PartialSend { .. } => Classification::new(
                 "io.partial_send",
                 Kind::Io,
-                Some("treat the operation as incomplete; do not retry without accounting for the attempted transmission"),
+                Some(
+                    "treat the operation as incomplete; do not retry without accounting for the attempted transmission",
+                ),
             ),
             Self::Capture { .. } => Classification::new(
                 "io.capture",
                 Kind::Io,
-                Some("inspect the capture device state and native backend diagnostic before retrying"),
+                Some(
+                    "inspect the capture device state and native backend diagnostic before retrying",
+                ),
             ),
             Self::CaptureReadiness { .. } => Classification::new(
                 "io.capture_readiness",
                 Kind::Io,
-                Some("fix capture startup before transmitting; capture-before-send readiness cannot be bypassed"),
+                Some(
+                    "fix capture startup before transmitting; capture-before-send readiness cannot be bypassed",
+                ),
             ),
             Self::DeadlineExceeded { .. } => Classification::new(
                 "io.deadline_exceeded",
                 Kind::Io,
-                Some("increase the finite operation timeout or reduce readiness, send, and capture work"),
+                Some(
+                    "increase the finite operation timeout or reduce readiness, send, and capture work",
+                ),
             ),
             Self::CaptureQueueOverflow { .. } => Classification::new(
                 "io.capture_overflow",
                 Kind::Io,
-                Some("treat the capture as incomplete or explicitly select a lossy overflow policy with visible statistics"),
+                Some(
+                    "treat the capture as incomplete or explicitly select a lossy overflow policy with visible statistics",
+                ),
             ),
             Self::CaptureEvidenceLoss { .. } => Classification::new(
                 "io.capture_evidence_loss",
                 Kind::Io,
-                Some("treat the capture as incomplete; inspect receiver-drop counters and reduce native capture pressure before retrying"),
+                Some(
+                    "treat the capture as incomplete; inspect receiver-drop counters and reduce native capture pressure before retrying",
+                ),
             ),
             Self::InvalidCaptureQueueLimit { .. } => Classification::new(
                 "cli.capture_limit",
                 Kind::Cli,
-                Some("use non-zero capture limits whose snap length fits the aggregate byte ceiling"),
+                Some(
+                    "use non-zero capture limits whose snap length fits the aggregate byte ceiling",
+                ),
             ),
             Self::InvalidCaptureTimeout { .. } => Classification::new(
                 "cli.capture_timeout",
@@ -718,12 +742,16 @@ impl Classified for LiveIoError {
             Self::InvalidTransmissionFrame { .. } => Classification::new(
                 "packet.transmission_frame",
                 Kind::Packet,
-                Some("rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite"),
+                Some(
+                    "rebuild a complete route-consistent IP datagram without fields the native kernel would rewrite",
+                ),
             ),
             Self::Encapsulation { .. } => Classification::new(
                 "packet.encapsulation",
                 Kind::Packet,
-                Some("supply a complete link-layer envelope compatible with the materialized Layer 2 route"),
+                Some(
+                    "supply a complete link-layer envelope compatible with the materialized Layer 2 route",
+                ),
             ),
             Self::TransmissionModeMismatch { .. }
             | Self::UnresolvedLinkMode
@@ -732,7 +760,9 @@ impl Classified for LiveIoError {
             | Self::InvalidCaptureStatistics { .. } => Classification::new(
                 "internal.live_io_invariant",
                 Kind::Internal,
-                Some("report the inconsistent provider result; do not reinterpret it as a successful operation"),
+                Some(
+                    "report the inconsistent provider result; do not reinterpret it as a successful operation",
+                ),
             ),
         }
     }

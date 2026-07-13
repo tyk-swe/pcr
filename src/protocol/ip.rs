@@ -15,11 +15,12 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    aliased_fields, bytes, checksum, expected_discriminator, field_layout, impl_layer_boilerplate,
-    invalid, ipv4, ipv6, make_layer, network_from_addresses, out_of_range, payload_without_padding,
-    protocol, resolve_u16, resolve_u8, set_wire_u16, set_wire_u8, strict_or_diagnostic, truncated,
-    unknown_field, validate_auto_raw_discriminator, validate_ipv6_routing_child,
-    validate_raw_child_discriminator, wire_u16, wire_u8, wrong_layer, wrong_type, ValueExpectation,
+    ValueExpectation, aliased_fields, bytes, checksum, expected_discriminator, field_layout,
+    impl_layer_boilerplate, invalid, ipv4, ipv6, make_layer, network_from_addresses, out_of_range,
+    payload_without_padding, protocol, resolve_u8, resolve_u16, set_wire_u8, set_wire_u16,
+    strict_or_diagnostic, truncated, unknown_field, validate_auto_raw_discriminator,
+    validate_ipv6_routing_child, validate_raw_child_discriminator, wire_u8, wire_u16, wrong_layer,
+    wrong_type,
 };
 
 const IPV4_MIN_LEN: usize = 20;
@@ -268,7 +269,7 @@ impl Layer for Ipv4 {
                     u8::try_from(value).map_err(|_| out_of_range(ipv4_schema(), name))?
             }
             ("total_length", value) => {
-                return set_wire_u16(&mut self.total_length, ipv4_schema(), name, value)
+                return set_wire_u16(&mut self.total_length, ipv4_schema(), name, value);
             }
             ("identification", FieldValue::Unsigned(value)) => {
                 self.identification =
@@ -287,10 +288,10 @@ impl Layer for Ipv4 {
                 self.ttl = u8::try_from(value).map_err(|_| out_of_range(ipv4_schema(), name))?
             }
             ("protocol", value) => {
-                return set_wire_u8(&mut self.protocol, ipv4_schema(), name, value)
+                return set_wire_u8(&mut self.protocol, ipv4_schema(), name, value);
             }
             ("checksum", value) => {
-                return set_wire_u16(&mut self.checksum, ipv4_schema(), name, value)
+                return set_wire_u16(&mut self.checksum, ipv4_schema(), name, value);
             }
             ("source", value) => {
                 self.source = ipv4(&value).ok_or_else(|| wrong_type(ipv4_schema(), name, "ipv4"))?
@@ -304,10 +305,10 @@ impl Layer for Ipv4 {
                     bytes(&value).ok_or_else(|| wrong_type(ipv4_schema(), name, "bytes"))?
             }
             ("reserved_flag" | "dont_fragment" | "more_fragments", _) => {
-                return Err(wrong_type(ipv4_schema(), name, "bool"))
+                return Err(wrong_type(ipv4_schema(), name, "bool"));
             }
             ("dscp_ecn" | "identification" | "fragment_offset" | "ttl", _) => {
-                return Err(wrong_type(ipv4_schema(), name, "unsigned"))
+                return Err(wrong_type(ipv4_schema(), name, "unsigned"));
             }
             _ => return Err(unknown_field(ipv4_schema(), name)),
         }
@@ -742,10 +743,10 @@ impl Layer for Ipv6 {
                     .ok_or_else(|| out_of_range(ipv6_schema(), name))?
             }
             ("payload_length", value) => {
-                return set_wire_u16(&mut self.payload_length, ipv6_schema(), name, value)
+                return set_wire_u16(&mut self.payload_length, ipv6_schema(), name, value);
             }
             ("next_header", value) => {
-                return set_wire_u8(&mut self.next_header, ipv6_schema(), name, value)
+                return set_wire_u8(&mut self.next_header, ipv6_schema(), name, value);
             }
             ("hop_limit", FieldValue::Unsigned(value)) => {
                 self.hop_limit =
@@ -759,7 +760,7 @@ impl Layer for Ipv6 {
                     ipv6(&value).ok_or_else(|| wrong_type(ipv6_schema(), name, "ipv6"))?
             }
             ("traffic_class" | "flow_label" | "hop_limit", _) => {
-                return Err(wrong_type(ipv6_schema(), name, "unsigned"))
+                return Err(wrong_type(ipv6_schema(), name, "unsigned"));
             }
             _ => return Err(unknown_field(ipv6_schema(), name)),
         }
@@ -825,20 +826,21 @@ impl LayerCodec for Ipv6Codec {
                 srh.segments.get(last - segments_left).copied()
             });
         let mut diagnostics = Vec::new();
-        if let Some(active) = srh_active {
-            if !layer.destination.is_unspecified() && layer.destination != active {
-                strict_or_diagnostic(
-                    "ipv6",
-                    "build.srh_outer_destination",
-                    "destination",
-                    format!(
-                        "outer destination {} does not match active SRH segment {active}",
-                        layer.destination
-                    ),
-                    context,
-                    &mut diagnostics,
-                )?;
-            }
+        if let Some(active) = srh_active
+            && !layer.destination.is_unspecified()
+            && layer.destination != active
+        {
+            strict_or_diagnostic(
+                "ipv6",
+                "build.srh_outer_destination",
+                "destination",
+                format!(
+                    "outer destination {} does not match active SRH segment {active}",
+                    layer.destination
+                ),
+                context,
+                &mut diagnostics,
+            )?;
         }
         let destination = if layer.destination.is_unspecified() {
             srh_active.unwrap_or(match context.build_context.destination {

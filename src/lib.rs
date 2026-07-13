@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! PacketcraftR's runtime-neutral packet model, protocol registry, exact builder,
+//! `PacketcraftR`'s runtime-neutral packet model, protocol registry, exact builder,
 //! bounded dissector, offline capture I/O, session stages, and high-level client.
 //!
 //! ```

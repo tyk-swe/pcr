@@ -10,18 +10,18 @@ use packetcraftr::{
     capture::{Frame, LinkType},
     error::{Classification, Kind},
     packet::{
+        Packet,
         build::{Builder, Context, Options},
         layer::Raw,
         registry::Registry,
-        Packet,
     },
     protocol::builtin::registry,
     workflow::{
         clock::Clock as FuzzClock,
         fuzz::{
-            run, run_live, AuthorizationError, Authorizer as FuzzAuthorizer, CaseOutcome,
-            Execution, ExecutionCase, ExecutionError, ExecutionStats, Executor as FuzzExecutor,
-            LiveOptions, Request, Strategy, Target,
+            AuthorizationError, Authorizer as FuzzAuthorizer, CaseOutcome, Execution,
+            ExecutionCase, ExecutionError, ExecutionStats, Executor as FuzzExecutor, LiveOptions,
+            Request, Strategy, Target, run, run_live,
         },
     },
 };
@@ -119,10 +119,12 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
     // parameter and therefore cannot produce network side effects.
     let offline = run(&request, packet.clone(), Arc::clone(&registry)).unwrap();
     assert_eq!(offline.cases.len(), 2);
-    assert!(offline
-        .cases
-        .iter()
-        .all(|case| case.outcome == CaseOutcome::Built));
+    assert!(
+        offline
+            .cases
+            .iter()
+            .all(|case| case.outcome == CaseOutcome::Built)
+    );
 
     let mut authorizer = Authorizer { calls: 0 };
     let mut executor = Executor {
@@ -148,10 +150,11 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
     assert_eq!(authorizer.calls, 1);
     assert_eq!(executor.calls, 2);
     assert_eq!(clock.sleeps, 1);
-    assert!(live
-        .cases
-        .iter()
-        .all(|case| case.outcome == CaseOutcome::Timeout));
+    assert!(
+        live.cases
+            .iter()
+            .all(|case| case.outcome == CaseOutcome::Timeout)
+    );
     assert_eq!(
         live.cases[1].reproduction.case_seed,
         offline.cases[1].reproduction.case_seed

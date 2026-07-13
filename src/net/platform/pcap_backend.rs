@@ -9,8 +9,8 @@ use bytes::Bytes;
 use pcap::{Active, Capture, Error as PcapError};
 
 use super::live_capture::{
-    system_time, CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-    NativeCaptureStatistics, NativeCapturedPacket,
+    CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
+    NativeCaptureStatistics, NativeCapturedPacket, system_time,
 };
 use crate::capture::LinkType;
 use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};

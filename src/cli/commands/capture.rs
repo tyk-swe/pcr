@@ -399,28 +399,50 @@ fn run_exchange(arguments: ExchangeArgs, output: OutputFormat) -> Result<(), Cli
         if !stream_enabled {
             return Ok(());
         }
-        if let ClientExchangeEvent::Sent {
-            request_index,
-            frame,
-        } = event
-        {
-            let request_index = u64::try_from(request_index).map_err(|_| {
-                crate::operation::EventError::new("exchange request index overflowed")
-            })?;
-            emit_json_compact(&StreamRecord::success(
-                CommandName::Exchange,
-                stream_sequence,
-                ExchangeStreamCommandResult::Sent {
-                    request_index,
-                    frame: WireFrameOutput::new(frame.bytes),
-                },
-                Vec::new(),
-            ))
-            .map_err(|source| crate::operation::EventError::new(source.message))?;
-            stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
-                crate::operation::EventError::new("exchange output sequence overflowed")
-            })?;
-        }
+        let item = match event {
+            ClientExchangeEvent::Sent {
+                request_index,
+                frame,
+            } => ExchangeStreamCommandResult::Sent {
+                request_index: u64::try_from(request_index).map_err(|_| {
+                    crate::operation::EventError::new("exchange request index overflowed")
+                })?,
+                frame: WireFrameOutput::new(frame.bytes),
+            },
+            ClientExchangeEvent::Response(response) => {
+                ExchangeStreamCommandResult::Response {
+                    request_index: u64::try_from(response.request_index).map_err(|_| {
+                        crate::operation::EventError::new("exchange request index overflowed")
+                    })?,
+                    response: DecodedFrameOutput::try_from_decoded(response.response)
+                        .map_err(|source| {
+                            crate::operation::EventError::new(source.to_string())
+                        })?,
+                    latency: response.latency,
+                }
+            }
+            ClientExchangeEvent::Unsolicited(frame) => {
+                ExchangeStreamCommandResult::Unsolicited {
+                    frame: DecodedFrameOutput::try_from_decoded(frame).map_err(|source| {
+                        crate::operation::EventError::new(source.to_string())
+                    })?,
+                }
+            }
+            ClientExchangeEvent::Undecoded(frame) => ExchangeStreamCommandResult::Undecoded {
+                frame: FrameOutput::try_from_frame(frame)
+                    .map_err(|source| crate::operation::EventError::new(source.to_string()))?,
+            },
+        };
+        emit_json_compact(&StreamRecord::success(
+            CommandName::Exchange,
+            stream_sequence,
+            item,
+            Vec::new(),
+        ))
+        .map_err(|source| crate::operation::EventError::new(source.message))?;
+        stream_sequence = stream_sequence.checked_add(1).ok_or_else(|| {
+            crate::operation::EventError::new("exchange output sequence overflowed")
+        })?;
         Ok(())
     };
     let result = client
@@ -473,6 +495,9 @@ fn run_exchange(arguments: ExchangeArgs, output: OutputFormat) -> Result<(), Cli
         OutputFormat::Ndjson => {
             let mut result = result;
             result.sent.clear();
+            result.responses.clear();
+            result.unsolicited.clear();
+            result.undecoded.clear();
             render_exchange_stream(result, diagnostics, stats, stream_sequence)
         }
         _ => Err(CliError::classified(

@@ -38,11 +38,7 @@ fn run_doctor(arguments: DoctorArgs, output: OutputFormat) -> Result<(), CliErro
     let mut capabilities = vec![
         doctor_capability(
             "interfaces",
-            if interface_error.is_none() && selected.as_ref().is_none_or(|_| !interfaces.is_empty()) {
-                DoctorReadiness::Ready
-            } else {
-                DoctorReadiness::Unavailable
-            },
+            doctor_interfaces_readiness(interface_error.is_none(), interfaces.len()),
             interface_error.as_ref().map_or_else(
                 || format!("{} interface(s) discovered", interfaces.len()),
                 ToString::to_string,
@@ -160,6 +156,17 @@ fn doctor_capability(
         name: name.to_owned(),
         status,
         detail: detail.into(),
+    }
+}
+
+fn doctor_interfaces_readiness(
+    enumeration_succeeded: bool,
+    interface_count: usize,
+) -> DoctorReadiness {
+    if enumeration_succeeded && interface_count != 0 {
+        DoctorReadiness::Ready
+    } else {
+        DoctorReadiness::Unavailable
     }
 }
 

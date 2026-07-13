@@ -606,6 +606,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dns_any_family_reserves_only_the_literal_address_family() {
+        assert_eq!(
+            dns_port_family(
+                AddressFamily::Any,
+                &ScanTarget::Address("192.0.2.53".parse().unwrap()),
+            ),
+            crate::operation::PortFamily::Ipv4,
+        );
+        assert_eq!(
+            dns_port_family(
+                AddressFamily::Any,
+                &ScanTarget::Address("2001:db8::53".parse().unwrap()),
+            ),
+            crate::operation::PortFamily::Ipv6,
+        );
+    }
+
+    #[test]
+    fn doctor_requires_at_least_one_discovered_interface() {
+        assert_eq!(
+            doctor_interfaces_readiness(true, 0),
+            DoctorReadiness::Unavailable,
+        );
+        assert_eq!(
+            doctor_interfaces_readiness(true, 1),
+            DoctorReadiness::Ready,
+        );
+        assert_eq!(
+            doctor_interfaces_readiness(false, 1),
+            DoctorReadiness::Unavailable,
+        );
+    }
+
     struct DoctorProbeCapture {
         shutdown: Arc<std::sync::atomic::AtomicBool>,
     }

@@ -211,9 +211,8 @@ where
         )
     }
 
-    /// Incremental, cancellable exchange entry point. Successful sends are
-    /// emitted immediately; classified capture evidence follows after the
-    /// owned capture session has shut down cleanly.
+    /// Incremental, cancellable exchange entry point. Successful sends and
+    /// classified capture evidence are emitted as each operation completes.
     pub fn exchange_streaming<S>(
         &self,
         template: &PacketTemplate,
@@ -390,6 +389,7 @@ where
                     deadline,
                     options: &options,
                 },
+                sink,
                 operation.cancellation(),
             ) {
                 return Err(drain_error_after_shutdown(&mut capture, error));
@@ -469,6 +469,7 @@ where
                     deadline,
                     options: &options,
                 },
+                sink,
                 operation.cancellation(),
             ) {
                 return Err(drain_error_after_shutdown(&mut capture, error));
@@ -492,7 +493,7 @@ where
                     return Err(error_after_shutdown(&mut capture, error));
                 }
             };
-            captured.process(
+            let event = captured.process(
                 frame,
                 ExchangeProcessContext {
                     registry: &self.registry,
@@ -503,6 +504,11 @@ where
                     options: &options,
                 },
             );
+            if let Some(event) = event
+                && let Err(error) = sink.emit(event)
+            {
+                return Err(event_error_after_shutdown(&mut capture, error));
+            }
         }
         if let Err(error) = drain_available(
             &mut capture,
@@ -517,6 +523,7 @@ where
                 deadline,
                 options: &options,
             },
+            sink,
             operation.cancellation(),
         ) {
             return Err(drain_error_after_shutdown(&mut capture, error));
@@ -570,15 +577,6 @@ where
                     ),
                 ),
             );
-        }
-        for response in captured.responses.iter().cloned() {
-            sink.emit(ExchangeEvent::Response(response))?;
-        }
-        for response in captured.unsolicited.iter().cloned() {
-            sink.emit(ExchangeEvent::Unsolicited(response))?;
-        }
-        for frame in captured.undecoded.iter().cloned() {
-            sink.emit(ExchangeEvent::Undecoded(frame))?;
         }
         Ok(ExchangeResult {
             sent,

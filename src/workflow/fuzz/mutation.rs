@@ -1,8 +1,13 @@
-fn prepare(
+fn prepare<F>(
     request: &FuzzRequest,
     packet: Packet,
     registry: Arc<ProtocolRegistry>,
-) -> Result<PreparedFuzz, FuzzError> {
+    cancellation: &crate::operation::Cancellation,
+    mut on_case: F,
+) -> Result<PreparedFuzz, FuzzError>
+where
+    F: FnMut(&FuzzCase, FuzzStats) -> Result<(), FuzzError>,
+{
     request.validate()?;
     let started = Instant::now();
     validate_base_shape(&packet, request.build.max_layers)?;
@@ -31,11 +36,17 @@ fn prepare(
     let mut built_byte_count = 0_u64;
     let mut retained_bytes = 0_u64;
     for offset in 0..request.cases {
-        enforce_preparation_deadline(started, request.limits.max_duration)?;
         let index = request
             .first_case
             .checked_add(offset as u64)
             .ok_or(FuzzError::CaseIndexOverflow)?;
+        cancellation
+            .check()
+            .map_err(|source| FuzzError::Operation {
+                case_index: index,
+                source,
+            })?;
+        enforce_preparation_deadline(started, request.limits.max_duration)?;
         let seed = case_seed(request.seed, index);
         let pair_index = (index % pairs.len() as u64) as usize;
         let round = index / pairs.len() as u64;
@@ -102,6 +113,16 @@ fn prepare(
                 Vec::new(),
             ));
             cases.push(case);
+            emit_prepared_case(
+                cases.last().expect("prepared case was just retained"),
+                offset as u64 + 1,
+                built_case_count,
+                built_byte_count,
+                started,
+                request.limits.max_duration,
+                cancellation,
+                &mut on_case,
+            )?;
             continue;
         }
 
@@ -158,6 +179,16 @@ fn prepare(
             }
         }
         cases.push(case);
+        emit_prepared_case(
+            cases.last().expect("prepared case was just retained"),
+            offset as u64 + 1,
+            built_case_count,
+            built_byte_count,
+            started,
+            request.limits.max_duration,
+            cancellation,
+            &mut on_case,
+        )?;
     }
     enforce_preparation_deadline(started, request.limits.max_duration)?;
     Ok(PreparedFuzz {
@@ -166,6 +197,42 @@ fn prepare(
         built_byte_count,
         preparation_elapsed: started.elapsed(),
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_prepared_case<F>(
+    case: &FuzzCase,
+    cases_generated: u64,
+    cases_built: u64,
+    built_bytes: u64,
+    started: Instant,
+    duration_limit: Duration,
+    cancellation: &crate::operation::Cancellation,
+    on_case: &mut F,
+) -> Result<(), FuzzError>
+where
+    F: FnMut(&FuzzCase, FuzzStats) -> Result<(), FuzzError>,
+{
+    enforce_preparation_deadline(started, duration_limit)?;
+    cancellation
+        .check()
+        .map_err(|source| FuzzError::Operation {
+            case_index: case.index,
+            source,
+        })?;
+    on_case(
+        case,
+        FuzzStats {
+            cases_generated,
+            cases_built,
+            cases_rejected: cases_generated - cases_built,
+            packets_attempted: cases_generated,
+            packets_completed: cases_built,
+            bytes: built_bytes,
+            elapsed: started.elapsed(),
+            ..FuzzStats::default()
+        },
+    )
 }
 
 fn enforce_preparation_deadline(started: Instant, limit: Duration) -> Result<(), FuzzError> {

@@ -142,6 +142,7 @@ fn drain_error_after_shutdown<C: CaptureSession>(
             operation_error_after_shutdown(capture, operation)
         }
         CaptureDrainError::Capture(operation) => error_after_shutdown(capture, operation),
+        CaptureDrainError::Event(operation) => event_error_after_shutdown(capture, operation),
     }
 }
 

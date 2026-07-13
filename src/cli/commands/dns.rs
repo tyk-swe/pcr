@@ -35,11 +35,7 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
     };
     let address_family: AddressFamily = family.into();
-    let port_family = match address_family {
-        AddressFamily::Any => crate::operation::PortFamily::Both,
-        AddressFamily::Ipv4 => crate::operation::PortFamily::Ipv4,
-        AddressFamily::Ipv6 => crate::operation::PortFamily::Ipv6,
-    };
+    let port_family = dns_port_family(address_family, &server);
     let capture_options = limits.capture_options();
     let evidence_bytes = limits.evidence_bytes();
     let queue_limits = limits.into_limits();
@@ -60,7 +56,9 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         server,
         address_family,
         server_port: port,
-        source_port: source_port.or(generated_source_port).expect("explicit or generated port"),
+        source_port: source_port
+            .or(generated_source_port)
+            .expect("explicit or generated port"),
         query_name: name,
         query_type: query_type.into(),
         transaction_id: transaction_id.unwrap_or_else(|| {
@@ -198,6 +196,21 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
                 format: output,
             },
         )),
+    }
+}
+
+fn dns_port_family(
+    address_family: AddressFamily,
+    server: &ScanTarget,
+) -> crate::operation::PortFamily {
+    match (address_family, server) {
+        (AddressFamily::Any, ScanTarget::Address(address)) if address.is_ipv4() => {
+            crate::operation::PortFamily::Ipv4
+        }
+        (AddressFamily::Any, ScanTarget::Address(_)) => crate::operation::PortFamily::Ipv6,
+        (AddressFamily::Any, ScanTarget::Hostname(_)) => crate::operation::PortFamily::Both,
+        (AddressFamily::Ipv4, _) => crate::operation::PortFamily::Ipv4,
+        (AddressFamily::Ipv6, _) => crate::operation::PortFamily::Ipv6,
     }
 }
 

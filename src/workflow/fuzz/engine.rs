@@ -31,7 +31,22 @@ where
             case_index: request.first_case,
             source,
         })?;
-    let prepared = prepare(request, packet, registry)?;
+    let prepared = prepare(
+        request,
+        packet,
+        registry,
+        operation.cancellation(),
+        |case, stats| {
+            sink.emit(FuzzEvent {
+                case: case.clone(),
+                stats,
+            })
+            .map_err(|source| FuzzError::Event {
+                case_index: case.index,
+                source,
+            })
+        },
+    )?;
     let result = FuzzResult {
         mode: FuzzMode::Offline,
         seed: request.seed,
@@ -48,23 +63,6 @@ where
             ..FuzzStats::default()
         },
     };
-    for case in &result.cases {
-        operation
-            .cancellation()
-            .check()
-            .map_err(|source| FuzzError::Operation {
-                case_index: case.index,
-                source,
-            })?;
-        sink.emit(FuzzEvent {
-            case: case.clone(),
-            stats: result.stats.clone(),
-        })
-        .map_err(|source| FuzzError::Event {
-            case_index: case.index,
-            source,
-        })?;
-    }
     Ok(result)
 }
 
@@ -134,7 +132,13 @@ where
     let live = live.validate()?;
     let operation_started = Instant::now();
     let live_dissector = Dissector::new(Arc::clone(&registry));
-    let mut prepared = prepare(request, packet, registry)?;
+    let mut prepared = prepare(
+        request,
+        packet,
+        registry,
+        operation.cancellation(),
+        |_, _| Ok(()),
+    )?;
     let built_indices = prepared
         .cases
         .iter()

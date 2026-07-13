@@ -100,7 +100,7 @@ jobs:
         shell: bash
         run: |
           gh api \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/qualification.yml/runs?status=success&per_page=100" \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/qualification.yml/runs?branch=main&status=success&per_page=100" \
             > qualification-runs.json
           python3 scripts/verify-qualification.py qualification-runs.json
           ! rg -q 'RUSTSEC-2024-0436' deny.toml

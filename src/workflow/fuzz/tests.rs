@@ -192,6 +192,78 @@ mod tests {
     }
 
     #[test]
+    fn offline_stream_preserves_cases_completed_before_a_budget_error() {
+        let request = FuzzRequest {
+            cases: 2,
+            strategies: vec![FuzzStrategy::BitFlip],
+            targets: vec!["2.bytes".parse().unwrap()],
+            build: BuildOptions {
+                max_packet_size: 64,
+                ..BuildOptions::default()
+            },
+            limits: FuzzLimits {
+                max_cases: 2,
+                max_packet_bytes: 64,
+                max_total_bytes: 256,
+                max_field_bytes: 32,
+                max_evidence_bytes: 256,
+                ..FuzzLimits::default()
+            },
+            ..FuzzRequest::default()
+        };
+        let operation = crate::operation::Context::new(crate::operation::Id::from_bytes([9; 16]));
+        let mut events = Vec::new();
+        let error = fuzz_streaming(
+            &request,
+            packet(),
+            registry(),
+            &operation,
+            &mut |event: FuzzEvent| {
+                events.push((event.case.index, event.stats.cases_generated));
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, FuzzError::ByteLimit { .. }));
+        assert_eq!(events, [(request.first_case, 1)]);
+    }
+
+    #[test]
+    fn offline_preparation_observes_cancellation_between_cases() {
+        let request = FuzzRequest {
+            cases: 3,
+            ..FuzzRequest::default()
+        };
+        let operation = crate::operation::Context::new(crate::operation::Id::from_bytes([10; 16]));
+        let cancellation = operation.cancellation().clone();
+        let mut generated = Vec::new();
+        let error = fuzz_streaming(
+            &request,
+            packet(),
+            registry(),
+            &operation,
+            &mut |event: FuzzEvent| {
+                generated.push(event.stats.cases_generated);
+                cancellation.cancel(crate::operation::CancellationReason::Interrupt);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            FuzzError::Operation {
+                case_index,
+                source: crate::operation::Error::Cancelled {
+                    reason: crate::operation::CancellationReason::Interrupt,
+                },
+            } if case_index == request.first_case + 1
+        ));
+        assert_eq!(generated, [1]);
+    }
+
+    #[test]
     fn rejected_case_recipes_and_shrink_data_share_the_aggregate_byte_budget() {
         let error = fuzz(
             &FuzzRequest {

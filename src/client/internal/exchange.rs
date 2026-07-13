@@ -159,16 +159,22 @@ struct ExchangeProcessContext<'a> {
 enum CaptureDrainError {
     Operation(crate::operation::Error),
     Capture(LiveIoError),
+    Event(crate::operation::EventError),
 }
 
-fn drain_available<C: CaptureSession>(
+fn drain_available<C, S>(
     capture: &mut CaptureGuard<C>,
     enforced_deadline: Option<Instant>,
     frame_limit: usize,
     captured: &mut ExchangeAccumulator,
     context: ExchangeProcessContext<'_>,
+    sink: &mut S,
     cancellation: &crate::operation::Cancellation,
-) -> Result<(), CaptureDrainError> {
+) -> Result<(), CaptureDrainError>
+where
+    C: CaptureSession,
+    S: crate::operation::EventSink<ExchangeEvent>,
+{
     for _ in 0..frame_limit {
         cancellation
             .check()
@@ -186,7 +192,9 @@ fn drain_available<C: CaptureSession>(
         else {
             return Ok(());
         };
-        captured.process(frame, context);
+        if let Some(event) = captured.process(frame, context) {
+            sink.emit(event).map_err(CaptureDrainError::Event)?;
+        }
     }
     push_diagnostic_once(
         &mut captured.diagnostics,
@@ -213,7 +221,11 @@ impl ExchangeAccumulator {
         }
     }
 
-    fn process(&mut self, captured: CapturedFrame, context: ExchangeProcessContext<'_>) {
+    fn process(
+        &mut self,
+        captured: CapturedFrame,
+        context: ExchangeProcessContext<'_>,
+    ) -> Option<ExchangeEvent> {
         let ExchangeProcessContext {
             registry,
             dissector,
@@ -234,8 +246,7 @@ impl ExchangeAccumulator {
                         format!("captured frame could not be decoded: {error}"),
                     ),
                 );
-                self.retain_undecoded(raw_frame, options);
-                return;
+                return self.process_undecoded(raw_frame, options);
             }
         };
         let integrity_failure = decoded.diagnostics.iter().any(|diagnostic| {
@@ -250,8 +261,7 @@ impl ExchangeAccumulator {
                     "a response with failed checksum validation was not correlated",
                 ),
             );
-            self.retain_unsolicited(decoded, options);
-            return;
+            return self.process_unsolicited(decoded, options);
         }
 
         if received_at.is_none() {
@@ -300,6 +310,11 @@ impl ExchangeAccumulator {
             let received_at = received_at.expect("only timestamped capture frames can match");
             self.response_counts[request_index] =
                 self.response_counts[request_index].saturating_add(1);
+            let response = MatchedResponse {
+                request_index,
+                response: decoded,
+                latency: received_at.saturating_duration_since(sent_at[request_index]),
+            };
             if self.responses.len() >= options.max_responses {
                 push_diagnostic_once(
                     &mut self.diagnostics,
@@ -311,22 +326,17 @@ impl ExchangeAccumulator {
                         ),
                     ),
                 );
-                return;
-            }
-            if reserve_capture_evidence(
+            } else if reserve_capture_evidence(
                 &mut self.retained_frames,
                 &mut self.retained_bytes,
-                decoded.original.len(),
+                response.response.original.len(),
                 options.max_capture_queue_frames,
                 options.max_evidence_bytes,
                 &mut self.diagnostics,
             ) {
-                self.responses.push(MatchedResponse {
-                    request_index,
-                    response: decoded,
-                    latency: received_at.saturating_duration_since(sent_at[request_index]),
-                });
+                self.responses.push(response.clone());
             }
+            Some(ExchangeEvent::Response(response))
         } else {
             if sent_at.len() < prepared.len() {
                 push_diagnostic_once(
@@ -337,14 +347,18 @@ impl ExchangeAccumulator {
                     ),
                 );
             }
-            self.retain_unsolicited(decoded, options);
+            self.process_unsolicited(decoded, options)
         }
     }
 
-    fn retain_unsolicited(&mut self, decoded: DecodedPacket, options: &ExchangeOptions) {
+    fn process_unsolicited(
+        &mut self,
+        decoded: DecodedPacket,
+        options: &ExchangeOptions,
+    ) -> Option<ExchangeEvent> {
         if self.discard_unmatched {
             self.discarded_unmatched = self.discarded_unmatched.saturating_add(1);
-            return;
+            return None;
         }
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
@@ -357,9 +371,7 @@ impl ExchangeAccumulator {
                     ),
                 ),
             );
-            return;
-        }
-        if reserve_capture_evidence(
+        } else if reserve_capture_evidence(
             &mut self.retained_frames,
             &mut self.retained_bytes,
             decoded.original.len(),
@@ -367,14 +379,19 @@ impl ExchangeAccumulator {
             options.max_evidence_bytes,
             &mut self.diagnostics,
         ) {
-            self.unsolicited.push(decoded);
+            self.unsolicited.push(decoded.clone());
         }
+        Some(ExchangeEvent::Unsolicited(decoded))
     }
 
-    fn retain_undecoded(&mut self, frame: Frame, options: &ExchangeOptions) {
+    fn process_undecoded(
+        &mut self,
+        frame: Frame,
+        options: &ExchangeOptions,
+    ) -> Option<ExchangeEvent> {
         if self.discard_unmatched {
             self.discarded_unmatched = self.discarded_unmatched.saturating_add(1);
-            return;
+            return None;
         }
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
@@ -387,9 +404,7 @@ impl ExchangeAccumulator {
                     ),
                 ),
             );
-            return;
-        }
-        if reserve_capture_evidence(
+        } else if reserve_capture_evidence(
             &mut self.retained_frames,
             &mut self.retained_bytes,
             frame.bytes.len(),
@@ -397,7 +412,8 @@ impl ExchangeAccumulator {
             options.max_evidence_bytes,
             &mut self.diagnostics,
         ) {
-            self.undecoded.push(frame);
+            self.undecoded.push(frame.clone());
         }
+        Some(ExchangeEvent::Undecoded(frame))
     }
 }

@@ -107,7 +107,8 @@ pub(crate) mod output {
     #[cfg(test)]
     pub(crate) use packetcraftr::output::frame;
     pub(crate) use packetcraftr::output::frame::{
-        Captured as FrameOutput, Timestamp as OutputTimestamp, Wire as WireFrameOutput,
+        Captured as FrameOutput, Decoded as DecodedFrameOutput, Timestamp as OutputTimestamp,
+        Wire as WireFrameOutput,
     };
     pub(crate) use packetcraftr::output::fuzz::{
         Case as FuzzCaseOutput, Event as FuzzStreamCommandResult, Mode as FuzzMode,

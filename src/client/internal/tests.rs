@@ -279,6 +279,57 @@ mod tests {
     }
 
     #[derive(Clone)]
+    struct ShutdownFailIo(FakeIo);
+
+    impl PacketIo for ShutdownFailIo {
+        fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+            self.0.send(frame)
+        }
+    }
+
+    struct ShutdownFailCapture(FakeCapture);
+
+    impl CaptureSession for ShutdownFailCapture {
+        fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+            self.0.wait_ready(timeout)
+        }
+
+        fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+            self.0.next_frame(timeout)
+        }
+
+        fn next_captured_frame(
+            &mut self,
+            timeout: Duration,
+        ) -> Result<Option<CapturedFrame>, LiveIoError> {
+            self.0.next_captured_frame(timeout)
+        }
+
+        fn shutdown(&mut self) -> Result<(), LiveIoError> {
+            self.0.events.lock().unwrap().push("shutdown");
+            Err(LiveIoError::Capture {
+                message: "test shutdown failure".to_owned(),
+            })
+        }
+
+        fn statistics(&self) -> CaptureStatistics {
+            self.0.statistics()
+        }
+    }
+
+    impl CaptureProvider for ShutdownFailIo {
+        type Capture = ShutdownFailCapture;
+
+        fn arm_capture(
+            &self,
+            route: &PlannedRoute,
+            limits: CaptureQueueLimits,
+        ) -> Result<Self::Capture, LiveIoError> {
+            self.0.arm_capture(route, limits).map(ShutdownFailCapture)
+        }
+    }
+
+    #[derive(Clone)]
     struct EndlessCaptureIo {
         frame: Frame,
         sends: Arc<AtomicUsize>,
@@ -1262,7 +1313,7 @@ mod tests {
     }
 
     #[test]
-    fn exchange_arms_and_awaits_capture_before_send_and_matches_response() {
+    fn exchange_streams_response_before_capture_shutdown() {
         let registry = Arc::new(default_registry().unwrap());
         let response_packet = packet(
             Ipv4Addr::new(10, 0, 0, 2),
@@ -1302,8 +1353,19 @@ mod tests {
             12345,
             9,
         );
+        let stream_events = Arc::clone(&events);
+        let mut sink = move |event| {
+            stream_events.lock().unwrap().push(match event {
+                ExchangeEvent::Sent { .. } => "sent_event",
+                ExchangeEvent::Response(_) => "response_event",
+                ExchangeEvent::Unsolicited(_) => "unsolicited_event",
+                ExchangeEvent::Undecoded(_) => "undecoded_event",
+            });
+            Ok(())
+        };
+        let operation = crate::operation::Context::new(crate::operation::Id::from_bytes([7; 16]));
         let result = client
-            .exchange(
+            .exchange_streaming(
                 &PacketTemplate::new(request),
                 ExchangeOptions {
                     send: SendOptions {
@@ -1314,14 +1376,25 @@ mod tests {
                         },
                         ..SendOptions::default()
                     },
+                    timeout: Duration::from_millis(10),
                     ..ExchangeOptions::default()
                 },
+                CaptureOptions::default(),
+                &operation,
+                &mut sink,
             )
             .unwrap();
 
         assert_eq!(
             *events.lock().unwrap(),
-            ["arm", "ready", "send", "shutdown"]
+            [
+                "arm",
+                "ready",
+                "send",
+                "sent_event",
+                "response_event",
+                "shutdown"
+            ]
         );
         assert_eq!(
             limits.lock().unwrap().as_slice(),
@@ -1337,6 +1410,88 @@ mod tests {
         assert_eq!(result.sent_evidence[0].bytes, result.sent[0].bytes);
         assert!(result.unanswered.is_empty());
         assert!(result.unsolicited.is_empty());
+    }
+
+    #[test]
+    fn exchange_stream_preserves_response_when_capture_shutdown_fails() {
+        let registry = Arc::new(default_registry().unwrap());
+        let response_bytes = Builder::new(Arc::clone(&registry))
+            .build(
+                packet(
+                    Ipv4Addr::new(10, 0, 0, 2),
+                    Ipv4Addr::new(10, 0, 0, 1),
+                    9,
+                    12_345,
+                ),
+                BuildContext::default(),
+                BuildOptions::default(),
+            )
+            .unwrap()
+            .bytes;
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let client = Client::new(
+            registry,
+            FixedRoutes(route(LinkCapability::Layer3)),
+            CountingNeighbors::default(),
+            ShutdownFailIo(FakeIo {
+                events: Arc::clone(&events),
+                response: Arc::new(Mutex::new(Some(
+                    Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response_bytes).unwrap(),
+                ))),
+                deliver_before_send: false,
+                limits: Arc::new(Mutex::new(Vec::new())),
+                capture_statistics: CaptureStatistics::default(),
+            }),
+            TrafficPolicy::default(),
+        );
+        let stream_events = Arc::clone(&events);
+        let mut sink = move |event| {
+            stream_events.lock().unwrap().push(match event {
+                ExchangeEvent::Sent { .. } => "sent_event",
+                ExchangeEvent::Response(_) => "response_event",
+                ExchangeEvent::Unsolicited(_) => "unsolicited_event",
+                ExchangeEvent::Undecoded(_) => "undecoded_event",
+            });
+            Ok(())
+        };
+        let operation = crate::operation::Context::new(crate::operation::Id::from_bytes([8; 16]));
+        let error = client
+            .exchange_streaming(
+                &PacketTemplate::new(packet(
+                    Ipv4Addr::new(10, 0, 0, 1),
+                    Ipv4Addr::new(10, 0, 0, 2),
+                    12_345,
+                    9,
+                )),
+                ExchangeOptions {
+                    send: SendOptions {
+                        plan: PlanOptions {
+                            link_mode: LinkMode::Layer3,
+                            ..PlanOptions::default()
+                        },
+                        ..SendOptions::default()
+                    },
+                    timeout: Duration::from_millis(10),
+                    ..ExchangeOptions::default()
+                },
+                CaptureOptions::default(),
+                &operation,
+                &mut sink,
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, ClientError::Io(LiveIoError::Capture { .. })));
+        assert_eq!(
+            *events.lock().unwrap(),
+            [
+                "arm",
+                "ready",
+                "send",
+                "sent_event",
+                "response_event",
+                "shutdown"
+            ]
+        );
     }
 
     #[test]
@@ -1449,7 +1604,7 @@ mod tests {
         let dissector = Dissector::new(Arc::clone(&registry));
         let options = ExchangeOptions::default();
         let mut accumulator = ExchangeAccumulator::new(1, false);
-        accumulator.process(
+        let event = accumulator.process(
             CapturedFrame::new(
                 Frame::new(
                     std::time::UNIX_EPOCH,
@@ -1469,6 +1624,7 @@ mod tests {
             },
         );
 
+        assert!(matches!(event, Some(ExchangeEvent::Response(_))));
         assert_eq!(accumulator.responses.len(), 1);
         assert_eq!(accumulator.responses[0].latency, Duration::from_millis(1));
         assert_eq!(
@@ -1481,7 +1637,7 @@ mod tests {
             ..ExchangeOptions::default()
         };
         let mut evidence_limited = ExchangeAccumulator::new(1, false);
-        evidence_limited.process(
+        let event = evidence_limited.process(
             CapturedFrame::new(
                 Frame::new(
                     std::time::UNIX_EPOCH,
@@ -1500,6 +1656,7 @@ mod tests {
                 options: &evidence_limited_options,
             },
         );
+        assert!(matches!(event, Some(ExchangeEvent::Response(_))));
         assert!(evidence_limited.responses.is_empty());
         assert_eq!(evidence_limited.response_counts, [1]);
         assert!(evidence_limited
@@ -1512,7 +1669,7 @@ mod tests {
             ..ExchangeOptions::default()
         };
         let mut discarding = ExchangeAccumulator::new(1, true);
-        discarding.process(
+        let event = discarding.process(
             CapturedFrame::without_ingress_time(
                 Frame::new(
                     std::time::UNIX_EPOCH,
@@ -1530,9 +1687,10 @@ mod tests {
                 options: &discard_options,
             },
         );
+        assert!(event.is_none());
         assert_eq!(discarding.discarded_unmatched, 1);
         assert_eq!(discarding.retained_bytes, 0);
-        discarding.process(
+        let event = discarding.process(
             CapturedFrame::new(
                 Frame::new(
                     std::time::UNIX_EPOCH,
@@ -1551,6 +1709,7 @@ mod tests {
                 options: &discard_options,
             },
         );
+        assert!(matches!(event, Some(ExchangeEvent::Response(_))));
         assert_eq!(discarding.responses.len(), 1);
         assert_eq!(discarding.retained_bytes, response.bytes.len());
         assert!(!discarding
@@ -1559,7 +1718,7 @@ mod tests {
             .any(|diagnostic| diagnostic.code == "exchange.capture_byte_limit"));
 
         let mut fallback = ExchangeAccumulator::new(1, false);
-        fallback.process(
+        let event = fallback.process(
             CapturedFrame::without_ingress_time(
                 Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
             ),
@@ -1572,6 +1731,7 @@ mod tests {
                 options: &options,
             },
         );
+        assert!(matches!(event, Some(ExchangeEvent::Unsolicited(_))));
         assert!(fallback.responses.is_empty());
         assert_eq!(fallback.unsolicited.len(), 1);
         assert!(fallback
@@ -1644,6 +1804,7 @@ mod tests {
         let mut capture = CaptureGuard::new(ReadinessAndShutdownFailCapture(Arc::clone(&events)));
         let cancellation = crate::operation::Cancellation::default();
         cancellation.cancel(crate::operation::CancellationReason::Interrupt);
+        let mut sink = |_| Ok(());
 
         let drain_error = drain_available(
             &mut capture,
@@ -1658,6 +1819,7 @@ mod tests {
                 deadline: Instant::now(),
                 options: &options,
             },
+            &mut sink,
             &cancellation,
         )
         .unwrap_err();

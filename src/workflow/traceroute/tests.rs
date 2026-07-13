@@ -328,7 +328,7 @@ mod tests {
                 let mut response = execution.unsolicited.remove(0);
                 response.frame.timestamp = execution.sent_evidence[0]
                     .timestamp
-                    .checked_sub(Duration::from_nanos(1))
+                    .checked_sub(Duration::from_millis(1))
                     .unwrap();
                 execution.responses.push(TracerouteMatchedResponse {
                     request_index: 0,

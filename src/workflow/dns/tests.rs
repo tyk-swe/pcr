@@ -987,7 +987,7 @@ mod tests {
                 .execute(exchange)?;
                 let mut response = execution.responses.remove(0).response;
                 response.frame.timestamp =
-                    execution.sent_evidence.timestamp + exchange.timeout + Duration::from_nanos(1);
+                    execution.sent_evidence.timestamp + exchange.timeout + Duration::from_millis(1);
                 execution.unsolicited.push(response);
                 Ok(execution)
             }
@@ -1039,7 +1039,7 @@ mod tests {
                 execution.responses[0].response.frame.timestamp = execution
                     .sent_evidence
                     .timestamp
-                    .checked_sub(Duration::from_nanos(1))
+                    .checked_sub(Duration::from_millis(1))
                     .unwrap();
                 Ok(execution)
             }

@@ -765,4 +765,57 @@ mod tests {
             vec![IpAddr::V6(final_destination)]
         );
     }
+
+    #[test]
+    fn encapsulated_srh_does_not_redirect_the_outer_route() {
+        let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
+        let inner_destination: Ipv6Addr = "2001:db8:1::2".parse().unwrap();
+        let inner_segment: Ipv6Addr = "2001:db8:ffff::1".parse().unwrap();
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv6 {
+                source: outer_source,
+                destination: outer_destination,
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: "2001:db8:1::1".parse().unwrap(),
+                destination: inner_destination,
+                ..Ipv6::default()
+            })
+            .push(SegmentRoutingHeader {
+                segments: vec![inner_segment, inner_destination],
+                segments_left: WireValue::Raw(Bytes::from_static(&[1])),
+                ..SegmentRoutingHeader::default()
+            });
+        let decision = RouteDecision {
+            selected_address: Some(IpAddr::V6(outer_source)),
+            preferred_source: Some(IpAddr::V6(outer_source)),
+            next_hop: None,
+            capability: LinkCapability::Layer3,
+            link_type: LinkType::IPV6,
+            ..route(None)
+        };
+
+        let plan = RoutePlanner
+            .plan(
+                &packet,
+                None,
+                &PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    interface: None,
+                    preferred_source: None,
+                },
+                &FixedRoute(decision),
+            )
+            .unwrap();
+
+        assert_eq!(plan.lookup_destination, Some(IpAddr::V6(outer_destination)));
+        assert_eq!(plan.final_destination, Some(IpAddr::V6(outer_destination)));
+        assert_eq!(
+            plan.visited_destinations,
+            vec![IpAddr::V6(outer_destination)]
+        );
+    }
 }

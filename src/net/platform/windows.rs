@@ -109,7 +109,25 @@ fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, NativeRouteError> {
         if result != NO_ERROR.0 {
             return Err(win32_error("GetAdaptersAddresses", WIN32_ERROR(result)));
         }
-        return parse_adapters(head);
+        let initialized =
+            usize::try_from(supplied).map_err(|_| NativeRouteError::InvalidResponse {
+                message: "Windows returned an unrepresentable adapter buffer length".to_owned(),
+            })?;
+        let allocated = storage
+            .len()
+            .checked_mul(size_of::<usize>())
+            .ok_or_else(|| NativeRouteError::InvalidResponse {
+                message: "Windows adapter buffer size overflowed".to_owned(),
+            })?;
+        if initialized == 0 || initialized > allocated {
+            return Err(NativeRouteError::InvalidResponse {
+                message: format!(
+                    "Windows initialized {initialized} bytes of a {allocated}-byte adapter buffer"
+                ),
+            });
+        }
+        let bounds = BufferBounds::new(storage.as_ptr().cast(), initialized)?;
+        return parse_adapters(head, bounds);
     }
     Err(NativeRouteError::OperatingSystem {
         operation: "GetAdaptersAddresses",
@@ -274,6 +292,45 @@ struct WindowsAdapter {
     luid: NET_LUID_LH,
 }
 
+#[cfg(any(feature = "live", feature = "native-route"))]
+#[derive(Clone, Copy)]
+struct BufferBounds {
+    start: usize,
+    end: usize,
+}
+
+#[cfg(any(feature = "live", feature = "native-route"))]
+impl BufferBounds {
+    fn new(start: *const u8, length: usize) -> Result<Self, NativeRouteError> {
+        let start = start as usize;
+        let end = start
+            .checked_add(length)
+            .ok_or_else(|| NativeRouteError::InvalidResponse {
+                message: "Windows adapter buffer address range overflowed".to_owned(),
+            })?;
+        Ok(Self { start, end })
+    }
+
+    fn contains<T>(self, pointer: *const T) -> bool {
+        let address = pointer as usize;
+        !pointer.is_null()
+            && address % align_of::<T>() == 0
+            && address >= self.start
+            && address
+                .checked_add(size_of::<T>())
+                .is_some_and(|end| end <= self.end)
+    }
+
+    fn contains_bytes(self, pointer: *const u8, length: usize) -> bool {
+        let address = pointer as usize;
+        !pointer.is_null()
+            && address >= self.start
+            && address
+                .checked_add(length)
+                .is_some_and(|end| end <= self.end)
+    }
+}
+
 #[cfg(feature = "native-route")]
 fn adapter_index_for(adapter: &WindowsAdapter, destination: IpAddr) -> u32 {
     if destination.is_ipv4() {
@@ -321,6 +378,7 @@ fn find_windows_adapter(
 #[cfg(any(feature = "live", feature = "native-route"))]
 fn parse_adapters(
     head: *mut IP_ADAPTER_ADDRESSES_LH,
+    bounds: BufferBounds,
 ) -> Result<Vec<WindowsAdapter>, NativeRouteError> {
     let mut interfaces = Vec::new();
     let mut current = head;
@@ -328,8 +386,14 @@ fn parse_adapters(
         if current.is_null() {
             return Ok(interfaces);
         }
+        if !bounds.contains(current) {
+            return Err(NativeRouteError::InvalidResponse {
+                message: "Windows adapter list contained an out-of-buffer or misaligned node"
+                    .to_owned(),
+            });
+        }
         // SAFETY: IP Helper constructed this node in the still-live backing
-        // allocation. The list is traversed only until its null terminator.
+        // allocation, and `bounds` established a complete aligned node.
         let adapter = unsafe { &*current };
         // SAFETY: these are the active documented fields of the generated C
         // unions in IP_ADAPTER_ADDRESSES_LH.
@@ -341,13 +405,14 @@ fn parse_adapters(
             adapter.Ipv6IfIndex
         };
         if index != 0 {
-            let friendly_name = wide_string(adapter.FriendlyName).unwrap_or_default();
+            let friendly_name = wide_string(adapter.FriendlyName, bounds)?.unwrap_or_default();
             let name = if friendly_name.is_empty() {
                 format!("index-{index}")
             } else {
                 friendly_name
             };
-            let description = wide_string(adapter.Description).filter(|value| !value.is_empty());
+            let description =
+                wide_string(adapter.Description, bounds)?.filter(|value| !value.is_empty());
             let mac_address = if adapter.PhysicalAddressLength == 6 {
                 let mut bytes = [0_u8; 6];
                 bytes.copy_from_slice(&adapter.PhysicalAddress[..6]);
@@ -363,7 +428,7 @@ fn parse_adapters(
                     id: InterfaceId { name, index },
                     description,
                     mac_address,
-                    addresses: parse_unicast_addresses(adapter.FirstUnicastAddress)?,
+                    addresses: parse_unicast_addresses(adapter.FirstUnicastAddress, bounds)?,
                     flags: InterfaceFlags {
                         up: adapter.OperStatus == IfOperStatusUp,
                         broadcast: ethernet,
@@ -398,16 +463,33 @@ fn parse_adapters(
 #[cfg(any(feature = "live", feature = "native-route"))]
 fn parse_unicast_addresses(
     mut current: *mut windows::Win32::NetworkManagement::IpHelper::IP_ADAPTER_UNICAST_ADDRESS_LH,
+    bounds: BufferBounds,
 ) -> Result<Vec<InterfaceAddress>, NativeRouteError> {
     let mut addresses = Vec::new();
     for _ in 0..16_384 {
         if current.is_null() {
             return Ok(addresses);
         }
+        if !bounds.contains(current) {
+            return Err(NativeRouteError::InvalidResponse {
+                message:
+                    "Windows unicast-address list contained an out-of-buffer or misaligned node"
+                        .to_owned(),
+            });
+        }
         // SAFETY: each node belongs to the live adapter buffer and the pointer
-        // is advanced using the OS-created linked list.
+        // was checked to cover a complete aligned structure.
         let unicast = unsafe { &*current };
-        if let Some(address) = socket_address_ip(&unicast.Address) {
+        if let Some(address) = socket_address_ip(&unicast.Address, bounds)? {
+            let maximum_prefix = if address.is_ipv4() { 32 } else { 128 };
+            if unicast.OnLinkPrefixLength > maximum_prefix {
+                return Err(NativeRouteError::InvalidResponse {
+                    message: format!(
+                        "Windows returned invalid prefix length {} for {address}",
+                        unicast.OnLinkPrefixLength
+                    ),
+                });
+            }
             let assigned = InterfaceAddress {
                 address,
                 prefix_length: unicast.OnLinkPrefixLength,
@@ -424,41 +506,82 @@ fn parse_unicast_addresses(
 }
 
 #[cfg(any(feature = "live", feature = "native-route"))]
-fn wide_string(value: windows::core::PWSTR) -> Option<String> {
+fn wide_string(
+    value: windows::core::PWSTR,
+    bounds: BufferBounds,
+) -> Result<Option<String>, NativeRouteError> {
     if value.is_null() {
-        return None;
+        return Ok(None);
     }
-    // SAFETY: IP Helper guarantees a NUL-terminated UTF-16 string within the
-    // live adapter buffer.
-    unsafe { value.to_string().ok() }
+    let pointer = value.as_ptr();
+    if (pointer as usize) % align_of::<u16>() != 0 || !bounds.contains_bytes(pointer.cast(), 2) {
+        return Err(NativeRouteError::InvalidResponse {
+            message: "Windows adapter string pointed outside its response buffer".to_owned(),
+        });
+    }
+    let available = (bounds.end - pointer as usize) / size_of::<u16>();
+    // SAFETY: the checked pointer is aligned and `available` ends at the
+    // response buffer boundary. We search only this initialized range.
+    let units = unsafe { std::slice::from_raw_parts(pointer, available) };
+    let length = units.iter().position(|unit| *unit == 0).ok_or_else(|| {
+        NativeRouteError::InvalidResponse {
+            message: "Windows adapter string was not terminated within its response buffer"
+                .to_owned(),
+        }
+    })?;
+    Ok(String::from_utf16(&units[..length]).ok())
 }
 
 #[cfg(any(feature = "live", feature = "native-route"))]
 fn socket_address_ip(
     address: &windows::Win32::Networking::WinSock::SOCKET_ADDRESS,
-) -> Option<IpAddr> {
+    bounds: BufferBounds,
+) -> Result<Option<IpAddr>, NativeRouteError> {
     if address.lpSockaddr.is_null() || address.iSockaddrLength < size_of::<ADDRESS_FAMILY>() as i32
     {
-        return None;
+        return Ok(None);
     }
-    // SAFETY: the socket-address length establishes at least the family field.
-    let family = unsafe { (*address.lpSockaddr).sa_family };
+    let length = usize::try_from(address.iSockaddrLength).map_err(|_| {
+        NativeRouteError::InvalidResponse {
+            message: "Windows returned a negative socket-address length".to_owned(),
+        }
+    })?;
+    if !bounds.contains_bytes(address.lpSockaddr.cast(), length) {
+        return Err(NativeRouteError::InvalidResponse {
+            message: "Windows socket address extended outside its response buffer".to_owned(),
+        });
+    }
+    // SAFETY: the checked byte range contains the family field; use an
+    // unaligned read before the family-specific alignment checks below.
+    let family = unsafe { std::ptr::read_unaligned(address.lpSockaddr.cast::<ADDRESS_FAMILY>()) };
     match family {
         AF_INET if address.iSockaddrLength >= size_of::<SOCKADDR_IN>() as i32 => {
-            // SAFETY: family and length establish a complete SOCKADDR_IN.
+            if !bounds.contains(address.lpSockaddr.cast::<SOCKADDR_IN>()) {
+                return Err(NativeRouteError::InvalidResponse {
+                    message: "Windows returned a misaligned IPv4 socket address".to_owned(),
+                });
+            }
+            // SAFETY: family, length, bounds, and alignment establish a
+            // complete SOCKADDR_IN.
             let value = unsafe { &*address.lpSockaddr.cast::<SOCKADDR_IN>() };
             // SAFETY: S_addr is the active IN_ADDR representation.
             let bytes = unsafe { value.sin_addr.S_un.S_addr.to_ne_bytes() };
-            Some(IpAddr::V4(Ipv4Addr::from(bytes)))
+            Ok(Some(IpAddr::V4(Ipv4Addr::from(bytes))))
         }
         AF_INET6 if address.iSockaddrLength >= size_of::<SOCKADDR_IN6>() as i32 => {
-            // SAFETY: family and length establish a complete SOCKADDR_IN6.
+            if !bounds.contains(address.lpSockaddr.cast::<SOCKADDR_IN6>()) {
+                return Err(NativeRouteError::InvalidResponse {
+                    message: "Windows returned a misaligned IPv6 socket address".to_owned(),
+                });
+            }
+            // SAFETY: family, length, bounds, and alignment establish a
+            // complete SOCKADDR_IN6.
             let value = unsafe { &*address.lpSockaddr.cast::<SOCKADDR_IN6>() };
             // SAFETY: Byte is the active byte representation of IN6_ADDR.
             let bytes = unsafe { value.sin6_addr.u.Byte };
-            Some(IpAddr::V6(Ipv6Addr::from(bytes)))
+            Ok(Some(IpAddr::V6(Ipv6Addr::from(bytes))))
         }
-        _ => None,
+        _ => Ok(None),
     }
 }
 
@@ -539,6 +662,26 @@ fn win32_error(operation: &'static str, error: WIN32_ERROR) -> NativeRouteError 
 mod tests {
     use super::*;
     use crate::net::RouteProvider;
+
+    #[test]
+    fn adapter_buffer_bounds_reject_misaligned_and_out_of_range_pointers() {
+        let storage = [0_u64; 8];
+        let bounds =
+            BufferBounds::new(storage.as_ptr().cast(), std::mem::size_of_val(&storage)).unwrap();
+        assert!(bounds.contains(storage.as_ptr()));
+
+        // The arithmetic creates inert test pointers only; neither is
+        // dereferenced.
+        let misaligned = unsafe { storage.as_ptr().cast::<u8>().add(1) }.cast::<u64>();
+        assert!(!bounds.contains(misaligned));
+        let end = unsafe {
+            storage
+                .as_ptr()
+                .cast::<u8>()
+                .add(std::mem::size_of_val(&storage))
+        };
+        assert!(!bounds.contains_bytes(end, 1));
+    }
 
     #[test]
     fn native_windows_provider_finds_loopback_routes_and_interfaces() {

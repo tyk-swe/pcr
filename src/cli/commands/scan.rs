@@ -112,24 +112,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
 }
 
 fn validate_live_interface_selector(command: &str, selector: Option<&str>) -> Result<(), CliError> {
-    let Some(selector) = selector else {
-        return Ok(());
-    };
-    if selector.is_empty() {
-        return Err(CliError::new(
-            2,
-            format!("{command} interface cannot be empty"),
-        ));
-    }
-    let numeric = selector.bytes().all(|byte| byte.is_ascii_digit());
-    let index = selector.parse::<u32>().unwrap_or(0);
-    if numeric && index == 0 {
-        return Err(CliError::new(
-            2,
-            format!("{command} interface index must be non-zero"),
-        ));
-    }
-    Ok(())
+    validate_interface_selector(command, selector).map(|_| ())
 }
 
 struct CliScanExecutor {

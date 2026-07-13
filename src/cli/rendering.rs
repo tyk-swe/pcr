@@ -162,7 +162,7 @@ fn terminal_safe(value: &str) -> String {
                         character,
                         '\u{061c}'
                             | '\u{200b}'..='\u{200f}'
-                            | '\u{202a}'..='\u{202e}'
+                            | '\u{2028}'..='\u{202e}'
                             | '\u{2060}'..='\u{206f}'
                             | '\u{feff}'
                     ) =>

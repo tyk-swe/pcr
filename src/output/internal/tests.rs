@@ -54,6 +54,47 @@ mod tests {
     }
 
     #[test]
+    fn interface_output_has_stable_interface_and_address_ordering() {
+        let interface = |index, name: &str, addresses: &[(&str, u8)]| InterfaceInfo {
+            id: InterfaceId {
+                name: name.to_owned(),
+                index,
+            },
+            description: None,
+            mac_address: None,
+            addresses: addresses
+                .iter()
+                .map(|(address, prefix_length)| crate::net::interface::Address {
+                    address: address.parse().unwrap(),
+                    prefix_length: *prefix_length,
+                })
+                .collect(),
+            flags: InterfaceFlags::default(),
+            mtu: None,
+            capability: LinkCapability::Layer3,
+            link_type: crate::capture::LinkType::RAW,
+        };
+        let result = InterfacesCommandResult::new(vec![
+            interface(7, "zeta", &[("2001:db8::1", 64), ("10.0.0.2", 24)]),
+            interface(2, "beta", &[]),
+            interface(2, "alpha", &[]),
+        ]);
+
+        assert_eq!(
+            result
+                .interfaces
+                .iter()
+                .map(|interface| (interface.index, interface.name.as_str()))
+                .collect::<Vec<_>>(),
+            [(2, "alpha"), (2, "beta"), (7, "zeta")]
+        );
+        assert_eq!(
+            result.interfaces[2].addresses,
+            ["10.0.0.2/24", "2001:db8::1/64"]
+        );
+    }
+
+    #[test]
     fn workflow_enums_convert_to_output_owned_v1_spellings() {
         assert_eq!(
             serde_json::to_value(ScanClassification::from(
@@ -186,11 +227,8 @@ mod tests {
     #[test]
     fn fractional_pre_epoch_timestamp_accepts_the_signed_seconds_minimum() {
         assert_eq!(
-            OutputTimestamp::from_pre_epoch_duration(Duration::new(
-                i64::MAX as u64,
-                250_000_000,
-            ))
-            .unwrap(),
+            OutputTimestamp::from_pre_epoch_duration(Duration::new(i64::MAX as u64, 250_000_000,))
+                .unwrap(),
             OutputTimestamp {
                 unix_seconds: i64::MIN,
                 nanoseconds: 750_000_000,

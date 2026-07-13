@@ -1052,6 +1052,39 @@ fn conflicting_recipe_sources_use_cli_exit_code() {
 }
 
 #[test]
+fn overflowing_numeric_interface_selectors_are_cli_errors_before_platform_io() {
+    for arguments in [
+        vec![
+            "--output",
+            "json",
+            "plan",
+            "--packet",
+            "raw()",
+            "--interface",
+            "4294967296",
+        ],
+        vec![
+            "--output",
+            "json",
+            "replay",
+            "definitely-missing.pcap",
+            "--interface",
+            "4294967296",
+        ],
+    ] {
+        let output = binary().args(arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stderr.is_empty());
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["kind"], "cli");
+        assert!(value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("interface index"));
+    }
+}
+
+#[test]
 fn piped_stdin_cannot_be_silently_ignored_by_an_explicit_recipe() {
     let mut child = binary()
         .args(["--output", "json", "build", "--packet", "raw(hex=00)"])

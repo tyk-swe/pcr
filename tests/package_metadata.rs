@@ -90,6 +90,16 @@ fn manifest_and_lockfile_describe_a_single_local_package() {
             .any(|line| line.trim().starts_with("[workspace")),
         "an explicit workspace manifest must not remain"
     );
+    for required in [
+        "unsafe_op_in_unsafe_fn = \"deny\"",
+        "[profile.release]",
+        "overflow-checks = true",
+    ] {
+        assert!(
+            manifest.lines().any(|line| line.trim() == required),
+            "Cargo.toml must retain the hardening setting {required}"
+        );
+    }
 
     let lockfile =
         std::fs::read_to_string(root.join("Cargo.lock")).expect("Cargo.lock should be readable");

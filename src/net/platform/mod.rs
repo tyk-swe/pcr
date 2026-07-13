@@ -129,17 +129,69 @@ pub(super) fn system_send_layer2(
 
 #[cfg(all(feature = "native-route", target_os = "linux"))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    linux::interfaces().map_err(interface_error)
+    linux::interfaces()
+        .and_then(validate_native_interfaces)
+        .map_err(interface_error)
 }
 
 #[cfg(all(feature = "native-route", target_os = "macos"))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    macos::interfaces().map_err(interface_error)
+    macos::interfaces()
+        .and_then(validate_native_interfaces)
+        .map_err(interface_error)
 }
 
 #[cfg(all(any(feature = "live", feature = "native-route"), windows))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
-    windows::interfaces().map_err(interface_error)
+    windows::interfaces()
+        .and_then(validate_native_interfaces)
+        .map_err(interface_error)
+}
+
+#[cfg(any(
+    all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos")
+    ),
+    all(any(feature = "live", feature = "native-route"), windows)
+))]
+fn validate_native_interfaces(
+    interfaces: Vec<InterfaceInfo>,
+) -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+    let mut identities = std::collections::HashSet::with_capacity(interfaces.len());
+    for interface in &interfaces {
+        validate_native_interface(interface)?;
+        if !identities.insert(&interface.id) {
+            return Err(NativeRouteError::InvalidResponse {
+                message: format!(
+                    "operating system returned duplicate interface {} (index {})",
+                    interface.id.name, interface.id.index
+                ),
+            });
+        }
+    }
+    Ok(interfaces)
+}
+
+#[cfg(any(feature = "native-route", all(feature = "live", windows)))]
+fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), NativeRouteError> {
+    if interface.id.name.is_empty() || interface.id.index == 0 {
+        return Err(NativeRouteError::InvalidResponse {
+            message: "operating system returned an incomplete interface identity".to_owned(),
+        });
+    }
+    for assigned in &interface.addresses {
+        let maximum = if assigned.address.is_ipv4() { 32 } else { 128 };
+        if assigned.prefix_length > maximum {
+            return Err(NativeRouteError::InvalidResponse {
+                message: format!(
+                    "interface {} returned invalid prefix length {} for {}",
+                    interface.id.name, assigned.prefix_length, assigned.address
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 #[cfg(all(not(feature = "native-route"), feature = "live", not(windows)))]
@@ -256,6 +308,7 @@ pub(super) fn finish_route(
     preferred_source: Option<IpAddr>,
     snapshot: NativeRouteSnapshot,
 ) -> Result<RouteDecision, NativeRouteError> {
+    validate_native_interface(&snapshot.interface)?;
     if let Some(hint) = interface_hint {
         validate_interface_hint(hint, &snapshot.interface.id)?;
     }
@@ -425,6 +478,7 @@ pub(super) fn find_interface(
 pub(super) fn interface_decision(
     interface: InterfaceInfo,
 ) -> Result<RouteDecision, NativeRouteError> {
+    validate_native_interface(&interface)?;
     let mtu =
         interface
             .mtu
@@ -654,6 +708,34 @@ mod tests {
         missing_mtu.mtu = Some(0);
         assert!(matches!(
             interface_decision(missing_mtu),
+            Err(NativeRouteError::InvalidResponse { .. })
+        ));
+    }
+
+    #[test]
+    fn native_interfaces_reject_invalid_identity_and_address_prefixes() {
+        let mut invalid_identity = interface();
+        invalid_identity.id.index = 0;
+        assert!(matches!(
+            interface_decision(invalid_identity),
+            Err(NativeRouteError::InvalidResponse { .. })
+        ));
+
+        let mut invalid_prefix = interface();
+        invalid_prefix.addresses[0].prefix_length = 33;
+        assert!(matches!(
+            finish_route(
+                IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+                None,
+                None,
+                NativeRouteSnapshot {
+                    interface: invalid_prefix,
+                    selected_address: None,
+                    next_hop: None,
+                    route_mtu: None,
+                    selection_reason: RouteSelectionReason::OnLink,
+                },
+            ),
             Err(NativeRouteError::InvalidResponse { .. })
         ));
     }

@@ -101,7 +101,7 @@ where
         let execution = executor
             .execute(batch)
             .map_err(|source| TracerouteError::Execution { sequence, source })?;
-        validate_execution(batch, &execution)?;
+        validate_execution(batch, &execution, request.limits)?;
         add_stats(&mut stats, &execution.stats, sequence)?;
         let processed = process_batch(
             batch,
@@ -301,6 +301,7 @@ fn traceroute_identity(sequence: u64) -> Bytes {
 fn validate_execution(
     batch: &TracerouteBatch,
     execution: &TracerouteBatchExecution,
+    limits: TracerouteLimits,
 ) -> Result<(), TracerouteError> {
     let sequence = batch.probes[0].sequence;
     if execution.sent.len() != batch.probes.len()
@@ -324,6 +325,49 @@ fn validate_execution(
         return Err(TracerouteError::InvalidEvidence {
             sequence,
             message: "matched response references a request outside the hop batch".to_owned(),
+        });
+    }
+    let captured_frames = execution
+        .responses
+        .len()
+        .checked_add(execution.unsolicited.len())
+        .and_then(|count| count.checked_add(execution.undecoded.len()))
+        .ok_or_else(|| TracerouteError::InvalidEvidence {
+            sequence,
+            message: "executor capture frame-count accounting overflowed".to_owned(),
+        })?;
+    if captured_frames > limits.max_evidence_frames {
+        return Err(TracerouteError::InvalidEvidence {
+            sequence,
+            message: format!(
+                "executor returned {captured_frames} captured frames beyond max_evidence_frames={}",
+                limits.max_evidence_frames
+            ),
+        });
+    }
+    let captured_bytes = execution
+        .responses
+        .iter()
+        .map(|response| response.response.frame.bytes.len())
+        .chain(
+            execution
+                .unsolicited
+                .iter()
+                .map(|response| response.frame.bytes.len()),
+        )
+        .chain(execution.undecoded.iter().map(|frame| frame.bytes.len()))
+        .try_fold(0usize, |total, length| total.checked_add(length))
+        .ok_or_else(|| TracerouteError::InvalidEvidence {
+            sequence,
+            message: "executor capture byte accounting overflowed".to_owned(),
+        })?;
+    if captured_bytes > limits.max_evidence_bytes {
+        return Err(TracerouteError::InvalidEvidence {
+            sequence,
+            message: format!(
+                "executor returned {captured_bytes} captured bytes beyond max_evidence_bytes={}",
+                limits.max_evidence_bytes
+            ),
         });
     }
     for (probe, (sent, evidence)) in batch

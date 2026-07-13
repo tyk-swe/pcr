@@ -62,6 +62,13 @@ fn read_section_header_with_length<R: Read>(
             minor,
         });
     }
+    let section_length = decode_i64(endianness, &remaining[4..12]);
+    if section_length < -1 {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "section length is negative but is not the unknown-length sentinel",
+        });
+    }
     visit_options(
         &remaining[12..footer_offset],
         endianness,
@@ -93,6 +100,12 @@ fn parse_interface_description(
         return Err(Error::InvalidData {
             format: Format::PcapNg,
             reason: "interface description block is shorter than 8 bytes",
+        });
+    }
+    if body[2..4] != [0, 0] {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "interface description reserved field is non-zero",
         });
     }
     let link_type = LinkType(u32::from(decode_u16(endianness, &body[0..2])));

@@ -109,9 +109,13 @@ fn read_bounded(reader: impl Read, maximum: usize) -> Result<Vec<u8>, CliError> 
 }
 
 fn read_bounded_allow_empty(reader: impl Read, maximum: usize) -> Result<Vec<u8>, CliError> {
+    let read_limit = maximum
+        .checked_add(1)
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(|| CliError::new(70, "packet input byte limit cannot be represented"))?;
     let mut bytes = Vec::new();
     reader
-        .take(maximum as u64 + 1)
+        .take(read_limit)
         .read_to_end(&mut bytes)
         .map_err(|source| CliError::new(2, format!("read packet input failed: {source}")))?;
     if bytes.len() > maximum {

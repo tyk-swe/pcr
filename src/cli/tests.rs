@@ -220,9 +220,38 @@ mod tests {
 
     #[test]
     fn terminal_text_escapes_controls_and_directional_overrides() {
-        let safe = terminal_safe("line\n\u{1b}[31m\u{202e}tail");
-        assert_eq!(safe, "line\\n\\u{1b}[31m\\u{202e}tail");
+        let safe = terminal_safe("line\n\u{1b}[31m\u{2028}next\u{2029}\u{202e}tail");
+        assert_eq!(
+            safe,
+            "line\\n\\u{1b}[31m\\u{2028}next\\u{2029}\\u{202e}tail"
+        );
         assert!(!safe.chars().any(char::is_control));
+        assert!(!safe.contains(['\u{2028}', '\u{2029}']));
+    }
+
+    #[test]
+    fn bounded_input_rejects_an_unrepresentable_sentinel_limit() {
+        let error = read_bounded_allow_empty(std::io::Cursor::new(Vec::<u8>::new()), usize::MAX)
+            .unwrap_err();
+        assert_eq!(error.code, 70);
+        assert!(error.message.contains("cannot be represented"));
+    }
+
+    #[test]
+    fn decimal_interface_selectors_never_fall_back_to_names() {
+        assert_eq!(
+            validate_interface_selector("test", Some("7")).unwrap(),
+            Some(7)
+        );
+        assert_eq!(
+            validate_interface_selector("test", Some("eth0")).unwrap(),
+            None
+        );
+
+        for selector in ["", "0", "4294967296", "999999999999999999999999"] {
+            let error = validate_interface_selector("test", Some(selector)).unwrap_err();
+            assert_eq!(error.code, 2, "{selector:?}");
+        }
     }
 
     #[test]

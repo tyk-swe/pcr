@@ -197,18 +197,17 @@ fn retain_evidence(
             omitted = true;
         }
     }
-    if omitted
-        && !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "fuzz.evidence_limit")
-    {
-        diagnostics.push(Diagnostic::warning(
-            "fuzz.evidence_limit",
-            format!(
-                "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-                limits.max_evidence_frames, limits.max_evidence_bytes
+    if omitted {
+        push_diagnostic_once(
+            diagnostics,
+            Diagnostic::warning(
+                "fuzz.evidence_limit",
+                format!(
+                    "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+                    limits.max_evidence_frames, limits.max_evidence_bytes
+                ),
             ),
-        ));
+        );
     }
 }
 

@@ -293,19 +293,19 @@ impl From<CliScanTransport> for ScanTransport {
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliScanAddressFamily {
+enum CliAddressFamily {
     #[default]
     Any,
     Ipv4,
     Ipv6,
 }
 
-impl From<CliScanAddressFamily> for ScanAddressFamily {
-    fn from(value: CliScanAddressFamily) -> Self {
+impl From<CliAddressFamily> for AddressFamily {
+    fn from(value: CliAddressFamily) -> Self {
         match value {
-            CliScanAddressFamily::Any => Self::Any,
-            CliScanAddressFamily::Ipv4 => Self::Ipv4,
-            CliScanAddressFamily::Ipv6 => Self::Ipv6,
+            CliAddressFamily::Any => Self::Any,
+            CliAddressFamily::Ipv4 => Self::Ipv4,
+            CliAddressFamily::Ipv6 => Self::Ipv6,
         }
     }
 }
@@ -319,8 +319,8 @@ struct ScanArgs {
     #[arg(long, value_enum, default_value_t = CliScanTransport::Tcp)]
     transport: CliScanTransport,
     /// Select all authorized addresses or only one IP family.
-    #[arg(long, value_enum, default_value_t = CliScanAddressFamily::Any)]
-    family: CliScanAddressFamily,
+    #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
+    family: CliAddressFamily,
     /// Comma-separated TCP/UDP destination ports; omitted for ICMP.
     #[arg(long, value_delimiter = ',', num_args = 1..)]
     ports: Vec<u16>,
@@ -361,24 +361,6 @@ struct ScanArgs {
     limits: CaptureLimitArgs,
     #[command(flatten)]
     policy: TrafficPolicyArgs,
-}
-
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliDnsAddressFamily {
-    #[default]
-    Any,
-    Ipv4,
-    Ipv6,
-}
-
-impl From<CliDnsAddressFamily> for DnsAddressFamily {
-    fn from(value: CliDnsAddressFamily) -> Self {
-        match value {
-            CliDnsAddressFamily::Any => Self::Any,
-            CliDnsAddressFamily::Ipv4 => Self::Ipv4,
-            CliDnsAddressFamily::Ipv6 => Self::Ipv6,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -425,8 +407,8 @@ struct DnsArgs {
     #[arg(long = "type", value_enum, default_value_t = CliDnsQueryType::A)]
     query_type: CliDnsQueryType,
     /// Select the first authorized server address or one IP family.
-    #[arg(long, value_enum, default_value_t = CliDnsAddressFamily::Any)]
-    family: CliDnsAddressFamily,
+    #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
+    family: CliAddressFamily,
     /// DNS server UDP port.
     #[arg(long, default_value_t = crate::workflow_api::DEFAULT_DNS_SERVER_PORT)]
     port: u16,
@@ -505,24 +487,6 @@ impl From<CliTracerouteStrategy> for TracerouteStrategy {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliTracerouteAddressFamily {
-    #[default]
-    Any,
-    Ipv4,
-    Ipv6,
-}
-
-impl From<CliTracerouteAddressFamily> for TracerouteAddressFamily {
-    fn from(value: CliTracerouteAddressFamily) -> Self {
-        match value {
-            CliTracerouteAddressFamily::Any => Self::Any,
-            CliTracerouteAddressFamily::Ipv4 => Self::Ipv4,
-            CliTracerouteAddressFamily::Ipv6 => Self::Ipv6,
-        }
-    }
-}
-
 #[derive(Debug, Args)]
 struct TracerouteArgs {
     /// Explicit IP address or hostname to trace.
@@ -532,8 +496,8 @@ struct TracerouteArgs {
     #[arg(long, value_enum, default_value_t = CliTracerouteStrategy::Udp)]
     strategy: CliTracerouteStrategy,
     /// Select the first authorized address or only one IP family.
-    #[arg(long, value_enum, default_value_t = CliTracerouteAddressFamily::Any)]
-    family: CliTracerouteAddressFamily,
+    #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
+    family: CliAddressFamily,
     /// UDP base destination port or fixed TCP destination port.
     #[arg(long)]
     port: Option<u16>,

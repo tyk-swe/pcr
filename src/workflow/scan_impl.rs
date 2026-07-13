@@ -29,7 +29,7 @@ use super::clock::Clock;
 use super::nonzero_ipv4_identification;
 use super::probe::Correlation;
 use super::target::{AuthorizationError, Authorizer, Target};
-use super::{AddressFamily, Stats};
+use super::{push_diagnostic_once, AddressFamily, Stats};
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;

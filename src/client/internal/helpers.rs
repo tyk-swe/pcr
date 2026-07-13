@@ -102,7 +102,10 @@ fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
     Ok(())
 }
 
-fn error_after_shutdown<C: CaptureSession>(capture: &mut C, operation: LiveIoError) -> ClientError {
+fn error_after_shutdown<C: CaptureSession>(
+    capture: &mut CaptureGuard<C>,
+    operation: LiveIoError,
+) -> ClientError {
     match capture.shutdown() {
         Ok(()) => ClientError::Io(operation),
         Err(shutdown) => ClientError::OperationAndCaptureShutdown {

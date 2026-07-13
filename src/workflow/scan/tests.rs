@@ -555,9 +555,13 @@ mod tests {
     #[test]
     fn executor_cannot_replace_the_authorized_scan_probe() {
         let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
-        let batch = build_batches(&operation, &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))], &[80])
-            .unwrap()
-            .remove(0);
+        let batch = build_batches(
+            &operation,
+            &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
+            &[Some(80)],
+        )
+        .unwrap()
+        .remove(0);
         let mut execution = TimeoutExecutor::new().execute(&batch).unwrap();
         let mut layer2 = execution.sent[0].clone();
         layer2
@@ -574,8 +578,7 @@ mod tests {
         execution.stats.bytes = execution.sent_evidence[0].bytes.len() as u64;
         execution.sent[0].get_mut::<Ipv4>().unwrap().destination = Ipv4Addr::new(10, 0, 0, 99);
 
-        let error =
-            validate_exchange_evidence(&batch, &execution, operation.limits).unwrap_err();
+        let error = validate_exchange_evidence(&batch, &execution, operation.limits).unwrap_err();
 
         assert!(matches!(
             error,
@@ -586,9 +589,13 @@ mod tests {
     #[test]
     fn executor_capture_evidence_must_stay_within_declared_scan_limits() {
         let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
-        let batch = build_batches(&operation, &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))], &[80])
-            .unwrap()
-            .remove(0);
+        let batch = build_batches(
+            &operation,
+            &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
+            &[Some(80)],
+        )
+        .unwrap()
+        .remove(0);
         let mut execution = TimeoutExecutor::new().execute(&batch).unwrap();
         execution.undecoded = vec![
             Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0xff]).unwrap(),
@@ -603,9 +610,8 @@ mod tests {
             Err(ScanError::InvalidEvidence { sequence: 0, .. })
         ));
 
-        execution.undecoded = vec![
-            Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0xff, 0xfe]).unwrap(),
-        ];
+        execution.undecoded =
+            vec![Frame::new(UNIX_EPOCH, LinkType::RAW, vec![0xff, 0xfe]).unwrap()];
         let limits = ScanLimits {
             max_evidence_bytes: 1,
             ..operation.limits

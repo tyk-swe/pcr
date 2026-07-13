@@ -141,7 +141,7 @@ mod tests {
             panic!("expected DNS command");
         };
         assert!(matches!(arguments.query_type, CliDnsQueryType::Srv));
-        assert!(matches!(arguments.family, CliDnsAddressFamily::Ipv4));
+        assert!(matches!(arguments.family, CliAddressFamily::Ipv4));
         assert_eq!(arguments.port, 5353);
         assert_eq!(arguments.transaction_id, Some(7));
         assert_eq!(arguments.source_port, Some(50_000));
@@ -187,7 +187,7 @@ mod tests {
             panic!("expected traceroute command");
         };
         assert!(matches!(arguments.strategy, CliTracerouteStrategy::Tcp));
-        assert!(matches!(arguments.family, CliTracerouteAddressFamily::Ipv4));
+        assert!(matches!(arguments.family, CliAddressFamily::Ipv4));
         assert_eq!(arguments.port, Some(443));
         assert_eq!(arguments.first_hop, 2);
         assert_eq!(arguments.max_hops, 12);

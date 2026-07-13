@@ -102,7 +102,7 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             interface: DeferredInterface::new(interface),
         };
         let mut authorizer = TrafficPolicyFuzzAuthorizer::new(&policy);
-        let mut clock = SystemFuzzClock;
+        let mut clock = SystemClock;
         fuzz_live(
             &request,
             FuzzLiveOptions {
@@ -155,14 +155,12 @@ impl FuzzExecutor for CliFuzzExecutor {
     ) -> Result<FuzzCaseExecution, FuzzExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
-            .map_err(fuzz_execution_error_from_cli)?;
+            .map_err(|error| {
+                FuzzExecutionError::new(error.message, error.classification, error.causes)
+            })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientFuzzExecutor::new(&client, self.exchange.clone()).execute(case, timeout)
     }
-}
-
-fn fuzz_execution_error_from_cli(error: CliError) -> FuzzExecutionError {
-    FuzzExecutionError::new(error.message, error.classification, error.causes)
 }
 
 fn fuzz_cli_error(error: FuzzError) -> CliError {

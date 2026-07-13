@@ -29,7 +29,7 @@ use super::nonzero_ipv4_identification;
 use super::probe::{self, Correlation, Transport as ProbeTransport};
 use super::scan_impl::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
 use super::target::{AuthorizationError, Authorizer, Target};
-use super::{AddressFamily, Stats};
+use super::{push_diagnostic_once, AddressFamily, Stats};
 
 pub const DEFAULT_TRACEROUTE_FIRST_HOP: u8 = 1;
 pub const DEFAULT_TRACEROUTE_MAX_HOPS: u8 = 30;

@@ -4,11 +4,7 @@
 // Offline build, dissect, and capture-read commands.
 
 fn run_build(arguments: BuildArgs, output: OutputFormat) -> Result<(), CliError> {
-    let registry = Arc::new(
-        crate::protocol::internal::default_registry().map_err(|source| {
-            CliError::new(70, format!("built-in registry invariant failed: {source}"))
-        })?,
-    );
+    let registry = default_registry_arc()?;
     let packet = read_recipe(arguments.recipe, &registry)?;
     let built = Builder::new(registry)
         .build(
@@ -61,11 +57,7 @@ fn run_dissect(arguments: DissectArgs, output: OutputFormat) -> Result<(), CliEr
         (None, None) => read_stdin_bounded(DEFAULT_MAX_DOCUMENT_BYTES)?,
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
-    let registry = Arc::new(
-        crate::protocol::internal::default_registry().map_err(|source| {
-            CliError::new(70, format!("built-in registry invariant failed: {source}"))
-        })?,
-    );
+    let registry = default_registry_arc()?;
     let decoded = Dissector::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)

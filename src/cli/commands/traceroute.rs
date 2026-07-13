@@ -97,7 +97,7 @@ fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(),
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyTracerouteAuthorizer::new(&policy, &resolver);
-    let mut clock = SystemTracerouteClock;
+    let mut clock = SystemClock;
     let result = traceroute(
         &request,
         &mut authorizer,
@@ -139,14 +139,12 @@ impl TracerouteExecutor for CliTracerouteExecutor {
     ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
-            .map_err(traceroute_execution_error_from_cli)?;
+            .map_err(|error| {
+                TracerouteExecutionError::new(error.message, error.classification, error.causes)
+            })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientTracerouteExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
-}
-
-fn traceroute_execution_error_from_cli(error: CliError) -> TracerouteExecutionError {
-    TracerouteExecutionError::new(error.message, error.classification, error.causes)
 }
 
 fn traceroute_cli_error(error: TracerouteError) -> CliError {

@@ -122,15 +122,8 @@ pub(crate) mod output {
 }
 
 pub(crate) mod workflow_api {
-    pub(crate) use packetcraftr::workflow::clock::System as SystemDnsClock;
-    pub(crate) use packetcraftr::workflow::clock::System as SystemFuzzClock;
-    pub(crate) use packetcraftr::workflow::clock::System as SystemReplayClock;
-    pub(crate) use packetcraftr::workflow::clock::System as SystemScanClock;
-    pub(crate) use packetcraftr::workflow::clock::System as SystemTracerouteClock;
-
-    pub(crate) use packetcraftr::workflow::AddressFamily as DnsAddressFamily;
-    pub(crate) use packetcraftr::workflow::AddressFamily as ScanAddressFamily;
-    pub(crate) use packetcraftr::workflow::AddressFamily as TracerouteAddressFamily;
+    pub(crate) use packetcraftr::workflow::clock::System as SystemClock;
+    pub(crate) use packetcraftr::workflow::AddressFamily;
 
     pub(crate) use packetcraftr::workflow::dns::{
         run as dns, Error as DnsError, Exchange as DnsExchange, Execution as DnsExchangeExecution,

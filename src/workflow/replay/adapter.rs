@@ -167,7 +167,6 @@ impl ReplayAuthorizer for SystemAuthorizer {
 pub struct SystemTransmitter {
     validated_interface: Option<InterfaceInfo>,
     packet_io: DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>,
-    route_provider: SystemRouteProvider,
 }
 
 impl SystemTransmitter {
@@ -175,7 +174,6 @@ impl SystemTransmitter {
         Self {
             validated_interface: None,
             packet_io: DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
-            route_provider: SystemRouteProvider,
         }
     }
 
@@ -274,10 +272,9 @@ impl SystemTransmitter {
             },
             LinkMode::Layer3 => {
                 let network = replay_network_envelope(&frame.bytes)?;
-                let route = self
-                    .route_provider
+                let route = SystemRouteProvider
                     .lookup_with_preferences(network.destination, Some(&interface.id), None)
-                    .map_err(|source| map_replay_route_error(&self.route_provider, source))?;
+                    .map_err(map_replay_route_error)?;
                 if route.interface != interface.id {
                     return Err(LiveIoError::Device {
                         interface: interface.id.name.clone(),

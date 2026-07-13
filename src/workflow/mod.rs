@@ -23,6 +23,18 @@ const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
     ((sequence % u16::MAX as u64) + 1) as u16
 }
 
+fn push_diagnostic_once(
+    diagnostics: &mut Vec<crate::packet::internal::Diagnostic>,
+    diagnostic: crate::packet::internal::Diagnostic,
+) {
+    if !diagnostics
+        .iter()
+        .any(|existing| existing.code == diagnostic.code)
+    {
+        diagnostics.push(diagnostic);
+    }
+}
+
 pub use address_family::AddressFamily;
 pub use stats::Stats;
 

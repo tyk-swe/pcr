@@ -83,7 +83,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyScanAuthorizer::new(&policy, &resolver);
-    let mut clock = SystemScanClock;
+    let mut clock = SystemClock;
     let result = scan(
         &request,
         &mut authorizer,
@@ -125,14 +125,12 @@ impl ScanExecutor for CliScanExecutor {
     fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
-            .map_err(scan_execution_error_from_cli)?;
+            .map_err(|error| {
+                ScanExecutionError::new(error.message, error.classification, error.causes)
+            })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientScanExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
-}
-
-fn scan_execution_error_from_cli(error: CliError) -> ScanExecutionError {
-    ScanExecutionError::new(error.message, error.classification, error.causes)
 }
 
 fn scan_cli_error(error: ScanError) -> CliError {

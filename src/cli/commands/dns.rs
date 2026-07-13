@@ -97,7 +97,7 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyDnsAuthorizer::new(&policy, &resolver);
-    let mut clock = SystemDnsClock;
+    let mut clock = SystemClock;
     let result = dns(
         &request,
         &mut authorizer,
@@ -160,14 +160,12 @@ impl DnsExecutor for CliDnsExecutor {
     ) -> Result<DnsExchangeExecution, DnsExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
-            .map_err(dns_execution_error_from_cli)?;
+            .map_err(|error| {
+                DnsExecutionError::new(error.message, error.classification, error.causes)
+            })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientDnsExecutor::new(&client, self.exchange.clone()).execute(exchange)
     }
-}
-
-fn dns_execution_error_from_cli(error: CliError) -> DnsExecutionError {
-    DnsExecutionError::new(error.message, error.classification, error.causes)
 }
 
 fn dns_cli_error(error: DnsError) -> CliError {

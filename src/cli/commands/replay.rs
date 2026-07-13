@@ -80,7 +80,7 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
         limits,
     };
     let mut transmitter = ReplaySystemTransmitter::new();
-    let mut clock = SystemReplayClock;
+    let mut clock = SystemClock;
     let started = Instant::now();
 
     match output {

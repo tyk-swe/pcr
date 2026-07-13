@@ -48,7 +48,7 @@ pcap = { version = "2.4", default-features = false, optional = true }
 socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
-libloading = { version = "0.8", default-features = false, optional = true }
+libloading = { version = "0.9", default-features = false, optional = true }
 socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 windows = { version = "0.62", default-features = false, features = [
     "std",

@@ -61,11 +61,13 @@ impl Diagnostic {
         }
     }
 
+    #[must_use]
     pub fn at_layer(mut self, layer: usize) -> Self {
         self.layer = Some(layer);
         self
     }
 
+    #[must_use]
     pub fn at_field(mut self, field: impl Into<String>) -> Self {
         self.field = Some(field.into());
         self

@@ -112,18 +112,18 @@ handles or network privileges. Reassembly under `session::fragment` and
 The core local checks are:
 
 ```console
-cargo fmt -- --check
+cargo fmt --all -- --check
 cargo check --locked --all-targets --no-default-features
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo test --locked --all-features
 ```
 
-CI also installs `cargo-deny` 0.19.7 and runs `cargo deny check`. The temporary
+CI also installs `cargo-deny` 0.20.2 and runs `cargo deny check`. The temporary
 `RUSTSEC-2024-0436` exception in `deny.toml` expires on 2026-10-12, and CI
 requires it to be reviewed before then.
 
-All-feature Linux builds need the libpcap development package. CI runs both
-feature-profile checks, Clippy, and all-feature tests on Linux x86-64, macOS
-x86-64 and arm64, and Windows MSVC. Formatting runs on Linux, while Windows
-also runs `cargo test --locked --lib`.
+All-feature Linux builds need the libpcap development package. CI runs portable,
+default, and all-feature tests plus all-feature Clippy on Linux x86-64, macOS
+x86-64 and arm64, and Windows MSVC. Linux also runs the Rust 1.96 minimum-version
+check, formatting, documentation, the pairwise feature powerset, and coverage.

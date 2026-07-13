@@ -74,7 +74,7 @@ pub(crate) fn run_entrypoint() -> ExitCode {
             if let Err(write_error) = emitted {
                 if matches!(output, OutputFormat::Json | OutputFormat::Ndjson) {
                     let _ = emit_stderr_error(&write_error.message);
-                };
+                }
                 return exit_code(write_error.code);
             }
             exit_code(error.code)

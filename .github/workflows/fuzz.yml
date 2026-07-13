@@ -32,8 +32,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Cache Cargo tools and fuzz builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/bin
@@ -43,9 +44,14 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             fuzz/target
-            fuzz/corpus
-          key: nightly-fuzz-v2-${{ matrix.target }}-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
-          restore-keys: nightly-fuzz-v2-${{ matrix.target }}-
+          key: nightly-fuzz-build-v3-${{ matrix.target }}-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: nightly-fuzz-build-v3-${{ matrix.target }}-
+      - name: Cache evolving fuzz corpus
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: nightly-fuzz-corpus-v3-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: nightly-fuzz-corpus-v3-${{ matrix.target }}-
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup toolchain install nightly-2026-07-11 --profile minimal
       - run: cargo install cargo-fuzz --locked --version 0.13.2
@@ -58,7 +64,7 @@ jobs:
           -dict=fuzz/dictionaries/${{ matrix.target }}.dict
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: fuzz-crash-${{ matrix.target }}
           path: fuzz/artifacts/${{ matrix.target }}

@@ -253,7 +253,7 @@ where
                 &mut captured,
                 &mut captured_bytes,
                 &mut evidence_truncated,
-            )?;
+            );
         }
 
         for attempt in 1..=self.options.max_attempts {
@@ -285,7 +285,7 @@ where
                         &mut captured,
                         &mut captured_bytes,
                         &mut evidence_truncated,
-                    )?;
+                    );
                     continue;
                 };
                 if received_at < send_started || received_at > deadline {
@@ -295,10 +295,10 @@ where
                         &mut captured,
                         &mut captured_bytes,
                         &mut evidence_truncated,
-                    )?;
+                    );
                     continue;
                 }
-                let response = match_neighbor_response(request, &frame)?;
+                let response = match_neighbor_response(request, &frame);
                 if let Some(mac_address) = response {
                     retain_matching_evidence(
                         frame,
@@ -320,7 +320,7 @@ where
                     &mut captured,
                     &mut captured_bytes,
                     &mut evidence_truncated,
-                )?;
+                );
             }
         }
         Ok(NeighborExchangeOutcome {
@@ -514,17 +514,16 @@ fn retain_evidence(
     captured: &mut Vec<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
-) -> Result<(), NeighborError> {
+) {
     let next_bytes = captured_bytes.checked_add(frame.bytes.len());
     if captured.len() >= options.max_capture_queue_frames
         || next_bytes.is_none_or(|bytes| bytes > options.max_captured_bytes)
     {
         *truncated = true;
-        return Ok(());
+        return;
     }
     *captured_bytes = next_bytes.expect("checked evidence bytes");
     captured.push(frame);
-    Ok(())
 }
 
 fn retain_matching_evidence(

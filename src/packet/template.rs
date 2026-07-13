@@ -106,6 +106,7 @@ impl PacketTemplate {
         &self.base
     }
 
+    #[must_use]
     pub fn axis(mut self, layer: usize, field: impl Into<String>, values: TemplateValues) -> Self {
         self.axes.push(TemplateAxis {
             layer,

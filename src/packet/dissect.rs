@@ -154,7 +154,7 @@ impl Dissector {
         let mut current = original.as_ref();
         let mut absolute_offset = 0usize;
         let mut network = None;
-        let mut trailing = Vec::<(usize, Bytes, usize, bool)>::new();
+        let mut trailing = Vec::<(usize, Bytes, usize)>::new();
 
         loop {
             if packet.len() >= options.max_layers {
@@ -250,7 +250,6 @@ impl Dissector {
                     trailing_offset,
                     Bytes::copy_from_slice(&current[payload_end..]),
                     index,
-                    allow_current_link_padding,
                 ));
                 let message = format!(
                     "preserved {} byte(s) outside the declared length of {current_protocol}",
@@ -386,22 +385,18 @@ impl Dissector {
             current = payload;
         }
 
-        trailing.sort_by_key(|(offset, _, _, _)| *offset);
-        for (offset, bytes, outside_layer, is_padding) in trailing {
+        trailing.sort_by_key(|(offset, _, _)| *offset);
+        for (offset, bytes, outside_layer) in trailing {
             if packet.len() >= options.max_layers {
                 return Err(DecodeError::LayerLimit {
                     limit: options.max_layers,
                 });
             }
-            if is_padding {
-                append_padding(&mut packet, &mut layouts, bytes, offset, outside_layer);
-            } else {
-                // Keep explicit coverage ownership so a strict byte-for-byte
-                // rebuild preserves the declared protocol length. The builder
-                // marks padding outside a network root as requiring live
-                // malformed-traffic opt-in.
-                append_padding(&mut packet, &mut layouts, bytes, offset, outside_layer);
-            }
+            // Keep explicit coverage ownership so a strict byte-for-byte
+            // rebuild preserves the declared protocol length. The builder
+            // marks padding outside a network root as requiring live
+            // malformed-traffic opt-in.
+            append_padding(&mut packet, &mut layouts, bytes, offset, outside_layer);
         }
 
         Ok(DecodedPacket {

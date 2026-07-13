@@ -14,11 +14,11 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    aliased_fields, binding_protocol, bytes, field_layout, impl_layer_boilerplate, invalid,
+    aliased_fields, bytes, expected_discriminator, field_layout, impl_layer_boilerplate, invalid,
     make_layer, out_of_range, payload_without_padding, protocol, resolve_u8, set_wire_u8,
     strict_or_diagnostic, truncated, unknown_field, validate_auto_raw_discriminator,
     validate_ipv6_routing_child, validate_raw_child_discriminator, wire_u8, wrong_layer,
-    wrong_type,
+    wrong_type, ValueExpectation,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -142,21 +142,14 @@ fn encode_options<L>(
 where
     L: Layer + Clone + 'static,
 {
-    let expected = expected_next(name, context, 59);
+    let expectation = expected_discriminator(name, context, 59_u8);
     let mut diagnostics = Vec::new();
-    validate_auto_raw_discriminator(
-        name,
-        "next_header",
-        matches!(next_header, WireValue::Auto),
-        context,
-        &mut diagnostics,
-    )?;
+    validate_auto_raw_discriminator(name, "next_header", next_header, context, &mut diagnostics)?;
     let (next, _) = resolve_u8(
         name,
         "next_header",
         next_header,
-        expected.0,
-        expected.1,
+        expectation,
         context.mode,
         &mut diagnostics,
     )?;
@@ -462,12 +455,12 @@ impl LayerCodec for Ipv6FragmentCodec {
         if layer.fragment_offset > 0x1fff {
             return Err(invalid("ipv6_fragment", "fragment offset exceeds 13 bits"));
         }
-        let expected = expected_next("ipv6_fragment", context, 59);
+        let expectation = expected_discriminator("ipv6_fragment", context, 59_u8);
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
             "ipv6_fragment",
             "next_header",
-            matches!(layer.next_header, WireValue::Auto),
+            &layer.next_header,
             context,
             &mut diagnostics,
         )?;
@@ -506,8 +499,7 @@ impl LayerCodec for Ipv6FragmentCodec {
             "ipv6_fragment",
             "next_header",
             &layer.next_header,
-            expected.0,
-            expected.1,
+            expectation,
             context.mode,
             &mut diagnostics,
         )?;
@@ -760,11 +752,11 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         }
         let expected_last = (layer.segments.len() - 1) as u8;
         let mut diagnostics = Vec::new();
-        let expected = expected_next("ipv6_srh", context, 59);
+        let expectation = expected_discriminator("ipv6_srh", context, 59_u8);
         validate_auto_raw_discriminator(
             "ipv6_srh",
             "next_header",
-            matches!(layer.next_header, WireValue::Auto),
+            &layer.next_header,
             context,
             &mut diagnostics,
         )?;
@@ -772,8 +764,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             "ipv6_srh",
             "next_header",
             &layer.next_header,
-            expected.0,
-            expected.1,
+            expectation,
             context.mode,
             &mut diagnostics,
         )?;
@@ -783,8 +774,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             "ipv6_srh",
             "segments_left",
             &layer.segments_left,
-            expected_last,
-            false,
+            ValueExpectation::Suggested(expected_last),
             context.mode,
             &mut diagnostics,
         )?;
@@ -803,8 +793,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             "ipv6_srh",
             "last_entry",
             &layer.last_entry,
-            expected_last,
-            true,
+            ValueExpectation::Required(expected_last),
             context.mode,
             &mut diagnostics,
         )?;
@@ -923,25 +912,6 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             &aliased_fields("ipv6_srh", fields, &[("segs", "segments")])?,
         )
     }
-}
-
-fn expected_next(parent: &str, context: &LayerEncodeContext<'_>, fallback: u8) -> (u8, bool) {
-    let Some(child) = context.child else {
-        return (fallback, false);
-    };
-    if child.protocol_id().as_str() == "raw" {
-        let expected = context
-            .registry
-            .discriminator_for(&protocol(parent), &child.protocol_id())
-            .and_then(|value| u8::try_from(value.0).ok())
-            .unwrap_or(fallback);
-        return (expected, false);
-    }
-    context
-        .registry
-        .discriminator_for(&protocol(parent), &binding_protocol(child))
-        .and_then(|value| u8::try_from(value.0).ok())
-        .map_or((fallback, false), |value| (value, true))
 }
 
 #[cfg(test)]

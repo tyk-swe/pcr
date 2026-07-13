@@ -94,7 +94,7 @@ pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
                                         128
                                     }
                                 } else {
-                                    sockaddr_prefix(entry.ifa_netmask, ip.is_ipv4())
+                                    sockaddr_prefix(entry.ifa_netmask, ip)
                                         .unwrap_or(if ip.is_ipv4() { 32 } else { 128 })
                                 };
                                 let assigned = InterfaceAddress {
@@ -275,7 +275,7 @@ fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
 }
 
 #[cfg(feature = "native-route")]
-fn sockaddr_prefix(address: *const libc::sockaddr, ipv4: bool) -> Option<u8> {
+fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) -> Option<u8> {
     if address.is_null() {
         return None;
     }
@@ -284,14 +284,14 @@ fn sockaddr_prefix(address: *const libc::sockaddr, ipv4: bool) -> Option<u8> {
     let length = usize::from(unsafe { *address.cast::<u8>() });
     let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
     let ip = sockaddr_ip(bytes)?;
-    match (ipv4, ip) {
-        (true, IpAddr::V4(mask)) => Some(
+    match (interface_address, ip) {
+        (IpAddr::V4(_), IpAddr::V4(mask)) => Some(
             mask.octets()
                 .iter()
                 .map(|byte| byte.count_ones())
                 .sum::<u32>() as u8,
         ),
-        (false, IpAddr::V6(mask)) => Some(
+        (IpAddr::V6(_), IpAddr::V6(mask)) => Some(
             mask.octets()
                 .iter()
                 .map(|byte| byte.count_ones())

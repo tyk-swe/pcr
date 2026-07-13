@@ -68,26 +68,26 @@ fn timestamp_from_ticks(
     resolution: TimestampResolution,
     offset_seconds: i64,
 ) -> Result<SystemTime, Error> {
-    let denominator = match resolution {
+    let ticks_per_second = match resolution {
         TimestampResolution::Decimal(exponent) => 10_u128.checked_pow(u32::from(exponent)),
         TimestampResolution::Binary(exponent) => 1_u128.checked_shl(u32::from(exponent)),
     };
-    let (seconds, nanoseconds) = match denominator {
-        Some(denominator) => {
-            let ticks = u128::from(ticks);
-            let seconds = ticks / denominator;
-            let remainder = ticks % denominator;
+    let (whole_seconds, nanoseconds) = match ticks_per_second {
+        Some(exact_ticks_per_second) => {
+            let wide_ticks = u128::from(ticks);
+            let whole_seconds = wide_ticks / exact_ticks_per_second;
+            let remainder = wide_ticks % exact_ticks_per_second;
             let scaled = remainder
                 .checked_mul(1_000_000_000)
                 .expect("u64 ticks multiplied by one billion fit in u128");
-            if !scaled.is_multiple_of(denominator) {
+            if !scaled.is_multiple_of(exact_ticks_per_second) {
                 return Err(Error::MetadataNotRepresentable {
                     format: Format::PcapNg,
                     field: "sub-nanosecond timestamp",
                 });
             }
-            let nanoseconds = scaled / denominator;
-            (seconds, nanoseconds as u32)
+            let nanoseconds = scaled / exact_ticks_per_second;
+            (whole_seconds, nanoseconds as u32)
         }
         None => {
             // Any denominator too large for u128 is also much larger than a
@@ -101,13 +101,13 @@ fn timestamp_from_ticks(
             (0, 0)
         }
     };
-    let seconds = i128::try_from(seconds)
+    let unix_seconds = i128::try_from(whole_seconds)
         .ok()
         .and_then(|seconds| seconds.checked_add(i128::from(offset_seconds)))
         .ok_or(Error::TimestampOutOfRange {
             format: Format::PcapNg,
         })?;
-    system_time_from_signed_unix(seconds, nanoseconds)
+    system_time_from_signed_unix(unix_seconds, nanoseconds)
 }
 
 fn timestamp_to_ticks(
@@ -129,13 +129,13 @@ fn timestamp_to_ticks(
             }
         }
     };
-    let seconds =
+    let relative_seconds =
         unix_seconds
             .checked_sub(i128::from(offset_seconds))
             .ok_or(Error::TimestampOutOfRange {
                 format: Format::PcapNg,
             })?;
-    if seconds < 0 {
+    if relative_seconds < 0 {
         return Err(Error::TimestampOutOfRange {
             format: Format::PcapNg,
         });
@@ -144,25 +144,25 @@ fn timestamp_to_ticks(
     // denominator. This also keeps writing symmetric with
     // `timestamp_from_ticks`, which accepts zero for decimal exponents whose
     // denominator is too large for u128.
-    if seconds == 0 && nanoseconds == 0 {
+    if relative_seconds == 0 && nanoseconds == 0 {
         return Ok(0);
     }
-    let denominator = match resolution {
+    let ticks_per_second = match resolution {
         TimestampResolution::Decimal(exponent) => 10_u128.checked_pow(u32::from(exponent)),
         TimestampResolution::Binary(exponent) => 1_u128.checked_shl(u32::from(exponent)),
     }
     .ok_or(Error::TimestampOutOfRange {
         format: Format::PcapNg,
     })?;
-    let seconds = u128::try_from(seconds).map_err(|_| Error::TimestampOutOfRange {
-        format: Format::PcapNg,
-    })?;
-    let fractional_numerator =
-        u128::from(nanoseconds)
-            .checked_mul(denominator)
-            .ok_or(Error::TimestampOutOfRange {
-                format: Format::PcapNg,
-            })?;
+    let whole_seconds =
+        u128::try_from(relative_seconds).map_err(|_| Error::TimestampOutOfRange {
+            format: Format::PcapNg,
+        })?;
+    let fractional_numerator = u128::from(nanoseconds)
+        .checked_mul(ticks_per_second)
+        .ok_or(Error::TimestampOutOfRange {
+            format: Format::PcapNg,
+        })?;
     if !fractional_numerator.is_multiple_of(1_000_000_000) {
         return Err(Error::MetadataNotRepresentable {
             format: Format::PcapNg,
@@ -170,9 +170,9 @@ fn timestamp_to_ticks(
         });
     }
     let fractional = fractional_numerator / 1_000_000_000;
-    let ticks = seconds
-        .checked_mul(denominator)
-        .and_then(|ticks| ticks.checked_add(fractional))
+    let ticks = whole_seconds
+        .checked_mul(ticks_per_second)
+        .and_then(|whole_ticks| whole_ticks.checked_add(fractional))
         .ok_or(Error::TimestampOutOfRange {
             format: Format::PcapNg,
         })?;
@@ -186,9 +186,9 @@ fn system_time_from_signed_unix(seconds: i128, nanoseconds: u32) -> Result<Syste
         format: Format::PcapNg,
     };
     if seconds >= 0 {
-        let seconds = u64::try_from(seconds).map_err(|_| out_of_range())?;
+        let seconds_since_epoch = u64::try_from(seconds).map_err(|_| out_of_range())?;
         UNIX_EPOCH
-            .checked_add(Duration::new(seconds, nanoseconds))
+            .checked_add(Duration::new(seconds_since_epoch, nanoseconds))
             .ok_or_else(out_of_range)
     } else if nanoseconds == 0 {
         let magnitude = seconds
@@ -261,7 +261,7 @@ fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {
 fn align_to_usize(value: usize) -> Result<usize, Error> {
     value
         .checked_add(3)
-        .map(|value| value & !3)
+        .map(|padded| padded & !3)
         .ok_or(Error::InvalidData {
             format: Format::PcapNg,
             reason: "aligned length overflow",
@@ -271,7 +271,7 @@ fn align_to_usize(value: usize) -> Result<usize, Error> {
 fn align_to_u32(value: u32) -> Result<u32, Error> {
     value
         .checked_add(3)
-        .map(|value| value & !3)
+        .map(|padded| padded & !3)
         .ok_or(Error::InvalidBlockLength { length: value })
 }
 
@@ -282,26 +282,26 @@ fn write_padding<W: Write>(writer: &mut W, unpadded_length: u32) -> Result<(), E
 }
 
 fn decode_u16(endianness: Endianness, bytes: &[u8]) -> u16 {
-    let bytes: [u8; 2] = bytes[..2].try_into().expect("two-byte slice");
+    let word: [u8; 2] = bytes[..2].try_into().expect("two-byte slice");
     match endianness {
-        Endianness::Little => u16::from_le_bytes(bytes),
-        Endianness::Big => u16::from_be_bytes(bytes),
+        Endianness::Little => u16::from_le_bytes(word),
+        Endianness::Big => u16::from_be_bytes(word),
     }
 }
 
 fn decode_u32(endianness: Endianness, bytes: &[u8]) -> u32 {
-    let bytes: [u8; 4] = bytes[..4].try_into().expect("four-byte slice");
+    let word: [u8; 4] = bytes[..4].try_into().expect("four-byte slice");
     match endianness {
-        Endianness::Little => u32::from_le_bytes(bytes),
-        Endianness::Big => u32::from_be_bytes(bytes),
+        Endianness::Little => u32::from_le_bytes(word),
+        Endianness::Big => u32::from_be_bytes(word),
     }
 }
 
 fn decode_i64(endianness: Endianness, bytes: &[u8]) -> i64 {
-    let bytes: [u8; 8] = bytes[..8].try_into().expect("eight-byte slice");
+    let word: [u8; 8] = bytes[..8].try_into().expect("eight-byte slice");
     match endianness {
-        Endianness::Little => i64::from_le_bytes(bytes),
-        Endianness::Big => i64::from_be_bytes(bytes),
+        Endianness::Little => i64::from_le_bytes(word),
+        Endianness::Big => i64::from_be_bytes(word),
     }
 }
 

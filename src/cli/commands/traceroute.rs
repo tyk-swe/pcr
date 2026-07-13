@@ -61,6 +61,9 @@ fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(),
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     validate_live_interface_selector("traceroute", interface.as_deref())?;
+    let max_template_packets = usize::try_from(attempts).map_err(|_| {
+        CliError::new(2, "traceroute attempt count exceeds the platform size limit")
+    })?;
 
     let registry = default_registry_arc()?;
     let mut exchange = ExchangeOptions {
@@ -75,7 +78,7 @@ fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(),
             allow_permissive_live: false,
         },
         timeout: request.timeout,
-        max_template_packets: attempts as usize,
+        max_template_packets,
         max_unsolicited: queue_limits.max_frames,
         max_responses: queue_limits.max_frames,
         max_capture_queue_frames: queue_limits.max_frames,
@@ -90,8 +93,7 @@ fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(),
         registry: Arc::clone(&registry),
         policy: policy.clone(),
         exchange,
-        interface,
-        interface_resolved: false,
+        interface: DeferredInterface::new(interface),
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyTracerouteAuthorizer::new(&policy, &resolver);
@@ -127,8 +129,7 @@ struct CliTracerouteExecutor {
     registry: Arc<crate::packet::internal::ProtocolRegistry>,
     policy: TrafficPolicy,
     exchange: ExchangeOptions,
-    interface: Option<String>,
-    interface_resolved: bool,
+    interface: DeferredInterface,
 }
 
 impl TracerouteExecutor for CliTracerouteExecutor {
@@ -136,12 +137,9 @@ impl TracerouteExecutor for CliTracerouteExecutor {
         &mut self,
         batch: &TracerouteBatch,
     ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
-        if !self.interface_resolved {
-            self.exchange.send.plan.interface =
-                resolve_interface(self.interface.take(), &SystemInterfaceProvider)
-                    .map_err(traceroute_execution_error_from_cli)?;
-            self.interface_resolved = true;
-        }
+        self.interface
+            .resolve_into(&mut self.exchange.send.plan)
+            .map_err(traceroute_execution_error_from_cli)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientTracerouteExecutor::new(&client, self.exchange.clone()).execute(batch)
     }

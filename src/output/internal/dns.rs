@@ -214,6 +214,24 @@ pub struct DnsCommandResult {
     pub undecoded: Vec<DnsUndecodedOutput>,
 }
 
+#[derive(Default)]
+struct DnsResponseOutputFields {
+    response_code: Option<u16>,
+    response_code_name: Option<String>,
+    edns: Option<DnsEdnsOutput>,
+    authoritative: Option<bool>,
+    truncated: Option<bool>,
+    recursion_desired: Option<bool>,
+    recursion_available: Option<bool>,
+    authenticated_data: Option<bool>,
+    checking_disabled: Option<bool>,
+    answers: Vec<DnsRecordOutput>,
+    authorities: Vec<DnsRecordOutput>,
+    additionals: Vec<DnsRecordOutput>,
+    rejected_records: Vec<DnsRejectedRecordOutput>,
+    rejected_record_count: usize,
+}
+
 impl DnsCommandResult {
     pub fn try_from_dns(
         result: DnsResult,
@@ -233,48 +251,33 @@ impl DnsCommandResult {
             diagnostics,
             stats,
         } = result;
-        let (
-            response_code,
-            response_code_name,
-            edns,
-            authoritative,
-            truncated,
-            recursion_desired,
-            recursion_available,
-            authenticated_data,
-            checking_disabled,
-            answers,
-            authorities,
-            additionals,
-            rejected_records,
-            rejected_record_count,
-        ) = if let Some(response) = response {
-            (
-                Some(response.response_code),
-                Some(response.response_code_name().to_owned()),
-                response.edns.map(Into::into),
-                Some(response.authoritative),
-                Some(response.truncated),
-                Some(response.recursion_desired),
-                Some(response.recursion_available),
-                Some(response.authenticated_data),
-                Some(response.checking_disabled),
-                response
+        let response_fields = if let Some(response) = response {
+            DnsResponseOutputFields {
+                response_code: Some(response.response_code),
+                response_code_name: Some(response.response_code_name().to_owned()),
+                edns: response.edns.map(Into::into),
+                authoritative: Some(response.authoritative),
+                truncated: Some(response.truncated),
+                recursion_desired: Some(response.recursion_desired),
+                recursion_available: Some(response.recursion_available),
+                authenticated_data: Some(response.authenticated_data),
+                checking_disabled: Some(response.checking_disabled),
+                answers: response
                     .answers
                     .into_iter()
                     .map(DnsRecordOutput::from_record)
                     .collect(),
-                response
+                authorities: response
                     .authorities
                     .into_iter()
                     .map(DnsRecordOutput::from_record)
                     .collect(),
-                response
+                additionals: response
                     .additionals
                     .into_iter()
                     .map(DnsRecordOutput::from_record)
                     .collect(),
-                response
+                rejected_records: response
                     .rejected_records
                     .into_iter()
                     .map(|record| DnsRejectedRecordOutput {
@@ -285,27 +288,12 @@ impl DnsCommandResult {
                         reason: record.reason,
                     })
                     .collect(),
-                response.rejected_record_count,
-            )
+                rejected_record_count: response.rejected_record_count,
+            }
         } else {
-            (
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-                0,
-            )
+            DnsResponseOutputFields::default()
         };
-        let attempts = attempts
+        let attempt_outputs = attempts
             .into_iter()
             .map(|evidence| {
                 Ok(DnsAttemptOutput {
@@ -328,7 +316,7 @@ impl DnsCommandResult {
                 })
             })
             .collect::<Result<Vec<_>, OutputContractError>>()?;
-        let undecoded = undecoded
+        let undecoded_outputs = undecoded
             .into_iter()
             .map(|evidence| {
                 Ok(DnsUndecodedOutput {
@@ -337,13 +325,29 @@ impl DnsCommandResult {
                 })
             })
             .collect::<Result<Vec<_>, OutputContractError>>()?;
-        let stats = OperationStats {
+        let operation_stats = OperationStats {
             packets_attempted: stats.packets_attempted,
             packets_completed: stats.packets_completed,
             bytes: stats.bytes,
             elapsed: stats.elapsed,
             capture: stats.capture.into(),
         };
+        let DnsResponseOutputFields {
+            response_code,
+            response_code_name,
+            edns,
+            authoritative,
+            truncated,
+            recursion_desired,
+            recursion_available,
+            authenticated_data,
+            checking_disabled,
+            answers,
+            authorities,
+            additionals,
+            rejected_records,
+            rejected_record_count,
+        } = response_fields;
         Ok((
             Self {
                 server,
@@ -368,11 +372,11 @@ impl DnsCommandResult {
                 additionals,
                 rejected_records,
                 rejected_record_count,
-                attempts,
-                undecoded,
+                attempts: attempt_outputs,
+                undecoded: undecoded_outputs,
             },
             diagnostics,
-            stats,
+            operation_stats,
         ))
     }
 }

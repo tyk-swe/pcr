@@ -99,8 +99,7 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             registry: Arc::clone(&registry),
             policy: policy.clone(),
             exchange,
-            interface,
-            interface_resolved: false,
+            interface: DeferredInterface::new(interface),
         };
         let mut authorizer = TrafficPolicyFuzzAuthorizer::new(&policy);
         let mut clock = SystemFuzzClock;
@@ -145,8 +144,7 @@ struct CliFuzzExecutor {
     registry: Arc<crate::packet::internal::ProtocolRegistry>,
     policy: TrafficPolicy,
     exchange: ExchangeOptions,
-    interface: Option<String>,
-    interface_resolved: bool,
+    interface: DeferredInterface,
 }
 
 impl FuzzExecutor for CliFuzzExecutor {
@@ -155,12 +153,9 @@ impl FuzzExecutor for CliFuzzExecutor {
         case: &FuzzExecutionCase,
         timeout: Duration,
     ) -> Result<FuzzCaseExecution, FuzzExecutionError> {
-        if !self.interface_resolved {
-            self.exchange.send.plan.interface =
-                resolve_interface(self.interface.take(), &SystemInterfaceProvider)
-                    .map_err(fuzz_execution_error_from_cli)?;
-            self.interface_resolved = true;
-        }
+        self.interface
+            .resolve_into(&mut self.exchange.send.plan)
+            .map_err(fuzz_execution_error_from_cli)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientFuzzExecutor::new(&client, self.exchange.clone()).execute(case, timeout)
     }

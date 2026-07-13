@@ -91,10 +91,10 @@ impl ScanCommandResult {
             diagnostics,
             stats,
         } = result;
-        let ports = endpoints
+        let port_outputs = endpoints
             .into_iter()
             .map(|endpoint| {
-                let evidence = endpoint
+                let evidence_outputs = endpoint
                     .evidence
                     .into_iter()
                     .map(|evidence| {
@@ -131,15 +131,15 @@ impl ScanCommandResult {
                     port: endpoint.port.unwrap_or(0),
                     transport: endpoint.transport.to_string(),
                     classification: endpoint.classification.into(),
-                    evidence,
+                    evidence: evidence_outputs,
                 })
             })
             .collect::<Result<Vec<_>, OutputContractError>>()?;
-        let undecoded = undecoded
+        let undecoded_frames = undecoded
             .into_iter()
             .map(FrameOutput::try_from_frame)
             .collect::<Result<Vec<_>, _>>()?;
-        let stats = OperationStats {
+        let operation_stats = OperationStats {
             packets_attempted: stats.packets_attempted,
             packets_completed: stats.packets_completed,
             bytes: stats.bytes,
@@ -150,11 +150,11 @@ impl ScanCommandResult {
             Self {
                 target,
                 resolved_addresses,
-                ports,
-                undecoded,
+                ports: port_outputs,
+                undecoded: undecoded_frames,
             },
             diagnostics,
-            stats,
+            operation_stats,
         ))
     }
 }

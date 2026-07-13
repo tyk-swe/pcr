@@ -208,7 +208,14 @@ where
                 return Err(shutdown_after_error(&mut capture, error));
             }
         };
-        let next_bytes = bytes.checked_add(frame.bytes.len() as u64).ok_or_else(|| {
+        let frame_bytes = u64::try_from(frame.bytes.len()).map_err(|_| {
+            shutdown_after_error(
+                &mut capture,
+                CliError::new(70, "captured frame length exceeds the byte-accounting domain")
+                    .at_sequence(frames),
+            )
+        })?;
+        let next_bytes = bytes.checked_add(frame_bytes).ok_or_else(|| {
             shutdown_after_error(
                 &mut capture,
                 CliError::new(70, "capture output byte accounting overflowed").at_sequence(frames),
@@ -427,10 +434,12 @@ fn render_exchange_stream(
     } = result;
     let mut sequence = 0_u64;
     for (request_index, frame) in sent.into_iter().enumerate() {
+        let request_index = u64::try_from(request_index)
+            .map_err(|_| CliError::classified(OutputContractError::SequenceOverflow))?;
         emit_exchange_record(
             &mut sequence,
             ExchangeStreamCommandResult::Sent {
-                request_index: request_index as u64,
+                request_index,
                 frame,
             },
         )?;

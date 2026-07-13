@@ -107,7 +107,7 @@ impl Classified for PlanError {
 #[derive(Clone, Debug, Default)]
 pub struct RoutePlanner;
 
-fn has_link_layer_intent(packet: &Packet) -> bool {
+fn packet_has_link_layer_intent(packet: &Packet) -> bool {
     packet.iter().any(|layer| {
         matches!(
             layer.protocol_id().as_str(),
@@ -135,7 +135,7 @@ impl RoutePlanner {
         }) {
             return Err(PlanError::OfflineOnlyLinkHeader { protocol });
         }
-        let has_link_layer_intent = has_link_layer_intent(packet);
+        let has_link_layer_intent = packet_has_link_layer_intent(packet);
         if options.link_mode == LinkMode::Layer3 && has_link_layer_intent {
             return Err(PlanError::EthernetInLayer3);
         }
@@ -296,7 +296,7 @@ impl RoutePlanner {
             }
         }
         let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);
-        let neighbor_vlan_tags = neighbor_vlan_tags(packet)?;
+        let neighbor_vlan_tags = extract_neighbor_vlan_tags(packet)?;
         let visited_destinations = srh.map_or_else(
             || final_destination.into_iter().collect(),
             |route| route.segments[route.active_index..].to_vec(),
@@ -532,7 +532,7 @@ pub struct MaterializedRoute {
     pub neighbor_resolution: Option<NeighborResolution>,
 }
 
-fn neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, PlanError> {
+fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, PlanError> {
     let mut tags = Vec::new();
     for layer in packet
         .iter()

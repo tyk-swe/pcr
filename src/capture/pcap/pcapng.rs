@@ -92,10 +92,7 @@ fn validate_pcapng_block_length(length: u32, max_size: usize) -> Result<(), Erro
     Ok(())
 }
 
-fn parse_interface_description(
-    body: &[u8],
-    endianness: Endianness,
-) -> Result<InterfaceDescription, Error> {
+fn parse_interface_description(body: &[u8], endianness: Endianness) -> Result<Interface, Error> {
     if body.len() < 8 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,
@@ -162,7 +159,7 @@ fn parse_interface_description(
             Ok(())
         },
     )?;
-    Ok(InterfaceDescription {
+    Ok(Interface {
         link_type,
         snap_len,
         timestamp_resolution,
@@ -173,7 +170,7 @@ fn parse_interface_description(
 fn parse_enhanced_packet(
     body: &[u8],
     endianness: Endianness,
-    interfaces: &[InterfaceDescription],
+    interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
 ) -> Result<Frame, Error> {
@@ -205,7 +202,7 @@ fn parse_enhanced_packet(
 fn parse_obsolete_packet(
     body: &[u8],
     endianness: Endianness,
-    interfaces: &[InterfaceDescription],
+    interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
 ) -> Result<Frame, Error> {
@@ -243,7 +240,7 @@ fn parse_pcapng_packet_body(
     captured_length: u32,
     original_length: u32,
     endianness: Endianness,
-    interfaces: &[InterfaceDescription],
+    interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
 ) -> Result<Frame, Error> {
@@ -307,7 +304,7 @@ fn parse_pcapng_packet_body(
 fn parse_simple_packet(
     body: &[u8],
     endianness: Endianness,
-    interfaces: &[InterfaceDescription],
+    interfaces: &[Interface],
     interface_base: u32,
     max_size: usize,
 ) -> Result<Frame, Error> {
@@ -457,10 +454,7 @@ where
             });
         }
         visitor(code, &options[offset..offset + length])?;
-        if options[offset + length..end]
-            .iter()
-            .any(|byte| *byte != 0)
-        {
+        if options[offset + length..end].iter().any(|byte| *byte != 0) {
             return Err(Error::InvalidData {
                 format: Format::PcapNg,
                 reason: "option padding is non-zero",

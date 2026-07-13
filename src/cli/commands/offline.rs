@@ -221,7 +221,7 @@ fn validate_capture_stream_limits(
             Vec::new(),
         ));
     }
-    if max_frame_bytes as u64 > max_bytes {
+    if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
         return Err(CliError::from_classification(
             Classification::new(
                 "cli.capture_limit",

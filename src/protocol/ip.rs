@@ -15,11 +15,11 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    aliased_fields, binding_protocol, bytes, checksum, field_layout, impl_layer_boilerplate,
+    aliased_fields, bytes, checksum, expected_discriminator, field_layout, impl_layer_boilerplate,
     invalid, ipv4, ipv6, make_layer, network_from_addresses, out_of_range, payload_without_padding,
     protocol, resolve_u16, resolve_u8, set_wire_u16, set_wire_u8, strict_or_diagnostic, truncated,
     unknown_field, validate_auto_raw_discriminator, validate_ipv6_routing_child,
-    validate_raw_child_discriminator, wire_u16, wire_u8, wrong_layer, wrong_type,
+    validate_raw_child_discriminator, wire_u16, wire_u8, wrong_layer, wrong_type, ValueExpectation,
 };
 
 const IPV4_MIN_LEN: usize = 20;
@@ -439,16 +439,15 @@ impl LayerCodec for Ipv4Codec {
             "ipv4",
             "total_length",
             &layer.total_length,
-            total_expected,
-            true,
+            ValueExpectation::Required(total_expected),
             context.mode,
             &mut diagnostics,
         )?;
-        let (expected_protocol, validate_protocol) = expected_next("ipv4", context, 255);
+        let expected_protocol = expected_discriminator("ipv4", context, 255_u8);
         validate_auto_raw_discriminator(
             "ipv4",
             "protocol",
-            matches!(layer.protocol, WireValue::Auto),
+            &layer.protocol,
             context,
             &mut diagnostics,
         )?;
@@ -457,7 +456,6 @@ impl LayerCodec for Ipv4Codec {
             "protocol",
             &layer.protocol,
             expected_protocol,
-            validate_protocol,
             context.mode,
             &mut diagnostics,
         )?;
@@ -492,8 +490,7 @@ impl LayerCodec for Ipv4Codec {
             "ipv4",
             "checksum",
             &layer.checksum,
-            checksum_expected,
-            true,
+            ValueExpectation::Required(checksum_expected),
             context.mode,
             &mut diagnostics,
         )?;
@@ -858,16 +855,15 @@ impl LayerCodec for Ipv6Codec {
             "ipv6",
             "payload_length",
             &layer.payload_length,
-            expected_length,
-            true,
+            ValueExpectation::Required(expected_length),
             context.mode,
             &mut diagnostics,
         )?;
-        let (expected_next, validate_next) = expected_next("ipv6", context, 59);
+        let expected_next = expected_discriminator("ipv6", context, 59_u8);
         validate_auto_raw_discriminator(
             "ipv6",
             "next_header",
-            matches!(layer.next_header, WireValue::Auto),
+            &layer.next_header,
             context,
             &mut diagnostics,
         )?;
@@ -876,7 +872,6 @@ impl LayerCodec for Ipv6Codec {
             "next_header",
             &layer.next_header,
             expected_next,
-            validate_next,
             context.mode,
             &mut diagnostics,
         )?;
@@ -996,25 +991,6 @@ impl LayerCodec for Ipv6Codec {
             &aliased_fields("ipv6", fields, &[("src", "source"), ("dst", "destination")])?,
         )
     }
-}
-
-fn expected_next(parent: &str, context: &LayerEncodeContext<'_>, fallback: u8) -> (u8, bool) {
-    let Some(child) = context.child else {
-        return (fallback, false);
-    };
-    if child.protocol_id().as_str() == "raw" {
-        let expected = context
-            .registry
-            .discriminator_for(&protocol(parent), &child.protocol_id())
-            .and_then(|value| u8::try_from(value.0).ok())
-            .unwrap_or(fallback);
-        return (expected, false);
-    }
-    context
-        .registry
-        .discriminator_for(&protocol(parent), &binding_protocol(child))
-        .and_then(|value| u8::try_from(value.0).ok())
-        .map_or((fallback, false), |value| (value, true))
 }
 
 pub(crate) fn encode_network(

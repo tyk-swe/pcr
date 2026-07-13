@@ -27,8 +27,8 @@ fn prepare(
     let builder = Builder::new(Arc::clone(&registry));
     let dissector = Dissector::new(registry);
     let mut cases = Vec::with_capacity(request.cases);
-    let mut built_cases = 0_u64;
-    let mut built_bytes = 0_u64;
+    let mut built_case_count = 0_u64;
+    let mut built_byte_count = 0_u64;
     let mut retained_bytes = 0_u64;
     for offset in 0..request.cases {
         enforce_preparation_deadline(started, request.limits.max_duration)?;
@@ -111,15 +111,15 @@ fn prepare(
             request.build.clone(),
         ) {
             Ok(built) => {
-                let next_bytes = built_bytes.checked_add(built.bytes.len() as u64).ok_or(
-                    FuzzError::ByteLimit {
+                let next_built_byte_count = built_byte_count
+                    .checked_add(built.bytes.len() as u64)
+                    .ok_or(FuzzError::ByteLimit {
                         actual: u64::MAX,
                         limit: request.limits.max_total_bytes as u64,
-                    },
-                )?;
-                if next_bytes > request.limits.max_total_bytes as u64 {
+                    })?;
+                if next_built_byte_count > request.limits.max_total_bytes as u64 {
                     return Err(FuzzError::ByteLimit {
-                        actual: next_bytes,
+                        actual: next_built_byte_count,
                         limit: request.limits.max_total_bytes as u64,
                     });
                 }
@@ -142,8 +142,8 @@ fn prepare(
                 }
                 case.built = Some(built);
                 case.outcome = FuzzCaseOutcome::Built;
-                built_cases += 1;
-                built_bytes = next_bytes;
+                built_case_count += 1;
+                built_byte_count = next_built_byte_count;
             }
             Err(source) => {
                 case.error = Some(FuzzCaseFailure::new(
@@ -162,8 +162,8 @@ fn prepare(
     enforce_preparation_deadline(started, request.limits.max_duration)?;
     Ok(PreparedFuzz {
         cases,
-        built_cases,
-        built_bytes,
+        built_case_count,
+        built_byte_count,
         preparation_elapsed: started.elapsed(),
     })
 }
@@ -317,7 +317,7 @@ fn resolve_fields(
                     },
                     protocol: layer.protocol_id().to_string(),
                     kind: field.kind,
-                    derived: field.derived,
+                    is_derived: field.derived,
                 });
             }
         }
@@ -368,7 +368,7 @@ fn resolve_fields(
             target: target.clone(),
             protocol: layer.protocol_id().to_string(),
             kind: schema.kind,
-            derived: schema.derived,
+            is_derived: schema.derived,
         });
     }
     Ok(fields)
@@ -378,7 +378,7 @@ fn strategy_compatible(strategy: FuzzStrategy, field: &ResolvedField) -> bool {
     match strategy {
         FuzzStrategy::Boundary | FuzzStrategy::Random => true,
         FuzzStrategy::BitFlip => field.kind == FieldKind::Bytes,
-        FuzzStrategy::Malformed => field.derived,
+        FuzzStrategy::Malformed => field.is_derived,
     }
 }
 

@@ -13,7 +13,7 @@ fn map_replay_route_error(
     }
 }
 
-fn replay_ip_endpoints(bytes: &[u8]) -> Result<(IpAddr, IpAddr), LiveIoError> {
+fn replay_network_envelope(bytes: &[u8]) -> Result<NetworkEnvelope, LiveIoError> {
     let invalid = |message: String| LiveIoError::InvalidTransmissionFrame { message };
     let Some(version) = bytes.first().map(|byte| byte >> 4) else {
         return Err(invalid("replay frame is empty".to_owned()));
@@ -22,17 +22,20 @@ fn replay_ip_endpoints(bytes: &[u8]) -> Result<(IpAddr, IpAddr), LiveIoError> {
         4 if bytes.len() >= 20 => {
             let source = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]);
             let destination = Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19]);
-            Ok((IpAddr::V4(source), IpAddr::V4(destination)))
+            Ok(NetworkEnvelope {
+                source: IpAddr::V4(source),
+                destination: IpAddr::V4(destination),
+            })
         }
         6 if bytes.len() >= 40 => {
             let mut source = [0_u8; 16];
             let mut destination = [0_u8; 16];
             source.copy_from_slice(&bytes[8..24]);
             destination.copy_from_slice(&bytes[24..40]);
-            Ok((
-                IpAddr::V6(Ipv6Addr::from(source)),
-                IpAddr::V6(Ipv6Addr::from(destination)),
-            ))
+            Ok(NetworkEnvelope {
+                source: IpAddr::V6(Ipv6Addr::from(source)),
+                destination: IpAddr::V6(Ipv6Addr::from(destination)),
+            })
         }
         4 => Err(invalid(
             "replay frame has a truncated IPv4 header".to_owned(),
@@ -46,9 +49,14 @@ fn replay_ip_endpoints(bytes: &[u8]) -> Result<(IpAddr, IpAddr), LiveIoError> {
     }
 }
 
-fn replay_wire_policy(
+struct ReplayWireDestinations {
+    addresses: Vec<IpAddr>,
+    has_unsupported_routing_header: bool,
+}
+
+fn replay_wire_destinations(
     frame: &Frame,
-) -> Result<(Vec<IpAddr>, bool), crate::protocol::internal::Ipv4OptionsError> {
+) -> Result<ReplayWireDestinations, crate::protocol::internal::Ipv4OptionsError> {
     let bytes = frame.bytes.as_ref();
     let (network_offset, protocol) = match frame.link_type.0 {
         12 | 101 => (0, bytes.first().map(|byte| byte >> 4).unwrap_or(0)),
@@ -74,7 +82,7 @@ fn replay_wire_policy(
         _ => (0, 0),
     };
     let mut destinations = Vec::new();
-    let unsupported_routing = match protocol {
+    let has_unsupported_routing_header = match protocol {
         4 => {
             collect_ipv4_wire_destinations(bytes, network_offset, &mut destinations)?;
             false
@@ -82,7 +90,10 @@ fn replay_wire_policy(
         6 => collect_ipv6_wire_destinations(bytes, network_offset, &mut destinations),
         _ => false,
     };
-    Ok((destinations, unsupported_routing))
+    Ok(ReplayWireDestinations {
+        addresses: destinations,
+        has_unsupported_routing_header,
+    })
 }
 
 fn collect_ipv4_wire_destinations(
@@ -103,9 +114,7 @@ fn collect_ipv4_wire_destinations(
     let Some(header) = bytes.get(offset..offset.saturating_add(header_length)) else {
         return Ok(());
     };
-    for destination in
-        crate::protocol::internal::ipv4_source_route_destinations(&header[20..])?
-    {
+    for destination in crate::protocol::internal::ipv4_source_route_destinations(&header[20..])? {
         output.push(IpAddr::V4(destination));
     }
     Ok(())
@@ -120,17 +129,17 @@ fn collect_ipv6_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<
     output.push(IpAddr::V6(Ipv6Addr::from(destination)));
     let mut next_header = header[6];
     let mut cursor = offset.saturating_add(40);
-    let mut unsupported_routing = false;
+    let mut has_unsupported_routing_header = false;
     for _ in 0..crate::packet::build::DEFAULT_MAX_LAYERS {
         match next_header {
             0 | 43 | 60 => {
                 let Some(extension) = bytes.get(cursor..cursor.saturating_add(8)) else {
-                    unsupported_routing |= next_header == 43;
+                    has_unsupported_routing_header |= next_header == 43;
                     break;
                 };
                 let length = (usize::from(extension[1]) + 1).saturating_mul(8);
                 let Some(extension) = bytes.get(cursor..cursor.saturating_add(length)) else {
-                    unsupported_routing |= next_header == 43;
+                    has_unsupported_routing_header |= next_header == 43;
                     break;
                 };
                 if next_header == 43 && extension[2] == 4 {
@@ -145,7 +154,7 @@ fn collect_ipv6_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<
                         output.push(IpAddr::V6(Ipv6Addr::from(address)));
                     }
                 } else if next_header == 43 {
-                    unsupported_routing = true;
+                    has_unsupported_routing_header = true;
                 }
                 next_header = extension[0];
                 cursor = cursor.saturating_add(length);
@@ -171,7 +180,7 @@ fn collect_ipv6_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<
             _ => break,
         }
     }
-    unsupported_routing
+    has_unsupported_routing_header
 }
 
 fn replay_link_mode(

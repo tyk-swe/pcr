@@ -48,17 +48,18 @@ where
         options: &PlanOptions,
     ) -> Result<(ResolvedTarget, PlannedRoute), ClientError> {
         let resolved = self.policy.resolve_target(target, resolver)?;
-        let packet_family = packet
-            .iter()
-            .find_map(|layer| match layer.protocol_id().as_str() {
-                "ipv4" => Some(true),
-                "ipv6" => Some(false),
-                _ => None,
-            });
-        let selected = match packet_family {
-            Some(ipv4) => resolved.address_for_family(ipv4).ok_or(
+        let packet_ip_version =
+            packet
+                .iter()
+                .find_map(|layer| match layer.protocol_id().as_str() {
+                    "ipv4" => Some(IpVersion::V4),
+                    "ipv6" => Some(IpVersion::V6),
+                    _ => None,
+                });
+        let selected = match packet_ip_version {
+            Some(version) => resolved.address_for_version(version).ok_or(
                 TargetResolutionError::AddressFamilyUnavailable {
-                    family: if ipv4 { "IPv4" } else { "IPv6" },
+                    family: version.label(),
                 },
             )?,
             None => resolved.selected_address(),
@@ -100,21 +101,25 @@ where
             .into());
         }
         let plan = self.plan(&packet, options.destination, &options.plan)?;
-        let mut packet = packet;
-        materialize_network_fields(&mut packet, &plan)?;
-        materialize_link_structure(&mut packet, &plan)?;
+        let mut packet_to_send = packet;
+        materialize_network_fields(&mut packet_to_send, &plan)?;
+        materialize_link_structure(&mut packet_to_send, &plan)?;
         let builder = Builder::new(Arc::clone(&self.registry));
         let context = build_context(&plan);
         // Validate all packet fields before neighbor discovery emits traffic.
-        let preliminary = builder.build(packet.clone(), context.clone(), options.build.clone())?;
+        let preliminary = builder.build(
+            packet_to_send.clone(),
+            context.clone(),
+            options.build.clone(),
+        )?;
         validate_mtu(&preliminary, plan.route.mtu)?;
         self.authorize_built(&preliminary, options.allow_permissive_live)?;
         self.authorize_byte_count(preliminary.bytes.len() as u64)?;
         let preliminary_len = preliminary.bytes.len();
         let route = self.planner.materialize(plan, &self.neighbors)?;
-        let link_changed = materialize_link_fields(&mut packet, &route)?;
+        let link_changed = materialize_link_fields(&mut packet_to_send, &route)?;
         let built = if link_changed {
-            let built = builder.build(packet, context, options.build)?;
+            let built = builder.build(packet_to_send, context, options.build)?;
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             self.authorize_built(&built, options.allow_permissive_live)?;
             self.authorize_byte_count(built.bytes.len() as u64)?;
@@ -209,26 +214,32 @@ where
                 message: "template expanded to no packets".to_owned(),
             });
         }
-        let packets = template
+        let expanded_packets = template
             .expand(options.max_template_packets)
             .map_err(|source| ClientError::Template {
                 message: source.to_string(),
             })?;
         let packet_count = expansion_len as u64;
         let builder = Builder::new(Arc::clone(&self.registry));
-        let mut planned: Vec<(Packet, PlannedRoute, BuildContext, BuiltPacket)> =
-            Vec::with_capacity(expansion_len);
+        let mut planned_packets: Vec<PlannedExchangePacket> = Vec::with_capacity(expansion_len);
         let mut total_bytes = 0u64;
-        for packet in packets {
-            let mut packet = packet.map_err(|source| ClientError::Template {
+        for expanded_packet in expanded_packets {
+            let mut packet_to_send = expanded_packet.map_err(|source| ClientError::Template {
                 message: source.to_string(),
             })?;
-            let plan = self.plan(&packet, options.send.destination, &options.send.plan)?;
-            materialize_network_fields(&mut packet, &plan)?;
-            materialize_link_structure(&mut packet, &plan)?;
+            let plan = self.plan(
+                &packet_to_send,
+                options.send.destination,
+                &options.send.plan,
+            )?;
+            materialize_network_fields(&mut packet_to_send, &plan)?;
+            materialize_link_structure(&mut packet_to_send, &plan)?;
             let context = build_context(&plan);
-            let preliminary =
-                builder.build(packet.clone(), context.clone(), options.send.build.clone())?;
+            let preliminary = builder.build(
+                packet_to_send.clone(),
+                context.clone(),
+                options.send.build.clone(),
+            )?;
             validate_mtu(&preliminary, plan.route.mtu)?;
             self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
             total_bytes = total_bytes
@@ -244,37 +255,48 @@ where
                 }
                 .into());
             }
-            if let Some((_, first_plan, _, _)) = planned.first() {
-                if first_plan.route.interface != plan.route.interface
-                    || first_plan.mode != plan.mode
+            if let Some(first_packet) = planned_packets.first() {
+                if first_packet.plan.route.interface != plan.route.interface
+                    || first_packet.plan.mode != plan.mode
                 {
                     return Err(ClientError::HeterogeneousExchangeRoute);
                 }
             }
-            planned.push((packet, plan, context, preliminary));
+            planned_packets.push(PlannedExchangePacket {
+                packet: packet_to_send,
+                plan,
+                build_context: context,
+                preliminary_build: preliminary,
+            });
         }
 
         // Neighbor discovery is delayed until every packet has passed packet,
         // route, permissive-build, and aggregate byte-policy checks.
-        let mut prepared: Vec<(BuiltPacket, MaterializedRoute)> = Vec::with_capacity(planned.len());
-        for (mut packet, plan, context, preliminary) in planned {
-            let preliminary_len = preliminary.bytes.len();
+        let mut prepared_packets = Vec::with_capacity(planned_packets.len());
+        for planned_packet in planned_packets {
+            let PlannedExchangePacket {
+                mut packet,
+                plan,
+                build_context,
+                preliminary_build,
+            } = planned_packet;
+            let preliminary_len = preliminary_build.bytes.len();
             let route = self.planner.materialize(plan, &self.neighbors)?;
             let link_changed = materialize_link_fields(&mut packet, &route)?;
             let built = if link_changed {
-                builder.build(packet, context, options.send.build.clone())?
+                builder.build(packet, build_context, options.send.build.clone())?
             } else {
-                preliminary
+                preliminary_build
             };
             self.authorize_built(&built, options.send.allow_permissive_live)?;
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
-            prepared.push((built, route));
+            prepared_packets.push(PreparedExchangePacket { built, route });
         }
 
-        let first_route = &prepared
+        let first_route = &prepared_packets
             .first()
             .expect("non-empty prepared exchange")
-            .1
+            .route
             .plan;
         if deadline.checked_duration_since(Instant::now()).is_none() {
             return Err(LiveIoError::DeadlineExceeded {
@@ -298,22 +320,23 @@ where
             return Err(error_after_shutdown(&mut capture, error));
         }
 
-        let mut sent_at = Vec::with_capacity(prepared.len());
-        let mut sent_evidence = Vec::with_capacity(prepared.len());
+        let mut sent_at = Vec::with_capacity(prepared_packets.len());
+        let mut sent_evidence = Vec::with_capacity(prepared_packets.len());
         let mut completed_sends = 0u64;
         let dissector = Dissector::new(Arc::clone(&self.registry));
-        let mut captured = ExchangeAccumulator::new(prepared.len());
-        for (send_index, (built, route)) in prepared.iter().enumerate() {
+        let mut captured = ExchangeAccumulator::new(prepared_packets.len());
+        for (send_index, prepared_packet) in prepared_packets.iter().enumerate() {
+            let built = &prepared_packet.built;
+            let route = &prepared_packet.route;
             if let Err(error) = drain_available(
                 &mut capture,
-                deadline,
+                Some(deadline),
                 capture_limits.max_frames,
-                true,
                 &mut captured,
                 ExchangeProcessContext {
                     registry: &self.registry,
                     dissector: &dissector,
-                    prepared: &prepared,
+                    prepared: &prepared_packets,
                     sent_at: &sent_at,
                     deadline,
                     options: &options,
@@ -376,14 +399,13 @@ where
             }
             if let Err(error) = drain_available(
                 &mut capture,
-                deadline,
+                (send_index + 1 < prepared_packets.len()).then_some(deadline),
                 capture_limits.max_frames,
-                send_index + 1 < prepared.len(),
                 &mut captured,
                 ExchangeProcessContext {
                     registry: &self.registry,
                     dissector: &dissector,
-                    prepared: &prepared,
+                    prepared: &prepared_packets,
                     sent_at: &sent_at,
                     deadline,
                     options: &options,
@@ -410,7 +432,7 @@ where
                 ExchangeProcessContext {
                     registry: &self.registry,
                     dissector: &dissector,
-                    prepared: &prepared,
+                    prepared: &prepared_packets,
                     sent_at: &sent_at,
                     deadline,
                     options: &options,
@@ -419,14 +441,13 @@ where
         }
         if let Err(error) = drain_available(
             &mut capture,
-            deadline,
+            None,
             capture_limits.max_frames,
-            false,
             &mut captured,
             ExchangeProcessContext {
                 registry: &self.registry,
                 dissector: &dissector,
-                prepared: &prepared,
+                prepared: &prepared_packets,
                 sent_at: &sent_at,
                 deadline,
                 options: &options,
@@ -459,16 +480,16 @@ where
             );
         }
 
-        let mut answered = vec![false; prepared.len()];
-        for response in &captured.responses {
-            answered[response.request_index] = true;
-        }
-        let unanswered = answered
+        let unanswered = captured
+            .response_counts
             .iter()
             .enumerate()
-            .filter_map(|(index, answered)| (!answered).then_some(index))
+            .filter_map(|(index, response_count)| (*response_count == 0).then_some(index))
             .collect();
-        let sent = prepared.into_iter().map(|(built, _)| built).collect();
+        let sent = prepared_packets
+            .into_iter()
+            .map(|prepared_packet| prepared_packet.built)
+            .collect();
         Ok(ExchangeResult {
             sent,
             sent_evidence,

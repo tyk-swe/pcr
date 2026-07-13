@@ -11,9 +11,10 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    binding_protocol, field_layout, impl_layer_boilerplate, invalid, make_layer, out_of_range,
-    protocol, resolve_u16, set_wire_u16, truncated, unknown_field, validate_auto_raw_discriminator,
-    validate_raw_child_discriminator, wire_u16, wrong_layer, wrong_type,
+    binding_protocol, expected_discriminator, field_layout, impl_layer_boilerplate, invalid,
+    make_layer, out_of_range, protocol, resolve_u16, set_wire_u16, truncated, unknown_field,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator, wire_u16, wrong_layer,
+    wrong_type,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -170,6 +171,12 @@ pub(super) struct BsdNullCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct BsdLoopCodec;
 
+#[derive(Clone, Copy, Debug)]
+enum FamilyHeader {
+    Null,
+    Loop,
+}
+
 fn family_discriminator(family: u32) -> u64 {
     match family {
         2 => 4,
@@ -256,7 +263,7 @@ impl LayerCodec for BsdNullCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
-        decode_family("bsd_null", input, false)
+        decode_family(input, FamilyHeader::Null)
     }
 
     fn make_layer(
@@ -298,7 +305,7 @@ impl LayerCodec for BsdLoopCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
-        decode_family("bsd_loop", input, true)
+        decode_family(input, FamilyHeader::Loop)
     }
 
     fn make_layer(
@@ -309,28 +316,27 @@ impl LayerCodec for BsdLoopCodec {
     }
 }
 
-fn decode_family(
-    name: &str,
-    input: &[u8],
-    network_order: bool,
-) -> Result<DecodedLayerValue, CodecError> {
+fn decode_family(input: &[u8], header: FamilyHeader) -> Result<DecodedLayerValue, CodecError> {
+    let name = match header {
+        FamilyHeader::Null => "bsd_null",
+        FamilyHeader::Loop => "bsd_loop",
+    };
     if input.len() < 4 {
         return Err(truncated(name, 4, input.len()));
     }
     let bytes = [input[0], input[1], input[2], input[3]];
     let big = u32::from_be_bytes(bytes);
     let little = u32::from_le_bytes(bytes);
-    let (family, byte_order) = if network_order {
-        (big, CaptureByteOrder::Big)
-    } else if matches!(little, 2 | 10 | 24 | 28 | 30) {
-        (little, CaptureByteOrder::Little)
-    } else {
-        (big, CaptureByteOrder::Big)
+    let (family, byte_order) = match header {
+        FamilyHeader::Loop => (big, CaptureByteOrder::Big),
+        FamilyHeader::Null if matches!(little, 2 | 10 | 24 | 28 | 30) => {
+            (little, CaptureByteOrder::Little)
+        }
+        FamilyHeader::Null => (big, CaptureByteOrder::Big),
     };
-    let layer: Box<dyn Layer> = if network_order {
-        Box::new(BsdLoop { family })
-    } else {
-        Box::new(BsdNull { family, byte_order })
+    let layer: Box<dyn Layer> = match header {
+        FamilyHeader::Loop => Box::new(BsdLoop { family }),
+        FamilyHeader::Null => Box::new(BsdNull { family, byte_order }),
     };
     Ok(DecodedLayerValue {
         layer,
@@ -338,13 +344,12 @@ fn decode_family(
         payload_offset: 4,
         payload_len: input.len() - 4,
         next: vec![Discriminator(family_discriminator(family))],
-        fields: if network_order {
-            vec![field_layout("family", 0, 4)]
-        } else {
-            vec![
+        fields: match header {
+            FamilyHeader::Loop => vec![field_layout("family", 0, 4)],
+            FamilyHeader::Null => vec![
                 field_layout("family", 0, 4),
                 field_layout("byte_order", 0, 4),
-            ]
+            ],
         },
         diagnostics: Vec::new(),
         stop: input.len() == 4,
@@ -634,29 +639,6 @@ pub(super) struct LinuxSllCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct LinuxSll2Codec;
 
-fn expected_protocol(parent: &str, context: &LayerEncodeContext<'_>) -> (u16, bool) {
-    if let Some(child) = context
-        .child
-        .filter(|child| child.protocol_id().as_str() == "raw")
-    {
-        let expected = context
-            .registry
-            .discriminator_for(&protocol(parent), &child.protocol_id())
-            .and_then(|value| u16::try_from(value.0).ok())
-            .unwrap_or(0);
-        return (expected, false);
-    }
-    context
-        .child
-        .and_then(|child| {
-            context
-                .registry
-                .discriminator_for(&protocol(parent), &binding_protocol(child))
-        })
-        .and_then(|value| u16::try_from(value.0).ok())
-        .map_or((0, false), |value| (value, true))
-}
-
 impl LayerCodec for LinuxSllCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("linux_sll")
@@ -678,11 +660,11 @@ impl LayerCodec for LinuxSllCodec {
             return Err(invalid("linux_sll", "address length exceeds slot"));
         }
         let mut diagnostics = Vec::new();
-        let expected = expected_protocol("linux_sll", context);
+        let expectation = expected_discriminator("linux_sll", context, 0_u16);
         validate_auto_raw_discriminator(
             "linux_sll",
             "protocol",
-            matches!(layer.protocol, WireValue::Auto),
+            &layer.protocol,
             context,
             &mut diagnostics,
         )?;
@@ -690,8 +672,7 @@ impl LayerCodec for LinuxSllCodec {
             "linux_sll",
             "protocol",
             &layer.protocol,
-            expected.0,
-            expected.1,
+            expectation,
             context.mode,
             &mut diagnostics,
         )?;
@@ -713,7 +694,7 @@ impl LayerCodec for LinuxSllCodec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: sll_layout(false),
+            fields: linux_sll_layout(),
             diagnostics,
         })
     }
@@ -744,7 +725,7 @@ impl LayerCodec for LinuxSllCodec {
             payload_offset: 16,
             payload_len: input.len() - 16,
             next: vec![Discriminator(protocol_value.into())],
-            fields: sll_layout(false),
+            fields: linux_sll_layout(),
             diagnostics: Vec::new(),
             stop: input.len() == 16,
             network: None,
@@ -779,11 +760,11 @@ impl LayerCodec for LinuxSll2Codec {
             return Err(invalid("linux_sll2", "address length exceeds slot"));
         }
         let mut diagnostics = Vec::new();
-        let expected = expected_protocol("linux_sll2", context);
+        let expectation = expected_discriminator("linux_sll2", context, 0_u16);
         validate_auto_raw_discriminator(
             "linux_sll2",
             "protocol",
-            matches!(layer.protocol, WireValue::Auto),
+            &layer.protocol,
             context,
             &mut diagnostics,
         )?;
@@ -791,8 +772,7 @@ impl LayerCodec for LinuxSll2Codec {
             "linux_sll2",
             "protocol",
             &layer.protocol,
-            expected.0,
-            expected.1,
+            expectation,
             context.mode,
             &mut diagnostics,
         )?;
@@ -816,7 +796,7 @@ impl LayerCodec for LinuxSll2Codec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: sll_layout(true),
+            fields: linux_sll2_layout(),
             diagnostics,
         })
     }
@@ -850,7 +830,7 @@ impl LayerCodec for LinuxSll2Codec {
             payload_offset: 20,
             payload_len: input.len() - 20,
             next: vec![Discriminator(protocol_value.into())],
-            fields: sll_layout(true),
+            fields: linux_sll2_layout(),
             diagnostics: Vec::new(),
             stop: input.len() == 20,
             network: None,
@@ -864,25 +844,25 @@ impl LayerCodec for LinuxSll2Codec {
     }
 }
 
-fn sll_layout(v2: bool) -> Vec<crate::packet::internal::FieldLayout> {
-    if v2 {
-        vec![
-            field_layout("protocol", 0, 2),
-            field_layout("interface_index", 4, 8),
-            field_layout("arp_hardware_type", 8, 10),
-            field_layout("packet_type", 10, 11),
-            field_layout("address_length", 11, 12),
-            field_layout("address", 12, 20),
-        ]
-    } else {
-        vec![
-            field_layout("packet_type", 0, 2),
-            field_layout("arp_hardware_type", 2, 4),
-            field_layout("address_length", 4, 6),
-            field_layout("address", 6, 14),
-            field_layout("protocol", 14, 16),
-        ]
-    }
+fn linux_sll_layout() -> Vec<crate::packet::internal::FieldLayout> {
+    vec![
+        field_layout("packet_type", 0, 2),
+        field_layout("arp_hardware_type", 2, 4),
+        field_layout("address_length", 4, 6),
+        field_layout("address", 6, 14),
+        field_layout("protocol", 14, 16),
+    ]
+}
+
+fn linux_sll2_layout() -> Vec<crate::packet::internal::FieldLayout> {
+    vec![
+        field_layout("protocol", 0, 2),
+        field_layout("interface_index", 4, 8),
+        field_layout("arp_hardware_type", 8, 10),
+        field_layout("packet_type", 10, 11),
+        field_layout("address_length", 11, 12),
+        field_layout("address", 12, 20),
+    ]
 }
 
 #[cfg(test)]
@@ -916,7 +896,7 @@ mod tests {
     #[test]
     fn truncated_loopback_header_reports_the_selected_protocol() {
         assert!(matches!(
-            decode_family("bsd_loop", &[0, 0, 0], true),
+            decode_family(&[0, 0, 0], FamilyHeader::Loop),
             Err(CodecError::Truncated {
                 protocol: actual,
                 needed: 4,

@@ -20,8 +20,8 @@ use crate::net::{
     DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
 };
 use crate::packet::internal::{
-    DecodedPacket, Diagnostic, DiagnosticSeverity, FieldValue, Packet, PacketTemplate,
-    ProtocolRegistry, Raw,
+    DecodedPacket, Diagnostic, DiagnosticSeverity, FieldValue, NetworkEnvelope, Packet,
+    PacketTemplate, ProtocolRegistry, Raw,
 };
 use crate::protocol::internal::{Ipv4, Ipv6, Udp};
 

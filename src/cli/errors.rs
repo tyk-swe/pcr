@@ -5,7 +5,7 @@
 
 #[derive(Debug)]
 struct CliError {
-    code: u8,
+    exit_code: u8,
     message: String,
     classification: Classification,
     causes: Vec<String>,
@@ -13,8 +13,8 @@ struct CliError {
 }
 
 impl CliError {
-    fn new(code: u8, message: impl Into<String>) -> Self {
-        let kind = match code {
+    fn new(exit_code: u8, message: impl Into<String>) -> Self {
+        let kind = match exit_code {
             2 => Kind::Cli,
             3 => Kind::Packet,
             4 => Kind::Capability,
@@ -23,7 +23,7 @@ impl CliError {
             _ => Kind::Internal,
         };
         Self {
-            code,
+            exit_code,
             message: message.into(),
             classification: Classification::new(
                 match kind {
@@ -54,7 +54,7 @@ impl CliError {
         causes: Vec<String>,
     ) -> Self {
         Self {
-            code: exit_code_for_kind(classification.kind),
+            exit_code: exit_code_for_kind(classification.kind),
             message: message.into(),
             classification,
             causes,

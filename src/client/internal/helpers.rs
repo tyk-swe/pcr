@@ -215,9 +215,9 @@ fn materialize_network_fields(packet: &mut Packet, plan: &PlannedRoute) -> Resul
             continue;
         };
         let protocol = layer.protocol_id();
-        let family_v4 = match protocol.as_str() {
-            "ipv4" => true,
-            "ipv6" => false,
+        let ip_version = match protocol.as_str() {
+            "ipv4" => IpVersion::V4,
+            "ipv6" => IpVersion::V6,
             _ => continue,
         };
         let source_unspecified = match layer.field("source") {
@@ -226,9 +226,9 @@ fn materialize_network_fields(packet: &mut Packet, plan: &PlannedRoute) -> Resul
             _ => false,
         };
         if source_unspecified {
-            let value = match plan.packet_source {
-                Some(IpAddr::V4(value)) if family_v4 => FieldValue::Ipv4(value),
-                Some(IpAddr::V6(value)) if !family_v4 => FieldValue::Ipv6(value),
+            let value = match (ip_version, plan.packet_source) {
+                (IpVersion::V4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
+                (IpVersion::V6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
                 _ => {
                     return Err(ClientError::PacketMaterialization {
                         layer: index,
@@ -252,9 +252,9 @@ fn materialize_network_fields(packet: &mut Packet, plan: &PlannedRoute) -> Resul
             _ => false,
         };
         if destination_unspecified {
-            let value = match plan.lookup_destination {
-                Some(IpAddr::V4(value)) if family_v4 => FieldValue::Ipv4(value),
-                Some(IpAddr::V6(value)) if !family_v4 => FieldValue::Ipv6(value),
+            let value = match (ip_version, plan.lookup_destination) {
+                (IpVersion::V4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
+                (IpVersion::V6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
                 _ => {
                     return Err(ClientError::PacketMaterialization {
                         layer: index,
@@ -364,18 +364,18 @@ fn is_public(address: IpAddr) -> bool {
         IpAddr::V4(address) => {
             address.is_multicast()
                 || !(address.is_private()
-                || address.is_loopback()
-                || address.is_link_local()
-                || address.is_unspecified()
-                || address.is_documentation())
+                    || address.is_loopback()
+                    || address.is_link_local()
+                    || address.is_unspecified()
+                    || address.is_documentation())
         }
         IpAddr::V6(address) => {
             address.is_multicast()
                 || !(address.is_loopback()
-                || address.is_unspecified()
-                || address.is_unique_local()
-                || address.is_unicast_link_local()
-                || is_ipv6_documentation(address))
+                    || address.is_unspecified()
+                    || address.is_unique_local()
+                    || address.is_unicast_link_local()
+                    || is_ipv6_documentation(address))
         }
     }
 }

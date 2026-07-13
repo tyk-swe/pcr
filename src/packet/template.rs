@@ -138,7 +138,7 @@ impl PacketTemplate {
         }
         Ok(PacketTemplateIter {
             template: self,
-            next: 0,
+            next_ordinal: 0,
             total,
         })
     }
@@ -146,7 +146,7 @@ impl PacketTemplate {
 
 pub struct PacketTemplateIter<'a> {
     template: &'a PacketTemplate,
-    next: usize,
+    next_ordinal: usize,
     total: usize,
 }
 
@@ -154,11 +154,11 @@ impl Iterator for PacketTemplateIter<'_> {
     type Item = Result<Packet, TemplateError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.next >= self.total {
+        if self.next_ordinal >= self.total {
             return None;
         }
-        let ordinal = self.next;
-        self.next += 1;
+        let ordinal = self.next_ordinal;
+        self.next_ordinal += 1;
         let mut packet = self.template.base.clone();
         let mut divisor = self.total;
         for axis in &self.template.axes {
@@ -191,7 +191,7 @@ impl Iterator for PacketTemplateIter<'_> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.total.saturating_sub(self.next);
+        let remaining = self.total.saturating_sub(self.next_ordinal);
         (remaining, Some(remaining))
     }
 }

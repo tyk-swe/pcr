@@ -93,8 +93,7 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         registry: Arc::clone(&registry),
         policy: policy.clone(),
         exchange,
-        interface,
-        interface_resolved: false,
+        interface: DeferredInterface::new(interface),
     };
     let resolver = SystemHostnameResolver;
     let mut authorizer = TrafficPolicyDnsAuthorizer::new(&policy, &resolver);
@@ -125,13 +124,15 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
 }
 
 fn generated_dns_transaction_id() -> u16 {
-    generated_dns_entropy() as u16
+    let bytes = generated_dns_entropy().to_le_bytes();
+    u16::from_le_bytes([bytes[0], bytes[1]])
 }
 
 fn generated_dns_source_port() -> u16 {
-    const WIDTH: u64 =
-        u16::MAX as u64 - crate::workflow_api::DNS_EPHEMERAL_SOURCE_PORT_BASE as u64 + 1;
-    crate::workflow_api::DNS_EPHEMERAL_SOURCE_PORT_BASE + (generated_dns_entropy() % WIDTH) as u16
+    const WIDTH: u16 = u16::MAX - crate::workflow_api::DNS_EPHEMERAL_SOURCE_PORT_BASE + 1;
+    let offset = u16::try_from(generated_dns_entropy() % u64::from(WIDTH))
+        .expect("ephemeral source-port offset is bounded to u16");
+    crate::workflow_api::DNS_EPHEMERAL_SOURCE_PORT_BASE + offset
 }
 
 fn generated_dns_entropy() -> u64 {
@@ -149,8 +150,7 @@ struct CliDnsExecutor {
     registry: Arc<crate::packet::internal::ProtocolRegistry>,
     policy: TrafficPolicy,
     exchange: ExchangeOptions,
-    interface: Option<String>,
-    interface_resolved: bool,
+    interface: DeferredInterface,
 }
 
 impl DnsExecutor for CliDnsExecutor {
@@ -158,12 +158,9 @@ impl DnsExecutor for CliDnsExecutor {
         &mut self,
         exchange: &DnsExchange,
     ) -> Result<DnsExchangeExecution, DnsExecutionError> {
-        if !self.interface_resolved {
-            self.exchange.send.plan.interface =
-                resolve_interface(self.interface.take(), &SystemInterfaceProvider)
-                    .map_err(dns_execution_error_from_cli)?;
-            self.interface_resolved = true;
-        }
+        self.interface
+            .resolve_into(&mut self.exchange.send.plan)
+            .map_err(dns_execution_error_from_cli)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         ClientDnsExecutor::new(&client, self.exchange.clone()).execute(exchange)
     }

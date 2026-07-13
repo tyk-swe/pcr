@@ -9,7 +9,9 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(test)]
 use super::Limits;
+use super::ReassemblyLimits;
 
 // Conservative accounting for a BTree node, key, and Bytes handle. The
 // allocator may use more, but never charging metadata allowed sparse one-byte
@@ -116,14 +118,14 @@ struct TcpFlowState {
 
 #[derive(Debug)]
 pub struct Reassembler {
-    limits: Limits,
+    limits: ReassemblyLimits,
     flows: HashMap<FlowKey, TcpFlowState>,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
 }
 
 impl Reassembler {
-    pub fn new(limits: Limits) -> Self {
+    pub fn new(limits: ReassemblyLimits) -> Self {
         Self {
             limits,
             flows: HashMap::new(),
@@ -192,8 +194,8 @@ impl Reassembler {
                 self.aggregate_memory_charge,
             )
         });
-        let result = self.push_inner(segment, now);
-        if result.is_err() {
+        let push_result = self.push_inner(segment, now);
+        if push_result.is_err() {
             if let Some((flow, prior, aggregate_bytes, aggregate_memory_charge)) = rollback {
                 match prior {
                     Some(state) => {
@@ -207,7 +209,7 @@ impl Reassembler {
                 self.aggregate_memory_charge = aggregate_memory_charge;
             }
         }
-        result
+        push_result
     }
 
     fn push_inner(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
@@ -320,19 +322,18 @@ impl Reassembler {
             .ok_or(Error::FlowByteLimit {
                 limit: self.limits.max_bytes_per_flow,
             })?;
-        let pending_bytes =
-            candidate
-                .pending_bytes
-                .checked_add(merge.added)
-                .ok_or(Error::FlowByteLimit {
-                    limit: self.limits.max_bytes_per_flow,
-                })?;
+        let pending_bytes = candidate
+            .pending_bytes
+            .checked_add(merge.added_bytes)
+            .ok_or(Error::FlowByteLimit {
+                limit: self.limits.max_bytes_per_flow,
+            })?;
         if pending_bytes > self.limits.max_bytes_per_flow {
             return Err(Error::FlowByteLimit {
                 limit: self.limits.max_bytes_per_flow,
             });
         }
-        if merge.segments > self.limits.max_tcp_segments_per_flow {
+        if merge.segment_count > self.limits.max_tcp_segments_per_flow {
             return Err(Error::SegmentLimit {
                 limit: self.limits.max_tcp_segments_per_flow,
             });
@@ -352,7 +353,7 @@ impl Reassembler {
         let initial_history_capacity = self.limits.max_bytes_per_flow.saturating_sub(pending_bytes);
         let final_pending_bytes = pending_bytes.saturating_sub(merge.emitted_segment_bytes);
         let final_pending_segments = merge
-            .segments
+            .segment_count
             .saturating_sub(usize::from(merge.emitted_segment_bytes != 0));
         let final_history_capacity = self
             .limits
@@ -396,8 +397,8 @@ impl Reassembler {
             });
         }
 
-        retransmitted += merge.overlap;
-        conflicting |= merge.conflicting;
+        retransmitted += merge.overlapping_bytes;
+        conflicting |= merge.has_conflicting_overlap;
         trim_emitted_history(&mut candidate, initial_history_capacity);
         candidate.pending = merge_pending(&candidate.pending, offset, payload, &merge).ok_or(
             Error::FlowByteLimit {
@@ -585,8 +586,8 @@ impl Reassembler {
     }
 }
 
-fn pending_memory_charge(pending_bytes: usize, segments: usize) -> Option<usize> {
-    segments
+fn pending_memory_charge(pending_bytes: usize, segment_count: usize) -> Option<usize> {
+    segment_count
         .checked_mul(PENDING_SEGMENT_METADATA_CHARGE)
         .and_then(|metadata| pending_bytes.checked_add(metadata))
 }
@@ -664,10 +665,10 @@ fn append_emitted_history(
 
 #[derive(Clone, Copy, Debug)]
 struct PendingMergePlan {
-    added: usize,
-    overlap: usize,
-    conflicting: bool,
-    segments: usize,
+    added_bytes: usize,
+    overlapping_bytes: usize,
+    has_conflicting_overlap: bool,
+    segment_count: usize,
     emitted_segment_bytes: usize,
 }
 
@@ -679,22 +680,22 @@ fn plan_pending_merge(
 ) -> Option<PendingMergePlan> {
     if payload.is_empty() {
         return Some(PendingMergePlan {
-            added: 0,
-            overlap: 0,
-            conflicting: false,
-            segments: existing.len(),
+            added_bytes: 0,
+            overlapping_bytes: 0,
+            has_conflicting_overlap: false,
+            segment_count: existing.len(),
             emitted_segment_bytes: 0,
         });
     }
     let payload_end = offset.checked_add(payload.len() as u64)?;
-    let mut overlap = 0usize;
-    let mut conflicting = false;
-    let mut connected = 0usize;
+    let mut overlapping_bytes = 0usize;
+    let mut has_conflicting_overlap = false;
+    let mut connected_segment_count = 0usize;
     let mut connected_end = payload_end;
     for (start, value) in existing {
         let end = start.checked_add(value.len() as u64)?;
         if end >= offset && *start <= payload_end {
-            connected += 1;
+            connected_segment_count += 1;
             connected_end = connected_end.max(end);
         }
         let overlap_start = (*start).max(offset);
@@ -703,16 +704,19 @@ fn plan_pending_merge(
             let length = usize::try_from(overlap_end - overlap_start).ok()?;
             let existing_start = usize::try_from(overlap_start - *start).ok()?;
             let payload_start = usize::try_from(overlap_start - offset).ok()?;
-            overlap = overlap.checked_add(length)?;
-            conflicting |= value[existing_start..existing_start + length]
+            overlapping_bytes = overlapping_bytes.checked_add(length)?;
+            has_conflicting_overlap |= value[existing_start..existing_start + length]
                 != payload[payload_start..payload_start + length];
         }
     }
     Some(PendingMergePlan {
-        added: payload.len().checked_sub(overlap)?,
-        overlap,
-        conflicting,
-        segments: existing.len().checked_add(1)?.checked_sub(connected)?,
+        added_bytes: payload.len().checked_sub(overlapping_bytes)?,
+        overlapping_bytes,
+        has_conflicting_overlap,
+        segment_count: existing
+            .len()
+            .checked_add(1)?
+            .checked_sub(connected_segment_count)?,
         emitted_segment_bytes: (offset == next_offset)
             .then(|| usize::try_from(connected_end.checked_sub(next_offset)?).ok())
             .flatten()
@@ -740,7 +744,7 @@ fn merge_pending(
     let mut pending = existing.clone();
     if affected.is_empty() {
         pending.insert(offset, Bytes::copy_from_slice(payload));
-        debug_assert_eq!(pending.len(), plan.segments);
+        debug_assert_eq!(pending.len(), plan.segment_count);
         return Some(pending);
     }
 
@@ -768,7 +772,7 @@ fn merge_pending(
         pending.remove(start);
     }
     pending.insert(union_start, Bytes::from(bytes));
-    debug_assert_eq!(pending.len(), plan.segments);
+    debug_assert_eq!(pending.len(), plan.segment_count);
     Some(pending)
 }
 

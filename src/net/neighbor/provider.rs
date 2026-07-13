@@ -191,10 +191,10 @@ where
                 })
             }
         };
-        let statistics = statistics
+        let validated_statistics = statistics
             .validate()
             .map_err(|error| map_io_error(request, "validating capture statistics", error))?;
-        if let Some(error) = statistics.evidence_loss_error() {
+        if let Some(error) = validated_statistics.evidence_loss_error() {
             return Err(map_io_error(
                 request,
                 "checking capture completeness",
@@ -209,7 +209,7 @@ where
                 attempts: outcome.attempts,
                 captured: outcome.captured,
                 evidence_truncated: outcome.evidence_truncated,
-                capture_statistics: statistics,
+                capture_statistics: validated_statistics,
             });
         };
         self.cache(mac_address, cache_key)?;
@@ -219,7 +219,7 @@ where
             cache_hit: false,
             captured: outcome.captured,
             evidence_truncated: outcome.evidence_truncated,
-            capture_statistics: statistics,
+            capture_statistics: validated_statistics,
         })
     }
 
@@ -270,9 +270,10 @@ where
                 .checked_add(self.options.attempt_timeout)
                 .ok_or_else(|| invalid_configuration("attempt deadline overflowed".to_owned()))?;
             while let Some(remaining) = deadline.checked_duration_since(Instant::now()) {
-                let Some(captured_frame) = capture.next_captured_frame(remaining).map_err(|error| {
-                    map_io_error(request, "receiving discovery response", error)
-                })?
+                let Some(captured_frame) =
+                    capture.next_captured_frame(remaining).map_err(|error| {
+                        map_io_error(request, "receiving discovery response", error)
+                    })?
                 else {
                     break;
                 };

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
@@ -11,6 +12,20 @@ use crate::packet::internal::{
     LayerEncodeContext, LayerSchema, MalformedLayer, NetworkEnvelope, Padding, ProtocolId,
     WireValue,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ValueExpectation<T> {
+    Required(T),
+    Suggested(T),
+}
+
+impl<T: Copy> ValueExpectation<T> {
+    fn value(self) -> T {
+        match self {
+            Self::Required(value) | Self::Suggested(value) => value,
+        }
+    }
+}
 
 pub(crate) fn protocol(name: &str) -> ProtocolId {
     ProtocolId::new(name)
@@ -133,23 +148,15 @@ pub(crate) fn resolve_u8(
     name: &str,
     field: &str,
     value: &WireValue<u8>,
-    expected: u8,
-    validate_exact: bool,
+    expectation: ValueExpectation<u8>,
     mode: BuildMode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u8, WireValue<u8>), CodecError> {
+    let expected = expectation.value();
     match value {
         WireValue::Auto => Ok((expected, WireValue::Exact(expected))),
         WireValue::Exact(actual) => {
-            validate_dependent(
-                name,
-                field,
-                u64::from(*actual),
-                u64::from(expected),
-                validate_exact,
-                mode,
-                diagnostics,
-            )?;
+            validate_dependent(name, field, *actual, expectation, mode, diagnostics)?;
             Ok((*actual, value.clone()))
         }
         WireValue::Raw(bytes) => {
@@ -181,23 +188,15 @@ pub(crate) fn resolve_u16(
     name: &str,
     field: &str,
     value: &WireValue<u16>,
-    expected: u16,
-    validate_exact: bool,
+    expectation: ValueExpectation<u16>,
     mode: BuildMode,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(u16, WireValue<u16>), CodecError> {
+    let expected = expectation.value();
     match value {
         WireValue::Auto => Ok((expected, WireValue::Exact(expected))),
         WireValue::Exact(actual) => {
-            validate_dependent(
-                name,
-                field,
-                u64::from(*actual),
-                u64::from(expected),
-                validate_exact,
-                mode,
-                diagnostics,
-            )?;
+            validate_dependent(name, field, *actual, expectation, mode, diagnostics)?;
             Ok((*actual, value.clone()))
         }
         WireValue::Raw(bytes) => {
@@ -225,16 +224,21 @@ pub(crate) fn resolve_u16(
     }
 }
 
-fn validate_dependent(
+fn validate_dependent<T>(
     name: &str,
     field: &str,
-    actual: u64,
-    expected: u64,
-    enabled: bool,
+    actual: T,
+    expectation: ValueExpectation<T>,
     mode: BuildMode,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Result<(), CodecError> {
-    if !enabled || actual == expected {
+) -> Result<(), CodecError>
+where
+    T: Copy + fmt::Display + PartialEq,
+{
+    let ValueExpectation::Required(expected) = expectation else {
+        return Ok(());
+    };
+    if actual == expected {
         return Ok(());
     }
     let message = format!("{field} is {actual}, expected {expected}");
@@ -244,6 +248,35 @@ fn validate_dependent(
     diagnostics
         .push(Diagnostic::warning("build.inconsistent_dependent_field", message).at_field(field));
     Ok(())
+}
+
+pub(crate) fn expected_discriminator<T>(
+    parent: &str,
+    context: &LayerEncodeContext<'_>,
+    fallback: T,
+) -> ValueExpectation<T>
+where
+    T: Copy + TryFrom<u64>,
+{
+    let Some(child) = context.child else {
+        return ValueExpectation::Suggested(fallback);
+    };
+    if child.protocol_id().as_str() == "raw" {
+        let expected = context
+            .registry
+            .discriminator_for(&protocol(parent), &child.protocol_id())
+            .and_then(|value| T::try_from(value.0).ok())
+            .unwrap_or(fallback);
+        return ValueExpectation::Suggested(expected);
+    }
+    context
+        .registry
+        .discriminator_for(&protocol(parent), &binding_protocol(child))
+        .and_then(|value| T::try_from(value.0).ok())
+        .map_or(
+            ValueExpectation::Suggested(fallback),
+            ValueExpectation::Required,
+        )
 }
 
 pub(crate) fn make_layer<L>(
@@ -499,14 +532,14 @@ pub(crate) fn validate_raw_child_discriminator(
     Ok(())
 }
 
-pub(crate) fn validate_auto_raw_discriminator(
+pub(crate) fn validate_auto_raw_discriminator<T>(
     name: &str,
     field: &'static str,
-    is_auto: bool,
+    value: &WireValue<T>,
     context: &LayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), CodecError> {
-    if !is_auto
+    if !matches!(value, WireValue::Auto)
         || context
             .child
             .is_none_or(|child| child.protocol_id().as_str() != "raw")

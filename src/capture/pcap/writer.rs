@@ -7,15 +7,15 @@ enum WriterState {
     },
     PcapNg {
         endianness: Endianness,
-        interfaces: Vec<InterfaceDescription>,
+        interfaces: Vec<Interface>,
     },
 }
 
 #[derive(Clone, Copy, Debug)]
 struct InterfacePlan {
     id: u32,
-    description: InterfaceDescription,
-    needs_commit: bool,
+    description: Interface,
+    requires_description_block: bool,
 }
 
 /// A streaming capture writer over any [`Write`] implementation.
@@ -139,20 +139,20 @@ impl<W: Write> Writer<W> {
                 return Err(Error::InvalidTimestampResolution { base: 2, exponent });
             }
         };
-        let snap_len = usize_to_u32_limit(snap_len)?;
-        if snap_len == 0 {
+        let snap_len_u32 = usize_to_u32_limit(snap_len)?;
+        if snap_len_u32 == 0 {
             return Err(Error::InvalidData {
                 format: Format::Pcap,
                 reason: "snapshot length must be non-zero",
             });
         }
-        write_pcap_header(&mut inner, endianness, precision, snap_len, link_type)?;
+        write_pcap_header(&mut inner, endianness, precision, snap_len_u32, link_type)?;
         Ok(Self {
             inner,
             state: WriterState::Pcap {
                 endianness,
                 precision,
-                snap_len,
+                snap_len: snap_len_u32,
                 link_type,
             },
             max_size,
@@ -338,10 +338,7 @@ impl<W: Write> Writer<W> {
         Ok(interface_id)
     }
 
-    fn validate_new_interface(
-        &self,
-        description: InterfaceDescription,
-    ) -> Result<(Endianness, u32), Error> {
+    fn validate_new_interface(&self, description: Interface) -> Result<(Endianness, u32), Error> {
         validate_timestamp_resolution(description.timestamp_resolution)?;
         let block_length = if description.timestamp_offset == 0 {
             32
@@ -434,11 +431,17 @@ impl<W: Write> Writer<W> {
                 snap_len,
                 link_type,
             } => {
-                let endianness = *endianness;
-                let precision = *precision;
-                let snap_len = *snap_len;
-                let link_type = *link_type;
-                self.write_pcap_frame(frame, endianness, precision, snap_len, link_type)
+                let file_endianness = *endianness;
+                let timestamp_precision = *precision;
+                let snapshot_length = *snap_len;
+                let file_link_type = *link_type;
+                self.write_pcap_frame(
+                    frame,
+                    file_endianness,
+                    timestamp_precision,
+                    snapshot_length,
+                    file_link_type,
+                )
             }
             WriterState::PcapNg { .. } => self.write_pcapng_frame(frame),
         }?;
@@ -550,7 +553,7 @@ impl<W: Write> Writer<W> {
             });
         }
 
-        if plan.needs_commit {
+        if plan.requires_description_block {
             let committed = self.add_interface_description(interface)?;
             debug_assert_eq!(committed, interface_id);
         }
@@ -604,11 +607,11 @@ impl<W: Write> Writer<W> {
             return Ok(InterfacePlan {
                 id: interface_id,
                 description: *interface,
-                needs_commit: false,
+                requires_description_block: false,
             });
         }
 
-        let matches = match &self.state {
+        let matching_interfaces = match &self.state {
             WriterState::PcapNg { interfaces, .. } => interfaces
                 .iter()
                 .enumerate()
@@ -618,18 +621,16 @@ impl<W: Write> Writer<W> {
             WriterState::Pcap { .. } => unreachable!("format checked by caller"),
         };
 
-        match matches.as_slice() {
+        match matching_interfaces.as_slice() {
             [interface_id] => {
                 let description = match &self.state {
-                    WriterState::PcapNg { interfaces, .. } => {
-                        interfaces[*interface_id as usize]
-                    }
+                    WriterState::PcapNg { interfaces, .. } => interfaces[*interface_id as usize],
                     WriterState::Pcap { .. } => unreachable!("format checked by caller"),
                 };
                 Ok(InterfacePlan {
                     id: *interface_id,
                     description,
-                    needs_commit: false,
+                    requires_description_block: false,
                 })
             }
             [] => {
@@ -643,7 +644,7 @@ impl<W: Write> Writer<W> {
                 Ok(InterfacePlan {
                     id,
                     description,
-                    needs_commit: true,
+                    requires_description_block: true,
                 })
             }
             _ => Err(Error::AmbiguousInterface {

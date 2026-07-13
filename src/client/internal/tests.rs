@@ -634,6 +634,19 @@ mod tests {
     }
 
     #[test]
+    fn resolved_target_selects_addresses_by_typed_ip_version() {
+        let ipv4 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+        let ipv6 = "fd00::2".parse().unwrap();
+        let resolved = ResolvedTarget {
+            declared: LiveTarget::Address(ipv4),
+            addresses: vec![ipv6, ipv4],
+        };
+
+        assert_eq!(resolved.address_for_version(IpVersion::V4), Some(ipv4));
+        assert_eq!(resolved.address_for_version(IpVersion::V6), Some(ipv6));
+    }
+
+    #[test]
     fn every_resolution_reauthorizes_all_addresses_before_route_use() {
         let resolver_calls = Arc::new(AtomicUsize::new(0));
         let route_calls = Arc::new(AtomicUsize::new(0));
@@ -1322,9 +1335,9 @@ mod tests {
                 BuildOptions::default(),
             )
             .unwrap();
-        let prepared = vec![(
-            request,
-            MaterializedRoute {
+        let prepared = vec![PreparedExchangePacket {
+            built: request,
+            route: MaterializedRoute {
                 plan: PlannedRoute {
                     route: route(LinkCapability::Layer3),
                     mode: LinkMode::Layer3,
@@ -1341,14 +1354,10 @@ mod tests {
                 },
                 neighbor_resolution: None,
             },
-        )];
+        }];
         let sent_at = vec![Instant::now()];
-        let received_at = sent_at[0]
-            .checked_add(Duration::from_millis(1))
-            .unwrap();
-        let deadline = sent_at[0]
-            .checked_add(Duration::from_millis(10))
-            .unwrap();
+        let received_at = sent_at[0].checked_add(Duration::from_millis(1)).unwrap();
+        let deadline = sent_at[0].checked_add(Duration::from_millis(10)).unwrap();
         std::thread::sleep(Duration::from_millis(20));
         assert!(Instant::now() > deadline);
 
@@ -1376,10 +1385,7 @@ mod tests {
         );
 
         assert_eq!(accumulator.responses.len(), 1);
-        assert_eq!(
-            accumulator.responses[0].latency,
-            Duration::from_millis(1)
-        );
+        assert_eq!(accumulator.responses[0].latency, Duration::from_millis(1));
         assert_eq!(
             accumulator.responses[0].response.frame.timestamp,
             std::time::UNIX_EPOCH
@@ -1945,15 +1951,8 @@ mod tests {
                 12_345,
                 9,
             );
-            request.get_mut::<Ipv4>().unwrap().options = Bytes::from(vec![
-                option_type,
-                7,
-                4,
-                8,
-                8,
-                8,
-                8,
-            ]);
+            request.get_mut::<Ipv4>().unwrap().options =
+                Bytes::from(vec![option_type, 7, 4, 8, 8, 8, 8]);
             let client = Client::new(
                 Arc::new(default_registry().unwrap()),
                 CountingRoutes {

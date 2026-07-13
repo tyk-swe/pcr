@@ -29,9 +29,9 @@ pub(super) struct NativeCapturedPacket {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct NativeCaptureStatistics {
-    pub dropped: u32,
-    pub network_dropped: u32,
-    pub interface_dropped: u32,
+    pub capture_dropped_frames: u32,
+    pub network_dropped_frames: u32,
+    pub interface_dropped_frames: u32,
 }
 
 pub(super) enum NativeCaptureEvent {
@@ -69,8 +69,8 @@ impl NativeCaptureSession {
         parts: NativeCaptureParts,
         limits: CaptureQueueLimits,
     ) -> Result<Self, LiveIoError> {
-        let limits = limits.validate()?;
-        let shared = Arc::new(SharedCapture::new(limits));
+        let validated_limits = limits.validate()?;
+        let shared = Arc::new(SharedCapture::new(validated_limits));
         let stop = Arc::new(AtomicBool::new(false));
         let worker_shared = Arc::clone(&shared);
         let worker_stop = Arc::clone(&stop);
@@ -376,36 +376,39 @@ impl SharedCapture {
         Ok(false)
     }
 
-    fn add_native_drops(
+    fn add_native_drop_deltas(
         &self,
         previous: NativeCaptureStatistics,
         current: NativeCaptureStatistics,
     ) -> Result<(), LiveIoError> {
-        let dropped = current.dropped.wrapping_sub(previous.dropped) as u64;
-        let network_dropped = current
-            .network_dropped
-            .wrapping_sub(previous.network_dropped) as u64;
-        let interface_dropped = current
-            .interface_dropped
-            .wrapping_sub(previous.interface_dropped) as u64;
-        let total = dropped
-            .checked_add(network_dropped)
-            .and_then(|total| total.checked_add(interface_dropped))
+        let capture_drop_delta = current
+            .capture_dropped_frames
+            .wrapping_sub(previous.capture_dropped_frames) as u64;
+        let network_drop_delta = current
+            .network_dropped_frames
+            .wrapping_sub(previous.network_dropped_frames) as u64;
+        let interface_drop_delta = current
+            .interface_dropped_frames
+            .wrapping_sub(previous.interface_dropped_frames)
+            as u64;
+        let total_drop_delta = capture_drop_delta
+            .checked_add(network_drop_delta)
+            .and_then(|total| total.checked_add(interface_drop_delta))
             .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
                 message: "native receiver drop delta overflowed".to_owned(),
             })?;
-        if total == 0 {
+        if total_drop_delta == 0 {
             return Ok(());
         }
         let mut state = self.lock()?;
         increment(
             &mut state.statistics.dropped_frames,
-            total,
+            total_drop_delta,
             "dropped frames",
         )?;
         increment(
             &mut state.statistics.receiver_dropped_frames,
-            total,
+            total_drop_delta,
             "receiver-dropped frames",
         )?;
         Ok(())
@@ -487,7 +490,7 @@ fn capture_worker(
                     return;
                 }
             };
-            if let Err(error) = shared.add_native_drops(native_statistics, current) {
+            if let Err(error) = shared.add_native_drop_deltas(native_statistics, current) {
                 shared.set_error(error);
                 return;
             }
@@ -498,7 +501,7 @@ fn capture_worker(
 
     match source.statistics() {
         Ok(current) => {
-            if let Err(error) = shared.add_native_drops(native_statistics, current) {
+            if let Err(error) = shared.add_native_drop_deltas(native_statistics, current) {
                 shared.set_error(error);
                 return;
             }
@@ -768,12 +771,12 @@ mod tests {
             overflow_policy: CaptureOverflowPolicy::Fail,
         });
         shared
-            .add_native_drops(
+            .add_native_drop_deltas(
                 NativeCaptureStatistics::default(),
                 NativeCaptureStatistics {
-                    dropped: 2,
-                    network_dropped: 0,
-                    interface_dropped: 1,
+                    capture_dropped_frames: 2,
+                    network_dropped_frames: 0,
+                    interface_dropped_frames: 1,
                 },
             )
             .unwrap();
@@ -796,12 +799,12 @@ mod tests {
             overflow_policy: CaptureOverflowPolicy::Fail,
         });
         shared
-            .add_native_drops(
+            .add_native_drop_deltas(
                 NativeCaptureStatistics::default(),
                 NativeCaptureStatistics {
-                    dropped: u32::MAX,
-                    network_dropped: 1,
-                    interface_dropped: 2,
+                    capture_dropped_frames: u32::MAX,
+                    network_dropped_frames: 1,
+                    interface_dropped_frames: 2,
                 },
             )
             .unwrap();
@@ -816,16 +819,16 @@ mod tests {
             overflow_policy: CaptureOverflowPolicy::Fail,
         });
         wrapped
-            .add_native_drops(
+            .add_native_drop_deltas(
                 NativeCaptureStatistics {
-                    dropped: u32::MAX - 1,
-                    network_dropped: 7,
-                    interface_dropped: 0,
+                    capture_dropped_frames: u32::MAX - 1,
+                    network_dropped_frames: 7,
+                    interface_dropped_frames: 0,
                 },
                 NativeCaptureStatistics {
-                    dropped: 1,
-                    network_dropped: 9,
-                    interface_dropped: 0,
+                    capture_dropped_frames: 1,
+                    network_dropped_frames: 9,
+                    interface_dropped_frames: 0,
                 },
             )
             .unwrap();

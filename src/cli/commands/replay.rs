@@ -3,6 +3,12 @@
 
 // Capture replay command.
 
+#[derive(Clone, Copy, Debug)]
+struct ReplayInterfaceMapping {
+    source_id: Option<u32>,
+    output_id: u32,
+}
+
 fn replay_timing(arguments: &ReplayArgs) -> Result<ReplayTiming, CliError> {
     let timing = if let Some(rate) = arguments.rate {
         if matches!(arguments.timing, CliReplayTiming::Immediate) {
@@ -182,7 +188,7 @@ fn run_replay(arguments: ReplayArgs, output: OutputFormat) -> Result<(), CliErro
                 limits,
                 arguments.max_interfaces,
             )?;
-            let mut interfaces = Vec::<(Option<u32>, u32)>::new();
+            let mut interfaces = Vec::<ReplayInterfaceMapping>::new();
             replay_capture(
                 &mut reader,
                 &options,
@@ -223,12 +229,15 @@ fn replay_capture_writer<W: Write>(
                 ));
             }
             let interface = reader.interfaces()[0];
+            let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
+                CliError::new(2, "capture snap length exceeds the platform size limit")
+            })?;
             Writer::pcap_with_metadata(
                 output,
                 interface.link_type,
                 reader.endianness(),
                 interface.timestamp_resolution,
-                interface.snap_len as usize,
+                snap_length,
                 limits.max_frame_bytes,
             )
         }
@@ -252,7 +261,7 @@ fn replay_capture_writer<W: Write>(
 fn write_replay_capture_evidence<W: Write>(
     writer: &mut Writer<W>,
     format: Format,
-    interfaces: &mut Vec<(Option<u32>, u32)>,
+    interfaces: &mut Vec<ReplayInterfaceMapping>,
     evidence: crate::workflow_api::ReplayFrameEvidence,
 ) -> Result<(), ReplayError> {
     let sequence = evidence.source_sequence;
@@ -262,14 +271,17 @@ fn write_replay_capture_evidence<W: Write>(
         Format::PcapNg => {
             let interface = match interfaces
                 .iter()
-                .find(|(source, _)| *source == evidence.source_interface_id)
+                .find(|mapping| mapping.source_id == evidence.source_interface_id)
             {
-                Some((_, interface)) => *interface,
+                Some(mapping) => mapping.output_id,
                 None => {
                     let interface = writer
                         .add_interface_description(evidence.capture_interface)
                         .map_err(|source| ReplayError::output(sequence, source.to_string()))?;
-                    interfaces.push((evidence.source_interface_id, interface));
+                    interfaces.push(ReplayInterfaceMapping {
+                        source_id: evidence.source_interface_id,
+                        output_id: interface,
+                    });
                     interface
                 }
             };

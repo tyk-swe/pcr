@@ -29,7 +29,7 @@ use crate::packet::build::{
     Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions,
 };
 use crate::packet::decode::{Decoder, Options as DecodeOptions};
-use crate::packet::registry::Registry as ProtocolRegistry;
+use crate::packet::internal::{NetworkEnvelope, ProtocolRegistry};
 
 include!("replay/model.rs");
 include!("replay/adapter.rs");

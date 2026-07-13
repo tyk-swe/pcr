@@ -231,8 +231,14 @@ pub enum RegistryError {
 }
 
 #[derive(Clone, Debug)]
-struct Binding {
+struct ChildBinding {
     child: ProtocolId,
+    priority: i32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ReverseBinding {
+    discriminator: Discriminator,
     priority: i32,
 }
 
@@ -241,8 +247,8 @@ pub struct ProtocolRegistry {
     codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
     aliases: HashMap<String, ProtocolId>,
     roots: HashMap<u32, ProtocolId>,
-    bindings: HashMap<(ProtocolId, Discriminator), Vec<Binding>>,
-    reverse_bindings: HashMap<(ProtocolId, ProtocolId), Vec<(Discriminator, i32)>>,
+    bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
+    reverse_bindings: HashMap<(ProtocolId, ProtocolId), Vec<ReverseBinding>>,
     matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
 }
 
@@ -306,7 +312,7 @@ impl ProtocolRegistry {
         self.reverse_bindings
             .get(&(parent.clone(), child.clone()))
             .and_then(|bindings| bindings.first())
-            .map(|binding| binding.0)
+            .map(|binding| binding.discriminator)
     }
 
     pub fn matcher(&self, protocol: &ProtocolId) -> Option<&Arc<dyn ResponseMatcher>> {
@@ -328,7 +334,7 @@ pub struct RegistryBuilder {
     codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
     aliases: HashMap<String, ProtocolId>,
     roots: HashMap<u32, ProtocolId>,
-    bindings: HashMap<(ProtocolId, Discriminator), Vec<Binding>>,
+    bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
     matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
 }
 
@@ -410,7 +416,7 @@ impl RegistryBuilder {
             });
         }
         if !entries.iter().any(|entry| entry.child == child) {
-            entries.push(Binding { child, priority });
+            entries.push(ChildBinding { child, priority });
         }
         Ok(self)
     }
@@ -447,7 +453,7 @@ impl RegistryBuilder {
                 });
             }
         }
-        let mut reverse_bindings: HashMap<(ProtocolId, ProtocolId), Vec<(Discriminator, i32)>> =
+        let mut reverse_bindings: HashMap<(ProtocolId, ProtocolId), Vec<ReverseBinding>> =
             HashMap::new();
         for ((parent, discriminator), entries) in &mut self.bindings {
             if !self.codecs.contains_key(parent) {
@@ -470,11 +476,19 @@ impl RegistryBuilder {
                 reverse_bindings
                     .entry((parent.clone(), entry.child.clone()))
                     .or_default()
-                    .push((*discriminator, entry.priority));
+                    .push(ReverseBinding {
+                        discriminator: *discriminator,
+                        priority: entry.priority,
+                    });
             }
         }
         for entries in reverse_bindings.values_mut() {
-            entries.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+            entries.sort_by(|left, right| {
+                right
+                    .priority
+                    .cmp(&left.priority)
+                    .then_with(|| left.discriminator.cmp(&right.discriminator))
+            });
         }
         for protocol in self.matchers.keys() {
             if !self.codecs.contains_key(protocol) {

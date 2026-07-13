@@ -12,10 +12,10 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    aliased_fields, binding_protocol, field_layout, impl_layer_boilerplate, invalid, ipv4, mac,
-    make_layer, out_of_range, protocol, resolve_u16, resolve_u8, set_wire_u16, set_wire_u8,
+    aliased_fields, expected_discriminator, field_layout, impl_layer_boilerplate, invalid, ipv4,
+    mac, make_layer, out_of_range, protocol, resolve_u16, resolve_u8, set_wire_u16, set_wire_u8,
     truncated, unknown_field, validate_auto_raw_discriminator, validate_raw_child_discriminator,
-    wire_u16, wire_u8, wrong_layer, wrong_type,
+    wire_u16, wire_u8, wrong_layer, wrong_type, ValueExpectation,
 };
 
 const ETHERNET_LEN: usize = 14;
@@ -128,12 +128,12 @@ impl LayerCodec for EthernetCodec {
             .as_any()
             .downcast_ref::<Ethernet>()
             .ok_or_else(|| wrong_layer("ethernet", layer))?;
-        let (expected, validate) = expected_discriminator("ethernet", context, 0);
+        let expectation = expected_discriminator("ethernet", context, 0_u16);
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
             "ethernet",
             "ether_type",
-            matches!(layer.ether_type, WireValue::Auto),
+            &layer.ether_type,
             context,
             &mut diagnostics,
         )?;
@@ -141,8 +141,7 @@ impl LayerCodec for EthernetCodec {
             "ethernet",
             "ether_type",
             &layer.ether_type,
-            expected,
-            validate,
+            expectation,
             context.mode,
             &mut diagnostics,
         )?;
@@ -218,29 +217,6 @@ impl LayerCodec for EthernetCodec {
             )?,
         )
     }
-}
-
-fn expected_discriminator(
-    parent: &str,
-    context: &LayerEncodeContext<'_>,
-    fallback: u16,
-) -> (u16, bool) {
-    let Some(child) = context.child else {
-        return (fallback, false);
-    };
-    if child.protocol_id().as_str() == "raw" {
-        let expected = context
-            .registry
-            .discriminator_for(&protocol(parent), &child.protocol_id())
-            .and_then(|value| u16::try_from(value.0).ok())
-            .unwrap_or(fallback);
-        return (expected, false);
-    }
-    context
-        .registry
-        .discriminator_for(&protocol(parent), &binding_protocol(child))
-        .and_then(|value| u16::try_from(value.0).ok())
-        .map_or((fallback, false), |value| (value, true))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -409,12 +385,12 @@ where
             "VLAN priority or identifier is outside its wire range",
         ));
     }
-    let (expected, validate) = expected_discriminator(name, context, 0);
+    let expectation = expected_discriminator(name, context, 0_u16);
     let mut diagnostics = Vec::new();
     validate_auto_raw_discriminator(
         name,
         "ether_type",
-        matches!(ether_type_value, WireValue::Auto),
+        ether_type_value,
         context,
         &mut diagnostics,
     )?;
@@ -422,8 +398,7 @@ where
         name,
         "ether_type",
         ether_type_value,
-        expected,
-        validate,
+        expectation,
         context.mode,
         &mut diagnostics,
     )?;
@@ -833,8 +808,7 @@ impl LayerCodec for ArpCodec {
             "arp",
             "hardware_len",
             &layer.hardware_len,
-            6,
-            true,
+            ValueExpectation::Required(6),
             context.mode,
             &mut diagnostics,
         )?;
@@ -842,8 +816,7 @@ impl LayerCodec for ArpCodec {
             "arp",
             "protocol_len",
             &layer.protocol_len,
-            4,
-            true,
+            ValueExpectation::Required(4),
             context.mode,
             &mut diagnostics,
         )?;

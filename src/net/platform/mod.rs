@@ -45,18 +45,19 @@ pub(super) fn system_capture(
 ) -> Result<Box<dyn super::provider_impl::CaptureSession>, LiveIoError> {
     // Reject invalid bounds before opening a device or allocating native
     // resources. NativeCaptureSession validates again at its ownership seam.
-    let limits = limits.validate()?;
+    let validated_limits = limits.validate()?;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let parts = pcap_backend::open_capture(&route.route.interface, limits)?;
+    let parts = pcap_backend::open_capture(&route.route.interface, validated_limits)?;
     #[cfg(windows)]
-    let parts = npcap::open_capture(&route.route.interface, limits)?;
+    let parts = npcap::open_capture(&route.route.interface, validated_limits)?;
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     return Err(LiveIoError::Unsupported {
         message: "native Layer 2 capture is unsupported on this target".to_owned(),
     });
 
     Ok(Box::new(live_capture::NativeCaptureSession::spawn(
-        parts, limits,
+        parts,
+        validated_limits,
     )?))
 }
 
@@ -387,11 +388,19 @@ pub(super) fn finish_route(
 }
 
 #[cfg(feature = "native-route")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct SourceAddressRank {
+    prefix_match: bool,
+    matched_prefix_length: u8,
+    scope_match: bool,
+}
+
+#[cfg(feature = "native-route")]
 fn fallback_source(
     addresses: &[super::provider_impl::InterfaceAddress],
     destination: IpAddr,
 ) -> Option<IpAddr> {
-    let mut best: Option<(IpAddr, (bool, u8, bool))> = None;
+    let mut best: Option<(IpAddr, SourceAddressRank)> = None;
     for assigned in addresses {
         let address = assigned.address;
         if address.is_ipv4() != destination.is_ipv4()
@@ -401,15 +410,15 @@ fn fallback_source(
             continue;
         }
         let prefix_match = prefix_matches(address, destination, assigned.prefix_length);
-        let rank = (
+        let rank = SourceAddressRank {
             prefix_match,
-            if prefix_match {
+            matched_prefix_length: if prefix_match {
                 assigned.prefix_length
             } else {
                 0
             },
-            address_scope(address) == address_scope(destination),
-        );
+            scope_match: address_scope(address) == address_scope(destination),
+        };
         if best.as_ref().is_none_or(|(_, current)| rank > *current) {
             best = Some((address, rank));
         }

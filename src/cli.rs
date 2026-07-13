@@ -21,7 +21,7 @@ use crate::client::{
     exchange::Options as ExchangeOptions,
     policy::{Error as TrafficPolicyError, Policy as TrafficPolicy},
     send::Options as SendOptions,
-    target::{SystemResolver as SystemHostnameResolver, Target as LiveTarget},
+    target::{IpVersion, SystemResolver as SystemHostnameResolver, Target as LiveTarget},
     Client,
 };
 use crate::error::{Classification, Classified, Kind};

@@ -80,8 +80,8 @@ impl ProtocolModule for BuiltinProtocols {
         builder.register_codec(TcpCodec)?;
         builder.register_codec(Icmpv4Codec)?;
         builder.register_codec(Icmpv6Codec)?;
-        builder.register_matcher("tcp", matcher::ReverseTupleMatcher::new("tcp"))?;
-        builder.register_matcher("udp", matcher::ReverseTupleMatcher::new("udp"))?;
+        builder.register_matcher("tcp", matcher::ReverseFlowMatcher::new("tcp"))?;
+        builder.register_matcher("udp", matcher::ReverseFlowMatcher::new("udp"))?;
         builder.register_matcher("icmpv4", matcher::EchoMatcher::v4())?;
         builder.register_matcher("icmpv6", matcher::EchoMatcher::v6())?;
 

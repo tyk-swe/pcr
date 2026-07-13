@@ -3,6 +3,12 @@
 
 // Shared capture-file and terminal rendering.
 
+#[derive(Clone, Copy, Debug)]
+struct CaptureInterfaceMapping {
+    link_type: LinkType,
+    output_id: u32,
+}
+
 fn capture_file_format(output: OutputFormat) -> Result<Format, CliError> {
     match output {
         OutputFormat::Pcap => Ok(Format::Pcap),
@@ -61,18 +67,21 @@ fn encode_capture_file(
     let mut writer = Writer::pcapng(Vec::new()).map_err(|source| {
         CliError::new(5, format!("initialize capture output failed: {source}"))
     })?;
-    let mut interfaces = Vec::<(LinkType, u32)>::new();
+    let mut interfaces = Vec::<CaptureInterfaceMapping>::new();
     for mut frame in std::iter::once(first).chain(frames) {
         let interface = match interfaces
             .iter()
-            .find(|(link_type, _)| *link_type == frame.link_type)
+            .find(|mapping| mapping.link_type == frame.link_type)
         {
-            Some((_, interface)) => *interface,
+            Some(mapping) => mapping.output_id,
             None => {
                 let interface = writer.add_interface(frame.link_type).map_err(|source| {
                     CliError::new(5, format!("initialize capture interface failed: {source}"))
                 })?;
-                interfaces.push((frame.link_type, interface));
+                interfaces.push(CaptureInterfaceMapping {
+                    link_type: frame.link_type,
+                    output_id: interface,
+                });
                 interface
             }
         };
@@ -168,7 +177,7 @@ fn terminal_safe(value: &str) -> String {
                     ) =>
             {
                 use std::fmt::Write as _;
-                let _ = write!(safe, "\\u{{{:x}}}", character as u32);
+                let _ = write!(safe, "\\u{{{:x}}}", u32::from(character));
             }
             character => safe.push(character),
         }

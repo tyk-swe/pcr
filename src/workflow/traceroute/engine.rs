@@ -485,7 +485,7 @@ fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool
         TracerouteStrategy::Icmp if probe.address.is_ipv4() => "icmpv4",
         TracerouteStrategy::Icmp => "icmpv6",
     };
-    if !traceroute_packet_shape_matches(sent, network_protocol, transport_protocol) {
+    if !probe::packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
     }
     let network_matches = match probe.address {
@@ -538,24 +538,6 @@ fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool
                     && icmp.body == traceroute_identity(probe.sequence)
             }),
         },
-    }
-}
-
-fn traceroute_packet_shape_matches(sent: &Packet, network: &str, transport: &str) -> bool {
-    let protocols = sent
-        .iter()
-        .map(|layer| layer.protocol_id())
-        .collect::<Vec<_>>();
-    match protocols.as_slice() {
-        [actual_network, actual_transport] => {
-            actual_network.as_str() == network && actual_transport.as_str() == transport
-        }
-        [ethernet, actual_network, actual_transport] => {
-            ethernet.as_str() == "ethernet"
-                && actual_network.as_str() == network
-                && actual_transport.as_str() == transport
-        }
-        _ => false,
     }
 }
 

@@ -1,8 +1,5 @@
-fn map_replay_route_error(
-    provider: &SystemRouteProvider,
-    source: crate::net::NativeRouteError,
-) -> LiveIoError {
-    let classification = provider.classify_error(&source);
+fn map_replay_route_error(source: crate::net::NativeRouteError) -> LiveIoError {
+    let classification = SystemRouteProvider.classify_error(&source);
     match classification.kind {
         Kind::Capability => LiveIoError::Unsupported {
             message: source.to_string(),

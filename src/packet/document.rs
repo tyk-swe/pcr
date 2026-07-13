@@ -14,10 +14,10 @@ use super::Packet;
 
 pub const PACKET_DOCUMENT_SCHEMA_V1: &str = "packetcraftr.packet/v1";
 pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
-pub const DEFAULT_MAX_DOCUMENT_NESTING: usize = 64;
 /// Absolute recursive `FieldValue::List` nesting accepted by the stable
 /// packet-document parser.
 pub const MAX_DOCUMENT_NESTING: usize = 64;
+pub const DEFAULT_MAX_DOCUMENT_NESTING: usize = MAX_DOCUMENT_NESTING;
 
 const DOCUMENT_BASE_CONTAINER_DEPTH: usize = 6;
 const LAYER_LIMIT_SENTINEL: &str = "$__packetcraftr_document_layer_limit";

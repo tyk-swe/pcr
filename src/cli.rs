@@ -67,16 +67,14 @@ use crate::workflow::traceroute::{
     PolicyAuthorizer as TrafficPolicyTracerouteAuthorizer,
 };
 use crate::workflow_api::{
-    dns, fuzz, fuzz_live, replay_capture, scan, traceroute, DnsAddressFamily, DnsError,
-    DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsLimits, DnsQueryType,
-    DnsRequest, FuzzCaseExecution, FuzzError, FuzzExecutionCase, FuzzExecutionError, FuzzExecutor,
-    FuzzLimits, FuzzLiveOptions, FuzzRequest, FuzzStrategy, FuzzTarget, ReplayError, ReplayLimits,
-    ReplayOptions, ScanAddressFamily, ScanBatch, ScanBatchExecution, ScanError, ScanExecutionError,
-    ScanExecutor, ScanLimits, ScanRequest, ScanTarget, ScanTransport, SystemDnsClock,
-    SystemFuzzClock, SystemReplayClock, SystemScanClock, SystemTracerouteClock,
-    TracerouteAddressFamily, TracerouteBatch, TracerouteBatchExecution, TracerouteError,
-    TracerouteExecutionError, TracerouteExecutor, TracerouteLimits, TracerouteRequest,
-    TracerouteStrategy,
+    dns, fuzz, fuzz_live, replay_capture, scan, traceroute, AddressFamily, DnsError, DnsExchange,
+    DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsLimits, DnsQueryType, DnsRequest,
+    FuzzCaseExecution, FuzzError, FuzzExecutionCase, FuzzExecutionError, FuzzExecutor, FuzzLimits,
+    FuzzLiveOptions, FuzzRequest, FuzzStrategy, FuzzTarget, ReplayError, ReplayLimits,
+    ReplayOptions, ScanBatch, ScanBatchExecution, ScanError, ScanExecutionError, ScanExecutor,
+    ScanLimits, ScanRequest, ScanTarget, ScanTransport, SystemClock, TracerouteBatch,
+    TracerouteBatchExecution, TracerouteError, TracerouteExecutionError, TracerouteExecutor,
+    TracerouteLimits, TracerouteRequest, TracerouteStrategy,
 };
 
 include!("cli/arguments.rs");

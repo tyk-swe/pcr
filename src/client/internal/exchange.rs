@@ -13,15 +13,9 @@ impl<C: CaptureSession> CaptureGuard<C> {
             shutdown_attempted: false,
         }
     }
-}
 
-impl<C: CaptureSession> CaptureSession for CaptureGuard<C> {
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         self.inner.wait_ready(timeout)
-    }
-
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
-        self.inner.next_frame(timeout)
     }
 
     fn next_captured_frame(

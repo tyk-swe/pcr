@@ -136,7 +136,7 @@ where
         validate_dns_execution(&probe, &execution, request.limits, request.timeout)?;
         add_dns_stats(&mut result.stats, &execution.stats, attempt)?;
         for diagnostic in execution.diagnostics {
-            push_dns_diagnostic_once(&mut result.diagnostics, diagnostic);
+            push_diagnostic_once(&mut result.diagnostics, diagnostic);
         }
 
         let sent_at = execution.sent_evidence.timestamp;
@@ -298,7 +298,7 @@ where
         // frames under the one operation-wide retention budget.
         for frame in execution.undecoded {
             if result.undecoded.len() >= request.limits.max_undecoded {
-                push_dns_diagnostic_once(
+                push_diagnostic_once(
                     &mut result.diagnostics,
                     Diagnostic::warning(
                         "dns.undecoded_limit",
@@ -414,7 +414,12 @@ fn validate_dns_execution(
             message: "sent packet has no complete UDP tuple".to_owned(),
         });
     };
-    if !dns_packet_shape_matches(&execution.sent, probe.server_address)
+    let network_protocol = if probe.server_address.is_ipv4() {
+        "ipv4"
+    } else {
+        "ipv6"
+    };
+    if !super::probe::packet_shape_matches(&execution.sent, &[network_protocol, "udp", "raw"])
         || network.destination != probe.server_address
         || ports.source != probe.source_port
         || ports.destination != probe.server_port
@@ -546,26 +551,6 @@ fn validate_dns_execution(
     Ok(())
 }
 
-fn dns_packet_shape_matches(packet: &Packet, server: IpAddr) -> bool {
-    let network = if server.is_ipv4() { "ipv4" } else { "ipv6" };
-    let protocols = packet
-        .iter()
-        .map(|layer| layer.protocol_id())
-        .collect::<Vec<_>>();
-    match protocols.as_slice() {
-        [actual_network, udp, raw] => {
-            actual_network.as_str() == network && udp.as_str() == "udp" && raw.as_str() == "raw"
-        }
-        [ethernet, actual_network, udp, raw] => {
-            ethernet.as_str() == "ethernet"
-                && actual_network.as_str() == network
-                && udp.as_str() == "udp"
-                && raw.as_str() == "raw"
-        }
-        _ => false,
-    }
-}
-
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
     let layer = packet
         .iter()
@@ -658,7 +643,7 @@ impl DnsEvidenceBudget {
         diagnostics: &mut Vec<Diagnostic>,
     ) -> bool {
         let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
-            push_dns_diagnostic_once(
+            push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
                     "dns.evidence_limit",
@@ -668,7 +653,7 @@ impl DnsEvidenceBudget {
             return false;
         };
         let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
-            push_dns_diagnostic_once(
+            push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
                     "dns.evidence_limit",
@@ -680,7 +665,7 @@ impl DnsEvidenceBudget {
         if next_frame_count > limits.max_evidence_frames
             || next_byte_count > limits.max_evidence_bytes
         {
-            push_dns_diagnostic_once(
+            push_diagnostic_once(
                 diagnostics,
                 Diagnostic::warning(
                     "dns.evidence_limit",
@@ -702,13 +687,4 @@ fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), D
     total
         .checked_add(value)
         .ok_or(DnsError::StatisticsOverflow { attempt })
-}
-
-fn push_dns_diagnostic_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
-    if !diagnostics
-        .iter()
-        .any(|existing| existing.code == diagnostic.code)
-    {
-        diagnostics.push(diagnostic);
-    }
 }

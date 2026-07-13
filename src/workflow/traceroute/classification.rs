@@ -77,12 +77,3 @@ fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), Trac
         .checked_add(batch)
         .ok_or(TracerouteError::StatisticsOverflow { sequence })
 }
-
-fn push_diagnostic_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
-    if !diagnostics
-        .iter()
-        .any(|existing| existing.code == diagnostic.code)
-    {
-        diagnostics.push(diagnostic);
-    }
-}

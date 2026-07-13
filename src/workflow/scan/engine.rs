@@ -17,22 +17,12 @@ where
     // Implementations must perform declared-target authorization before DNS
     // and authorize every answer before anything below constructs a ScanProbe.
     let resolved = authorizer.resolve_and_authorize(&request.target)?;
-    if resolved.addresses.is_empty() {
-        return Err(ScanError::AddressFamily {
-            family: request.address_family.label(),
-        });
-    }
-    let mut authorized_addresses = Vec::with_capacity(resolved.addresses.len());
+    let mut addresses = Vec::with_capacity(resolved.addresses.len());
     for address in resolved.addresses {
-        if !authorized_addresses.contains(&address) {
-            authorized_addresses.push(address);
+        if request.address_family.accepts(address) && !addresses.contains(&address) {
+            addresses.push(address);
         }
     }
-    let addresses = authorized_addresses
-        .iter()
-        .copied()
-        .filter(|address| request.address_family.accepts(*address))
-        .collect::<Vec<_>>();
     if addresses.is_empty() {
         return Err(ScanError::AddressFamily {
             family: request.address_family.label(),
@@ -98,13 +88,13 @@ where
     }
     authorizer.authorize_operation(total_probes as u64, maximum_bytes)?;
 
-    let batches = build_batches(request, &addresses, &ports)?;
-
     let endpoint_ports = if request.transport == ScanTransport::Icmp {
         vec![None]
     } else {
         ports.iter().copied().map(Some).collect()
     };
+    let batches = build_batches(request, &addresses, &endpoint_ports)?;
+
     let mut endpoints = addresses
         .iter()
         .flat_map(|address| {
@@ -179,13 +169,8 @@ where
 fn build_batches(
     request: &ScanRequest,
     addresses: &[IpAddr],
-    ports: &[u16],
+    endpoint_ports: &[Option<u16>],
 ) -> Result<Vec<ScanBatch>, ScanError> {
-    let endpoint_ports = if request.transport == ScanTransport::Icmp {
-        vec![None]
-    } else {
-        ports.iter().copied().map(Some).collect::<Vec<_>>()
-    };
     let mut batches = Vec::new();
     let mut sequence = 0_u64;
     for address in addresses {
@@ -518,7 +503,7 @@ fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
         ScanTransport::Icmp if probe.address.is_ipv4() => "icmpv4",
         ScanTransport::Icmp => "icmpv6",
     };
-    if !scan_packet_shape_matches(sent, network_protocol, transport_protocol) {
+    if !super::probe::packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
     }
     let network_matches = match probe.address {
@@ -565,24 +550,6 @@ fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
                     && icmp.body == icmp_identity(probe.sequence)
             }),
         },
-    }
-}
-
-fn scan_packet_shape_matches(sent: &Packet, network: &str, transport: &str) -> bool {
-    let protocols = sent
-        .iter()
-        .map(|layer| layer.protocol_id())
-        .collect::<Vec<_>>();
-    match protocols.as_slice() {
-        [actual_network, actual_transport] => {
-            actual_network.as_str() == network && actual_transport.as_str() == transport
-        }
-        [ethernet, actual_network, actual_transport] => {
-            ethernet.as_str() == "ethernet"
-                && actual_network.as_str() == network
-                && actual_transport.as_str() == transport
-        }
-        _ => false,
     }
 }
 
@@ -834,13 +801,4 @@ fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), Scan
     total
         .checked_add(batch)
         .ok_or(ScanError::StatisticsOverflow { sequence })
-}
-
-fn push_diagnostic_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
-    if !diagnostics
-        .iter()
-        .any(|existing| existing.code == diagnostic.code)
-    {
-        diagnostics.push(diagnostic);
-    }
 }

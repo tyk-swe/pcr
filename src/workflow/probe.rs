@@ -60,6 +60,21 @@ impl Observation {
     }
 }
 
+pub(super) fn packet_shape_matches(packet: &Packet, expected: &[&str]) -> bool {
+    let mut layers = packet.iter().peekable();
+    if layers
+        .peek()
+        .is_some_and(|layer| layer.protocol_id().as_str() == "ethernet")
+    {
+        layers.next();
+    }
+    expected.iter().all(|expected| {
+        layers
+            .next()
+            .is_some_and(|layer| layer.protocol_id().as_str() == *expected)
+    }) && layers.next().is_none()
+}
+
 /// Correlates one decoded response with a request without assigning an
 /// operation-specific status. Corrupt and unrelated traffic returns `None`.
 pub(super) fn observe(

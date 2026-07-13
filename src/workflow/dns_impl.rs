@@ -30,7 +30,7 @@ use super::nonzero_ipv4_identification;
 use super::probe::{self, Transport as ProbeTransport};
 use super::scan_impl::MAX_SCAN_RATE;
 use super::target::{AuthorizationError, Authorizer, Target};
-use super::{AddressFamily, Stats};
+use super::{push_diagnostic_once, AddressFamily, Stats};
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;

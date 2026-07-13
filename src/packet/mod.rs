@@ -94,9 +94,7 @@ pub mod document {
         MAX_DOCUMENT_NESTING, PACKET_DOCUMENT_SCHEMA_V1,
     };
 
-    pub(crate) use super::document_impl::{
-        DocumentError, DocumentFormat, LayerDocument, PacketDocument,
-    };
+    pub(crate) use super::document_impl::PacketDocument;
 }
 
 pub mod expression {
@@ -105,10 +103,6 @@ pub mod expression {
     pub use super::expression_impl::{
         decode_hex, parse_packet_expression as parse, ExpressionError as Error,
         ExpressionOptions as Options, DEFAULT_MAX_EXPRESSION_BYTES, MAX_EXPRESSION_NESTING,
-    };
-
-    pub(crate) use super::expression_impl::{
-        parse_packet_expression, ExpressionError, ExpressionOptions,
     };
 }
 
@@ -120,9 +114,7 @@ pub mod template {
         TemplateValues as Values, DEFAULT_MAX_TEMPLATE_PACKETS,
     };
 
-    pub(crate) use super::template_impl::{
-        PacketTemplate, PacketTemplateIter, TemplateError, TemplateValues,
-    };
+    pub(crate) use super::template_impl::{PacketTemplate, TemplateValues};
 }
 
 pub mod diagnostic {
@@ -151,11 +143,8 @@ pub mod registry {
         RegistryBuilder as Builder, RegistryError as Error,
     };
 
-    #[allow(unused_imports)]
     pub(crate) use super::registry_impl::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext, MatchResult, ProtocolModule, ProtocolRegistry, RegistryBuilder,
-        RegistryError, ResponseMatcher,
+        CodecError, LayerDecodeContext, LayerEncodeContext, ProtocolRegistry,
     };
 }
 
@@ -167,11 +156,10 @@ pub mod matcher {
 
 /// Flat implementation vocabulary used only while composing the library's domains.
 /// It is deliberately unavailable to downstream crates.
-#[allow(unused_imports)]
 pub(crate) mod internal {
     pub(crate) use super::build::{
         BuildContext, BuildError, BuildMode, BuildOptions, Builder, BuiltPacket,
-        DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE,
+        DEFAULT_MAX_PACKET_SIZE,
     };
     pub(crate) use super::codec::{
         Codec as LayerCodec, DecodeContext as LayerDecodeContext, Decoded as DecodedLayerValue,
@@ -180,27 +168,24 @@ pub(crate) mod internal {
     };
     pub(crate) use super::decode::{DecodeError, DecodeOptions, DecodedPacket, Dissector};
     pub(crate) use super::diagnostic::{Diagnostic, DiagnosticSeverity};
-    pub(crate) use super::document::{
-        DocumentError, DocumentFormat, LayerDocument, PacketDocument, DEFAULT_MAX_DOCUMENT_BYTES,
-        DEFAULT_MAX_DOCUMENT_NESTING, MAX_DOCUMENT_NESTING, PACKET_DOCUMENT_SCHEMA_V1,
-    };
+    pub(crate) use super::document::PacketDocument;
+    pub(crate) use super::expression::decode_hex;
+    #[cfg(test)]
     pub(crate) use super::expression::{
-        decode_hex, parse_packet_expression, ExpressionError, ExpressionOptions,
-        DEFAULT_MAX_EXPRESSION_BYTES, MAX_EXPRESSION_NESTING,
+        parse as parse_packet_expression, Options as ExpressionOptions,
     };
     pub(crate) use super::field::{FieldKind, FieldValue, WireValue};
     pub(crate) use super::layer::{
         FieldError, FieldSchema, Layer, LayerSchema, MalformedLayer, Padding, ProtocolId, Raw,
     };
-    pub(crate) use super::layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout};
+    pub(crate) use super::layout::{ByteRange, FieldLayout, PacketLayout};
     pub(crate) use super::matcher::{Matcher as ResponseMatcher, Result as MatchResult};
     pub(crate) use super::registry::{
         Builder as RegistryBuilder, Discriminator, Error as RegistryError,
         Module as ProtocolModule, Registry as ProtocolRegistry,
     };
     pub(crate) use super::template::{
-        PacketTemplate, PacketTemplateIter, TemplateError, TemplateValues,
-        DEFAULT_MAX_TEMPLATE_PACKETS,
+        PacketTemplate, TemplateValues, DEFAULT_MAX_TEMPLATE_PACKETS,
     };
-    pub(crate) use super::{Error as PacketError, Packet};
+    pub(crate) use super::Packet;
 }

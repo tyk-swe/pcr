@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::clock::Clock;
+use super::push_diagnostic_once;
 use crate::capture::{Frame, LinkType};
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{

@@ -223,7 +223,6 @@ impl Packet {
         field: &str,
         value: FieldValue,
     ) -> Result<(), PacketError> {
-        self.invalidate_encoded_payload_lengths();
         let layer =
             self.by_protocol_mut(protocol)
                 .ok_or_else(|| PacketError::ProtocolNotFound {

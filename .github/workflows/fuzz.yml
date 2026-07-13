@@ -1,0 +1,64 @@
+name: Nightly fuzz
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: nightly-fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: campaign (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: capture_reader
+            max_len: 131072
+          - target: decode_roundtrip
+            max_len: 65537
+          - target: packet_inputs
+            max_len: 65537
+          - target: dns_wire
+            max_len: 65538
+          - target: reassembly_state
+            max_len: 4096
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            fuzz/target
+            fuzz/corpus
+          key: nightly-fuzz-${{ matrix.target }}-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: nightly-fuzz-${{ matrix.target }}-
+      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - run: rustup toolchain install nightly-2026-07-11 --profile minimal
+      - run: cargo install cargo-fuzz --locked --version 0.13.2
+      - name: Fuzz for ten minutes
+        run: >-
+          cargo +nightly-2026-07-11 fuzz run ${{ matrix.target }}
+          fuzz/corpus/${{ matrix.target }}
+          -- -max_total_time=600 -timeout=5 -rss_limit_mb=2048
+          -max_len=${{ matrix.max_len }}
+          -dict=fuzz/dictionaries/${{ matrix.target }}.dict
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: warn
+          retention-days: 7

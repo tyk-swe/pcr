@@ -1,0 +1,52 @@
+[package]
+name = "packetcraftr-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+bytes = "1"
+libfuzzer-sys = "=0.4.13"
+packetcraftr = { path = "..", version = "0.2.0", default-features = false }
+
+[[bin]]
+name = "capture_reader"
+path = "fuzz_targets/capture_reader.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decode_roundtrip"
+path = "fuzz_targets/decode_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "packet_inputs"
+path = "fuzz_targets/packet_inputs.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dns_wire"
+path = "fuzz_targets/dns_wire.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "reassembly_state"
+path = "fuzz_targets/reassembly_state.rs"
+test = false
+doc = false
+bench = false

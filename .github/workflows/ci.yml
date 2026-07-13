@@ -1,6 +1,14 @@
 name: CI
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -9,19 +17,31 @@ jobs:
   dependency-policy:
     name: dependency policy
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-tools-deny-${{ runner.os }}-0.19.7-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.19.7
       - name: Enforce the RUSTSEC-2024-0436 exception expiry
         shell: bash
         run: test "$(date -u +%F)" '<' '2026-10-12'
-      - name: Check advisories, licenses, sources, and bans
+      - name: Check root dependency policy
         run: cargo deny check
+      - name: Check fuzz dependency policy
+        run: cargo deny --manifest-path fuzz/Cargo.toml check
 
   test:
     name: test (${{ matrix.platform }})
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: linux-x86_64
@@ -33,16 +53,123 @@ jobs:
           - platform: windows-msvc
             os: windows-2022
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-test-${{ matrix.platform }}-1.96.0-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-test-${{ matrix.platform }}-1.96.0-
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add clippy rustfmt
-      - if: runner.os == 'Linux'
-        run: cargo fmt -- --check
-      - run: cargo check --locked --all-targets --no-default-features
-      - run: cargo check --locked --all-targets
-      - if: runner.os == 'Windows'
-        run: cargo test --locked --lib
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --all-features
+      - name: Test portable profile
+        run: cargo test --locked --no-default-features
+      - name: Test default profile
+        run: cargo test --locked
+      - name: Test complete profile
+        run: cargo test --locked --all-features
+      - name: Clippy complete profile
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+
+  linux-quality:
+    name: Linux quality and feature powerset
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-quality-linux-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-quality-linux-1.96.0-
+      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - run: rustup component add rustfmt
+      - run: cargo install cargo-hack --locked --version 0.6.45
+      - name: Formatting
+        run: cargo fmt --all -- --check
+      - name: Warning-free documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --all-features --no-deps
+      - name: Pairwise feature powerset
+        run: cargo hack check --locked --feature-powerset --depth 2 --all-targets
+      - name: Complete feature profile
+        run: cargo check --locked --all-targets --all-features
+
+  coverage:
+    name: Linux line coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target/llvm-cov-target
+          key: cargo-coverage-linux-1.96.0-llvm-cov-0.8.6-${{ hashFiles('Cargo.lock') }}
+      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - run: rustup component add llvm-tools-preview
+      - run: cargo install cargo-llvm-cov --locked --version 0.8.6
+      - name: Enforce 75% line coverage
+        run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info --fail-under-lines 75
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-lcov
+          path: lcov.info
+          retention-days: 3
+
+  fuzz-smoke:
+    name: fuzz smoke (${{ matrix.target }})
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: capture_reader
+            max_len: 131072
+          - target: decode_roundtrip
+            max_len: 65537
+          - target: packet_inputs
+            max_len: 65537
+          - target: dns_wire
+            max_len: 65538
+          - target: reassembly_state
+            max_len: 4096
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            fuzz/target
+          key: cargo-fuzz-linux-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - run: rustup toolchain install nightly-2026-07-11 --profile minimal
+      - run: cargo install cargo-fuzz --locked --version 0.13.2
+      - name: Run fixed deterministic budget
+        run: >-
+          cargo +nightly-2026-07-11 fuzz run ${{ matrix.target }}
+          fuzz/corpus/${{ matrix.target }}
+          -- -runs=1000 -seed=12648430 -timeout=5 -rss_limit_mb=2048
+          -max_len=${{ matrix.max_len }}
+          -dict=fuzz/dictionaries/${{ matrix.target }}.dict

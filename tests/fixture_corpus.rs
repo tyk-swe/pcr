@@ -10,7 +10,7 @@ use std::time::SystemTime;
 use packetcraftr::{
     capture::{Frame as CapturedFrame, LinkType, Reader as CaptureReader},
     packet::{
-        build::{Builder, Context as BuildContext, Options as BuildOptions},
+        build::{Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions},
         decode::{Decoder as Dissector, Options as DecodeOptions},
         diagnostic::Diagnostic,
         document::{Format as DocumentFormat, Packet as PacketDocument},
@@ -58,6 +58,21 @@ fn diagnostic_codes(diagnostics: &[Diagnostic]) -> Vec<String> {
 
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
+}
+
+fn assert_valid_layout(decoded: &packetcraftr::packet::decode::Result) {
+    let length = decoded.original.len();
+    assert_eq!(decoded.layout.layers.len(), decoded.packet.len());
+    for (index, layer) in decoded.layout.layers.iter().enumerate() {
+        assert_eq!(layer.index, index);
+        assert!(layer.range.start <= layer.range.end);
+        assert!(layer.range.end <= length);
+        for field in &layer.fields {
+            assert!(field.range.start <= field.range.end);
+            assert!(field.range.start >= layer.range.start);
+            assert!(field.range.end <= layer.range.end);
+        }
+    }
 }
 
 #[test]
@@ -240,6 +255,82 @@ fn capture_corpus_streams_valid_files_and_rejects_malformed_input() {
     ] {
         let mut reader = CaptureReader::new(Cursor::new(fixture(relative))).unwrap();
         assert!(reader.next_frame().is_err(), "{relative}");
+        assert!(reader.next_frame().unwrap().is_none(), "{relative}");
+    }
+}
+
+#[test]
+fn every_capture_truncation_is_bounded_and_errors_are_terminal() {
+    for relative in [
+        "captures/pcap/ethernet-ipv4-udp.pcap",
+        "captures/pcapng/multi-link.pcapng",
+    ] {
+        let bytes = fixture(relative);
+        for end in 0..bytes.len() {
+            match CaptureReader::new(Cursor::new(&bytes[..end])) {
+                Err(_) => {}
+                Ok(mut reader) => loop {
+                    match reader.next_frame() {
+                        Ok(Some(frame)) => assert!(frame.bytes.len() <= 16 * 1024 * 1024),
+                        Ok(None) => break,
+                        Err(_) => {
+                            assert!(reader.next_frame().unwrap().is_none(), "{relative}@{end}");
+                            break;
+                        }
+                    }
+                },
+            }
+        }
+    }
+}
+
+#[test]
+fn frame_truncations_and_corruptions_preserve_layout_and_permissive_bytes() {
+    let registry = Arc::new(default_registry().unwrap());
+    let dissector = Dissector::new(Arc::clone(&registry));
+    for (relative, link_type) in [
+        ("frames/ethernet/ipv4-udp.bin", LinkType::ETHERNET),
+        ("frames/raw/ipv6-udp.bin", LinkType::RAW),
+        ("frames/sll2/ipv6-udp.bin", LinkType::LINUX_SLL2),
+    ] {
+        let original = fixture(relative);
+        let mut cases = (0..=original.len())
+            .map(|end| original[..end].to_vec())
+            .collect::<Vec<_>>();
+        for offset in (0..original.len()).step_by(7) {
+            for mask in [0x01, 0x80, 0xff] {
+                let mut corrupt = original.clone();
+                corrupt[offset] ^= mask;
+                cases.push(corrupt);
+            }
+        }
+
+        for bytes in cases {
+            let decoded = dissector
+                .decode(
+                    CapturedFrame::new(SystemTime::UNIX_EPOCH, link_type, bytes.clone()).unwrap(),
+                    DecodeOptions {
+                        max_layers: 64,
+                        max_packet_size: 64 * 1024,
+                        verify_checksums: true,
+                    },
+                )
+                .unwrap();
+            assert_valid_layout(&decoded);
+            if !bytes.is_empty() {
+                let rebuilt = Builder::new(Arc::clone(&registry))
+                    .build(
+                        decoded.packet,
+                        BuildContext::default(),
+                        BuildOptions {
+                            mode: BuildMode::Permissive,
+                            ..BuildOptions::default()
+                        },
+                    )
+                    .unwrap();
+                assert_eq!(rebuilt.bytes.as_ref(), bytes, "{relative}");
+            }
+        }
     }
 }
 

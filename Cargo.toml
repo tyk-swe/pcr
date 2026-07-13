@@ -27,7 +27,7 @@ native-layer3 = ["live", "dep:socket2", "dep:windows"]
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-noyalib = { version = "0.0.5", features = ["compat-serde-yaml"] }
+noyalib = { version = "0.0.15", features = ["compat-serde-yaml"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 thiserror = "2"

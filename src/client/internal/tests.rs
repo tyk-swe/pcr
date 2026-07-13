@@ -1448,7 +1448,7 @@ mod tests {
 
         let dissector = Dissector::new(Arc::clone(&registry));
         let options = ExchangeOptions::default();
-        let mut accumulator = ExchangeAccumulator::new(1);
+        let mut accumulator = ExchangeAccumulator::new(1, false);
         accumulator.process(
             CapturedFrame::new(
                 Frame::new(
@@ -1480,7 +1480,7 @@ mod tests {
             max_evidence_bytes: 1,
             ..ExchangeOptions::default()
         };
-        let mut evidence_limited = ExchangeAccumulator::new(1);
+        let mut evidence_limited = ExchangeAccumulator::new(1, false);
         evidence_limited.process(
             CapturedFrame::new(
                 Frame::new(
@@ -1507,7 +1507,58 @@ mod tests {
             .iter()
             .any(|diagnostic| diagnostic.code == "exchange.capture_byte_limit"));
 
-        let mut fallback = ExchangeAccumulator::new(1);
+        let discard_options = ExchangeOptions {
+            max_evidence_bytes: response.bytes.len(),
+            ..ExchangeOptions::default()
+        };
+        let mut discarding = ExchangeAccumulator::new(1, true);
+        discarding.process(
+            CapturedFrame::without_ingress_time(
+                Frame::new(
+                    std::time::UNIX_EPOCH,
+                    LinkType::IPV4,
+                    response.bytes.clone(),
+                )
+                .unwrap(),
+            ),
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                options: &discard_options,
+            },
+        );
+        assert_eq!(discarding.discarded_unmatched, 1);
+        assert_eq!(discarding.retained_bytes, 0);
+        discarding.process(
+            CapturedFrame::new(
+                Frame::new(
+                    std::time::UNIX_EPOCH,
+                    LinkType::IPV4,
+                    response.bytes.clone(),
+                )
+                .unwrap(),
+                received_at,
+            ),
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                options: &discard_options,
+            },
+        );
+        assert_eq!(discarding.responses.len(), 1);
+        assert_eq!(discarding.retained_bytes, response.bytes.len());
+        assert!(!discarding
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.capture_byte_limit"));
+
+        let mut fallback = ExchangeAccumulator::new(1, false);
         fallback.process(
             CapturedFrame::without_ingress_time(
                 Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
@@ -1579,6 +1630,55 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "exchange.drain_limit"));
+    }
+
+    #[test]
+    fn capture_drain_cancellation_keeps_its_operation_error_through_cleanup() {
+        let registry = Arc::new(default_registry().unwrap());
+        let dissector = Dissector::new(Arc::clone(&registry));
+        let prepared = Vec::new();
+        let sent_at = Vec::new();
+        let options = ExchangeOptions::default();
+        let mut accumulator = ExchangeAccumulator::new(0, false);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let mut capture = CaptureGuard::new(ReadinessAndShutdownFailCapture(Arc::clone(&events)));
+        let cancellation = crate::operation::Cancellation::default();
+        cancellation.cancel(crate::operation::CancellationReason::Interrupt);
+
+        let drain_error = drain_available(
+            &mut capture,
+            None,
+            1,
+            &mut accumulator,
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline: Instant::now(),
+                options: &options,
+            },
+            &cancellation,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            &drain_error,
+            CaptureDrainError::Operation(crate::operation::Error::Cancelled {
+                reason: crate::operation::CancellationReason::Interrupt
+            })
+        ));
+
+        let error = drain_error_after_shutdown(&mut capture, drain_error);
+        assert!(matches!(
+            &error,
+            ClientError::OperationCancellationAndCaptureShutdown {
+                operation: crate::operation::Error::Cancelled { .. },
+                shutdown: LiveIoError::Capture { .. },
+            }
+        ));
+        assert_eq!(error.classification().category, Category::Cleanup);
+        assert_eq!(error.classification().code, "operation.cancelled");
+        assert_eq!(*events.lock().unwrap(), ["shutdown"]);
     }
 
     #[test]

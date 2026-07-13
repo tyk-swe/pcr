@@ -271,35 +271,32 @@ fn replay_capture_interface<R: Read>(
         })
 }
 
-fn replay_frame_identity(frame: &Frame, interface: Interface) -> u64 {
-    let mut value = 0xcbf2_9ce4_8422_2325_u64;
-    let mut mix = |bytes: &[u8]| {
-        for byte in bytes {
-            value ^= u64::from(*byte);
-            value = value.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    };
-    mix(&frame.link_type.0.to_le_bytes());
-    mix(&frame.captured_length.to_le_bytes());
-    mix(&frame.original_length.to_le_bytes());
-    mix(&frame.interface.unwrap_or(u32::MAX).to_le_bytes());
-    mix(&interface.link_type.0.to_le_bytes());
-    mix(&interface.snap_len.to_le_bytes());
+fn replay_frame_identity(frame: &Frame, interface: Interface) -> [u8; 32] {
+    use sha2::{Digest as _, Sha256};
+
+    let mut digest = Sha256::new();
+    digest.update(b"packetcraftr/replay-frame/v1\0");
+    digest.update(frame.link_type.0.to_le_bytes());
+    digest.update(frame.captured_length.to_le_bytes());
+    digest.update(frame.original_length.to_le_bytes());
+    digest.update(frame.interface.unwrap_or(u32::MAX).to_le_bytes());
+    digest.update(interface.link_type.0.to_le_bytes());
+    digest.update(interface.snap_len.to_le_bytes());
     match frame.timestamp.duration_since(SystemTime::UNIX_EPOCH) {
         Ok(duration) => {
-            mix(&[0]);
-            mix(&duration.as_secs().to_le_bytes());
-            mix(&duration.subsec_nanos().to_le_bytes());
+            digest.update([0]);
+            digest.update(duration.as_secs().to_le_bytes());
+            digest.update(duration.subsec_nanos().to_le_bytes());
         }
         Err(error) => {
             let duration = error.duration();
-            mix(&[1]);
-            mix(&duration.as_secs().to_le_bytes());
-            mix(&duration.subsec_nanos().to_le_bytes());
+            digest.update([1]);
+            digest.update(duration.as_secs().to_le_bytes());
+            digest.update(duration.subsec_nanos().to_le_bytes());
         }
     }
-    mix(&frame.bytes);
-    value
+    digest.update(&frame.bytes);
+    digest.finalize().into()
 }
 
 /// Streams, authorizes, schedules, and transmits a non-seekable capture. Use

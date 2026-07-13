@@ -170,13 +170,7 @@ fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(),
                 .with_stats(stats),
         ),
         OutputFormat::Ndjson => {
-            let completion_reason = match result.completion {
-                TraceCompletionReason::DestinationReached => CompletionReason::DestinationReached,
-                TraceCompletionReason::Timeout => CompletionReason::Timeout,
-                TraceCompletionReason::Unreachable | TraceCompletionReason::MaximumHops => {
-                    CompletionReason::LimitReached
-                }
-            };
+            let completion_reason = traceroute_completion_reason(result.completion);
             emit_json_compact(
                 &StreamRecord::success(
                     CommandName::Traceroute,
@@ -202,6 +196,15 @@ fn run_traceroute(arguments: TracerouteArgs, output: OutputFormat) -> Result<(),
                 format: output,
             },
         )),
+    }
+}
+
+fn traceroute_completion_reason(completion: TraceCompletionReason) -> CompletionReason {
+    match completion {
+        TraceCompletionReason::DestinationReached => CompletionReason::DestinationReached,
+        TraceCompletionReason::Timeout => CompletionReason::Timeout,
+        TraceCompletionReason::Unreachable => CompletionReason::Completed,
+        TraceCompletionReason::MaximumHops => CompletionReason::LimitReached,
     }
 }
 

@@ -133,6 +133,18 @@ fn operation_error_after_shutdown<C: CaptureSession>(
     }
 }
 
+fn drain_error_after_shutdown<C: CaptureSession>(
+    capture: &mut CaptureGuard<C>,
+    operation: CaptureDrainError,
+) -> ClientError {
+    match operation {
+        CaptureDrainError::Operation(operation) => {
+            operation_error_after_shutdown(capture, operation)
+        }
+        CaptureDrainError::Capture(operation) => error_after_shutdown(capture, operation),
+    }
+}
+
 fn event_error_after_shutdown<C: CaptureSession>(
     capture: &mut CaptureGuard<C>,
     operation: crate::operation::EventError,

@@ -34,13 +34,23 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
         LiveTarget::Address(address) => ScanTarget::Address(address),
         LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
     };
+    let address_family: AddressFamily = family.into();
+    let port_family = match address_family {
+        AddressFamily::Any => crate::operation::PortFamily::Both,
+        AddressFamily::Ipv4 => crate::operation::PortFamily::Ipv4,
+        AddressFamily::Ipv6 => crate::operation::PortFamily::Ipv6,
+    };
     let capture_options = limits.capture_options();
     let evidence_bytes = limits.evidence_bytes();
     let queue_limits = limits.into_limits();
     let generated_source_port = if source_port.is_none() {
         Some(
             current_operation()
-                .reserve_port("dns.udp.source_port", crate::operation::Transport::Udp)
+                .reserve_port_for_family(
+                    "dns.udp.source_port",
+                    crate::operation::Transport::Udp,
+                    port_family,
+                )
                 .map_err(CliError::classified)?,
         )
     } else {
@@ -48,7 +58,7 @@ fn run_dns(arguments: DnsArgs, output: OutputFormat) -> Result<(), CliError> {
     };
     let request = DnsRequest {
         server,
-        address_family: family.into(),
+        address_family,
         server_port: port,
         source_port: source_port.or(generated_source_port).expect("explicit or generated port"),
         query_name: name,

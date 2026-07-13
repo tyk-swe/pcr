@@ -430,7 +430,7 @@ impl SendCommandResult {
 pub struct DecodedFrameOutput {
     pub frame: FrameOutput,
     pub packet: PacketDocument,
-    pub layout: PacketLayout,
+    pub layout: OutputPacketLayout,
     pub diagnostics: Vec<DiagnosticOutput>,
 }
 
@@ -446,7 +446,7 @@ impl DecodedFrameOutput {
         Ok(Self {
             frame: FrameOutput::try_from_frame(frame)?,
             packet: PacketDocument::from_packet(&packet),
-            layout,
+            layout: layout.into(),
             diagnostics: diagnostics.into_iter().map(Into::into).collect(),
         })
     }

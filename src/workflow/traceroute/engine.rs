@@ -107,12 +107,19 @@ where
         })?;
     authorizer.authorize_operation(total_probes as u64, maximum_wire_bytes)?;
 
+    let port_family = if destination.is_ipv4() {
+        crate::operation::PortFamily::Ipv4
+    } else {
+        crate::operation::PortFamily::Ipv6
+    };
+
     let source_port = match request.strategy {
         TracerouteStrategy::Tcp => Some(
             operation
-                .reserve_port(
+                .reserve_port_for_family(
                     "traceroute.tcp.source_port",
                     crate::operation::Transport::Tcp,
+                    port_family,
                 )
                 .map_err(|source| TracerouteError::Operation {
                     sequence: 0,
@@ -121,9 +128,10 @@ where
         ),
         TracerouteStrategy::Udp => Some(
             operation
-                .reserve_port(
+                .reserve_port_for_family(
                     "traceroute.udp.source_port",
                     crate::operation::Transport::Udp,
+                    port_family,
                 )
                 .map_err(|source| TracerouteError::Operation {
                     sequence: 0,

@@ -131,6 +131,43 @@ mod tests {
     }
 
     #[test]
+    fn decoded_exchange_layout_offsets_use_output_v2_decimal_strings() {
+        let frame = Frame::new(
+            UNIX_EPOCH,
+            crate::capture::LinkType::RAW,
+            Bytes::from_static(&[0]),
+        )
+        .unwrap();
+        let decoded = DecodedPacket {
+            packet: crate::packet::Packet::default(),
+            original: frame.bytes.clone(),
+            frame,
+            layout: PacketLayout {
+                layers: vec![crate::packet::layout::Layer {
+                    index: 7,
+                    protocol: crate::packet::layer::Id::new("raw"),
+                    range: crate::packet::layout::Range::new(11, 13),
+                    fields: vec![crate::packet::layout::Field {
+                        name: "bytes".to_owned(),
+                        range: crate::packet::layout::Range::new(11, 12),
+                    }],
+                }],
+            },
+            diagnostics: Vec::new(),
+        };
+
+        let value = serde_json::to_value(DecodedFrameOutput::try_from_decoded(decoded).unwrap())
+            .unwrap();
+        assert_eq!(value["layout"]["layers"][0]["index"], "7");
+        assert_eq!(value["layout"]["layers"][0]["range"]["start"], "11");
+        assert_eq!(value["layout"]["layers"][0]["range"]["end"], "13");
+        assert_eq!(
+            value["layout"]["layers"][0]["fields"][0]["range"]["start"],
+            "11"
+        );
+    }
+
+    #[test]
     fn aggregate_and_stream_envelopes_freeze_mode_and_sequence() {
         let aggregate = AggregateOutput::success(
             CommandName::Routes,

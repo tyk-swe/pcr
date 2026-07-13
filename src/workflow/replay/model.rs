@@ -196,7 +196,7 @@ impl ReplayPlan {
 
 #[derive(Clone, Debug)]
 struct PreparedReplayFrame {
-    identity: u64,
+    identity: [u8; 32],
     source_interface_id: Option<u32>,
     capture_interface: Interface,
     interface: InterfaceId,

@@ -32,12 +32,11 @@ native-route = [
     "dep:futures-util",
     "dep:libc",
     "dep:rtnetlink",
-    "dep:socket2",
     "dep:tokio",
     "dep:windows",
 ]
 native-layer2 = ["live", "dep:libloading", "dep:pcap", "dep:windows"]
-native-layer3 = ["live", "dep:socket2", "dep:windows"]
+native-layer3 = ["live", "dep:windows"]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
@@ -46,6 +45,8 @@ getrandom = "0.3"
 noyalib = { version = "0.0.15", features = ["compat-serde-yaml"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
+sha2 = { version = "0.10", default-features = false }
+socket2 = { version = "0.6", default-features = false, features = ["all"] }
 thiserror = "2"
 
 [target.'cfg(not(windows))'.dependencies]
@@ -56,18 +57,15 @@ signal-hook = { version = "0.3", default-features = false, features = ["iterator
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }
 pcap = { version = "2.4", default-features = false, optional = true }
 rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"], optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 tokio = { version = "1", default-features = false, features = ["net", "rt"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = { version = "0.2", default-features = false, optional = true }
 pcap = { version = "2.4", default-features = false, optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 ctrlc = "3"
 libloading = { version = "0.9", default-features = false, features = ["std"], optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
 windows = { version = "0.62", default-features = false, features = [
     "std",
     "Win32_Foundation",

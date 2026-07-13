@@ -469,7 +469,7 @@ impl CaptureOptions {
                 .final_destination
                 .or(route.lookup_destination)
                 .or(route.route.selected_address)
-                .map(|address| format!("host {address}"))
+                .map(automatic_capture_filter)
                 .map(Some)
                 .ok_or_else(|| LiveIoError::InvalidCaptureFilter {
                     message:
@@ -478,6 +478,12 @@ impl CaptureOptions {
                 }),
         }
     }
+}
+
+#[cfg(feature = "native-layer2")]
+fn automatic_capture_filter(address: IpAddr) -> String {
+    let control_protocol = if address.is_ipv4() { "icmp" } else { "icmp6" };
+    format!("(host {address}) or {control_protocol}")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -943,6 +949,19 @@ mod tests {
             .unwrap();
 
         assert!(captured.received_at.is_none());
+    }
+
+    #[cfg(feature = "native-layer2")]
+    #[test]
+    fn automatic_capture_filters_admit_control_replies_from_intermediate_hops() {
+        assert_eq!(
+            automatic_capture_filter("192.0.2.1".parse().unwrap()),
+            "(host 192.0.2.1) or icmp"
+        );
+        assert_eq!(
+            automatic_capture_filter("2001:db8::1".parse().unwrap()),
+            "(host 2001:db8::1) or icmp6"
+        );
     }
 
     #[test]

@@ -336,6 +336,34 @@ mod tests {
             AggregateErrorOutput::error(Some(CommandName::Exchange), dual.output_error());
         let envelope = serde_json::to_value(envelope).unwrap();
         assert_eq!(envelope["error"]["causes"].as_array().unwrap().len(), 2);
+
+        let cancelled_cleanup = CliError::classified(
+            crate::client::Error::OperationCancellationAndCaptureShutdown {
+                operation: crate::operation::Error::Cancelled {
+                    reason: crate::operation::CancellationReason::Interrupt,
+                },
+                shutdown: crate::net::LiveIoError::Capture {
+                    message: "join failed".to_owned(),
+                },
+            },
+        );
+        assert_eq!(
+            cancelled_cleanup.classification.category,
+            crate::error::Category::Cleanup
+        );
+        assert!(is_cleanup_failure(&cancelled_cleanup));
+    }
+
+    #[test]
+    fn traceroute_envelope_completion_distinguishes_unreachable_from_limits() {
+        assert_eq!(
+            traceroute_completion_reason(TraceCompletionReason::Unreachable),
+            CompletionReason::Completed
+        );
+        assert_eq!(
+            traceroute_completion_reason(TraceCompletionReason::MaximumHops),
+            CompletionReason::LimitReached
+        );
     }
 
     #[test]
@@ -368,6 +396,36 @@ mod tests {
         assert_eq!(outcome.stats.packets_completed, 1);
         assert_eq!(outcome.stats.bytes, 3);
         assert_eq!(outcome.stats.capture.received_frames, 1);
+        assert_eq!(outcome.completion_reason, CompletionReason::Timeout);
+    }
+
+    #[test]
+    fn capture_driver_reports_the_packet_limit_as_its_completion_reason() {
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![1]).unwrap();
+        let capture = ScriptedCapture {
+            ready: Some(Ok(())),
+            frames: VecDeque::from([Ok(Some(frame))]),
+            shutdown: Some(Ok(())),
+            statistics: crate::net::CaptureStatistics {
+                received_frames: 1,
+                received_bytes: 1,
+                ..crate::net::CaptureStatistics::default()
+            },
+        };
+
+        let outcome = drive_capture(
+            capture,
+            Duration::from_secs(1),
+            CaptureQueueLimits::default(),
+            CaptureBudget {
+                max_frames: 1,
+                max_bytes: 1,
+            },
+            |_, _| Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(outcome.completion_reason, CompletionReason::LimitReached);
     }
 
     #[test]
@@ -391,6 +449,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(outcome.stats.packets_completed, 0);
+        assert_eq!(outcome.completion_reason, CompletionReason::Timeout);
     }
 
     #[test]

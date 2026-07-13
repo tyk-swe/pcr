@@ -129,10 +129,22 @@ where
     }
     authorizer.authorize_operation(total_probes as u64, maximum_bytes)?;
 
+    let port_family = if addresses.iter().all(IpAddr::is_ipv4) {
+        crate::operation::PortFamily::Ipv4
+    } else if addresses.iter().all(IpAddr::is_ipv6) {
+        crate::operation::PortFamily::Ipv6
+    } else {
+        crate::operation::PortFamily::Both
+    };
+
     let source_port = match request.transport {
         ScanTransport::Tcp => Some(
             operation
-                .reserve_port("scan.tcp.source_port", crate::operation::Transport::Tcp)
+                .reserve_port_for_family(
+                    "scan.tcp.source_port",
+                    crate::operation::Transport::Tcp,
+                    port_family,
+                )
                 .map_err(|source| ScanError::Operation {
                     sequence: 0,
                     source,
@@ -140,7 +152,11 @@ where
         ),
         ScanTransport::Udp => Some(
             operation
-                .reserve_port("scan.udp.source_port", crate::operation::Transport::Udp)
+                .reserve_port_for_family(
+                    "scan.udp.source_port",
+                    crate::operation::Transport::Udp,
+                    port_family,
+                )
                 .map_err(|source| ScanError::Operation {
                     sequence: 0,
                     source,

@@ -6,7 +6,7 @@
 #![forbid(unsafe_code)]
 
 use std::fmt;
-use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -277,8 +277,19 @@ impl Context {
     /// Reserves a generated port and retains its socket until every clone of
     /// this operation context is dropped.
     pub fn reserve_port(&self, domain: &str, transport: Transport) -> Result<u16, Error> {
+        self.reserve_port_for_family(domain, transport, PortFamily::Ipv4)
+    }
+
+    /// Reserves a generated port in every address-family namespace that the
+    /// operation may use and retains the sockets for the operation lifetime.
+    pub fn reserve_port_for_family(
+        &self,
+        domain: &str,
+        transport: Transport,
+        family: PortFamily,
+    ) -> Result<u16, Error> {
         self.cancellation.check()?;
-        let reservation = PortReservation::reserve(self.id, domain, transport)?;
+        let reservation = PortReservation::reserve_for_family(self.id, domain, transport, family)?;
         let port = reservation.port();
         self.reservations
             .lock()
@@ -328,23 +339,34 @@ pub enum Transport {
     Udp,
 }
 
+/// IP namespaces in which a generated source port must remain reserved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PortFamily {
+    Ipv4,
+    Ipv6,
+    Both,
+}
+
 enum Reservation {
-    Tcp(TcpListener),
-    Udp(UdpSocket),
+    Tcp(socket2::Socket),
+    Udp(socket2::Socket),
 }
 
 impl Reservation {
     fn port(&self) -> u16 {
-        match self {
-            Self::Tcp(socket) => socket.local_addr().expect("bound listener address").port(),
-            Self::Udp(socket) => socket.local_addr().expect("bound datagram address").port(),
+        let address = match self {
+            Self::Tcp(socket) | Self::Udp(socket) => socket.local_addr(),
         }
+        .expect("bound reservation address")
+        .as_socket()
+        .expect("IP reservation address");
+        address.port()
     }
 }
 
 /// Holds generated source-port reservations for the complete operation lifetime.
 pub struct PortReservation {
-    reservation: Reservation,
+    reservations: Vec<Reservation>,
 }
 
 impl fmt::Debug for PortReservation {
@@ -358,22 +380,24 @@ impl fmt::Debug for PortReservation {
 
 impl PortReservation {
     pub fn reserve(id: Id, domain: &str, transport: Transport) -> Result<Self, Error> {
-        Self::reserve_with(
-            id,
-            domain,
-            transport,
-            |transport, address| match transport {
-                Transport::Tcp => TcpListener::bind(address).map(Reservation::Tcp),
-                Transport::Udp => UdpSocket::bind(address).map(Reservation::Udp),
-            },
-        )
+        Self::reserve_for_family(id, domain, transport, PortFamily::Ipv4)
+    }
+
+    pub fn reserve_for_family(
+        id: Id,
+        domain: &str,
+        transport: Transport,
+        family: PortFamily,
+    ) -> Result<Self, Error> {
+        Self::reserve_with(id, domain, transport, family, bind_reservation)
     }
 
     fn reserve_with(
         id: Id,
         domain: &str,
         transport: Transport,
-        mut bind: impl FnMut(Transport, SocketAddrV4) -> std::io::Result<Reservation>,
+        family: PortFamily,
+        mut bind: impl FnMut(Transport, SocketAddr) -> std::io::Result<Reservation>,
     ) -> Result<Self, Error> {
         const FIRST: u16 = 49_152;
         const WIDTH: u64 = u16::MAX as u64 - FIRST as u64 + 1;
@@ -382,11 +406,35 @@ impl PortReservation {
         for attempt in 0..128_u64 {
             let offset = (start + attempt) % WIDTH;
             let port = FIRST + offset as u16;
-            let address = SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port);
-            let reservation = bind(transport, address);
-            match reservation {
-                Ok(reservation) => return Ok(Self { reservation }),
-                Err(error) => last_error = Some(error),
+            let addresses = match family {
+                PortFamily::Ipv4 => vec![SocketAddr::V4(SocketAddrV4::new(
+                    Ipv4Addr::UNSPECIFIED,
+                    port,
+                ))],
+                PortFamily::Ipv6 => vec![SocketAddr::V6(SocketAddrV6::new(
+                    Ipv6Addr::UNSPECIFIED,
+                    port,
+                    0,
+                    0,
+                ))],
+                PortFamily::Both => vec![
+                    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)),
+                    SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, port, 0, 0)),
+                ],
+            };
+            let required = addresses.len();
+            let mut reservations = Vec::with_capacity(required);
+            for address in addresses {
+                match bind(transport, address) {
+                    Ok(reservation) => reservations.push(reservation),
+                    Err(error) => {
+                        last_error = Some(error);
+                        break;
+                    }
+                }
+            }
+            if reservations.len() == required {
+                return Ok(Self { reservations });
             }
         }
         Err(Error::PortReservation {
@@ -398,7 +446,36 @@ impl PortReservation {
     }
 
     pub fn port(&self) -> u16 {
-        self.reservation.port()
+        self.reservations
+            .first()
+            .expect("port reservation contains at least one socket")
+            .port()
+    }
+}
+
+fn bind_reservation(transport: Transport, address: SocketAddr) -> std::io::Result<Reservation> {
+    use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+
+    let domain = if address.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
+    let (socket_type, protocol) = match transport {
+        Transport::Tcp => (Type::STREAM, Protocol::TCP),
+        Transport::Udp => (Type::DGRAM, Protocol::UDP),
+    };
+    let socket = Socket::new(domain, socket_type, Some(protocol))?;
+    if address.is_ipv6() {
+        socket.set_only_v6(true)?;
+    }
+    socket.bind(&SockAddr::from(address))?;
+    match transport {
+        Transport::Tcp => {
+            socket.listen(1)?;
+            Ok(Reservation::Tcp(socket))
+        }
+        Transport::Udp => Ok(Reservation::Udp(socket)),
     }
 }
 
@@ -511,7 +588,22 @@ mod tests {
         let id = Id::from_bytes([7; 16]);
         let reservation = PortReservation::reserve(id, "test.udp", Transport::Udp).unwrap();
         assert!(reservation.port() >= 49_152);
-        assert!(UdpSocket::bind((Ipv4Addr::UNSPECIFIED, reservation.port())).is_err());
+        assert!(std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, reservation.port())).is_err());
+    }
+
+    #[test]
+    fn a_dual_family_port_is_reserved_in_both_namespaces() {
+        let reservation = PortReservation::reserve_for_family(
+            Id::from_bytes([8; 16]),
+            "test.dual.udp",
+            Transport::Udp,
+            PortFamily::Both,
+        )
+        .unwrap();
+        let port = reservation.port();
+
+        assert!(std::net::UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port)).is_err());
+        assert!(std::net::UdpSocket::bind((Ipv6Addr::UNSPECIFIED, port)).is_err());
     }
 
     #[test]
@@ -526,6 +618,7 @@ mod tests {
             Id::from_bytes([5; 16]),
             "test.failure",
             Transport::Tcp,
+            PortFamily::Ipv4,
             |_, _| {
                 attempts += 1;
                 Err(std::io::Error::new(

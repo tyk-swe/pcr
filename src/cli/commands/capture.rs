@@ -14,6 +14,7 @@ fn cli_build_mode(mode: CliBuildMode) -> BuildMode {
 struct CaptureOutcome {
     diagnostics: Vec<crate::packet::internal::Diagnostic>,
     stats: crate::output::envelope::Stats,
+    completion_reason: CompletionReason,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -105,7 +106,7 @@ fn run_capture(arguments: CaptureArgs, output: OutputFormat) -> Result<(), CliEr
                     CaptureFrameCommandResult::Complete { frames: sequence },
                     outcome.diagnostics,
                 )
-                .complete(CompletionReason::Timeout)
+                .complete(outcome.completion_reason)
                 .with_stats(outcome.stats),
             )
             .map_err(|error| error.at_sequence(sequence))
@@ -291,6 +292,11 @@ where
     }
     Ok(CaptureOutcome {
         diagnostics,
+        completion_reason: if frames >= budget.max_frames {
+            CompletionReason::LimitReached
+        } else {
+            CompletionReason::Timeout
+        },
         stats: crate::output::envelope::Stats {
             packets_attempted: frames,
             packets_completed: frames,

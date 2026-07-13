@@ -174,8 +174,7 @@ pub(crate) fn run_entrypoint() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             let cancelled = cancellation.reason();
-            let cleanup_failed = error.classification.category == crate::error::Category::Cleanup
-                && error.classification.code != "operation.cancelled";
+            let cleanup_failed = is_cleanup_failure(&error);
             let emitted = match (output, cancelled.filter(|_| !cleanup_failed)) {
                 (OutputFormat::Json, Some(_)) => emit_json(
                     &AggregateErrorOutput::cancelled(Some(command), error.output_error())
@@ -212,6 +211,10 @@ pub(crate) fn run_entrypoint() -> ExitCode {
             )
         }
     }
+}
+
+fn is_cleanup_failure(error: &CliError) -> bool {
+    error.classification.category == crate::error::Category::Cleanup
 }
 
 fn operator_warnings(command: &Command) -> Vec<crate::packet::internal::Diagnostic> {
@@ -284,7 +287,13 @@ fn install_signal_handlers(
     std::thread::Builder::new()
         .name("packetcraftr-signals".to_owned())
         .spawn(move || {
-            if let Some(signal) = signals.forever().next() {
+            let mut first_signal = true;
+            for signal in signals.forever() {
+                if !first_signal {
+                    let _ = signal_hook::low_level::emulate_default_handler(signal);
+                    continue;
+                }
+                first_signal = false;
                 let reason = if signal == SIGTERM {
                     crate::operation::CancellationReason::Terminate
                 } else {

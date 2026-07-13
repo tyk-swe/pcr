@@ -127,6 +127,8 @@ struct ExchangeAccumulator {
     unsolicited: Vec<DecodedPacket>,
     undecoded: Vec<Frame>,
     diagnostics: Vec<crate::packet::internal::Diagnostic>,
+    discard_unmatched: bool,
+    discarded_unmatched: usize,
     retained_frames: usize,
     retained_bytes: usize,
     response_counts: Vec<usize>,
@@ -154,6 +156,11 @@ struct ExchangeProcessContext<'a> {
     options: &'a ExchangeOptions,
 }
 
+enum CaptureDrainError {
+    Operation(crate::operation::Error),
+    Capture(LiveIoError),
+}
+
 fn drain_available<C: CaptureSession>(
     capture: &mut CaptureGuard<C>,
     enforced_deadline: Option<Instant>,
@@ -161,21 +168,22 @@ fn drain_available<C: CaptureSession>(
     captured: &mut ExchangeAccumulator,
     context: ExchangeProcessContext<'_>,
     cancellation: &crate::operation::Cancellation,
-) -> Result<(), LiveIoError> {
+) -> Result<(), CaptureDrainError> {
     for _ in 0..frame_limit {
-        if cancellation.is_cancelled() {
-            return Err(LiveIoError::Capture {
-                message: "operation cancellation requested while draining capture".to_owned(),
-            });
-        }
+        cancellation
+            .check()
+            .map_err(CaptureDrainError::Operation)?;
         if enforced_deadline
             .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
         {
-            return Err(LiveIoError::DeadlineExceeded {
+            return Err(CaptureDrainError::Capture(LiveIoError::DeadlineExceeded {
                 operation: "draining capture before all requests were sent",
-            });
+            }));
         }
-        let Some(frame) = capture.next_captured_frame(Duration::ZERO)? else {
+        let Some(frame) = capture
+            .next_captured_frame(Duration::ZERO)
+            .map_err(CaptureDrainError::Capture)?
+        else {
             return Ok(());
         };
         captured.process(frame, context);
@@ -191,12 +199,14 @@ fn drain_available<C: CaptureSession>(
 }
 
 impl ExchangeAccumulator {
-    fn new(requests: usize) -> Self {
+    fn new(requests: usize, discard_unmatched: bool) -> Self {
         Self {
             responses: Vec::new(),
             unsolicited: Vec::new(),
             undecoded: Vec::new(),
             diagnostics: Vec::new(),
+            discard_unmatched,
+            discarded_unmatched: 0,
             retained_frames: 0,
             retained_bytes: 0,
             response_counts: vec![0; requests],
@@ -249,7 +259,7 @@ impl ExchangeAccumulator {
                 &mut self.diagnostics,
                 crate::packet::internal::Diagnostic::warning(
                     "capture.ingress_time_unavailable",
-                    "a capture provider returned a frame without an ingress marker; the frame was retained but not correlated",
+                    "a capture provider returned a frame without an ingress marker; the frame could not be correlated",
                 ),
             );
         }
@@ -332,6 +342,10 @@ impl ExchangeAccumulator {
     }
 
     fn retain_unsolicited(&mut self, decoded: DecodedPacket, options: &ExchangeOptions) {
+        if self.discard_unmatched {
+            self.discarded_unmatched = self.discarded_unmatched.saturating_add(1);
+            return;
+        }
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
                 &mut self.diagnostics,
@@ -358,6 +372,10 @@ impl ExchangeAccumulator {
     }
 
     fn retain_undecoded(&mut self, frame: Frame, options: &ExchangeOptions) {
+        if self.discard_unmatched {
+            self.discarded_unmatched = self.discarded_unmatched.saturating_add(1);
+            return;
+        }
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
                 &mut self.diagnostics,

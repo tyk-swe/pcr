@@ -24,13 +24,23 @@ install -m 0644 schemas/packetcraftr.output.v2.schema.json "$stage/schemas/"
 install -m 0644 "$sbom" "$stage/packetcraftr-${target}.cdx.json"
 checksums=$(mktemp)
 trap 'rm -f "$checksums"' EXIT
+if command -v sha256sum >/dev/null 2>&1; then
+  checksum() { sha256sum "$@"; }
+elif command -v shasum >/dev/null 2>&1; then
+  checksum() { shasum -a 256 "$@"; }
+else
+  echo "no SHA-256 checksum command is available" >&2
+  exit 1
+fi
 (
   cd "$stage"
-  find . -type f -print0 | sort -z | xargs -0 sha256sum
+  find . -type f -print | LC_ALL=C sort | while IFS= read -r file; do
+    checksum "$file"
+  done
 ) >"$checksums"
 mv "$checksums" "$stage/SHA256SUMS"
 tar -czf "dist/${name}.tar.gz" -C dist "$name"
 (
   cd dist
-  sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256"
+  checksum "${name}.tar.gz" > "${name}.tar.gz.sha256"
 )

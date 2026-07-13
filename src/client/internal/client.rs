@@ -370,7 +370,7 @@ where
         let mut sent_evidence = Vec::with_capacity(prepared_packets.len());
         let mut completed_sends = 0u64;
         let dissector = Dissector::new(Arc::clone(&self.registry));
-        let mut captured = ExchangeAccumulator::new(prepared_packets.len());
+        let mut captured = ExchangeAccumulator::new(prepared_packets.len(), discard_unmatched);
         for (send_index, prepared_packet) in prepared_packets.iter().enumerate() {
             if let Err(error) = operation.cancellation().check() {
                 return Err(operation_error_after_shutdown(&mut capture, error));
@@ -392,7 +392,7 @@ where
                 },
                 operation.cancellation(),
             ) {
-                return Err(error_after_shutdown(&mut capture, error));
+                return Err(drain_error_after_shutdown(&mut capture, error));
             }
             if deadline.checked_duration_since(Instant::now()).is_none() {
                 return Err(error_after_shutdown(
@@ -471,7 +471,7 @@ where
                 },
                 operation.cancellation(),
             ) {
-                return Err(error_after_shutdown(&mut capture, error));
+                return Err(drain_error_after_shutdown(&mut capture, error));
             }
         }
 
@@ -519,7 +519,7 @@ where
             },
             operation.cancellation(),
         ) {
-            return Err(error_after_shutdown(&mut capture, error));
+            return Err(drain_error_after_shutdown(&mut capture, error));
         }
         if let Err(error) = operation.cancellation().check() {
             return Err(operation_error_after_shutdown(&mut capture, error));
@@ -559,15 +559,15 @@ where
             .into_iter()
             .map(|prepared_packet| prepared_packet.built)
             .collect();
-        if discard_unmatched && (!captured.unsolicited.is_empty() || !captured.undecoded.is_empty()) {
-            let discarded = captured.unsolicited.len() + captured.undecoded.len();
-            captured.unsolicited.clear();
-            captured.undecoded.clear();
+        if captured.discarded_unmatched != 0 {
             push_diagnostic_once(
                 &mut captured.diagnostics,
                 crate::packet::internal::Diagnostic::warning(
                     "capture.unmatched_discarded",
-                    format!("discarded {discarded} unmatched or undecodable captured frame(s)"),
+                    format!(
+                        "discarded {} unmatched or undecodable captured frame(s)",
+                        captured.discarded_unmatched
+                    ),
                 ),
             );
         }

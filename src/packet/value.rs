@@ -39,7 +39,7 @@ impl<T> WireValue<T> {
     }
 }
 
-/// Stable reflective field types exposed by [`crate::LayerSchema`].
+/// Stable reflective field types exposed by [`crate::packet::layer::Schema`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]

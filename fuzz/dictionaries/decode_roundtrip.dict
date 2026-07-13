@@ -1,0 +1,4 @@
+"ipv4"="\x45\x00"
+"ipv6"="\x60\x00\x00\x00"
+"ether_ipv4"="\x08\x00"
+"ether_ipv6"="\x86\xdd"

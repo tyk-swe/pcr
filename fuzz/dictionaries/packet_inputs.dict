@@ -1,0 +1,5 @@
+"schema"="packetcraftr.packet/v1"
+"layers"="layers"
+"protocol"="protocol"
+"raw"="raw(hex=deadbeef)"
+"bytes"="bytes"

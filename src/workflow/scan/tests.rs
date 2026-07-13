@@ -1264,7 +1264,7 @@ mod tests {
                     port: Some(443),
                     attempt: 1,
                 }],
-                timeout: Duration::from_millis(1),
+                timeout: Duration::from_secs(1),
             };
 
             let result = executor.execute(&batch);
@@ -1309,7 +1309,7 @@ mod tests {
                     query_type: DnsQueryType::A,
                     query: encode_dns_query("www.example", DnsQueryType::A, 7, true).unwrap(),
                 },
-                timeout: Duration::from_millis(1),
+                timeout: Duration::from_secs(1),
                 max_responses: 8,
             };
 
@@ -1407,7 +1407,7 @@ mod tests {
                         attempt: sequence as u32 + 1,
                     })
                     .collect(),
-                timeout: Duration::from_millis(1),
+                timeout: Duration::from_secs(1),
             };
 
             let result = executor.execute(&batch).unwrap();

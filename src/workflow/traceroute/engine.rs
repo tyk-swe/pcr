@@ -327,15 +327,15 @@ fn validate_execution(
             message: "matched response references a request outside the hop batch".to_owned(),
         });
     }
-    let captured_frames = execution
-        .responses
-        .len()
-        .checked_add(execution.unsolicited.len())
-        .and_then(|count| count.checked_add(execution.undecoded.len()))
-        .ok_or_else(|| TracerouteError::InvalidEvidence {
-            sequence,
-            message: "executor capture frame-count accounting overflowed".to_owned(),
-        })?;
+    let captured_frames = checked_frame_count(&[
+        execution.responses.len(),
+        execution.unsolicited.len(),
+        execution.undecoded.len(),
+    ])
+    .ok_or_else(|| TracerouteError::InvalidEvidence {
+        sequence,
+        message: "executor capture frame-count accounting overflowed".to_owned(),
+    })?;
     if captured_frames > limits.max_evidence_frames {
         return Err(TracerouteError::InvalidEvidence {
             sequence,
@@ -345,22 +345,18 @@ fn validate_execution(
             ),
         });
     }
-    let captured_bytes = execution
-        .responses
-        .iter()
-        .map(|response| response.response.frame.bytes.len())
-        .chain(
-            execution
-                .unsolicited
-                .iter()
-                .map(|response| response.frame.bytes.len()),
-        )
-        .chain(execution.undecoded.iter().map(|frame| frame.bytes.len()))
-        .try_fold(0usize, |total, length| total.checked_add(length))
-        .ok_or_else(|| TracerouteError::InvalidEvidence {
-            sequence,
-            message: "executor capture byte accounting overflowed".to_owned(),
-        })?;
+    let captured_bytes = checked_frame_bytes(
+        execution
+            .responses
+            .iter()
+            .map(|response| &response.response.frame)
+            .chain(execution.unsolicited.iter().map(|response| &response.frame))
+            .chain(execution.undecoded.iter()),
+    )
+    .ok_or_else(|| TracerouteError::InvalidEvidence {
+        sequence,
+        message: "executor capture byte accounting overflowed".to_owned(),
+    })?;
     if captured_bytes > limits.max_evidence_bytes {
         return Err(TracerouteError::InvalidEvidence {
             sequence,
@@ -383,23 +379,17 @@ fn validate_execution(
                         .to_owned(),
             });
         }
-        evidence
-            .validate()
-            .map_err(|error| TracerouteError::InvalidEvidence {
-                sequence: probe.sequence,
-                message: format!("sent frame is invalid: {error}"),
-            })?;
+        validate_frame(evidence, "sent").map_err(|message| TracerouteError::InvalidEvidence {
+            sequence: probe.sequence,
+            message,
+        })?;
     }
-    let sent_bytes = execution
-        .sent_evidence
-        .iter()
-        .try_fold(0_u64, |total, frame| {
-            total.checked_add(frame.bytes.len() as u64)
-        })
-        .ok_or_else(|| TracerouteError::InvalidEvidence {
+    let sent_bytes = checked_sent_frame_bytes(&execution.sent_evidence).ok_or_else(|| {
+        TracerouteError::InvalidEvidence {
             sequence,
             message: "sent frame byte accounting overflowed".to_owned(),
-        })?;
+        }
+    })?;
     if execution.stats.bytes != sent_bytes {
         return Err(TracerouteError::InvalidEvidence {
             sequence,
@@ -410,7 +400,8 @@ fn validate_execution(
         });
     }
     for response in &execution.responses {
-        validate_traceroute_decoded(sequence, "matched response", &response.response)?;
+        validate_decoded_frame(&response.response, "matched response")
+            .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
         if response.latency > batch.timeout {
             return Err(TracerouteError::InvalidEvidence {
                 sequence,
@@ -422,24 +413,15 @@ fn validate_execution(
         }
     }
     for response in &execution.unsolicited {
-        validate_traceroute_decoded(sequence, "unsolicited response", response)?;
+        validate_decoded_frame(response, "unsolicited response")
+            .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
     }
     for frame in &execution.undecoded {
-        frame
-            .validate()
-            .map_err(|error| TracerouteError::InvalidEvidence {
-                sequence,
-                message: format!("undecoded frame is invalid: {error}"),
-            })?;
+        validate_frame(frame, "undecoded")
+            .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
     }
-    execution
-        .stats
-        .capture
-        .validate()
-        .map_err(|error| TracerouteError::InvalidEvidence {
-            sequence,
-            message: format!("capture statistics are invalid: {error}"),
-        })?;
+    validate_capture_statistics(execution.stats.capture)
+        .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
     if execution.stats.packets_attempted != batch.probes.len() as u64
         || execution.stats.packets_completed != batch.probes.len() as u64
     {
@@ -447,27 +429,6 @@ fn validate_execution(
             sequence,
             message: "successful exchange statistics do not account for every traceroute probe"
                 .to_owned(),
-        });
-    }
-    Ok(())
-}
-
-fn validate_traceroute_decoded(
-    sequence: u64,
-    kind: &str,
-    decoded: &DecodedPacket,
-) -> Result<(), TracerouteError> {
-    decoded
-        .frame
-        .validate()
-        .map_err(|error| TracerouteError::InvalidEvidence {
-            sequence,
-            message: format!("{kind} frame is invalid: {error}"),
-        })?;
-    if decoded.original != decoded.frame.bytes {
-        return Err(TracerouteError::InvalidEvidence {
-            sequence,
-            message: format!("{kind} original bytes differ from its exact frame"),
         });
     }
     Ok(())

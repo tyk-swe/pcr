@@ -117,6 +117,30 @@ impl From<crate::client::Stats> for OperationStats {
     }
 }
 
+impl From<crate::workflow::Stats> for OperationStats {
+    fn from(value: crate::workflow::Stats) -> Self {
+        Self {
+            packets_attempted: value.packets_attempted,
+            packets_completed: value.packets_completed,
+            bytes: value.bytes,
+            elapsed: value.elapsed,
+            capture: value.capture.into(),
+        }
+    }
+}
+
+impl From<&crate::workflow::fuzz::Stats> for OperationStats {
+    fn from(value: &crate::workflow::fuzz::Stats) -> Self {
+        Self {
+            packets_attempted: value.packets_attempted,
+            packets_completed: value.packets_completed,
+            bytes: value.bytes,
+            elapsed: value.elapsed,
+            capture: value.capture.into(),
+        }
+    }
+}
+
 /// Output-v1 diagnostic severity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -404,6 +404,18 @@ pub struct FuzzExecutionStats {
     pub capture: CaptureStatistics,
 }
 
+impl From<crate::client::Stats> for FuzzExecutionStats {
+    fn from(stats: crate::client::Stats) -> Self {
+        Self {
+            packets_attempted: stats.packets_attempted,
+            packets_completed: stats.packets_completed,
+            bytes: stats.bytes,
+            elapsed: stats.elapsed,
+            capture: stats.capture,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct FuzzCaseExecution {
     pub built: BuiltPacket,

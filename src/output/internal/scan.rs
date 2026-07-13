@@ -139,13 +139,7 @@ impl ScanCommandResult {
             .into_iter()
             .map(FrameOutput::try_from_frame)
             .collect::<Result<Vec<_>, _>>()?;
-        let operation_stats = OperationStats {
-            packets_attempted: stats.packets_attempted,
-            packets_completed: stats.packets_completed,
-            bytes: stats.bytes,
-            elapsed: stats.elapsed,
-            capture: stats.capture.into(),
-        };
+        let operation_stats = stats.into();
         Ok((
             Self {
                 target,

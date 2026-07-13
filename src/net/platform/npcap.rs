@@ -8,7 +8,7 @@ use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, Liv
 
 #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
 mod supported {
-    use std::ffi::{c_char, c_int, c_long, c_uchar, c_uint, c_void, CStr, CString, OsString};
+    use std::ffi::{CStr, CString, OsString, c_char, c_int, c_long, c_uchar, c_uint, c_void};
     use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::ptr::NonNull;
@@ -16,19 +16,19 @@ mod supported {
 
     use bytes::Bytes;
     use libloading::os::windows::{
-        Library, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32,
+        LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, Library,
     };
-    use windows::core::GUID;
     use windows::Win32::Foundation::NO_ERROR;
     use windows::Win32::NetworkManagement::IpHelper::{
         ConvertInterfaceIndexToLuid, ConvertInterfaceLuidToGuid,
     };
     use windows::Win32::NetworkManagement::Ndis::NET_LUID_LH;
     use windows::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
+    use windows::core::GUID;
 
     use super::super::live_capture::{
-        system_time, CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket,
+        CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
+        NativeCaptureStatistics, NativeCapturedPacket, system_time,
     };
     use crate::capture::LinkType;
     use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};

@@ -21,7 +21,7 @@ use packetcraftr::{
     },
     output::{
         capture::{Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult},
-        contract::{Command as CommandName, CONTRACTS as COMMAND_OUTPUT_CONTRACTS},
+        contract::{CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName},
         dns::{
             Attempt as DnsAttemptOutput, AttemptStatus as DnsAttemptStatus,
             Event as DnsStreamCommandResult, Outcome as DnsOutcome, Record as DnsRecordOutput,
@@ -45,13 +45,14 @@ use packetcraftr::{
         },
         replay::{Frame as ReplayFrameCommandResult, Result as ReplayCommandResult},
         scan::{
-            Classification as ScanClassification, Evidence as ProbeEvidenceOutput,
-            Port as ScanPortOutput, ProbeStatus as ScanProbeStatus, Result as ScanCommandResult,
+            Classification as ScanClassification, Event as ScanStreamCommandResult,
+            Evidence as ProbeEvidenceOutput, Port as ScanPortOutput,
+            ProbeStatus as ScanProbeStatus, Result as ScanCommandResult,
         },
         traceroute::{
-            Completion as TraceCompletionReason, Hop as TraceHopOutput, Probe as TraceProbeOutput,
-            ProbeStatus as TraceProbeStatus, ResponseKind as TraceResponseKind,
-            Result as TracerouteCommandResult,
+            Completion as TraceCompletionReason, Event as TracerouteStreamCommandResult,
+            Hop as TraceHopOutput, Probe as TraceProbeOutput, ProbeStatus as TraceProbeStatus,
+            ResponseKind as TraceResponseKind, Result as TracerouteCommandResult,
         },
     },
     packet::diagnostic::Diagnostic,
@@ -592,6 +593,140 @@ fn published_tool_aggregate_success_outputs_match_typed_contracts() {
 }
 
 #[test]
+fn published_scan_stream_outputs_match_typed_contracts() {
+    let destination = "192.168.56.10".parse().unwrap();
+    let event = StreamRecord::success(
+        CommandName::Scan,
+        0,
+        ScanStreamCommandResult::Port {
+            target: "192.168.56.10".to_owned(),
+            resolved_address: destination,
+            port: ScanPortOutput {
+                port: 443,
+                transport: "tcp".to_owned(),
+                classification: ScanClassification::Timeout,
+                evidence: vec![ProbeEvidenceOutput {
+                    protocol: "tcp".to_owned(),
+                    destination,
+                    destination_port: Some(443),
+                    attempt: 1,
+                    status: ScanProbeStatus::Timeout,
+                    classification: ScanClassification::Timeout,
+                    responder: None,
+                    sent_at: OutputTimestamp {
+                        unix_seconds: 1_770_000_000,
+                        nanoseconds: 0,
+                    },
+                    received_at: None,
+                    latency: None,
+                    frame: None,
+                    reason: "no checksum-valid, protocol-consistent response before the deadline"
+                        .to_owned(),
+                }],
+            },
+        },
+        Vec::new(),
+    );
+    assert_eq!(
+        serde_json::to_value(event).unwrap(),
+        json_file("output-scan-event.json")
+    );
+
+    let complete = StreamRecord::success(
+        CommandName::Scan,
+        1,
+        ScanStreamCommandResult::Complete {
+            target: "192.168.56.10".to_owned(),
+            resolved_addresses: vec![destination],
+        },
+        Vec::new(),
+    )
+    .with_stats(OperationStats {
+        packets_attempted: 1,
+        packets_completed: 1,
+        bytes: 40,
+        elapsed: std::time::Duration::from_secs(1),
+        capture: CaptureStatistics::default(),
+    });
+    assert_eq!(
+        serde_json::to_value(complete).unwrap(),
+        json_file("output-scan-complete.json")
+    );
+}
+
+#[test]
+fn published_traceroute_stream_outputs_match_typed_contracts() {
+    let destination = "192.168.56.10".parse().unwrap();
+    let event = StreamRecord::success(
+        CommandName::Traceroute,
+        0,
+        TracerouteStreamCommandResult::Hop {
+            target: "router.lab".to_owned(),
+            destination,
+            hop: TraceHopOutput {
+                hop_limit: 1,
+                probes: vec![TraceProbeOutput {
+                    sequence: 0,
+                    hop_limit: 1,
+                    attempt: 1,
+                    strategy: "udp".to_owned(),
+                    destination,
+                    destination_port: Some(33_434),
+                    status: TraceProbeStatus::Response,
+                    response_kind: Some(TraceResponseKind::Intermediate),
+                    responder: Some("192.168.56.1".parse().unwrap()),
+                    sent_at: OutputTimestamp {
+                        unix_seconds: 1_770_000_000,
+                        nanoseconds: 0,
+                    },
+                    received_at: Some(OutputTimestamp {
+                        unix_seconds: 1_770_000_000,
+                        nanoseconds: 4_000_000,
+                    }),
+                    latency: Some(std::time::Duration::from_millis(4)),
+                    frame: None,
+                    reason: "ICMPv4 time exceeded before reaching the endpoint".to_owned(),
+                }],
+            },
+        },
+        Vec::new(),
+    );
+    assert_eq!(
+        serde_json::to_value(event).unwrap(),
+        json_file("output-traceroute-event.json")
+    );
+
+    let complete = StreamRecord::success(
+        CommandName::Traceroute,
+        2,
+        TracerouteStreamCommandResult::Complete {
+            target: "router.lab".to_owned(),
+            resolved_addresses: vec![destination],
+            destination,
+            strategy: "udp".to_owned(),
+            destination_port: Some(33_434),
+            completion: TraceCompletionReason::DestinationReached,
+        },
+        Vec::new(),
+    )
+    .with_stats(OperationStats {
+        packets_attempted: 3,
+        packets_completed: 3,
+        bytes: 126,
+        elapsed: std::time::Duration::new(1, 15_000_000),
+        capture: CaptureStatistics {
+            received_frames: 2,
+            received_bytes: 8,
+            ..CaptureStatistics::default()
+        },
+    });
+    assert_eq!(
+        serde_json::to_value(complete).unwrap(),
+        json_file("output-traceroute-complete.json")
+    );
+}
+
+#[test]
 fn published_error_outputs_match_every_command_cli_path() {
     let cases: &[(&str, i32, &[&str])] = &[
         (
@@ -765,7 +900,7 @@ fn published_capture_stream_event_matches_the_typed_contract() {
 }
 
 #[test]
-fn published_dns_stream_event_matches_the_typed_contract() {
+fn published_dns_stream_outputs_match_typed_contracts() {
     let event = StreamRecord::success(
         CommandName::Dns,
         0,
@@ -797,6 +932,50 @@ fn published_dns_stream_event_matches_the_typed_contract() {
     assert_eq!(
         serde_json::to_value(event).unwrap(),
         json_file("output-dns-event.json")
+    );
+
+    let complete = StreamRecord::success(
+        CommandName::Dns,
+        2,
+        DnsStreamCommandResult::Complete {
+            server: "resolver.lab".to_owned(),
+            server_port: 53,
+            resolved_addresses: vec![
+                "192.168.56.53".parse().unwrap(),
+                "192.168.56.54".parse().unwrap(),
+            ],
+            query_name: "www.example.test.".to_owned(),
+            query_type: "a".to_owned(),
+            transaction_id: 20_547,
+            transport: "udp".to_owned(),
+            outcome: DnsOutcome::Response,
+            response_code: Some(0),
+            response_code_name: Some("no_error".to_owned()),
+            edns: None,
+            authoritative: Some(false),
+            truncated: Some(false),
+            recursion_desired: Some(true),
+            recursion_available: Some(true),
+            authenticated_data: Some(false),
+            checking_disabled: Some(false),
+            rejected_record_count: 0,
+        },
+        Vec::new(),
+    )
+    .with_stats(OperationStats {
+        packets_attempted: 2,
+        packets_completed: 2,
+        bytes: 116,
+        elapsed: std::time::Duration::new(1, 5_000_000),
+        capture: CaptureStatistics {
+            received_frames: 1,
+            received_bytes: 86,
+            ..CaptureStatistics::default()
+        },
+    });
+    assert_eq!(
+        serde_json::to_value(complete).unwrap(),
+        json_file("output-dns-complete.json")
     );
 }
 

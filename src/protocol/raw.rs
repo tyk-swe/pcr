@@ -6,8 +6,8 @@ use std::collections::BTreeMap;
 use bytes::Bytes;
 
 use crate::packet::internal::{
-    decode_hex, CodecError, DecodedLayerValue, Diagnostic, EncodedLayer, FieldValue, Layer,
-    LayerCodec, LayerDecodeContext, LayerEncodeContext, MalformedLayer, Padding, ProtocolId, Raw,
+    CodecError, DecodedLayerValue, Diagnostic, EncodedLayer, FieldValue, Layer, LayerCodec,
+    LayerDecodeContext, LayerEncodeContext, MalformedLayer, Padding, ProtocolId, Raw, decode_hex,
 };
 
 use super::common::{
@@ -174,23 +174,27 @@ fn raw_fields(
     name: &str,
 ) -> Result<BTreeMap<String, FieldValue>, CodecError> {
     let mut normalized = fields.clone();
-    let derived = if let Some(value) = normalized.remove("hex") {
-        let FieldValue::Text(value) = value else {
-            return Err(invalid(name, "hex must be a quoted hexadecimal string"));
-        };
-        Some(FieldValue::Bytes(decode_hex(&value)?))
-    } else if let Some(value) = normalized.remove("text") {
-        let FieldValue::Text(value) = value else {
-            return Err(invalid(name, "text must be a quoted string"));
-        };
-        Some(FieldValue::Bytes(Bytes::from(value.into_bytes())))
-    } else {
-        None
-    };
-    if let Some(value) = derived {
-        if normalized.insert("bytes".to_string(), value).is_some() {
-            return Err(invalid(name, "bytes cannot be combined with hex or text"));
+    let derived = match normalized.remove("hex") {
+        Some(value) => {
+            let FieldValue::Text(value) = value else {
+                return Err(invalid(name, "hex must be a quoted hexadecimal string"));
+            };
+            Some(FieldValue::Bytes(decode_hex(&value)?))
         }
+        None => match normalized.remove("text") {
+            Some(value) => {
+                let FieldValue::Text(value) = value else {
+                    return Err(invalid(name, "text must be a quoted string"));
+                };
+                Some(FieldValue::Bytes(Bytes::from(value.into_bytes())))
+            }
+            None => None,
+        },
+    };
+    if let Some(value) = derived
+        && normalized.insert("bytes".to_string(), value).is_some()
+    {
+        return Err(invalid(name, "bytes cannot be combined with hex or text"));
     }
     Ok(normalized)
 }

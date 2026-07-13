@@ -14,6 +14,7 @@ use packetcraftr::{
         target::{Error as TargetResolutionError, Hostname, Resolver, Target},
     },
     net::{
+        Error,
         capture::{
             Limits as CaptureLimits, Provider as CaptureProvider, Session as CaptureSession,
             Statistics as CaptureStatistics,
@@ -26,7 +27,6 @@ use packetcraftr::{
             Dispatch, Frame as TransmissionFrame, Layer2Frame, Layer2Sender, Layer3Frame,
             Layer3Sender, Report, Sender,
         },
-        Error,
     },
 };
 

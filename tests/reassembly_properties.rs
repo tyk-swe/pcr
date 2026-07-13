@@ -5,7 +5,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr::session::{fragment, tcp, Limits};
+use packetcraftr::session::{Limits, fragment, tcp};
 
 fn limits() -> Limits {
     Limits {

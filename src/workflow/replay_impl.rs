@@ -15,15 +15,16 @@ use thiserror::Error;
 
 use super::clock::Clock as WorkflowClock;
 use crate::capture::{
-    Error as CaptureError, Format, Frame, Interface, LinkType, Reader, DEFAULT_SIZE_LIMIT,
-    DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES,
+    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Format,
+    Frame, Interface, LinkType, Reader,
 };
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
     DestinationScope, DispatchPacketIo, InterfaceId, InterfaceInfo, InterfaceProvider,
-    IoSendReport, LinkCapability, LinkMode, LiveIoError, MaterializedRoute, PacketIo, PlannedRoute,
-    RouteDecision, RouteProvider, RouteSelectionReason, SystemInterfaceProvider, SystemLayer2Io,
-    SystemLayer3Io, SystemRouteProvider, TransmissionFrame, MAX_CAPTURE_TIMEOUT,
+    IoSendReport, LinkCapability, LinkMode, LiveIoError, MAX_CAPTURE_TIMEOUT, MaterializedRoute,
+    PacketIo, PlannedRoute, RouteDecision, RouteProvider, RouteSelectionReason,
+    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemRouteProvider,
+    TransmissionFrame,
 };
 use crate::packet::build::{
     Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions,

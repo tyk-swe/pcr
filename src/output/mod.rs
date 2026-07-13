@@ -14,9 +14,9 @@ mod internal;
 /// Output-version, command, and format contracts.
 pub mod contract {
     pub use super::internal::{
-        CommandName as Command, CommandOutputContract as CommandContract,
+        COMMAND_OUTPUT_CONTRACTS as CONTRACTS, CommandName as Command,
+        CommandOutputContract as CommandContract, OUTPUT_SCHEMA_V1 as SCHEMA_V1,
         OutputContractError as Error, OutputFormat as Format, OutputMode as Mode,
-        COMMAND_OUTPUT_CONTRACTS as CONTRACTS, OUTPUT_SCHEMA_V1 as SCHEMA_V1,
     };
 }
 

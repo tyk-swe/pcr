@@ -16,14 +16,14 @@ use crate::capture::Frame;
 use crate::error::{Category, Classification, Classified, Kind};
 use crate::net::{
     CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
-    ExchangeIo, IoSendReport, LiveIoError, MaterializedRoute, NeighborError, NeighborResolver,
-    PacketIo, PlanError, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo, IoSendReport,
+    LiveIoError, MAX_CAPTURE_TIMEOUT, MaterializedRoute, NeighborError, NeighborResolver, PacketIo,
+    PlanError, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
 };
 use crate::packet::internal::{
-    BuildContext, BuildError, BuildOptions, Builder, BuiltPacket, DecodeOptions, DecodedPacket,
-    Dissector, FieldValue, Packet, PacketTemplate, Padding, ProtocolRegistry,
-    DEFAULT_MAX_TEMPLATE_PACKETS,
+    BuildContext, BuildError, BuildOptions, Builder, BuiltPacket, DEFAULT_MAX_TEMPLATE_PACKETS,
+    DecodeOptions, DecodedPacket, Dissector, FieldValue, Packet, PacketTemplate, Padding,
+    ProtocolRegistry,
 };
 use crate::protocol::internal::Ethernet;
 

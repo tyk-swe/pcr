@@ -49,11 +49,13 @@ fuzz_target!(|data: &[u8]| {
     for (index, layer) in decoded.layout.layers.iter().enumerate() {
         assert_eq!(layer.index, index);
         assert!(layer.range.start <= layer.range.end && layer.range.end <= bytes.len());
-        assert!(layer
-            .fields
-            .iter()
-            .all(|field| field.range.start >= layer.range.start
-                && field.range.end <= layer.range.end));
+        assert!(
+            layer
+                .fields
+                .iter()
+                .all(|field| field.range.start >= layer.range.start
+                    && field.range.end <= layer.range.end)
+        );
     }
     if !bytes.is_empty() {
         let rebuilt = Builder::new(registry)

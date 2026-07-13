@@ -8,6 +8,7 @@
 mod address_family;
 pub mod clock;
 mod dns_impl;
+mod evidence;
 mod fuzz_impl;
 mod probe;
 mod replay_impl;
@@ -41,15 +42,15 @@ pub use stats::Stats;
 /// Bounded network scanning.
 pub mod scan {
     pub use super::scan_impl::{
-        classify_scan_response as classify_response, scan as run, ClientExecutor,
-        ScanBatch as Batch, ScanBatchExecution as Execution, ScanClassification as Classification,
-        ScanEndpointResult as Endpoint, ScanError as Error, ScanExecutionError as ExecutionError,
-        ScanExecutor as Executor, ScanLimits as Limits, ScanMatchedResponse as MatchedResponse,
-        ScanProbe as Probe, ScanProbeEvidence as ProbeEvidence, ScanProbeStatus as ProbeStatus,
-        ScanRequest as Request, ScanResponseClassification as ResponseClassification,
-        ScanResult as Result, ScanTransport as Transport, DEFAULT_MAX_SCAN_PORTS,
-        DEFAULT_MAX_UNDECODED_SCAN_FRAMES, DEFAULT_SCAN_BATCH_SIZE, MAX_SCAN_ATTEMPTS,
-        MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE,
+        ClientExecutor, DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES,
+        DEFAULT_SCAN_BATCH_SIZE, MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES,
+        MAX_SCAN_RATE, ScanBatch as Batch, ScanBatchExecution as Execution,
+        ScanClassification as Classification, ScanEndpointResult as Endpoint, ScanError as Error,
+        ScanExecutionError as ExecutionError, ScanExecutor as Executor, ScanLimits as Limits,
+        ScanMatchedResponse as MatchedResponse, ScanProbe as Probe,
+        ScanProbeEvidence as ProbeEvidence, ScanProbeStatus as ProbeStatus, ScanRequest as Request,
+        ScanResponseClassification as ResponseClassification, ScanResult as Result,
+        ScanTransport as Transport, classify_scan_response as classify_response, scan as run,
     };
     pub use super::target_adapter::PolicyAuthorizer;
 }
@@ -57,9 +58,10 @@ pub mod scan {
 /// Bounded DNS queries.
 pub mod dns {
     pub use super::dns_impl::{
-        canonical_query_name, classify_dns_response as classify_response,
-        decode_dns_response as decode_response, decode_dns_tcp_frame as decode_tcp_frame,
-        dns as run, encode_dns_query as encode_query, response_code_name, ClientExecutor,
+        ClientExecutor, DEFAULT_DNS_ATTEMPTS, DEFAULT_DNS_SERVER_PORT,
+        DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
+        DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
+        DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_HEADER_BYTES,
         DnsAttemptEvidence as AttemptEvidence, DnsAttemptStatus as AttemptStatus, DnsEdns as Edns,
         DnsEdnsOption as EdnsOption, DnsError as Error, DnsExchange as Exchange,
         DnsExchangeExecution as Execution, DnsExecutionError as ExecutionError,
@@ -68,13 +70,12 @@ pub mod dns {
         DnsRecord as Record, DnsRecordValue as RecordValue, DnsRejectedRecord as RejectedRecord,
         DnsRequest as Request, DnsResponseClassification as ResponseClassification,
         DnsResult as Result, DnsSection as Section, DnsTransport as Transport,
-        DnsUndecodedEvidence as UndecodedEvidence, DnsWireError as WireError,
-        ValidatedDnsResponse as ValidatedResponse, DEFAULT_DNS_ATTEMPTS, DEFAULT_DNS_SERVER_PORT,
-        DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
-        DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
-        DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_HEADER_BYTES,
-        MAX_DNS_ATTEMPTS, MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS,
-        MAX_DNS_RECORDS,
+        DnsUndecodedEvidence as UndecodedEvidence, DnsWireError as WireError, MAX_DNS_ATTEMPTS,
+        MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS, MAX_DNS_RECORDS,
+        ValidatedDnsResponse as ValidatedResponse, canonical_query_name,
+        classify_dns_response as classify_response, decode_dns_response as decode_response,
+        decode_dns_tcp_frame as decode_tcp_frame, dns as run, encode_dns_query as encode_query,
+        response_code_name,
     };
     pub use super::target_adapter::PolicyAuthorizer;
 }
@@ -83,27 +84,27 @@ pub mod dns {
 pub mod traceroute {
     pub use super::target_adapter::PolicyAuthorizer;
     pub use super::traceroute_impl::{
-        classify_traceroute_response as classify_response, traceroute as run, ClientExecutor,
-        TracerouteBatch as Batch, TracerouteBatchExecution as Execution,
-        TracerouteCompletion as Completion, TracerouteError as Error,
-        TracerouteExecutionError as ExecutionError, TracerouteExecutor as Executor,
-        TracerouteHopResult as Hop, TracerouteLimits as Limits,
+        ClientExecutor, DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DEFAULT_TRACEROUTE_FIRST_HOP,
+        DEFAULT_TRACEROUTE_MAX_HOPS, DEFAULT_TRACEROUTE_PROBES_PER_HOP,
+        DEFAULT_TRACEROUTE_TCP_PORT, DEFAULT_TRACEROUTE_UDP_PORT, MAX_TRACEROUTE_DURATION,
+        MAX_TRACEROUTE_PROBES_PER_HOP, TracerouteBatch as Batch,
+        TracerouteBatchExecution as Execution, TracerouteCompletion as Completion,
+        TracerouteError as Error, TracerouteExecutionError as ExecutionError,
+        TracerouteExecutor as Executor, TracerouteHopResult as Hop, TracerouteLimits as Limits,
         TracerouteMatchedResponse as MatchedResponse, TracerouteProbe as Probe,
         TracerouteProbeEvidence as ProbeEvidence, TracerouteProbeStatus as ProbeStatus,
         TracerouteRequest as Request, TracerouteResponseClassification as ResponseClassification,
         TracerouteResponseKind as ResponseKind, TracerouteResult as Result,
         TracerouteStrategy as Strategy, TracerouteUndecodedEvidence as UndecodedEvidence,
-        DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DEFAULT_TRACEROUTE_FIRST_HOP,
-        DEFAULT_TRACEROUTE_MAX_HOPS, DEFAULT_TRACEROUTE_PROBES_PER_HOP,
-        DEFAULT_TRACEROUTE_TCP_PORT, DEFAULT_TRACEROUTE_UDP_PORT, MAX_TRACEROUTE_DURATION,
-        MAX_TRACEROUTE_PROBES_PER_HOP,
+        classify_traceroute_response as classify_response, traceroute as run,
     };
 }
 
 /// Deterministic packet fuzzing and optional live execution.
 pub mod fuzz {
     pub use super::fuzz_impl::{
-        fuzz as run, fuzz_live as run_live, ClientExecutor,
+        ClientExecutor, DEFAULT_FUZZ_CASES, DEFAULT_MAX_FUZZ_CASES, DEFAULT_MAX_FUZZ_FIELD_BYTES,
+        DEFAULT_MAX_FUZZ_LIST_ITEMS, DEFAULT_MAX_FUZZ_SHRINK_STEPS,
         FuzzAuthorizationError as AuthorizationError, FuzzAuthorizer as Authorizer,
         FuzzCase as Case, FuzzCaseExecution as Execution, FuzzCaseFailure as CaseFailure,
         FuzzCaseOutcome as CaseOutcome, FuzzError as Error, FuzzExecutionCase as ExecutionCase,
@@ -111,22 +112,22 @@ pub mod fuzz {
         FuzzExecutor as Executor, FuzzLimits as Limits, FuzzLiveOptions as LiveOptions,
         FuzzMode as Mode, FuzzMutation as Mutation, FuzzReproduction as Reproduction,
         FuzzRequest as Request, FuzzResult as Result, FuzzStats as Stats, FuzzStrategy as Strategy,
-        FuzzTarget as Target, FuzzTargetParseError as TargetParseError, PolicyAuthorizer,
-        DEFAULT_FUZZ_CASES, DEFAULT_MAX_FUZZ_CASES, DEFAULT_MAX_FUZZ_FIELD_BYTES,
-        DEFAULT_MAX_FUZZ_LIST_ITEMS, DEFAULT_MAX_FUZZ_SHRINK_STEPS, MAX_FUZZ_CASES,
+        FuzzTarget as Target, FuzzTargetParseError as TargetParseError, MAX_FUZZ_CASES,
         MAX_FUZZ_DURATION, MAX_FUZZ_FIELD_BYTES, MAX_FUZZ_LIST_ITEMS, MAX_FUZZ_RATE,
-        MAX_FUZZ_SHRINK_STEPS, MAX_FUZZ_STRATEGIES, MAX_FUZZ_TARGET_FIELDS,
+        MAX_FUZZ_SHRINK_STEPS, MAX_FUZZ_STRATEGIES, MAX_FUZZ_TARGET_FIELDS, PolicyAuthorizer,
+        fuzz as run, fuzz_live as run_live,
     };
 }
 
 /// Capture replay.
 pub mod replay {
     pub use super::replay_impl::{
-        replay_capture as run, ReplayAuthorizationError as AuthorizationError,
+        MAX_REPLAY_DURATION, ReplayAuthorizationError as AuthorizationError,
         ReplayAuthorizer as Authorizer, ReplayError as Error, ReplayFrameEvidence as FrameEvidence,
         ReplayLimits as Limits, ReplayOptions as Options, ReplaySummary as Summary,
         ReplayTiming as Timing, ReplayTransmission as Transmission,
-        ReplayTransmitter as Transmitter, SystemAuthorizer, SystemTransmitter, MAX_REPLAY_DURATION,
+        ReplayTransmitter as Transmitter, SystemAuthorizer, SystemTransmitter,
+        replay_capture as run,
     };
 }
 

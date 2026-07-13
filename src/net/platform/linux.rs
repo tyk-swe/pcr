@@ -17,10 +17,13 @@ use rtnetlink::packet_route::{
     route::{RouteAddress, RouteAttribute, RouteMetric, RouteNextHopFlags, RouteType},
 };
 #[cfg(feature = "native-route")]
-use rtnetlink::{new_connection, Handle, RouteMessageBuilder};
+use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
 
 #[cfg(feature = "native-route")]
-use super::{find_interface, finish_route, interface_decision, NativeRouteSnapshot};
+use super::{
+    NativeRouteSnapshot, find_interface, finish_route, interface_decision,
+    validate_preferred_source_family,
+};
 #[cfg(feature = "native-route")]
 use crate::capture::LinkType;
 #[cfg(feature = "native-route")]
@@ -40,12 +43,7 @@ pub(super) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<RouteDecision, NativeRouteError> {
-    if preferred_source.is_some_and(|source| source.is_ipv4() != destination.is_ipv4()) {
-        return Err(NativeRouteError::SourceFamilyMismatch {
-            preferred_source: preferred_source.expect("checked source"),
-            destination,
-        });
-    }
+    validate_preferred_source_family(destination, preferred_source)?;
     let interface_hint = interface_hint.cloned();
     with_netlink(move |handle| async move {
         let message = route_request(destination, interface_hint.as_ref(), preferred_source);

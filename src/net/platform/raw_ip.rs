@@ -14,8 +14,8 @@ use bytes::Bytes;
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 #[cfg(windows)]
 use windows::Win32::Networking::WinSock::{
-    setsockopt, WSAGetLastError, IPPROTO_IP, IPPROTO_IPV6, IPV6_MULTICAST_IF, IPV6_UNICAST_IF,
-    IP_MULTICAST_IF, IP_UNICAST_IF, SOCKET, SOCKET_ERROR,
+    IP_MULTICAST_IF, IP_UNICAST_IF, IPPROTO_IP, IPPROTO_IPV6, IPV6_MULTICAST_IF, IPV6_UNICAST_IF,
+    SOCKET, SOCKET_ERROR, WSAGetLastError, setsockopt,
 };
 
 use super::super::{IoSendReport, Layer3Frame, LiveIoError};

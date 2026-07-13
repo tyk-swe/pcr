@@ -565,12 +565,12 @@ mod tests {
 
     impl NativeCaptureSource for MockSource {
         fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
-            if let Some(event) = self.events.pop_front() {
-                Ok(event)
-            } else if let Some(error) = self.failure.take() {
-                Err(error)
-            } else {
-                Ok(NativeCaptureEvent::Timeout)
+            match self.events.pop_front() {
+                Some(event) => Ok(event),
+                None => match self.failure.take() {
+                    Some(error) => Err(error),
+                    None => Ok(NativeCaptureEvent::Timeout),
+                },
             }
         }
 

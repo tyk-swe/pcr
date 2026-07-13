@@ -11,7 +11,7 @@ use packetcraftr::{
     capture::{Format as CaptureFormat, Frame, LinkType, Reader, Writer},
     packet::{
         build::{Builder, Context as BuildContext, Options as BuildOptions},
-        expression::{parse as parse_packet_expression, Options as ExpressionOptions},
+        expression::{Options as ExpressionOptions, parse as parse_packet_expression},
     },
     protocol::builtin::registry as default_registry,
 };
@@ -851,9 +851,11 @@ fn native_plan_and_routes_are_passive_typed_workflows() {
     );
     let plan: serde_json::Value = serde_json::from_slice(&plan.stdout).unwrap();
     assert_eq!(plan["result"]["route"]["mode"], "layer3");
-    assert!(plan["result"]["route"]["route"]["mtu"]
-        .as_u64()
-        .is_some_and(|mtu| mtu > 0));
+    assert!(
+        plan["result"]["route"]["route"]["mtu"]
+            .as_u64()
+            .is_some_and(|mtu| mtu > 0)
+    );
 
     let routes = binary()
         .args(["--output", "json", "routes"])
@@ -1077,10 +1079,12 @@ fn overflowing_numeric_interface_selectors_are_cli_errors_before_platform_io() {
         assert!(output.stderr.is_empty());
         let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(value["error"]["kind"], "cli");
-        assert!(value["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("interface index"));
+        assert!(
+            value["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("interface index")
+        );
     }
 }
 
@@ -1104,10 +1108,12 @@ fn piped_stdin_cannot_be_silently_ignored_by_an_explicit_recipe() {
     assert_eq!(output.status.code(), Some(2));
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["status"], "error");
-    assert!(value["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("exactly one"));
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("exactly one")
+    );
 }
 
 #[test]
@@ -1194,10 +1200,12 @@ fn unsupported_json_for_read_is_typed_before_opening_the_input() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["mode"], "aggregate");
     assert_eq!(value["error"]["code"], "cli.output_format");
-    assert!(value["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("text, ndjson, hex"));
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("text, ndjson, hex")
+    );
 }
 
 #[cfg(unix)]

@@ -14,11 +14,11 @@ use crate::packet::internal::{
 };
 
 use super::common::{
-    aliased_fields, bytes, expected_discriminator, field_layout, impl_layer_boilerplate, invalid,
-    make_layer, out_of_range, payload_without_padding, protocol, resolve_u8, set_wire_u8,
-    strict_or_diagnostic, truncated, unknown_field, validate_auto_raw_discriminator,
-    validate_ipv6_routing_child, validate_raw_child_discriminator, wire_u8, wrong_layer,
-    wrong_type, ValueExpectation,
+    ValueExpectation, aliased_fields, bytes, expected_discriminator, field_layout,
+    impl_layer_boilerplate, invalid, make_layer, out_of_range, payload_without_padding, protocol,
+    resolve_u8, set_wire_u8, strict_or_diagnostic, truncated, unknown_field,
+    validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
+    wire_u8, wrong_layer, wrong_type,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -922,7 +922,7 @@ mod tests {
     use crate::packet::internal::{
         BuildContext, BuildOptions, Builder, DecodeOptions, Dissector, Packet,
     };
-    use crate::protocol::internal::{default_registry, Ipv6, Udp};
+    use crate::protocol::internal::{Ipv6, Udp, default_registry};
 
     #[test]
     fn srh_encodes_rfc8754_segment_list_and_round_trips() {
@@ -1001,14 +1001,18 @@ mod tests {
         let decoded = Dissector::new(Arc::clone(&registry))
             .decode_with_root(bytes, protocol("ipv6"), DecodeOptions::default())
             .unwrap();
-        assert!(decoded
-            .packet
-            .get::<crate::packet::internal::MalformedLayer>()
-            .is_some());
-        assert!(decoded
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "decode.malformed_layer"));
+        assert!(
+            decoded
+                .packet
+                .get::<crate::packet::internal::MalformedLayer>()
+                .is_some()
+        );
+        assert!(
+            decoded
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "decode.malformed_layer")
+        );
 
         let document = crate::packet::internal::PacketDocument::from_packet(&decoded.packet);
         let reloaded = document.to_packet(&registry, 64).unwrap();

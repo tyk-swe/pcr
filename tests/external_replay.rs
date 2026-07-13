@@ -7,12 +7,12 @@ use std::time::{Duration, SystemTime};
 
 use packetcraftr::{
     capture::{Frame, LinkType, Reader, Writer},
-    net::{interface::Id, link::Mode, transmit::Report, Error as LiveIoError},
+    net::{Error as LiveIoError, interface::Id, link::Mode, transmit::Report},
     workflow::{
         clock::Clock as ReplayClock,
         replay::{
-            run, AuthorizationError, Authorizer as ReplayAuthorizer, Limits, Options, Timing,
-            Transmission, Transmitter as ReplayTransmitter,
+            AuthorizationError, Authorizer as ReplayAuthorizer, Limits, Options, Timing,
+            Transmission, Transmitter as ReplayTransmitter, run,
         },
     },
 };

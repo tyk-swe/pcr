@@ -10,12 +10,12 @@ use std::time::SystemTime;
 use packetcraftr::{
     capture::{Frame as CapturedFrame, LinkType, Reader as CaptureReader},
     packet::{
+        Packet,
         build::{Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions},
         decode::{Decoder as Dissector, Options as DecodeOptions},
         diagnostic::Diagnostic,
         document::{Format as DocumentFormat, Packet as PacketDocument},
         layer::Raw,
-        Packet,
     },
     protocol::{
         builtin::registry as default_registry,

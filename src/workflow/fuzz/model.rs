@@ -259,15 +259,14 @@ impl FuzzLiveOptions {
                 maximum: MAX_CAPTURE_TIMEOUT,
             });
         }
-        if let Some(rate) = self.cases_per_second {
-            if rate == 0 || rate > MAX_FUZZ_RATE {
+        if let Some(rate) = self.cases_per_second
+            && (rate == 0 || rate > MAX_FUZZ_RATE) {
                 return Err(FuzzError::InvalidLimit {
                     field: "cases_per_second",
                     value: u64::from(rate),
                     reason: format!("must be within 1..={MAX_FUZZ_RATE}"),
                 });
             }
-        }
         Ok(self)
     }
 }

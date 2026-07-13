@@ -12,33 +12,37 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[cfg(feature = "native-route")]
 use windows::Win32::Foundation::{
-    ERROR_ADDRESS_NOT_ASSOCIATED, ERROR_HOST_UNREACHABLE, ERROR_NETWORK_UNREACHABLE,
-    ERROR_NOT_FOUND, ERROR_NO_DATA,
+    ERROR_ADDRESS_NOT_ASSOCIATED, ERROR_HOST_UNREACHABLE, ERROR_NETWORK_UNREACHABLE, ERROR_NO_DATA,
+    ERROR_NOT_FOUND,
 };
 #[cfg(any(feature = "live", feature = "native-route"))]
 use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR, WIN32_ERROR};
 #[cfg(any(feature = "live", feature = "native-route"))]
 use windows::Win32::NetworkManagement::IpHelper::{
-    GetAdaptersAddresses, GAA_FLAG_INCLUDE_PREFIX, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER,
-    GAA_FLAG_SKIP_MULTICAST, GET_ADAPTERS_ADDRESSES_FLAGS, IF_TYPE_ETHERNET_CSMACD,
-    IF_TYPE_IEEE80211, IF_TYPE_PPP, IF_TYPE_SOFTWARE_LOOPBACK, IP_ADAPTER_ADDRESSES_LH,
-    IP_ADAPTER_NO_MULTICAST,
+    GAA_FLAG_INCLUDE_PREFIX, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER,
+    GAA_FLAG_SKIP_MULTICAST, GET_ADAPTERS_ADDRESSES_FLAGS, GetAdaptersAddresses,
+    IF_TYPE_ETHERNET_CSMACD, IF_TYPE_IEEE80211, IF_TYPE_PPP, IF_TYPE_SOFTWARE_LOOPBACK,
+    IP_ADAPTER_ADDRESSES_LH, IP_ADAPTER_NO_MULTICAST,
 };
 #[cfg(feature = "native-route")]
 use windows::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
 #[cfg(any(feature = "live", feature = "native-route"))]
-use windows::Win32::NetworkManagement::Ndis::{IfOperStatusUp, NET_LUID_LH};
+use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
+#[cfg(feature = "native-route")]
+use windows::Win32::NetworkManagement::Ndis::NET_LUID_LH;
 #[cfg(any(feature = "live", feature = "native-route"))]
 use windows::Win32::Networking::WinSock::{
     ADDRESS_FAMILY, AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
 };
 #[cfg(feature = "native-route")]
 use windows::Win32::Networking::WinSock::{
-    IN6_ADDR, IN6_ADDR_0, IN_ADDR, IN_ADDR_0, SOCKADDR_IN6_0, SOCKADDR_INET,
+    IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN6_0, SOCKADDR_INET,
 };
 
 #[cfg(feature = "native-route")]
-use super::{finish_route, interface_decision, NativeRouteSnapshot};
+use super::{
+    NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
+};
 #[cfg(any(feature = "live", feature = "native-route"))]
 use crate::capture::LinkType;
 #[cfg(any(feature = "live", feature = "native-route"))]
@@ -141,12 +145,7 @@ pub(super) fn route(
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
 ) -> Result<RouteDecision, NativeRouteError> {
-    if preferred_source.is_some_and(|source| source.is_ipv4() != destination.is_ipv4()) {
-        return Err(NativeRouteError::SourceFamilyMismatch {
-            preferred_source: preferred_source.expect("checked source"),
-            destination,
-        });
-    }
+    validate_preferred_source_family(destination, preferred_source)?;
 
     let available = adapter_snapshots()?;
     let mut constrained_interface = interface_hint
@@ -284,11 +283,13 @@ pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, 
 
 #[cfg(any(feature = "live", feature = "native-route"))]
 #[derive(Clone)]
-#[allow(dead_code)]
 struct WindowsAdapter {
     interface: InterfaceInfo,
+    #[cfg(feature = "native-route")]
     ipv4_index: u32,
+    #[cfg(feature = "native-route")]
     ipv6_index: u32,
+    #[cfg(feature = "native-route")]
     luid: NET_LUID_LH,
 }
 
@@ -448,8 +449,11 @@ fn parse_adapters(
                         LinkType::RAW
                     },
                 },
+                #[cfg(feature = "native-route")]
                 ipv4_index,
+                #[cfg(feature = "native-route")]
                 ipv6_index: adapter.Ipv6IfIndex,
+                #[cfg(feature = "native-route")]
                 luid: adapter.Luid,
             });
         }
@@ -769,8 +773,10 @@ mod default_profile_tests {
     fn default_live_profile_enumerates_windows_interfaces() {
         let interfaces = interfaces().unwrap();
         assert!(!interfaces.is_empty());
-        assert!(interfaces
-            .iter()
-            .all(|interface| interface.id.index != 0 && !interface.id.name.is_empty()));
+        assert!(
+            interfaces
+                .iter()
+                .all(|interface| interface.id.index != 0 && !interface.id.name.is_empty())
+        );
     }
 }

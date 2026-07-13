@@ -140,32 +140,20 @@ fn add_execution_stats(
     Ok(())
 }
 
-#[derive(Default)]
-struct EvidenceBudget {
-    retained_frame_count: usize,
-    retained_byte_count: usize,
+fn retain_fuzz_evidence(
+    budget: &mut EvidenceBudget,
+    frame: &Frame,
+    limits: FuzzLimits,
+) -> bool {
+    budget
+        .retain(
+            frame,
+            limits.max_evidence_frames,
+            limits.max_evidence_bytes,
+        )
+        .is_ok()
 }
 
-impl EvidenceBudget {
-    fn retain(&mut self, frame: &Frame, limits: FuzzLimits) -> bool {
-        let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
-            return false;
-        };
-        let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
-            return false;
-        };
-        if next_frame_count > limits.max_evidence_frames
-            || next_byte_count > limits.max_evidence_bytes
-        {
-            return false;
-        }
-        self.retained_frame_count = next_frame_count;
-        self.retained_byte_count = next_byte_count;
-        true
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
 fn retain_evidence(
     case: &mut FuzzCase,
     responses: Vec<Frame>,
@@ -177,21 +165,21 @@ fn retain_evidence(
 ) {
     let mut omitted = false;
     for frame in responses {
-        if budget.retain(&frame, limits) {
+        if retain_fuzz_evidence(budget, &frame, limits) {
             case.responses.push(frame);
         } else {
             omitted = true;
         }
     }
     for frame in unmatched {
-        if budget.retain(&frame, limits) {
+        if retain_fuzz_evidence(budget, &frame, limits) {
             case.unmatched.push(frame);
         } else {
             omitted = true;
         }
     }
     for frame in undecoded {
-        if budget.retain(&frame, limits) {
+        if retain_fuzz_evidence(budget, &frame, limits) {
             case.undecoded.push(frame);
         } else {
             omitted = true;

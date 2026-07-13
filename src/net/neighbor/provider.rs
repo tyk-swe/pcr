@@ -350,15 +350,14 @@ where
             message: "neighbor cache mutex was poisoned".to_owned(),
         })?;
         cache.retain(|_, entry| entry.expires_at > now);
-        if !cache.contains_key(&key) && cache.len() >= self.options.max_cache_entries {
-            if let Some(oldest) = cache
+        if !cache.contains_key(&key) && cache.len() >= self.options.max_cache_entries
+            && let Some(oldest) = cache
                 .iter()
                 .min_by_key(|(_, entry)| entry.inserted_at)
                 .map(|(key, _)| key.clone())
             {
                 cache.remove(&oldest);
             }
-        }
         cache.insert(
             key,
             NeighborCacheEntry {
@@ -603,8 +602,8 @@ fn validate_send_report(
             },
         ));
     }
-    if let Some(wire_bytes) = report.wire_bytes {
-        if wire_bytes != *expected {
+    if let Some(wire_bytes) = report.wire_bytes
+        && wire_bytes != *expected {
             return Err(map_io_error(
                 request,
                 "validating discovery send evidence",
@@ -614,7 +613,6 @@ fn validate_send_report(
                 },
             ));
         }
-    }
     Ok(())
 }
 

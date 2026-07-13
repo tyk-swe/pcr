@@ -17,10 +17,10 @@ use crate::capture::{Frame, LinkType};
 use super::{
     CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
     CapturedFrame, DestinationScope, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport,
-    Layer2Frame, Layer2Io, LinkCapability, LinkMode, LiveIoError, MacAddress, MaterializedRoute,
-    NeighborError, NeighborRequest, NeighborResolution, NeighborResolver, NeighborVlanKind,
-    NeighborVlanTag, PlannedRoute, RouteDecision, RouteSelectionReason, SystemCaptureProvider,
-    SystemInterfaceProvider, SystemLayer2Io, MAX_NEIGHBOR_VLAN_TAGS,
+    Layer2Frame, Layer2Io, LinkCapability, LinkMode, LiveIoError, MAX_NEIGHBOR_VLAN_TAGS,
+    MacAddress, MaterializedRoute, NeighborError, NeighborRequest, NeighborResolution,
+    NeighborResolver, NeighborVlanKind, NeighborVlanTag, PlannedRoute, RouteDecision,
+    RouteSelectionReason, SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io,
 };
 
 // Active resolution is split by responsibility while retaining one private

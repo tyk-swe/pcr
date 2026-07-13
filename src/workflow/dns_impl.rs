@@ -16,8 +16,8 @@ use thiserror::Error;
 use crate::capture::Frame;
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
-    ExchangeIo, NeighborResolver, RouteProvider, DEFAULT_CAPTURE_QUEUE_BYTES,
-    DEFAULT_CAPTURE_QUEUE_FRAMES, MAX_CAPTURE_TIMEOUT,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo, MAX_CAPTURE_TIMEOUT,
+    NeighborResolver, RouteProvider,
 };
 use crate::packet::internal::{
     DecodedPacket, Diagnostic, DiagnosticSeverity, FieldValue, NetworkEnvelope, Packet,
@@ -26,11 +26,14 @@ use crate::packet::internal::{
 use crate::protocol::internal::{Ipv4, Ipv6, Udp};
 
 use super::clock::Clock;
+use super::evidence::{
+    EvidenceBudget, EvidenceBudgetError, preferred_latency, response_within_deadline,
+};
 use super::nonzero_ipv4_identification;
 use super::probe::{self, Transport as ProbeTransport};
 use super::scan_impl::MAX_SCAN_RATE;
 use super::target::{AuthorizationError, Authorizer, Target};
-use super::{push_diagnostic_once, AddressFamily, Stats};
+use super::{AddressFamily, Stats, push_diagnostic_once};
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;

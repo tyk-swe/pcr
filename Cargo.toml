@@ -1,10 +1,12 @@
 [package]
 name = "packetcraftr"
 version = "0.2.0"
-edition = "2021"
+description = "Rust library and CLI for building, dissecting, capturing, and testing network packets"
+edition = "2024"
 resolver = "2"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
+repository = "https://github.com/tyk-swe/pcr"
 publish = false
 
 [lints.rust]
@@ -18,7 +20,7 @@ overflow-checks = true
 
 [features]
 default = ["live"]
-live = ["dep:pnet", "dep:windows"]
+live = ["dep:pnet_datalink", "dep:windows"]
 native-route = [
     "dep:futures-util",
     "dep:libc",
@@ -39,7 +41,7 @@ serde_json = { version = "1", features = ["unbounded_depth"] }
 thiserror = "2"
 
 [target.'cfg(not(windows))'.dependencies]
-pnet = { version = "0.35", default-features = false, features = ["std"], optional = true }
+pnet_datalink = { version = "0.35", default-features = false, features = ["std"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }

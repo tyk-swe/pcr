@@ -73,7 +73,7 @@ pub struct ProtocolSupportManifest {
 }
 
 macro_rules! protocol {
-    ($name:literal, $aliases:expr, matcher = $matcher:literal) => {
+    ($name:literal, $aliases:expr_2021, matcher = $matcher:literal) => {
         ProtocolSupport {
             protocol: $name,
             aliases: $aliases,

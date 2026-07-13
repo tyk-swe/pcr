@@ -8,12 +8,12 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
+use super::Packet;
 use super::build::{BuildContext, BuildMode};
 use super::diagnostic::Diagnostic;
 use super::field::FieldValue;
 use super::layer::{FieldError, Layer, ProtocolId};
 use super::layout::FieldLayout;
-use super::Packet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Discriminator(pub u64);

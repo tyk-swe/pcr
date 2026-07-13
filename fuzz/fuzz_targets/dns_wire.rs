@@ -1,7 +1,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::workflow::dns::{decode_response, decode_tcp_frame, Limits, QueryType};
+use packetcraftr::workflow::dns::{Limits, QueryType, decode_response, decode_tcp_frame};
 
 fuzz_target!(|data: &[u8]| {
     let Some((&mode, wire)) = data.split_first() else {

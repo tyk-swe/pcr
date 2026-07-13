@@ -73,7 +73,7 @@ where
         diagnostics: Vec::new(),
         stats: Stats::default(),
     };
-    let mut evidence_budget = DnsEvidenceBudget::default();
+    let mut evidence_budget = EvidenceBudget::default();
     let mut fallback_rank = 0u8;
     let mut scheduled_delay = Duration::ZERO;
 
@@ -141,31 +141,24 @@ where
 
         let sent_at = execution.sent_evidence.timestamp;
         let mut best: Option<DnsCandidate<'_>> = None;
+        let candidate_context = DnsCandidateContext {
+            registry,
+            probe: &probe,
+            sent: &execution.sent,
+            sent_at,
+            timeout: request.timeout,
+            limits: request.limits,
+        };
         for matched in &execution.responses {
             consider_dns_candidate(
                 &mut best,
-                registry,
-                &probe,
-                &execution.sent,
+                &candidate_context,
                 &matched.response,
                 Some(matched.latency),
-                sent_at,
-                request.timeout,
-                request.limits,
             );
         }
         for decoded in &execution.unsolicited {
-            consider_dns_candidate(
-                &mut best,
-                registry,
-                &probe,
-                &execution.sent,
-                decoded,
-                None,
-                sent_at,
-                request.timeout,
-                request.limits,
-            );
+            consider_dns_candidate(&mut best, &candidate_context, decoded, None);
         }
 
         let evidence = if let Some(candidate) = best {
@@ -173,12 +166,12 @@ where
             let latency = candidate
                 .latency
                 .or_else(|| received_at.duration_since(sent_at).ok());
-            let response_frame = evidence_budget
-                .retain(
-                    &candidate.decoded.frame,
-                    request.limits,
-                    &mut result.diagnostics,
-                )
+            let response_frame = retain_dns_evidence(
+                &mut evidence_budget,
+                &candidate.decoded.frame,
+                request.limits,
+                &mut result.diagnostics,
+            )
                 .then(|| candidate.decoded.frame.clone());
             match candidate.classification {
                 DnsResponseClassification::Response(response) => {
@@ -310,7 +303,12 @@ where
                 );
                 break;
             }
-            if evidence_budget.retain(&frame, request.limits, &mut result.diagnostics) {
+            if retain_dns_evidence(
+                &mut evidence_budget,
+                &frame,
+                request.limits,
+                &mut result.diagnostics,
+            ) {
                 result
                     .undecoded
                     .push(DnsUndecodedEvidence { attempt, frame });
@@ -337,30 +335,37 @@ struct DnsCandidate<'a> {
     latency: Option<Duration>,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn consider_dns_candidate<'a>(
-    best: &mut Option<DnsCandidate<'a>>,
-    registry: &ProtocolRegistry,
-    probe: &DnsProbe,
-    sent: &Packet,
-    decoded: &'a DecodedPacket,
-    latency: Option<Duration>,
+struct DnsCandidateContext<'a> {
+    registry: &'a ProtocolRegistry,
+    probe: &'a DnsProbe,
+    sent: &'a Packet,
     sent_at: SystemTime,
     timeout: Duration,
     limits: DnsLimits,
+}
+
+fn consider_dns_candidate<'a>(
+    best: &mut Option<DnsCandidate<'a>>,
+    context: &DnsCandidateContext<'_>,
+    decoded: &'a DecodedPacket,
+    latency: Option<Duration>,
 ) {
-    let within_deadline = match latency {
-        Some(latency) => latency <= timeout,
-        None => decoded
-            .frame
-            .timestamp
-            .duration_since(sent_at)
-            .is_ok_and(|captured_latency| captured_latency <= timeout),
-    };
-    if !within_deadline {
+    if !response_within_deadline(
+        latency,
+        decoded.frame.timestamp,
+        context.sent_at,
+        context.timeout,
+    ) {
         return;
     }
-    let Some(classification) = classify_dns_response(registry, probe, sent, decoded, limits) else {
+    let Some(classification) = classify_dns_response(
+        context.registry,
+        context.probe,
+        context.sent,
+        decoded,
+        context.limits,
+    )
+    else {
         return;
     };
     if best.as_ref().is_none_or(|current| {
@@ -370,21 +375,13 @@ fn consider_dns_candidate<'a>(
                     || (decoded.frame.timestamp == current.decoded.frame.timestamp
                         && (decoded.frame.bytes < current.decoded.frame.bytes
                             || (decoded.frame.bytes == current.decoded.frame.bytes
-                                && dns_preferred_latency(latency, current.latency))))))
+                                && preferred_latency(latency, current.latency))))))
     }) {
         *best = Some(DnsCandidate {
             classification,
             decoded,
             latency,
         });
-    }
-}
-
-fn dns_preferred_latency(candidate: Option<Duration>, current: Option<Duration>) -> bool {
-    match (candidate, current) {
-        (Some(candidate), Some(current)) => candidate < current,
-        (Some(_), None) => true,
-        (None, _) => false,
     }
 }
 
@@ -629,58 +626,37 @@ fn update_dns_fallback(outcome: &mut DnsOutcome, rank: &mut u8, candidate: DnsOu
     }
 }
 
-#[derive(Default)]
-struct DnsEvidenceBudget {
-    retained_frame_count: usize,
-    retained_byte_count: usize,
-}
-
-impl DnsEvidenceBudget {
-    fn retain(
-        &mut self,
-        frame: &Frame,
-        limits: DnsLimits,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> bool {
-        let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "dns.evidence_limit",
-                    "DNS evidence frame accounting overflowed; later frames were omitted",
-                ),
-            );
-            return false;
-        };
-        let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "dns.evidence_limit",
-                    "DNS evidence byte accounting overflowed; later frames were omitted",
-                ),
-            );
-            return false;
-        };
-        if next_frame_count > limits.max_evidence_frames
-            || next_byte_count > limits.max_evidence_bytes
-        {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "dns.evidence_limit",
-                    format!(
-                        "DNS evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-                        limits.max_evidence_frames, limits.max_evidence_bytes
-                    ),
-                ),
-            );
-            return false;
+fn retain_dns_evidence(
+    budget: &mut EvidenceBudget,
+    frame: &Frame,
+    limits: DnsLimits,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let error = match budget.retain(
+        frame,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+    ) {
+        Ok(()) => return true,
+        Err(error) => error,
+    };
+    let message = match error {
+        EvidenceBudgetError::FrameCountOverflow => {
+            "DNS evidence frame accounting overflowed; later frames were omitted".to_owned()
         }
-        self.retained_frame_count = next_frame_count;
-        self.retained_byte_count = next_byte_count;
-        true
-    }
+        EvidenceBudgetError::ByteCountOverflow => {
+            "DNS evidence byte accounting overflowed; later frames were omitted".to_owned()
+        }
+        EvidenceBudgetError::LimitExceeded => format!(
+            "DNS evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+            limits.max_evidence_frames, limits.max_evidence_bytes
+        ),
+    };
+    push_diagnostic_once(
+        diagnostics,
+        Diagnostic::warning("dns.evidence_limit", message),
+    );
+    false
 }
 
 fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), DnsError> {

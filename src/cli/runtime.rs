@@ -42,8 +42,8 @@ pub(crate) fn run_entrypoint() -> ExitCode {
         Ok(cli) => cli,
         Err(error) => {
             let code = if error.use_stderr() { 2 } else { 0 };
-            if code != 0 {
-                if let Some(output) = machine_format_from_env() {
+            if code != 0
+                && let Some(output) = machine_format_from_env() {
                     let message = error.to_string();
                     let error = CliError::new(code, message);
                     let emitted = match output {
@@ -66,7 +66,6 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                         }
                     };
                 }
-            }
             return if code == 0 {
                 if error.print().is_ok() {
                     ExitCode::SUCCESS

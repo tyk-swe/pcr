@@ -32,9 +32,9 @@ pub use capture_link::{BsdLoop, BsdNull, CaptureByteOrder, LinuxSll, LinuxSll2};
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 pub use icmp::{Icmpv4, Icmpv6};
 use icmp::{Icmpv4Codec, Icmpv6Codec};
-pub(crate) use ip::{ipv4_source_route_destinations, Ipv4OptionsError};
 pub use ip::{Ipv4, Ipv6};
 use ip::{Ipv4Codec, Ipv6Codec, RawIpCodec};
+pub(crate) use ip::{Ipv4OptionsError, ipv4_source_route_destinations};
 pub use ipv6_ext::{DestinationOptions, HopByHop, Ipv6Fragment, SegmentRoutingHeader};
 use ipv6_ext::{
     DestinationOptionsCodec, HopByHopCodec, Ipv6FragmentCodec, SegmentRoutingHeaderCodec,
@@ -43,9 +43,9 @@ pub use link::{Arp, Ethernet, Vlan, Vlan8021ad};
 use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 pub use support::{
-    CaptureRootByteOrder, CaptureRootSupport, ProtocolFallbackSupport, ProtocolSupport,
-    ProtocolSupportManifest, WorkflowProtocolSupport, BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS,
-    BUILTIN_PROTOCOL_SUPPORT, PROTOCOL_SUPPORT_SCHEMA_V1, STABLE_WORKFLOW_PROTOCOLS,
+    BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOL_SUPPORT, BUILTIN_PROTOCOLS, CaptureRootByteOrder,
+    CaptureRootSupport, PROTOCOL_SUPPORT_SCHEMA_V1, ProtocolFallbackSupport, ProtocolSupport,
+    ProtocolSupportManifest, STABLE_WORKFLOW_PROTOCOLS, WorkflowProtocolSupport,
 };
 pub use transport::{Tcp, Udp};
 use transport::{TcpCodec, UdpCodec};
@@ -192,8 +192,8 @@ mod tests {
 
     use super::*;
     use crate::packet::internal::{
-        parse_packet_expression, BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions,
-        Dissector, ExpressionOptions, Packet, WireValue,
+        BuildContext, BuildMode, BuildOptions, Builder, DecodeOptions, Dissector,
+        ExpressionOptions, Packet, WireValue, parse_packet_expression,
     };
 
     #[test]
@@ -541,10 +541,12 @@ mod tests {
 
         assert!(decoded.packet.get::<Raw>().is_some());
         assert!(decoded.packet.get::<Udp>().is_none());
-        assert!(decoded
-            .packet
-            .get::<crate::packet::internal::MalformedLayer>()
-            .is_none());
+        assert!(
+            decoded
+                .packet
+                .get::<crate::packet::internal::MalformedLayer>()
+                .is_none()
+        );
     }
 
     #[test]
@@ -559,13 +561,15 @@ mod tests {
             })
             .push(Raw::new(Bytes::from_static(b"not-ip")));
 
-        assert!(builder
-            .build(
-                packet.clone(),
-                BuildContext::default(),
-                BuildOptions::default(),
-            )
-            .is_err());
+        assert!(
+            builder
+                .build(
+                    packet.clone(),
+                    BuildContext::default(),
+                    BuildOptions::default(),
+                )
+                .is_err()
+        );
         let permissive = builder
             .build(
                 packet,
@@ -577,10 +581,12 @@ mod tests {
             )
             .unwrap();
         assert!(permissive.requires_live_opt_in);
-        assert!(permissive
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "build.raw_typed_discriminator"));
+        assert!(
+            permissive
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "build.raw_typed_discriminator")
+        );
     }
 
     #[test]
@@ -590,9 +596,11 @@ mod tests {
         packet
             .push(Ethernet::default())
             .push(Raw::new(Bytes::from_static(b"opaque")));
-        assert!(Builder::new(registry)
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            Builder::new(registry)
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -604,23 +612,29 @@ mod tests {
             ether_type: WireValue::Exact(0x0800),
             ..Ethernet::default()
         });
-        assert!(builder
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            builder
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
 
         let mut bytes = vec![0_u8; 14];
         bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
         let decoded = Dissector::new(Arc::clone(&registry))
             .decode_with_root(bytes.clone(), "ethernet".into(), DecodeOptions::default())
             .unwrap();
-        assert!(decoded
-            .packet
-            .get::<crate::packet::internal::MalformedLayer>()
-            .is_some());
-        assert!(decoded
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "decode.missing_required_child"));
+        assert!(
+            decoded
+                .packet
+                .get::<crate::packet::internal::MalformedLayer>()
+                .is_some()
+        );
+        assert!(
+            decoded
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "decode.missing_required_child")
+        );
         let rebuilt = builder
             .build(
                 decoded.packet,
@@ -644,9 +658,11 @@ mod tests {
                 ..Ipv6::default()
             })
             .push(Raw::new(Bytes::from_static(b"bad")));
-        assert!(Builder::new(registry)
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            Builder::new(registry)
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -661,9 +677,11 @@ mod tests {
                 ..Ipv4::default()
             })
             .push(Udp::default());
-        assert!(Builder::new(registry)
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            Builder::new(registry)
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -712,9 +730,11 @@ mod tests {
                 ..Ipv4::default()
             })
             .push(Raw::new(Bytes::from_static(b"odd")));
-        assert!(builder
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            builder
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -730,9 +750,11 @@ mod tests {
             .push(DestinationOptions::default())
             .push(HopByHop::default())
             .push(Udp::default());
-        assert!(Builder::new(registry)
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            Builder::new(registry)
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -753,9 +775,11 @@ mod tests {
                 ..SegmentRoutingHeader::default()
             })
             .push(Udp::default());
-        assert!(Builder::new(registry)
-            .build(packet, BuildContext::default(), BuildOptions::default())
-            .is_err());
+        assert!(
+            Builder::new(registry)
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .is_err()
+        );
     }
 
     #[test]
@@ -770,10 +794,12 @@ mod tests {
         let decoded = Dissector::new(Arc::clone(&registry))
             .decode_with_root(bytes.clone(), "ipv6".into(), DecodeOptions::default())
             .unwrap();
-        assert!(decoded
-            .packet
-            .get::<crate::packet::internal::MalformedLayer>()
-            .is_some());
+        assert!(
+            decoded
+                .packet
+                .get::<crate::packet::internal::MalformedLayer>()
+                .is_some()
+        );
         let rebuilt = Builder::new(registry)
             .build(
                 decoded.packet,
@@ -836,10 +862,12 @@ mod tests {
             .decode_with_root(bytes.clone(), "ethernet".into(), DecodeOptions::default())
             .unwrap();
         assert!(decoded.packet.get::<Ipv6>().is_some());
-        assert!(decoded
-            .packet
-            .get::<crate::packet::internal::MalformedLayer>()
-            .is_some());
+        assert!(
+            decoded
+                .packet
+                .get::<crate::packet::internal::MalformedLayer>()
+                .is_some()
+        );
         assert_eq!(
             decoded.packet.get::<Padding>().unwrap().bytes,
             Bytes::from_static(&[0; 6])
@@ -872,10 +900,12 @@ mod tests {
             decoded.packet.get::<Padding>().unwrap().outside_layer,
             Some(0)
         );
-        assert!(decoded
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "decode.trailing_malformed"));
+        assert!(
+            decoded
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "decode.trailing_malformed")
+        );
 
         let rebuilt = Builder::new(registry)
             .build(
@@ -961,13 +991,15 @@ mod tests {
             hardware_type: 2,
             ..Arp::default()
         });
-        assert!(builder
-            .build(
-                packet.clone(),
-                BuildContext::default(),
-                BuildOptions::default(),
-            )
-            .is_err());
+        assert!(
+            builder
+                .build(
+                    packet.clone(),
+                    BuildContext::default(),
+                    BuildOptions::default(),
+                )
+                .is_err()
+        );
         let permissive = builder
             .build(
                 packet,
@@ -978,18 +1010,22 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(permissive
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "build.arp_address_types"));
+        assert!(
+            permissive
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "build.arp_address_types")
+        );
 
         let decoded = Dissector::new(registry)
             .decode_with_root(permissive.bytes, "arp".into(), DecodeOptions::default())
             .unwrap();
-        assert!(decoded
-            .packet
-            .get::<crate::packet::internal::MalformedLayer>()
-            .is_some());
+        assert!(
+            decoded
+                .packet
+                .get::<crate::packet::internal::MalformedLayer>()
+                .is_some()
+        );
     }
 
     #[test]
@@ -1052,13 +1088,15 @@ mod tests {
             ..Ipv4::default()
         });
 
-        assert!(builder
-            .build(
-                packet.clone(),
-                BuildContext::default(),
-                BuildOptions::default()
-            )
-            .is_err());
+        assert!(
+            builder
+                .build(
+                    packet.clone(),
+                    BuildContext::default(),
+                    BuildOptions::default()
+                )
+                .is_err()
+        );
         let permissive = builder
             .build(
                 packet,
@@ -1070,10 +1108,12 @@ mod tests {
             )
             .unwrap();
         assert!(permissive.requires_live_opt_in);
-        assert!(permissive
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "build.inconsistent_dependent_field"));
+        assert!(
+            permissive
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "build.inconsistent_dependent_field")
+        );
     }
 
     #[test]
@@ -1090,13 +1130,15 @@ mod tests {
             })
             .push(Raw::new(Bytes::from_static(&[59, 0, 0, 0, 0, 0, 0, 0])));
 
-        assert!(builder
-            .build(
-                packet.clone(),
-                BuildContext::default(),
-                BuildOptions::default(),
-            )
-            .is_err());
+        assert!(
+            builder
+                .build(
+                    packet.clone(),
+                    BuildContext::default(),
+                    BuildOptions::default(),
+                )
+                .is_err()
+        );
         let built = builder
             .build(
                 packet,
@@ -1107,10 +1149,12 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(built
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "build.untyped_ipv6_routing_header"));
+        assert!(
+            built
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "build.untyped_ipv6_routing_header")
+        );
         assert!(built.requires_live_opt_in);
     }
 
@@ -1130,13 +1174,15 @@ mod tests {
                 reserved_bits: 0b101,
                 ..Tcp::default()
             });
-        assert!(builder
-            .build(
-                packet.clone(),
-                BuildContext::default(),
-                BuildOptions::default(),
-            )
-            .is_err());
+        assert!(
+            builder
+                .build(
+                    packet.clone(),
+                    BuildContext::default(),
+                    BuildOptions::default(),
+                )
+                .is_err()
+        );
         let options = BuildOptions {
             mode: BuildMode::Permissive,
             ..BuildOptions::default()

@@ -338,10 +338,10 @@ fn dependencies(source: &str) -> BTreeSet<String> {
             {
                 cursor += 2;
             }
-            if let Some(root) = tokens.get(cursor).map(|token| token.text.as_str()) {
-                if is_tracked_root(root) {
-                    dependencies.insert(root.to_owned());
-                }
+            if let Some(root) = tokens.get(cursor).map(|token| token.text.as_str())
+                && is_tracked_root(root)
+            {
+                dependencies.insert(root.to_owned());
             }
         } else if tokens[index].text == "::"
             && tokens.get(index.wrapping_sub(1)).is_none_or(|previous| {
@@ -351,12 +351,10 @@ fn dependencies(source: &str) -> BTreeSet<String> {
                     .first()
                     .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
             })
+            && let Some(root) = tokens.get(index + 1).map(|token| token.text.as_str())
+            && is_tracked_root(root)
         {
-            if let Some(root) = tokens.get(index + 1).map(|token| token.text.as_str()) {
-                if is_tracked_root(root) {
-                    dependencies.insert(root.to_owned());
-                }
-            }
+            dependencies.insert(root.to_owned());
         }
     }
     dependencies

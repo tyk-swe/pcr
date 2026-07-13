@@ -9,13 +9,13 @@ use packetcraftr::{
     capture::{Frame, LinkType},
     protocol::{builtin::registry, network::Ipv4},
     workflow::{
+        AddressFamily, Stats,
         clock::Clock,
         scan::{
-            run, Batch, Classification, Execution, ExecutionError, Executor, Limits, ProbeStatus,
-            Request, Transport,
+            Batch, Classification, Execution, ExecutionError, Executor, Limits, ProbeStatus,
+            Request, Transport, run,
         },
         target::{AuthorizationError, Authorized, Authorizer, Target},
-        AddressFamily, Stats,
     },
 };
 

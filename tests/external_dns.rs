@@ -9,12 +9,12 @@ use packetcraftr::{
     capture::{Frame, LinkType},
     protocol::builtin::registry,
     workflow::{
+        AddressFamily, Stats,
         clock::Clock,
         dns::{
-            run, Exchange, Execution, ExecutionError, Executor, Limits, Outcome, QueryType, Request,
+            Exchange, Execution, ExecutionError, Executor, Limits, Outcome, QueryType, Request, run,
         },
         target::{AuthorizationError, Authorized, Authorizer, Target},
-        AddressFamily, Stats,
     },
 };
 

@@ -95,7 +95,7 @@ where
     };
     let batches = build_batches(request, &addresses, &endpoint_ports)?;
 
-    let mut endpoints = addresses
+    let endpoints = addresses
         .iter()
         .flat_map(|address| {
             endpoint_ports.iter().map(move |port| ScanEndpointResult {
@@ -107,10 +107,13 @@ where
             })
         })
         .collect::<Vec<_>>();
-    let mut diagnostics = Vec::new();
-    let mut undecoded = Vec::new();
+    let mut output = ScanOutput {
+        evidence_budget: EvidenceBudget::default(),
+        endpoints,
+        undecoded: Vec::new(),
+        diagnostics: Vec::new(),
+    };
     let mut stats = Stats::default();
-    let mut evidence_budget = EvidenceBudget::default();
     let mut scheduled_delay = Duration::ZERO;
 
     for (batch_index, batch) in batches.iter().enumerate() {
@@ -142,10 +145,7 @@ where
             exchange,
             registry,
             request.limits,
-            &mut evidence_budget,
-            &mut endpoints,
-            &mut undecoded,
-            &mut diagnostics,
+            &mut output,
         );
     }
     stats.elapsed =
@@ -159,9 +159,9 @@ where
     Ok(ScanResult {
         target: resolved.declared,
         resolved_addresses: addresses,
-        endpoints,
-        undecoded,
-        diagnostics,
+        endpoints: output.endpoints,
+        undecoded: output.undecoded,
+        diagnostics: output.diagnostics,
         stats,
     })
 }
@@ -553,70 +553,52 @@ fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
     }
 }
 
-#[derive(Default)]
-struct EvidenceBudget {
-    retained_frame_count: usize,
-    retained_byte_count: usize,
-}
-
-impl EvidenceBudget {
-    fn retain(
-        &mut self,
-        frame: &Frame,
-        limits: ScanLimits,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> bool {
-        let Some(next_frame_count) = self.retained_frame_count.checked_add(1) else {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "scan.evidence_limit",
-                    "scan evidence frame accounting overflowed; later frames were omitted",
-                ),
-            );
-            return false;
-        };
-        let Some(next_byte_count) = self.retained_byte_count.checked_add(frame.bytes.len()) else {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "scan.evidence_limit",
-                    "scan evidence byte accounting overflowed; later frames were omitted",
-                ),
-            );
-            return false;
-        };
-        if next_frame_count > limits.max_evidence_frames
-            || next_byte_count > limits.max_evidence_bytes
-        {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "scan.evidence_limit",
-                    format!(
-                        "scan evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-                        limits.max_evidence_frames, limits.max_evidence_bytes
-                    ),
-                ),
-            );
-            return false;
+fn retain_scan_evidence(
+    budget: &mut EvidenceBudget,
+    frame: &Frame,
+    limits: ScanLimits,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let error = match budget.retain(
+        frame,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+    ) {
+        Ok(()) => return true,
+        Err(error) => error,
+    };
+    let message = match error {
+        EvidenceBudgetError::FrameCountOverflow => {
+            "scan evidence frame accounting overflowed; later frames were omitted".to_owned()
         }
-        self.retained_frame_count = next_frame_count;
-        self.retained_byte_count = next_byte_count;
-        true
-    }
+        EvidenceBudgetError::ByteCountOverflow => {
+            "scan evidence byte accounting overflowed; later frames were omitted".to_owned()
+        }
+        EvidenceBudgetError::LimitExceeded => format!(
+            "scan evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+            limits.max_evidence_frames, limits.max_evidence_bytes
+        ),
+    };
+    push_diagnostic_once(
+        diagnostics,
+        Diagnostic::warning("scan.evidence_limit", message),
+    );
+    false
 }
 
-#[allow(clippy::too_many_arguments)]
+struct ScanOutput {
+    evidence_budget: EvidenceBudget,
+    endpoints: Vec<ScanEndpointResult>,
+    undecoded: Vec<Frame>,
+    diagnostics: Vec<Diagnostic>,
+}
+
 fn process_batch(
     batch: &ScanBatch,
     exchange: ScanBatchExecution,
     registry: &ProtocolRegistry,
     limits: ScanLimits,
-    evidence_budget: &mut EvidenceBudget,
-    endpoints: &mut [ScanEndpointResult],
-    undecoded: &mut Vec<Frame>,
-    diagnostics: &mut Vec<Diagnostic>,
+    output: &mut ScanOutput,
 ) {
     let ScanBatchExecution {
         sent,
@@ -628,7 +610,7 @@ fn process_batch(
         stats: _,
     } = exchange;
     for diagnostic in batch_diagnostics {
-        push_diagnostic_once(diagnostics, diagnostic);
+        push_diagnostic_once(&mut output.diagnostics, diagnostic);
     }
 
     for (request_index, ((probe, built), sent_frame)) in batch
@@ -675,7 +657,8 @@ fn process_batch(
             }
         }
 
-        let endpoint = endpoints
+        let endpoint = output
+            .endpoints
             .iter_mut()
             .find(|endpoint| {
                 endpoint.address == probe.address
@@ -688,8 +671,12 @@ fn process_batch(
             let latency = candidate
                 .latency
                 .or_else(|| received_at.duration_since(sent_frame.timestamp).ok());
-            let response = evidence_budget
-                .retain(&candidate.decoded.frame, limits, diagnostics)
+            let response = retain_scan_evidence(
+                &mut output.evidence_budget,
+                &candidate.decoded.frame,
+                limits,
+                &mut output.diagnostics,
+            )
                 .then(|| candidate.decoded.frame.clone());
             if candidate.observation.classification.rank() > endpoint.classification.rank() {
                 endpoint.classification = candidate.observation.classification;
@@ -723,9 +710,9 @@ fn process_batch(
     }
 
     for frame in batch_undecoded {
-        if undecoded.len() >= limits.max_undecoded {
+        if output.undecoded.len() >= limits.max_undecoded {
             push_diagnostic_once(
-                diagnostics,
+                &mut output.diagnostics,
                 Diagnostic::warning(
                     "scan.undecoded_limit",
                     format!(
@@ -736,8 +723,13 @@ fn process_batch(
             );
             break;
         }
-        if evidence_budget.retain(&frame, limits, diagnostics) {
-            undecoded.push(frame);
+        if retain_scan_evidence(
+            &mut output.evidence_budget,
+            &frame,
+            limits,
+            &mut output.diagnostics,
+        ) {
+            output.undecoded.push(frame);
         }
     }
 }
@@ -754,16 +746,12 @@ fn select_candidate<'a>(
     sent_at: SystemTime,
     timeout: Duration,
 ) {
-    let within_deadline = match candidate.latency {
-        Some(latency) => latency <= timeout,
-        None => candidate
-            .decoded
-            .frame
-            .timestamp
-            .duration_since(sent_at)
-            .is_ok_and(|captured_latency| captured_latency <= timeout),
-    };
-    if !within_deadline {
+    if !response_within_deadline(
+        candidate.latency,
+        candidate.decoded.frame.timestamp,
+        sent_at,
+        timeout,
+    ) {
         return;
     }
     if best
@@ -787,14 +775,6 @@ fn candidate_precedes(candidate: &ResponseCandidate<'_>, current: &ResponseCandi
                                 || (candidate.decoded.frame.bytes
                                     == current.decoded.frame.bytes
                                     && preferred_latency(candidate.latency, current.latency))))))))
-}
-
-fn preferred_latency(candidate: Option<Duration>, current: Option<Duration>) -> bool {
-    match (candidate, current) {
-        (Some(candidate), Some(current)) => candidate < current,
-        (Some(_), None) => true,
-        (None, _) => false,
-    }
 }
 
 fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), ScanError> {

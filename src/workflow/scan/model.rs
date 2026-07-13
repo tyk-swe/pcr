@@ -145,15 +145,14 @@ impl ScanRequest {
                 maximum: MAX_CAPTURE_TIMEOUT,
             });
         }
-        if let Some(rate) = self.probes_per_second {
-            if rate == 0 || rate > MAX_SCAN_RATE {
+        if let Some(rate) = self.probes_per_second
+            && (rate == 0 || rate > MAX_SCAN_RATE) {
                 return Err(ScanError::InvalidLimit {
                     field: "probes_per_second",
                     value: u64::from(rate),
                     reason: format!("must be within 1..={MAX_SCAN_RATE}"),
                 });
             }
-        }
         match self.transport {
             ScanTransport::Tcp | ScanTransport::Udp if self.ports.is_empty() => {
                 return Err(ScanError::InvalidPorts {

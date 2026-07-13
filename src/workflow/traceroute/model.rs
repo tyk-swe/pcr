@@ -148,15 +148,14 @@ impl TracerouteRequest {
                 maximum: MAX_CAPTURE_TIMEOUT,
             });
         }
-        if let Some(rate) = self.probes_per_second {
-            if rate == 0 || rate > MAX_SCAN_RATE {
+        if let Some(rate) = self.probes_per_second
+            && (rate == 0 || rate > MAX_SCAN_RATE) {
                 return Err(TracerouteError::InvalidLimit {
                     field: "probes_per_second",
                     value: u64::from(rate),
                     reason: format!("must be within 1..={MAX_SCAN_RATE}"),
                 });
             }
-        }
         match (self.strategy, self.destination_port) {
             (TracerouteStrategy::Udp | TracerouteStrategy::Tcp, None) => {
                 return Err(TracerouteError::InvalidPort {

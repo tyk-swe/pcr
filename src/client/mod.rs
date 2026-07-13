@@ -12,9 +12,9 @@ pub use internal::{Client, ClientError as Error, OperationStats as Stats};
 /// Live target resolution.
 pub mod target {
     pub use super::internal::{
-        Hostname, HostnameResolver as Resolver, IpVersion, LiveTarget as Target,
-        ResolvedTarget as Resolved, SystemHostnameResolver as SystemResolver,
-        TargetResolutionError as Error, DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_RESOLVED_ADDRESSES,
+        DEFAULT_MAX_RESOLVED_ADDRESSES, Hostname, HostnameResolver as Resolver, IpVersion,
+        LiveTarget as Target, MAX_RESOLVED_ADDRESSES, ResolvedTarget as Resolved,
+        SystemHostnameResolver as SystemResolver, TargetResolutionError as Error,
     };
 }
 
@@ -31,8 +31,8 @@ pub mod send {
 /// Multi-packet capture-ready exchange contracts.
 pub mod exchange {
     pub use super::internal::{
-        ExchangeOptions as Options, ExchangeResult as Result, MatchedResponse as Response,
-        DEFAULT_MAX_UNSOLICITED_FRAMES, MAX_EXCHANGE_TIMEOUT,
+        DEFAULT_MAX_UNSOLICITED_FRAMES, ExchangeOptions as Options, ExchangeResult as Result,
+        MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response,
     };
 }
 

@@ -52,10 +52,16 @@ impl TemplateValues {
             Self::UnsignedRange {
                 start,
                 end_inclusive,
-            } => end_inclusive
-                .checked_sub(*start)
-                .and_then(|span| span.checked_add(1))
-                .and_then(|count| usize::try_from(count).ok()),
+            } => {
+                if start > end_inclusive {
+                    Some(0)
+                } else {
+                    end_inclusive
+                        .checked_sub(*start)
+                        .and_then(|span| span.checked_add(1))
+                        .and_then(|count| usize::try_from(count).ok())
+                }
+            }
             Self::Generated { count, .. } => Some(*count),
         }
     }
@@ -241,5 +247,20 @@ mod tests {
             .map(|packet| packet.unwrap().get::<Raw>().unwrap().bytes.clone())
             .collect::<Vec<_>>();
         assert_eq!(values, [Bytes::from_static(b"a"), Bytes::from_static(b"b")]);
+    }
+
+    #[test]
+    fn reversed_unsigned_range_is_empty_instead_of_overflowing() {
+        let template = PacketTemplate::new(Packet::new()).axis(
+            0,
+            "unused",
+            TemplateValues::UnsignedRange {
+                start: 2,
+                end_inclusive: 1,
+            },
+        );
+
+        assert_eq!(template.expansion_len().unwrap(), 0);
+        assert_eq!(template.expand(0).unwrap().count(), 0);
     }
 }

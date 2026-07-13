@@ -171,7 +171,7 @@ where
                 case_index: case.index,
                 source,
             })?;
-        validate_execution(case, &execution, request.limits)?;
+        validate_execution(case, &execution, request.limits, live.timeout)?;
         add_execution_stats(&mut stats, &execution.stats, case.index)?;
         if stats.bytes > request.limits.max_total_bytes as u64 {
             return Err(FuzzError::ByteLimit {

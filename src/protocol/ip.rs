@@ -25,6 +25,13 @@ use super::common::{
 const IPV4_MIN_LEN: usize = 20;
 const IPV6_LEN: usize = 40;
 
+fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
+    matches!(
+        layer.protocol_id().as_str(),
+        "ipv6_hop_by_hop" | "ipv6_destination_options" | "ipv6_fragment" | "ipv6_srh"
+    )
+}
+
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[error("invalid IPv4 options: {reason}")]
 pub(crate) struct Ipv4OptionsError {
@@ -804,6 +811,10 @@ impl LayerCodec for Ipv6Codec {
             .packet
             .iter()
             .skip(context.index + 1)
+            // Only the contiguous IPv6 extension chain belongs to this
+            // envelope. A routing header beyond a transport, opaque payload,
+            // or nested network header belongs to another protocol scope.
+            .take_while(|candidate| is_ipv6_extension_layer(*candidate))
             .find_map(|candidate| {
                 let srh = candidate
                     .as_any()
@@ -909,7 +920,7 @@ impl LayerCodec for Ipv6Codec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < IPV6_LEN {
             return Err(truncated("ipv6", IPV6_LEN, input.len()));
@@ -921,11 +932,12 @@ impl LayerCodec for Ipv6Codec {
             ));
         }
         let payload_length = usize::from(u16::from_be_bytes([input[4], input[5]]));
-        let zero_length_link_padding = payload_length == 0
-            && input.len() > IPV6_LEN
-            && input[6] == 59
-            && context.allow_trailing_padding;
-        if payload_length == 0 && input.len() > IPV6_LEN && !zero_length_link_padding {
+        // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
+        // Payload option. With any other next header, the declared IPv6
+        // payload is empty and any remaining capture bytes are outside it;
+        // the dissector will classify them as link padding or a malformed
+        // trailer according to the enclosing link context.
+        if payload_length == 0 && input.len() > IPV6_LEN && input[6] == 0 {
             return Err(CodecError::Unsupported {
                 protocol: protocol("ipv6"),
                 message: "IPv6 jumbogram payload requires a Hop-by-Hop Jumbo Payload option"
@@ -1008,16 +1020,6 @@ fn expected_next(parent: &str, context: &LayerEncodeContext<'_>, fallback: u8) -
 pub(crate) fn encode_network(
     context: &LayerEncodeContext<'_>,
 ) -> Result<NetworkEnvelope, CodecError> {
-    let segment_routing_destination = (0..context.index).rev().find_map(|index| {
-        context
-            .packet
-            .layer(index)?
-            .as_any()
-            .downcast_ref::<super::ipv6_ext::SegmentRoutingHeader>()?
-            .segments
-            .last()
-            .copied()
-    });
     for index in (0..context.index).rev() {
         let Some(layer) = context.packet.layer(index) else {
             continue;
@@ -1050,6 +1052,21 @@ pub(crate) fn encode_network(
             return Ok(network_from_addresses(source.into(), destination.into()));
         }
         if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
+            // Only routing headers inside the nearest IPv6 envelope can
+            // replace its pseudo-header destination. An SRH belonging to an
+            // outer tunnel must not affect an encapsulated transport.
+            let segment_routing_destination = ((index + 1)..context.index)
+                .filter_map(|candidate_index| context.packet.layer(candidate_index))
+                .take_while(|candidate| is_ipv6_extension_layer(*candidate))
+                .filter_map(|candidate| {
+                    candidate
+                        .as_any()
+                        .downcast_ref::<super::ipv6_ext::SegmentRoutingHeader>()?
+                        .segments
+                        .last()
+                        .copied()
+                })
+                .last();
             let source = if ipv6.source.is_unspecified() {
                 context
                     .build_context
@@ -1094,6 +1111,92 @@ pub(crate) fn encode_network(
             "transport",
             "transport checksum requires matching source and destination IP addresses",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::packet::internal::{BuildContext, BuildOptions, Builder, Packet, ProtocolRegistry};
+    use crate::protocol::builtin_impl::{BuiltinProtocols, SegmentRoutingHeader, Udp};
+
+    fn address(value: &str) -> Ipv6Addr {
+        value.parse().unwrap()
+    }
+
+    fn tunnel_registry() -> Arc<ProtocolRegistry> {
+        let mut builder = ProtocolRegistry::builder();
+        builder.module(&BuiltinProtocols).unwrap();
+        builder.bind("ipv6", 41, "ipv6", 100).unwrap();
+        builder.bind("ipv6_srh", 41, "ipv6", 100).unwrap();
+        Arc::new(builder.build().unwrap())
+    }
+
+    #[test]
+    fn outer_srh_does_not_change_inner_ipv6_udp_checksum() {
+        let inner_source = address("2001:db8:1::1");
+        let inner_destination = address("2001:db8:1::2");
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv6 {
+                next_header: WireValue::Exact(43),
+                source: address("2001:db8::1"),
+                destination: address("2001:db8::10"),
+                ..Ipv6::default()
+            })
+            .push(SegmentRoutingHeader {
+                next_header: WireValue::Exact(41),
+                segments: vec![address("2001:db8::10")],
+                ..SegmentRoutingHeader::default()
+            })
+            .push(Ipv6 {
+                source: inner_source,
+                destination: inner_destination,
+                ..Ipv6::default()
+            })
+            .push(Udp::default());
+
+        let built = Builder::new(tunnel_registry())
+            .build(packet, BuildContext::default(), BuildOptions::default())
+            .unwrap();
+        let udp_offset = 40 + 24 + 40;
+        assert_eq!(
+            super::super::common::transport_checksum(
+                network_from_addresses(inner_source.into(), inner_destination.into()),
+                17,
+                &built.bytes[udp_offset..],
+            )
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn inner_srh_does_not_override_outer_ipv6_destination() {
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv6 {
+                next_header: WireValue::Exact(41),
+                source: address("2001:db8::1"),
+                destination: address("2001:db8::2"),
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: address("2001:db8:1::1"),
+                destination: address("2001:db8:1::10"),
+                ..Ipv6::default()
+            })
+            .push(SegmentRoutingHeader {
+                segments: vec![address("2001:db8:1::10")],
+                ..SegmentRoutingHeader::default()
+            })
+            .push(Udp::default());
+
+        Builder::new(tunnel_registry())
+            .build(packet, BuildContext::default(), BuildOptions::default())
+            .unwrap();
     }
 }
 

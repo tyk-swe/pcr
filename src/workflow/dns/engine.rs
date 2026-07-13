@@ -34,11 +34,6 @@ where
                 value: u64::MAX,
                 reason: "wire-byte accounting overflowed".to_owned(),
             })?;
-    // This complete-operation gate deliberately precedes resolution and probe
-    // construction. The authorizer's resolver path independently enforces the
-    // declared hostname before every resolver side effect.
-    authorizer.authorize_operation(packet_count, maximum_wire_bytes)?;
-
     let delay = dns_rate_delay(request.queries_per_second)?;
     let worst_case = request
         .timeout
@@ -58,6 +53,10 @@ where
             limit: request.limits.max_duration,
         });
     }
+    // This complete-operation gate deliberately precedes resolution and probe
+    // construction. The authorizer's resolver path independently enforces the
+    // declared hostname before every resolver side effect.
+    authorizer.authorize_operation(packet_count, maximum_wire_bytes)?;
 
     let mut result = DnsResult {
         server: request.server.to_string(),
@@ -151,6 +150,7 @@ where
                 &matched.response,
                 Some(matched.latency),
                 sent_at,
+                request.timeout,
                 request.limits,
             );
         }
@@ -163,6 +163,7 @@ where
                 decoded,
                 None,
                 sent_at,
+                request.timeout,
                 request.limits,
             );
         }
@@ -345,9 +346,18 @@ fn consider_dns_candidate<'a>(
     decoded: &'a DecodedPacket,
     latency: Option<Duration>,
     sent_at: SystemTime,
+    timeout: Duration,
     limits: DnsLimits,
 ) {
-    if decoded.frame.timestamp.duration_since(sent_at).is_err() {
+    let within_deadline = match latency {
+        Some(latency) => latency <= timeout,
+        None => decoded
+            .frame
+            .timestamp
+            .duration_since(sent_at)
+            .is_ok_and(|captured_latency| captured_latency <= timeout),
+    };
+    if !within_deadline {
         return;
     }
     let Some(classification) = classify_dns_response(registry, probe, sent, decoded, limits) else {
@@ -356,13 +366,25 @@ fn consider_dns_candidate<'a>(
     if best.as_ref().is_none_or(|current| {
         classification.rank() > current.classification.rank()
             || (classification.rank() == current.classification.rank()
-                && decoded.frame.timestamp < current.decoded.frame.timestamp)
+                && (decoded.frame.timestamp < current.decoded.frame.timestamp
+                    || (decoded.frame.timestamp == current.decoded.frame.timestamp
+                        && (decoded.frame.bytes < current.decoded.frame.bytes
+                            || (decoded.frame.bytes == current.decoded.frame.bytes
+                                && dns_preferred_latency(latency, current.latency))))))
     }) {
         *best = Some(DnsCandidate {
             classification,
             decoded,
             latency,
         });
+    }
+}
+
+fn dns_preferred_latency(candidate: Option<Duration>, current: Option<Duration>) -> bool {
+    match (candidate, current) {
+        (Some(candidate), Some(current)) => candidate < current,
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }
 
@@ -392,7 +414,8 @@ fn validate_dns_execution(
             message: "sent packet has no complete UDP tuple".to_owned(),
         });
     };
-    if destination != probe.server_address
+    if !dns_packet_shape_matches(&execution.sent, probe.server_address)
+        || destination != probe.server_address
         || source_port != probe.source_port
         || destination_port != probe.server_port
         || raw_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
@@ -410,6 +433,24 @@ fn validate_dns_execution(
                 .to_owned(),
         });
     }
+    let sent_bytes = execution.sent_evidence.bytes.len() as u64;
+    if execution.stats.bytes != sent_bytes {
+        return Err(DnsError::InvalidEvidence {
+            attempt,
+            message: format!(
+                "successful exchange reported {} sent bytes for {sent_bytes} exact frame bytes",
+                execution.stats.bytes
+            ),
+        });
+    }
+    execution
+        .stats
+        .capture
+        .validate()
+        .map_err(|error| DnsError::InvalidEvidence {
+            attempt,
+            message: format!("capture statistics are invalid: {error}"),
+        })?;
     for response in &execution.responses {
         response
             .response
@@ -503,6 +544,26 @@ fn validate_dns_execution(
         });
     }
     Ok(())
+}
+
+fn dns_packet_shape_matches(packet: &Packet, server: IpAddr) -> bool {
+    let network = if server.is_ipv4() { "ipv4" } else { "ipv6" };
+    let protocols = packet
+        .iter()
+        .map(|layer| layer.protocol_id())
+        .collect::<Vec<_>>();
+    match protocols.as_slice() {
+        [actual_network, udp, raw] => {
+            actual_network.as_str() == network && udp.as_str() == "udp" && raw.as_str() == "raw"
+        }
+        [ethernet, actual_network, udp, raw] => {
+            ethernet.as_str() == "ethernet"
+                && actual_network.as_str() == network
+                && udp.as_str() == "udp"
+                && raw.as_str() == "raw"
+        }
+        _ => false,
+    }
 }
 
 fn dns_ip_tuple(packet: &Packet) -> Option<(IpAddr, IpAddr)> {

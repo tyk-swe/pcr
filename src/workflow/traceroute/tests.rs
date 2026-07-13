@@ -102,7 +102,7 @@ mod tests {
                     11,
                     0,
                     ipv4_udp_quote(&sent[0]),
-                    batch.probes[0].sequence + 2,
+                    batch.probes[0].sequence + 1,
                     Vec::new(),
                 )
             } else {
@@ -112,7 +112,7 @@ mod tests {
                     3,
                     3,
                     ipv4_udp_quote(&sent[0]),
-                    batch.probes[0].sequence + 2,
+                    batch.probes[0].sequence + 1,
                     Vec::new(),
                 )
             };
@@ -245,6 +245,116 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "traceroute.undecoded_limit"));
+    }
+
+    #[test]
+    fn executor_cannot_replace_the_authorized_traceroute_probe() {
+        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+        let operation = request(Target::Address(destination));
+        let batch = build_batches(&operation, destination).unwrap().remove(0);
+        let mut execution = UndecodedExecutor.execute(&batch).unwrap();
+        let mut layer2 = execution.sent[0].clone();
+        layer2
+            .insert(0, crate::protocol::internal::Ethernet::default())
+            .unwrap();
+        assert!(sent_traceroute_probe_matches(&batch.probes[0], &layer2));
+        layer2.push(crate::protocol::internal::Ethernet::default());
+        assert!(!sent_traceroute_probe_matches(&batch.probes[0], &layer2));
+        execution.stats.bytes = 0;
+        assert!(matches!(
+            validate_execution(&batch, &execution),
+            Err(TracerouteError::InvalidEvidence { sequence: 0, .. })
+        ));
+        execution.stats.bytes = execution.sent_evidence[0].bytes.len() as u64;
+        execution.sent[0].get_mut::<Ipv4>().unwrap().ttl += 1;
+
+        let error = validate_execution(&batch, &execution).unwrap_err();
+
+        assert!(matches!(
+            error,
+            TracerouteError::InvalidEvidence { sequence: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn unsolicited_hop_response_after_the_deadline_cannot_finish_the_trace() {
+        struct LateHopExecutor;
+
+        impl TracerouteExecutor for LateHopExecutor {
+            fn execute(
+                &mut self,
+                batch: &TracerouteBatch,
+            ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+                let mut execution = MixedHopExecutor.execute(batch)?;
+                for response in &mut execution.unsolicited {
+                    response.frame.timestamp += Duration::from_secs(1);
+                }
+                Ok(execution)
+            }
+        }
+
+        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+        let operation = request(Target::Address(destination));
+        let result = traceroute(
+            &operation,
+            &mut FixedAuthorizer {
+                address: destination,
+                operations: Vec::new(),
+            },
+            &default_registry().unwrap(),
+            &mut LateHopExecutor,
+            &mut NoopClock::default(),
+        )
+        .unwrap();
+
+        assert_eq!(result.completion, TracerouteCompletion::Timeout);
+        assert!(result
+            .hops
+            .iter()
+            .flat_map(|hop| &hop.probes)
+            .all(|probe| { probe.status == TracerouteProbeStatus::Timeout }));
+    }
+
+    #[test]
+    fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
+        struct PreSendMatchedExecutor;
+
+        impl TracerouteExecutor for PreSendMatchedExecutor {
+            fn execute(
+                &mut self,
+                batch: &TracerouteBatch,
+            ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+                let mut execution = MixedHopExecutor.execute(batch)?;
+                let mut response = execution.unsolicited.remove(0);
+                response.frame.timestamp = execution.sent_evidence[0]
+                    .timestamp
+                    .checked_sub(Duration::from_millis(1))
+                    .unwrap();
+                execution.responses.push(TracerouteMatchedResponse {
+                    request_index: 0,
+                    response,
+                    latency: Duration::from_millis(1),
+                });
+                Ok(execution)
+            }
+        }
+
+        let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+        let result = traceroute(
+            &request(Target::Address(destination)),
+            &mut FixedAuthorizer {
+                address: destination,
+                operations: Vec::new(),
+            },
+            &default_registry().unwrap(),
+            &mut PreSendMatchedExecutor,
+            &mut NoopClock::default(),
+        )
+        .unwrap();
+
+        let evidence = &result.hops[0].probes[0];
+        assert_eq!(evidence.status, TracerouteProbeStatus::Response);
+        assert!(evidence.received_at.unwrap() < evidence.sent_at);
     }
 
     struct ScriptedResolver {
@@ -481,6 +591,60 @@ mod tests {
             .kind,
             TracerouteResponseKind::Intermediate
         );
+    }
+
+    #[test]
+    fn tunneled_direct_reply_reaches_the_inner_destination() {
+        let registry = default_registry().unwrap();
+        let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
+        let inner_source: Ipv6Addr = "2001:db8:1::1".parse().unwrap();
+        let inner_destination: Ipv6Addr = "2001:db8:1::2".parse().unwrap();
+        let mut request = Packet::new();
+        request
+            .push(Ipv6 {
+                source: outer_source,
+                destination: outer_destination,
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_source,
+                destination: inner_destination,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: TRACEROUTE_SOURCE_PORT,
+                destination_port: DEFAULT_TRACEROUTE_UDP_PORT,
+                ..Udp::default()
+            });
+        let mut reply = Packet::new();
+        reply
+            .push(Ipv6 {
+                source: "2001:db8:ffff::1".parse().unwrap(),
+                destination: "2001:db8:ffff::2".parse().unwrap(),
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_destination,
+                destination: inner_source,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: DEFAULT_TRACEROUTE_UDP_PORT,
+                destination_port: TRACEROUTE_SOURCE_PORT,
+                ..Udp::default()
+            });
+
+        let classification = classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &request,
+            &decoded_at(reply, 2, Vec::new()),
+        )
+        .unwrap();
+
+        assert_eq!(classification.kind, TracerouteResponseKind::DestinationReached);
+        assert_eq!(classification.responder, IpAddr::V6(inner_destination));
     }
 
     #[test]

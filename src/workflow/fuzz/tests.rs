@@ -318,6 +318,7 @@ mod tests {
     struct RecordingExecutor {
         calls: usize,
         response: Option<Vec<u8>>,
+        response_delay: Duration,
         invalid_statistics: bool,
         sleep: Option<Duration>,
     }
@@ -358,10 +359,12 @@ mod tests {
                 .response
                 .as_ref()
                 .map(|bytes| {
-                    vec![
-                        Frame::new(std::time::UNIX_EPOCH, LinkType::BSD_RAW, bytes.clone())
-                            .unwrap(),
-                    ]
+                    vec![Frame::new(
+                        std::time::UNIX_EPOCH + self.response_delay,
+                        LinkType::BSD_RAW,
+                        bytes.clone(),
+                    )
+                    .unwrap()]
                 })
                 .unwrap_or_default();
             Ok(FuzzCaseExecution {
@@ -611,6 +614,35 @@ mod tests {
             &mut executor,
             &mut clock,
         );
+        assert!(matches!(result, Err(FuzzError::InvalidEvidence { .. })));
+    }
+
+    #[test]
+    fn executor_cannot_turn_a_response_after_the_case_deadline_into_success() {
+        let mut authorizer = RecordingAuthorizer::default();
+        let mut executor = RecordingExecutor {
+            response: Some(vec![0xaa]),
+            response_delay: Duration::from_millis(2),
+            ..RecordingExecutor::default()
+        };
+        let result = fuzz_live(
+            &FuzzRequest {
+                cases: 1,
+                strategies: vec![FuzzStrategy::BitFlip],
+                targets: vec!["2.bytes".parse().unwrap()],
+                ..FuzzRequest::default()
+            },
+            FuzzLiveOptions {
+                timeout: Duration::from_millis(1),
+                ..FuzzLiveOptions::default()
+            },
+            packet(),
+            registry(),
+            &mut authorizer,
+            &mut executor,
+            &mut RecordingClock::default(),
+        );
+
         assert!(matches!(result, Err(FuzzError::InvalidEvidence { .. })));
     }
 

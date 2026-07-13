@@ -10,8 +10,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::diagnostic::Diagnostic;
-use super::field::FieldValue;
-use super::layer::{FieldError, MalformedLayer, Padding, ProtocolId};
+use super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
 use super::layout::{ByteRange, LayerLayout, PacketLayout};
 use super::registry::{CodecError, LayerEncodeContext, ProtocolRegistry};
 use super::Packet;
@@ -144,13 +143,14 @@ impl Builder {
                 limit: options.max_layers,
             });
         }
-        // Reject definitely oversized byte-bearing layers before any codec
-        // duplicates their buffers. Fixed headers only increase this lower
-        // bound, so exceeding it can never produce a valid packet.
-        let reflected_bytes = reflected_byte_length(&packet)?;
-        if reflected_bytes > options.max_packet_size {
+        // Reject definitely oversized pass-through layers before their codecs
+        // duplicate the buffers. An arbitrary external byte-valued reflective
+        // field is not necessarily emitted on the wire, so it cannot safely be
+        // included in this lower bound.
+        let pass_through_bytes = pass_through_byte_length(&packet)?;
+        if pass_through_bytes > options.max_packet_size {
             return Err(BuildError::PacketSizeLimit {
-                actual: reflected_bytes,
+                actual: pass_through_bytes,
                 limit: options.max_packet_size,
             });
         }
@@ -405,26 +405,132 @@ impl Builder {
     }
 }
 
-fn reflected_byte_length(packet: &Packet) -> Result<usize, BuildError> {
+fn pass_through_byte_length(packet: &Packet) -> Result<usize, BuildError> {
     packet.iter().try_fold(0_usize, |total, layer| {
-        layer
-            .schema()
-            .fields
-            .iter()
-            .try_fold(total, |total, field| {
-                let length = match layer.field(field.name) {
-                    Some(FieldValue::Bytes(bytes)) => bytes.len(),
-                    _ => 0,
-                };
-                total.checked_add(length).ok_or(BuildError::LengthOverflow)
+        let length = layer
+            .as_any()
+            .downcast_ref::<Raw>()
+            .map(|layer| layer.bytes.len())
+            .or_else(|| {
+                layer
+                    .as_any()
+                    .downcast_ref::<Padding>()
+                    .map(|layer| layer.bytes.len())
             })
+            .or_else(|| {
+                layer
+                    .as_any()
+                    .downcast_ref::<MalformedLayer>()
+                    .map(|layer| layer.bytes.len())
+            })
+            .unwrap_or(0);
+        total.checked_add(length).ok_or(BuildError::LengthOverflow)
     })
 }
 
 #[cfg(test)]
 mod tests {
+    use std::any::Any;
+    use std::collections::BTreeMap;
+    use std::sync::OnceLock;
+
     use super::*;
+    use crate::packet::internal::{
+        DecodedLayerValue, EncodedLayer, FieldKind, FieldSchema, FieldValue, Layer, LayerCodec,
+        LayerDecodeContext, LayerSchema, RegistryBuilder,
+    };
     use crate::packet::layer::Raw;
+
+    #[derive(Clone, Debug)]
+    struct ExternalMetadata(Bytes);
+
+    impl Layer for ExternalMetadata {
+        fn schema(&self) -> &'static LayerSchema {
+            static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
+            static FIELDS: &[FieldSchema] = &[FieldSchema {
+                name: "metadata",
+                kind: FieldKind::Bytes,
+                derived: false,
+                required: false,
+                description: "Reflective metadata that is not emitted on the wire",
+            }];
+            SCHEMA.get_or_init(|| LayerSchema {
+                protocol: ProtocolId::new("external.metadata"),
+                name: "External metadata",
+                fields: FIELDS,
+            })
+        }
+
+        fn clone_box(&self) -> Box<dyn Layer> {
+            Box::new(self.clone())
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn field(&self, name: &str) -> Option<FieldValue> {
+            (name == "metadata").then(|| FieldValue::Bytes(self.0.clone()))
+        }
+
+        fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+            match (name, value) {
+                ("metadata", FieldValue::Bytes(value)) => {
+                    self.0 = value;
+                    Ok(())
+                }
+                ("metadata", _) => Err(FieldError::WrongType {
+                    protocol: self.protocol_id(),
+                    field: name.to_owned(),
+                    expected: "bytes",
+                }),
+                _ => Err(FieldError::UnknownField {
+                    protocol: self.protocol_id(),
+                    field: name.to_owned(),
+                }),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    struct ExternalMetadataCodec;
+
+    impl LayerCodec for ExternalMetadataCodec {
+        fn protocol_id(&self) -> ProtocolId {
+            ProtocolId::new("external.metadata")
+        }
+
+        fn encode(
+            &self,
+            layer: &dyn Layer,
+            _payload: &[u8],
+            _context: &LayerEncodeContext<'_>,
+        ) -> Result<EncodedLayer, CodecError> {
+            Ok(EncodedLayer::header(vec![0], layer.clone_box()))
+        }
+
+        fn decode(
+            &self,
+            input: &[u8],
+            _context: &LayerDecodeContext<'_>,
+        ) -> Result<DecodedLayerValue, CodecError> {
+            Ok(DecodedLayerValue::terminal(
+                Box::new(ExternalMetadata(Bytes::new())),
+                input.len(),
+            ))
+        }
+
+        fn make_layer(
+            &self,
+            _fields: &BTreeMap<String, FieldValue>,
+        ) -> Result<Box<dyn Layer>, CodecError> {
+            Ok(Box::new(ExternalMetadata(Bytes::new())))
+        }
+    }
 
     fn empty_registry() -> Arc<ProtocolRegistry> {
         Arc::new(ProtocolRegistry::builder().build().unwrap())
@@ -448,6 +554,27 @@ mod tests {
                 limit: 16
             })
         ));
+    }
+
+    #[test]
+    fn external_byte_fields_are_not_assumed_to_be_wire_bytes() {
+        let mut packet = Packet::new();
+        packet.push(ExternalMetadata(Bytes::from(vec![0_u8; 1024])));
+        let mut registry = RegistryBuilder::new();
+        registry.register_codec(ExternalMetadataCodec).unwrap();
+        let registry = Arc::new(registry.build().unwrap());
+
+        let built = Builder::new(registry)
+            .build(
+                packet,
+                BuildContext::default(),
+                BuildOptions {
+                    max_packet_size: 1,
+                    ..BuildOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(built.bytes.as_ref(), &[0]);
     }
 
     #[test]

@@ -30,6 +30,7 @@ fn validate_execution(
     case: &FuzzCase,
     execution: &FuzzCaseExecution,
     limits: FuzzLimits,
+    timeout: Duration,
 ) -> Result<(), FuzzError> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(FuzzError::InvalidEvidence {
@@ -82,6 +83,20 @@ fn validate_execution(
                     case_index: case.index,
                     message: format!("invalid {kind} evidence: {source}"),
                 })?;
+        }
+    }
+    for response in &execution.responses {
+        let within_deadline = response
+            .timestamp
+            .duration_since(execution.sent.timestamp)
+            .is_ok_and(|latency| latency <= timeout);
+        if !within_deadline {
+            return Err(FuzzError::InvalidEvidence {
+                case_index: case.index,
+                message: format!(
+                    "response timestamp is outside the sent frame's {timeout:?} deadline"
+                ),
+            });
         }
     }
     Ok(())

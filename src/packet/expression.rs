@@ -13,6 +13,8 @@ use super::registry::{CodecError, ProtocolRegistry};
 use super::Packet;
 
 pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
+/// Absolute recursive list nesting accepted by the expression parser.
+pub const MAX_EXPRESSION_NESTING: usize = 64;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -25,6 +27,8 @@ pub enum ExpressionError {
     LayerLimit { limit: usize },
     #[error("packet expression nesting exceeds configured limit {limit}")]
     NestingLimit { limit: usize },
+    #[error("packet expression nesting limit {value} exceeds stable maximum {maximum}")]
+    InvalidNestingLimit { value: usize, maximum: usize },
     #[error("expression syntax error at byte {offset}: {message}")]
     Syntax { offset: usize, message: String },
     #[error("unknown protocol {name} at layer {layer}")]
@@ -52,7 +56,7 @@ impl Default for ExpressionOptions {
         Self {
             max_bytes: DEFAULT_MAX_EXPRESSION_BYTES,
             max_layers: super::build::DEFAULT_MAX_LAYERS,
-            max_nesting: 64,
+            max_nesting: MAX_EXPRESSION_NESTING,
         }
     }
 }
@@ -69,6 +73,12 @@ pub fn parse_packet_expression(
         return Err(ExpressionError::SizeLimit {
             actual: input.len(),
             limit: options.max_bytes,
+        });
+    }
+    if options.max_nesting > MAX_EXPRESSION_NESTING {
+        return Err(ExpressionError::InvalidNestingLimit {
+            value: options.max_nesting,
+            maximum: MAX_EXPRESSION_NESTING,
         });
     }
     let segments = split_top_level(input, '/')?;
@@ -238,7 +248,7 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
     }
     let mut output = String::new();
     let mut escaped = false;
-    for character in input[1..input.len() - 1].chars() {
+    for (offset, character) in input[1..input.len() - 1].char_indices() {
         if escaped {
             output.push(match character {
                 'n' => '\n',
@@ -251,6 +261,11 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
             escaped = false;
         } else if character == '\\' {
             escaped = true;
+        } else if character == '"' {
+            return Err(ExpressionError::Syntax {
+                offset: offset + 1,
+                message: "unescaped quote in quoted string".to_owned(),
+            });
         } else {
             output.push(character);
         }
@@ -452,6 +467,18 @@ mod tests {
     }
 
     #[test]
+    fn quoted_values_reject_unescaped_interior_quotes() {
+        assert!(matches!(
+            parse_value_bounded(r#""a"b"c""#, 0, 64),
+            Err(ExpressionError::Syntax { .. })
+        ));
+        assert_eq!(
+            parse_value_bounded(r#""a\"b""#, 0, 64).unwrap(),
+            FieldValue::Text("a\"b".to_owned())
+        );
+    }
+
+    #[test]
     fn expression_list_nesting_is_bounded() {
         let registry = ProtocolRegistry::builder().build().unwrap();
         let error = parse_packet_expression(
@@ -464,5 +491,26 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(error, ExpressionError::NestingLimit { limit: 2 }));
+    }
+
+    #[test]
+    fn expression_nesting_limit_cannot_disable_the_stack_guard() {
+        let registry = ProtocolRegistry::builder().build().unwrap();
+        let error = parse_packet_expression(
+            "raw()",
+            &registry,
+            ExpressionOptions {
+                max_nesting: MAX_EXPRESSION_NESTING + 1,
+                ..ExpressionOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            ExpressionError::InvalidNestingLimit {
+                value,
+                maximum: MAX_EXPRESSION_NESTING,
+            } if value == MAX_EXPRESSION_NESTING + 1
+        ));
     }
 }

@@ -326,6 +326,76 @@ fn validate_execution(
             message: "matched response references a request outside the hop batch".to_owned(),
         });
     }
+    for (probe, (sent, evidence)) in batch
+        .probes
+        .iter()
+        .zip(execution.sent.iter().zip(&execution.sent_evidence))
+    {
+        if !sent_traceroute_probe_matches(probe, sent) {
+            return Err(TracerouteError::InvalidEvidence {
+                sequence: probe.sequence,
+                message:
+                    "sent packet does not preserve the traceroute destination and probe identity"
+                        .to_owned(),
+            });
+        }
+        evidence
+            .validate()
+            .map_err(|error| TracerouteError::InvalidEvidence {
+                sequence: probe.sequence,
+                message: format!("sent frame is invalid: {error}"),
+            })?;
+    }
+    let sent_bytes = execution
+        .sent_evidence
+        .iter()
+        .try_fold(0_u64, |total, frame| {
+            total.checked_add(frame.bytes.len() as u64)
+        })
+        .ok_or_else(|| TracerouteError::InvalidEvidence {
+            sequence,
+            message: "sent frame byte accounting overflowed".to_owned(),
+        })?;
+    if execution.stats.bytes != sent_bytes {
+        return Err(TracerouteError::InvalidEvidence {
+            sequence,
+            message: format!(
+                "successful exchange reported {} sent bytes for {sent_bytes} exact frame bytes",
+                execution.stats.bytes
+            ),
+        });
+    }
+    for response in &execution.responses {
+        validate_traceroute_decoded(sequence, "matched response", &response.response)?;
+        if response.latency > batch.timeout {
+            return Err(TracerouteError::InvalidEvidence {
+                sequence,
+                message: format!(
+                    "matched response latency {:?} exceeds timeout {:?}",
+                    response.latency, batch.timeout
+                ),
+            });
+        }
+    }
+    for response in &execution.unsolicited {
+        validate_traceroute_decoded(sequence, "unsolicited response", response)?;
+    }
+    for frame in &execution.undecoded {
+        frame
+            .validate()
+            .map_err(|error| TracerouteError::InvalidEvidence {
+                sequence,
+                message: format!("undecoded frame is invalid: {error}"),
+            })?;
+    }
+    execution
+        .stats
+        .capture
+        .validate()
+        .map_err(|error| TracerouteError::InvalidEvidence {
+            sequence,
+            message: format!("capture statistics are invalid: {error}"),
+        })?;
     if execution.stats.packets_attempted != batch.probes.len() as u64
         || execution.stats.packets_completed != batch.probes.len() as u64
     {
@@ -336,6 +406,113 @@ fn validate_execution(
         });
     }
     Ok(())
+}
+
+fn validate_traceroute_decoded(
+    sequence: u64,
+    kind: &str,
+    decoded: &DecodedPacket,
+) -> Result<(), TracerouteError> {
+    decoded
+        .frame
+        .validate()
+        .map_err(|error| TracerouteError::InvalidEvidence {
+            sequence,
+            message: format!("{kind} frame is invalid: {error}"),
+        })?;
+    if decoded.original != decoded.frame.bytes {
+        return Err(TracerouteError::InvalidEvidence {
+            sequence,
+            message: format!("{kind} original bytes differ from its exact frame"),
+        });
+    }
+    Ok(())
+}
+
+fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool {
+    let network_protocol = if probe.address.is_ipv4() {
+        "ipv4"
+    } else {
+        "ipv6"
+    };
+    let transport_protocol = match probe.strategy {
+        TracerouteStrategy::Tcp => "tcp",
+        TracerouteStrategy::Udp => "udp",
+        TracerouteStrategy::Icmp if probe.address.is_ipv4() => "icmpv4",
+        TracerouteStrategy::Icmp => "icmpv6",
+    };
+    if !traceroute_packet_shape_matches(sent, network_protocol, transport_protocol) {
+        return false;
+    }
+    let network_matches = match probe.address {
+        IpAddr::V4(destination) => {
+            sent.iter()
+                .filter(|layer| layer.protocol_id().as_str() == "ipv4")
+                .count()
+                == 1
+                && sent.get::<Ipv4>().is_some_and(|ipv4| {
+                    ipv4.destination == destination
+                        && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
+                        && ipv4.ttl == probe.hop_limit
+                })
+        }
+        IpAddr::V6(destination) => {
+            sent.iter()
+                .filter(|layer| layer.protocol_id().as_str() == "ipv6")
+                .count()
+                == 1
+                && sent.get::<Ipv6>().is_some_and(|ipv6| {
+                    ipv6.destination == destination
+                        && ipv6.flow_label == (probe.sequence as u32) & 0x000f_ffff
+                        && ipv6.hop_limit == probe.hop_limit
+                })
+        }
+    };
+    if !network_matches {
+        return false;
+    }
+    match probe.strategy {
+        TracerouteStrategy::Udp => sent.get::<Udp>().is_some_and(|udp| {
+            udp.source_port == TRACEROUTE_SOURCE_PORT
+                && udp.destination_port == probe.destination_port.expect("validated UDP port")
+        }),
+        TracerouteStrategy::Tcp => sent.get::<Tcp>().is_some_and(|tcp| {
+            tcp.source_port == TRACEROUTE_SOURCE_PORT
+                && tcp.destination_port == probe.destination_port.expect("validated TCP port")
+                && tcp.sequence == probe.sequence as u32
+                && tcp.flags == Tcp::SYN
+        }),
+        TracerouteStrategy::Icmp => match probe.address {
+            IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {
+                icmp.icmp_type == 8
+                    && icmp.code == 0
+                    && icmp.body == traceroute_identity(probe.sequence)
+            }),
+            IpAddr::V6(_) => sent.get::<Icmpv6>().is_some_and(|icmp| {
+                icmp.icmp_type == 128
+                    && icmp.code == 0
+                    && icmp.body == traceroute_identity(probe.sequence)
+            }),
+        },
+    }
+}
+
+fn traceroute_packet_shape_matches(sent: &Packet, network: &str, transport: &str) -> bool {
+    let protocols = sent
+        .iter()
+        .map(|layer| layer.protocol_id())
+        .collect::<Vec<_>>();
+    match protocols.as_slice() {
+        [actual_network, actual_transport] => {
+            actual_network.as_str() == network && actual_transport.as_str() == transport
+        }
+        [ethernet, actual_network, actual_transport] => {
+            ethernet.as_str() == "ethernet"
+                && actual_network.as_str() == network
+                && actual_transport.as_str() == transport
+        }
+        _ => false,
+    }
 }
 
 #[derive(Default)]
@@ -437,6 +614,7 @@ fn process_batch(
                         latency: Some(response.latency),
                     },
                     sent_frame.timestamp,
+                    batch.timeout,
                 );
             }
         }
@@ -452,6 +630,7 @@ fn process_batch(
                         latency: None,
                     },
                     sent_frame.timestamp,
+                    batch.timeout,
                 );
             }
         }
@@ -534,20 +713,53 @@ fn select_candidate<'a>(
     best: &mut Option<ResponseCandidate<'a>>,
     candidate: ResponseCandidate<'a>,
     sent_at: SystemTime,
+    timeout: Duration,
 ) {
-    if candidate
-        .decoded
-        .frame
-        .timestamp
-        .duration_since(sent_at)
-        .is_err()
-    {
+    let within_deadline = match candidate.latency {
+        Some(latency) => latency <= timeout,
+        None => candidate
+            .decoded
+            .frame
+            .timestamp
+            .duration_since(sent_at)
+            .is_ok_and(|captured_latency| captured_latency <= timeout),
+    };
+    if !within_deadline {
         return;
     }
     if best
         .as_ref()
-        .is_none_or(|current| candidate.observation.kind.rank() > current.observation.kind.rank())
+        .is_none_or(|current| traceroute_candidate_precedes(&candidate, current))
     {
         *best = Some(candidate);
+    }
+}
+
+fn traceroute_candidate_precedes(
+    candidate: &ResponseCandidate<'_>,
+    current: &ResponseCandidate<'_>,
+) -> bool {
+    let candidate_rank = candidate.observation.kind.rank();
+    let current_rank = current.observation.kind.rank();
+    candidate_rank > current_rank
+        || (candidate_rank == current_rank
+            && (candidate.decoded.frame.timestamp < current.decoded.frame.timestamp
+                || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
+                    && (candidate.observation.responder < current.observation.responder
+                        || (candidate.observation.responder == current.observation.responder
+                            && (candidate.decoded.frame.bytes < current.decoded.frame.bytes
+                                || (candidate.decoded.frame.bytes
+                                    == current.decoded.frame.bytes
+                                    && traceroute_preferred_latency(
+                                        candidate.latency,
+                                        current.latency,
+                                    ))))))))
+}
+
+fn traceroute_preferred_latency(candidate: Option<Duration>, current: Option<Duration>) -> bool {
+    match (candidate, current) {
+        (Some(candidate), Some(current)) => candidate < current,
+        (Some(_), None) => true,
+        (None, _) => false,
     }
 }

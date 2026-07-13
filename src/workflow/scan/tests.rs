@@ -255,6 +255,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn aggregate_duration_precedes_operation_authorization() {
+        struct CountingAuthorizer {
+            operation_calls: usize,
+        }
+
+        impl Authorizer for CountingAuthorizer {
+            fn resolve_and_authorize(
+                &mut self,
+                target: &Target,
+            ) -> Result<crate::workflow::target::Authorized, AuthorizationError> {
+                Ok(crate::workflow::target::Authorized {
+                    declared: target.to_string(),
+                    addresses: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
+                })
+            }
+
+            fn authorize_operation(
+                &mut self,
+                _packets: u64,
+                _maximum_wire_bytes: u64,
+            ) -> Result<(), AuthorizationError> {
+                self.operation_calls += 1;
+                Ok(())
+            }
+        }
+
+        let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        operation.limits.max_duration = Duration::from_micros(1);
+        let mut authorizer = CountingAuthorizer { operation_calls: 0 };
+        let error = scan(
+            &operation,
+            &mut authorizer,
+            &default_registry().unwrap(),
+            &mut CountingRejectExecutor {
+                calls: Arc::new(AtomicUsize::new(0)),
+            },
+            &mut NoopClock,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ScanError::DurationLimit { .. }));
+        assert_eq!(authorizer.operation_calls, 0);
+    }
+
     struct TimeoutExecutor {
         batches: Vec<Vec<(u32, Vec<Option<u16>>)>>,
     }
@@ -343,13 +388,16 @@ mod tests {
             let mut result = self.0.execute(batch)?;
             let local = Ipv4Addr::new(10, 0, 0, 1);
             let remote = Ipv4Addr::new(10, 0, 0, 2);
+            let latency = Duration::from_millis(4);
+            let mut response = decoded(
+                tcp_packet(remote, local, 80, 50_000, Tcp::SYN | Tcp::ACK),
+                Vec::new(),
+            );
+            response.frame.timestamp = result.sent_evidence[0].timestamp + latency;
             result.responses.push(ScanMatchedResponse {
                 request_index: 0,
-                response: decoded(
-                    tcp_packet(remote, local, 80, 50_000, Tcp::SYN | Tcp::ACK),
-                    Vec::new(),
-                ),
-                latency: Duration::from_millis(4),
+                response,
+                latency,
             });
             Ok(result)
         }
@@ -443,7 +491,8 @@ mod tests {
     #[test]
     fn correlated_response_becomes_exact_open_evidence() {
         let registry = default_registry().unwrap();
-        let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        operation.timeout = Duration::from_millis(10);
         let resolver = ScriptedResolver::new([]);
         let policy = private_policy();
         let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
@@ -469,6 +518,169 @@ mod tests {
         assert!(endpoint.evidence[0].response.is_some());
     }
 
+    #[test]
+    fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
+        struct PreSendMatchedExecutor;
+
+        impl ScanExecutor for PreSendMatchedExecutor {
+            fn execute(
+                &mut self,
+                batch: &ScanBatch,
+            ) -> Result<ScanBatchExecution, ScanExecutionError> {
+                let mut execution = OpenTcpExecutor(TimeoutExecutor::new()).execute(batch)?;
+                execution.responses[0].response.frame.timestamp = execution.sent_evidence[0]
+                    .timestamp
+                    .checked_sub(Duration::from_millis(1))
+                    .unwrap();
+                Ok(execution)
+            }
+        }
+
+        let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        operation.timeout = Duration::from_millis(10);
+        let result = scan(
+            &operation,
+            &mut PolicyAuthorizer::new(&private_policy(), &ScriptedResolver::new([])),
+            &default_registry().unwrap(),
+            &mut PreSendMatchedExecutor,
+            &mut NoopClock,
+        )
+        .unwrap();
+
+        let evidence = &result.endpoints[0].evidence[0];
+        assert_eq!(evidence.status, ScanProbeStatus::Response);
+        assert!(evidence.received_at.unwrap() < evidence.sent_at);
+    }
+
+    #[test]
+    fn executor_cannot_replace_the_authorized_scan_probe() {
+        let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        let batch = build_batches(&operation, &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))], &[80])
+            .unwrap()
+            .remove(0);
+        let mut execution = TimeoutExecutor::new().execute(&batch).unwrap();
+        let mut layer2 = execution.sent[0].clone();
+        layer2
+            .insert(0, crate::protocol::internal::Ethernet::default())
+            .unwrap();
+        assert!(sent_scan_probe_matches(&batch.probes[0], &layer2));
+        layer2.push(crate::protocol::internal::Ethernet::default());
+        assert!(!sent_scan_probe_matches(&batch.probes[0], &layer2));
+        execution.stats.bytes = 0;
+        assert!(matches!(
+            validate_exchange_evidence(&batch, &execution),
+            Err(ScanError::InvalidEvidence { sequence: 0, .. })
+        ));
+        execution.stats.bytes = execution.sent_evidence[0].bytes.len() as u64;
+        execution.sent[0].get_mut::<Ipv4>().unwrap().destination = Ipv4Addr::new(10, 0, 0, 99);
+
+        let error = validate_exchange_evidence(&batch, &execution).unwrap_err();
+
+        assert!(matches!(
+            error,
+            ScanError::InvalidEvidence { sequence: 0, .. }
+        ));
+    }
+
+    #[test]
+    fn unsolicited_response_after_the_probe_deadline_remains_a_timeout() {
+        struct LateResponseExecutor(TimeoutExecutor);
+
+        impl ScanExecutor for LateResponseExecutor {
+            fn execute(
+                &mut self,
+                batch: &ScanBatch,
+            ) -> Result<ScanBatchExecution, ScanExecutionError> {
+                let mut execution = self.0.execute(batch)?;
+                execution.unsolicited.push(decoded(
+                    tcp_packet(
+                        Ipv4Addr::new(10, 0, 0, 2),
+                        Ipv4Addr::new(10, 0, 0, 1),
+                        80,
+                        50_000,
+                        Tcp::SYN | Tcp::ACK,
+                    ),
+                    Vec::new(),
+                ));
+                Ok(execution)
+            }
+        }
+
+        let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        let result = scan(
+            &operation,
+            &mut PolicyAuthorizer::new(&private_policy(), &ScriptedResolver::new([])),
+            &default_registry().unwrap(),
+            &mut LateResponseExecutor(TimeoutExecutor::new()),
+            &mut NoopClock,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.endpoints[0].classification,
+            ScanClassification::Timeout
+        );
+        assert_eq!(
+            result.endpoints[0].evidence[0].status,
+            ScanProbeStatus::Timeout
+        );
+    }
+
+    #[test]
+    fn equal_rank_candidates_choose_earliest_evidence_independent_of_source_list() {
+        struct ReorderedResponses(TimeoutExecutor);
+
+        impl ScanExecutor for ReorderedResponses {
+            fn execute(
+                &mut self,
+                batch: &ScanBatch,
+            ) -> Result<ScanBatchExecution, ScanExecutionError> {
+                let mut execution = self.0.execute(batch)?;
+                let reply = || {
+                    decoded(
+                        tcp_packet(
+                            Ipv4Addr::new(10, 0, 0, 2),
+                            Ipv4Addr::new(10, 0, 0, 1),
+                            80,
+                            50_000,
+                            Tcp::SYN | Tcp::ACK,
+                        ),
+                        Vec::new(),
+                    )
+                };
+                let mut later = reply();
+                later.frame.timestamp =
+                    execution.sent_evidence[0].timestamp + Duration::from_millis(5);
+                let mut earlier = reply();
+                earlier.frame.timestamp =
+                    execution.sent_evidence[0].timestamp + Duration::from_millis(2);
+                execution.responses.push(ScanMatchedResponse {
+                    request_index: 0,
+                    response: later,
+                    latency: Duration::from_millis(5),
+                });
+                execution.unsolicited.push(earlier);
+                Ok(execution)
+            }
+        }
+
+        let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        operation.timeout = Duration::from_millis(10);
+        let result = scan(
+            &operation,
+            &mut PolicyAuthorizer::new(&private_policy(), &ScriptedResolver::new([])),
+            &default_registry().unwrap(),
+            &mut ReorderedResponses(TimeoutExecutor::new()),
+            &mut NoopClock,
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.endpoints[0].evidence[0].latency,
+            Some(Duration::from_millis(2))
+        );
+    }
+
     fn tcp_packet(
         source: Ipv4Addr,
         destination: Ipv4Addr,
@@ -487,11 +699,7 @@ mod tests {
                 source_port,
                 destination_port,
                 flags,
-                acknowledgment: if flags & Tcp::ACK != 0 {
-                    1
-                } else {
-                    0
-                },
+                acknowledgment: if flags & Tcp::ACK != 0 { 1 } else { 0 },
                 ..Tcp::default()
             });
         packet
@@ -628,6 +836,60 @@ mod tests {
             .classification,
             ScanClassification::Open
         );
+    }
+
+    #[test]
+    fn tunneled_direct_reply_reports_the_inner_responder() {
+        let registry = default_registry().unwrap();
+        let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
+        let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
+        let inner_source: Ipv6Addr = "2001:db8:1::1".parse().unwrap();
+        let inner_destination: Ipv6Addr = "2001:db8:1::2".parse().unwrap();
+        let mut request = Packet::new();
+        request
+            .push(Ipv6 {
+                source: outer_source,
+                destination: outer_destination,
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_source,
+                destination: inner_destination,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 50_000,
+                destination_port: 53,
+                ..Udp::default()
+            });
+        let mut reply = Packet::new();
+        reply
+            .push(Ipv6 {
+                source: "2001:db8:ffff::1".parse().unwrap(),
+                destination: "2001:db8:ffff::2".parse().unwrap(),
+                ..Ipv6::default()
+            })
+            .push(Ipv6 {
+                source: inner_destination,
+                destination: inner_source,
+                ..Ipv6::default()
+            })
+            .push(Udp {
+                source_port: 53,
+                destination_port: 50_000,
+                ..Udp::default()
+            });
+
+        let classification = classify_scan_response(
+            &registry,
+            ScanTransport::Udp,
+            &request,
+            &decoded(reply, Vec::new()),
+        )
+        .unwrap();
+
+        assert_eq!(classification.classification, ScanClassification::Open);
+        assert_eq!(classification.responder, IpAddr::V6(inner_destination));
     }
 
     fn ipv4_quote(

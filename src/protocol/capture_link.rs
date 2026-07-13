@@ -256,7 +256,7 @@ impl LayerCodec for BsdNullCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
-        decode_family(input, false)
+        decode_family("bsd_null", input, false)
     }
 
     fn make_layer(
@@ -298,7 +298,7 @@ impl LayerCodec for BsdLoopCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
-        decode_family(input, true)
+        decode_family("bsd_loop", input, true)
     }
 
     fn make_layer(
@@ -309,9 +309,13 @@ impl LayerCodec for BsdLoopCodec {
     }
 }
 
-fn decode_family(input: &[u8], network_order: bool) -> Result<DecodedLayerValue, CodecError> {
+fn decode_family(
+    name: &str,
+    input: &[u8],
+    network_order: bool,
+) -> Result<DecodedLayerValue, CodecError> {
     if input.len() < 4 {
-        return Err(truncated("bsd_null", 4, input.len()));
+        return Err(truncated(name, 4, input.len()));
     }
     let bytes = [input[0], input[1], input[2], input[3]];
     let big = u32::from_be_bytes(bytes);
@@ -670,6 +674,9 @@ impl LayerCodec for LinuxSllCodec {
             .as_any()
             .downcast_ref::<LinuxSll>()
             .ok_or_else(|| wrong_layer("linux_sll", layer))?;
+        if layer.address_length > 8 {
+            return Err(invalid("linux_sll", "address length exceeds slot"));
+        }
         let mut diagnostics = Vec::new();
         let expected = expected_protocol("linux_sll", context);
         validate_auto_raw_discriminator(
@@ -768,6 +775,9 @@ impl LayerCodec for LinuxSll2Codec {
             .as_any()
             .downcast_ref::<LinuxSll2>()
             .ok_or_else(|| wrong_layer("linux_sll2", layer))?;
+        if layer.address_length > 8 {
+            return Err(invalid("linux_sll2", "address length exceeds slot"));
+        }
         let mut diagnostics = Vec::new();
         let expected = expected_protocol("linux_sll2", context);
         validate_auto_raw_discriminator(
@@ -901,6 +911,42 @@ mod tests {
             .unwrap()
             .bytes
             .to_vec()
+    }
+
+    #[test]
+    fn truncated_loopback_header_reports_the_selected_protocol() {
+        assert!(matches!(
+            decode_family("bsd_loop", &[0, 0, 0], true),
+            Err(CodecError::Truncated {
+                protocol: actual,
+                needed: 4,
+                available: 3,
+            }) if actual == protocol("bsd_loop")
+        ));
+    }
+
+    #[test]
+    fn cooked_link_build_rejects_address_length_beyond_wire_slot() {
+        let registry = Arc::new(default_registry().unwrap());
+        let builder = Builder::new(registry);
+
+        let mut sll = Packet::new();
+        sll.push(LinuxSll {
+            address_length: 9,
+            ..LinuxSll::default()
+        });
+        assert!(builder
+            .build(sll, BuildContext::default(), BuildOptions::default())
+            .is_err());
+
+        let mut sll2 = Packet::new();
+        sll2.push(LinuxSll2 {
+            address_length: 9,
+            ..LinuxSll2::default()
+        });
+        assert!(builder
+            .build(sll2, BuildContext::default(), BuildOptions::default())
+            .is_err());
     }
 
     #[test]

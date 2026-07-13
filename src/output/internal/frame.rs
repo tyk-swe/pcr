@@ -15,33 +15,44 @@ impl TryFrom<SystemTime> for OutputTimestamp {
                     .map_err(|_| OutputContractError::TimestampOutOfRange)?,
                 nanoseconds: duration.subsec_nanos(),
             }),
-            Err(source) => {
-                let duration = source.duration();
-                if duration.subsec_nanos() == 0 {
-                    let unix_seconds = if duration.as_secs() == i64::MAX as u64 + 1 {
-                        i64::MIN
-                    } else {
-                        i64::try_from(duration.as_secs())
-                            .ok()
-                            .and_then(i64::checked_neg)
-                            .ok_or(OutputContractError::TimestampOutOfRange)?
-                    };
-                    Ok(Self {
-                        unix_seconds,
-                        nanoseconds: 0,
-                    })
-                } else {
-                    let seconds = i64::try_from(duration.as_secs())
-                        .map_err(|_| OutputContractError::TimestampOutOfRange)?;
-                    Ok(Self {
-                        unix_seconds: seconds
-                            .checked_add(1)
-                            .and_then(i64::checked_neg)
-                            .ok_or(OutputContractError::TimestampOutOfRange)?,
-                        nanoseconds: 1_000_000_000 - duration.subsec_nanos(),
-                    })
-                }
+            Err(source) => Self::from_pre_epoch_duration(source.duration()),
+        }
+    }
+}
+
+impl OutputTimestamp {
+    fn from_pre_epoch_duration(duration: Duration) -> Result<Self, OutputContractError> {
+        if duration.subsec_nanos() == 0 {
+            let unix_seconds = if duration.as_secs() == i64::MAX as u64 + 1 {
+                i64::MIN
+            } else {
+                i64::try_from(duration.as_secs())
+                    .ok()
+                    .and_then(i64::checked_neg)
+                    .ok_or(OutputContractError::TimestampOutOfRange)?
+            };
+            Ok(Self {
+                unix_seconds,
+                nanoseconds: 0,
+            })
+        } else {
+            let seconds = duration.as_secs();
+            if seconds > i64::MAX as u64 {
+                return Err(OutputContractError::TimestampOutOfRange);
             }
+            // A fractional instant before the epoch is represented with
+            // floor seconds. `i64::MAX` seconds plus a fraction therefore
+            // maps to `(i64::MIN, positive nanos)`, which is still inside the
+            // v1 signed-seconds range.
+            let unix_seconds = if seconds == i64::MAX as u64 {
+                i64::MIN
+            } else {
+                -(seconds as i64 + 1)
+            };
+            Ok(Self {
+                unix_seconds,
+                nanoseconds: 1_000_000_000 - duration.subsec_nanos(),
+            })
         }
     }
 }

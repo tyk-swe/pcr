@@ -32,6 +32,34 @@ mod tests {
     }
 
     #[test]
+    fn classic_pcap_rejects_zero_snapshot_length() {
+        assert!(matches!(
+            Writer::pcap_with_options(
+                Vec::new(),
+                LinkType::ETHERNET,
+                Endianness::Little,
+                0,
+                DEFAULT_SIZE_LIMIT,
+            ),
+            Err(Error::InvalidData {
+                format: Format::Pcap,
+                reason: "snapshot length must be non-zero",
+            })
+        ));
+
+        let writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+        let mut bytes = writer.into_inner();
+        bytes[16..20].copy_from_slice(&0_u32.to_le_bytes());
+        assert!(matches!(
+            Reader::new(Cursor::new(bytes)),
+            Err(Error::InvalidData {
+                format: Format::Pcap,
+                reason: "snapshot length must be non-zero",
+            })
+        ));
+    }
+
+    #[test]
     fn reads_independent_little_endian_microsecond_fixture() {
         let fixture = [
             // Classic PCAP global header, version 2.4, snaplen 64, Ethernet.
@@ -170,6 +198,34 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn bounded_transcode_preserves_snaplen_larger_than_actual_block_limit() {
+        let mut writer = Writer::pcapng(Vec::new()).unwrap();
+        let interface = writer
+            .add_interface_with_snaplen(LinkType::ETHERNET, 65_535)
+            .unwrap();
+        let mut original = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]);
+        original.interface = Some(interface);
+        writer.write_frame(&original).unwrap();
+
+        // The 64-byte processing limit bounds allocated blocks and actual
+        // records, not the interface's advertised wire snap length.
+        let mut source = Reader::with_limit(Cursor::new(writer.into_inner()), 64).unwrap();
+        let (bytes, report) = transcode(
+            &mut source,
+            Vec::new(),
+            Format::PcapNg,
+            Limits::default(),
+        )
+        .unwrap();
+        assert_eq!(report.interfaces, 1);
+
+        let mut copied = Reader::with_limit(Cursor::new(bytes), 64).unwrap();
+        assert_eq!(copied.next_frame().unwrap(), Some(original));
+        assert_eq!(copied.interfaces()[0].snap_len, 65_535);
+        assert_eq!(copied.next_frame().unwrap(), None);
     }
 
     #[test]
@@ -457,13 +513,30 @@ mod tests {
 
         let mut bytes = first_writer.into_inner();
         bytes.extend_from_slice(&second_writer.into_inner());
-        let mut reader = Reader::with_limits(Cursor::new(bytes.clone()), DEFAULT_SIZE_LIMIT, 1)
-            .unwrap();
-        assert_eq!(reader.next_frame().unwrap(), Some(first));
+        let mut reader =
+            Reader::with_limits(Cursor::new(bytes.clone()), DEFAULT_SIZE_LIMIT, 1).unwrap();
+        assert_eq!(reader.next_frame().unwrap(), Some(first.clone()));
         let mut global_second = second;
         global_second.interface = Some(1);
-        assert_eq!(reader.next_frame().unwrap(), Some(global_second));
+        assert_eq!(reader.next_frame().unwrap(), Some(global_second.clone()));
         assert_eq!(reader.next_frame().unwrap(), None);
+
+        let mut source = Reader::with_all_resource_limits(
+            Cursor::new(bytes.clone()),
+            DEFAULT_SIZE_LIMIT,
+            1,
+            2,
+            DEFAULT_METADATA_BLOCK_LIMIT,
+        )
+        .unwrap();
+        let (transcoded, report) =
+            transcode(&mut source, Vec::new(), Format::PcapNg, Limits::default()).unwrap();
+        assert_eq!(report.interfaces, 2);
+        let mut normalized =
+            Reader::with_limits(Cursor::new(transcoded), DEFAULT_SIZE_LIMIT, 2).unwrap();
+        assert_eq!(normalized.next_frame().unwrap(), Some(first));
+        assert_eq!(normalized.next_frame().unwrap(), Some(global_second));
+        assert_eq!(normalized.next_frame().unwrap(), None);
 
         let mut total_limited = Reader::with_all_resource_limits(
             Cursor::new(bytes),
@@ -594,6 +667,58 @@ mod tests {
         assert!(matches!(
             reader.next_frame(),
             Err(Error::MetadataBlockLimit { limit: 1 })
+        ));
+    }
+
+    #[test]
+    fn pcapng_rejects_nonzero_alignment_padding_and_duplicate_singletons() {
+        let mut interface_writer = Writer::pcapng(Vec::new()).unwrap();
+        interface_writer.add_interface(LinkType::ETHERNET).unwrap();
+        let interface_bytes = interface_writer.into_inner();
+
+        let mut bad_option_padding = interface_bytes.clone();
+        bad_option_padding[49] = 1;
+        let mut reader = Reader::new(Cursor::new(bad_option_padding)).unwrap();
+        assert!(matches!(
+            reader.next_frame(),
+            Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "option padding is non-zero",
+            })
+        ));
+
+        let mut duplicate_resolution = interface_bytes;
+        let duplicate = duplicate_resolution[44..52].to_vec();
+        duplicate_resolution.splice(52..52, duplicate);
+        duplicate_resolution[32..36].copy_from_slice(&40_u32.to_le_bytes());
+        duplicate_resolution[64..68].copy_from_slice(&40_u32.to_le_bytes());
+        let mut reader = Reader::new(Cursor::new(duplicate_resolution)).unwrap();
+        assert!(matches!(
+            reader.next_frame(),
+            Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "if_tsresol option appears more than once",
+            })
+        ));
+
+        let mut packet_writer = Writer::new(
+            Vec::new(),
+            Format::PcapNg,
+            LinkType::ETHERNET,
+        )
+        .unwrap();
+        let mut packet = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]);
+        packet.interface = Some(0);
+        packet_writer.write_frame(&packet).unwrap();
+        let mut bad_packet_padding = packet_writer.into_inner();
+        bad_packet_padding[89] = 1;
+        let mut reader = Reader::new(Cursor::new(bad_packet_padding)).unwrap();
+        assert!(matches!(
+            reader.next_frame(),
+            Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "packet data padding is non-zero",
+            })
         ));
     }
 

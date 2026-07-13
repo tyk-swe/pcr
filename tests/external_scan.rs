@@ -52,7 +52,7 @@ impl Executor for TimeoutExecutor {
         let sent = Frame::new(
             UNIX_EPOCH + Duration::from_secs(1),
             LinkType::RAW,
-            vec![0x45],
+            vec![0x45; 40],
         )
         .unwrap();
         Ok(Execution {

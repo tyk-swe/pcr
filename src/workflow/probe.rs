@@ -67,9 +67,15 @@ pub(super) fn observe(
     let direct_match = request
         .iter()
         .filter_map(|layer| registry.matcher(&layer.protocol_id()))
-        .map(|matcher| matcher.matches(request, &response.packet))
-        .any(|result| result.matched);
-    if direct_match {
+        .filter_map(|matcher| {
+            let result = matcher.matches(request, &response.packet);
+            result.matched.then_some((matcher, result))
+        })
+        .max_by_key(|(_, result)| result.confidence);
+    if let Some((matcher, _)) = direct_match {
+        let responder = matcher
+            .responder(request, &response.packet)
+            .unwrap_or(responder);
         let (correlation, reason) = match transport {
             Transport::Tcp => {
                 let tcp = response

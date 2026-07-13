@@ -184,6 +184,21 @@ mod tests {
     }
 
     #[test]
+    fn fractional_pre_epoch_timestamp_accepts_the_signed_seconds_minimum() {
+        assert_eq!(
+            OutputTimestamp::from_pre_epoch_duration(Duration::new(
+                i64::MAX as u64,
+                250_000_000,
+            ))
+            .unwrap(),
+            OutputTimestamp {
+                unix_seconds: i64::MIN,
+                nanoseconds: 750_000_000,
+            }
+        );
+    }
+
+    #[test]
     fn frame_results_revalidate_public_capture_fields() {
         let mut frame = Frame::new(UNIX_EPOCH, crate::capture::LinkType::RAW, vec![0_u8]).unwrap();
         frame.captured_length = 2;

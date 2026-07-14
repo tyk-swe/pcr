@@ -66,10 +66,10 @@ mod tests;
 
 pub use adapter::ClientExecutor;
 pub use classification::{ScanResponseClassification, classify_scan_response};
-pub use engine::scan;
-pub use error::ScanError;
+pub use engine::{scan, scan_observed};
+pub use error::{ScanError, ScanObservedError};
 pub use model::{
     ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanExecutionError,
     ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus,
-    ScanRequest, ScanResult, ScanTransport,
+    ScanProgress, ScanProgressObserver, ScanRequest, ScanResult, ScanTransport,
 };

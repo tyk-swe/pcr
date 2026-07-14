@@ -1,19 +1,22 @@
+use std::convert::Infallible;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use crate::capture::{Frame, LinkType};
 use crate::net::{
-    CaptureOverflowPolicy, CaptureStatistics, ExchangeIo, LiveIoError, NeighborResolver, PacketIo,
-    PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
+    CaptureOverflowPolicy, CaptureSession, CaptureStatistics, ExchangeIo, LiveIoError,
+    NeighborResolver, PacketIo, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider,
+    TransmissionFrame,
 };
 use crate::packet::internal::{
     Builder, BuiltPacket, Dissector, Packet, PacketTemplate, ProtocolRegistry,
 };
 
 use super::exchange::{
-    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext, ExchangeResult,
-    PlannedExchangePacket, PreparedExchangePacket, drain_available,
+    ActiveExchangeError, CaptureGuard, ExchangeAccumulator, ExchangeOptions,
+    ExchangeProcessContext, ExchangeResult, ObservedError, PlannedExchangePacket,
+    PreparedExchangePacket, Progress, ProgressObserver, drain_available,
 };
 use super::helpers::{
     build_context, error_after_shutdown, materialize_link_fields, materialize_link_structure,
@@ -219,6 +222,21 @@ where
         template: &PacketTemplate,
         options: ExchangeOptions,
     ) -> Result<ExchangeResult, ClientError> {
+        let mut observer = NoopExchangeObserver;
+        match self.exchange_observed(template, options, &mut observer) {
+            Ok(result) => Ok(result),
+            Err(ObservedError::Operation(error)) => Err(error),
+            Err(ObservedError::Observer(error)) => match error {},
+            Err(ObservedError::ObserverAndCaptureShutdown { observer, .. }) => match observer {},
+        }
+    }
+
+    pub fn exchange_observed<O: ProgressObserver>(
+        &self,
+        template: &PacketTemplate,
+        options: ExchangeOptions,
+        observer: &mut O,
+    ) -> Result<ExchangeResult, ObservedError<O::Error>> {
         let started = Instant::now();
         let capture_limits = options.validate()?;
         let deadline = started
@@ -232,16 +250,18 @@ where
         let policy_packet_limit =
             usize::try_from(self.policy.max_packets_per_operation).unwrap_or(usize::MAX);
         if expansion_len > policy_packet_limit {
-            return Err(TrafficPolicyError::PacketLimit {
-                actual: expansion_len as u64,
-                limit: self.policy.max_packets_per_operation,
-            }
-            .into());
+            return Err(ObservedError::Operation(
+                TrafficPolicyError::PacketLimit {
+                    actual: expansion_len as u64,
+                    limit: self.policy.max_packets_per_operation,
+                }
+                .into(),
+            ));
         }
         if expansion_len == 0 {
-            return Err(ClientError::Template {
+            return Err(ObservedError::Operation(ClientError::Template {
                 message: "template expanded to no packets".to_owned(),
-            });
+            }));
         }
         let expanded_packets = template
             .expand(options.max_template_packets)
@@ -264,11 +284,13 @@ where
             materialize_network_fields(&mut packet_to_send, &plan)?;
             materialize_link_structure(&mut packet_to_send, &plan)?;
             let context = build_context(&plan);
-            let preliminary = builder.build(
-                packet_to_send.clone(),
-                context.clone(),
-                options.send.build.clone(),
-            )?;
+            let preliminary = builder
+                .build(
+                    packet_to_send.clone(),
+                    context.clone(),
+                    options.send.build.clone(),
+                )
+                .map_err(ClientError::from)?;
             validate_mtu(&preliminary, plan.route.mtu)?;
             self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
             total_bytes = total_bytes
@@ -276,19 +298,24 @@ where
                 .ok_or(TrafficPolicyError::ByteLimit {
                     actual: u64::MAX,
                     limit: self.policy.max_bytes_per_operation,
-                })?;
+                })
+                .map_err(ClientError::from)?;
             if total_bytes > self.policy.max_bytes_per_operation {
-                return Err(TrafficPolicyError::ByteLimit {
-                    actual: total_bytes,
-                    limit: self.policy.max_bytes_per_operation,
-                }
-                .into());
+                return Err(ObservedError::Operation(
+                    TrafficPolicyError::ByteLimit {
+                        actual: total_bytes,
+                        limit: self.policy.max_bytes_per_operation,
+                    }
+                    .into(),
+                ));
             }
             if let Some(first_packet) = planned_packets.first()
                 && (first_packet.plan.route.interface != plan.route.interface
                     || first_packet.plan.mode != plan.mode)
             {
-                return Err(ClientError::HeterogeneousExchangeRoute);
+                return Err(ObservedError::Operation(
+                    ClientError::HeterogeneousExchangeRoute,
+                ));
             }
             planned_packets.push(PlannedExchangePacket {
                 packet: packet_to_send,
@@ -309,10 +336,15 @@ where
                 preliminary_build,
             } = planned_packet;
             let preliminary_len = preliminary_build.bytes.len();
-            let route = self.planner.materialize(plan, &self.neighbors)?;
+            let route = self
+                .planner
+                .materialize(plan, &self.neighbors)
+                .map_err(ClientError::from)?;
             let link_changed = materialize_link_fields(&mut packet, &route)?;
             let built = if link_changed {
-                builder.build(packet, build_context, options.send.build.clone())?
+                builder
+                    .build(packet, build_context, options.send.build.clone())
+                    .map_err(ClientError::from)?
             } else {
                 preliminary_build
             };
@@ -327,25 +359,34 @@ where
             .route
             .plan;
         if deadline.checked_duration_since(Instant::now()).is_none() {
-            return Err(LiveIoError::DeadlineExceeded {
-                operation: "preparing the exchange",
-            }
-            .into());
+            return Err(ObservedError::Operation(
+                LiveIoError::DeadlineExceeded {
+                    operation: "preparing the exchange",
+                }
+                .into(),
+            ));
         }
-        let mut capture = CaptureGuard::new(self.io.arm_capture(first_route, capture_limits)?);
+        let mut capture = CaptureGuard::new(
+            self.io
+                .arm_capture(first_route, capture_limits)
+                .map_err(ClientError::from)?,
+        );
         let readiness_timeout = match deadline.checked_duration_since(Instant::now()) {
             Some(remaining) => remaining,
             None => {
-                return Err(error_after_shutdown(
+                return Err(ObservedError::Operation(error_after_shutdown(
                     &mut capture,
                     LiveIoError::DeadlineExceeded {
                         operation: "waiting for capture readiness",
                     },
-                ));
+                )));
             }
         };
         if let Err(error) = capture.wait_ready(readiness_timeout) {
-            return Err(error_after_shutdown(&mut capture, error));
+            return Err(ObservedError::Operation(error_after_shutdown(
+                &mut capture,
+                error,
+            )));
         }
 
         let mut sent_at = Vec::with_capacity(prepared_packets.len());
@@ -369,61 +410,85 @@ where
                     deadline,
                     options: &options,
                 },
+                observer,
             ) {
-                return Err(error_after_shutdown(&mut capture, error));
+                return Err(active_error_after_shutdown(&mut capture, error));
             }
             if deadline.checked_duration_since(Instant::now()).is_none() {
-                return Err(error_after_shutdown(
+                return Err(ObservedError::Operation(error_after_shutdown(
                     &mut capture,
                     LiveIoError::DeadlineExceeded {
                         operation: "sending exchange requests",
                     },
-                ));
+                )));
             }
             let send_started = Instant::now();
             let send_wall_time = SystemTime::now();
             let frame = match TransmissionFrame::try_new(&built.bytes, route) {
                 Ok(frame) => frame,
-                Err(error) => return Err(error_after_shutdown(&mut capture, error)),
+                Err(error) => {
+                    return Err(ObservedError::Operation(error_after_shutdown(
+                        &mut capture,
+                        error,
+                    )));
+                }
             };
             let sent = match self.io.send(frame) {
                 Ok(report) => report,
-                Err(error) => return Err(error_after_shutdown(&mut capture, error)),
+                Err(error) => {
+                    return Err(ObservedError::Operation(error_after_shutdown(
+                        &mut capture,
+                        error,
+                    )));
+                }
             };
             if let Err(error) = validate_send_report(&built.bytes, &sent) {
-                return Err(error_after_shutdown(&mut capture, error));
+                return Err(ObservedError::Operation(error_after_shutdown(
+                    &mut capture,
+                    error,
+                )));
             }
             let link_type = match route.plan.mode {
                 crate::net::LinkMode::Layer2 => route.plan.route.link_type,
                 crate::net::LinkMode::Layer3 => LinkType::RAW,
                 crate::net::LinkMode::Auto => {
-                    return Err(error_after_shutdown(
+                    return Err(ObservedError::Operation(error_after_shutdown(
                         &mut capture,
                         LiveIoError::UnresolvedLinkMode,
-                    ));
+                    )));
                 }
             };
             let evidence = match Frame::new(send_wall_time, link_type, built.bytes.clone()) {
                 Ok(evidence) => evidence,
                 Err(source) => {
-                    return Err(error_after_shutdown(
+                    return Err(ObservedError::Operation(error_after_shutdown(
                         &mut capture,
                         LiveIoError::InvalidSendEvidence {
                             message: source.to_string(),
                         },
-                    ));
+                    )));
                 }
             };
             sent_at.push(send_started);
             sent_evidence.push(evidence);
             completed_sends += 1;
+            if let Err(error) = observer.observe(Progress::Sent {
+                request_index: send_index,
+                built,
+                evidence: sent_evidence.last().expect("just retained sent evidence"),
+            }) {
+                return Err(active_error_after_shutdown(
+                    &mut capture,
+                    ActiveExchangeError::Observer(error),
+                ));
+            }
             if deadline.checked_duration_since(Instant::now()).is_none() {
-                return Err(error_after_shutdown(
+                return Err(ObservedError::Operation(error_after_shutdown(
                     &mut capture,
                     LiveIoError::DeadlineExceeded {
                         operation: "sending exchange requests",
                     },
-                ));
+                )));
             }
             if let Err(error) = drain_available(
                 &mut capture,
@@ -438,8 +503,9 @@ where
                     deadline,
                     options: &options,
                 },
+                observer,
             ) {
-                return Err(error_after_shutdown(&mut capture, error));
+                return Err(active_error_after_shutdown(&mut capture, error));
             }
         }
 
@@ -452,10 +518,13 @@ where
                 Ok(Some(frame)) => frame,
                 Ok(None) => break,
                 Err(error) => {
-                    return Err(error_after_shutdown(&mut capture, error));
+                    return Err(ObservedError::Operation(error_after_shutdown(
+                        &mut capture,
+                        error,
+                    )));
                 }
             };
-            captured.process(
+            if let Err(error) = captured.process(
                 frame,
                 ExchangeProcessContext {
                     registry: &self.registry,
@@ -465,7 +534,10 @@ where
                     deadline,
                     options: &options,
                 },
-            );
+                observer,
+            ) {
+                return Err(active_error_after_shutdown(&mut capture, error));
+            }
         }
         if let Err(error) = drain_available(
             &mut capture,
@@ -480,17 +552,20 @@ where
                 deadline,
                 options: &options,
             },
+            observer,
         ) {
-            return Err(error_after_shutdown(&mut capture, error));
+            return Err(active_error_after_shutdown(&mut capture, error));
         }
-        capture.shutdown()?;
-        let capture_statistics = capture.statistics().validate()?;
+        capture.shutdown().map_err(ClientError::from)?;
+        let capture_statistics = capture.statistics().validate().map_err(ClientError::from)?;
         if capture_statistics.has_loss() {
             if capture_limits.overflow_policy == CaptureOverflowPolicy::Fail {
-                return Err(capture_statistics
-                    .evidence_loss_error()
-                    .expect("lossy capture statistics must produce a typed error")
-                    .into());
+                return Err(ObservedError::Operation(
+                    capture_statistics
+                        .evidence_loss_error()
+                        .expect("lossy capture statistics must produce a typed error")
+                        .into(),
+                ));
             }
             push_diagnostic_once(
                 &mut captured.diagnostics,
@@ -534,5 +609,30 @@ where
                 capture: capture_statistics,
             },
         })
+    }
+}
+
+struct NoopExchangeObserver;
+
+impl ProgressObserver for NoopExchangeObserver {
+    type Error = Infallible;
+
+    fn observe(&mut self, _progress: Progress<'_>) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+fn active_error_after_shutdown<C: CaptureSession, E>(
+    capture: &mut CaptureGuard<C>,
+    error: ActiveExchangeError<E>,
+) -> ObservedError<E> {
+    match error {
+        ActiveExchangeError::Operation(error) => {
+            ObservedError::Operation(error_after_shutdown(capture, error))
+        }
+        ActiveExchangeError::Observer(observer) => match capture.shutdown() {
+            Ok(()) => ObservedError::Observer(observer),
+            Err(shutdown) => ObservedError::ObserverAndCaptureShutdown { observer, shutdown },
+        },
     }
 }

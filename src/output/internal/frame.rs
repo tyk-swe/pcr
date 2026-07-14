@@ -127,6 +127,10 @@ pub struct FrameOutput {
 
 impl FrameOutput {
     pub fn try_from_frame(frame: Frame) -> Result<Self, OutputContractError> {
+        Self::try_from_frame_ref(&frame)
+    }
+
+    pub fn try_from_frame_ref(frame: &Frame) -> Result<Self, OutputContractError> {
         frame
             .validate()
             .map_err(|source| OutputContractError::InvalidFrame {

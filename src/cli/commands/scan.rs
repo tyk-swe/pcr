@@ -3,6 +3,7 @@
 
 // Scan command execution and presentation.
 
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,7 +13,7 @@ use super::arguments::ScanArgs;
 use super::capture::render_diagnostics_text;
 use super::errors::CliError;
 use super::rendering::{
-    emit_json, emit_json_compact, output_timestamp_text, spaced_hex, write_stdout_line,
+    NdjsonStream, emit_json, output_timestamp_text, spaced_hex, write_stdout_line,
 };
 use super::runtime::{
     DeferredInterface, default_registry_arc, system_client, validate_interface_selector,
@@ -107,6 +108,51 @@ pub(super) fn run_scan(
     let resolver = client::target::SystemResolver;
     let mut authorizer = workflow::scan::PolicyAuthorizer::new(&policy, &resolver);
     let mut clock = workflow::clock::System;
+    if output == output::contract::Format::Ndjson {
+        let stdout = io::stdout();
+        let mut stream = NdjsonStream::new(stdout.lock(), output::contract::Command::Scan);
+        let result = {
+            let mut observer = ScanStreamObserver {
+                stream: &mut stream,
+            };
+            workflow::scan::run_observed(
+                &request,
+                &mut authorizer,
+                &registry,
+                &mut executor,
+                &mut clock,
+                &mut observer,
+            )
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(workflow::scan::ObservedError::Operation(error)) => {
+                let error = scan_cli_error(error).at_sequence(stream.next_sequence());
+                drop(stream);
+                return Err(error);
+            }
+            Err(workflow::scan::ObservedError::Observer(error)) => {
+                drop(stream);
+                return Err(error);
+            }
+        };
+        let workflow::scan::Result {
+            target,
+            resolved_addresses,
+            endpoints: _,
+            undecoded: _,
+            diagnostics,
+            stats,
+        } = result;
+        return stream.emit_terminal(
+            output::scan::Event::Complete {
+                target,
+                resolved_addresses,
+            },
+            diagnostics,
+            stats.into(),
+        );
+    }
     let result = workflow::scan::run(
         &request,
         &mut authorizer,
@@ -128,13 +174,40 @@ pub(super) fn run_scan(
             )
             .with_stats(stats),
         ),
-        output::contract::Format::Ndjson => render_scan_stream(result, diagnostics, stats),
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Scan,
                 format: output,
             },
         )),
+    }
+}
+
+struct ScanStreamObserver<'a, W: Write> {
+    stream: &'a mut NdjsonStream<W>,
+}
+
+impl<W: Write> workflow::scan::ProgressObserver for ScanStreamObserver<'_, W> {
+    type Error = CliError;
+
+    fn observe(&mut self, progress: workflow::scan::Progress<'_>) -> Result<(), Self::Error> {
+        let event = match progress {
+            workflow::scan::Progress::EndpointComplete { target, endpoint } => {
+                output::scan::Event::Port {
+                    target: target.to_owned(),
+                    resolved_address: endpoint.address,
+                    port: output::scan::Port::try_from_endpoint_ref(endpoint).map_err(|error| {
+                        CliError::classified(error).at_sequence(self.stream.next_sequence())
+                    })?,
+                }
+            }
+            workflow::scan::Progress::Undecoded { frame } => output::scan::Event::Undecoded {
+                frame: output::frame::Captured::try_from_frame_ref(frame).map_err(|error| {
+                    CliError::classified(error).at_sequence(self.stream.next_sequence())
+                })?,
+            },
+        };
+        self.stream.emit(event, Vec::new())
     }
 }
 
@@ -278,65 +351,4 @@ fn scan_probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
         output::scan::ProbeStatus::Response => "response",
         output::scan::ProbeStatus::Timeout => "timeout",
     }
-}
-
-fn render_scan_stream(
-    result: output::scan::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
-) -> Result<(), CliError> {
-    let output::scan::Result {
-        target,
-        resolved_addresses,
-        ports,
-        undecoded,
-    } = result;
-    let mut sequence = 0_u64;
-    for port in ports {
-        let resolved_address = port
-            .evidence
-            .first()
-            .map(|evidence| evidence.destination)
-            .ok_or_else(|| {
-                CliError::new(70, "scan endpoint has no attempt evidence").at_sequence(sequence)
-            })?;
-        emit_scan_record(
-            &mut sequence,
-            output::scan::Event::Port {
-                target: target.clone(),
-                resolved_address,
-                port,
-            },
-        )?;
-    }
-    for frame in undecoded {
-        emit_scan_record(&mut sequence, output::scan::Event::Undecoded { frame })?;
-    }
-    emit_json_compact(
-        &output::envelope::Stream::success(
-            output::contract::Command::Scan,
-            sequence,
-            output::scan::Event::Complete {
-                target,
-                resolved_addresses,
-            },
-            diagnostics,
-        )
-        .with_stats(stats),
-    )
-    .map_err(|error| error.at_sequence(sequence))
-}
-
-fn emit_scan_record(sequence: &mut u64, result: output::scan::Event) -> Result<(), CliError> {
-    emit_json_compact(&output::envelope::Stream::success(
-        output::contract::Command::Scan,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|error| error.at_sequence(*sequence))?;
-    *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
-    })?;
-    Ok(())
 }

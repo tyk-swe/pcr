@@ -33,6 +33,12 @@ pub enum ScanError {
     StatisticsOverflow { sequence: u64 },
 }
 
+#[derive(Debug)]
+pub enum ScanObservedError<E> {
+    Operation(ScanError),
+    Observer(E),
+}
+
 impl ScanError {
     pub fn sequence(&self) -> Option<u64> {
         match self {

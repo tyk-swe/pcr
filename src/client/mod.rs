@@ -33,7 +33,8 @@ pub mod send {
 pub mod exchange {
     pub use super::internal::exchange::{
         DEFAULT_MAX_UNSOLICITED_FRAMES, ExchangeOptions as Options, ExchangeResult as Result,
-        MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response,
+        MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response, ObservedError, Progress,
+        ProgressObserver,
     };
 }
 

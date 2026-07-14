@@ -16,8 +16,8 @@ use packetcraftr::{
 use super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs};
 use super::errors::CliError;
 use super::rendering::{
-    capture_file_format, capture_file_frame, emit_json, emit_json_compact, emit_stderr_message,
-    spaced_hex, write_capture_file, write_stdout_line,
+    NdjsonStream, capture_file_format, capture_file_frame, emit_json, emit_json_compact,
+    emit_stderr_message, spaced_hex, write_capture_file, write_stdout_line,
 };
 use super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
@@ -399,8 +399,74 @@ pub(super) fn run_exchange(
         allow_permissive_live,
     };
     let client = system_client(Arc::clone(&registry), request.policy);
+    let template = packet::template::Template::new(request.packet);
+    if output == output::contract::Format::Ndjson {
+        let stdout = io::stdout();
+        let mut stream = NdjsonStream::new(stdout.lock(), output::contract::Command::Exchange);
+        let result = {
+            let mut observer = ExchangeStreamObserver {
+                stream: &mut stream,
+            };
+            client.exchange_observed(&template, options, &mut observer)
+        };
+        let result = match result {
+            Ok(result) => result,
+            Err(client::exchange::ObservedError::Operation(error)) => {
+                let error = CliError::classified(error).at_sequence(stream.next_sequence());
+                drop(stream);
+                return Err(error);
+            }
+            Err(client::exchange::ObservedError::Observer(error)) => {
+                drop(stream);
+                return Err(error);
+            }
+            Err(client::exchange::ObservedError::ObserverAndCaptureShutdown {
+                observer,
+                shutdown,
+            }) => {
+                let error = observer.with_cleanup(shutdown);
+                drop(stream);
+                return Err(error);
+            }
+        };
+        let client::exchange::Result {
+            sent,
+            sent_evidence: _,
+            responses: _,
+            unanswered,
+            unsolicited: _,
+            undecoded: _,
+            mut diagnostics,
+            stats,
+        } = result;
+        let unanswered = unanswered
+            .into_iter()
+            .map(|request_index| {
+                u64::try_from(request_index).map_err(|_| {
+                    CliError::classified(output::contract::Error::SequenceOverflow)
+                        .at_sequence(stream.next_sequence())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        for request_index in &unanswered {
+            stream.emit(
+                output::network::exchange::Event::Unanswered {
+                    request_index: *request_index,
+                },
+                Vec::new(),
+            )?;
+        }
+        for built in sent {
+            diagnostics.extend(built.diagnostics);
+        }
+        return stream.emit_terminal(
+            output::network::exchange::Event::Complete { unanswered },
+            diagnostics,
+            stats.into(),
+        );
+    }
     let result = client
-        .exchange(&packet::template::Template::new(request.packet), options)
+        .exchange(&template, options)
         .map_err(CliError::classified)?;
 
     if matches!(
@@ -448,7 +514,6 @@ pub(super) fn run_exchange(
             )
             .with_stats(stats),
         ),
-        output::contract::Format::Ndjson => render_exchange_stream(result, diagnostics, stats),
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Exchange,
@@ -458,85 +523,56 @@ pub(super) fn run_exchange(
     }
 }
 
-fn render_exchange_stream(
-    result: output::network::exchange::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
-) -> Result<(), CliError> {
-    let output::network::exchange::Result {
-        sent,
-        responses,
-        unanswered,
-        unsolicited,
-        undecoded,
-    } = result;
-    let mut sequence = 0_u64;
-    for (request_index, frame) in sent.into_iter().enumerate() {
-        let request_index = u64::try_from(request_index)
-            .map_err(|_| CliError::classified(output::contract::Error::SequenceOverflow))?;
-        emit_exchange_record(
-            &mut sequence,
-            output::network::exchange::Event::Sent {
-                request_index,
-                frame,
-            },
-        )?;
-    }
-    for response in responses {
-        emit_exchange_record(
-            &mut sequence,
-            output::network::exchange::Event::Response {
-                request_index: response.request_index,
-                response: response.response,
-                latency: response.latency,
-            },
-        )?;
-    }
-    for request_index in &unanswered {
-        emit_exchange_record(
-            &mut sequence,
-            output::network::exchange::Event::Unanswered {
-                request_index: *request_index,
-            },
-        )?;
-    }
-    for frame in unsolicited {
-        emit_exchange_record(
-            &mut sequence,
-            output::network::exchange::Event::Unsolicited { frame },
-        )?;
-    }
-    for frame in undecoded {
-        emit_exchange_record(
-            &mut sequence,
-            output::network::exchange::Event::Undecoded { frame },
-        )?;
-    }
-    emit_json_compact(
-        &output::envelope::Stream::success(
-            output::contract::Command::Exchange,
-            sequence,
-            output::network::exchange::Event::Complete { unanswered },
-            diagnostics,
-        )
-        .with_stats(stats),
-    )
-    .map_err(|error| error.at_sequence(sequence))
+struct ExchangeStreamObserver<'a, W: Write> {
+    stream: &'a mut NdjsonStream<W>,
 }
 
-fn emit_exchange_record(
-    sequence: &mut u64,
-    result: output::network::exchange::Event,
-) -> Result<(), CliError> {
-    emit_json_compact(&output::envelope::Stream::success(
-        output::contract::Command::Exchange,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|error| error.at_sequence(*sequence))?;
-    *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
-    })?;
-    Ok(())
+impl<W: Write> client::exchange::ProgressObserver for ExchangeStreamObserver<'_, W> {
+    type Error = CliError;
+
+    fn observe(&mut self, progress: client::exchange::Progress<'_>) -> Result<(), Self::Error> {
+        let event = match progress {
+            client::exchange::Progress::Sent {
+                request_index,
+                built,
+                evidence: _,
+            } => output::network::exchange::Event::Sent {
+                request_index: u64::try_from(request_index).map_err(|_| {
+                    CliError::classified(output::contract::Error::SequenceOverflow)
+                        .at_sequence(self.stream.next_sequence())
+                })?,
+                frame: output::frame::Wire::new(built.bytes.clone()),
+            },
+            client::exchange::Progress::Response { response } => {
+                output::network::exchange::Event::Response {
+                    request_index: u64::try_from(response.request_index).map_err(|_| {
+                        CliError::classified(output::contract::Error::SequenceOverflow)
+                            .at_sequence(self.stream.next_sequence())
+                    })?,
+                    response: output::frame::Decoded::try_from_decoded_ref(&response.response)
+                        .map_err(|error| {
+                            CliError::classified(error).at_sequence(self.stream.next_sequence())
+                        })?,
+                    latency: response.latency,
+                }
+            }
+            client::exchange::Progress::Unsolicited { response } => {
+                output::network::exchange::Event::Unsolicited {
+                    frame: output::frame::Decoded::try_from_decoded_ref(response).map_err(
+                        |error| {
+                            CliError::classified(error).at_sequence(self.stream.next_sequence())
+                        },
+                    )?,
+                }
+            }
+            client::exchange::Progress::Undecoded { frame } => {
+                output::network::exchange::Event::Undecoded {
+                    frame: output::frame::Captured::try_from_frame_ref(frame).map_err(|error| {
+                        CliError::classified(error).at_sequence(self.stream.next_sequence())
+                    })?,
+                }
+            }
+        };
+        self.stream.emit(event, Vec::new())
+    }
 }

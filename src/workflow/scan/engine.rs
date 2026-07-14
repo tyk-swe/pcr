@@ -13,10 +13,42 @@ where
     E: ScanExecutor,
     C: Clock,
 {
-    let ports = request.validate()?;
+    let mut observer = NoopScanObserver;
+    match scan_observed(
+        request,
+        authorizer,
+        registry,
+        executor,
+        clock,
+        &mut observer,
+    ) {
+        Ok(result) => Ok(result),
+        Err(ScanObservedError::Operation(error)) => Err(error),
+        Err(ScanObservedError::Observer(error)) => match error {},
+    }
+}
+
+pub fn scan_observed<A, E, C, O>(
+    request: &ScanRequest,
+    authorizer: &mut A,
+    registry: &ProtocolRegistry,
+    executor: &mut E,
+    clock: &mut C,
+    observer: &mut O,
+) -> Result<ScanResult, ScanObservedError<O::Error>>
+where
+    A: Authorizer,
+    E: ScanExecutor,
+    C: Clock,
+    O: ScanProgressObserver,
+{
+    let ports = request.validate().map_err(ScanObservedError::Operation)?;
     // Implementations must perform declared-target authorization before DNS
     // and authorize every answer before anything below constructs a ScanProbe.
-    let resolved = authorizer.resolve_and_authorize(&request.target)?;
+    let resolved = authorizer
+        .resolve_and_authorize(&request.target)
+        .map_err(ScanError::from)
+        .map_err(ScanObservedError::Operation)?;
     let mut addresses = Vec::with_capacity(resolved.addresses.len());
     for address in resolved.addresses {
         if request.address_family.accepts(address) && !addresses.contains(&address) {
@@ -24,9 +56,9 @@ where
         }
     }
     if addresses.is_empty() {
-        return Err(ScanError::AddressFamily {
+        return Err(ScanObservedError::Operation(ScanError::AddressFamily {
             family: request.address_family.label(),
-        });
+        }));
     }
 
     let endpoints_per_address = if request.transport == ScanTransport::Icmp {
@@ -42,58 +74,67 @@ where
             field: "probes",
             value: u64::MAX,
             reason: "probe-count arithmetic overflowed".to_owned(),
-        })?;
+        })
+        .map_err(ScanObservedError::Operation)?;
     if total_probes > request.limits.max_probes {
-        return Err(ScanError::InvalidLimit {
+        return Err(ScanObservedError::Operation(ScanError::InvalidLimit {
             field: "probes",
             value: total_probes as u64,
             reason: format!("exceeds max_probes={}", request.limits.max_probes),
-        });
+        }));
     }
-    let maximum_bytes = addresses.iter().try_fold(0_u64, |total, address| {
-        let per_probe = if address.is_ipv4() {
-            IPV4_PROBE_BYTES
-        } else {
-            IPV6_PROBE_BYTES
-        };
-        let address_probes = (endpoints_per_address as u64)
-            .checked_mul(u64::from(request.attempts))
-            .ok_or(ScanError::InvalidLimit {
-                field: "wire_bytes",
-                value: u64::MAX,
-                reason: "wire-byte accounting overflowed".to_owned(),
-            })?;
-        let address_bytes =
-            per_probe
-                .checked_mul(address_probes)
+    let maximum_bytes = addresses
+        .iter()
+        .try_fold(0_u64, |total, address| {
+            let per_probe = if address.is_ipv4() {
+                IPV4_PROBE_BYTES
+            } else {
+                IPV6_PROBE_BYTES
+            };
+            let address_probes = (endpoints_per_address as u64)
+                .checked_mul(u64::from(request.attempts))
                 .ok_or(ScanError::InvalidLimit {
                     field: "wire_bytes",
                     value: u64::MAX,
                     reason: "wire-byte accounting overflowed".to_owned(),
                 })?;
-        total
-            .checked_add(address_bytes)
-            .ok_or(ScanError::InvalidLimit {
-                field: "wire_bytes",
-                value: u64::MAX,
-                reason: "wire-byte accounting overflowed".to_owned(),
-            })
-    })?;
-    let worst_case = worst_case_duration(request, addresses.len(), endpoints_per_address)?;
+            let address_bytes =
+                per_probe
+                    .checked_mul(address_probes)
+                    .ok_or(ScanError::InvalidLimit {
+                        field: "wire_bytes",
+                        value: u64::MAX,
+                        reason: "wire-byte accounting overflowed".to_owned(),
+                    })?;
+            total
+                .checked_add(address_bytes)
+                .ok_or(ScanError::InvalidLimit {
+                    field: "wire_bytes",
+                    value: u64::MAX,
+                    reason: "wire-byte accounting overflowed".to_owned(),
+                })
+        })
+        .map_err(ScanObservedError::Operation)?;
+    let worst_case = worst_case_duration(request, addresses.len(), endpoints_per_address)
+        .map_err(ScanObservedError::Operation)?;
     if worst_case > request.limits.max_duration {
-        return Err(ScanError::DurationLimit {
+        return Err(ScanObservedError::Operation(ScanError::DurationLimit {
             actual: worst_case,
             limit: request.limits.max_duration,
-        });
+        }));
     }
-    authorizer.authorize_operation(total_probes as u64, maximum_bytes)?;
+    authorizer
+        .authorize_operation(total_probes as u64, maximum_bytes)
+        .map_err(ScanError::from)
+        .map_err(ScanObservedError::Operation)?;
 
     let endpoint_ports = if request.transport == ScanTransport::Icmp {
         vec![None]
     } else {
         ports.iter().copied().map(Some).collect()
     };
-    let batches = build_batches(request, &addresses, &endpoint_ports)?;
+    let batches = build_batches(request, &addresses, &endpoint_ports)
+        .map_err(ScanObservedError::Operation)?;
 
     let endpoints = addresses
         .iter()
@@ -122,33 +163,59 @@ where
             let delay = rate_delay(
                 batches[batch_index - 1].probes.len(),
                 request.probes_per_second,
-            )?;
-            clock.sleep(delay).map_err(|source| ScanError::Clock {
-                sequence,
-                message: source.to_string(),
-            })?;
-            scheduled_delay =
-                scheduled_delay
-                    .checked_add(delay)
-                    .ok_or(ScanError::DurationLimit {
-                        actual: Duration::MAX,
-                        limit: request.limits.max_duration,
-                    })?;
+            )
+            .map_err(ScanObservedError::Operation)?;
+            clock
+                .sleep(delay)
+                .map_err(|source| ScanError::Clock {
+                    sequence,
+                    message: source.to_string(),
+                })
+                .map_err(ScanObservedError::Operation)?;
+            scheduled_delay = scheduled_delay
+                .checked_add(delay)
+                .ok_or(ScanError::DurationLimit {
+                    actual: Duration::MAX,
+                    limit: request.limits.max_duration,
+                })
+                .map_err(ScanObservedError::Operation)?;
         }
         let exchange = executor
             .execute(batch)
-            .map_err(|source| ScanError::Execution { sequence, source })?;
-        validate_exchange_evidence(batch, &exchange, request.limits)?;
-        add_stats(&mut stats, &exchange.stats, sequence)?;
-        process_batch(batch, exchange, registry, request.limits, &mut output);
+            .map_err(|source| ScanError::Execution { sequence, source })
+            .map_err(ScanObservedError::Operation)?;
+        validate_exchange_evidence(batch, &exchange, request.limits)
+            .map_err(ScanObservedError::Operation)?;
+        add_stats(&mut stats, &exchange.stats, sequence).map_err(ScanObservedError::Operation)?;
+        let progress = process_batch(
+            batch,
+            exchange,
+            registry,
+            request.limits,
+            request.attempts,
+            &mut output,
+        );
+        for endpoint_index in progress.completed_endpoint_indices {
+            observer
+                .observe(ScanProgress::EndpointComplete {
+                    target: &resolved.declared,
+                    endpoint: &output.endpoints[endpoint_index],
+                })
+                .map_err(ScanObservedError::Observer)?;
+        }
+        for frame in &output.undecoded[progress.undecoded_start..progress.undecoded_end] {
+            observer
+                .observe(ScanProgress::Undecoded { frame })
+                .map_err(ScanObservedError::Observer)?;
+        }
     }
-    stats.elapsed =
-        stats
-            .elapsed
-            .checked_add(scheduled_delay)
-            .ok_or(ScanError::StatisticsOverflow {
-                sequence: total_probes.saturating_sub(1) as u64,
-            })?;
+    stats.elapsed = stats
+        .elapsed
+        .checked_add(scheduled_delay)
+        .ok_or(ScanError::StatisticsOverflow {
+            sequence: total_probes.saturating_sub(1) as u64,
+        })
+        .map_err(ScanObservedError::Operation)?;
 
     Ok(ScanResult {
         target: resolved.declared,
@@ -158,6 +225,16 @@ where
         diagnostics: output.diagnostics,
         stats,
     })
+}
+
+struct NoopScanObserver;
+
+impl ScanProgressObserver for NoopScanObserver {
+    type Error = std::convert::Infallible;
+
+    fn observe(&mut self, _progress: ScanProgress<'_>) -> Result<(), Self::Error> {
+        Ok(())
+    }
 }
 
 pub(super) fn build_batches(
@@ -503,13 +580,20 @@ struct ScanOutput {
     diagnostics: Vec<Diagnostic>,
 }
 
+struct BatchProgress {
+    completed_endpoint_indices: Vec<usize>,
+    undecoded_start: usize,
+    undecoded_end: usize,
+}
+
 fn process_batch(
     batch: &ScanBatch,
     exchange: ScanBatchExecution,
     registry: &ProtocolRegistry,
     limits: ScanLimits,
+    final_attempt: u32,
     output: &mut ScanOutput,
-) {
+) -> BatchProgress {
     let ScanBatchExecution {
         sent,
         sent_evidence,
@@ -523,6 +607,7 @@ fn process_batch(
         push_diagnostic_once(&mut output.diagnostics, diagnostic);
     }
 
+    let mut completed_endpoint_indices = Vec::new();
     for (request_index, ((probe, built), sent_frame)) in batch
         .probes
         .iter()
@@ -570,12 +655,14 @@ fn process_batch(
         let endpoint = output
             .endpoints
             .iter_mut()
-            .find(|endpoint| {
+            .enumerate()
+            .find(|(_, endpoint)| {
                 endpoint.address == probe.address
                     && endpoint.transport == probe.transport
                     && endpoint.port == probe.port
             })
             .expect("validated scan probe must have a result endpoint");
+        let (endpoint_index, endpoint) = endpoint;
         let evidence = if let Some(candidate) = best {
             let received_at = candidate.decoded.frame.timestamp;
             let latency = candidate
@@ -617,8 +704,12 @@ fn process_batch(
             }
         };
         endpoint.evidence.push(evidence);
+        if probe.attempt == final_attempt {
+            completed_endpoint_indices.push(endpoint_index);
+        }
     }
 
+    let undecoded_start = output.undecoded.len();
     for frame in batch_undecoded {
         if output.undecoded.len() >= limits.max_undecoded {
             push_diagnostic_once(
@@ -641,6 +732,11 @@ fn process_batch(
         ) {
             output.undecoded.push(frame);
         }
+    }
+    BatchProgress {
+        completed_endpoint_indices,
+        undecoded_start,
+        undecoded_end: output.undecoded.len(),
     }
 }
 
@@ -698,8 +794,9 @@ use super::{
     EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError, Frame, IPV4_PROBE_BYTES,
     IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
     ProtocolRegistry, ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult,
-    ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence,
-    ScanProbeStatus, ScanRequest, ScanResponseClassification, ScanResult, ScanTransport, Stats,
-    SystemTime, Tcp, Udp, classify_scan_response, nonzero_ipv4_identification, preferred_latency,
-    push_diagnostic_once, response_within_deadline, validate_shared_exchange_evidence,
+    ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanObservedError, ScanProbe,
+    ScanProbeEvidence, ScanProbeStatus, ScanProgress, ScanProgressObserver, ScanRequest,
+    ScanResponseClassification, ScanResult, ScanTransport, Stats, SystemTime, Tcp, Udp,
+    classify_scan_response, nonzero_ipv4_identification, preferred_latency, push_diagnostic_once,
+    response_within_deadline, validate_shared_exchange_evidence,
 };

@@ -8,6 +8,7 @@ use std::io::{self, Write};
 use packetcraftr::{
     capture::{Format, Frame, LinkType, Writer},
     output,
+    packet::diagnostic::Diagnostic,
 };
 use serde::Serialize;
 
@@ -138,6 +139,68 @@ pub(super) fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> 
     let rendered = serde_json::to_string(value)
         .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
     write_machine_line(&rendered)
+}
+
+pub(super) struct NdjsonStream<W: Write> {
+    writer: io::BufWriter<W>,
+    command: output::contract::Command,
+    next_sequence: u64,
+}
+
+impl<W: Write> NdjsonStream<W> {
+    pub(super) fn new(writer: W, command: output::contract::Command) -> Self {
+        Self {
+            writer: io::BufWriter::new(writer),
+            command,
+            next_sequence: 0,
+        }
+    }
+
+    pub(super) fn emit<T: Serialize>(
+        &mut self,
+        event: T,
+        diagnostics: Vec<Diagnostic>,
+    ) -> Result<(), CliError> {
+        let record =
+            output::envelope::Stream::success(self.command, self.next_sequence, event, diagnostics);
+        self.write_record(&record)
+    }
+
+    pub(super) fn emit_terminal<T: Serialize>(
+        &mut self,
+        event: T,
+        diagnostics: Vec<Diagnostic>,
+        stats: output::envelope::Stats,
+    ) -> Result<(), CliError> {
+        let record =
+            output::envelope::Stream::success(self.command, self.next_sequence, event, diagnostics)
+                .with_stats(stats);
+        self.write_record(&record)
+    }
+
+    pub(super) const fn next_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
+    fn write_record(&mut self, record: &impl Serialize) -> Result<(), CliError> {
+        let sequence = self.next_sequence;
+        let following = sequence.checked_add(1).ok_or_else(|| {
+            CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(sequence)
+        })?;
+        serde_json::to_writer(&mut self.writer, record).map_err(|source| {
+            let exit_code = if source.is_io() { 5 } else { 70 };
+            CliError::new(exit_code, format!("serialize output failed: {source}"))
+                .at_sequence(sequence)
+        })?;
+        self.writer
+            .write_all(b"\n")
+            .and_then(|()| self.writer.flush())
+            .map_err(|source| {
+                CliError::new(5, format!("write stdout failed: {source}")).at_sequence(sequence)
+            })?;
+        self.next_sequence = following;
+        Ok(())
+    }
 }
 
 pub(super) fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {

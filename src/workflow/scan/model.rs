@@ -248,6 +248,23 @@ pub struct ScanResult {
     pub stats: Stats,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum ScanProgress<'a> {
+    EndpointComplete {
+        target: &'a str,
+        endpoint: &'a ScanEndpointResult,
+    },
+    Undecoded {
+        frame: &'a Frame,
+    },
+}
+
+pub trait ScanProgressObserver {
+    type Error;
+
+    fn observe(&mut self, progress: ScanProgress<'_>) -> Result<(), Self::Error>;
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ScanProbe {
     pub sequence: u64,

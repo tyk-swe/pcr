@@ -18,6 +18,48 @@ use super::stats::OperationStats;
 pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
 pub const MAX_EXCHANGE_TIMEOUT: Duration = crate::net::capture::MAX_TIMEOUT;
 
+#[derive(Clone, Copy, Debug)]
+pub enum Progress<'a> {
+    Sent {
+        request_index: usize,
+        built: &'a BuiltPacket,
+        evidence: &'a Frame,
+    },
+    Response {
+        response: &'a MatchedResponse,
+    },
+    Unsolicited {
+        response: &'a DecodedPacket,
+    },
+    Undecoded {
+        frame: &'a Frame,
+    },
+}
+
+pub trait ProgressObserver {
+    type Error;
+
+    fn observe(&mut self, progress: Progress<'_>) -> Result<(), Self::Error>;
+}
+
+#[derive(Debug)]
+pub enum ObservedError<E> {
+    Operation(super::send::ClientError),
+    Observer(E),
+    ObserverAndCaptureShutdown { observer: E, shutdown: LiveIoError },
+}
+
+impl<E> From<super::send::ClientError> for ObservedError<E> {
+    fn from(value: super::send::ClientError) -> Self {
+        Self::Operation(value)
+    }
+}
+
+pub(super) enum ActiveExchangeError<E> {
+    Operation(LiveIoError),
+    Observer(E),
+}
+
 pub(super) struct CaptureGuard<C: CaptureSession> {
     inner: C,
     shutdown_attempted: bool,
@@ -149,25 +191,31 @@ pub(super) struct ExchangeProcessContext<'a> {
     pub(super) options: &'a ExchangeOptions,
 }
 
-pub(super) fn drain_available<C: CaptureSession>(
+pub(super) fn drain_available<C: CaptureSession, O: ProgressObserver>(
     capture: &mut CaptureGuard<C>,
     enforced_deadline: Option<Instant>,
     frame_limit: usize,
     captured: &mut ExchangeAccumulator,
     context: ExchangeProcessContext<'_>,
-) -> Result<(), LiveIoError> {
+    observer: &mut O,
+) -> Result<(), ActiveExchangeError<O::Error>> {
     for _ in 0..frame_limit {
         if enforced_deadline
             .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
         {
-            return Err(LiveIoError::DeadlineExceeded {
-                operation: "draining capture before all requests were sent",
-            });
+            return Err(ActiveExchangeError::Operation(
+                LiveIoError::DeadlineExceeded {
+                    operation: "draining capture before all requests were sent",
+                },
+            ));
         }
-        let Some(frame) = capture.next_captured_frame(Duration::ZERO)? else {
+        let Some(frame) = capture
+            .next_captured_frame(Duration::ZERO)
+            .map_err(ActiveExchangeError::Operation)?
+        else {
             return Ok(());
         };
-        captured.process(frame, context);
+        captured.process(frame, context, observer)?;
     }
     push_diagnostic_once(
         &mut captured.diagnostics,
@@ -192,7 +240,12 @@ impl ExchangeAccumulator {
         }
     }
 
-    pub(super) fn process(&mut self, captured: CapturedFrame, context: ExchangeProcessContext<'_>) {
+    pub(super) fn process<O: ProgressObserver>(
+        &mut self,
+        captured: CapturedFrame,
+        context: ExchangeProcessContext<'_>,
+        observer: &mut O,
+    ) -> Result<(), ActiveExchangeError<O::Error>> {
         let ExchangeProcessContext {
             registry,
             dissector,
@@ -213,8 +266,17 @@ impl ExchangeAccumulator {
                         format!("captured frame could not be decoded: {error}"),
                     ),
                 );
-                self.retain_undecoded(raw_frame, options);
-                return;
+                if self.retain_undecoded(raw_frame, options) {
+                    observer
+                        .observe(Progress::Undecoded {
+                            frame: self
+                                .undecoded
+                                .last()
+                                .expect("just retained undecoded frame"),
+                        })
+                        .map_err(ActiveExchangeError::Observer)?;
+                }
+                return Ok(());
             }
         };
         let integrity_failure = decoded.diagnostics.iter().any(|diagnostic| {
@@ -229,8 +291,17 @@ impl ExchangeAccumulator {
                     "a response with failed checksum validation was not correlated",
                 ),
             );
-            self.retain_unsolicited(decoded, options);
-            return;
+            if self.retain_unsolicited(decoded, options) {
+                observer
+                    .observe(Progress::Unsolicited {
+                        response: self
+                            .unsolicited
+                            .last()
+                            .expect("just retained unsolicited response"),
+                    })
+                    .map_err(ActiveExchangeError::Observer)?;
+            }
+            return Ok(());
         }
 
         if received_at.is_none() {
@@ -288,7 +359,7 @@ impl ExchangeAccumulator {
                         ),
                     ),
                 );
-                return;
+                return Ok(());
             }
             if reserve_capture_evidence(
                 &mut self.retained_frames,
@@ -304,6 +375,14 @@ impl ExchangeAccumulator {
                     response: decoded,
                     latency: received_at.saturating_duration_since(sent_at[request_index]),
                 });
+                observer
+                    .observe(Progress::Response {
+                        response: self
+                            .responses
+                            .last()
+                            .expect("just retained matched response"),
+                    })
+                    .map_err(ActiveExchangeError::Observer)?;
             }
         } else {
             if sent_at.len() < prepared.len() {
@@ -315,11 +394,21 @@ impl ExchangeAccumulator {
                     ),
                 );
             }
-            self.retain_unsolicited(decoded, options);
+            if self.retain_unsolicited(decoded, options) {
+                observer
+                    .observe(Progress::Unsolicited {
+                        response: self
+                            .unsolicited
+                            .last()
+                            .expect("just retained unsolicited response"),
+                    })
+                    .map_err(ActiveExchangeError::Observer)?;
+            }
         }
+        Ok(())
     }
 
-    fn retain_unsolicited(&mut self, decoded: DecodedPacket, options: &ExchangeOptions) {
+    fn retain_unsolicited(&mut self, decoded: DecodedPacket, options: &ExchangeOptions) -> bool {
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
                 &mut self.diagnostics,
@@ -331,7 +420,7 @@ impl ExchangeAccumulator {
                     ),
                 ),
             );
-            return;
+            return false;
         }
         if reserve_capture_evidence(
             &mut self.retained_frames,
@@ -342,10 +431,12 @@ impl ExchangeAccumulator {
             &mut self.diagnostics,
         ) {
             self.unsolicited.push(decoded);
+            return true;
         }
+        false
     }
 
-    fn retain_undecoded(&mut self, frame: Frame, options: &ExchangeOptions) {
+    fn retain_undecoded(&mut self, frame: Frame, options: &ExchangeOptions) -> bool {
         if self.unsolicited.len() + self.undecoded.len() >= options.max_unsolicited {
             push_diagnostic_once(
                 &mut self.diagnostics,
@@ -357,7 +448,7 @@ impl ExchangeAccumulator {
                     ),
                 ),
             );
-            return;
+            return false;
         }
         if reserve_capture_evidence(
             &mut self.retained_frames,
@@ -368,6 +459,8 @@ impl ExchangeAccumulator {
             &mut self.diagnostics,
         ) {
             self.undecoded.push(frame);
+            return true;
         }
+        false
     }
 }

@@ -49,10 +49,12 @@ pub mod scan {
         MAX_SCAN_RATE, ScanBatch as Batch, ScanBatchExecution as Execution,
         ScanClassification as Classification, ScanEndpointResult as Endpoint, ScanError as Error,
         ScanExecutionError as ExecutionError, ScanExecutor as Executor, ScanLimits as Limits,
-        ScanMatchedResponse as MatchedResponse, ScanProbe as Probe,
-        ScanProbeEvidence as ProbeEvidence, ScanProbeStatus as ProbeStatus, ScanRequest as Request,
+        ScanMatchedResponse as MatchedResponse, ScanObservedError as ObservedError,
+        ScanProbe as Probe, ScanProbeEvidence as ProbeEvidence, ScanProbeStatus as ProbeStatus,
+        ScanProgress as Progress, ScanProgressObserver as ProgressObserver, ScanRequest as Request,
         ScanResponseClassification as ResponseClassification, ScanResult as Result,
         ScanTransport as Transport, classify_scan_response as classify_response, scan as run,
+        scan_observed as run_observed,
     };
     pub use super::target_adapter::PolicyAuthorizer;
 }

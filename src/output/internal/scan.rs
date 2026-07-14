@@ -82,6 +82,53 @@ pub struct ScanPortOutput {
     pub evidence: Vec<ProbeEvidenceOutput>,
 }
 
+impl ScanPortOutput {
+    pub fn try_from_endpoint_ref(
+        endpoint: &crate::workflow::scan::Endpoint,
+    ) -> Result<Self, OutputContractError> {
+        let evidence = endpoint
+            .evidence
+            .iter()
+            .map(|evidence| {
+                let protocol = match (endpoint.transport, endpoint.address) {
+                    (crate::workflow::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
+                    (crate::workflow::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
+                    _ => endpoint.transport.as_str(),
+                };
+                Ok(ProbeEvidenceOutput {
+                    protocol: protocol.to_owned(),
+                    destination: endpoint.address,
+                    destination_port: endpoint.port,
+                    attempt: evidence.attempt,
+                    status: evidence.status.into(),
+                    classification: evidence.classification.into(),
+                    responder: evidence.responder,
+                    sent_at: evidence.sent_at.try_into()?,
+                    received_at: evidence
+                        .received_at
+                        .map(OutputTimestamp::try_from)
+                        .transpose()?,
+                    latency: evidence.latency,
+                    frame: evidence
+                        .response
+                        .as_ref()
+                        .map(FrameOutput::try_from_frame_ref)
+                        .transpose()?,
+                    reason: evidence.reason.clone(),
+                })
+            })
+            .collect::<Result<Vec<_>, OutputContractError>>()?;
+        Ok(Self {
+            // Port zero is the versioned sentinel for a portless ICMP
+            // endpoint; destination_port remains absent in evidence.
+            port: endpoint.port.unwrap_or(0),
+            transport: endpoint.transport.to_string(),
+            classification: endpoint.classification.into(),
+            evidence,
+        })
+    }
+}
+
 /// Aggregate or streamed result of `scan`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ScanCommandResult {
@@ -104,48 +151,8 @@ impl ScanCommandResult {
             stats,
         } = result;
         let port_outputs = endpoints
-            .into_iter()
-            .map(|endpoint| {
-                let evidence_outputs = endpoint
-                    .evidence
-                    .into_iter()
-                    .map(|evidence| {
-                        let protocol = match (endpoint.transport, endpoint.address) {
-                            (crate::workflow::scan::Transport::Icmp, IpAddr::V4(_)) => "icmpv4",
-                            (crate::workflow::scan::Transport::Icmp, IpAddr::V6(_)) => "icmpv6",
-                            _ => endpoint.transport.as_str(),
-                        };
-                        Ok(ProbeEvidenceOutput {
-                            protocol: protocol.to_owned(),
-                            destination: endpoint.address,
-                            destination_port: endpoint.port,
-                            attempt: evidence.attempt,
-                            status: evidence.status.into(),
-                            classification: evidence.classification.into(),
-                            responder: evidence.responder,
-                            sent_at: evidence.sent_at.try_into()?,
-                            received_at: evidence
-                                .received_at
-                                .map(OutputTimestamp::try_from)
-                                .transpose()?,
-                            latency: evidence.latency,
-                            frame: evidence
-                                .response
-                                .map(FrameOutput::try_from_frame)
-                                .transpose()?,
-                            reason: evidence.reason,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, OutputContractError>>()?;
-                Ok(ScanPortOutput {
-                    // Port zero is the versioned sentinel for a portless ICMP
-                    // endpoint; destination_port remains absent in evidence.
-                    port: endpoint.port.unwrap_or(0),
-                    transport: endpoint.transport.to_string(),
-                    classification: endpoint.classification.into(),
-                    evidence: evidence_outputs,
-                })
-            })
+            .iter()
+            .map(ScanPortOutput::try_from_endpoint_ref)
             .collect::<Result<Vec<_>, OutputContractError>>()?;
         let undecoded_frames = undecoded
             .into_iter()

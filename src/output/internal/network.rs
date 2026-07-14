@@ -454,18 +454,20 @@ pub struct DecodedFrameOutput {
 
 impl DecodedFrameOutput {
     pub fn try_from_decoded(decoded: DecodedPacket) -> Result<Self, OutputContractError> {
-        let DecodedPacket {
-            packet,
-            original: _,
-            frame,
-            layout,
-            diagnostics,
-        } = decoded;
+        Self::try_from_decoded_ref(&decoded)
+    }
+
+    pub fn try_from_decoded_ref(decoded: &DecodedPacket) -> Result<Self, OutputContractError> {
         Ok(Self {
-            frame: FrameOutput::try_from_frame(frame)?,
-            packet: PacketDocument::from_packet(&packet),
-            layout,
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+            frame: FrameOutput::try_from_frame_ref(&decoded.frame)?,
+            packet: PacketDocument::from_packet(&decoded.packet),
+            layout: decoded.layout.clone(),
+            diagnostics: decoded
+                .diagnostics
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
         })
     }
 }

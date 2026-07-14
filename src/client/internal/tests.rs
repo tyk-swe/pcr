@@ -166,7 +166,7 @@ impl NeighborResolver for FailingNeighbors {
 }
 
 #[derive(Clone)]
-struct FakeIo {
+struct ScriptedExchangeIo {
     events: Arc<Mutex<Vec<&'static str>>>,
     response: Arc<Mutex<Option<Frame>>>,
     deliver_before_send: bool,
@@ -174,7 +174,7 @@ struct FakeIo {
     capture_statistics: CaptureStatistics,
 }
 
-impl PacketIo for FakeIo {
+impl PacketIo for ScriptedExchangeIo {
     fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
         self.events.lock().unwrap().push("send");
         Ok(IoSendReport {
@@ -223,14 +223,14 @@ impl PacketIo for ChangedWireIo {
     }
 }
 
-struct FakeCapture {
+struct ScriptedExchangeCapture {
     events: Arc<Mutex<Vec<&'static str>>>,
     response: Arc<Mutex<Option<Frame>>>,
     deliver_before_send: bool,
     statistics: CaptureStatistics,
 }
 
-impl CaptureSession for FakeCapture {
+impl CaptureSession for ScriptedExchangeCapture {
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.events.lock().unwrap().push("ready");
         Ok(())
@@ -276,8 +276,8 @@ impl CaptureSession for FakeCapture {
     }
 }
 
-impl CaptureProvider for FakeIo {
-    type Capture = FakeCapture;
+impl CaptureProvider for ScriptedExchangeIo {
+    type Capture = ScriptedExchangeCapture;
 
     fn arm_capture(
         &self,
@@ -286,7 +286,7 @@ impl CaptureProvider for FakeIo {
     ) -> Result<Self::Capture, LiveIoError> {
         self.events.lock().unwrap().push("arm");
         self.limits.lock().unwrap().push(limits);
-        Ok(FakeCapture {
+        Ok(ScriptedExchangeCapture {
             events: Arc::clone(&self.events),
             response: Arc::clone(&self.response),
             deliver_before_send: self.deliver_before_send,
@@ -570,7 +570,7 @@ fn exchange_with_capture_statistics(
     statistics: CaptureStatistics,
     overflow_policy: CaptureOverflowPolicy,
 ) -> Result<ExchangeResult, ClientError> {
-    let io = FakeIo {
+    let io = ScriptedExchangeIo {
         events: Arc::new(Mutex::new(Vec::new())),
         response: Arc::new(Mutex::new(None)),
         deliver_before_send: false,
@@ -906,7 +906,7 @@ fn invalid_exchange_limits_fail_before_route_or_live_side_effects() {
     let route_calls = Arc::new(AtomicUsize::new(0));
     let neighbors = CountingNeighbors::default();
     let events = Arc::new(Mutex::new(Vec::new()));
-    let io = FakeIo {
+    let io = ScriptedExchangeIo {
         events: Arc::clone(&events),
         response: Arc::new(Mutex::new(None)),
         deliver_before_send: false,
@@ -1219,7 +1219,7 @@ fn exchange_arms_and_awaits_capture_before_send_and_matches_response() {
         .bytes;
     let events = Arc::new(Mutex::new(Vec::new()));
     let limits = Arc::new(Mutex::new(Vec::new()));
-    let io = FakeIo {
+    let io = ScriptedExchangeIo {
         events: Arc::clone(&events),
         response: Arc::new(Mutex::new(Some(
             Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response_bytes).unwrap(),
@@ -1298,7 +1298,7 @@ fn frame_captured_before_request_send_cannot_satisfy_it() {
         registry,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
-        FakeIo {
+        ScriptedExchangeIo {
             events: Arc::new(Mutex::new(Vec::new())),
             response: Arc::new(Mutex::new(Some(
                 Frame::new(std::time::SystemTime::now(), LinkType::IPV4, response_bytes).unwrap(),
@@ -1560,7 +1560,7 @@ fn exchange_retains_complete_frame_when_decode_fails() {
         registry,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
-        FakeIo {
+        ScriptedExchangeIo {
             events: Arc::new(Mutex::new(Vec::new())),
             response: Arc::new(Mutex::new(Some(invalid))),
             deliver_before_send: false,
@@ -2088,7 +2088,7 @@ fn exchange_accounts_generated_template_packets_lazily() {
         Arc::new(default_registry().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
-        FakeIo {
+        ScriptedExchangeIo {
             events: Arc::new(Mutex::new(Vec::new())),
             response: Arc::new(Mutex::new(None)),
             deliver_before_send: false,

@@ -22,10 +22,10 @@ use crate::net::{
     NeighborRequest, NeighborResolver, NeighborVlanKind, NeighborVlanTag, PlannedRoute,
 };
 
-type ResponseFactory = dyn Fn(&Bytes) -> Vec<Frame> + Send + Sync;
+type FrameResponseScript = dyn Fn(&Bytes) -> Vec<Frame> + Send + Sync;
 
 #[derive(Default)]
-struct MockState {
+struct ResolutionIoState {
     ready: bool,
     sent: Vec<Bytes>,
     planned: Vec<PlannedRoute>,
@@ -35,38 +35,38 @@ struct MockState {
 }
 
 #[derive(Default)]
-struct MockShared {
-    state: Mutex<MockState>,
+struct CoordinatedResolutionIo {
+    state: Mutex<ResolutionIoState>,
     changed: Condvar,
 }
 
-impl MockShared {
-    fn lock(&self) -> MutexGuard<'_, MockState> {
+impl CoordinatedResolutionIo {
+    fn lock(&self) -> MutexGuard<'_, ResolutionIoState> {
         self.state.lock().unwrap()
     }
 }
 
 #[derive(Clone)]
-struct MockInterfaces(InterfaceInfo);
+struct FixedInterfaceProvider(InterfaceInfo);
 
-impl InterfaceProvider for MockInterfaces {
+impl InterfaceProvider for FixedInterfaceProvider {
     fn interfaces(&self) -> Result<Vec<InterfaceInfo>, LiveIoError> {
         Ok(vec![self.0.clone()])
     }
 }
 
 #[derive(Clone)]
-struct MockLayer2 {
-    shared: Arc<MockShared>,
-    responses: Arc<ResponseFactory>,
+struct ScriptedLayer2Io {
+    shared: Arc<CoordinatedResolutionIo>,
+    response_script: Arc<FrameResponseScript>,
     pre_send_responses: usize,
     record_ingress_time: bool,
 }
 
-impl Layer2Io for MockLayer2 {
+impl Layer2Io for ScriptedLayer2Io {
     fn send_layer2(&self, frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
         let bytes = frame.bytes().clone();
-        let responses = (self.responses)(&bytes);
+        let responses = (self.response_script)(&bytes);
         let mut state = self.shared.lock();
         assert!(state.ready, "capture must be ready before neighbor send");
         assert_eq!(frame.route().plan.mode, LinkMode::Layer2);
@@ -95,10 +95,10 @@ impl Layer2Io for MockLayer2 {
 }
 
 #[derive(Clone)]
-struct MockCaptureProvider(Arc<MockShared>);
+struct CoordinatedCaptureProvider(Arc<CoordinatedResolutionIo>);
 
-impl CaptureProvider for MockCaptureProvider {
-    type Capture = MockCaptureSession;
+impl CaptureProvider for CoordinatedCaptureProvider {
+    type Capture = CoordinatedCaptureSession;
 
     fn arm_capture(
         &self,
@@ -107,13 +107,13 @@ impl CaptureProvider for MockCaptureProvider {
     ) -> Result<Self::Capture, LiveIoError> {
         limits.validate()?;
         self.0.lock().planned.push(route.clone());
-        Ok(MockCaptureSession(Arc::clone(&self.0)))
+        Ok(CoordinatedCaptureSession(Arc::clone(&self.0)))
     }
 }
 
-struct MockCaptureSession(Arc<MockShared>);
+struct CoordinatedCaptureSession(Arc<CoordinatedResolutionIo>);
 
-impl CaptureSession for MockCaptureSession {
+impl CaptureSession for CoordinatedCaptureSession {
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().ready = true;
         self.0.changed.notify_all();
@@ -152,7 +152,7 @@ impl CaptureSession for MockCaptureSession {
     }
 }
 
-fn interface() -> InterfaceInfo {
+fn dual_stack_interface() -> InterfaceInfo {
     InterfaceInfo {
         id: InterfaceId {
             name: "mock0".to_owned(),
@@ -182,8 +182,8 @@ fn interface() -> InterfaceInfo {
     }
 }
 
-fn request(source: &str, target: &str) -> NeighborRequest {
-    let interface = interface();
+fn neighbor_request(source: &str, target: &str) -> NeighborRequest {
+    let interface = dual_stack_interface();
     NeighborRequest {
         interface: interface.id,
         interface_source: source.parse().unwrap(),
@@ -195,7 +195,7 @@ fn request(source: &str, target: &str) -> NeighborRequest {
     }
 }
 
-fn options() -> NeighborResolutionOptions {
+fn resolution_options() -> NeighborResolutionOptions {
     NeighborResolutionOptions {
         max_attempts: 2,
         attempt_timeout: Duration::from_millis(20),
@@ -207,67 +207,67 @@ fn options() -> NeighborResolutionOptions {
     }
 }
 
-fn resolver(
-    shared: Arc<MockShared>,
-    responses: Arc<ResponseFactory>,
+fn scripted_resolver(
+    shared: Arc<CoordinatedResolutionIo>,
+    response_script: Arc<FrameResponseScript>,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<MockInterfaces, MockLayer2, MockCaptureProvider> {
+) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        MockInterfaces(interface()),
-        MockLayer2 {
+        FixedInterfaceProvider(dual_stack_interface()),
+        ScriptedLayer2Io {
             shared: Arc::clone(&shared),
-            responses,
+            response_script,
             pre_send_responses: 0,
             record_ingress_time: true,
         },
-        MockCaptureProvider(shared),
+        CoordinatedCaptureProvider(shared),
         options,
     )
     .unwrap()
 }
 
-fn resolver_with_pre_send_responses(
-    shared: Arc<MockShared>,
-    responses: Arc<ResponseFactory>,
+fn scripted_resolver_with_pre_send_responses(
+    shared: Arc<CoordinatedResolutionIo>,
+    response_script: Arc<FrameResponseScript>,
     pre_send_responses: usize,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<MockInterfaces, MockLayer2, MockCaptureProvider> {
+) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        MockInterfaces(interface()),
-        MockLayer2 {
+        FixedInterfaceProvider(dual_stack_interface()),
+        ScriptedLayer2Io {
             shared: Arc::clone(&shared),
-            responses,
+            response_script,
             pre_send_responses,
             record_ingress_time: true,
         },
-        MockCaptureProvider(shared),
+        CoordinatedCaptureProvider(shared),
         options,
     )
     .unwrap()
 }
 
-fn resolver_without_ingress_time(
-    shared: Arc<MockShared>,
-    responses: Arc<ResponseFactory>,
+fn scripted_resolver_without_ingress_time(
+    shared: Arc<CoordinatedResolutionIo>,
+    response_script: Arc<FrameResponseScript>,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<MockInterfaces, MockLayer2, MockCaptureProvider> {
+) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        MockInterfaces(interface()),
-        MockLayer2 {
+        FixedInterfaceProvider(dual_stack_interface()),
+        ScriptedLayer2Io {
             shared: Arc::clone(&shared),
-            responses,
+            response_script,
             pre_send_responses: 0,
             record_ingress_time: false,
         },
-        MockCaptureProvider(shared),
+        CoordinatedCaptureProvider(shared),
         options,
     )
     .unwrap()
 }
 
-fn captured(bytes: Bytes, interface: u32) -> Frame {
+fn inbound_frame_at_unix_epoch(bytes: Bytes, interface_index: u32) -> Frame {
     let mut frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap();
-    frame.interface = Some(interface);
+    frame.interface = Some(interface_index);
     frame.direction = Some(Direction::Inbound);
     frame
 }
@@ -292,7 +292,7 @@ fn arp_reply(request: &NeighborRequest, target_mac: MacAddress) -> Frame {
         ETHERNET_MINIMUM_WITHOUT_FCS + request.vlan_tags.len() * VLAN_HEADER_LENGTH,
         0,
     );
-    captured(Bytes::from(frame), request.interface.index)
+    inbound_frame_at_unix_epoch(Bytes::from(frame), request.interface.index)
 }
 
 fn neighbor_advertisement(request: &NeighborRequest, target_mac: MacAddress) -> Frame {
@@ -322,12 +322,12 @@ fn neighbor_advertisement(request: &NeighborRequest, target_mac: MacAddress) -> 
     frame.extend_from_slice(&target.octets());
     frame.extend_from_slice(&interface_source.octets());
     frame.extend_from_slice(&icmp);
-    captured(Bytes::from(frame), request.interface.index)
+    inbound_frame_at_unix_epoch(Bytes::from(frame), request.interface.index)
 }
 
 #[test]
 fn arp_resolution_preserves_vlan_route_and_uses_cache() {
-    let mut request = request("192.0.2.7", "192.0.2.1");
+    let mut request = neighbor_request("192.0.2.7", "192.0.2.1");
     request.vlan_tags = vec![
         NeighborVlanTag {
             kind: NeighborVlanKind::Ieee8021Ad,
@@ -344,11 +344,11 @@ fn arp_resolution_preserves_vlan_route_and_uses_cache() {
     ];
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
     let response_request = request.clone();
-    let shared = Arc::new(MockShared::default());
-    let resolver = resolver(
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let resolver = scripted_resolver(
         Arc::clone(&shared),
         Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
-        options(),
+        resolution_options(),
     );
 
     let resolution = resolver.resolve_request(&request).unwrap();
@@ -381,19 +381,19 @@ fn arp_resolution_preserves_vlan_route_and_uses_cache() {
 
 #[test]
 fn receiver_loss_rejects_a_match_and_does_not_populate_the_cache() {
-    let request = request("192.0.2.7", "192.0.2.1");
+    let request = neighbor_request("192.0.2.7", "192.0.2.1");
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
     let response_request = request.clone();
-    let shared = Arc::new(MockShared::default());
+    let shared = Arc::new(CoordinatedResolutionIo::default());
     shared.lock().statistics = CaptureStatistics {
         dropped_frames: 1,
         receiver_dropped_frames: 1,
         ..CaptureStatistics::default()
     };
-    let resolver = resolver(
+    let resolver = scripted_resolver(
         Arc::clone(&shared),
         Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
-        options(),
+        resolution_options(),
     );
 
     let error = resolver.resolve_request(&request).unwrap_err();
@@ -417,14 +417,14 @@ fn receiver_loss_rejects_a_match_and_does_not_populate_the_cache() {
 
 #[test]
 fn arp_response_without_ingress_time_is_evidence_only() {
-    let request = request("192.0.2.7", "192.0.2.1");
+    let request = neighbor_request("192.0.2.7", "192.0.2.1");
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
     let response_request = request.clone();
-    let shared = Arc::new(MockShared::default());
-    let mut bounded = options();
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let mut bounded = resolution_options();
     bounded.max_attempts = 1;
     bounded.attempt_timeout = Duration::from_millis(5);
-    let resolver = resolver_without_ingress_time(
+    let resolver = scripted_resolver_without_ingress_time(
         Arc::clone(&shared),
         Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
         bounded,
@@ -445,14 +445,14 @@ fn arp_response_without_ingress_time_is_evidence_only() {
 
 #[test]
 fn ndp_solicitation_and_advertisement_follow_wire_contract() {
-    let request = request("2001:db8::7", "2001:db8::1");
+    let request = neighbor_request("2001:db8::7", "2001:db8::1");
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
     let response_request = request.clone();
-    let shared = Arc::new(MockShared::default());
-    let resolver = resolver(
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let resolver = scripted_resolver(
         Arc::clone(&shared),
         Arc::new(move |_| vec![neighbor_advertisement(&response_request, target_mac)]),
-        options(),
+        resolution_options(),
     );
 
     let resolution = resolver.resolve_request(&request).unwrap();
@@ -487,11 +487,11 @@ fn ndp_solicitation_and_advertisement_follow_wire_contract() {
 
 #[test]
 fn ndp_rejects_bad_checksum_before_accepting_correlated_evidence() {
-    let request = request("2001:db8::7", "2001:db8::1");
+    let request = neighbor_request("2001:db8::7", "2001:db8::1");
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
     let response_request = request.clone();
-    let shared = Arc::new(MockShared::default());
-    let resolver = resolver(
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let resolver = scripted_resolver(
         Arc::clone(&shared),
         Arc::new(move |_| {
             let valid = neighbor_advertisement(&response_request, target_mac);
@@ -509,7 +509,7 @@ fn ndp_rejects_bad_checksum_before_accepting_correlated_evidence() {
             bad.direction = valid.direction;
             vec![bad, valid]
         }),
-        options(),
+        resolution_options(),
     );
 
     let resolution = resolver.resolve_request(&request).unwrap();
@@ -521,7 +521,7 @@ fn ndp_rejects_bad_checksum_before_accepting_correlated_evidence() {
 
 #[test]
 fn arp_rejects_responses_from_another_vlan_or_interface() {
-    let mut request = request("192.0.2.7", "192.0.2.1");
+    let mut request = neighbor_request("192.0.2.7", "192.0.2.1");
     request.vlan_tags.push(NeighborVlanTag {
         kind: NeighborVlanKind::Ieee8021Q,
         priority: 0,
@@ -532,11 +532,11 @@ fn arp_rejects_responses_from_another_vlan_or_interface() {
     let correct_request = request.clone();
     let mut other_vlan_request = request.clone();
     other_vlan_request.vlan_tags[0].vlan_id = 101;
-    let shared = Arc::new(MockShared::default());
-    let mut bounded = options();
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let mut bounded = resolution_options();
     bounded.max_attempts = 1;
     bounded.attempt_timeout = Duration::from_millis(5);
-    let resolver = resolver(
+    let resolver = scripted_resolver(
         Arc::clone(&shared),
         Arc::new(move |_| {
             let wrong_vlan = arp_reply(&other_vlan_request, target_mac);
@@ -561,14 +561,14 @@ fn arp_rejects_responses_from_another_vlan_or_interface() {
 
 #[test]
 fn timeout_is_bounded_attempted_and_joined() {
-    let request = request("192.0.2.7", "192.0.2.99");
-    let shared = Arc::new(MockShared::default());
-    let mut bounded = options();
+    let request = neighbor_request("192.0.2.7", "192.0.2.99");
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let mut bounded = resolution_options();
     bounded.max_capture_queue_frames = 1;
-    let resolver = resolver(
+    let resolver = scripted_resolver(
         Arc::clone(&shared),
         Arc::new(|_| {
-            vec![captured(
+            vec![inbound_frame_at_unix_epoch(
                 Bytes::from_static(&[0; ETHERNET_HEADER_LENGTH]),
                 7,
             )]
@@ -599,17 +599,17 @@ fn timeout_is_bounded_attempted_and_joined() {
 
 #[test]
 fn pre_request_frames_cannot_satisfy_lookup_and_evidence_is_bounded() {
-    let request = request("192.0.2.7", "192.0.2.1");
+    let request = neighbor_request("192.0.2.7", "192.0.2.1");
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
-    let shared = Arc::new(MockShared::default());
+    let shared = Arc::new(CoordinatedResolutionIo::default());
     shared.lock().frames.push_back(CapturedFrame::new(
         arp_reply(&request, target_mac),
         Instant::now(),
     ));
     let response_request = request.clone();
-    let mut bounded = options();
+    let mut bounded = resolution_options();
     bounded.max_capture_queue_frames = 1;
-    let resolver = resolver(
+    let resolver = scripted_resolver(
         Arc::clone(&shared),
         Arc::new(move |_| {
             let mut response = arp_reply(&response_request, target_mac);
@@ -631,13 +631,13 @@ fn pre_request_frames_cannot_satisfy_lookup_and_evidence_is_bounded() {
 
 #[test]
 fn matching_frame_in_drain_to_send_race_is_evidence_only() {
-    let request = request("192.0.2.7", "192.0.2.1");
+    let request = neighbor_request("192.0.2.7", "192.0.2.1");
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
     let response_request = request.clone();
-    let shared = Arc::new(MockShared::default());
-    let mut bounded = options();
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let mut bounded = resolution_options();
     bounded.max_attempts = 1;
-    let resolver = resolver_with_pre_send_responses(
+    let resolver = scripted_resolver_with_pre_send_responses(
         Arc::clone(&shared),
         Arc::new(move |_| {
             vec![
@@ -658,10 +658,14 @@ fn matching_frame_in_drain_to_send_race_is_evidence_only() {
 
 #[test]
 fn low_mtu_rejects_ndp_before_native_side_effects() {
-    let mut request = request("2001:db8::7", "2001:db8::1");
+    let mut request = neighbor_request("2001:db8::7", "2001:db8::1");
     request.mtu = 64;
-    let shared = Arc::new(MockShared::default());
-    let resolver = resolver(Arc::clone(&shared), Arc::new(|_| Vec::new()), options());
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let resolver = scripted_resolver(
+        Arc::clone(&shared),
+        Arc::new(|_| Vec::new()),
+        resolution_options(),
+    );
     assert!(matches!(
         resolver.resolve_request(&request),
         Err(NeighborError::InvalidRequest { .. })
@@ -673,10 +677,14 @@ fn low_mtu_rejects_ndp_before_native_side_effects() {
 
 #[test]
 fn low_mtu_rejects_arp_before_native_side_effects() {
-    let mut request = request("192.0.2.7", "192.0.2.1");
+    let mut request = neighbor_request("192.0.2.7", "192.0.2.1");
     request.mtu = (ARP_PAYLOAD_LENGTH - 1) as u32;
-    let shared = Arc::new(MockShared::default());
-    let resolver = resolver(Arc::clone(&shared), Arc::new(|_| Vec::new()), options());
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let resolver = scripted_resolver(
+        Arc::clone(&shared),
+        Arc::new(|_| Vec::new()),
+        resolution_options(),
+    );
     assert!(matches!(
         resolver.resolve_request(&request),
         Err(NeighborError::InvalidRequest { .. })
@@ -687,14 +695,18 @@ fn low_mtu_rejects_arp_before_native_side_effects() {
 }
 
 #[test]
-fn invalid_options_fail_before_provider_construction() {
-    let mut invalid = options();
+fn zero_max_attempts_is_an_invalid_resolution_option() {
+    let mut invalid = resolution_options();
     invalid.max_attempts = 0;
     assert!(matches!(
         invalid.validate(),
         Err(NeighborError::InvalidConfiguration { .. })
     ));
-    let mut invalid = options();
+}
+
+#[test]
+fn undersized_snap_length_is_an_invalid_resolution_option() {
+    let mut invalid = resolution_options();
     invalid.snap_length = 64;
     assert!(matches!(
         invalid.validate(),
@@ -705,13 +717,13 @@ fn invalid_options_fail_before_provider_construction() {
 #[test]
 fn direct_resolve_uses_interface_owned_metadata() {
     let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
-    let request = request("192.0.2.7", "192.0.2.1");
+    let request = neighbor_request("192.0.2.7", "192.0.2.1");
     let response_request = request.clone();
-    let shared = Arc::new(MockShared::default());
-    let resolver = resolver(
+    let shared = Arc::new(CoordinatedResolutionIo::default());
+    let resolver = scripted_resolver(
         shared,
         Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
-        options(),
+        resolution_options(),
     );
     assert_eq!(
         resolver
@@ -727,7 +739,7 @@ fn checksum_carries_across_odd_part_boundaries() {
 }
 
 #[test]
-fn captured_helper_uses_stable_timestamp() {
-    let frame = captured(Bytes::from_static(&[0; 14]), 7);
+fn inbound_test_frame_uses_the_unix_epoch_timestamp() {
+    let frame = inbound_frame_at_unix_epoch(Bytes::from_static(&[0; 14]), 7);
     assert_eq!(frame.timestamp, SystemTime::UNIX_EPOCH);
 }

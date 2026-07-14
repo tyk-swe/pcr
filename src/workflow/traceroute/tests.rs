@@ -17,7 +17,7 @@ use crate::protocol::internal::default_registry;
 use crate::workflow::target::Authorized;
 use crate::workflow::target_adapter::PolicyAuthorizer;
 
-fn private_policy() -> TrafficPolicy {
+fn private_traceroute_policy() -> TrafficPolicy {
     TrafficPolicy {
         max_packets_per_operation: 1_000,
         max_bytes_per_operation: 1_000_000,
@@ -25,7 +25,7 @@ fn private_policy() -> TrafficPolicy {
     }
 }
 
-fn request(target: Target) -> TracerouteRequest {
+fn udp_traceroute_request(target: Target) -> TracerouteRequest {
     TracerouteRequest {
         target,
         strategy: TracerouteStrategy::Udp,
@@ -168,7 +168,7 @@ impl TracerouteExecutor for UndecodedExecutor {
 #[test]
 fn workflow_preserves_mixed_attempts_and_stops_after_destination_evidence() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-    let mut operation = request(Target::Address(destination));
+    let mut operation = udp_traceroute_request(Target::Address(destination));
     operation.probes_per_second = Some(2);
     operation.max_hops = 8;
     let mut authorizer = FixedAuthorizer {
@@ -217,7 +217,7 @@ fn workflow_preserves_mixed_attempts_and_stops_after_destination_evidence() {
 #[test]
 fn undecodable_evidence_remains_exact_hop_scoped_and_operation_bounded() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-    let mut operation = request(Target::Address(destination));
+    let mut operation = udp_traceroute_request(Target::Address(destination));
     operation.probes_per_hop = 1;
     operation.limits.max_evidence_frames = 2;
     operation.limits.max_evidence_bytes = 2;
@@ -250,7 +250,7 @@ fn undecodable_evidence_remains_exact_hop_scoped_and_operation_bounded() {
 #[test]
 fn executor_cannot_replace_the_authorized_traceroute_probe() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-    let operation = request(Target::Address(destination));
+    let operation = udp_traceroute_request(Target::Address(destination));
     let batch = build_batches(&operation, destination).unwrap().remove(0);
     let mut execution = UndecodedExecutor.execute(&batch).unwrap();
     let mut layer2 = execution.sent[0].clone();
@@ -290,7 +290,7 @@ fn executor_cannot_replace_the_authorized_traceroute_probe() {
 #[test]
 fn executor_capture_evidence_must_stay_within_declared_traceroute_limits() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-    let operation = request(Target::Address(destination));
+    let operation = udp_traceroute_request(Target::Address(destination));
     let batch = build_batches(&operation, destination).unwrap().remove(0);
     let mut execution = UndecodedExecutor.execute(&batch).unwrap();
     execution.undecoded.push(frame_at(12));
@@ -333,7 +333,7 @@ fn unsolicited_hop_response_after_the_deadline_cannot_finish_the_trace() {
     }
 
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-    let operation = request(Target::Address(destination));
+    let operation = udp_traceroute_request(Target::Address(destination));
     let result = traceroute(
         &operation,
         &mut FixedAuthorizer {
@@ -382,7 +382,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
 
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let result = traceroute(
-        &request(Target::Address(destination)),
+        &udp_traceroute_request(Target::Address(destination)),
         &mut FixedAuthorizer {
             address: destination,
             operations: Vec::new(),
@@ -452,10 +452,10 @@ fn hostname_policy_precedes_dns_and_every_answer_precedes_probe_execution() {
     let resolver = ScriptedResolver::new([vec![private]]);
     let calls = Arc::new(AtomicUsize::new(0));
     let mut executor = CountingRejectExecutor(Arc::clone(&calls));
-    let policy = private_policy();
+    let policy = private_traceroute_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = traceroute(
-        &request(Target::Hostname("lab.example".to_owned())),
+        &udp_traceroute_request(Target::Hostname("lab.example".to_owned())),
         &mut authorizer,
         &registry,
         &mut executor,
@@ -467,9 +467,9 @@ fn hostname_policy_precedes_dns_and_every_answer_precedes_probe_execution() {
     assert_eq!(calls.load(Ordering::SeqCst), 0);
 
     let resolver = ScriptedResolver::new([vec![private, "8.8.8.8".parse().unwrap()]]);
-    let mut policy = private_policy();
+    let mut policy = private_traceroute_policy();
     policy.allow_hostname_resolution = true;
-    let mut operation = request(Target::Hostname("mixed.example".to_owned()));
+    let mut operation = udp_traceroute_request(Target::Hostname("mixed.example".to_owned()));
     operation.address_family = AddressFamily::Ipv6;
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let error = traceroute(
@@ -490,13 +490,13 @@ fn rerun_reauthorizes_rebound_hostname_before_another_probe() {
     let private = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
     let resolver =
         ScriptedResolver::new([vec![private], vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))]]);
-    let mut policy = private_policy();
+    let mut policy = private_traceroute_policy();
     policy.allow_hostname_resolution = true;
     let registry = default_registry().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let mut executor = CountingRejectExecutor(Arc::clone(&calls));
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
-    let operation = request(Target::Hostname("changing.example".to_owned()));
+    let operation = udp_traceroute_request(Target::Hostname("changing.example".to_owned()));
 
     assert!(matches!(
         traceroute(
@@ -523,12 +523,12 @@ fn rerun_reauthorizes_rebound_hostname_before_another_probe() {
 }
 
 #[test]
-fn pure_classifier_covers_ipv4_ipv6_terminal_intermediate_and_rejection() {
+fn ipv4_classifier_accepts_intermediate_destination_and_unreachable_responses() {
     let registry = default_registry().unwrap();
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 9);
     let router = Ipv4Addr::new(10, 0, 0, 254);
-    let mut request = TracerouteProbe {
+    let mut udp_probe_packet = TracerouteProbe {
         sequence: 0,
         address: IpAddr::V4(remote),
         strategy: TracerouteStrategy::Udp,
@@ -537,30 +537,65 @@ fn pure_classifier_covers_ipv4_ipv6_terminal_intermediate_and_rejection() {
         attempt: 1,
     }
     .packet();
-    request.get_mut::<Ipv4>().unwrap().source = local;
-    let quote = ipv4_udp_quote(&request);
+    udp_probe_packet.get_mut::<Ipv4>().unwrap().source = local;
+    let quote = ipv4_udp_quote(&udp_probe_packet);
 
     let intermediate = icmpv4_error(router, local, 11, 0, quote.clone(), 2, Vec::new());
     assert_eq!(
-        classify_traceroute_response(&registry, TracerouteStrategy::Udp, &request, &intermediate,)
-            .unwrap()
-            .kind,
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &udp_probe_packet,
+            &intermediate,
+        )
+        .unwrap()
+        .kind,
         TracerouteResponseKind::Intermediate
     );
     let reached = icmpv4_error(remote, local, 3, 3, quote.clone(), 2, Vec::new());
     assert_eq!(
-        classify_traceroute_response(&registry, TracerouteStrategy::Udp, &request, &reached,)
-            .unwrap()
-            .kind,
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &udp_probe_packet,
+            &reached,
+        )
+        .unwrap()
+        .kind,
         TracerouteResponseKind::DestinationReached
     );
     let unreachable = icmpv4_error(router, local, 3, 1, quote.clone(), 2, Vec::new());
     assert_eq!(
-        classify_traceroute_response(&registry, TracerouteStrategy::Udp, &request, &unreachable,)
-            .unwrap()
-            .kind,
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &udp_probe_packet,
+            &unreachable,
+        )
+        .unwrap()
+        .kind,
         TracerouteResponseKind::Unreachable
     );
+}
+
+#[test]
+fn ipv4_classifier_rejects_corrupt_unrelated_and_malformed_evidence() {
+    let registry = default_registry().unwrap();
+    let local = Ipv4Addr::new(10, 0, 0, 1);
+    let remote = Ipv4Addr::new(10, 0, 0, 9);
+    let router = Ipv4Addr::new(10, 0, 0, 254);
+    let mut udp_probe_packet = TracerouteProbe {
+        sequence: 0,
+        address: IpAddr::V4(remote),
+        strategy: TracerouteStrategy::Udp,
+        destination_port: Some(DEFAULT_TRACEROUTE_UDP_PORT),
+        hop_limit: 1,
+        attempt: 1,
+    }
+    .packet();
+    udp_probe_packet.get_mut::<Ipv4>().unwrap().source = local;
+    let quote = ipv4_udp_quote(&udp_probe_packet);
+
     let corrupt = icmpv4_error(
         router,
         local,
@@ -571,27 +606,46 @@ fn pure_classifier_covers_ipv4_ipv6_terminal_intermediate_and_rejection() {
         vec![Diagnostic::warning("icmpv4.checksum", "invalid checksum")],
     );
     assert!(
-        classify_traceroute_response(&registry, TracerouteStrategy::Udp, &request, &corrupt,)
-            .is_none()
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &udp_probe_packet,
+            &corrupt,
+        )
+        .is_none()
     );
 
-    let mut unrelated_quote = ipv4_udp_quote(&request);
+    let mut unrelated_quote = ipv4_udp_quote(&udp_probe_packet);
     unrelated_quote[19] ^= 1;
     let unrelated = icmpv4_error(router, local, 11, 0, unrelated_quote, 2, Vec::new());
     assert!(
-        classify_traceroute_response(&registry, TracerouteStrategy::Udp, &request, &unrelated,)
-            .is_none()
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &udp_probe_packet,
+            &unrelated,
+        )
+        .is_none()
     );
     let malformed = icmpv4_error(router, local, 11, 0, vec![0_u8; 3], 2, Vec::new());
     assert!(
-        classify_traceroute_response(&registry, TracerouteStrategy::Udp, &request, &malformed,)
-            .is_none()
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &udp_probe_packet,
+            &malformed,
+        )
+        .is_none()
     );
+}
 
+#[test]
+fn ipv6_classifier_accepts_intermediate_response() {
+    let registry = default_registry().unwrap();
     let local6: Ipv6Addr = "fd00::1".parse().unwrap();
     let remote6: Ipv6Addr = "fd00::9".parse().unwrap();
     let router6: Ipv6Addr = "fd00::fe".parse().unwrap();
-    let mut request6 = TracerouteProbe {
+    let mut udp_probe_packet = TracerouteProbe {
         sequence: 9,
         address: IpAddr::V6(remote6),
         strategy: TracerouteStrategy::Udp,
@@ -600,13 +654,13 @@ fn pure_classifier_covers_ipv4_ipv6_terminal_intermediate_and_rejection() {
         attempt: 1,
     }
     .packet();
-    request6.get_mut::<Ipv6>().unwrap().source = local6;
-    let intermediate6 = icmpv6_error(router6, local6, 3, 0, ipv6_udp_quote(&request6), 11);
+    udp_probe_packet.get_mut::<Ipv6>().unwrap().source = local6;
+    let intermediate6 = icmpv6_error(router6, local6, 3, 0, ipv6_udp_quote(&udp_probe_packet), 11);
     assert_eq!(
         classify_traceroute_response(
             &registry,
             TracerouteStrategy::Udp,
-            &request6,
+            &udp_probe_packet,
             &intermediate6,
         )
         .unwrap()
@@ -673,7 +727,7 @@ fn tunneled_direct_reply_reaches_the_inner_destination() {
 }
 
 #[test]
-fn tcp_and_icmp_strategies_build_hop_limits_and_accept_only_direct_terminal_replies() {
+fn tcp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
     let registry = default_registry().unwrap();
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 9);
@@ -713,7 +767,11 @@ fn tcp_and_icmp_strategies_build_hop_limits_and_accept_only_direct_terminal_repl
         .kind,
         TracerouteResponseKind::DestinationReached
     );
+}
 
+#[test]
+fn icmp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
+    let registry = default_registry().unwrap();
     let local6: Ipv6Addr = "fd00::1".parse().unwrap();
     let remote6: Ipv6Addr = "fd00::9".parse().unwrap();
     let mut echo_request = TracerouteProbe {
@@ -753,9 +811,9 @@ fn tcp_and_icmp_strategies_build_hop_limits_and_accept_only_direct_terminal_repl
 }
 
 #[test]
-fn request_bounds_reject_before_authorized_probe_construction() {
+fn udp_destination_port_overflow_is_rejected_before_authorized_probe_construction() {
     let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
-    let mut operation = request(Target::Address(destination));
+    let mut operation = udp_traceroute_request(Target::Address(destination));
     operation.destination_port = Some(u16::MAX);
     let mut authorizer = FixedAuthorizer {
         address: destination,

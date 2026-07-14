@@ -43,7 +43,7 @@ impl NeighborResolver for NoNeighbors {
     }
 }
 
-fn private_policy() -> TrafficPolicy {
+fn private_scan_policy() -> TrafficPolicy {
     TrafficPolicy {
         max_packets_per_operation: 1_000,
         max_bytes_per_operation: 1_000_000,
@@ -51,7 +51,7 @@ fn private_policy() -> TrafficPolicy {
     }
 }
 
-fn request(target: Target) -> ScanRequest {
+fn tcp_scan_request(target: Target) -> ScanRequest {
     ScanRequest {
         target,
         transport: ScanTransport::Tcp,
@@ -129,11 +129,11 @@ fn hostname_policy_denial_precedes_resolution_and_probe_construction() {
     };
     let registry = default_registry().unwrap();
     let target = Target::Hostname("lab.example".to_owned());
-    let policy = private_policy();
+    let policy = private_scan_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
 
     let error = scan(
-        &request(target),
+        &tcp_scan_request(target),
         &mut authorizer,
         &registry,
         &mut executor,
@@ -157,9 +157,9 @@ fn every_mixed_resolution_answer_is_authorized_before_family_filter_or_probe() {
         calls: Arc::clone(&executor_calls),
     };
     let registry = default_registry().unwrap();
-    let mut policy = private_policy();
+    let mut policy = private_scan_policy();
     policy.allow_hostname_resolution = true;
-    let mut operation = request(Target::Hostname("mixed.example".to_owned()));
+    let mut operation = tcp_scan_request(Target::Hostname("mixed.example".to_owned()));
     operation.address_family = AddressFamily::Ipv6;
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
 
@@ -189,9 +189,9 @@ fn rerunning_scan_reauthorizes_changed_addresses_before_another_probe() {
         calls: Arc::clone(&executor_calls),
     };
     let registry = default_registry().unwrap();
-    let mut policy = private_policy();
+    let mut policy = private_scan_policy();
     policy.allow_hostname_resolution = true;
-    let operation = request(Target::Hostname("changing.example".to_owned()));
+    let operation = tcp_scan_request(Target::Hostname("changing.example".to_owned()));
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
 
     assert!(matches!(
@@ -232,11 +232,11 @@ fn aggregate_packet_and_wire_byte_policy_precede_probe_execution() {
             calls: Arc::clone(&executor_calls),
         };
         let registry = default_registry().unwrap();
-        let mut policy = private_policy();
+        let mut policy = private_scan_policy();
         policy.max_packets_per_operation = packet_limit;
         policy.max_bytes_per_operation = byte_limit;
         let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
-        let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+        let operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
 
         let error = scan(
             &operation,
@@ -279,7 +279,7 @@ fn aggregate_duration_precedes_operation_authorization() {
         }
     }
 
-    let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let mut operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     operation.limits.max_duration = Duration::from_micros(1);
     let mut authorizer = CountingAuthorizer { operation_calls: 0 };
     let error = scan(
@@ -416,13 +416,13 @@ impl Clock for RecordingClock {
 fn batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     let registry = default_registry().unwrap();
     let target = Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)));
-    let mut operation = request(target);
+    let mut operation = tcp_scan_request(target);
     operation.ports = vec![80, 81, 82, 83];
     operation.attempts = 2;
     operation.probes_per_second = Some(2);
     operation.limits.batch_size = 2;
     let resolver = ScriptedResolver::new([]);
-    let policy = private_policy();
+    let policy = private_scan_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let mut executor = TimeoutExecutor::new();
     let mut clock = RecordingClock::default();
@@ -459,13 +459,13 @@ fn batching_attempts_rate_and_timeout_evidence_are_deterministic() {
 #[test]
 fn undecodable_evidence_is_bounded_across_the_scan() {
     let registry = default_registry().unwrap();
-    let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let mut operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     operation.limits.batch_size = 1;
     operation.limits.max_evidence_frames = 2;
     operation.limits.max_evidence_bytes = 2;
     operation.limits.max_undecoded = 1;
     let resolver = ScriptedResolver::new([]);
-    let policy = private_policy();
+    let policy = private_scan_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let mut executor = UndecodedExecutor(TimeoutExecutor::new());
 
@@ -490,10 +490,10 @@ fn undecodable_evidence_is_bounded_across_the_scan() {
 #[test]
 fn correlated_response_becomes_exact_open_evidence() {
     let registry = default_registry().unwrap();
-    let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let mut operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     operation.timeout = Duration::from_millis(10);
     let resolver = ScriptedResolver::new([]);
-    let policy = private_policy();
+    let policy = private_scan_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
     let mut executor = OpenTcpExecutor(TimeoutExecutor::new());
 
@@ -532,11 +532,11 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
         }
     }
 
-    let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let mut operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     operation.timeout = Duration::from_millis(10);
     let result = scan(
         &operation,
-        &mut PolicyAuthorizer::new(&private_policy(), &ScriptedResolver::new([])),
+        &mut PolicyAuthorizer::new(&private_scan_policy(), &ScriptedResolver::new([])),
         &default_registry().unwrap(),
         &mut PreSendMatchedExecutor,
         &mut NoopClock,
@@ -550,7 +550,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
 
 #[test]
 fn executor_cannot_replace_the_authorized_scan_probe() {
-    let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     let batch = build_batches(
         &operation,
         &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
@@ -591,7 +591,7 @@ fn executor_cannot_replace_the_authorized_scan_probe() {
 
 #[test]
 fn executor_capture_evidence_must_stay_within_declared_scan_limits() {
-    let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     let batch = build_batches(
         &operation,
         &[IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
@@ -645,10 +645,10 @@ fn unsolicited_response_after_the_probe_deadline_remains_a_timeout() {
         }
     }
 
-    let operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     let result = scan(
         &operation,
-        &mut PolicyAuthorizer::new(&private_policy(), &ScriptedResolver::new([])),
+        &mut PolicyAuthorizer::new(&private_scan_policy(), &ScriptedResolver::new([])),
         &default_registry().unwrap(),
         &mut LateResponseExecutor(TimeoutExecutor::new()),
         &mut NoopClock,
@@ -699,11 +699,11 @@ fn equal_rank_candidates_choose_earliest_evidence_independent_of_source_list() {
         }
     }
 
-    let mut operation = request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
+    let mut operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     operation.timeout = Duration::from_millis(10);
     let result = scan(
         &operation,
-        &mut PolicyAuthorizer::new(&private_policy(), &ScriptedResolver::new([])),
+        &mut PolicyAuthorizer::new(&private_scan_policy(), &ScriptedResolver::new([])),
         &default_registry().unwrap(),
         &mut ReorderedResponses(TimeoutExecutor::new()),
         &mut NoopClock,
@@ -778,7 +778,7 @@ fn decoded(packet: Packet, diagnostics: Vec<Diagnostic>) -> DecodedPacket {
 }
 
 #[test]
-fn direct_matchers_distinguish_tcp_udp_icmp_and_reject_bad_integrity() {
+fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
     let registry = default_registry().unwrap();
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 2);
@@ -829,7 +829,13 @@ fn direct_matchers_distinguish_tcp_udp_icmp_and_reject_bad_integrity() {
     assert!(
         classify_scan_response(&registry, ScanTransport::Tcp, &tcp_request, &corrupt).is_none()
     );
+}
 
+#[test]
+fn udp_direct_matcher_classifies_reply_as_open() {
+    let registry = default_registry().unwrap();
+    let local = Ipv4Addr::new(10, 0, 0, 1);
+    let remote = Ipv4Addr::new(10, 0, 0, 2);
     let udp_request = udp_packet(local, remote, 53_000, 53);
     let udp_response = decoded(udp_packet(remote, local, 53, 53_000), Vec::new());
     assert_eq!(
@@ -838,7 +844,13 @@ fn direct_matchers_distinguish_tcp_udp_icmp_and_reject_bad_integrity() {
             .classification,
         ScanClassification::Open
     );
+}
 
+#[test]
+fn icmp_direct_matcher_classifies_matching_echo_reply_as_open() {
+    let registry = default_registry().unwrap();
+    let local = Ipv4Addr::new(10, 0, 0, 1);
+    let remote = Ipv4Addr::new(10, 0, 0, 2);
     let mut echo_request = Packet::new();
     echo_request
         .push(Ipv4 {
@@ -1238,7 +1250,7 @@ fn client_scan_executor_waits_for_capture_and_always_shuts_it_down() {
             FixedRoute(lifecycle_route()),
             NoNeighbors,
             io,
-            private_policy(),
+            private_scan_policy(),
         );
         let mut executor = ClientExecutor::new(&client, lifecycle_exchange_options());
         let batch = ScanBatch {
@@ -1280,7 +1292,7 @@ fn client_dns_executor_waits_for_capture_and_always_shuts_it_down() {
             FixedRoute(lifecycle_route()),
             NoNeighbors,
             io,
-            private_policy(),
+            private_scan_policy(),
         );
         let mut executor = DnsClientExecutor::new(&client, lifecycle_exchange_options());
         let exchange = DnsExchange {
@@ -1326,7 +1338,7 @@ fn client_traceroute_executor_waits_for_capture_and_always_shuts_it_down() {
             FixedRoute(lifecycle_route()),
             NoNeighbors,
             io,
-            private_policy(),
+            private_scan_policy(),
         );
         let mut executor = TracerouteClientExecutor::new(&client, lifecycle_exchange_options());
         let batch = TracerouteBatch {
@@ -1372,7 +1384,7 @@ fn client_traceroute_executor_expands_unique_udp_tcp_and_icmp_probe_identities()
                 events: Arc::clone(&events),
                 fail_send: false,
             },
-            private_policy(),
+            private_scan_policy(),
         );
         let mut options = lifecycle_exchange_options();
         options.max_template_packets = 2;
@@ -1432,7 +1444,7 @@ fn client_traceroute_executor_rejects_unsupported_link_capability_before_capture
             events: Arc::clone(&events),
             fail_send: false,
         },
-        private_policy(),
+        private_scan_policy(),
     );
     let mut options = lifecycle_exchange_options();
     options.send.plan.link_mode = LinkMode::Layer2;

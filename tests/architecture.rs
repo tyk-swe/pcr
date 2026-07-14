@@ -3,6 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
+use syn::visit::Visit;
+
 const DOMAINS: &[(&str, &[&str])] = &[
     ("error", &[]),
     ("capture", &["error"]),
@@ -25,16 +27,8 @@ const DOMAINS: &[(&str, &[&str])] = &[
     ),
 ];
 
-const LIBRARY_ROOT_ITEMS: &[&str] = &[
-    "pub mod capture;",
-    "pub mod client;",
-    "pub mod error;",
-    "pub mod net;",
-    "pub mod output;",
-    "pub mod packet;",
-    "pub mod protocol;",
-    "pub mod session;",
-    "pub mod workflow;",
+const LIBRARY_ROOT_MODULES: &[&str] = &[
+    "capture", "client", "error", "net", "output", "packet", "protocol", "session", "workflow",
 ];
 
 fn rust_files(path: &Path, files: &mut Vec<PathBuf>) {
@@ -67,75 +61,412 @@ fn domain_files(root: &Path, domain: &str) -> Vec<PathBuf> {
     files
 }
 
-fn mentions_domain(source: &str, domain: &str) -> bool {
-    ["crate::", "packetcraftr::", "super::"]
-        .iter()
-        .any(|prefix| {
-            let marker = format!("{prefix}{domain}");
-            source.match_indices(&marker).any(|(index, _)| {
-                source[index + marker.len()..]
-                    .chars()
-                    .next()
-                    .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_')
-            }) || source
-                .match_indices(&format!("{prefix}{{"))
-                .any(|(index, marker)| {
-                    let group = &source[index + marker.len()..];
-                    let mut depth = 0_usize;
-                    let mut entry_start = 0_usize;
-
-                    for (offset, character) in group.char_indices() {
-                        match character {
-                            '{' => depth += 1,
-                            '}' if depth == 0 => {
-                                return group[entry_start..offset]
-                                    .trim_start()
-                                    .strip_prefix(domain)
-                                    .is_some_and(|suffix| {
-                                        suffix.chars().next().is_none_or(|character| {
-                                            !character.is_ascii_alphanumeric() && character != '_'
-                                        })
-                                    });
-                            }
-                            '}' => depth -= 1,
-                            ',' if depth == 0 => {
-                                let entry = group[entry_start..offset].trim_start();
-                                if entry.strip_prefix(domain).is_some_and(|suffix| {
-                                    suffix.chars().next().is_none_or(|character| {
-                                        !character.is_ascii_alphanumeric() && character != '_'
-                                    })
-                                }) {
-                                    return true;
-                                }
-                                entry_start = offset + character.len_utf8();
-                            }
-                            _ => {}
-                        }
-                    }
-                    false
-                })
-        })
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CfgValue {
+    True,
+    False,
+    Unknown,
 }
 
-#[test]
-fn grouped_imports_mention_their_top_level_domains() {
-    assert!(mentions_domain(
-        "use crate::{packet, output::Report};",
-        "output"
-    ));
-    assert!(mentions_domain(
-        "use packetcraftr::{\n    output as report,\n    packet,\n};",
-        "output"
-    ));
-    assert!(mentions_domain("use super::{output, packet};", "output"));
-    assert!(!mentions_domain(
-        "use crate::{packet::{output, Packet}};",
-        "output"
-    ));
-    assert!(!mentions_domain(
-        "use crate::{output_format, packet};",
-        "output"
-    ));
+fn cfg_value_without_test(meta: &syn::Meta) -> CfgValue {
+    match meta {
+        syn::Meta::Path(path) if path.is_ident("test") => CfgValue::False,
+        syn::Meta::List(list)
+            if list.path.is_ident("all")
+                || list.path.is_ident("any")
+                || list.path.is_ident("not") =>
+        {
+            let Ok(items) = list.parse_args_with(
+                syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+            ) else {
+                return CfgValue::Unknown;
+            };
+            let values: Vec<_> = items.iter().map(cfg_value_without_test).collect();
+
+            if list.path.is_ident("all") {
+                if values.contains(&CfgValue::False) {
+                    CfgValue::False
+                } else if values.iter().all(|value| *value == CfgValue::True) {
+                    CfgValue::True
+                } else {
+                    CfgValue::Unknown
+                }
+            } else if list.path.is_ident("any") {
+                if values.contains(&CfgValue::True) {
+                    CfgValue::True
+                } else if values.iter().all(|value| *value == CfgValue::False) {
+                    CfgValue::False
+                } else {
+                    CfgValue::Unknown
+                }
+            } else if let [value] = values.as_slice() {
+                match value {
+                    CfgValue::True => CfgValue::False,
+                    CfgValue::False => CfgValue::True,
+                    CfgValue::Unknown => CfgValue::Unknown,
+                }
+            } else {
+                CfgValue::Unknown
+            }
+        }
+        _ => CfgValue::Unknown,
+    }
+}
+
+fn test_only(attributes: &[syn::Attribute]) -> bool {
+    attributes.iter().any(|attribute| {
+        attribute.path().is_ident("test")
+            || (attribute.path().is_ident("cfg")
+                && attribute
+                    .parse_args::<syn::Meta>()
+                    .is_ok_and(|meta| cfg_value_without_test(&meta) == CfgValue::False))
+    })
+}
+
+fn item_attributes(item: &syn::Item) -> &[syn::Attribute] {
+    match item {
+        syn::Item::Const(item) => &item.attrs,
+        syn::Item::Enum(item) => &item.attrs,
+        syn::Item::ExternCrate(item) => &item.attrs,
+        syn::Item::Fn(item) => &item.attrs,
+        syn::Item::ForeignMod(item) => &item.attrs,
+        syn::Item::Impl(item) => &item.attrs,
+        syn::Item::Macro(item) => &item.attrs,
+        syn::Item::Mod(item) => &item.attrs,
+        syn::Item::Static(item) => &item.attrs,
+        syn::Item::Struct(item) => &item.attrs,
+        syn::Item::Trait(item) => &item.attrs,
+        syn::Item::TraitAlias(item) => &item.attrs,
+        syn::Item::Type(item) => &item.attrs,
+        syn::Item::Union(item) => &item.attrs,
+        syn::Item::Use(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn impl_item_attributes(item: &syn::ImplItem) -> &[syn::Attribute] {
+    match item {
+        syn::ImplItem::Const(item) => &item.attrs,
+        syn::ImplItem::Fn(item) => &item.attrs,
+        syn::ImplItem::Type(item) => &item.attrs,
+        syn::ImplItem::Macro(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn trait_item_attributes(item: &syn::TraitItem) -> &[syn::Attribute] {
+    match item {
+        syn::TraitItem::Const(item) => &item.attrs,
+        syn::TraitItem::Fn(item) => &item.attrs,
+        syn::TraitItem::Type(item) => &item.attrs,
+        syn::TraitItem::Macro(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn foreign_item_attributes(item: &syn::ForeignItem) -> &[syn::Attribute] {
+    match item {
+        syn::ForeignItem::Fn(item) => &item.attrs,
+        syn::ForeignItem::Static(item) => &item.attrs,
+        syn::ForeignItem::Type(item) => &item.attrs,
+        syn::ForeignItem::Macro(item) => &item.attrs,
+        _ => &[],
+    }
+}
+
+fn expression_attributes(expression: &syn::Expr) -> &[syn::Attribute] {
+    match expression {
+        syn::Expr::Array(expression) => &expression.attrs,
+        syn::Expr::Assign(expression) => &expression.attrs,
+        syn::Expr::Async(expression) => &expression.attrs,
+        syn::Expr::Await(expression) => &expression.attrs,
+        syn::Expr::Binary(expression) => &expression.attrs,
+        syn::Expr::Block(expression) => &expression.attrs,
+        syn::Expr::Break(expression) => &expression.attrs,
+        syn::Expr::Call(expression) => &expression.attrs,
+        syn::Expr::Cast(expression) => &expression.attrs,
+        syn::Expr::Closure(expression) => &expression.attrs,
+        syn::Expr::Const(expression) => &expression.attrs,
+        syn::Expr::Continue(expression) => &expression.attrs,
+        syn::Expr::Field(expression) => &expression.attrs,
+        syn::Expr::ForLoop(expression) => &expression.attrs,
+        syn::Expr::Group(expression) => &expression.attrs,
+        syn::Expr::If(expression) => &expression.attrs,
+        syn::Expr::Index(expression) => &expression.attrs,
+        syn::Expr::Infer(expression) => &expression.attrs,
+        syn::Expr::Let(expression) => &expression.attrs,
+        syn::Expr::Lit(expression) => &expression.attrs,
+        syn::Expr::Loop(expression) => &expression.attrs,
+        syn::Expr::Macro(expression) => &expression.attrs,
+        syn::Expr::Match(expression) => &expression.attrs,
+        syn::Expr::MethodCall(expression) => &expression.attrs,
+        syn::Expr::Paren(expression) => &expression.attrs,
+        syn::Expr::Path(expression) => &expression.attrs,
+        syn::Expr::Range(expression) => &expression.attrs,
+        syn::Expr::RawAddr(expression) => &expression.attrs,
+        syn::Expr::Reference(expression) => &expression.attrs,
+        syn::Expr::Repeat(expression) => &expression.attrs,
+        syn::Expr::Return(expression) => &expression.attrs,
+        syn::Expr::Struct(expression) => &expression.attrs,
+        syn::Expr::Try(expression) => &expression.attrs,
+        syn::Expr::TryBlock(expression) => &expression.attrs,
+        syn::Expr::Tuple(expression) => &expression.attrs,
+        syn::Expr::Unary(expression) => &expression.attrs,
+        syn::Expr::Unsafe(expression) => &expression.attrs,
+        syn::Expr::While(expression) => &expression.attrs,
+        syn::Expr::Yield(expression) => &expression.attrs,
+        _ => &[],
+    }
+}
+
+#[derive(Default)]
+struct DomainVisitor {
+    domains: std::collections::BTreeSet<&'static str>,
+}
+
+impl DomainVisitor {
+    fn record(&mut self, path: &[String]) {
+        let mut segments = path.iter().map(String::as_str);
+        let Some(root) = segments.next() else {
+            return;
+        };
+        let dependency = match root {
+            "crate" | "packetcraftr" => segments.next(),
+            "super" => segments.find(|segment| *segment != "super"),
+            _ => None,
+        };
+        if let Some(domain) = dependency.and_then(|dependency| {
+            DOMAINS
+                .iter()
+                .map(|(domain, _)| *domain)
+                .find(|domain| *domain == dependency)
+        }) {
+            self.domains.insert(domain);
+        }
+    }
+
+    fn visit_use_tree(&mut self, tree: &syn::UseTree, path: &mut Vec<String>) {
+        match tree {
+            syn::UseTree::Path(tree) => {
+                path.push(tree.ident.to_string());
+                self.visit_use_tree(&tree.tree, path);
+                path.pop();
+            }
+            syn::UseTree::Name(tree) => {
+                path.push(tree.ident.to_string());
+                self.record(path);
+                path.pop();
+            }
+            syn::UseTree::Rename(tree) => {
+                path.push(tree.ident.to_string());
+                self.record(path);
+                path.pop();
+            }
+            syn::UseTree::Glob(_) => self.record(path),
+            syn::UseTree::Group(tree) => {
+                for tree in &tree.items {
+                    self.visit_use_tree(tree, path);
+                }
+            }
+        }
+    }
+
+    fn visit_macro_tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        use proc_macro2::TokenTree;
+
+        let tokens: Vec<_> = tokens.into_iter().collect();
+        for (index, token) in tokens.iter().enumerate() {
+            if let TokenTree::Group(group) = token {
+                self.visit_macro_tokens(group.stream());
+            }
+
+            let TokenTree::Ident(root) = token else {
+                continue;
+            };
+            if !matches!(
+                root.to_string().as_str(),
+                "crate" | "packetcraftr" | "super"
+            ) {
+                continue;
+            }
+
+            let mut path = vec![root.to_string()];
+            let mut cursor = index + 1;
+            while let [
+                TokenTree::Punct(first),
+                TokenTree::Punct(second),
+                TokenTree::Ident(segment),
+                ..,
+            ] = &tokens[cursor..]
+            {
+                if first.as_char() != ':' || second.as_char() != ':' {
+                    break;
+                }
+                path.push(segment.to_string());
+                cursor += 3;
+            }
+            self.record(&path);
+
+            if let [
+                TokenTree::Punct(first),
+                TokenTree::Punct(second),
+                TokenTree::Group(group),
+                ..,
+            ] = &tokens[cursor..]
+                && first.as_char() == ':'
+                && second.as_char() == ':'
+                && group.delimiter() == proc_macro2::Delimiter::Brace
+            {
+                use syn::parse::Parser;
+
+                if let Ok(trees) =
+                    syn::punctuated::Punctuated::<syn::UseTree, syn::Token![,]>::parse_terminated
+                        .parse2(group.stream())
+                {
+                    for tree in trees {
+                        self.visit_use_tree(&tree, &mut path);
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for DomainVisitor {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        if !test_only(item_attributes(item)) {
+            syn::visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        self.visit_use_tree(&item.tree, &mut Vec::new());
+    }
+
+    fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+        if !test_only(impl_item_attributes(item)) {
+            syn::visit::visit_impl_item(self, item);
+        }
+    }
+
+    fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+        if !test_only(trait_item_attributes(item)) {
+            syn::visit::visit_trait_item(self, item);
+        }
+    }
+
+    fn visit_foreign_item(&mut self, item: &'ast syn::ForeignItem) {
+        if !test_only(foreign_item_attributes(item)) {
+            syn::visit::visit_foreign_item(self, item);
+        }
+    }
+
+    fn visit_field(&mut self, field: &'ast syn::Field) {
+        if !test_only(&field.attrs) {
+            syn::visit::visit_field(self, field);
+        }
+    }
+
+    fn visit_variant(&mut self, variant: &'ast syn::Variant) {
+        if !test_only(&variant.attrs) {
+            syn::visit::visit_variant(self, variant);
+        }
+    }
+
+    fn visit_local(&mut self, local: &'ast syn::Local) {
+        if !test_only(&local.attrs) {
+            syn::visit::visit_local(self, local);
+        }
+    }
+
+    fn visit_arm(&mut self, arm: &'ast syn::Arm) {
+        if !test_only(&arm.attrs) {
+            syn::visit::visit_arm(self, arm);
+        }
+    }
+
+    fn visit_fn_arg(&mut self, argument: &'ast syn::FnArg) {
+        let attributes = match argument {
+            syn::FnArg::Receiver(argument) => &argument.attrs,
+            syn::FnArg::Typed(argument) => &argument.attrs,
+        };
+        if !test_only(attributes) {
+            syn::visit::visit_fn_arg(self, argument);
+        }
+    }
+
+    fn visit_field_value(&mut self, field: &'ast syn::FieldValue) {
+        if !test_only(&field.attrs) {
+            syn::visit::visit_field_value(self, field);
+        }
+    }
+
+    fn visit_stmt_macro(&mut self, statement: &'ast syn::StmtMacro) {
+        if !test_only(&statement.attrs) {
+            syn::visit::visit_stmt_macro(self, statement);
+        }
+    }
+
+    fn visit_expr(&mut self, expression: &'ast syn::Expr) {
+        if !test_only(expression_attributes(expression)) {
+            syn::visit::visit_expr(self, expression);
+        }
+    }
+
+    fn visit_macro(&mut self, value: &'ast syn::Macro) {
+        self.visit_macro_tokens(value.tokens.clone());
+        syn::visit::visit_macro(self, value);
+    }
+
+    fn visit_path(&mut self, path: &'ast syn::Path) {
+        self.record(
+            &path
+                .segments
+                .iter()
+                .map(|segment| segment.ident.to_string())
+                .collect::<Vec<_>>(),
+        );
+        syn::visit::visit_path(self, path);
+    }
+}
+
+fn referenced_domains(source: &str) -> syn::Result<std::collections::BTreeSet<&'static str>> {
+    let syntax = syn::parse_file(source)?;
+    let mut visitor = DomainVisitor::default();
+    visitor.visit_file(&syntax);
+    Ok(visitor.domains)
+}
+
+fn validate_library_root(source: &str) -> Result<(), String> {
+    let syntax = syn::parse_file(source).map_err(|error| error.to_string())?;
+    let mut modules = Vec::new();
+
+    for item in syntax.items {
+        if test_only(item_attributes(&item)) {
+            continue;
+        }
+        match item {
+            syn::Item::Mod(item)
+                if matches!(item.vis, syn::Visibility::Public(_))
+                    && item.content.is_none()
+                    && item
+                        .attrs
+                        .iter()
+                        .all(|attribute| attribute.path().is_ident("doc")) =>
+            {
+                modules.push(item.ident.to_string());
+            }
+            _ => return Err("the library root contains a non-canonical item".into()),
+        }
+    }
+    modules.sort();
+    if modules == LIBRARY_ROOT_MODULES {
+        Ok(())
+    } else {
+        Err(format!(
+            "expected {LIBRARY_ROOT_MODULES:?}, found {modules:?}"
+        ))
+    }
 }
 
 #[test]
@@ -147,14 +478,13 @@ fn production_domains_follow_the_dependency_direction() {
         for file in domain_files(root, domain) {
             let source = std::fs::read_to_string(&file)
                 .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
-            let production = source
-                .split_once("\n#[cfg(test)]\nmod tests")
-                .map_or(source.as_str(), |(production, _)| production);
+            let dependencies = referenced_domains(&source)
+                .unwrap_or_else(|error| panic!("failed to parse {}: {error}", file.display()));
 
             for (dependency, _) in DOMAINS {
                 if dependency != domain
                     && !allowed.contains(dependency)
-                    && mentions_domain(production, dependency)
+                    && dependencies.contains(dependency)
                 {
                     violations.push(format!(
                         "{domain} -> {dependency} in {}",
@@ -174,15 +504,110 @@ fn production_domains_follow_the_dependency_direction() {
 
 #[test]
 fn library_root_contains_only_canonical_modules() {
-    let items: Vec<_> = include_str!("../src/lib.rs")
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with("#!"))
-        .collect();
-
-    assert_eq!(
-        items, LIBRARY_ROOT_ITEMS,
+    assert!(
+        validate_library_root(include_str!("../src/lib.rs")).is_ok(),
         "the library root must expose only the canonical modules; CLI code, removed facades, and \
          flat reexports belong outside it"
+    );
+}
+
+#[test]
+fn imports_report_only_their_top_level_domains() {
+    let domains = referenced_domains(
+        r#"
+        use crate::output;
+        use packetcraftr::{packet as packets, protocol::{self as protocols, builtin::Registry}};
+        use super::{super::session::Stage, workflow::{self, Runner}};
+        use crate::{packet::{client, Packet}, output_format};
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        domains.into_iter().collect::<Vec<_>>(),
+        ["output", "packet", "protocol", "session", "workflow"]
+    );
+}
+
+#[test]
+fn qualified_paths_report_domains() {
+    let domains = referenced_domains(
+        r#"
+        type Report = crate::output::Report;
+        fn packet() -> packetcraftr::packet::Packet { todo!() }
+        fn register() { super::protocol::builtin::register(); }
+        crate::capture::trace!();
+        inspect!(crate::client::Client, "crate::error::Kind");
+        imports!(crate::{net::Interface, error::Kind});
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        domains.into_iter().collect::<Vec<_>>(),
+        [
+            "capture", "client", "error", "net", "output", "packet", "protocol"
+        ]
+    );
+}
+
+#[test]
+fn comments_strings_and_test_only_items_are_ignored() {
+    let domains = referenced_domains(
+        r#"
+        // use crate::output;
+        const EXAMPLE: &str = "packetcraftr::workflow::Runner";
+        use crate::packet::Packet;
+        #[cfg(test)] mod tests { use crate::output; }
+        #[cfg(all(unix, test))] fn helper() { super::client::run(); }
+        struct Conditional { #[cfg(test)] output: crate::output::Report }
+        enum Choice { #[cfg(test)] Workflow(crate::workflow::Stats), Production }
+        struct Helpers;
+        impl Helpers {
+            #[cfg(test)] fn test_helper() { crate::workflow::run(); }
+            fn arguments(#[cfg(test)] value: crate::error::Kind) {}
+            fn production() {
+                #[cfg(test)] let _: crate::session::Stage;
+                let _ = Conditional { #[cfg(test)] output: crate::output::Report };
+                #[cfg(test)] hidden!(crate::client::Client);
+                match 0 { #[cfg(test)] 1 => crate::client::run(), _ => {} }
+            }
+        }
+        #[cfg(any(test, unix))] fn production_on_unix() { crate::capture::open(); }
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(
+        domains.into_iter().collect::<Vec<_>>(),
+        ["capture", "packet"]
+    );
+}
+
+#[test]
+fn library_root_validation_is_structural() {
+    let canonical = r#"
+        #![deny(unsafe_code)]
+        // Formatting and comments are immaterial.
+        /// Capture API.
+        pub mod capture ; pub mod client;
+        pub mod error; pub mod net; pub mod output;
+        pub mod packet; pub mod protocol; pub mod session; pub mod workflow;
+        #[cfg(test)] mod tests { const EXAMPLE: &str = "pub mod extra;"; }
+    "#;
+
+    assert!(validate_library_root(canonical).is_ok());
+    assert!(validate_library_root(&format!("{canonical}\npub use packet::Packet;")).is_err());
+    assert!(validate_library_root(&canonical.replace("pub mod net;", "mod net;")).is_err());
+    assert!(validate_library_root(&canonical.replace("pub mod net;", "pub mod net {} ")).is_err());
+    assert!(
+        validate_library_root(&canonical.replace("pub mod net;", "#[cfg(unix)] pub mod net;"))
+            .is_err()
+    );
+    assert!(
+        validate_library_root(
+            &canonical.replace("pub mod net;", "#[path = \"other.rs\"] pub mod net;")
+        )
+        .is_err()
     );
 }

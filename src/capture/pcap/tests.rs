@@ -72,8 +72,8 @@ fn classic_pcap_rejects_zero_snapshot_length() {
 }
 
 #[test]
-fn reads_independent_little_endian_microsecond_fixture() {
-    let fixture = [
+fn classic_pcap_reads_little_endian_microsecond_fixture() {
+    let pcap_bytes = [
         // Classic PCAP global header, version 2.4, snaplen 64, Ethernet.
         0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x40, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
@@ -81,7 +81,7 @@ fn reads_independent_little_endian_microsecond_fixture() {
         0x01, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00,
         0x00, 0xaa, 0xbb, 0xcc,
     ];
-    let decoded = Reader::new(Cursor::new(fixture))
+    let decoded = Reader::new(Cursor::new(pcap_bytes))
         .unwrap()
         .next_frame()
         .unwrap()

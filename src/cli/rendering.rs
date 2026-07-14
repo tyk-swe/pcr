@@ -3,16 +3,26 @@
 
 // Shared capture-file and terminal rendering.
 
+use std::io::{self, Write};
+
+use packetcraftr::{
+    capture::{Format, Frame, LinkType, Writer},
+    output,
+};
+use serde::Serialize;
+
+use super::errors::CliError;
+
 #[derive(Clone, Copy, Debug)]
 struct CaptureInterfaceMapping {
     link_type: LinkType,
     output_id: u32,
 }
 
-fn capture_file_format(output: OutputFormat) -> Result<Format, CliError> {
+pub(super) fn capture_file_format(output: output::contract::Format) -> Result<Format, CliError> {
     match output {
-        OutputFormat::Pcap => Ok(Format::Pcap),
-        OutputFormat::Pcapng => Ok(Format::PcapNg),
+        output::contract::Format::Pcap => Ok(Format::Pcap),
+        output::contract::Format::Pcapng => Ok(Format::PcapNg),
         _ => Err(CliError::new(
             70,
             "capture-file renderer received a non-capture format",
@@ -20,7 +30,7 @@ fn capture_file_format(output: OutputFormat) -> Result<Format, CliError> {
     }
 }
 
-fn capture_file_frame(mut frame: Frame, format: Format) -> Frame {
+pub(super) fn capture_file_frame(mut frame: Frame, format: Format) -> Frame {
     match format {
         Format::Pcap => frame.interface = None,
         Format::PcapNg => frame.interface = Some(0),
@@ -28,15 +38,15 @@ fn capture_file_frame(mut frame: Frame, format: Format) -> Frame {
     frame
 }
 
-fn write_capture_file(
-    output: OutputFormat,
+pub(super) fn write_capture_file(
+    output: output::contract::Format,
     frames: impl IntoIterator<Item = Frame>,
 ) -> Result<(), CliError> {
     write_raw(&encode_capture_file(output, frames)?)
 }
 
-fn encode_capture_file(
-    output: OutputFormat,
+pub(super) fn encode_capture_file(
+    output: output::contract::Format,
     frames: impl IntoIterator<Item = Frame>,
 ) -> Result<Vec<u8>, CliError> {
     let format = capture_file_format(output)?;
@@ -93,7 +103,7 @@ fn encode_capture_file(
     Ok(writer.into_inner())
 }
 
-fn spaced_hex(bytes: &[u8]) -> String {
+pub(super) fn spaced_hex(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len().saturating_mul(3));
     for (index, byte) in bytes.iter().enumerate() {
         use std::fmt::Write as _;
@@ -105,7 +115,7 @@ fn spaced_hex(bytes: &[u8]) -> String {
     output
 }
 
-fn output_timestamp_text(timestamp: crate::output::OutputTimestamp) -> String {
+pub(super) fn output_timestamp_text(timestamp: output::frame::Timestamp) -> String {
     if timestamp.unix_seconds >= 0 || timestamp.nanoseconds == 0 {
         return format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds);
     }
@@ -118,19 +128,19 @@ fn output_timestamp_text(timestamp: crate::output::OutputTimestamp) -> String {
     format!("-{whole_seconds}.{fractional:09}")
 }
 
-fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
+pub(super) fn emit_json(value: &impl Serialize) -> Result<(), CliError> {
     let rendered = serde_json::to_string_pretty(value)
         .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
     write_machine_line(&rendered)
 }
 
-fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> {
+pub(super) fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> {
     let rendered = serde_json::to_string(value)
         .map_err(|source| CliError::new(70, format!("serialize output failed: {source}")))?;
     write_machine_line(&rendered)
 }
 
-fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
+pub(super) fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
     let rendered = terminal_safe(&arguments.to_string());
     write_machine_line(&rendered)
 }
@@ -144,21 +154,21 @@ fn write_machine_line(rendered: &str) -> Result<(), CliError> {
         .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
 }
 
-fn emit_stderr_error(message: &str) -> Result<(), CliError> {
+pub(super) fn emit_stderr_error(message: &str) -> Result<(), CliError> {
     let mut stderr = io::stderr().lock();
     writeln!(stderr, "error: {}", terminal_safe(message))
         .and_then(|()| stderr.flush())
         .map_err(|source| CliError::new(5, format!("write stderr failed: {source}")))
 }
 
-fn emit_stderr_message(message: &str) -> Result<(), CliError> {
+pub(super) fn emit_stderr_message(message: &str) -> Result<(), CliError> {
     let mut stderr = io::stderr().lock();
     writeln!(stderr, "{}", terminal_safe(message))
         .and_then(|()| stderr.flush())
         .map_err(|source| CliError::new(5, format!("write stderr failed: {source}")))
 }
 
-fn terminal_safe(value: &str) -> String {
+pub(super) fn terminal_safe(value: &str) -> String {
     let mut safe = String::with_capacity(value.len());
     for character in value.chars() {
         match character {
@@ -185,7 +195,7 @@ fn terminal_safe(value: &str) -> String {
     safe
 }
 
-fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
+pub(super) fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
     stdout
         .write_all(bytes)

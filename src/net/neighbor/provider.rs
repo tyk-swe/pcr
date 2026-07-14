@@ -1,3 +1,24 @@
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use bytes::Bytes;
+
+use crate::capture::{Frame, LinkType};
+use crate::net::{
+    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
+    CapturedFrame, DestinationScope, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport,
+    Layer2Frame, Layer2Io, LinkCapability, LinkMode, LiveIoError, MAX_NEIGHBOR_VLAN_TAGS,
+    MacAddress, MaterializedRoute, NeighborError, NeighborRequest, NeighborResolution,
+    NeighborResolver, PlannedRoute, RouteDecision, RouteSelectionReason, SystemCaptureProvider,
+    SystemInterfaceProvider, SystemLayer2Io,
+};
+
+use super::cache::{NeighborCacheEntry, NeighborCacheKey, NeighborExchangeOutcome};
+use super::options::NeighborResolutionOptions;
+use super::wire::{build_request_frame, is_unicast_mac, match_neighbor_response};
+
 /// Injectable active resolver. Production composition uses the `System*`
 /// providers; tests and applications can supply deterministic providers.
 #[derive(Debug)]
@@ -180,7 +201,7 @@ where
                     interface: request.interface.name.clone(),
                     target: request.target,
                     source: cleanup,
-                })
+                });
             }
             (Err(operation), Err(cleanup)) => {
                 return Err(NeighborError::OperationAndCleanup {
@@ -188,7 +209,7 @@ where
                     target: request.target,
                     operation: Box::new(operation),
                     cleanup,
-                })
+                });
             }
         };
         let validated_statistics = statistics
@@ -350,14 +371,15 @@ where
             message: "neighbor cache mutex was poisoned".to_owned(),
         })?;
         cache.retain(|_, entry| entry.expires_at > now);
-        if !cache.contains_key(&key) && cache.len() >= self.options.max_cache_entries
+        if !cache.contains_key(&key)
+            && cache.len() >= self.options.max_cache_entries
             && let Some(oldest) = cache
                 .iter()
                 .min_by_key(|(_, entry)| entry.inserted_at)
                 .map(|(key, _)| key.clone())
-            {
-                cache.remove(&oldest);
-            }
+        {
+            cache.remove(&oldest);
+        }
         cache.insert(
             key,
             NeighborCacheEntry {
@@ -515,7 +537,7 @@ fn retain_evidence(
     captured_bytes: &mut usize,
     truncated: &mut bool,
 ) {
-    let next_bytes = captured_bytes.checked_add(frame.bytes.len());
+    let next_bytes = captured_bytes.checked_add(frame.bytes().len());
     if captured.len() >= options.max_capture_queue_frames
         || next_bytes.is_none_or(|bytes| bytes > options.max_captured_bytes)
     {
@@ -533,7 +555,7 @@ fn retain_matching_evidence(
     captured_bytes: &mut usize,
     truncated: &mut bool,
 ) -> Result<(), NeighborError> {
-    let frame_length = frame.bytes.len();
+    let frame_length = frame.bytes().len();
     while captured.len() >= options.max_capture_queue_frames
         || captured_bytes
             .checked_add(frame_length)
@@ -545,7 +567,7 @@ fn retain_matching_evidence(
             });
         };
         *captured_bytes = captured_bytes
-            .checked_sub(discarded.bytes.len())
+            .checked_sub(discarded.bytes().len())
             .ok_or_else(|| NeighborError::State {
                 message: "neighbor evidence byte accounting underflowed".to_owned(),
             })?;
@@ -574,13 +596,13 @@ fn validate_captured_frame(
             format!("capture returned an invalid frame: {error}"),
         )
     })?;
-    if frame.bytes.len() > snap_length {
+    if frame.bytes().len() > snap_length {
         return Err(resolution_error(
             &request.interface,
             request.target,
             format!(
                 "capture returned {} bytes beyond the configured {snap_length}-byte snap length",
-                frame.bytes.len()
+                frame.bytes().len()
             ),
         ));
     }
@@ -603,21 +625,17 @@ fn validate_send_report(
         ));
     }
     if let Some(wire_bytes) = report.wire_bytes
-        && wire_bytes != *expected {
-            return Err(map_io_error(
-                request,
-                "validating discovery send evidence",
-                LiveIoError::InvalidSendEvidence {
-                    message: "discovery wire bytes differ from the exact submitted frame"
-                        .to_owned(),
-                },
-            ));
-        }
+        && wire_bytes != *expected
+    {
+        return Err(map_io_error(
+            request,
+            "validating discovery send evidence",
+            LiveIoError::InvalidSendEvidence {
+                message: "discovery wire bytes differ from the exact submitted frame".to_owned(),
+            },
+        ));
+    }
     Ok(())
-}
-
-fn is_unicast_mac(address: MacAddress) -> bool {
-    address.0 != [0; 6] && address.0 != [0xff; 6] && address.0[0] & 1 == 0
 }
 
 fn invalid_configuration(message: String) -> NeighborError {

@@ -16,7 +16,7 @@ impl TracerouteStrategy {
         }
     }
 
-    const fn probe_transport(self) -> ProbeTransport {
+    pub(super) const fn probe_transport(self) -> ProbeTransport {
         match self {
             Self::Udp => ProbeTransport::Udp,
             Self::Icmp => ProbeTransport::Icmp,
@@ -142,20 +142,21 @@ impl TracerouteRequest {
                 ),
             });
         }
-        if self.timeout.is_zero() || self.timeout > MAX_CAPTURE_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > crate::net::capture::MAX_TIMEOUT {
             return Err(TracerouteError::InvalidTimeout {
                 value: self.timeout,
-                maximum: MAX_CAPTURE_TIMEOUT,
+                maximum: crate::net::capture::MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.probes_per_second
-            && (rate == 0 || rate > MAX_SCAN_RATE) {
-                return Err(TracerouteError::InvalidLimit {
-                    field: "probes_per_second",
-                    value: u64::from(rate),
-                    reason: format!("must be within 1..={MAX_SCAN_RATE}"),
-                });
-            }
+            && (rate == 0 || rate > MAX_SCAN_RATE)
+        {
+            return Err(TracerouteError::InvalidLimit {
+                field: "probes_per_second",
+                value: u64::from(rate),
+                reason: format!("must be within 1..={MAX_SCAN_RATE}"),
+            });
+        }
         match (self.strategy, self.destination_port) {
             (TracerouteStrategy::Udp | TracerouteStrategy::Tcp, None) => {
                 return Err(TracerouteError::InvalidPort {
@@ -172,11 +173,11 @@ impl TracerouteRequest {
         Ok(())
     }
 
-    fn hop_count(&self) -> usize {
+    pub(super) fn hop_count(&self) -> usize {
         usize::from(self.max_hops - self.first_hop) + 1
     }
 
-    fn total_probe_count(&self) -> Result<usize, TracerouteError> {
+    pub(super) fn total_probe_count(&self) -> Result<usize, TracerouteError> {
         self.hop_count()
             .checked_mul(self.probes_per_hop as usize)
             .ok_or(TracerouteError::InvalidLimit {
@@ -203,7 +204,7 @@ pub enum TracerouteResponseKind {
 }
 
 impl TracerouteResponseKind {
-    const fn rank(self) -> u8 {
+    pub(super) const fn rank(self) -> u8 {
         match self {
             Self::Intermediate => 1,
             Self::Unreachable => 2,
@@ -277,7 +278,7 @@ pub struct TracerouteProbe {
 
 impl TracerouteProbe {
     pub fn packet(&self) -> Packet {
-        probe_packet(self)
+        super::engine::probe_packet(self)
     }
 }
 
@@ -305,48 +306,7 @@ pub struct TracerouteBatchExecution {
     pub stats: Stats,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TracerouteExecutionError {
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-}
-
-impl TracerouteExecutionError {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-        }
-    }
-
-    pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
-        Self::new(error.to_string(), error.classification(), error.causes())
-    }
-}
-
-impl fmt::Display for TracerouteExecutionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for TracerouteExecutionError {}
-
-impl Classified for TracerouteExecutionError {
-    fn classification(&self) -> Classification {
-        self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        self.causes.clone()
-    }
-}
+pub use crate::workflow::BoundaryError as TracerouteExecutionError;
 
 pub trait TracerouteExecutor {
     fn execute(
@@ -354,3 +314,10 @@ pub trait TracerouteExecutor {
         batch: &TracerouteBatch,
     ) -> Result<TracerouteBatchExecution, TracerouteExecutionError>;
 }
+use super::{
+    AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DecodedPacket, Diagnostic, Duration, Frame, IpAddr,
+    MAX_SCAN_PROBES, MAX_SCAN_RATE, MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP, Packet,
+    ProbeTransport, Serialize, Stats, SystemTime, Target, TracerouteError, fmt,
+};
+use serde::Deserialize;

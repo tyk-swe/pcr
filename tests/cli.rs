@@ -305,9 +305,9 @@ fn exact_bytes_agree_across_json_raw_hex_ndjson_pcap_and_pcapng() {
         );
         let mut reader = Reader::new(std::io::Cursor::new(output.stdout)).unwrap();
         let frame = reader.next_frame().unwrap().unwrap();
-        assert_eq!(frame.bytes.as_ref(), expected, "{format}");
-        assert_eq!(frame.captured_length as usize, expected.len(), "{format}");
-        assert_eq!(frame.original_length as usize, expected.len(), "{format}");
+        assert_eq!(frame.bytes().as_ref(), expected, "{format}");
+        assert_eq!(frame.captured_length() as usize, expected.len(), "{format}");
+        assert_eq!(frame.original_length() as usize, expected.len(), "{format}");
         assert!(reader.next_frame().unwrap().is_none(), "{format}");
     }
     std::fs::remove_file(path).unwrap();
@@ -916,8 +916,14 @@ fn read_exposes_bounded_capture_file_writers() {
 
     let mut reader = Reader::new(std::io::Cursor::new(output.stdout)).unwrap();
     assert_eq!(reader.format(), CaptureFormat::PcapNg);
-    assert_eq!(reader.next_frame().unwrap().unwrap().bytes.as_ref(), b"one");
-    assert_eq!(reader.next_frame().unwrap().unwrap().bytes.as_ref(), b"two");
+    assert_eq!(
+        reader.next_frame().unwrap().unwrap().bytes().as_ref(),
+        b"one"
+    );
+    assert_eq!(
+        reader.next_frame().unwrap().unwrap().bytes().as_ref(),
+        b"two"
+    );
     assert!(reader.next_frame().unwrap().is_none());
 }
 

@@ -66,12 +66,17 @@ pub mod transmit {
 
 /// Owned live-capture sessions and bounded queue configuration.
 pub mod capture {
+    use std::time::Duration;
+
     pub use super::provider_impl::{
         CaptureEvidenceCompleteness as Completeness, CaptureOverflowPolicy as OverflowPolicy,
         CaptureProvider as Provider, CaptureQueueLimits as Limits, CaptureSession as Session,
         CaptureStatistics as Statistics, CapturedFrame as Captured,
         SystemCaptureProvider as SystemProvider, SystemCaptureSession as SystemSession,
     };
+
+    /// Maximum blocking wait accepted by an owned capture session.
+    pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 }
 
 /// Composition contracts for capture-before-send exchanges.
@@ -154,8 +159,8 @@ pub(crate) use provider_impl::{
     CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
     CapturedFrame, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DispatchPacketIo,
     ExchangeIo, InterfaceInfo, InterfaceProvider, IoSendReport, Layer2Frame, Layer2Io, LiveIoError,
-    MAX_CAPTURE_TIMEOUT, PacketIo, SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io,
-    SystemLayer3Io, TransmissionFrame,
+    PacketIo, SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io,
+    TransmissionFrame,
 };
 #[cfg(any(
     all(

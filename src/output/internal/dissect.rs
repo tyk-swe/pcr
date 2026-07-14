@@ -1,3 +1,10 @@
+use bytes::Bytes;
+use serde::Serialize;
+
+use crate::packet::internal::{DecodedPacket, Diagnostic, PacketDocument, PacketLayout};
+
+use super::common::compact_hex;
+
 /// Structured result of `dissect`.
 #[derive(Clone, Debug, Serialize)]
 pub struct DissectCommandResult {

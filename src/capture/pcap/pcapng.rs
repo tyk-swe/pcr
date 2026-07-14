@@ -1,4 +1,19 @@
-fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option<[u8; 8]>, Error> {
+use std::io::Read;
+use std::time::UNIX_EPOCH;
+
+use bytes::Bytes;
+
+use crate::capture::{Direction, Frame, LinkType};
+
+use super::models::{Endianness, Error, Format, Interface, TimestampResolution};
+use super::wire::{
+    DEFAULT_TIMESTAMP_RESOLUTION, PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS,
+    PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, align_to_usize, decode_i64, decode_u16,
+    decode_u32, read_exact_counted, read_exact_or_eof, timestamp_from_ticks,
+    validate_declared_lengths,
+};
+
+pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option<[u8; 8]>, Error> {
     let mut header = [0_u8; 8];
     if read_exact_or_eof(reader, &mut header, "pcapng block header")? {
         Ok(Some(header))
@@ -7,7 +22,7 @@ fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option<[u8; 8]>, 
     }
 }
 
-fn read_section_header_after_type<R: Read>(
+pub(super) fn read_section_header_after_type<R: Read>(
     reader: &mut R,
     max_size: usize,
 ) -> Result<Endianness, Error> {
@@ -16,7 +31,7 @@ fn read_section_header_after_type<R: Read>(
     read_section_header_with_length(reader, length, max_size)
 }
 
-fn read_section_header_with_length<R: Read>(
+pub(super) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
@@ -86,7 +101,7 @@ fn read_section_header_with_length<R: Read>(
     Ok(endianness)
 }
 
-fn validate_pcapng_block_length(length: u32, max_size: usize) -> Result<(), Error> {
+pub(super) fn validate_pcapng_block_length(length: u32, max_size: usize) -> Result<(), Error> {
     if length < 12 || !length.is_multiple_of(4) {
         return Err(Error::InvalidBlockLength { length });
     }
@@ -100,7 +115,10 @@ fn validate_pcapng_block_length(length: u32, max_size: usize) -> Result<(), Erro
     Ok(())
 }
 
-fn parse_interface_description(body: &[u8], endianness: Endianness) -> Result<Interface, Error> {
+pub(super) fn parse_interface_description(
+    body: &[u8],
+    endianness: Endianness,
+) -> Result<Interface, Error> {
     if body.len() < 8 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,
@@ -169,7 +187,7 @@ fn parse_interface_description(body: &[u8], endianness: Endianness) -> Result<In
     })
 }
 
-fn parse_enhanced_packet(
+pub(super) fn parse_enhanced_packet(
     body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
@@ -200,7 +218,7 @@ fn parse_enhanced_packet(
     )
 }
 
-fn parse_obsolete_packet(
+pub(super) fn parse_obsolete_packet(
     body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
@@ -299,18 +317,19 @@ fn parse_pcapng_packet_body(
     let global_interface = interface_base
         .checked_add(interface_id)
         .ok_or(Error::InterfaceLimit { limit: usize::MAX })?;
-    Ok(Frame {
+    let mut frame = Frame::try_with_lengths(
         timestamp,
+        interface.link_type,
         captured_length,
         original_length,
-        link_type: interface.link_type,
-        interface: Some(global_interface),
-        direction,
-        bytes: Bytes::copy_from_slice(&body[data_offset..actual_data_end]),
-    })
+        Bytes::copy_from_slice(&body[data_offset..actual_data_end]),
+    )?;
+    frame.interface = Some(global_interface);
+    frame.direction = direction;
+    Ok(frame)
 }
 
-fn parse_simple_packet(
+pub(super) fn parse_simple_packet(
     body: &[u8],
     endianness: Endianness,
     interfaces: &[Interface],
@@ -362,17 +381,17 @@ fn parse_simple_packet(
             reason: "simple packet data padding is non-zero",
         });
     }
-    Ok(Frame {
-        // A Simple Packet Block has no timestamp field.  UNIX_EPOCH is the
-        // deterministic sentinel used by the raw capture record model.
-        timestamp: UNIX_EPOCH,
+    // A Simple Packet Block has no timestamp field. UNIX_EPOCH is the
+    // deterministic sentinel used by the raw capture record model.
+    let mut frame = Frame::try_with_lengths(
+        UNIX_EPOCH,
+        interface.link_type,
         captured_length,
         original_length,
-        link_type: interface.link_type,
-        interface: Some(interface_base),
-        direction: None,
-        bytes: Bytes::copy_from_slice(&body[4..4 + captured_length as usize]),
-    })
+        Bytes::copy_from_slice(&body[4..4 + captured_length as usize]),
+    )?;
+    frame.interface = Some(interface_base);
+    Ok(frame)
 }
 
 fn parse_packet_direction(

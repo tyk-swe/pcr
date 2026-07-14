@@ -331,7 +331,7 @@ impl LayerCodec for Ipv4Codec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["ip", "ip4"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -781,7 +781,7 @@ impl LayerCodec for Ipv6Codec {
         protocol("ipv6")
     }
     fn aliases(&self) -> &'static [&'static str] {
-        &["ip6"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -1189,7 +1189,7 @@ impl LayerCodec for RawIpCodec {
         matches!(protocol.as_str(), "ipv4" | "ipv6")
     }
     fn aliases(&self) -> &'static [&'static str] {
-        &["rawip"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

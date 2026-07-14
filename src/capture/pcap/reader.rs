@@ -1,4 +1,25 @@
-enum ReaderState {
+use std::io::Read;
+
+use crate::capture::{Frame, LinkType};
+
+use super::classic::{read_next_pcap_frame, read_pcap_header};
+use super::models::{
+    DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT, DEFAULT_SIZE_LIMIT,
+    DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Error, Format, Interface, TimestampPrecision,
+    TimestampResolution,
+};
+use super::pcapng::{
+    parse_enhanced_packet, parse_interface_description, parse_obsolete_packet, parse_simple_packet,
+    read_pcapng_block_header, read_section_header_after_type, read_section_header_with_length,
+    validate_pcapng_block_length,
+};
+use super::wire::{
+    PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_PACKET_BLOCK,
+    PCAPNG_SECTION_HEADER, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32, read_exact_counted,
+    read_exact_or_eof,
+};
+
+pub(super) enum ReaderState {
     Pcap {
         endianness: Endianness,
         precision: TimestampPrecision,
@@ -23,7 +44,7 @@ pub struct Reader<R> {
     interfaces: Vec<Interface>,
     max_size: usize,
     max_interfaces: usize,
-    max_total_interfaces: usize,
+    pub(super) max_total_interfaces: usize,
     max_metadata_blocks_per_frame: usize,
     finished: bool,
 }

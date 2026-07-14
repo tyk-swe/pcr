@@ -15,11 +15,11 @@ impl ScanTransport {
         }
     }
 
-    const fn probe_transport(self) -> super::probe::Transport {
+    pub(super) const fn probe_transport(self) -> crate::workflow::probe::Transport {
         match self {
-            Self::Tcp => super::probe::Transport::Tcp,
-            Self::Udp => super::probe::Transport::Udp,
-            Self::Icmp => super::probe::Transport::Icmp,
+            Self::Tcp => crate::workflow::probe::Transport::Tcp,
+            Self::Udp => crate::workflow::probe::Transport::Udp,
+            Self::Icmp => crate::workflow::probe::Transport::Icmp,
         }
     }
 }
@@ -130,7 +130,7 @@ pub struct ScanRequest {
 }
 
 impl ScanRequest {
-    fn validate(&self) -> Result<Vec<u16>, ScanError> {
+    pub(super) fn validate(&self) -> Result<Vec<u16>, ScanError> {
         self.limits.validate()?;
         if !(1..=MAX_SCAN_ATTEMPTS).contains(&self.attempts) {
             return Err(ScanError::InvalidLimit {
@@ -139,20 +139,21 @@ impl ScanRequest {
                 reason: format!("must be within 1..={MAX_SCAN_ATTEMPTS}"),
             });
         }
-        if self.timeout.is_zero() || self.timeout > MAX_CAPTURE_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > crate::net::capture::MAX_TIMEOUT {
             return Err(ScanError::InvalidTimeout {
                 value: self.timeout,
-                maximum: MAX_CAPTURE_TIMEOUT,
+                maximum: crate::net::capture::MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.probes_per_second
-            && (rate == 0 || rate > MAX_SCAN_RATE) {
-                return Err(ScanError::InvalidLimit {
-                    field: "probes_per_second",
-                    value: u64::from(rate),
-                    reason: format!("must be within 1..={MAX_SCAN_RATE}"),
-                });
-            }
+            && (rate == 0 || rate > MAX_SCAN_RATE)
+        {
+            return Err(ScanError::InvalidLimit {
+                field: "probes_per_second",
+                value: u64::from(rate),
+                reason: format!("must be within 1..={MAX_SCAN_RATE}"),
+            });
+        }
         match self.transport {
             ScanTransport::Tcp | ScanTransport::Udp if self.ports.is_empty() => {
                 return Err(ScanError::InvalidPorts {
@@ -196,7 +197,7 @@ pub enum ScanClassification {
 }
 
 impl ScanClassification {
-    fn rank(self) -> u8 {
+    pub(super) fn rank(self) -> u8 {
         match self {
             Self::Open => 6,
             Self::Closed => 5,
@@ -261,7 +262,7 @@ impl ScanProbe {
     /// this already-authorized plan. Route-dependent fields remain unspecified
     /// for the high-level client to materialize.
     pub fn packet(&self) -> Packet {
-        probe_packet(self)
+        super::engine::probe_packet(self)
     }
 }
 
@@ -289,49 +290,16 @@ pub struct ScanBatchExecution {
     pub stats: Stats,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ScanExecutionError {
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-}
-
-impl ScanExecutionError {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-        }
-    }
-
-    pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
-        Self::new(error.to_string(), error.classification(), error.causes())
-    }
-}
-
-impl fmt::Display for ScanExecutionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for ScanExecutionError {}
-
-impl Classified for ScanExecutionError {
-    fn classification(&self) -> Classification {
-        self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        self.causes.clone()
-    }
-}
+pub use crate::workflow::BoundaryError as ScanExecutionError;
 
 pub trait ScanExecutor {
     fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError>;
 }
+use super::{
+    AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_TEMPLATE_PACKETS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES,
+    DEFAULT_SCAN_BATCH_SIZE, DecodedPacket, Diagnostic, Duration, Frame, IpAddr, MAX_SCAN_ATTEMPTS,
+    MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE, Packet, ScanError, Serialize, Stats,
+    SystemTime, Target, fmt,
+};
+use serde::Deserialize;

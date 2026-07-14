@@ -157,7 +157,7 @@ impl CaptureSession for NativeCaptureSession {
             if let Some(captured) = state.queue.pop_front() {
                 state.queued_bytes = state
                     .queued_bytes
-                    .checked_sub(captured.frame.bytes.len())
+                    .checked_sub(captured.frame.bytes().len())
                     .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
                         message: "native capture queue byte accounting underflowed".to_owned(),
                     })?;
@@ -295,7 +295,7 @@ impl SharedCapture {
 
     fn enqueue(&self, captured: CapturedFrame) -> Result<bool, LiveIoError> {
         let mut state = self.lock()?;
-        let frame_bytes = captured.frame.bytes.len();
+        let frame_bytes = captured.frame.bytes().len();
         let would_exceed_frames = state.queue.len() >= self.limits.max_frames;
         let would_exceed_bytes = state
             .queued_bytes
@@ -344,7 +344,7 @@ impl SharedCapture {
                         };
                         state.queued_bytes = state
                             .queued_bytes
-                            .checked_sub(dropped.frame.bytes.len())
+                            .checked_sub(dropped.frame.bytes().len())
                             .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
                                 message: "native capture queue byte accounting underflowed"
                                     .to_owned(),
@@ -352,7 +352,7 @@ impl SharedCapture {
                         increment(&mut state.statistics.dropped_frames, 1, "dropped frames")?;
                         increment(
                             &mut state.statistics.dropped_bytes,
-                            dropped.frame.bytes.len() as u64,
+                            dropped.frame.bytes().len() as u64,
                             "dropped bytes",
                         )?;
                     }
@@ -628,7 +628,7 @@ mod tests {
         session.wait_ready(Duration::from_secs(1)).unwrap();
         let frame = session.next_frame(Duration::from_secs(1)).unwrap().unwrap();
         assert_eq!(frame.interface, Some(7));
-        assert_eq!(frame.bytes.as_ref(), &[1, 1, 1, 1]);
+        assert_eq!(frame.bytes().as_ref(), &[1, 1, 1, 1]);
         session.shutdown().unwrap();
         assert_eq!(interrupts.load(Ordering::SeqCst), 1);
     }
@@ -686,7 +686,7 @@ mod tests {
             assert!(Instant::now() < deadline);
             thread::yield_now();
         };
-        assert_eq!(frame.bytes.as_ref(), &[2, 2, 2, 2]);
+        assert_eq!(frame.bytes().as_ref(), &[2, 2, 2, 2]);
         assert_eq!(session.statistics().received_frames, 2);
         assert_eq!(session.statistics().dropped_frames, 1);
         session.shutdown().unwrap();
@@ -713,7 +713,7 @@ mod tests {
             assert!(Instant::now() < deadline);
             thread::yield_now();
         };
-        assert_eq!(frame.bytes.as_ref(), &[1, 1, 1, 1]);
+        assert_eq!(frame.bytes().as_ref(), &[1, 1, 1, 1]);
         assert_eq!(session.statistics().received_frames, 1);
         assert_eq!(session.statistics().overflow_events, 1);
         session.shutdown().unwrap();

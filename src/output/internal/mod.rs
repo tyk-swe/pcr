@@ -5,49 +5,19 @@
 
 #![forbid(unsafe_code)]
 
-use std::fmt;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+pub(super) mod build;
+pub(super) mod capture;
+mod common;
+pub(super) mod contract;
+pub(super) mod dissect;
+pub(super) mod dns;
+pub(super) mod envelope;
+pub(super) mod frame;
+pub(super) mod fuzz;
+pub(super) mod network;
+pub(super) mod replay;
+pub(super) mod scan;
+pub(super) mod traceroute;
 
-use bytes::Bytes;
-use serde::{Deserialize, Serialize};
-
-use crate::capture::Frame;
-use crate::client::{exchange::Result as ExchangeResult, send::Report as SendReport};
-use crate::error::{Classification, Classified, Kind};
-use crate::net::{
-    interface::{Flags as InterfaceFlags, Id as InterfaceId, Info as InterfaceInfo},
-    link::{Capability as LinkCapability, Mode as LinkMode},
-    route::{Decision as RouteDecision, Materialized as MaterializedRoute, Plan as PlannedRoute},
-};
-use crate::packet::internal::{
-    BuiltPacket, DecodedPacket, Diagnostic, PacketDocument, PacketLayout,
-};
-use crate::workflow::{
-    dns::{
-        Edns as DnsEdns, EdnsOption as DnsEdnsOption, Record as DnsRecord,
-        RecordValue as DnsRecordValue, Result as DnsResult,
-    },
-    fuzz::Result as FuzzResult,
-    replay::{FrameEvidence as ReplayFrameEvidence, Summary as ReplaySummary},
-    scan::Result as ScanResult,
-    traceroute::Result as TracerouteResult,
-};
-
-// Output-v1 is physically organized by serialized contract responsibility.
-// The fragments deliberately share this private module scope so the split
-// cannot alter type paths, conversion visibility, or serialized behavior.
-include!("common.rs");
-include!("contract.rs");
-include!("envelope.rs");
-include!("frame.rs");
-include!("build.rs");
-include!("dissect.rs");
-include!("capture.rs");
-include!("network.rs");
-include!("replay.rs");
-include!("scan.rs");
-include!("traceroute.rs");
-include!("dns.rs");
-include!("fuzz.rs");
-include!("tests.rs");
+#[cfg(test)]
+mod tests;

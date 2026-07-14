@@ -48,14 +48,14 @@ pub enum Direction {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Frame {
     pub timestamp: SystemTime,
-    pub captured_length: u32,
-    pub original_length: u32,
+    captured_length: u32,
+    original_length: u32,
     pub link_type: LinkType,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interface: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direction: Option<Direction>,
-    pub bytes: Bytes,
+    bytes: Bytes,
 }
 
 impl Frame {
@@ -108,6 +108,18 @@ impl Frame {
             direction: None,
             bytes,
         })
+    }
+
+    pub fn captured_length(&self) -> u32 {
+        self.captured_length
+    }
+
+    pub fn original_length(&self) -> u32 {
+        self.original_length
+    }
+
+    pub fn bytes(&self) -> &Bytes {
+        &self.bytes
     }
 
     pub fn validate(&self) -> Result<(), Error> {
@@ -182,15 +194,11 @@ mod tests {
     }
 
     #[test]
-    fn validation_catches_public_field_mutation() {
-        let mut frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![1, 2]).unwrap();
-        frame.captured_length = 1;
-        assert!(matches!(
-            frame.validate(),
-            Err(Error::CapturedLengthMismatch {
-                declared: 1,
-                actual: 2
-            })
-        ));
+    fn constructors_preserve_length_invariants() {
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![1, 2]).unwrap();
+        assert_eq!(frame.captured_length(), 2);
+        assert_eq!(frame.original_length(), 2);
+        assert_eq!(frame.bytes().as_ref(), &[1, 2]);
+        assert!(frame.validate().is_ok());
     }
 }

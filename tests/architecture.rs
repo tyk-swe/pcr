@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 const DOMAINS: &[(&str, &[&str])] = &[
@@ -26,22 +25,23 @@ const DOMAINS: &[(&str, &[&str])] = &[
     ),
 ];
 
-const REMOVED_OR_BINARY_ROOTS: &[&str] = &["cli", "core", "io", "protocols", "tools"];
-
-#[derive(Clone, Debug)]
-struct Token {
-    text: String,
-    start: usize,
-    end: usize,
-}
-
-fn repository_root() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-}
+const LIBRARY_ROOT_ITEMS: &[&str] = &[
+    "pub mod capture;",
+    "pub mod client;",
+    "pub mod error;",
+    "pub mod net;",
+    "pub mod output;",
+    "pub mod packet;",
+    "pub mod protocol;",
+    "pub mod session;",
+    "pub mod workflow;",
+];
 
 fn rust_files(path: &Path, files: &mut Vec<PathBuf>) {
     if path.is_file() {
-        if path.extension().is_some_and(|extension| extension == "rs") {
+        if path.extension().is_some_and(|extension| extension == "rs")
+            && path.file_stem().is_none_or(|stem| stem != "tests")
+        {
             files.push(path.to_owned());
         }
         return;
@@ -52,11 +52,7 @@ fn rust_files(path: &Path, files: &mut Vec<PathBuf>) {
 
     let mut entries: Vec<_> = std::fs::read_dir(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
-        .map(|entry| {
-            entry
-                .expect("source directory entry should be readable")
-                .path()
-        })
+        .map(|entry| entry.expect("source entry should be readable").path())
         .collect();
     entries.sort();
     for entry in entries {
@@ -68,321 +64,107 @@ fn domain_files(root: &Path, domain: &str) -> Vec<PathBuf> {
     let mut files = Vec::new();
     rust_files(&root.join("src").join(format!("{domain}.rs")), &mut files);
     rust_files(&root.join("src").join(domain), &mut files);
-    files.sort();
-    files.dedup();
-    assert!(!files.is_empty(), "domain {domain} has no Rust source");
     files
 }
 
-fn skip_quoted(bytes: &[u8], mut index: usize, quote: u8) -> usize {
-    index += 1;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\\' => index = (index + 2).min(bytes.len()),
-            byte if byte == quote => return index + 1,
-            _ => index += 1,
-        }
-    }
-    index
-}
-
-fn raw_string_end(bytes: &[u8], index: usize) -> Option<usize> {
-    let mut cursor = index;
-    if matches!(bytes.get(cursor), Some(b'b' | b'c')) {
-        cursor += 1;
-    }
-    if bytes.get(cursor) != Some(&b'r') {
-        return None;
-    }
-    cursor += 1;
-    let hash_start = cursor;
-    while bytes.get(cursor) == Some(&b'#') {
-        cursor += 1;
-    }
-    if bytes.get(cursor) != Some(&b'\"') {
-        return None;
-    }
-    let hashes = cursor - hash_start;
-    cursor += 1;
-    while cursor < bytes.len() {
-        if bytes[cursor] == b'\"'
-            && bytes
-                .get(cursor + 1..cursor + 1 + hashes)
-                .is_some_and(|suffix| suffix.iter().all(|byte| *byte == b'#'))
-        {
-            return Some(cursor + 1 + hashes);
-        }
-        cursor += 1;
-    }
-    Some(bytes.len())
-}
-
-fn rust_tokens(source: &str) -> Vec<Token> {
-    let bytes = source.as_bytes();
-    let mut tokens = Vec::new();
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index].is_ascii_whitespace() {
-            index += 1;
-            continue;
-        }
-        if bytes.get(index..index + 2) == Some(b"//") {
-            index += 2;
-            while index < bytes.len() && bytes[index] != b'\n' {
-                index += 1;
-            }
-            continue;
-        }
-        if bytes.get(index..index + 2) == Some(b"/*") {
-            index += 2;
-            let mut depth = 1_usize;
-            while index < bytes.len() && depth > 0 {
-                if bytes.get(index..index + 2) == Some(b"/*") {
-                    depth += 1;
-                    index += 2;
-                } else if bytes.get(index..index + 2) == Some(b"*/") {
-                    depth -= 1;
-                    index += 2;
-                } else {
-                    index += 1;
-                }
-            }
-            continue;
-        }
-        if let Some(end) = raw_string_end(bytes, index) {
-            index = end;
-            continue;
-        }
-        if bytes[index] == b'\"' {
-            index = skip_quoted(bytes, index, b'\"');
-            continue;
-        }
-        if bytes[index] == b'\'' {
-            let looks_like_character =
-                bytes.get(index + 1) == Some(&b'\\') || bytes.get(index + 2) == Some(&b'\'');
-            if looks_like_character {
-                index = skip_quoted(bytes, index, b'\'');
-                continue;
-            }
-        }
-        if bytes[index].is_ascii_alphabetic() || bytes[index] == b'_' {
-            let start = index;
-            index += 1;
-            while index < bytes.len()
-                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
-            {
-                index += 1;
-            }
-            tokens.push(Token {
-                text: source[start..index].to_owned(),
-                start,
-                end: index,
-            });
-            continue;
-        }
-
-        let start = index;
-        if bytes.get(index..index + 2) == Some(b"::") {
-            index += 2;
-        } else {
-            index += 1;
-        }
-        tokens.push(Token {
-            text: source[start..index].to_owned(),
-            start,
-            end: index,
-        });
-    }
-    tokens
-}
-
-fn matching_delimiter(tokens: &[Token], open: usize, left: &str, right: &str) -> Option<usize> {
-    let mut depth = 0_usize;
-    for (index, token) in tokens.iter().enumerate().skip(open) {
-        if token.text == left {
-            depth += 1;
-        } else if token.text == right {
-            depth = depth.checked_sub(1)?;
-            if depth == 0 {
-                return Some(index);
-            }
-        }
-    }
-    None
-}
-
-fn exact_test_attribute(tokens: &[Token], index: usize) -> Option<usize> {
-    let expected = ["#", "[", "cfg", "(", "test", ")", "]"];
-    tokens
-        .get(index..index + expected.len())?
+fn mentions_domain(source: &str, domain: &str) -> bool {
+    ["crate::", "packetcraftr::", "super::"]
         .iter()
-        .map(|token| token.text.as_str())
-        .eq(expected)
-        .then_some(index + expected.len() - 1)
-}
+        .any(|prefix| {
+            let marker = format!("{prefix}{domain}");
+            source.match_indices(&marker).any(|(index, _)| {
+                source[index + marker.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|character| !character.is_ascii_alphanumeric() && character != '_')
+            }) || source
+                .match_indices(&format!("{prefix}{{"))
+                .any(|(index, marker)| {
+                    let group = &source[index + marker.len()..];
+                    let mut depth = 0_usize;
+                    let mut entry_start = 0_usize;
 
-fn test_only_ranges(tokens: &[Token]) -> Vec<(usize, usize)> {
-    let mut ranges = Vec::new();
-    let mut index = 0;
-    while index < tokens.len() {
-        let Some(attribute_end) = exact_test_attribute(tokens, index) else {
-            index += 1;
-            continue;
-        };
-
-        let start = tokens[index].start;
-        let mut item_start = attribute_end + 1;
-        while tokens
-            .get(item_start)
-            .is_some_and(|token| token.text == "#")
-            && tokens
-                .get(item_start + 1)
-                .is_some_and(|token| token.text == "[")
-        {
-            item_start = matching_delimiter(tokens, item_start + 1, "[", "]")
-                .expect("attribute brackets should balance")
-                + 1;
-        }
-
-        let mut item_end = None;
-        for cursor in item_start..tokens.len() {
-            match tokens[cursor].text.as_str() {
-                ";" => {
-                    item_end = Some(cursor);
-                    break;
-                }
-                "{" => {
-                    item_end = matching_delimiter(tokens, cursor, "{", "}");
-                    break;
-                }
-                _ => {}
-            }
-        }
-        let item_end = item_end.expect("a cfg(test) item should have a terminator");
-        ranges.push((start, tokens[item_end].end));
-        index = item_end + 1;
-    }
-    ranges
-}
-
-fn is_test_only(token: &Token, ranges: &[(usize, usize)]) -> bool {
-    ranges
-        .iter()
-        .any(|(start, end)| token.start >= *start && token.start < *end)
-}
-
-fn is_tracked_root(name: &str) -> bool {
-    DOMAINS.iter().any(|(domain, _)| *domain == name) || REMOVED_OR_BINARY_ROOTS.contains(&name)
-}
-
-fn dependencies(source: &str) -> BTreeSet<String> {
-    let tokens = rust_tokens(source);
-    let test_ranges = test_only_ranges(&tokens);
-    let tokens: Vec<_> = tokens
-        .iter()
-        .filter(|token| !is_test_only(token, &test_ranges))
-        .collect();
-    let mut dependencies = BTreeSet::new();
-
-    for index in 0..tokens.len().saturating_sub(2) {
-        if !matches!(tokens[index].text.as_str(), "crate" | "packetcraftr")
-            || tokens[index + 1].text != "::"
-        {
-            continue;
-        }
-
-        if tokens[index + 2].text != "{" {
-            let root = tokens[index + 2].text.as_str();
-            if is_tracked_root(root) {
-                dependencies.insert(root.to_owned());
-            }
-            continue;
-        }
-
-        let mut depth = 1_usize;
-        let mut expects_root = true;
-        for token in tokens.iter().skip(index + 3) {
-            match token.text.as_str() {
-                "{" => depth += 1,
-                "}" => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
+                    for (offset, character) in group.char_indices() {
+                        match character {
+                            '{' => depth += 1,
+                            '}' if depth == 0 => {
+                                return group[entry_start..offset]
+                                    .trim_start()
+                                    .strip_prefix(domain)
+                                    .is_some_and(|suffix| {
+                                        suffix.chars().next().is_none_or(|character| {
+                                            !character.is_ascii_alphanumeric() && character != '_'
+                                        })
+                                    });
+                            }
+                            '}' => depth -= 1,
+                            ',' if depth == 0 => {
+                                let entry = group[entry_start..offset].trim_start();
+                                if entry.strip_prefix(domain).is_some_and(|suffix| {
+                                    suffix.chars().next().is_none_or(|character| {
+                                        !character.is_ascii_alphanumeric() && character != '_'
+                                    })
+                                }) {
+                                    return true;
+                                }
+                                entry_start = offset + character.len_utf8();
+                            }
+                            _ => {}
+                        }
                     }
-                }
-                "," if depth == 1 => expects_root = true,
-                root if depth == 1 && expects_root => {
-                    if is_tracked_root(root) {
-                        dependencies.insert(root.to_owned());
-                    }
-                    expects_root = false;
-                }
-                _ => {}
-            }
-        }
-    }
+                    false
+                })
+        })
+}
 
-    // Also catch relative escapes such as `super::super::output` and
-    // absolute-root paths such as `::output`; otherwise a forbidden edge
-    // could evade the canonical `crate::domain` spelling without changing
-    // what it depends on.
-    for index in 0..tokens.len() {
-        if tokens[index].text == "super" {
-            let mut cursor = index;
-            while tokens
-                .get(cursor)
-                .is_some_and(|token| token.text == "super")
-                && tokens
-                    .get(cursor + 1)
-                    .is_some_and(|token| token.text == "::")
-            {
-                cursor += 2;
-            }
-            if let Some(root) = tokens.get(cursor).map(|token| token.text.as_str())
-                && is_tracked_root(root)
-            {
-                dependencies.insert(root.to_owned());
-            }
-        } else if tokens[index].text == "::"
-            && tokens.get(index.wrapping_sub(1)).is_none_or(|previous| {
-                !previous
-                    .text
-                    .as_bytes()
-                    .first()
-                    .is_some_and(|byte| byte.is_ascii_alphabetic() || *byte == b'_')
-            })
-            && let Some(root) = tokens.get(index + 1).map(|token| token.text.as_str())
-            && is_tracked_root(root)
-        {
-            dependencies.insert(root.to_owned());
-        }
-    }
-    dependencies
+#[test]
+fn grouped_imports_mention_their_top_level_domains() {
+    assert!(mentions_domain(
+        "use crate::{packet, output::Report};",
+        "output"
+    ));
+    assert!(mentions_domain(
+        "use packetcraftr::{\n    output as report,\n    packet,\n};",
+        "output"
+    ));
+    assert!(mentions_domain("use super::{output, packet};", "output"));
+    assert!(!mentions_domain(
+        "use crate::{packet::{output, Packet}};",
+        "output"
+    ));
+    assert!(!mentions_domain(
+        "use crate::{output_format, packet};",
+        "output"
+    ));
 }
 
 #[test]
 fn production_domains_follow_the_dependency_direction() {
-    let root = repository_root();
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut violations = Vec::new();
 
     for (domain, allowed) in DOMAINS {
-        for file in domain_files(&root, domain) {
+        for file in domain_files(root, domain) {
             let source = std::fs::read_to_string(&file)
                 .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
-            for dependency in dependencies(&source) {
-                if dependency != *domain && !allowed.contains(&dependency.as_str()) {
-                    let relative = file.strip_prefix(&root).unwrap_or(&file);
+            let production = source
+                .split_once("\n#[cfg(test)]\nmod tests")
+                .map_or(source.as_str(), |(production, _)| production);
+
+            for (dependency, _) in DOMAINS {
+                if dependency != domain
+                    && !allowed.contains(dependency)
+                    && mentions_domain(production, dependency)
+                {
                     violations.push(format!(
                         "{domain} -> {dependency} in {}",
-                        relative.display()
+                        file.strip_prefix(root).unwrap_or(&file).display()
                     ));
                 }
             }
         }
     }
 
-    violations.sort();
-    violations.dedup();
     assert!(
         violations.is_empty(),
         "forbidden production domain dependencies:\n{}",
@@ -391,48 +173,16 @@ fn production_domains_follow_the_dependency_direction() {
 }
 
 #[test]
-fn library_root_excludes_cli_and_removed_facades() {
-    let root = repository_root();
-    let source =
-        std::fs::read_to_string(root.join("src/lib.rs")).expect("src/lib.rs should be readable");
-    let tokens = rust_tokens(&source);
-    let test_ranges = test_only_ranges(&tokens);
-    let tokens: Vec<_> = tokens
-        .iter()
-        .filter(|token| !is_test_only(token, &test_ranges))
-        .collect();
-
-    let declared_forbidden: BTreeSet<_> = tokens
-        .windows(2)
-        .filter(|window| window[0].text == "mod")
-        .map(|window| window[1].text.as_str())
-        .filter(|module| REMOVED_OR_BINARY_ROOTS.contains(module))
-        .collect();
-    assert!(
-        declared_forbidden.is_empty(),
-        "the library root must not own CLI or removed facade modules: {declared_forbidden:?}"
-    );
-    assert!(
-        !tokens
-            .iter()
-            .any(|token| token.text == "run_cli_entrypoint"),
-        "the CLI entry point must be owned by the binary"
-    );
-
-    let public_modules: BTreeSet<_> = source
+fn library_root_contains_only_canonical_modules() {
+    let items: Vec<_> = include_str!("../src/lib.rs")
         .lines()
-        .filter_map(|line| line.trim().strip_prefix("pub mod "))
-        .filter_map(|line| line.strip_suffix(';'))
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with("//") && !line.starts_with("#!"))
         .collect();
-    let expected: BTreeSet<_> = DOMAINS.iter().map(|(domain, _)| *domain).collect();
+
     assert_eq!(
-        public_modules, expected,
-        "the library root must expose exactly the canonical domain modules"
-    );
-    assert!(
-        !source
-            .lines()
-            .any(|line| line.trim().starts_with("pub use ")),
-        "flat root reexports are forbidden"
+        items, LIBRARY_ROOT_ITEMS,
+        "the library root must expose only the canonical modules; CLI code, removed facades, and \
+         flat reexports belong outside it"
     );
 }

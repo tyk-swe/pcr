@@ -159,7 +159,7 @@ where
     })
 }
 
-fn build_batches(
+pub(super) fn build_batches(
     request: &TracerouteRequest,
     destination: IpAddr,
 ) -> Result<Vec<TracerouteBatch>, TracerouteError> {
@@ -227,14 +227,14 @@ fn worst_case_duration(request: &TracerouteRequest) -> Result<Duration, Tracerou
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, TracerouteError> {
-    super::clock::rate_delay(probes, rate).ok_or(TracerouteError::InvalidLimit {
+    crate::workflow::clock::rate_delay(probes, rate).ok_or(TracerouteError::InvalidLimit {
         field: "probes_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),
     })
 }
 
-fn probe_packet(probe: &TracerouteProbe) -> Packet {
+pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
         IpAddr::V4(destination) => {
@@ -293,148 +293,108 @@ fn probe_packet(probe: &TracerouteProbe) -> Packet {
     packet
 }
 
-fn traceroute_identity(sequence: u64) -> Bytes {
+pub(super) fn traceroute_identity(sequence: u64) -> Bytes {
     let sequence = sequence as u16;
     Bytes::copy_from_slice(&[0x50, 0x54, (sequence >> 8) as u8, sequence as u8])
 }
 
-fn validate_execution(
+pub(super) fn validate_execution(
     batch: &TracerouteBatch,
     execution: &TracerouteBatchExecution,
     limits: TracerouteLimits,
 ) -> Result<(), TracerouteError> {
-    let sequence = batch.probes[0].sequence;
-    if execution.sent.len() != batch.probes.len()
-        || execution.sent_evidence.len() != batch.probes.len()
-    {
-        return Err(TracerouteError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "expected {} sent packets and frames, received {} packets and {} frames",
-                batch.probes.len(),
-                execution.sent.len(),
-                execution.sent_evidence.len()
-            ),
-        });
-    }
-    if execution
-        .responses
-        .iter()
-        .any(|response| response.request_index >= batch.probes.len())
-    {
-        return Err(TracerouteError::InvalidEvidence {
-            sequence,
-            message: "matched response references a request outside the hop batch".to_owned(),
-        });
-    }
-    let captured_frames = checked_frame_count(&[
-        execution.responses.len(),
-        execution.unsolicited.len(),
-        execution.undecoded.len(),
-    ])
-    .ok_or_else(|| TracerouteError::InvalidEvidence {
-        sequence,
-        message: "executor capture frame-count accounting overflowed".to_owned(),
-    })?;
-    if captured_frames > limits.max_evidence_frames {
-        return Err(TracerouteError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "executor returned {captured_frames} captured frames beyond max_evidence_frames={}",
-                limits.max_evidence_frames
-            ),
-        });
-    }
-    let captured_bytes = checked_frame_bytes(
-        execution
-            .responses
-            .iter()
-            .map(|response| &response.response.frame)
-            .chain(execution.unsolicited.iter().map(|response| &response.frame))
-            .chain(execution.undecoded.iter()),
+    validate_shared_exchange_evidence(
+        ExchangeEvidence {
+            request_count: batch.probes.len(),
+            sent_packets: &execution.sent,
+            sent_frames: &execution.sent_evidence,
+            matched_responses: &execution.responses,
+            unsolicited: &execution.unsolicited,
+            undecoded: &execution.undecoded,
+            timeout: batch.timeout,
+            stats: &execution.stats,
+        },
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+        |request_index, sent| sent_traceroute_probe_matches(&batch.probes[request_index], sent),
     )
-    .ok_or_else(|| TracerouteError::InvalidEvidence {
-        sequence,
-        message: "executor capture byte accounting overflowed".to_owned(),
-    })?;
-    if captured_bytes > limits.max_evidence_bytes {
-        return Err(TracerouteError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "executor returned {captured_bytes} captured bytes beyond max_evidence_bytes={}",
-                limits.max_evidence_bytes
-            ),
-        });
-    }
-    for (probe, (sent, evidence)) in batch
-        .probes
-        .iter()
-        .zip(execution.sent.iter().zip(&execution.sent_evidence))
-    {
-        if !sent_traceroute_probe_matches(probe, sent) {
-            return Err(TracerouteError::InvalidEvidence {
-                sequence: probe.sequence,
-                message:
-                    "sent packet does not preserve the traceroute destination and probe identity"
-                        .to_owned(),
-            });
-        }
-        validate_frame(evidence, "sent").map_err(|message| TracerouteError::InvalidEvidence {
-            sequence: probe.sequence,
-            message,
-        })?;
-    }
-    let sent_bytes = checked_sent_frame_bytes(&execution.sent_evidence).ok_or_else(|| {
-        TracerouteError::InvalidEvidence {
-            sequence,
-            message: "sent frame byte accounting overflowed".to_owned(),
-        }
-    })?;
-    if execution.stats.bytes != sent_bytes {
-        return Err(TracerouteError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "successful exchange reported {} sent bytes for {sent_bytes} exact frame bytes",
-                execution.stats.bytes
-            ),
-        });
-    }
-    for response in &execution.responses {
-        validate_decoded_frame(&response.response, "matched response")
-            .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
-        if response.latency > batch.timeout {
-            return Err(TracerouteError::InvalidEvidence {
-                sequence,
-                message: format!(
-                    "matched response latency {:?} exceeds timeout {:?}",
-                    response.latency, batch.timeout
-                ),
-            });
-        }
-    }
-    for response in &execution.unsolicited {
-        validate_decoded_frame(response, "unsolicited response")
-            .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
-    }
-    for frame in &execution.undecoded {
-        validate_frame(frame, "undecoded")
-            .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
-    }
-    validate_capture_statistics(execution.stats.capture)
-        .map_err(|message| TracerouteError::InvalidEvidence { sequence, message })?;
-    if execution.stats.packets_attempted != batch.probes.len() as u64
-        || execution.stats.packets_completed != batch.probes.len() as u64
-    {
-        return Err(TracerouteError::InvalidEvidence {
-            sequence,
-            message: "successful exchange statistics do not account for every traceroute probe"
-                .to_owned(),
-        });
-    }
-    Ok(())
+    .map_err(|error| map_traceroute_evidence_error(batch, error))
 }
 
-fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool {
+impl MatchedResponseEvidence for TracerouteMatchedResponse {
+    fn request_index(&self) -> usize {
+        self.request_index
+    }
+
+    fn response(&self) -> &DecodedPacket {
+        &self.response
+    }
+
+    fn latency(&self) -> Duration {
+        self.latency
+    }
+}
+
+fn map_traceroute_evidence_error(
+    batch: &TracerouteBatch,
+    error: ExchangeEvidenceError,
+) -> TracerouteError {
+    let batch_sequence = batch.probes[0].sequence;
+    let sequence = match &error {
+        ExchangeEvidenceError::SentPacketMismatch { request_index }
+        | ExchangeEvidenceError::InvalidSentFrame { request_index, .. } => {
+            batch.probes[*request_index].sequence
+        }
+        _ => batch_sequence,
+    };
+    let message = match error {
+        ExchangeEvidenceError::SentCardinality {
+            expected,
+            packets,
+            frames,
+        } => format!(
+            "expected {expected} sent packets and frames, received {packets} packets and {frames} frames"
+        ),
+        ExchangeEvidenceError::MatchedResponseOutsideBatch => {
+            "matched response references a request outside the hop batch".to_owned()
+        }
+        ExchangeEvidenceError::CapturedFrameCountOverflow => {
+            "executor capture frame-count accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedFrameLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} captured frames beyond max_evidence_frames={limit}")
+        }
+        ExchangeEvidenceError::CapturedByteCountOverflow => {
+            "executor capture byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedByteLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")
+        }
+        ExchangeEvidenceError::SentPacketMismatch { .. } => {
+            "sent packet does not preserve the traceroute destination and probe identity".to_owned()
+        }
+        ExchangeEvidenceError::InvalidSentFrame { message, .. }
+        | ExchangeEvidenceError::InvalidMatchedResponse { message }
+        | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
+        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
+        | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
+        ExchangeEvidenceError::SentByteCountOverflow => {
+            "sent frame byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
+            "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
+        ),
+        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
+            format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
+        }
+        ExchangeEvidenceError::IncompleteStatistics => {
+            "successful exchange statistics do not account for every traceroute probe".to_owned()
+        }
+    };
+    TracerouteError::InvalidEvidence { sequence, message }
+}
+
+pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         "ipv4"
     } else {
@@ -446,7 +406,8 @@ fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool
         TracerouteStrategy::Icmp if probe.address.is_ipv4() => "icmpv4",
         TracerouteStrategy::Icmp => "icmpv6",
     };
-    if !probe::packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
+    if !crate::workflow::probe::packet_shape_matches(sent, &[network_protocol, transport_protocol])
+    {
         return false;
     }
     let network_matches = match probe.address {
@@ -508,11 +469,7 @@ fn retain_traceroute_evidence(
     limits: TracerouteLimits,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let error = match budget.retain(
-        frame,
-        limits.max_evidence_frames,
-        limits.max_evidence_bytes,
-    ) {
+    let error = match budget.retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes) {
         Ok(()) => return true,
         Err(error) => error,
     };
@@ -613,7 +570,7 @@ fn process_batch(
                 limits,
                 diagnostics,
             )
-                .then(|| candidate.decoded.frame.clone());
+            .then(|| candidate.decoded.frame.clone());
             TracerouteProbeEvidence {
                 sequence: probe.sequence,
                 hop_limit: probe.hop_limit,
@@ -714,11 +671,22 @@ fn traceroute_candidate_precedes(
                 || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
                     && (candidate.observation.responder < current.observation.responder
                         || (candidate.observation.responder == current.observation.responder
-                            && (candidate.decoded.frame.bytes < current.decoded.frame.bytes
-                                || (candidate.decoded.frame.bytes
-                                    == current.decoded.frame.bytes
-                                    && preferred_latency(
-                                        candidate.latency,
-                                        current.latency,
-                                    ))))))))
+                            && (candidate.decoded.frame.bytes()
+                                < current.decoded.frame.bytes()
+                                || (candidate.decoded.frame.bytes()
+                                    == current.decoded.frame.bytes()
+                                    && preferred_latency(candidate.latency, current.latency))))))))
 }
+use super::classification::add_stats;
+use super::{
+    Authorizer, Bytes, Clock, DecodedPacket, Diagnostic, Duration, EvidenceBudget,
+    EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError, Frame, Icmpv4, Icmpv6, IpAddr,
+    Ipv4, Ipv6, MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
+    Stats, SystemTime, TRACEROUTE_SOURCE_PORT, Tcp, TracerouteBatch, TracerouteBatchExecution,
+    TracerouteCompletion, TracerouteError, TracerouteExecutor, TracerouteHopResult,
+    TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe, TracerouteProbeEvidence,
+    TracerouteProbeStatus, TracerouteRequest, TracerouteResponseClassification,
+    TracerouteResponseKind, TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence, Udp,
+    classify_traceroute_response, nonzero_ipv4_identification, preferred_latency,
+    push_diagnostic_once, response_within_deadline, validate_shared_exchange_evidence,
+};

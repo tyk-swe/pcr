@@ -46,8 +46,8 @@ impl ReplayTransmitter for Transmitter {
         Ok(Transmission {
             interface: interface.clone(),
             report: Report {
-                bytes_sent: frame.bytes.len(),
-                wire_bytes: Some(frame.bytes.clone()),
+                bytes_sent: frame.bytes().len(),
+                wire_bytes: Some(frame.bytes().clone()),
             },
         })
     }

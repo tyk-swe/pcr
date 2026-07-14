@@ -3,25 +3,46 @@
 
 // Offline build, dissect, and capture-read commands.
 
-fn run_build(arguments: BuildArgs, output: OutputFormat) -> Result<(), CliError> {
+use std::fs::File;
+use std::io;
+use std::time::SystemTime;
+
+use packetcraftr::{
+    capture::{self, Frame, Limits, LinkType, Reader, transcode},
+    error::{Classification, Kind},
+    output, packet,
+};
+
+use super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
+use super::errors::CliError;
+use super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
+use super::rendering::{
+    capture_file_format, emit_json, emit_json_compact, spaced_hex, write_raw, write_stdout_line,
+};
+use super::runtime::default_registry_arc;
+
+pub(super) fn run_build(
+    arguments: BuildArgs,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
     let registry = default_registry_arc()?;
     let packet = read_recipe(arguments.recipe, &registry)?;
-    let built = Builder::new(registry)
+    let built = packet::build::Builder::new(registry)
         .build(
             packet,
-            BuildContext::default(),
-            BuildOptions {
+            packet::build::Context::default(),
+            packet::build::Options {
                 mode: match arguments.mode {
-                    CliBuildMode::Strict => BuildMode::Strict,
-                    CliBuildMode::Permissive => BuildMode::Permissive,
+                    CliBuildMode::Strict => packet::build::Mode::Strict,
+                    CliBuildMode::Permissive => packet::build::Mode::Permissive,
                 },
-                ..BuildOptions::default()
+                ..packet::build::Options::default()
             },
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
-    let (result, diagnostics) = BuildCommandResult::from_built(built);
+    let (result, diagnostics) = output::build::Result::from_built(built);
     match output {
-        OutputFormat::Text => {
+        output::contract::Format::Text => {
             write_stdout_line(format_args!("built {} bytes", result.length))?;
             write_stdout_line(format_args!("{}", spaced_hex(result.bytes())))?;
             for diagnostic in &diagnostics {
@@ -32,42 +53,47 @@ fn run_build(arguments: BuildArgs, output: OutputFormat) -> Result<(), CliError>
             }
             Ok(())
         }
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
-        OutputFormat::Raw => write_raw(result.bytes()),
-        OutputFormat::Json => emit_json(&AggregateOutput::success(
-            CommandName::Build,
+        output::contract::Format::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        output::contract::Format::Raw => write_raw(result.bytes()),
+        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+            output::contract::Command::Build,
             result,
             diagnostics,
         )),
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Build,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Build,
                 format: output,
             },
         )),
     }
 }
 
-fn run_dissect(arguments: DissectArgs, output: OutputFormat) -> Result<(), CliError> {
+pub(super) fn run_dissect(
+    arguments: DissectArgs,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
     let bytes = match (arguments.hex, arguments.file) {
-        (Some(value), None) => crate::packet::internal::decode_hex(&value)
+        (Some(value), None) => packet::expression::decode_hex(&value)
             .map_err(|source| CliError::new(2, source.to_string()))?
             .to_vec(),
-        (None, Some(path)) => read_bounded_file(&path, DEFAULT_MAX_DOCUMENT_BYTES)?,
-        (None, None) => read_stdin_bounded(DEFAULT_MAX_DOCUMENT_BYTES)?,
+        (None, Some(path)) => {
+            read_bounded_file(&path, packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?
+        }
+        (None, None) => read_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
     let registry = default_registry_arc()?;
-    let decoded = Dissector::new(registry)
+    let decoded = packet::decode::Decoder::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
                 .map_err(|source| CliError::new(3, source.to_string()))?,
-            DecodeOptions::default(),
+            packet::decode::Options::default(),
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
-    let (result, diagnostics) = DissectCommandResult::from_decoded(decoded);
+    let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);
     match output {
-        OutputFormat::Text => {
+        output::contract::Format::Text => {
             write_stdout_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
                 result.length,
@@ -84,23 +110,26 @@ fn run_dissect(arguments: DissectArgs, output: OutputFormat) -> Result<(), CliEr
             }
             Ok(())
         }
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
-        OutputFormat::Raw => write_raw(result.bytes()),
-        OutputFormat::Json => emit_json(&AggregateOutput::success(
-            CommandName::Dissect,
+        output::contract::Format::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        output::contract::Format::Raw => write_raw(result.bytes()),
+        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+            output::contract::Command::Dissect,
             result,
             diagnostics,
         )),
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Dissect,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Dissect,
                 format: output,
             },
         )),
     }
 }
 
-fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
+pub(super) fn run_read(
+    arguments: ReadArgs,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
     let ReadArgs {
         path,
         max_frames,
@@ -117,7 +146,10 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
         max_frames,
         max_bytes,
     };
-    if matches!(output, OutputFormat::Pcap | OutputFormat::Pcapng) {
+    if matches!(
+        output,
+        output::contract::Format::Pcap | output::contract::Format::Pcapng
+    ) {
         let format = capture_file_format(output)?;
         let stdout = io::stdout();
         let (_output, _report) = transcode(&mut reader, stdout.lock(), format, stream_limits)
@@ -135,21 +167,19 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
             return Ok(());
         };
         let next_sequence = sequence.checked_add(1).ok_or_else(|| {
-            CliError::classified(OutputContractError::SequenceOverflow).at_sequence(sequence)
+            CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(sequence)
         })?;
         if next_sequence > max_frames {
-            return Err(
-                CliError::classified(crate::capture::Error::FrameLimitExceeded {
-                    actual: next_sequence,
-                    limit: max_frames,
-                })
-                .at_sequence(sequence),
-            );
+            return Err(CliError::classified(capture::Error::FrameLimitExceeded {
+                actual: next_sequence,
+                limit: max_frames,
+            })
+            .at_sequence(sequence));
         }
         let next_bytes = captured_bytes
-            .checked_add(u64::from(frame.captured_length))
+            .checked_add(u64::from(frame.captured_length()))
             .ok_or_else(|| {
-                CliError::classified(crate::capture::Error::StreamByteLimitExceeded {
+                CliError::classified(capture::Error::StreamByteLimitExceeded {
                     actual: u64::MAX,
                     limit: max_bytes,
                 })
@@ -157,38 +187,42 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
             })?;
         if next_bytes > max_bytes {
             return Err(
-                CliError::classified(crate::capture::Error::StreamByteLimitExceeded {
+                CliError::classified(capture::Error::StreamByteLimitExceeded {
                     actual: next_bytes,
                     limit: max_bytes,
                 })
                 .at_sequence(sequence),
             );
         }
-        let result = ReadFrameCommandResult::try_from_frame(frame)
+        let result = output::capture::Read::try_from_frame(frame)
             .map_err(|source| CliError::classified(source).at_sequence(sequence))?;
         match output {
-            OutputFormat::Text => write_stdout_line(format_args!(
+            output::contract::Format::Text => write_stdout_line(format_args!(
                 "{sequence}: dlt={} caplen={} wirelen={} {}",
                 result.frame.link_type,
                 result.frame.captured_length,
                 result.frame.original_length,
                 spaced_hex(result.frame.bytes())
             ))?,
-            OutputFormat::Hex => write_stdout_line(format_args!("{}", result.frame.bytes_hex))?,
-            OutputFormat::Ndjson => emit_json_compact(&StreamRecord::success(
-                CommandName::Read,
-                sequence,
-                result,
-                Vec::new(),
-            ))
-            .map_err(|error| error.at_sequence(sequence))?,
+            output::contract::Format::Hex => {
+                write_stdout_line(format_args!("{}", result.frame.bytes_hex))?
+            }
+            output::contract::Format::Ndjson => {
+                emit_json_compact(&output::envelope::Stream::success(
+                    output::contract::Command::Read,
+                    sequence,
+                    result,
+                    Vec::new(),
+                ))
+                .map_err(|error| error.at_sequence(sequence))?
+            }
             _ => {
                 return Err(CliError::classified(
-                    OutputContractError::UnsupportedFormat {
-                        command: CommandName::Read,
+                    output::contract::Error::UnsupportedFormat {
+                        command: output::contract::Command::Read,
                         format: output,
                     },
-                ))
+                ));
             }
         }
         sequence = next_sequence;
@@ -196,7 +230,7 @@ fn run_read(arguments: ReadArgs, output: OutputFormat) -> Result<(), CliError> {
     }
 }
 
-fn validate_capture_stream_limits(
+pub(super) fn validate_capture_stream_limits(
     max_frames: u64,
     max_bytes: u64,
     max_frame_bytes: usize,

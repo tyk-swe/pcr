@@ -140,7 +140,9 @@ impl Classified for DnsError {
             | Self::InvalidDuration { .. } => Classification::new(
                 "cli.dns_limit",
                 Kind::Cli,
-                Some("use a valid query and finite non-zero DNS attempt, timeout, rate, message, record, and evidence limits"),
+                Some(
+                    "use a valid query and finite non-zero DNS attempt, timeout, rate, message, record, and evidence limits",
+                ),
             ),
             Self::Query(_) => Classification::new(
                 "packet.dns_query",
@@ -156,7 +158,9 @@ impl Classified for DnsError {
             Self::DurationLimit { .. } => Classification::new(
                 "policy.dns_duration_limit",
                 Kind::Policy,
-                Some("reduce attempts, timeout, or retry delay, or deliberately raise the finite duration limit"),
+                Some(
+                    "reduce attempts, timeout, or retry delay, or deliberately raise the finite duration limit",
+                ),
             ),
             Self::Execution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
@@ -164,13 +168,13 @@ impl Classified for DnsError {
                 Kind::Io,
                 Some("inspect the DNS retry timer and account for queries already transmitted"),
             ),
-            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
-                Classification::new(
-                    "internal.dns_evidence",
-                    Kind::Internal,
-                    Some("treat the DNS operation as incomplete because executor evidence was inconsistent"),
-                )
-            }
+            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
+                "internal.dns_evidence",
+                Kind::Internal,
+                Some(
+                    "treat the DNS operation as incomplete because executor evidence was inconsistent",
+                ),
+            ),
         }
     }
 
@@ -182,3 +186,6 @@ impl Classified for DnsError {
         }
     }
 }
+use super::{
+    AuthorizationError, Classification, Classified, DnsExecutionError, Duration, Error, Kind,
+};

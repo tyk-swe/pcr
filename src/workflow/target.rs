@@ -1,13 +1,10 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::error::Error;
 use std::fmt;
 use std::net::IpAddr;
 
 use serde::{Deserialize, Serialize};
-
-use crate::error::{Classification, Classified};
 
 /// Declared target before hostname resolution or traffic-policy effects.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,48 +31,7 @@ pub struct Authorized {
 }
 
 /// Structured failure from target resolution or operation authorization.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AuthorizationError {
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-}
-
-impl AuthorizationError {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-        }
-    }
-
-    pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
-        Self::new(error.to_string(), error.classification(), error.causes())
-    }
-}
-
-impl fmt::Display for AuthorizationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for AuthorizationError {}
-
-impl Classified for AuthorizationError {
-    fn classification(&self) -> Classification {
-        self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        self.causes.clone()
-    }
-}
+pub use super::BoundaryError as AuthorizationError;
 
 /// Policy and resolution seam shared by scan, DNS, and traceroute.
 pub trait Authorizer {

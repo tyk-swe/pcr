@@ -6,6 +6,7 @@
 //! Bounded, policy-gated network workflows.
 
 mod address_family;
+mod boundary_error;
 pub mod clock;
 mod dns_impl;
 mod evidence;
@@ -37,6 +38,7 @@ fn push_diagnostic_once(
 }
 
 pub use address_family::AddressFamily;
+pub use boundary_error::BoundaryError;
 pub use stats::Stats;
 
 /// Bounded network scanning.

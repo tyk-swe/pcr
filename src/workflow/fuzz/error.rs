@@ -73,7 +73,9 @@ impl Classified for FuzzError {
             Self::InvalidBasePacket { .. } => Classification::new(
                 "packet.fuzz_recipe",
                 Kind::Packet,
-                Some("use a base packet within the configured layer, reflected-value, and target-field limits"),
+                Some(
+                    "use a base packet within the configured layer, reflected-value, and target-field limits",
+                ),
             ),
             Self::NoCompatibleTargets => Classification::new(
                 "packet.fuzz_target",
@@ -83,12 +85,16 @@ impl Classified for FuzzError {
             Self::ByteLimit { .. } | Self::DurationLimit { .. } => Classification::new(
                 "policy.fuzz_resource_limit",
                 Kind::Policy,
-                Some("reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit"),
+                Some(
+                    "reduce cases, packet sizes, timeout, or rate delay, or deliberately raise the finite fuzz limit",
+                ),
             ),
             Self::MalformedLiveOptInRequired => Classification::new(
                 "policy.fuzz_malformed_opt_in",
                 Kind::Policy,
-                Some("pass the explicit malformed-live opt-in and separately authorize permissive packets in traffic policy"),
+                Some(
+                    "pass the explicit malformed-live opt-in and separately authorize permissive packets in traffic policy",
+                ),
             ),
             Self::Authorization(error) => error.classification(),
             Self::Execution { source, .. } => source.classification(),
@@ -97,13 +103,13 @@ impl Classified for FuzzError {
                 Kind::Io,
                 Some("inspect the fuzz rate timer and account for cases already transmitted"),
             ),
-            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
-                Classification::new(
-                    "internal.fuzz_evidence",
-                    Kind::Internal,
-                    Some("treat the fuzz operation as incomplete because executor evidence was inconsistent"),
-                )
-            }
+            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
+                "internal.fuzz_evidence",
+                Kind::Internal,
+                Some(
+                    "treat the fuzz operation as incomplete because executor evidence was inconsistent",
+                ),
+            ),
         }
     }
 
@@ -115,3 +121,7 @@ impl Classified for FuzzError {
         }
     }
 }
+use super::{
+    Classification, Classified, Duration, Error, FuzzAuthorizationError, FuzzExecutionError,
+    FuzzTarget, Kind,
+};

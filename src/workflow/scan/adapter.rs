@@ -98,7 +98,7 @@ where
             unsolicited,
             undecoded,
             diagnostics,
-            stats: stats.into(),
+            stats,
         })
     }
 }
@@ -114,3 +114,8 @@ fn invalid_client_execution(message: impl Into<String>) -> ScanExecutionError {
         Vec::new(),
     )
 }
+use super::{
+    Classification, ExchangeIo, FieldValue, Kind, NeighborResolver, PacketTemplate, RouteProvider,
+    ScanBatch, ScanBatchExecution, ScanExecutionError, ScanExecutor, ScanMatchedResponse,
+    ScanTransport, TemplateValues,
+};

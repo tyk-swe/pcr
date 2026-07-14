@@ -54,18 +54,24 @@ impl Classified for TracerouteError {
             | Self::InvalidDuration { .. } => Classification::new(
                 "cli.traceroute_limit",
                 Kind::Cli,
-                Some("use finite non-zero hops, attempts, timeouts, rates, ports, and evidence limits"),
+                Some(
+                    "use finite non-zero hops, attempts, timeouts, rates, ports, and evidence limits",
+                ),
             ),
             Self::Authorization(error) => error.classification(),
             Self::AddressFamily { .. } => Classification::new(
                 "packet.target_address_family",
                 Kind::Packet,
-                Some("select a traceroute address family returned by the authorized target resolution"),
+                Some(
+                    "select a traceroute address family returned by the authorized target resolution",
+                ),
             ),
             Self::DurationLimit { .. } => Classification::new(
                 "policy.traceroute_duration_limit",
                 Kind::Policy,
-                Some("reduce hops, attempts, timeout, or rate delay, or deliberately raise the finite duration limit"),
+                Some(
+                    "reduce hops, attempts, timeout, or rate delay, or deliberately raise the finite duration limit",
+                ),
             ),
             Self::Execution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
@@ -73,13 +79,11 @@ impl Classified for TracerouteError {
                 Kind::Io,
                 Some("inspect the traceroute timer and account for probes already transmitted"),
             ),
-            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
-                Classification::new(
-                    "internal.traceroute_evidence",
-                    Kind::Internal,
-                    Some("treat the trace as incomplete because executor evidence was inconsistent"),
-                )
-            }
+            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
+                "internal.traceroute_evidence",
+                Kind::Internal,
+                Some("treat the trace as incomplete because executor evidence was inconsistent"),
+            ),
         }
     }
 
@@ -91,3 +95,6 @@ impl Classified for TracerouteError {
         }
     }
 }
+use super::{
+    AuthorizationError, Classification, Classified, Duration, Error, Kind, TracerouteExecutionError,
+};

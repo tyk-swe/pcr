@@ -86,6 +86,14 @@ macro_rules! protocol {
     };
 }
 
+pub(super) fn aliases(protocol: &str) -> &'static [&'static str] {
+    BUILTIN_PROTOCOLS
+        .iter()
+        .find(|support| support.protocol == protocol)
+        .map(|support| support.aliases)
+        .unwrap_or_else(|| panic!("missing built-in protocol support for {protocol}"))
+}
+
 /// All 22 codecs registered by [`super::BuiltinProtocols`].
 pub const BUILTIN_PROTOCOLS: &[ProtocolSupport] = &[
     protocol!("arp", &[], matcher = false),
@@ -187,55 +195,43 @@ pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRootSupport] = &[
 ];
 
 const NONE: &[&str] = &[];
-const MATCHERS: &[&str] = &["icmpv4", "icmpv6", "tcp", "udp"];
 const DNS_MATCHERS: &[&str] = &["tcp", "udp"];
-const ALL_BUILD: &[&str] = &[
-    "arp",
-    "bsd_loop",
-    "bsd_null",
-    "ethernet",
-    "icmpv4",
-    "icmpv6",
-    "ipv4",
-    "ipv6",
-    "ipv6_destination_options",
-    "ipv6_fragment",
-    "ipv6_hop_by_hop",
-    "ipv6_srh",
-    "linux_sll",
-    "linux_sll2",
-    "malformed",
-    "padding",
-    "raw",
-    "tcp",
-    "udp",
-    "vlan",
-    "vlan8021ad",
-];
-const ALL_DISSECT: &[&str] = &[
-    "arp",
-    "bsd_loop",
-    "bsd_null",
-    "ethernet",
-    "icmpv4",
-    "icmpv6",
-    "ipv4",
-    "ipv6",
-    "ipv6_destination_options",
-    "ipv6_fragment",
-    "ipv6_hop_by_hop",
-    "ipv6_srh",
-    "linux_sll",
-    "linux_sll2",
-    "malformed",
-    "padding",
-    "raw",
-    "raw_ip",
-    "tcp",
-    "udp",
-    "vlan",
-    "vlan8021ad",
-];
+
+#[derive(Clone, Copy)]
+enum Capability {
+    Build,
+    Dissect,
+    Matcher,
+}
+
+const fn supported_protocols<const N: usize>(capability: Capability) -> [&'static str; N] {
+    let mut protocols = [""; N];
+    let mut source = 0;
+    let mut target = 0;
+    while source < BUILTIN_PROTOCOLS.len() {
+        let support = &BUILTIN_PROTOCOLS[source];
+        let supported = match capability {
+            Capability::Build => support.build,
+            Capability::Dissect => support.dissect,
+            Capability::Matcher => support.matcher,
+        };
+        if supported {
+            assert!(target < N, "too many protocols for capability list");
+            protocols[target] = support.protocol;
+            target += 1;
+        }
+        source += 1;
+    }
+    assert!(target == N, "too few protocols for capability list");
+    protocols
+}
+
+const ALL_BUILD_VALUES: [&str; 21] = supported_protocols(Capability::Build);
+const ALL_DISSECT_VALUES: [&str; 22] = supported_protocols(Capability::Dissect);
+const MATCHER_VALUES: [&str; 4] = supported_protocols(Capability::Matcher);
+const ALL_BUILD: &[&str] = &ALL_BUILD_VALUES;
+const ALL_DISSECT: &[&str] = &ALL_DISSECT_VALUES;
+const MATCHERS: &[&str] = &MATCHER_VALUES;
 const LIVE_BUILD: &[&str] = &[
     "arp",
     "ethernet",

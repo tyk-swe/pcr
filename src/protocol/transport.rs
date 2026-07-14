@@ -130,6 +130,10 @@ impl LayerCodec for UdpCodec {
         protocol("udp")
     }
 
+    fn aliases(&self) -> &'static [&'static str] {
+        super::support::aliases(self.protocol_id().as_str())
+    }
+
     fn encode(
         &self,
         layer: &dyn Layer,
@@ -489,6 +493,10 @@ pub(super) struct TcpCodec;
 impl LayerCodec for TcpCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("tcp")
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

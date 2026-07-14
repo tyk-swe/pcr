@@ -106,7 +106,7 @@ where
             unsolicited,
             undecoded,
             diagnostics,
-            stats: stats.into(),
+            stats,
         })
     }
 }
@@ -122,3 +122,8 @@ fn invalid_client_execution(message: impl Into<String>) -> TracerouteExecutionEr
         Vec::new(),
     )
 }
+use super::{
+    Classification, ExchangeIo, Kind, NeighborResolver, PacketTemplate, RouteProvider,
+    TemplateValues, TracerouteBatch, TracerouteBatchExecution, TracerouteExecutionError,
+    TracerouteExecutor, TracerouteMatchedResponse, TracerouteStrategy,
+};

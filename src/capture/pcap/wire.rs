@@ -1,19 +1,28 @@
-const PCAP_GLOBAL_HEADER_LEN: usize = 24;
-const PCAP_RECORD_HEADER_LEN: usize = 16;
-const PCAPNG_SECTION_HEADER: [u8; 4] = [0x0a, 0x0d, 0x0d, 0x0a];
-const PCAPNG_BYTE_ORDER_MAGIC: u32 = 0x1a2b_3c4d;
-const PCAPNG_SECTION_HEADER_BLOCK: u32 = 0x0a0d_0d0a;
-const PCAPNG_INTERFACE_DESCRIPTION_BLOCK: u32 = 0x0000_0001;
-const PCAPNG_PACKET_BLOCK: u32 = 0x0000_0002;
-const PCAPNG_SIMPLE_PACKET_BLOCK: u32 = 0x0000_0003;
-const PCAPNG_ENHANCED_PACKET_BLOCK: u32 = 0x0000_0006;
-const PCAPNG_OPTION_END: u16 = 0;
-const PCAPNG_OPTION_EPB_FLAGS: u16 = 2;
-const PCAPNG_OPTION_IF_TSRESOL: u16 = 9;
-const PCAPNG_OPTION_IF_TSOFFSET: u16 = 14;
-const DEFAULT_TIMESTAMP_RESOLUTION: TimestampResolution = TimestampResolution::Decimal(6);
-const WRITER_TIMESTAMP_RESOLUTION: TimestampResolution = TimestampResolution::Decimal(9);
-fn validate_timestamp_resolution(resolution: TimestampResolution) -> Result<(), Error> {
+use std::io::{self, Read, Write};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use crate::capture::Frame;
+
+use super::models::{Endianness, Error, Format, TimestampResolution};
+
+pub(super) const PCAP_GLOBAL_HEADER_LEN: usize = 24;
+pub(super) const PCAP_RECORD_HEADER_LEN: usize = 16;
+pub(super) const PCAPNG_SECTION_HEADER: [u8; 4] = [0x0a, 0x0d, 0x0d, 0x0a];
+pub(super) const PCAPNG_BYTE_ORDER_MAGIC: u32 = 0x1a2b_3c4d;
+pub(super) const PCAPNG_SECTION_HEADER_BLOCK: u32 = 0x0a0d_0d0a;
+pub(super) const PCAPNG_INTERFACE_DESCRIPTION_BLOCK: u32 = 0x0000_0001;
+pub(super) const PCAPNG_PACKET_BLOCK: u32 = 0x0000_0002;
+pub(super) const PCAPNG_SIMPLE_PACKET_BLOCK: u32 = 0x0000_0003;
+pub(super) const PCAPNG_ENHANCED_PACKET_BLOCK: u32 = 0x0000_0006;
+pub(super) const PCAPNG_OPTION_END: u16 = 0;
+pub(super) const PCAPNG_OPTION_EPB_FLAGS: u16 = 2;
+pub(super) const PCAPNG_OPTION_IF_TSRESOL: u16 = 9;
+pub(super) const PCAPNG_OPTION_IF_TSOFFSET: u16 = 14;
+pub(super) const DEFAULT_TIMESTAMP_RESOLUTION: TimestampResolution =
+    TimestampResolution::Decimal(6);
+pub(super) const WRITER_TIMESTAMP_RESOLUTION: TimestampResolution = TimestampResolution::Decimal(9);
+
+pub(super) fn validate_timestamp_resolution(resolution: TimestampResolution) -> Result<(), Error> {
     match resolution {
         TimestampResolution::Decimal(exponent) if exponent <= 0x7f => Ok(()),
         TimestampResolution::Binary(exponent) if exponent <= 0x7f => Ok(()),
@@ -26,22 +35,22 @@ fn validate_timestamp_resolution(resolution: TimestampResolution) -> Result<(), 
     }
 }
 
-fn validate_frame_lengths(frame: &Frame, max_size: usize) -> Result<(), Error> {
-    if frame.bytes.len() != frame.captured_length as usize {
+pub(super) fn validate_frame_lengths(frame: &Frame, max_size: usize) -> Result<(), Error> {
+    if frame.bytes().len() != frame.captured_length() as usize {
         return Err(Error::CapturedLengthMismatch {
-            declared: frame.captured_length,
-            actual: frame.bytes.len(),
+            declared: frame.captured_length(),
+            actual: frame.bytes().len(),
         });
     }
     validate_declared_lengths(
-        frame.captured_length,
-        frame.original_length,
+        frame.captured_length(),
+        frame.original_length(),
         max_size,
         "captured packet",
     )
 }
 
-fn validate_declared_lengths(
+pub(super) fn validate_declared_lengths(
     captured_length: u32,
     original_length: u32,
     max_size: usize,
@@ -63,7 +72,7 @@ fn validate_declared_lengths(
     Ok(())
 }
 
-fn timestamp_from_ticks(
+pub(super) fn timestamp_from_ticks(
     ticks: u64,
     resolution: TimestampResolution,
     offset_seconds: i64,
@@ -110,7 +119,7 @@ fn timestamp_from_ticks(
     system_time_from_signed_unix(unix_seconds, nanoseconds)
 }
 
-fn timestamp_to_ticks(
+pub(super) fn timestamp_to_ticks(
     timestamp: SystemTime,
     resolution: TimestampResolution,
     offset_seconds: i64,
@@ -181,7 +190,10 @@ fn timestamp_to_ticks(
     })
 }
 
-fn system_time_from_signed_unix(seconds: i128, nanoseconds: u32) -> Result<SystemTime, Error> {
+pub(super) fn system_time_from_signed_unix(
+    seconds: i128,
+    nanoseconds: u32,
+) -> Result<SystemTime, Error> {
     let out_of_range = || Error::TimestampOutOfRange {
         format: Format::PcapNg,
     };
@@ -210,7 +222,7 @@ fn system_time_from_signed_unix(seconds: i128, nanoseconds: u32) -> Result<Syste
     }
 }
 
-fn read_exact_or_eof<R: Read>(
+pub(super) fn read_exact_or_eof<R: Read>(
     reader: &mut R,
     buffer: &mut [u8],
     context: &'static str,
@@ -234,7 +246,7 @@ fn read_exact_or_eof<R: Read>(
     Ok(true)
 }
 
-fn read_exact_counted<R: Read>(
+pub(super) fn read_exact_counted<R: Read>(
     reader: &mut R,
     buffer: &mut [u8],
     context: &'static str,
@@ -250,7 +262,7 @@ fn read_exact_counted<R: Read>(
     }
 }
 
-fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {
+pub(super) fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {
     u32::try_from(value).map_err(|_| Error::SizeLimitExceeded {
         kind: "capture size",
         declared: value as u64,
@@ -258,7 +270,7 @@ fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {
     })
 }
 
-fn align_to_usize(value: usize) -> Result<usize, Error> {
+pub(super) fn align_to_usize(value: usize) -> Result<usize, Error> {
     value
         .checked_add(3)
         .map(|padded| padded & !3)
@@ -268,20 +280,20 @@ fn align_to_usize(value: usize) -> Result<usize, Error> {
         })
 }
 
-fn align_to_u32(value: u32) -> Result<u32, Error> {
+pub(super) fn align_to_u32(value: u32) -> Result<u32, Error> {
     value
         .checked_add(3)
         .map(|padded| padded & !3)
         .ok_or(Error::InvalidBlockLength { length: value })
 }
 
-fn write_padding<W: Write>(writer: &mut W, unpadded_length: u32) -> Result<(), Error> {
+pub(super) fn write_padding<W: Write>(writer: &mut W, unpadded_length: u32) -> Result<(), Error> {
     let padding = (4 - (unpadded_length % 4)) % 4;
     writer.write_all(&[0_u8; 3][..padding as usize])?;
     Ok(())
 }
 
-fn decode_u16(endianness: Endianness, bytes: &[u8]) -> u16 {
+pub(super) fn decode_u16(endianness: Endianness, bytes: &[u8]) -> u16 {
     let word: [u8; 2] = bytes[..2].try_into().expect("two-byte slice");
     match endianness {
         Endianness::Little => u16::from_le_bytes(word),
@@ -289,7 +301,7 @@ fn decode_u16(endianness: Endianness, bytes: &[u8]) -> u16 {
     }
 }
 
-fn decode_u32(endianness: Endianness, bytes: &[u8]) -> u32 {
+pub(super) fn decode_u32(endianness: Endianness, bytes: &[u8]) -> u32 {
     let word: [u8; 4] = bytes[..4].try_into().expect("four-byte slice");
     match endianness {
         Endianness::Little => u32::from_le_bytes(word),
@@ -297,7 +309,7 @@ fn decode_u32(endianness: Endianness, bytes: &[u8]) -> u32 {
     }
 }
 
-fn decode_i64(endianness: Endianness, bytes: &[u8]) -> i64 {
+pub(super) fn decode_i64(endianness: Endianness, bytes: &[u8]) -> i64 {
     let word: [u8; 8] = bytes[..8].try_into().expect("eight-byte slice");
     match endianness {
         Endianness::Little => i64::from_le_bytes(word),
@@ -305,7 +317,11 @@ fn decode_i64(endianness: Endianness, bytes: &[u8]) -> i64 {
     }
 }
 
-fn write_u16<W: Write>(writer: &mut W, endianness: Endianness, value: u16) -> Result<(), Error> {
+pub(super) fn write_u16<W: Write>(
+    writer: &mut W,
+    endianness: Endianness,
+    value: u16,
+) -> Result<(), Error> {
     let bytes = match endianness {
         Endianness::Little => value.to_le_bytes(),
         Endianness::Big => value.to_be_bytes(),
@@ -314,7 +330,11 @@ fn write_u16<W: Write>(writer: &mut W, endianness: Endianness, value: u16) -> Re
     Ok(())
 }
 
-fn write_u32<W: Write>(writer: &mut W, endianness: Endianness, value: u32) -> Result<(), Error> {
+pub(super) fn write_u32<W: Write>(
+    writer: &mut W,
+    endianness: Endianness,
+    value: u32,
+) -> Result<(), Error> {
     let bytes = match endianness {
         Endianness::Little => value.to_le_bytes(),
         Endianness::Big => value.to_be_bytes(),
@@ -323,7 +343,11 @@ fn write_u32<W: Write>(writer: &mut W, endianness: Endianness, value: u32) -> Re
     Ok(())
 }
 
-fn write_i64<W: Write>(writer: &mut W, endianness: Endianness, value: i64) -> Result<(), Error> {
+pub(super) fn write_i64<W: Write>(
+    writer: &mut W,
+    endianness: Endianness,
+    value: i64,
+) -> Result<(), Error> {
     let bytes = match endianness {
         Endianness::Little => value.to_le_bytes(),
         Endianness::Big => value.to_be_bytes(),

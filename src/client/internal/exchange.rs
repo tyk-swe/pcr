@@ -1,36 +1,53 @@
-pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
-pub const MAX_EXCHANGE_TIMEOUT: Duration = MAX_CAPTURE_TIMEOUT;
+use std::time::{Duration, Instant};
 
-struct CaptureGuard<C: CaptureSession> {
+use crate::capture::Frame;
+use crate::net::{
+    CaptureOverflowPolicy, CaptureSession, CaptureStatistics, CapturedFrame,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, LiveIoError, MaterializedRoute,
+    PlannedRoute,
+};
+use crate::packet::internal::{
+    BuildContext, BuiltPacket, DEFAULT_MAX_TEMPLATE_PACKETS, DecodeOptions, DecodedPacket,
+    Dissector, Packet, ProtocolRegistry,
+};
+
+use super::helpers::{push_diagnostic_once, reserve_capture_evidence};
+use super::send::SendOptions;
+use super::stats::OperationStats;
+
+pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
+pub const MAX_EXCHANGE_TIMEOUT: Duration = crate::net::capture::MAX_TIMEOUT;
+
+pub(super) struct CaptureGuard<C: CaptureSession> {
     inner: C,
     shutdown_attempted: bool,
 }
 
 impl<C: CaptureSession> CaptureGuard<C> {
-    fn new(inner: C) -> Self {
+    pub(super) fn new(inner: C) -> Self {
         Self {
             inner,
             shutdown_attempted: false,
         }
     }
 
-    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+    pub(super) fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         self.inner.wait_ready(timeout)
     }
 
-    fn next_captured_frame(
+    pub(super) fn next_captured_frame(
         &mut self,
         timeout: Duration,
     ) -> Result<Option<CapturedFrame>, LiveIoError> {
         self.inner.next_captured_frame(timeout)
     }
 
-    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+    pub(super) fn shutdown(&mut self) -> Result<(), LiveIoError> {
         self.shutdown_attempted = true;
         self.inner.shutdown()
     }
 
-    fn statistics(&self) -> CaptureStatistics {
+    pub(super) fn statistics(&self) -> CaptureStatistics {
         self.inner.statistics()
     }
 }
@@ -100,39 +117,39 @@ pub struct ExchangeResult {
     pub stats: OperationStats,
 }
 
-struct ExchangeAccumulator {
-    responses: Vec<MatchedResponse>,
-    unsolicited: Vec<DecodedPacket>,
-    undecoded: Vec<Frame>,
-    diagnostics: Vec<crate::packet::internal::Diagnostic>,
+pub(super) struct ExchangeAccumulator {
+    pub(super) responses: Vec<MatchedResponse>,
+    pub(super) unsolicited: Vec<DecodedPacket>,
+    pub(super) undecoded: Vec<Frame>,
+    pub(super) diagnostics: Vec<crate::packet::internal::Diagnostic>,
     retained_frames: usize,
     retained_bytes: usize,
-    response_counts: Vec<usize>,
+    pub(super) response_counts: Vec<usize>,
 }
 
-struct PlannedExchangePacket {
-    packet: Packet,
-    plan: PlannedRoute,
-    build_context: BuildContext,
-    preliminary_build: BuiltPacket,
+pub(super) struct PlannedExchangePacket {
+    pub(super) packet: Packet,
+    pub(super) plan: PlannedRoute,
+    pub(super) build_context: BuildContext,
+    pub(super) preliminary_build: BuiltPacket,
 }
 
-struct PreparedExchangePacket {
-    built: BuiltPacket,
-    route: MaterializedRoute,
+pub(super) struct PreparedExchangePacket {
+    pub(super) built: BuiltPacket,
+    pub(super) route: MaterializedRoute,
 }
 
 #[derive(Clone, Copy)]
-struct ExchangeProcessContext<'a> {
-    registry: &'a ProtocolRegistry,
-    dissector: &'a Dissector,
-    prepared: &'a [PreparedExchangePacket],
-    sent_at: &'a [Instant],
-    deadline: Instant,
-    options: &'a ExchangeOptions,
+pub(super) struct ExchangeProcessContext<'a> {
+    pub(super) registry: &'a ProtocolRegistry,
+    pub(super) dissector: &'a Dissector,
+    pub(super) prepared: &'a [PreparedExchangePacket],
+    pub(super) sent_at: &'a [Instant],
+    pub(super) deadline: Instant,
+    pub(super) options: &'a ExchangeOptions,
 }
 
-fn drain_available<C: CaptureSession>(
+pub(super) fn drain_available<C: CaptureSession>(
     capture: &mut CaptureGuard<C>,
     enforced_deadline: Option<Instant>,
     frame_limit: usize,
@@ -163,7 +180,7 @@ fn drain_available<C: CaptureSession>(
 }
 
 impl ExchangeAccumulator {
-    fn new(requests: usize) -> Self {
+    pub(super) fn new(requests: usize) -> Self {
         Self {
             responses: Vec::new(),
             unsolicited: Vec::new(),
@@ -175,7 +192,7 @@ impl ExchangeAccumulator {
         }
     }
 
-    fn process(&mut self, captured: CapturedFrame, context: ExchangeProcessContext<'_>) {
+    pub(super) fn process(&mut self, captured: CapturedFrame, context: ExchangeProcessContext<'_>) {
         let ExchangeProcessContext {
             registry,
             dissector,
@@ -345,7 +362,7 @@ impl ExchangeAccumulator {
         if reserve_capture_evidence(
             &mut self.retained_frames,
             &mut self.retained_bytes,
-            frame.bytes.len(),
+            frame.bytes().len(),
             options.max_capture_queue_frames,
             options.max_captured_bytes,
             &mut self.diagnostics,

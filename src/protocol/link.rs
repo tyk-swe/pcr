@@ -115,7 +115,7 @@ impl LayerCodec for EthernetCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["eth", "ether", "ethernet2"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -462,7 +462,7 @@ impl LayerCodec for VlanCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["dot1q", "8021q"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -533,7 +533,7 @@ impl LayerCodec for Vlan8021adCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["dot1ad", "8021ad", "qinq"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -775,6 +775,10 @@ pub(super) struct ArpCodec;
 impl LayerCodec for ArpCodec {
     fn protocol_id(&self) -> ProtocolId {
         protocol("arp")
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

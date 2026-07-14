@@ -3,7 +3,23 @@
 
 // Fuzz command execution and presentation.
 
-fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
+use std::sync::Arc;
+use std::time::Duration;
+
+use packetcraftr::{client, net, output, packet, workflow};
+
+use super::arguments::{CliBuildMode, FuzzArgs};
+use super::capture::{render_diagnostics_text, render_output_diagnostics_text};
+use super::errors::CliError;
+use super::input::read_recipe;
+use super::rendering::{emit_json, emit_json_compact, spaced_hex, write_stdout_line};
+use super::runtime::{DeferredInterface, default_registry_arc, system_client};
+use super::scan::validate_live_interface_selector;
+
+pub(super) fn run_fuzz(
+    arguments: FuzzArgs,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
     let FuzzArgs {
         recipe,
         seed,
@@ -35,27 +51,27 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
         .into_iter()
         .map(|field| {
             field
-                .parse::<FuzzTarget>()
+                .parse::<workflow::fuzz::Target>()
                 .map_err(|source| CliError::new(2, source.to_string()))
         })
         .collect::<Result<Vec<_>, _>>()?;
     let queue_limits = limits.into_limits();
     let build_mode = match mode {
-        CliBuildMode::Strict => BuildMode::Strict,
-        CliBuildMode::Permissive => BuildMode::Permissive,
+        CliBuildMode::Strict => packet::build::Mode::Strict,
+        CliBuildMode::Permissive => packet::build::Mode::Permissive,
     };
-    let request = FuzzRequest {
+    let request = workflow::fuzz::Request {
         seed,
         first_case,
         cases,
         strategies: strategies.into_iter().map(Into::into).collect(),
         targets,
-        build: BuildOptions {
+        build: packet::build::Options {
             mode: build_mode,
             max_packet_size: queue_limits.snap_length,
-            ..BuildOptions::default()
+            ..packet::build::Options::default()
         },
-        limits: FuzzLimits {
+        limits: workflow::fuzz::Limits {
             max_cases,
             max_packet_bytes: queue_limits.snap_length,
             max_total_bytes,
@@ -73,10 +89,10 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
         let policy = policy.into_policy();
         policy.validate().map_err(CliError::classified)?;
         validate_live_interface_selector("fuzz", interface.as_deref())?;
-        let mut exchange = ExchangeOptions {
-            send: SendOptions {
+        let mut exchange = client::exchange::Options {
+            send: client::send::Options {
                 destination,
-                plan: crate::net::PlanOptions {
+                plan: net::route::Options {
                     link_mode: link_mode.into(),
                     interface: None,
                     preferred_source: source,
@@ -91,7 +107,7 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             max_capture_queue_frames: queue_limits.max_frames,
             max_captured_bytes: queue_limits.max_bytes,
             capture_overflow_policy: queue_limits.overflow_policy,
-            decode: DecodeOptions::default(),
+            decode: packet::decode::Options::default(),
         };
         exchange.decode.max_packet_size = queue_limits.snap_length;
         exchange.validate().map_err(CliError::classified)?;
@@ -101,11 +117,11 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
             exchange,
             interface: DeferredInterface::new(interface),
         };
-        let mut authorizer = TrafficPolicyFuzzAuthorizer::new(&policy);
-        let mut clock = SystemClock;
-        fuzz_live(
+        let mut authorizer = workflow::fuzz::PolicyAuthorizer::new(&policy);
+        let mut clock = workflow::clock::System;
+        workflow::fuzz::run_live(
             &request,
-            FuzzLiveOptions {
+            workflow::fuzz::LiveOptions {
                 timeout: Duration::from_millis(timeout_ms),
                 cases_per_second: rate,
                 destination,
@@ -121,19 +137,24 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
     } else {
         // This branch intentionally never validates or resolves the live
         // interface and never constructs a native client.
-        fuzz(&request, packet, registry).map_err(fuzz_cli_error)?
+        workflow::fuzz::run(&request, packet, registry).map_err(fuzz_cli_error)?
     };
     let (result, diagnostics, stats) =
-        FuzzCommandResult::try_from_fuzz(result).map_err(CliError::classified)?;
+        output::fuzz::Result::try_from_fuzz(result).map_err(CliError::classified)?;
     match output {
-        OutputFormat::Text => render_fuzz_text(result, diagnostics, stats),
-        OutputFormat::Json => emit_json(
-            &AggregateOutput::success(CommandName::Fuzz, result, diagnostics).with_stats(stats),
+        output::contract::Format::Text => render_fuzz_text(result, diagnostics, stats),
+        output::contract::Format::Json => emit_json(
+            &output::envelope::Aggregate::success(
+                output::contract::Command::Fuzz,
+                result,
+                diagnostics,
+            )
+            .with_stats(stats),
         ),
-        OutputFormat::Ndjson => render_fuzz_stream(result, diagnostics, stats),
+        output::contract::Format::Ndjson => render_fuzz_stream(result, diagnostics, stats),
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Fuzz,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Fuzz,
                 format: output,
             },
         )),
@@ -141,29 +162,33 @@ fn run_fuzz(arguments: FuzzArgs, output: OutputFormat) -> Result<(), CliError> {
 }
 
 struct CliFuzzExecutor {
-    registry: Arc<crate::packet::internal::ProtocolRegistry>,
-    policy: TrafficPolicy,
-    exchange: ExchangeOptions,
+    registry: Arc<packet::registry::Registry>,
+    policy: client::policy::Policy,
+    exchange: client::exchange::Options,
     interface: DeferredInterface,
 }
 
-impl FuzzExecutor for CliFuzzExecutor {
+impl workflow::fuzz::Executor for CliFuzzExecutor {
     fn execute(
         &mut self,
-        case: &FuzzExecutionCase,
+        case: &workflow::fuzz::ExecutionCase,
         timeout: Duration,
-    ) -> Result<FuzzCaseExecution, FuzzExecutionError> {
+    ) -> Result<workflow::fuzz::Execution, workflow::fuzz::ExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(|error| {
-                FuzzExecutionError::new(error.message, error.classification, error.causes)
+                workflow::fuzz::ExecutionError::new(
+                    error.message,
+                    error.classification,
+                    error.causes,
+                )
             })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        ClientFuzzExecutor::new(&client, self.exchange.clone()).execute(case, timeout)
+        workflow::fuzz::ClientExecutor::new(&client, self.exchange.clone()).execute(case, timeout)
     }
 }
 
-fn fuzz_cli_error(error: FuzzError) -> CliError {
+pub(super) fn fuzz_cli_error(error: workflow::fuzz::Error) -> CliError {
     let sequence = error.sequence();
     let mut error = CliError::classified(error);
     if let Some(sequence) = sequence {
@@ -173,9 +198,9 @@ fn fuzz_cli_error(error: FuzzError) -> CliError {
 }
 
 fn render_fuzz_text(
-    result: FuzzCommandResult,
-    diagnostics: Vec<crate::packet::internal::Diagnostic>,
-    stats: crate::output::envelope::Stats,
+    result: output::fuzz::Result,
+    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "mode={} seed={} first_case={} generated={} built={} rejected={}",
@@ -251,11 +276,11 @@ fn render_fuzz_text(
 }
 
 fn render_fuzz_stream(
-    result: FuzzCommandResult,
-    diagnostics: Vec<crate::packet::internal::Diagnostic>,
-    stats: crate::output::envelope::Stats,
+    result: output::fuzz::Result,
+    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
-    let FuzzCommandResult {
+    let output::fuzz::Result {
         seed,
         first_case,
         mode,
@@ -268,17 +293,17 @@ fn render_fuzz_stream(
     for case in cases {
         emit_fuzz_record(
             &mut sequence,
-            FuzzStreamCommandResult::Case {
+            output::fuzz::Event::Case {
                 operation_seed: seed,
                 case: Box::new(case),
             },
         )?;
     }
     emit_json_compact(
-        &StreamRecord::success(
-            CommandName::Fuzz,
+        &output::envelope::Stream::success(
+            output::contract::Command::Fuzz,
             sequence,
-            FuzzStreamCommandResult::Complete {
+            output::fuzz::Event::Complete {
                 operation_seed: seed,
                 first_case,
                 mode,
@@ -293,34 +318,34 @@ fn render_fuzz_stream(
     .map_err(|error| error.at_sequence(sequence))
 }
 
-fn emit_fuzz_record(sequence: &mut u64, result: FuzzStreamCommandResult) -> Result<(), CliError> {
-    emit_json_compact(&StreamRecord::success(
-        CommandName::Fuzz,
+fn emit_fuzz_record(sequence: &mut u64, result: output::fuzz::Event) -> Result<(), CliError> {
+    emit_json_compact(&output::envelope::Stream::success(
+        output::contract::Command::Fuzz,
         *sequence,
         result,
         Vec::new(),
     ))
     .map_err(|error| error.at_sequence(*sequence))?;
     *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(OutputContractError::SequenceOverflow).at_sequence(*sequence)
+        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
     })?;
     Ok(())
 }
 
-fn fuzz_mode_name(value: FuzzMode) -> &'static str {
+fn fuzz_mode_name(value: output::fuzz::Mode) -> &'static str {
     match value {
-        FuzzMode::Offline => "offline",
-        FuzzMode::Live => "live",
+        output::fuzz::Mode::Offline => "offline",
+        output::fuzz::Mode::Live => "live",
     }
 }
 
-fn fuzz_outcome_name(value: FuzzCaseOutcome) -> &'static str {
+fn fuzz_outcome_name(value: output::fuzz::Outcome) -> &'static str {
     match value {
-        FuzzCaseOutcome::Built => "built",
-        FuzzCaseOutcome::Rejected => "rejected",
-        FuzzCaseOutcome::Sent => "sent",
-        FuzzCaseOutcome::Response => "response",
-        FuzzCaseOutcome::Timeout => "timeout",
-        FuzzCaseOutcome::Error => "error",
+        output::fuzz::Outcome::Built => "built",
+        output::fuzz::Outcome::Rejected => "rejected",
+        output::fuzz::Outcome::Sent => "sent",
+        output::fuzz::Outcome::Response => "response",
+        output::fuzz::Outcome::Timeout => "timeout",
+        output::fuzz::Outcome::Error => "error",
     }
 }

@@ -1,5 +1,5 @@
 /// Maximum cumulative intentional delay accepted by one replay operation.
-pub const MAX_REPLAY_DURATION: Duration = MAX_CAPTURE_TIMEOUT;
+pub const MAX_REPLAY_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
 
 /// Timing policy used when replaying captured frames.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -32,7 +32,7 @@ impl ReplayTiming {
         }
     }
 
-    fn delay_between(
+    pub(super) fn delay_between(
         self,
         previous: SystemTime,
         current: SystemTime,
@@ -163,44 +163,7 @@ pub struct ReplaySummary {
 }
 
 /// Policy decision returned before a replay transmitter can observe a frame.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ReplayAuthorizationError {
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-}
-
-impl ReplayAuthorizationError {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-        }
-    }
-}
-
-impl fmt::Display for ReplayAuthorizationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for ReplayAuthorizationError {}
-
-impl Classified for ReplayAuthorizationError {
-    fn classification(&self) -> Classification {
-        self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        self.causes.clone()
-    }
-}
+pub use crate::workflow::BoundaryError as ReplayAuthorizationError;
 
 /// Explicit policy seam invoked before delay or transmission.
 pub trait ReplayAuthorizer {
@@ -231,3 +194,9 @@ pub struct ReplayTransmission {
     pub interface: InterfaceId,
     pub report: IoSendReport,
 }
+use super::{
+    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Duration, Format, Frame,
+    Interface, InterfaceId, IoSendReport, LinkMode, LiveIoError, ReplayError, Serialize,
+    SystemTime,
+};
+use serde::Deserialize;

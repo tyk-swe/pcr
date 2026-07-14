@@ -60,15 +60,15 @@ where
                 limit: limits.max_frames,
             });
         }
-        if frame.bytes.len() > limits.max_frame_bytes {
+        if frame.bytes().len() > limits.max_frame_bytes {
             return Err(ReplayError::FrameSizeLimit {
                 sequence,
-                actual: frame.bytes.len(),
+                actual: frame.bytes().len(),
                 limit: limits.max_frame_bytes,
             });
         }
         let next_bytes = bytes_completed
-            .checked_add(u64::from(frame.captured_length))
+            .checked_add(u64::from(frame.captured_length()))
             .ok_or(ReplayError::ByteLimit {
                 sequence,
                 actual: u64::MAX,
@@ -168,3 +168,8 @@ where
         scheduled_duration,
     })
 }
+use super::wire::{replay_link_mode, validate_transmission_evidence};
+use super::{
+    Duration, Format, Read, Reader, ReplayAuthorizer, ReplayError, ReplayFrameEvidence,
+    ReplayOptions, ReplaySummary, ReplayTransmitter, WorkflowClock,
+};

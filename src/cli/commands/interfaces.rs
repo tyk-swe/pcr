@@ -3,13 +3,17 @@
 
 // Interface enumeration command.
 
-fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
-    let interfaces =
-        crate::net::InterfaceProvider::interfaces(&crate::net::SystemInterfaceProvider)
-            .map_err(CliError::classified)?;
-    let result = InterfacesCommandResult::new(interfaces);
+use packetcraftr::{net, output};
+
+use super::errors::CliError;
+use super::rendering::{emit_json, write_stdout_line};
+
+pub(super) fn run_interfaces(output: output::contract::Format) -> Result<(), CliError> {
+    let interfaces = net::interface::Provider::interfaces(&net::interface::SystemProvider)
+        .map_err(CliError::classified)?;
+    let result = output::network::interfaces::Result::new(interfaces);
     match output {
-        OutputFormat::Text => {
+        output::contract::Format::Text => {
             for interface in result.interfaces {
                 write_stdout_line(format_args!(
                     "{} (index {}): {}",
@@ -20,14 +24,14 @@ fn run_interfaces(output: OutputFormat) -> Result<(), CliError> {
             }
             Ok(())
         }
-        OutputFormat::Json => emit_json(&AggregateOutput::success(
-            CommandName::Interfaces,
+        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+            output::contract::Command::Interfaces,
             result,
             Vec::new(),
         )),
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Interfaces,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Interfaces,
                 format: output,
             },
         )),

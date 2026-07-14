@@ -195,20 +195,21 @@ impl DnsRequest {
                 reason: format!("must be within 1..={MAX_DNS_ATTEMPTS}"),
             });
         }
-        if self.timeout.is_zero() || self.timeout > MAX_CAPTURE_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > crate::net::capture::MAX_TIMEOUT {
             return Err(DnsError::InvalidTimeout {
                 value: self.timeout,
-                maximum: MAX_CAPTURE_TIMEOUT,
+                maximum: crate::net::capture::MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.queries_per_second
-            && (rate == 0 || rate > MAX_SCAN_RATE) {
-                return Err(DnsError::InvalidLimit {
-                    field: "queries_per_second",
-                    value: u64::from(rate),
-                    reason: format!("must be within 1..={MAX_SCAN_RATE}"),
-                });
-            }
+            && (rate == 0 || rate > MAX_SCAN_RATE)
+        {
+            return Err(DnsError::InvalidLimit {
+                field: "queries_per_second",
+                value: u64::from(rate),
+                reason: format!("must be within 1..={MAX_SCAN_RATE}"),
+            });
+        }
         canonical_query_name(&self.query_name).map_err(DnsError::Query)
     }
 }
@@ -226,15 +227,15 @@ pub enum DnsSection {
 /// to [`fmt::Display`].
 #[derive(Clone, Debug, Eq)]
 pub struct DnsName {
-    labels: Vec<Bytes>,
+    pub(super) labels: Vec<Bytes>,
 }
 
 impl DnsName {
-    fn root() -> Self {
+    pub(super) fn root() -> Self {
         Self { labels: Vec::new() }
     }
 
-    fn from_canonical_ascii(value: &str) -> Self {
+    pub(super) fn from_canonical_ascii(value: &str) -> Self {
         if value == "." {
             return Self::root();
         }
@@ -274,7 +275,7 @@ impl DnsName {
         &self.labels
     }
 
-    fn is_root(&self) -> bool {
+    pub(super) fn is_root(&self) -> bool {
         self.labels.is_empty()
     }
 }
@@ -415,7 +416,7 @@ impl DnsRecordValue {
         }
     }
 
-    fn referenced_name(&self) -> Option<&DnsName> {
+    pub(super) fn referenced_name(&self) -> Option<&DnsName> {
         match self {
             Self::Cname(value) | Self::Ns(value) => Some(value),
             Self::Mx { exchange, .. } => Some(exchange),
@@ -597,48 +598,7 @@ pub struct DnsExchangeExecution {
     pub stats: Stats,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DnsExecutionError {
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-}
-
-impl DnsExecutionError {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-        }
-    }
-
-    pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
-        Self::new(error.to_string(), error.classification(), error.causes())
-    }
-}
-
-impl fmt::Display for DnsExecutionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for DnsExecutionError {}
-
-impl Classified for DnsExecutionError {
-    fn classification(&self) -> Classification {
-        self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        self.causes.clone()
-    }
-}
+pub use crate::workflow::BoundaryError as DnsExecutionError;
 
 pub trait DnsExecutor {
     fn execute(
@@ -646,3 +606,14 @@ pub trait DnsExecutor {
         exchange: &DnsExchange,
     ) -> Result<DnsExchangeExecution, DnsExecutionError>;
 }
+use super::{
+    AddressFamily, Bytes, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
+    DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
+    DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_TYPE_OPT, DecodedPacket, Diagnostic, DnsError,
+    DnsWireError, Duration, Frame, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, MAX_DNS_ATTEMPTS,
+    MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS, MAX_DNS_RECORDS, MAX_SCAN_RATE,
+    Packet, Raw, Serialize, Stats, SystemTime, Target, Udp, canonical_query_name, fmt,
+    nonzero_ipv4_identification, response_code_name,
+};
+use serde::Deserialize;

@@ -238,17 +238,27 @@ where
     })
 }
 
-struct PreparedFuzz {
-    cases: Vec<FuzzCase>,
-    built_case_count: u64,
-    built_byte_count: u64,
-    preparation_elapsed: Duration,
+pub(super) struct PreparedFuzz {
+    pub(super) cases: Vec<FuzzCase>,
+    pub(super) built_case_count: u64,
+    pub(super) built_byte_count: u64,
+    pub(super) preparation_elapsed: Duration,
 }
 
 #[derive(Clone)]
-struct ResolvedField {
-    target: FuzzTarget,
-    protocol: String,
-    kind: FieldKind,
-    is_derived: bool,
+pub(super) struct ResolvedField {
+    pub(super) target: FuzzTarget,
+    pub(super) protocol: String,
+    pub(super) kind: FieldKind,
+    pub(super) is_derived: bool,
 }
+use super::execution::{
+    add_execution_stats, rate_delay, retain_evidence, validate_execution, worst_case_duration,
+};
+use super::mutation::{dissect_built, enforce_operation_deadline, has_link_root, prepare};
+use super::{
+    Arc, Clock, Dissector, Duration, EvidenceBudget, FieldKind, FuzzAuthorizer, FuzzCase,
+    FuzzCaseOutcome, FuzzError, FuzzExecutionCase, FuzzExecutor, FuzzLiveOptions, FuzzMode,
+    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Instant, Packet, ProtocolRegistry,
+    SYNTHESIZED_ETHERNET_BYTES,
+};

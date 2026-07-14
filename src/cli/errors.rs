@@ -3,17 +3,24 @@
 
 // CLI error classification and exit-code mapping.
 
+use std::process::ExitCode;
+
+use packetcraftr::{
+    error::{Classification, Classified, Kind},
+    net, output,
+};
+
 #[derive(Debug)]
-struct CliError {
-    exit_code: u8,
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-    sequence: Option<u64>,
+pub(super) struct CliError {
+    pub(super) exit_code: u8,
+    pub(super) message: String,
+    pub(super) classification: Classification,
+    pub(super) causes: Vec<String>,
+    pub(super) sequence: Option<u64>,
 }
 
 impl CliError {
-    fn new(exit_code: u8, message: impl Into<String>) -> Self {
+    pub(super) fn new(exit_code: u8, message: impl Into<String>) -> Self {
         let kind = match exit_code {
             2 => Kind::Cli,
             3 => Kind::Packet,
@@ -42,13 +49,13 @@ impl CliError {
         }
     }
 
-    fn classified(error: impl Classified + std::fmt::Display) -> Self {
+    pub(super) fn classified(error: impl Classified + std::fmt::Display) -> Self {
         let classification = error.classification();
         let causes = error.causes();
         Self::from_classification(classification, error.to_string(), causes)
     }
 
-    fn from_classification(
+    pub(super) fn from_classification(
         classification: Classification,
         message: impl Into<String>,
         causes: Vec<String>,
@@ -62,17 +69,17 @@ impl CliError {
         }
     }
 
-    fn at_sequence(mut self, sequence: u64) -> Self {
+    pub(super) fn at_sequence(mut self, sequence: u64) -> Self {
         self.sequence = Some(sequence);
         self
     }
 
-    fn at_sequence_if_absent(mut self, sequence: u64) -> Self {
+    pub(super) fn at_sequence_if_absent(mut self, sequence: u64) -> Self {
         self.sequence.get_or_insert(sequence);
         self
     }
 
-    fn with_cleanup(mut self, cleanup: LiveIoError) -> Self {
+    pub(super) fn with_cleanup(mut self, cleanup: net::Error) -> Self {
         let operation = self.message.clone();
         self.message = format!("{operation}; capture shutdown also failed: {cleanup}");
         if self.causes.is_empty() {
@@ -82,8 +89,8 @@ impl CliError {
         self
     }
 
-    fn output_error(&self) -> OutputError {
-        OutputError::new(
+    pub(super) fn output_error(&self) -> output::envelope::Error {
+        output::envelope::Error::new(
             self.classification,
             self.message.clone(),
             self.causes.clone(),
@@ -102,12 +109,12 @@ const fn exit_code_for_kind(kind: Kind) -> u8 {
     }
 }
 
-fn machine_format_from_env() -> Option<OutputFormat> {
+pub(super) fn machine_format_from_env() -> Option<output::contract::Format> {
     let arguments = std::env::args_os().collect::<Vec<_>>();
     machine_format(&arguments)
 }
 
-fn machine_format(arguments: &[std::ffi::OsString]) -> Option<OutputFormat> {
+fn machine_format(arguments: &[std::ffi::OsString]) -> Option<output::contract::Format> {
     arguments
         .iter()
         .take_while(|argument| argument.as_os_str() != "--")
@@ -121,29 +128,29 @@ fn machine_format(arguments: &[std::ffi::OsString]) -> Option<OutputFormat> {
                     .and_then(|argument| argument.strip_prefix("--output="))
             }?;
             match value {
-                "json" => Some(OutputFormat::Json),
-                "ndjson" => Some(OutputFormat::Ndjson),
+                "json" => Some(output::contract::Format::Json),
+                "ndjson" => Some(output::contract::Format::Ndjson),
                 _ => None,
             }
         })
 }
 
-fn command_from_env() -> Option<CommandName> {
-    const COMMANDS: &[(&str, CommandName)] = &[
-        ("build", CommandName::Build),
-        ("dissect", CommandName::Dissect),
-        ("plan", CommandName::Plan),
-        ("send", CommandName::Send),
-        ("exchange", CommandName::Exchange),
-        ("capture", CommandName::Capture),
-        ("read", CommandName::Read),
-        ("replay", CommandName::Replay),
-        ("scan", CommandName::Scan),
-        ("traceroute", CommandName::Traceroute),
-        ("dns", CommandName::Dns),
-        ("fuzz", CommandName::Fuzz),
-        ("interfaces", CommandName::Interfaces),
-        ("routes", CommandName::Routes),
+pub(super) fn command_from_env() -> Option<output::contract::Command> {
+    const COMMANDS: &[(&str, output::contract::Command)] = &[
+        ("build", output::contract::Command::Build),
+        ("dissect", output::contract::Command::Dissect),
+        ("plan", output::contract::Command::Plan),
+        ("send", output::contract::Command::Send),
+        ("exchange", output::contract::Command::Exchange),
+        ("capture", output::contract::Command::Capture),
+        ("read", output::contract::Command::Read),
+        ("replay", output::contract::Command::Replay),
+        ("scan", output::contract::Command::Scan),
+        ("traceroute", output::contract::Command::Traceroute),
+        ("dns", output::contract::Command::Dns),
+        ("fuzz", output::contract::Command::Fuzz),
+        ("interfaces", output::contract::Command::Interfaces),
+        ("routes", output::contract::Command::Routes),
     ];
     std::env::args_os()
         .take_while(|argument| argument.as_os_str() != "--")
@@ -155,6 +162,6 @@ fn command_from_env() -> Option<CommandName> {
         })
 }
 
-fn exit_code(code: u8) -> ExitCode {
+pub(super) fn exit_code(code: u8) -> ExitCode {
     ExitCode::from(code)
 }

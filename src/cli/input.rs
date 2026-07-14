@@ -3,11 +3,20 @@
 
 // Bounded recipe, file, and standard-input handling.
 
-fn read_recipe(
+use std::fs::File;
+use std::io::{self, IsTerminal, Read};
+use std::path::Path;
+
+use packetcraftr::packet::{self, Packet};
+
+use super::arguments::RecipeArgs;
+use super::errors::CliError;
+
+pub(super) fn read_recipe(
     arguments: RecipeArgs,
-    registry: &crate::packet::internal::ProtocolRegistry,
+    registry: &packet::registry::Registry,
 ) -> Result<Packet, CliError> {
-    let stdin = read_nonterminal_stdin_bounded(DEFAULT_MAX_DOCUMENT_BYTES)?;
+    let stdin = read_nonterminal_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
     let RecipeArgs {
         packet,
         packet_file,
@@ -25,7 +34,7 @@ fn read_recipe(
     let (input, path) = match (packet, packet_file, stdin) {
         (Some(expression), None, None) => return parse_expression(&expression, registry),
         (None, Some(path), None) => {
-            let bytes = read_bounded_file(&path, DEFAULT_MAX_DOCUMENT_BYTES)?;
+            let bytes = read_bounded_file(&path, packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
             let input = String::from_utf8(bytes).map_err(|source| {
                 CliError::new(2, format!("packet document is not UTF-8: {source}"))
             })?;
@@ -43,20 +52,24 @@ fn read_recipe(
     let format = path
         .as_deref()
         .and_then(document_format_from_path)
-        .or_else(|| trimmed.starts_with('{').then_some(DocumentFormat::Json))
+        .or_else(|| {
+            trimmed
+                .starts_with('{')
+                .then_some(packet::document::Format::Json)
+        })
         .or_else(|| {
             (trimmed.starts_with("schema:") || trimmed.starts_with("---"))
-                .then_some(DocumentFormat::Yaml)
+                .then_some(packet::document::Format::Yaml)
         });
     if let Some(format) = format {
-        return PacketDocument::parse_with_resource_limits(
+        return packet::document::Packet::parse_with_resource_limits(
             &input,
             format,
-            DEFAULT_MAX_DOCUMENT_BYTES,
-            DEFAULT_MAX_LAYERS,
-            DEFAULT_MAX_DOCUMENT_NESTING,
+            packet::document::DEFAULT_MAX_DOCUMENT_BYTES,
+            packet::build::DEFAULT_MAX_LAYERS,
+            packet::document::DEFAULT_MAX_DOCUMENT_NESTING,
         )
-        .and_then(|document| document.to_packet(registry, DEFAULT_MAX_LAYERS))
+        .and_then(|document| document.to_packet(registry, packet::build::DEFAULT_MAX_LAYERS))
         .map_err(|source| CliError::new(2, source.to_string()));
     }
     parse_expression(&input, registry)
@@ -64,27 +77,27 @@ fn read_recipe(
 
 fn parse_expression(
     input: &str,
-    registry: &crate::packet::internal::ProtocolRegistry,
+    registry: &packet::registry::Registry,
 ) -> Result<Packet, CliError> {
-    parse_packet_expression(input, registry, ExpressionOptions::default())
+    packet::expression::parse(input, registry, packet::expression::Options::default())
         .map_err(|source| CliError::new(2, source.to_string()))
 }
 
-fn document_format_from_path(path: &Path) -> Option<DocumentFormat> {
+fn document_format_from_path(path: &Path) -> Option<packet::document::Format> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
-        "json" => Some(DocumentFormat::Json),
-        "yaml" | "yml" => Some(DocumentFormat::Yaml),
+        "json" => Some(packet::document::Format::Json),
+        "yaml" | "yml" => Some(packet::document::Format::Yaml),
         _ => None,
     }
 }
 
-fn read_bounded_file(path: &Path, maximum: usize) -> Result<Vec<u8>, CliError> {
+pub(super) fn read_bounded_file(path: &Path, maximum: usize) -> Result<Vec<u8>, CliError> {
     let file = File::open(path)
         .map_err(|source| CliError::new(2, format!("open {} failed: {source}", path.display())))?;
     read_bounded(file, maximum)
 }
 
-fn read_stdin_bounded(maximum: usize) -> Result<Vec<u8>, CliError> {
+pub(super) fn read_stdin_bounded(maximum: usize) -> Result<Vec<u8>, CliError> {
     read_bounded(io::stdin().lock(), maximum)
 }
 
@@ -108,7 +121,10 @@ fn read_bounded(reader: impl Read, maximum: usize) -> Result<Vec<u8>, CliError> 
     Ok(bytes)
 }
 
-fn read_bounded_allow_empty(reader: impl Read, maximum: usize) -> Result<Vec<u8>, CliError> {
+pub(super) fn read_bounded_allow_empty(
+    reader: impl Read,
+    maximum: usize,
+) -> Result<Vec<u8>, CliError> {
     let read_limit = maximum
         .checked_add(1)
         .and_then(|value| u64::try_from(value).ok())

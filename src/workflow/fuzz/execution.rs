@@ -1,4 +1,13 @@
-fn worst_case_duration(live: FuzzLiveOptions, cases: usize) -> Result<Duration, FuzzError> {
+use super::{
+    CASE_DOMAIN, Diagnostic, Duration, EvidenceBudget, Frame, FuzzCase, FuzzCaseExecution,
+    FuzzError, FuzzExecutionStats, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION,
+    SPLITMIX_INCREMENT, push_diagnostic_once,
+};
+
+pub(super) fn worst_case_duration(
+    live: FuzzLiveOptions,
+    cases: usize,
+) -> Result<Duration, FuzzError> {
     let exchange = live
         .timeout
         .checked_mul(cases as u32)
@@ -18,15 +27,15 @@ fn worst_case_duration(live: FuzzLiveOptions, cases: usize) -> Result<Duration, 
     })
 }
 
-fn rate_delay(rate: Option<u32>) -> Result<Duration, FuzzError> {
-    super::clock::rate_delay(1, rate).ok_or(FuzzError::InvalidLimit {
+pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, FuzzError> {
+    crate::workflow::clock::rate_delay(1, rate).ok_or(FuzzError::InvalidLimit {
         field: "cases_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),
     })
 }
 
-fn validate_execution(
+pub(super) fn validate_execution(
     case: &FuzzCase,
     execution: &FuzzCaseExecution,
     limits: FuzzLimits,
@@ -38,8 +47,8 @@ fn validate_execution(
             message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
         });
     }
-    if execution.stats.bytes != execution.sent.bytes.len() as u64
-        || execution.built.bytes != execution.sent.bytes
+    if execution.stats.bytes != execution.sent.bytes().len() as u64
+        || execution.built.bytes != execution.sent.bytes()
     {
         return Err(FuzzError::InvalidEvidence {
             case_index: case.index,
@@ -102,7 +111,7 @@ fn validate_execution(
     Ok(())
 }
 
-fn add_execution_stats(
+pub(super) fn add_execution_stats(
     total: &mut FuzzStats,
     value: &FuzzExecutionStats,
     case_index: u64,
@@ -140,21 +149,13 @@ fn add_execution_stats(
     Ok(())
 }
 
-fn retain_fuzz_evidence(
-    budget: &mut EvidenceBudget,
-    frame: &Frame,
-    limits: FuzzLimits,
-) -> bool {
+fn retain_fuzz_evidence(budget: &mut EvidenceBudget, frame: &Frame, limits: FuzzLimits) -> bool {
     budget
-        .retain(
-            frame,
-            limits.max_evidence_frames,
-            limits.max_evidence_bytes,
-        )
+        .retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes)
         .is_ok()
 }
 
-fn retain_evidence(
+pub(super) fn retain_evidence(
     case: &mut FuzzCase,
     responses: Vec<Frame>,
     unmatched: Vec<Frame>,
@@ -199,22 +200,22 @@ fn retain_evidence(
     }
 }
 
-fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
+pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
     let mut random =
         SplitMix64::new(operation_seed ^ case_index.wrapping_mul(SPLITMIX_INCREMENT) ^ CASE_DOMAIN);
     random.next_u64()
 }
 
-struct SplitMix64 {
+pub(super) struct SplitMix64 {
     state: u64,
 }
 
 impl SplitMix64 {
-    fn new(seed: u64) -> Self {
+    pub(super) fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
-    fn next_u64(&mut self) -> u64 {
+    pub(super) fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(SPLITMIX_INCREMENT);
         let mut value = self.state;
         value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -222,7 +223,7 @@ impl SplitMix64 {
         value ^ (value >> 31)
     }
 
-    fn bytes(&mut self, length: usize) -> Vec<u8> {
+    pub(super) fn bytes(&mut self, length: usize) -> Vec<u8> {
         let mut output = Vec::with_capacity(length);
         while output.len() < length {
             let bytes = self.next_u64().to_le_bytes();

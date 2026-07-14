@@ -1,3 +1,15 @@
+use std::net::IpAddr;
+use std::time::Duration;
+
+use serde::Serialize;
+
+use crate::packet::internal::Diagnostic;
+use crate::workflow::scan::Result as ScanResult;
+
+use super::contract::OutputContractError;
+use super::envelope::OperationStats;
+use super::frame::{FrameOutput, OutputTimestamp};
+
 /// Output-v1 scan classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

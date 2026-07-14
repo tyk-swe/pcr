@@ -1,3 +1,11 @@
+use std::{fmt, io};
+
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+use crate::capture::LinkType;
+use crate::error::{Classification, Classified, Kind};
+
 /// Default maximum size of an offline packet or a PCAPNG block (16 MiB).
 pub const DEFAULT_SIZE_LIMIT: usize = 16 * 1024 * 1024;
 /// Default maximum number of interface descriptions retained per PCAPNG section.
@@ -65,8 +73,8 @@ pub enum TimestampResolution {
 
 /// Metadata associated with one capture interface.
 ///
-/// The index in [`Reader::interfaces`] is the global interface ID used
-/// by [`Frame::interface`]. Multiple PCAPNG sections are normalized to
+/// The index in [`crate::capture::Reader::interfaces`] is the global interface
+/// ID used by [`crate::capture::Frame::interface`]. Multiple PCAPNG sections are normalized to
 /// one monotonically increasing namespace.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Interface {
@@ -176,13 +184,11 @@ impl Classified for Error {
                     "inspect the capture input/output stream and retry from a known record boundary",
                 ),
             ),
-            Self::InvalidTimestampResolution { .. } => {
-                Classification::new(
-                    "cli.capture_option",
-                    Kind::Cli,
-                    Some("use a supported finite capture timestamp or replay timing option"),
-                )
-            }
+            Self::InvalidTimestampResolution { .. } => Classification::new(
+                "cli.capture_option",
+                Kind::Cli,
+                Some("use a supported finite capture timestamp or replay timing option"),
+            ),
             Self::FrameLimitExceeded { .. } | Self::StreamByteLimitExceeded { .. } => {
                 Classification::new(
                     "policy.capture_stream_limit",
@@ -209,7 +215,7 @@ impl Classified for Error {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TimestampPrecision {
+pub(super) enum TimestampPrecision {
     Microseconds,
     Nanoseconds,
 }

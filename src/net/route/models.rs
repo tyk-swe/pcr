@@ -1,3 +1,12 @@
+use std::fmt;
+use std::net::IpAddr;
+
+use serde::{Deserialize, Serialize};
+
+use crate::capture::{Frame, LinkType};
+use crate::error::{Classification, Kind};
+use crate::net::provider_impl::CaptureStatistics;
+
 /// Maximum explicit VLAN headers copied into a neighbor-discovery request.
 pub(crate) const MAX_NEIGHBOR_VLAN_TAGS: usize = 8;
 
@@ -38,11 +47,11 @@ pub enum RouteSelectionReason {
 }
 
 impl LinkCapability {
-    fn supports_layer2(self) -> bool {
+    pub(super) fn supports_layer2(self) -> bool {
         matches!(self, Self::Layer2 | Self::Layer2And3)
     }
 
-    fn supports_layer3(self) -> bool {
+    pub(super) fn supports_layer3(self) -> bool {
         matches!(self, Self::Layer3 | Self::Layer2And3)
     }
 }
@@ -110,7 +119,9 @@ pub trait RouteProvider: Send + Sync {
         Classification::new(
             "io.route",
             Kind::Io,
-            Some("inspect the route table, interface selection, and provider diagnostic before retrying"),
+            Some(
+                "inspect the route table, interface selection, and provider diagnostic before retrying",
+            ),
         )
     }
 }

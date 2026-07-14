@@ -1,3 +1,11 @@
+use std::net::IpAddr;
+
+use thiserror::Error;
+
+use crate::error::{Classification, Classified, Kind};
+
+use super::models::{InterfaceId, RouteDecision, RouteProvider};
+
 /// Errors emitted by the current target's passive route/interface adapter.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -17,7 +25,9 @@ pub enum NativeRouteError {
         actual: String,
         actual_index: u32,
     },
-    #[error("preferred source {preferred_source} has a different address family than destination {destination}")]
+    #[error(
+        "preferred source {preferred_source} has a different address family than destination {destination}"
+    )]
     SourceFamilyMismatch {
         preferred_source: IpAddr,
         destination: IpAddr,
@@ -49,7 +59,7 @@ impl RouteProvider for SystemRouteProvider {
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
     ) -> Result<RouteDecision, Self::Error> {
-        super::platform::system_route(destination, interface_hint, None)
+        super::super::platform::system_route(destination, interface_hint, None)
     }
 
     fn lookup_with_preferences(
@@ -58,14 +68,14 @@ impl RouteProvider for SystemRouteProvider {
         interface_hint: Option<&InterfaceId>,
         preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
-        super::platform::system_route(destination, interface_hint, preferred_source)
+        super::super::platform::system_route(destination, interface_hint, preferred_source)
     }
 
     fn lookup_interface(
         &self,
         interface: &InterfaceId,
     ) -> Result<Option<RouteDecision>, Self::Error> {
-        super::platform::system_interface_route(interface).map(Some)
+        super::super::platform::system_interface_route(interface).map(Some)
     }
 
     fn classify_error(&self, error: &Self::Error) -> Classification {
@@ -79,12 +89,16 @@ impl Classified for NativeRouteError {
             Self::Unsupported { .. } => Classification::new(
                 "capability.route",
                 Kind::Capability,
-                Some("enable the native-route capability on a supported target or inject a route provider"),
+                Some(
+                    "enable the native-route capability on a supported target or inject a route provider",
+                ),
             ),
             Self::RouteNotFound { .. } => Classification::new(
                 "io.route_not_found",
                 Kind::Io,
-                Some("add or select a route for the destination; PacketcraftR will not fall back to another link mode"),
+                Some(
+                    "add or select a route for the destination; PacketcraftR will not fall back to another link mode",
+                ),
             ),
             Self::InterfaceNotFound { .. } => Classification::new(
                 "io.interface_not_found",
@@ -96,7 +110,9 @@ impl Classified for NativeRouteError {
             | Self::SourceUnavailable { .. } => Classification::new(
                 "io.route_selection",
                 Kind::Io,
-                Some("choose an interface-owned source and interface compatible with the destination family"),
+                Some(
+                    "choose an interface-owned source and interface compatible with the destination family",
+                ),
             ),
             Self::InvalidResponse { .. } => Classification::new(
                 "internal.route_response",
@@ -106,7 +122,9 @@ impl Classified for NativeRouteError {
             Self::OperatingSystem { .. } => Classification::new(
                 "io.route",
                 Kind::Io,
-                Some("inspect the operating-system route diagnostic and current network configuration"),
+                Some(
+                    "inspect the operating-system route diagnostic and current network configuration",
+                ),
             ),
         }
     }

@@ -3,35 +3,63 @@
 
 // Entrypoint dispatch and live runtime composition.
 
-struct PreparedRouteRequest {
-    packet: Packet,
-    destination: Option<IpAddr>,
-    options: crate::net::PlanOptions,
-    policy: TrafficPolicy,
+use std::net::IpAddr;
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use clap::Parser;
+use packetcraftr::{
+    client::{self, Client},
+    net::{self, exchange::Composite},
+    output,
+    packet::{self, Packet},
+    protocol,
+};
+
+use super::arguments::{Cli, Command, RouteArgs};
+use super::capture::{run_capture, run_exchange};
+use super::dns::run_dns;
+use super::errors::{CliError, command_from_env, exit_code, machine_format_from_env};
+use super::fuzz::run_fuzz;
+use super::input::read_recipe;
+use super::interfaces::run_interfaces;
+use super::network::{run_plan, run_routes, run_send};
+use super::offline::{run_build, run_dissect, run_read};
+use super::rendering::{emit_json, emit_json_compact, emit_stderr_error, emit_stderr_message};
+use super::replay::run_replay;
+use super::scan::run_scan;
+use super::traceroute::run_traceroute;
+
+pub(super) struct PreparedRouteRequest {
+    pub(super) packet: Packet,
+    pub(super) destination: Option<IpAddr>,
+    pub(super) options: net::route::Options,
+    pub(super) policy: client::policy::Policy,
 }
 
 #[derive(Debug)]
-enum DeferredInterface {
+pub(super) enum DeferredInterface {
     Pending(String),
     Resolved,
 }
 
 impl DeferredInterface {
-    fn new(selector: Option<String>) -> Self {
+    pub(super) fn new(selector: Option<String>) -> Self {
         match selector {
             Some(selector) => Self::Pending(selector),
             None => Self::Resolved,
         }
     }
 
-    fn resolve_into(&mut self, options: &mut crate::net::PlanOptions) -> Result<(), CliError> {
+    pub(super) fn resolve_into(
+        &mut self,
+        options: &mut net::route::Options,
+    ) -> Result<(), CliError> {
         let Self::Pending(selector) = self else {
             return Ok(());
         };
-        options.interface = resolve_interface(
-            Some(selector.clone()),
-            &SystemInterfaceProvider,
-        )?;
+        options.interface =
+            resolve_interface(Some(selector.clone()), &net::interface::SystemProvider)?;
         *self = Self::Resolved;
         Ok(())
     }
@@ -43,29 +71,34 @@ pub(crate) fn run_entrypoint() -> ExitCode {
         Err(error) => {
             let code = if error.use_stderr() { 2 } else { 0 };
             if code != 0
-                && let Some(output) = machine_format_from_env() {
-                    let message = error.to_string();
-                    let error = CliError::new(code, message);
-                    let emitted = match output {
-                        OutputFormat::Json => emit_json(&AggregateErrorOutput::error(
+                && let Some(output) = machine_format_from_env()
+            {
+                let message = error.to_string();
+                let error = CliError::new(code, message);
+                let emitted = match output {
+                    output::contract::Format::Json => {
+                        emit_json(&output::envelope::AggregateError::error(
                             command_from_env(),
                             error.output_error(),
-                        )),
-                        OutputFormat::Ndjson => emit_json_compact(&StreamErrorRecord::error(
+                        ))
+                    }
+                    output::contract::Format::Ndjson => {
+                        emit_json_compact(&output::envelope::StreamError::error(
                             command_from_env(),
                             0,
                             error.output_error(),
-                        )),
-                        _ => unreachable!("machine_format_from_env returns structured formats"),
-                    };
-                    return match emitted {
-                        Ok(()) => exit_code(code),
-                        Err(write_error) => {
-                            let _ = emit_stderr_error(&write_error.message);
-                            exit_code(write_error.exit_code)
-                        }
-                    };
-                }
+                        ))
+                    }
+                    _ => unreachable!("machine_format_from_env returns structured formats"),
+                };
+                return match emitted {
+                    Ok(()) => exit_code(code),
+                    Err(write_error) => {
+                        let _ = emit_stderr_error(&write_error.message);
+                        exit_code(write_error.exit_code)
+                    }
+                };
+            }
             return if code == 0 {
                 if error.print().is_ok() {
                     ExitCode::SUCCESS
@@ -80,25 +113,29 @@ pub(crate) fn run_entrypoint() -> ExitCode {
             };
         }
     };
-    let output = OutputFormat::from(cli.output);
+    let output = output::contract::Format::from(cli.output);
     let command = cli.command.name();
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             let emitted = match output {
-                OutputFormat::Json => emit_json(&AggregateErrorOutput::error(
-                    Some(command),
-                    error.output_error(),
-                )),
-                OutputFormat::Ndjson => emit_json_compact(&StreamErrorRecord::error(
-                    Some(command),
-                    error.sequence.unwrap_or(0),
-                    error.output_error(),
-                )),
+                output::contract::Format::Json => emit_json(
+                    &output::envelope::AggregateError::error(Some(command), error.output_error()),
+                ),
+                output::contract::Format::Ndjson => {
+                    emit_json_compact(&output::envelope::StreamError::error(
+                        Some(command),
+                        error.sequence.unwrap_or(0),
+                        error.output_error(),
+                    ))
+                }
                 _ => emit_stderr_error(&error.message),
             };
             if let Err(write_error) = emitted {
-                if matches!(output, OutputFormat::Json | OutputFormat::Ndjson) {
+                if matches!(
+                    output,
+                    output::contract::Format::Json | output::contract::Format::Ndjson
+                ) {
                     let _ = emit_stderr_error(&write_error.message);
                 }
                 return exit_code(write_error.exit_code);
@@ -109,28 +146,28 @@ pub(crate) fn run_entrypoint() -> ExitCode {
 }
 
 impl Command {
-    fn name(&self) -> CommandName {
+    fn name(&self) -> output::contract::Command {
         match self {
-            Self::Build(_) => CommandName::Build,
-            Self::Dissect(_) => CommandName::Dissect,
-            Self::Read(_) => CommandName::Read,
-            Self::Interfaces => CommandName::Interfaces,
-            Self::Plan(_) => CommandName::Plan,
-            Self::Send(_) => CommandName::Send,
-            Self::Exchange(_) => CommandName::Exchange,
-            Self::Capture(_) => CommandName::Capture,
-            Self::Replay(_) => CommandName::Replay,
-            Self::Scan(_) => CommandName::Scan,
-            Self::Traceroute(_) => CommandName::Traceroute,
-            Self::Dns(_) => CommandName::Dns,
-            Self::Fuzz(_) => CommandName::Fuzz,
-            Self::Routes => CommandName::Routes,
+            Self::Build(_) => output::contract::Command::Build,
+            Self::Dissect(_) => output::contract::Command::Dissect,
+            Self::Read(_) => output::contract::Command::Read,
+            Self::Interfaces => output::contract::Command::Interfaces,
+            Self::Plan(_) => output::contract::Command::Plan,
+            Self::Send(_) => output::contract::Command::Send,
+            Self::Exchange(_) => output::contract::Command::Exchange,
+            Self::Capture(_) => output::contract::Command::Capture,
+            Self::Replay(_) => output::contract::Command::Replay,
+            Self::Scan(_) => output::contract::Command::Scan,
+            Self::Traceroute(_) => output::contract::Command::Traceroute,
+            Self::Dns(_) => output::contract::Command::Dns,
+            Self::Fuzz(_) => output::contract::Command::Fuzz,
+            Self::Routes => output::contract::Command::Routes,
         }
     }
 }
 
-fn run(cli: Cli) -> Result<(), CliError> {
-    let output = OutputFormat::from(cli.output);
+pub(super) fn run(cli: Cli) -> Result<(), CliError> {
+    let output = output::contract::Format::from(cli.output);
     cli.command
         .name()
         .require_format(output)
@@ -153,37 +190,39 @@ fn run(cli: Cli) -> Result<(), CliError> {
     }
 }
 
-type SystemPacketIo = DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>;
-type SystemExchangeIo = Composite<SystemPacketIo, SystemCaptureProvider>;
-type SystemClient = Client<SystemRouteProvider, SystemNeighborResolver, SystemExchangeIo>;
+type SystemPacketIo =
+    net::transmit::Dispatch<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
+type SystemExchangeIo = Composite<SystemPacketIo, net::capture::SystemProvider>;
+type SystemClient =
+    Client<net::route::SystemProvider, net::neighbor::SystemResolver, SystemExchangeIo>;
 
-fn default_registry_arc() -> Result<Arc<crate::packet::internal::ProtocolRegistry>, CliError> {
-    crate::protocol::internal::default_registry()
+pub(super) fn default_registry_arc() -> Result<Arc<packet::registry::Registry>, CliError> {
+    protocol::builtin::registry()
         .map(Arc::new)
         .map_err(|source| {
             CliError::new(70, format!("built-in registry invariant failed: {source}"))
         })
 }
 
-fn system_client(
-    registry: Arc<crate::packet::internal::ProtocolRegistry>,
-    policy: TrafficPolicy,
+pub(super) fn system_client(
+    registry: Arc<packet::registry::Registry>,
+    policy: client::policy::Policy,
 ) -> SystemClient {
     Client::new(
         registry,
-        SystemRouteProvider,
-        SystemNeighborResolver::default(),
+        net::route::SystemProvider,
+        net::neighbor::SystemResolver::default(),
         Composite::new(
-            DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
-            SystemCaptureProvider,
+            net::transmit::Dispatch::new(net::transmit::SystemLayer2, net::transmit::SystemLayer3),
+            net::capture::SystemProvider,
         ),
         policy,
     )
 }
 
-fn prepare_route_request(
+pub(super) fn prepare_route_request(
     arguments: RouteArgs,
-    registry: &crate::packet::internal::ProtocolRegistry,
+    registry: &packet::registry::Registry,
 ) -> Result<PreparedRouteRequest, CliError> {
     let RouteArgs {
         recipe,
@@ -201,11 +240,11 @@ fn prepare_route_request(
         .authorize_packet_destinations(&packet)
         .map_err(CliError::classified)?;
     let destination = resolve_live_destination(destination, &packet, &policy)?;
-    let interface = resolve_interface(interface, &SystemInterfaceProvider)?;
+    let interface = resolve_interface(interface, &net::interface::SystemProvider)?;
     Ok(PreparedRouteRequest {
         packet,
         destination,
-        options: crate::net::PlanOptions {
+        options: net::route::Options {
             link_mode: link_mode.into(),
             interface,
             preferred_source: source,
@@ -217,38 +256,41 @@ fn prepare_route_request(
 fn resolve_live_destination(
     destination: Option<String>,
     packet: &Packet,
-    policy: &TrafficPolicy,
+    policy: &client::policy::Policy,
 ) -> Result<Option<IpAddr>, CliError> {
     let Some(destination) = destination else {
         return Ok(None);
     };
     let target = destination
-        .parse::<LiveTarget>()
+        .parse::<client::target::Target>()
         .map_err(CliError::classified)?;
     let resolved = policy
-        .resolve_target(&target, &SystemHostnameResolver)
+        .resolve_target(&target, &client::target::SystemResolver)
         .map_err(CliError::classified)?;
     let ip_version = packet
         .iter()
         .find_map(|layer| match layer.protocol_id().as_str() {
-            "ipv4" => Some(IpVersion::V4),
-            "ipv6" => Some(IpVersion::V6),
+            "ipv4" => Some(client::target::IpVersion::V4),
+            "ipv6" => Some(client::target::IpVersion::V6),
             _ => None,
         });
     match ip_version {
-        Some(version) => resolved.address_for_version(version).map(Some).ok_or_else(|| {
-            CliError::classified(crate::client::target::Error::AddressFamilyUnavailable {
-                family: version.label(),
-            })
-        }),
+        Some(version) => resolved
+            .address_for_version(version)
+            .map(Some)
+            .ok_or_else(|| {
+                CliError::classified(client::target::Error::AddressFamilyUnavailable {
+                    family: version.label(),
+                })
+            }),
         None => Ok(Some(resolved.selected_address())),
     }
 }
 
-fn resolve_interface<I: InterfaceProvider>(
+fn resolve_interface<I: net::interface::Provider>(
     selector: Option<String>,
     provider: &I,
-) -> Result<Option<InterfaceId>, CliError> {
+) -> Result<Option<net::interface::Id>, CliError> {
     let Some(selector) = selector else {
         return Ok(None);
     };
@@ -264,7 +306,7 @@ fn resolve_interface<I: InterfaceProvider>(
         })
         .map(|interface| Some(interface.id))
         .ok_or_else(|| {
-            CliError::classified(LiveIoError::Device {
+            CliError::classified(net::Error::Device {
                 interface: selector,
                 message: "no interface matches the requested name or index".to_owned(),
             })
@@ -274,7 +316,7 @@ fn resolve_interface<I: InterfaceProvider>(
 /// Validates an optional interface selector without consulting a platform
 /// provider. Decimal selectors are always indexes: zero and values outside
 /// the public `u32` index domain must not fall back to interface-name lookup.
-fn validate_interface_selector(
+pub(super) fn validate_interface_selector(
     command: &str,
     selector: Option<&str>,
 ) -> Result<Option<u32>, CliError> {

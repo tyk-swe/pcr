@@ -54,7 +54,9 @@ impl Classified for ScanError {
             | Self::InvalidDuration { .. } => Classification::new(
                 "cli.scan_limit",
                 Kind::Cli,
-                Some("use finite non-zero scan ports, attempts, timeouts, batches, rate, and evidence limits"),
+                Some(
+                    "use finite non-zero scan ports, attempts, timeouts, batches, rate, and evidence limits",
+                ),
             ),
             Self::Authorization(error) => error.classification(),
             Self::AddressFamily { .. } => Classification::new(
@@ -65,7 +67,9 @@ impl Classified for ScanError {
             Self::DurationLimit { .. } => Classification::new(
                 "policy.scan_duration_limit",
                 Kind::Policy,
-                Some("reduce ports, addresses, attempts, timeout, or rate delay, or deliberately raise the finite duration limit"),
+                Some(
+                    "reduce ports, addresses, attempts, timeout, or rate delay, or deliberately raise the finite duration limit",
+                ),
             ),
             Self::Execution { source, .. } => source.classification(),
             Self::Clock { .. } => Classification::new(
@@ -73,13 +77,11 @@ impl Classified for ScanError {
                 Kind::Io,
                 Some("inspect the scan timer and account for probes already transmitted"),
             ),
-            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
-                Classification::new(
-                    "internal.scan_evidence",
-                    Kind::Internal,
-                    Some("treat the scan as incomplete because executor evidence was inconsistent"),
-                )
-            }
+            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
+                "internal.scan_evidence",
+                Kind::Internal,
+                Some("treat the scan as incomplete because executor evidence was inconsistent"),
+            ),
         }
     }
 
@@ -91,3 +93,6 @@ impl Classified for ScanError {
         }
     }
 }
+use super::{
+    AuthorizationError, Classification, Classified, Duration, Error, Kind, ScanExecutionError,
+};

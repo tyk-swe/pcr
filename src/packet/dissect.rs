@@ -92,13 +92,13 @@ impl Dissector {
             return Err(DecodeError::LayerLimit { limit: 0 });
         }
         frame.validate()?;
-        if frame.bytes.len() > options.max_packet_size {
+        if frame.bytes().len() > options.max_packet_size {
             return Err(DecodeError::PacketSizeLimit {
-                actual: frame.bytes.len(),
+                actual: frame.bytes().len(),
                 limit: options.max_packet_size,
             });
         }
-        let original = frame.bytes.clone();
+        let original = frame.bytes().clone();
         let Some(root) = self.registry.root_for_link_type(frame.link_type.0).cloned() else {
             let link_type = frame.link_type.0;
             return Ok(raw_decoded_frame(
@@ -470,7 +470,7 @@ fn append_missing_required_layer(
 }
 
 fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
-    let original = frame.bytes.clone();
+    let original = frame.bytes().clone();
     let mut packet = Packet::new();
     packet.push(Raw::new(original.clone()));
     DecodedPacket {

@@ -12,9 +12,7 @@ pub enum ReplayError {
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("invalid replay timing: invalid replay {mode} value {value}")]
     InvalidTiming { mode: &'static str, value: f64 },
-    #[error(
-        "replay timing failed at source frame {sequence}: invalid replay {mode} value {value}"
-    )]
+    #[error("replay timing failed at source frame {sequence}: invalid replay {mode} value {value}")]
     Timing {
         sequence: u64,
         mode: &'static str,
@@ -26,13 +24,17 @@ pub enum ReplayError {
         #[source]
         source: CaptureError,
     },
-    #[error("replay frame count {actual} exceeds the configured limit of {limit} at source frame {sequence}")]
+    #[error(
+        "replay frame count {actual} exceeds the configured limit of {limit} at source frame {sequence}"
+    )]
     FrameLimit {
         sequence: u64,
         actual: u64,
         limit: u64,
     },
-    #[error("replay byte count {actual} exceeds the configured limit of {limit} at source frame {sequence}")]
+    #[error(
+        "replay byte count {actual} exceeds the configured limit of {limit} at source frame {sequence}"
+    )]
     ByteLimit {
         sequence: u64,
         actual: u64,
@@ -46,7 +48,9 @@ pub enum ReplayError {
         actual: usize,
         limit: usize,
     },
-    #[error("replay schedule {actual:?} exceeds the configured duration of {limit:?} at source frame {sequence}")]
+    #[error(
+        "replay schedule {actual:?} exceeds the configured duration of {limit:?} at source frame {sequence}"
+    )]
     DurationLimit {
         sequence: u64,
         actual: Duration,
@@ -56,7 +60,9 @@ pub enum ReplayError {
         "capture link type {link_type} is not supported for live replay at source frame {sequence}"
     )]
     UnsupportedLinkType { sequence: u64, link_type: u32 },
-    #[error("capture link type {link_type} is incompatible with requested {requested:?} replay at source frame {sequence}")]
+    #[error(
+        "capture link type {link_type} is incompatible with requested {requested:?} replay at source frame {sequence}"
+    )]
     LinkModeMismatch {
         sequence: u64,
         link_type: u32,
@@ -115,36 +121,42 @@ impl Classified for ReplayError {
         match self {
             Self::InvalidLimit { .. }
             | Self::InvalidDuration { .. }
-            | Self::InvalidTiming { .. } => {
-                Classification::new(
-                    "cli.replay_limit",
-                    Kind::Cli,
-                    Some("use finite non-zero replay limits and a valid positive timing value"),
-                )
-            }
+            | Self::InvalidTiming { .. } => Classification::new(
+                "cli.replay_limit",
+                Kind::Cli,
+                Some("use finite non-zero replay limits and a valid positive timing value"),
+            ),
             Self::Capture { source, .. } => source.classification(),
             Self::FrameLimit { .. } | Self::ByteLimit { .. } | Self::DurationLimit { .. } => {
                 Classification::new(
                     "policy.replay_limit",
                     Kind::Policy,
-                    Some("reduce the replay input or deliberately raise the finite operation budget"),
+                    Some(
+                        "reduce the replay input or deliberately raise the finite operation budget",
+                    ),
                 )
             }
             Self::FrameSizeLimit { .. } => Classification::new(
                 "packet.capture_size",
                 Kind::Packet,
-                Some("reduce the captured frame size or deliberately raise the bounded frame limit"),
+                Some(
+                    "reduce the captured frame size or deliberately raise the bounded frame limit",
+                ),
             ),
             Self::Timing { .. } => Classification::new(
                 "packet.replay_timing",
                 Kind::Packet,
-                Some("reduce the captured interval or select a bounded fixed/immediate replay timing"),
+                Some(
+                    "reduce the captured interval or select a bounded fixed/immediate replay timing",
+                ),
             ),
             Self::UnsupportedLinkType { .. } | Self::LinkModeMismatch { .. } => {
                 Classification::new(
                     "capability.replay_link_type",
                     Kind::Capability,
-                    Some("replay complete Ethernet frames through Layer 2 or raw IPv4/IPv6 datagrams through Layer 3"),
+                    Some(
+                        "replay complete Ethernet frames through Layer 2 or raw IPv4/IPv6 datagrams through Layer 3",
+                    ),
                 )
             }
             Self::Authorization { source, .. } => source.classification(),
@@ -152,12 +164,16 @@ impl Classified for ReplayError {
             Self::InvalidEvidence { .. } => Classification::new(
                 "internal.replay_evidence",
                 Kind::Internal,
-                Some("treat the operation as incomplete; the backend did not confirm the exact submitted bytes"),
+                Some(
+                    "treat the operation as incomplete; the backend did not confirm the exact submitted bytes",
+                ),
             ),
             Self::Clock { .. } | Self::Output { .. } => Classification::new(
                 "io.replay",
                 Kind::Io,
-                Some("inspect the replay timer or output sink and account for frames already transmitted"),
+                Some(
+                    "inspect the replay timer or output sink and account for frames already transmitted",
+                ),
             ),
         }
     }
@@ -174,3 +190,7 @@ impl Classified for ReplayError {
         }
     }
 }
+use super::{
+    CaptureError, Classification, Classified, Duration, Error, Kind, LinkMode, LiveIoError,
+    ReplayAuthorizationError,
+};

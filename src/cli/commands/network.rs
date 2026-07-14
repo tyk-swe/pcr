@@ -3,33 +3,51 @@
 
 // Route planning, route enumeration, and transmission commands.
 
-fn run_plan(arguments: RouteArgs, output: OutputFormat) -> Result<(), CliError> {
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use packetcraftr::net::{interface::Provider as _, route::Provider as _};
+use packetcraftr::{
+    capture::{Frame, LinkType},
+    client, net, output, packet,
+};
+
+use super::arguments::{RouteArgs, SendArgs};
+use super::capture::cli_build_mode;
+use super::errors::CliError;
+use super::rendering::{emit_json, write_capture_file, write_raw, write_stdout_line};
+use super::runtime::{default_registry_arc, prepare_route_request, system_client};
+
+pub(super) fn run_plan(
+    arguments: RouteArgs,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
     let registry = default_registry_arc()?;
     let request = prepare_route_request(arguments, &registry)?;
     let client = system_client(Arc::clone(&registry), request.policy);
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
-    let result = PlanCommandResult {
+    let result = output::network::plan::Result {
         route: route.into(),
     };
     match output {
-        OutputFormat::Text => render_planned_route(&result.route),
-        OutputFormat::Json => emit_json(&AggregateOutput::success(
-            CommandName::Plan,
+        output::contract::Format::Text => render_planned_route(&result.route),
+        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+            output::contract::Command::Plan,
             result,
             Vec::new(),
         )),
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Plan,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Plan,
                 format: output,
             },
         )),
     }
 }
 
-fn render_planned_route(route: &crate::output::network::plan::Plan) -> Result<(), CliError> {
+fn render_planned_route(route: &output::network::plan::Plan) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "interface={} index={} mode={:?} mtu={} link_type={}",
         route.route.interface.name,
@@ -57,11 +75,11 @@ fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String {
         .unwrap_or_else(|| "none".to_owned())
 }
 
-fn run_routes(output: OutputFormat) -> Result<(), CliError> {
-    let interfaces = SystemInterfaceProvider
+pub(super) fn run_routes(output: output::contract::Format) -> Result<(), CliError> {
+    let interfaces = net::interface::SystemProvider
         .interfaces()
         .map_err(CliError::classified)?;
-    let provider = SystemRouteProvider;
+    let provider = net::route::SystemProvider;
     let mut routes = Vec::new();
     for interface in interfaces
         .into_iter()
@@ -80,11 +98,11 @@ fn run_routes(output: OutputFormat) -> Result<(), CliError> {
     }
     routes.sort_by_key(|route| (route.interface.index, route.interface.name.clone()));
     routes.dedup_by(|left, right| left.interface == right.interface);
-    let result = RoutesCommandResult {
+    let result = output::network::routes::Result {
         routes: routes.into_iter().map(Into::into).collect(),
     };
     match output {
-        OutputFormat::Text => {
+        output::contract::Format::Text => {
             for route in result.routes {
                 write_stdout_line(format_args!(
                     "{} (index {}): source={} mtu={} capability={:?} link_type={}",
@@ -98,21 +116,24 @@ fn run_routes(output: OutputFormat) -> Result<(), CliError> {
             }
             Ok(())
         }
-        OutputFormat::Json => emit_json(&AggregateOutput::success(
-            CommandName::Routes,
+        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
+            output::contract::Command::Routes,
             result,
             Vec::new(),
         )),
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Routes,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Routes,
                 format: output,
             },
         )),
     }
 }
 
-fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
+pub(super) fn run_send(
+    arguments: SendArgs,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
     let SendArgs {
         route,
         mode,
@@ -124,25 +145,23 @@ fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
     let report = client
         .send(
             request.packet,
-            SendOptions {
+            client::send::Options {
                 destination: request.destination,
                 plan: request.options,
-                build: BuildOptions {
+                build: packet::build::Options {
                     mode: cli_build_mode(mode),
-                    ..BuildOptions::default()
+                    ..packet::build::Options::default()
                 },
                 allow_permissive_live,
             },
         )
         .map_err(CliError::classified)?;
-    let capture_link_type = send_capture_link_type(
-        report.route.plan.mode,
-        report.route.plan.route.link_type,
-    )?;
+    let capture_link_type =
+        send_capture_link_type(report.route.plan.mode, report.route.plan.route.link_type)?;
     let (result, diagnostics, stats) =
-        SendCommandResult::try_from_report(report).map_err(CliError::classified)?;
+        output::network::send::Result::try_from_report(report).map_err(CliError::classified)?;
     match output {
-        OutputFormat::Text => {
+        output::contract::Format::Text => {
             write_stdout_line(format_args!(
                 "sent {} bytes via {} (index {}, {:?})",
                 result.frame.length,
@@ -158,12 +177,19 @@ fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
             }
             Ok(())
         }
-        OutputFormat::Json => emit_json(
-            &AggregateOutput::success(CommandName::Send, result, diagnostics).with_stats(stats),
+        output::contract::Format::Json => emit_json(
+            &output::envelope::Aggregate::success(
+                output::contract::Command::Send,
+                result,
+                diagnostics,
+            )
+            .with_stats(stats),
         ),
-        OutputFormat::Hex => write_stdout_line(format_args!("{}", result.frame.bytes_hex)),
-        OutputFormat::Raw => write_raw(result.frame.bytes()),
-        OutputFormat::Pcap | OutputFormat::Pcapng => {
+        output::contract::Format::Hex => {
+            write_stdout_line(format_args!("{}", result.frame.bytes_hex))
+        }
+        output::contract::Format::Raw => write_raw(result.frame.bytes()),
+        output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let frame = Frame::new(
                 SystemTime::now(),
                 capture_link_type,
@@ -173,19 +199,22 @@ fn run_send(arguments: SendArgs, output: OutputFormat) -> Result<(), CliError> {
             write_capture_file(output, [frame])
         }
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Send,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Send,
                 format: output,
             },
         )),
     }
 }
 
-fn send_capture_link_type(mode: LinkMode, route_link_type: LinkType) -> Result<LinkType, CliError> {
+pub(super) fn send_capture_link_type(
+    mode: net::link::Mode,
+    route_link_type: LinkType,
+) -> Result<LinkType, CliError> {
     match mode {
-        LinkMode::Layer2 => Ok(route_link_type),
-        LinkMode::Layer3 => Ok(LinkType::RAW),
-        LinkMode::Auto => Err(CliError::new(
+        net::link::Mode::Layer2 => Ok(route_link_type),
+        net::link::Mode::Layer3 => Ok(LinkType::RAW),
+        net::link::Mode::Auto => Err(CliError::new(
             70,
             "send result retained an unresolved automatic link mode",
         )),

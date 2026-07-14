@@ -172,7 +172,7 @@ where
                 request.limits,
                 &mut result.diagnostics,
             )
-                .then(|| candidate.decoded.frame.clone());
+            .then(|| candidate.decoded.frame.clone());
             match candidate.classification {
                 DnsResponseClassification::Response(response) => {
                     let truncated = response.truncated;
@@ -364,8 +364,7 @@ fn consider_dns_candidate<'a>(
         context.sent,
         decoded,
         context.limits,
-    )
-    else {
+    ) else {
         return;
     };
     if best.as_ref().is_none_or(|current| {
@@ -373,8 +372,8 @@ fn consider_dns_candidate<'a>(
             || (classification.rank() == current.classification.rank()
                 && (decoded.frame.timestamp < current.decoded.frame.timestamp
                     || (decoded.frame.timestamp == current.decoded.frame.timestamp
-                        && (decoded.frame.bytes < current.decoded.frame.bytes
-                            || (decoded.frame.bytes == current.decoded.frame.bytes
+                        && (decoded.frame.bytes() < current.decoded.frame.bytes()
+                            || (decoded.frame.bytes() == current.decoded.frame.bytes()
                                 && preferred_latency(latency, current.latency))))))
     }) {
         *best = Some(DnsCandidate {
@@ -385,7 +384,7 @@ fn consider_dns_candidate<'a>(
     }
 }
 
-fn validate_dns_execution(
+pub(super) fn validate_dns_execution(
     probe: &DnsProbe,
     execution: &DnsExchangeExecution,
     limits: DnsLimits,
@@ -430,7 +429,7 @@ fn validate_dns_execution(
                 .to_owned(),
         });
     }
-    let sent_bytes = execution.sent_evidence.bytes.len() as u64;
+    let sent_bytes = execution.sent_evidence.bytes().len() as u64;
     if execution.stats.bytes != sent_bytes {
         return Err(DnsError::InvalidEvidence {
             attempt,
@@ -549,7 +548,7 @@ fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
     })
 }
 
-fn dns_source_port(base: u16, attempt: u32) -> u16 {
+pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
     let (range_start, width) = if base >= DNS_EPHEMERAL_SOURCE_PORT_BASE {
         (
             u32::from(DNS_EPHEMERAL_SOURCE_PORT_BASE),
@@ -563,7 +562,7 @@ fn dns_source_port(base: u16, attempt: u32) -> u16 {
 }
 
 fn dns_rate_delay(rate: Option<u32>) -> Result<Duration, DnsError> {
-    super::clock::rate_delay(1, rate).ok_or(DnsError::InvalidLimit {
+    crate::workflow::clock::rate_delay(1, rate).ok_or(DnsError::InvalidLimit {
         field: "queries_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),
@@ -589,11 +588,7 @@ fn retain_dns_evidence(
     limits: DnsLimits,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let error = match budget.retain(
-        frame,
-        limits.max_evidence_frames,
-        limits.max_evidence_bytes,
-    ) {
+    let error = match budget.retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes) {
         Ok(()) => return true,
         Err(error) => error,
     };
@@ -621,3 +616,15 @@ fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), D
         .checked_add(value)
         .ok_or(DnsError::StatisticsOverflow { attempt })
 }
+use super::Clock;
+use super::wire::raw_payload;
+use super::{
+    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DecodedPacket, Diagnostic, DnsAttemptEvidence,
+    DnsAttemptStatus, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
+    DnsOutcome, DnsProbe, DnsRequest, DnsResponseClassification, DnsResult, DnsTransport,
+    DnsUndecodedEvidence, Duration, EvidenceBudget, EvidenceBudgetError, FieldValue, Frame, IpAddr,
+    MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet, ProtocolRegistry, Stats, SystemTime,
+    checked_frame_bytes, checked_frame_count, classify_dns_response, encode_dns_query,
+    preferred_latency, push_diagnostic_once, response_within_deadline, validate_capture_statistics,
+    validate_decoded_frame, validate_frame,
+};

@@ -572,11 +572,11 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<DnsEdns, DnsWireErr
     let mut options = Vec::new();
     let mut cursor = 0usize;
     while cursor < rdata.len() {
-        let header = rdata
-            .get(cursor..cursor.saturating_add(4))
-            .ok_or_else(|| DnsWireError::InvalidEdns {
+        let header = rdata.get(cursor..cursor.saturating_add(4)).ok_or_else(|| {
+            DnsWireError::InvalidEdns {
                 message: format!("option header is truncated at RDATA byte {cursor}"),
-            })?;
+            }
+        })?;
         let code = u16::from_be_bytes([header[0], header[1]]);
         let length = usize::from(u16::from_be_bytes([header[2], header[3]]));
         cursor += 4;
@@ -630,10 +630,11 @@ fn filter_relevant_records(
             if type_code == DnsQueryType::Cname.code() {
                 accepted_answers[index] = true;
                 if let DnsRecordValue::Cname(target) = &record.value
-                    && !relevant_names.contains(target) {
-                        relevant_names.push(target.clone());
-                        changed = true;
-                    }
+                    && !relevant_names.contains(target)
+                {
+                    relevant_names.push(target.clone());
+                    changed = true;
+                }
             } else if query_type == DnsQueryType::Any || type_code == query_type.code() {
                 accepted_answers[index] = true;
             }
@@ -658,15 +659,17 @@ fn filter_relevant_records(
     }
     for (index, record) in answers.iter().enumerate() {
         if accepted_answers[index]
-            && let Some(name) = record.value.referenced_name() {
-                push_unique(&mut references, name);
-            }
+            && let Some(name) = record.value.referenced_name()
+        {
+            push_unique(&mut references, name);
+        }
     }
     for (index, record) in authorities.iter().enumerate() {
         if accepted_authorities[index]
-            && let Some(name) = record.value.referenced_name() {
-                push_unique(&mut references, name);
-            }
+            && let Some(name) = record.value.referenced_name()
+        {
+            push_unique(&mut references, name);
+        }
     }
     let accepted_additionals = additionals
         .iter()
@@ -776,10 +779,12 @@ fn is_same_or_ancestor(zone: &DnsName, name: &DnsName) -> bool {
                 .iter()
                 .rev()
                 .zip(name.labels.iter().rev())
-                .all(|(left, right)| DnsName {
-                    labels: vec![left.clone()],
-                } == DnsName {
-                    labels: vec![right.clone()],
+                .all(|(left, right)| {
+                    DnsName {
+                        labels: vec![left.clone()],
+                    } == DnsName {
+                        labels: vec![right.clone()],
+                    }
                 }))
 }
 
@@ -821,7 +826,7 @@ pub enum DnsResponseClassification {
 }
 
 impl DnsResponseClassification {
-    fn rank(&self) -> u8 {
+    pub(super) fn rank(&self) -> u8 {
         match self {
             Self::Response(_) => 4,
             Self::NetworkFailure { .. } => 3,
@@ -891,7 +896,7 @@ fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Pa
         .is_some_and(|matcher| matcher.matches(request, response).matched)
 }
 
-fn raw_payload(packet: &Packet) -> Option<Bytes> {
+pub(super) fn raw_payload(packet: &Packet) -> Option<Bytes> {
     match packet
         .iter()
         .find(|layer| layer.protocol_id().as_str() == "raw")?
@@ -901,3 +906,12 @@ fn raw_payload(packet: &Packet) -> Option<Bytes> {
         _ => None,
     }
 }
+use super::{
+    Bytes, DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE,
+    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
+    DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK,
+    DNS_RESERVED_MASK, DNS_TYPE_OPT, DecodedPacket, DiagnosticSeverity, DnsEdns, DnsEdnsOption,
+    DnsLimits, DnsName, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord,
+    DnsSection, DnsWireError, FieldValue, Ipv4Addr, Ipv6Addr, Packet, ProbeTransport,
+    ProtocolRegistry, ValidatedDnsResponse, probe,
+};

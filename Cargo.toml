@@ -29,13 +29,13 @@ native-route = [
     "dep:tokio",
     "dep:windows",
 ]
-native-layer2 = ["live", "dep:libloading", "dep:pcap", "dep:windows"]
-native-layer3 = ["live", "dep:socket2", "dep:windows"]
+native-layer2 = ["live", "dep:libloading", "dep:pcap"]
+native-layer3 = ["live", "dep:socket2"]
 
 [dependencies]
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
-noyalib = { version = "0.0.15", features = ["compat-serde-yaml"] }
+noyalib = { version = "0.0.15", default-features = false, features = ["std", "fast-int", "fast-float"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 thiserror = "2"
@@ -44,7 +44,7 @@ thiserror = "2"
 pnet_datalink = { version = "0.35", default-features = false, features = ["std"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-futures-util = { version = "0.3", default-features = false, features = ["async-await", "std"], optional = true }
+futures-util = { version = "0.3", default-features = false, optional = true }
 pcap = { version = "2.4", default-features = false, optional = true }
 rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"], optional = true }
 socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }

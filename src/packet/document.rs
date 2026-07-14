@@ -272,7 +272,7 @@ impl PacketDocument {
     }
 
     pub fn to_yaml(&self) -> Result<String, DocumentError> {
-        noyalib::compat::serde_yaml::to_string(self).map_err(|source| DocumentError::Serialize {
+        noyalib::to_string(self).map_err(|source| DocumentError::Serialize {
             format: "YAML",
             message: source.to_string(),
         })

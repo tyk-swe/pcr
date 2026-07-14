@@ -367,7 +367,10 @@ impl RoutePlanner {
     }
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(super) fn classify_destination(address: IpAddr) -> DestinationScope {
     if address.is_unspecified() {
         return DestinationScope::Unspecified;

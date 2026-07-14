@@ -63,13 +63,38 @@ impl<W: Write> Writer<W> {
                 Self::pcap_with_options(inner, link_type, Endianness::Little, max_size, max_size)
             }
             Format::PcapNg => {
+                // Validate the mandatory default interface before the section
+                // header is committed to the caller's output.
+                if max_size < 28 {
+                    return Err(Error::SizeLimitExceeded {
+                        kind: "pcapng section header",
+                        declared: 28,
+                        limit: max_size,
+                    });
+                }
+                let snap_len = usize_to_u32_limit(max_size)?;
+                if max_size < 32 {
+                    return Err(Error::SizeLimitExceeded {
+                        kind: "pcapng interface description",
+                        declared: 32,
+                        limit: max_size,
+                    });
+                }
+                if max_interfaces == 0 {
+                    return Err(Error::InterfaceLimit { limit: 0 });
+                }
+                if link_type.0 > u16::MAX as u32 {
+                    return Err(Error::LinkTypeOutOfRange {
+                        link_type: link_type.0,
+                    });
+                }
                 let mut writer = Self::pcapng_with_resource_limits(
                     inner,
                     Endianness::Little,
                     max_size,
                     max_interfaces,
                 )?;
-                writer.add_interface_with_snaplen(link_type, usize_to_u32_limit(max_size)?)?;
+                writer.add_interface_with_snaplen(link_type, snap_len)?;
                 Ok(writer)
             }
         }

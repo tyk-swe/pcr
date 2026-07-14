@@ -1,4 +1,9 @@
-fn map_replay_route_error(source: crate::net::NativeRouteError) -> LiveIoError {
+use super::{
+    Frame, IoSendReport, IpAddr, Ipv4Addr, Ipv6Addr, Kind, LinkMode, LinkType, LiveIoError,
+    NetworkEnvelope, ReplayError, RouteProvider, SystemRouteProvider,
+};
+
+pub(super) fn map_replay_route_error(source: crate::net::NativeRouteError) -> LiveIoError {
     let classification = SystemRouteProvider.classify_error(&source);
     match classification.kind {
         Kind::Capability => LiveIoError::Unsupported {
@@ -10,7 +15,7 @@ fn map_replay_route_error(source: crate::net::NativeRouteError) -> LiveIoError {
     }
 }
 
-fn replay_network_envelope(bytes: &[u8]) -> Result<NetworkEnvelope, LiveIoError> {
+pub(super) fn replay_network_envelope(bytes: &[u8]) -> Result<NetworkEnvelope, LiveIoError> {
     let invalid = |message: String| LiveIoError::InvalidTransmissionFrame { message };
     let Some(version) = bytes.first().map(|byte| byte >> 4) else {
         return Err(invalid("replay frame is empty".to_owned()));
@@ -46,15 +51,15 @@ fn replay_network_envelope(bytes: &[u8]) -> Result<NetworkEnvelope, LiveIoError>
     }
 }
 
-struct ReplayWireDestinations {
-    addresses: Vec<IpAddr>,
-    has_unsupported_routing_header: bool,
+pub(super) struct ReplayWireDestinations {
+    pub(super) addresses: Vec<IpAddr>,
+    pub(super) has_unsupported_routing_header: bool,
 }
 
-fn replay_wire_destinations(
+pub(super) fn replay_wire_destinations(
     frame: &Frame,
 ) -> Result<ReplayWireDestinations, crate::protocol::internal::Ipv4OptionsError> {
-    let bytes = frame.bytes.as_ref();
+    let bytes = frame.bytes().as_ref();
     let (network_offset, protocol) = match frame.link_type.0 {
         12 | 101 => (0, bytes.first().map(|byte| byte >> 4).unwrap_or(0)),
         228 => (0, 4),
@@ -180,7 +185,7 @@ fn collect_ipv6_wire_destinations(bytes: &[u8], offset: usize, output: &mut Vec<
     has_unsupported_routing_header
 }
 
-fn replay_link_mode(
+pub(super) fn replay_link_mode(
     sequence: u64,
     link_type: LinkType,
     requested: LinkMode,
@@ -192,7 +197,7 @@ fn replay_link_mode(
             return Err(ReplayError::UnsupportedLinkType {
                 sequence,
                 link_type: link_type.0,
-            })
+            });
         }
     };
     match requested {
@@ -206,16 +211,16 @@ fn replay_link_mode(
     }
 }
 
-fn validate_transmission_evidence(
+pub(super) fn validate_transmission_evidence(
     sequence: u64,
     frame: &Frame,
     report: &IoSendReport,
 ) -> Result<(), ReplayError> {
-    if report.bytes_sent != frame.bytes.len() {
+    if report.bytes_sent != frame.bytes().len() {
         return Err(ReplayError::Transmission {
             sequence,
             source: LiveIoError::PartialSend {
-                expected: frame.bytes.len(),
+                expected: frame.bytes().len(),
                 actual: report.bytes_sent,
             },
         });
@@ -227,13 +232,13 @@ fn validate_transmission_evidence(
             sequence,
             message: "backend omitted exact wire bytes".to_owned(),
         })?;
-    if wire_bytes != &frame.bytes {
+    if wire_bytes != frame.bytes() {
         return Err(ReplayError::InvalidEvidence {
             sequence,
             message: format!(
                 "backend returned {} wire bytes that differ from the {} submitted bytes",
                 wire_bytes.len(),
-                frame.bytes.len()
+                frame.bytes().len()
             ),
         });
     }

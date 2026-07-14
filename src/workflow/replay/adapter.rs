@@ -27,11 +27,12 @@ impl ReplayAuthorizer for SystemAuthorizer {
         frame: &Frame,
         _mode: LinkMode,
     ) -> Result<(), ReplayAuthorizationError> {
-        if frame.captured_length != frame.original_length {
+        if frame.captured_length() != frame.original_length() {
             return Err(ReplayAuthorizationError::new(
                 format!(
                     "captured frame contains {} of {} original wire bytes",
-                    frame.captured_length, frame.original_length
+                    frame.captured_length(),
+                    frame.original_length()
                 ),
                 Classification::new(
                     "packet.replay_truncated",
@@ -116,7 +117,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                     Vec::new(),
                 )
             })?;
-        if rebuilt.bytes != frame.bytes {
+        if rebuilt.bytes != frame.bytes() {
             return Err(ReplayAuthorizationError::new(
                 "captured frame did not reproduce the exact source bytes",
                 Classification::new(
@@ -271,7 +272,7 @@ impl SystemTransmitter {
                 synthesized_ethernet: false,
             },
             LinkMode::Layer3 => {
-                let network = replay_network_envelope(&frame.bytes)?;
+                let network = replay_network_envelope(frame.bytes())?;
                 let route = SystemRouteProvider
                     .lookup_with_preferences(network.destination, Some(&interface.id), None)
                     .map_err(map_replay_route_error)?;
@@ -354,10 +355,22 @@ impl ReplayTransmitter for SystemTransmitter {
         let route = self.materialized_route(&selected, mode, frame)?;
         let report = self
             .packet_io
-            .send(TransmissionFrame::try_new(&frame.bytes, &route)?)?;
+            .send(TransmissionFrame::try_new(frame.bytes(), &route)?)?;
         Ok(ReplayTransmission {
             interface: selected.id,
             report,
         })
     }
 }
+use super::wire::{
+    ReplayWireDestinations, map_replay_route_error, replay_network_envelope,
+    replay_wire_destinations,
+};
+use super::{
+    Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, Classified, DecodeOptions,
+    Decoder, DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo,
+    InterfaceProvider, Kind, LinkCapability, LinkMode, LiveIoError, MaterializedRoute, PacketIo,
+    PlannedRoute, ProtocolRegistry, ReplayAuthorizationError, ReplayAuthorizer, ReplayTransmission,
+    ReplayTransmitter, RouteDecision, RouteProvider, RouteSelectionReason, SystemInterfaceProvider,
+    SystemLayer2Io, SystemLayer3Io, SystemRouteProvider, TransmissionFrame,
+};

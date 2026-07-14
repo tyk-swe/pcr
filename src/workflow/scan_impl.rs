@@ -4,20 +4,19 @@
 //! Bounded structured scanning over the shared resolver, policy, template,
 //! exchange, matcher, and capture-evidence APIs.
 
-use std::error::Error;
 use std::fmt;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::capture::Frame;
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo, MAX_CAPTURE_TIMEOUT,
-    NeighborResolver, RouteProvider,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo, NeighborResolver,
+    RouteProvider,
 };
 use crate::packet::internal::{
     DEFAULT_MAX_TEMPLATE_PACKETS, DecodedPacket, Diagnostic, FieldValue, Packet, PacketTemplate,
@@ -27,9 +26,9 @@ use crate::protocol::internal::{Icmpv4, Icmpv6, Ipv4, Ipv6, Tcp, Udp};
 
 use super::clock::Clock;
 use super::evidence::{
-    EvidenceBudget, EvidenceBudgetError, checked_frame_bytes, checked_frame_count,
-    checked_sent_frame_bytes, preferred_latency, response_within_deadline,
-    validate_capture_statistics, validate_decoded_frame, validate_frame,
+    EvidenceBudget, EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError,
+    MatchedResponseEvidence, preferred_latency, response_within_deadline,
+    validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 use super::nonzero_ipv4_identification;
 use super::probe::Correlation;
@@ -42,7 +41,7 @@ pub const DEFAULT_MAX_UNDECODED_SCAN_FRAMES: usize = 64;
 pub const MAX_SCAN_ATTEMPTS: u32 = 32;
 pub const MAX_SCAN_PROBES: usize = 100_000;
 pub const MAX_SCAN_RATE: u32 = 1_000_000;
-pub const MAX_SCAN_DURATION: Duration = MAX_CAPTURE_TIMEOUT;
+pub const MAX_SCAN_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
 
 // Every generated scan probe is at most an Ethernet header plus IPv6 and TCP
 // without options. Keeping this bound explicit lets the workflow authorize
@@ -51,9 +50,26 @@ pub const MAX_SCAN_DURATION: Duration = MAX_CAPTURE_TIMEOUT;
 const IPV4_PROBE_BYTES: u64 = 14 + 20 + 20;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 
-include!("scan/model.rs");
-include!("scan/error.rs");
-include!("scan/engine.rs");
-include!("scan/classification.rs");
-include!("scan/adapter.rs");
-include!("scan/tests.rs");
+#[path = "scan/adapter.rs"]
+mod adapter;
+#[path = "scan/classification.rs"]
+mod classification;
+#[path = "scan/engine.rs"]
+mod engine;
+#[path = "scan/error.rs"]
+mod error;
+#[path = "scan/model.rs"]
+mod model;
+#[cfg(test)]
+#[path = "scan/tests.rs"]
+mod tests;
+
+pub use adapter::ClientExecutor;
+pub use classification::{ScanResponseClassification, classify_scan_response};
+pub use engine::scan;
+pub use error::ScanError;
+pub use model::{
+    ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanExecutionError,
+    ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus,
+    ScanRequest, ScanResult, ScanTransport,
+};

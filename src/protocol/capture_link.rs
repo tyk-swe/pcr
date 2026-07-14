@@ -232,7 +232,7 @@ impl LayerCodec for BsdNullCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["null"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -280,7 +280,7 @@ impl LayerCodec for BsdLoopCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["loop"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -644,7 +644,7 @@ impl LayerCodec for LinuxSllCodec {
         protocol("linux_sll")
     }
     fn aliases(&self) -> &'static [&'static str] {
-        &["sll"]
+        super::support::aliases(self.protocol_id().as_str())
     }
     fn encode(
         &self,
@@ -744,7 +744,7 @@ impl LayerCodec for LinuxSll2Codec {
         protocol("linux_sll2")
     }
     fn aliases(&self) -> &'static [&'static str] {
-        &["sll2"]
+        super::support::aliases(self.protocol_id().as_str())
     }
     fn encode(
         &self,

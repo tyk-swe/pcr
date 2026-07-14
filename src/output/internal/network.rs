@@ -1,3 +1,21 @@
+use std::fmt;
+use std::net::IpAddr;
+use std::time::Duration;
+
+use serde::Serialize;
+
+use crate::client::{exchange::Result as ExchangeResult, send::Report as SendReport};
+use crate::net::{
+    interface::{Flags as InterfaceFlags, Id as InterfaceId, Info as InterfaceInfo},
+    link::{Capability as LinkCapability, Mode as LinkMode},
+    route::{Decision as RouteDecision, Materialized as MaterializedRoute, Plan as PlannedRoute},
+};
+use crate::packet::internal::{DecodedPacket, Diagnostic, PacketDocument, PacketLayout};
+
+use super::contract::OutputContractError;
+use super::envelope::{CaptureStats, DiagnosticOutput, OperationStats};
+use super::frame::{FrameOutput, WireFrameOutput};
+
 /// Stable interface shape used by both the text and JSON renderers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
 pub struct InterfaceFlagsOutput {

@@ -3,7 +3,25 @@
 
 // Scan command execution and presentation.
 
-fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
+use std::sync::Arc;
+use std::time::Duration;
+
+use packetcraftr::{client, net, output, packet, workflow};
+
+use super::arguments::ScanArgs;
+use super::capture::render_diagnostics_text;
+use super::errors::CliError;
+use super::rendering::{
+    emit_json, emit_json_compact, output_timestamp_text, spaced_hex, write_stdout_line,
+};
+use super::runtime::{
+    DeferredInterface, default_registry_arc, system_client, validate_interface_selector,
+};
+
+pub(super) fn run_scan(
+    arguments: ScanArgs,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
     let ScanArgs {
         target,
         transport,
@@ -23,12 +41,17 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         limits,
         policy,
     } = arguments;
-    let target = match target.parse::<LiveTarget>().map_err(CliError::classified)? {
-        LiveTarget::Address(address) => ScanTarget::Address(address),
-        LiveTarget::Hostname(hostname) => ScanTarget::Hostname(hostname.to_string()),
+    let target = match target
+        .parse::<client::target::Target>()
+        .map_err(CliError::classified)?
+    {
+        client::target::Target::Address(address) => workflow::target::Target::Address(address),
+        client::target::Target::Hostname(hostname) => {
+            workflow::target::Target::Hostname(hostname.to_string())
+        }
     };
     let queue_limits = limits.into_limits();
-    let scan_limits = ScanLimits {
+    let scan_limits = workflow::scan::Limits {
         max_ports,
         max_probes,
         batch_size,
@@ -41,7 +64,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     validate_live_interface_selector("scan", interface.as_deref())?;
-    let request = ScanRequest {
+    let request = workflow::scan::Request {
         target,
         transport: transport.into(),
         address_family: family.into(),
@@ -52,15 +75,15 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         limits: scan_limits,
     };
     let registry = default_registry_arc()?;
-    let mut exchange = ExchangeOptions {
-        send: SendOptions {
+    let mut exchange = client::exchange::Options {
+        send: client::send::Options {
             destination: None,
-            plan: crate::net::PlanOptions {
+            plan: net::route::Options {
                 link_mode: link_mode.into(),
                 interface: None,
                 preferred_source: source,
             },
-            build: BuildOptions::default(),
+            build: packet::build::Options::default(),
             allow_permissive_live: false,
         },
         timeout: request.timeout,
@@ -70,7 +93,7 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         max_capture_queue_frames: queue_limits.max_frames,
         max_captured_bytes: queue_limits.max_bytes,
         capture_overflow_policy: queue_limits.overflow_policy,
-        decode: DecodeOptions::default(),
+        decode: packet::decode::Options::default(),
     };
     exchange.decode.max_packet_size = queue_limits.snap_length;
     exchange.validate().map_err(CliError::classified)?;
@@ -81,10 +104,10 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
         exchange,
         interface: DeferredInterface::new(interface),
     };
-    let resolver = SystemHostnameResolver;
-    let mut authorizer = TrafficPolicyScanAuthorizer::new(&policy, &resolver);
-    let mut clock = SystemClock;
-    let result = scan(
+    let resolver = client::target::SystemResolver;
+    let mut authorizer = workflow::scan::PolicyAuthorizer::new(&policy, &resolver);
+    let mut clock = workflow::clock::System;
+    let result = workflow::scan::run(
         &request,
         &mut authorizer,
         &registry,
@@ -93,47 +116,62 @@ fn run_scan(arguments: ScanArgs, output: OutputFormat) -> Result<(), CliError> {
     )
     .map_err(scan_cli_error)?;
     let (result, diagnostics, stats) =
-        ScanCommandResult::try_from_scan(result).map_err(CliError::classified)?;
+        output::scan::Result::try_from_scan(result).map_err(CliError::classified)?;
 
     match output {
-        OutputFormat::Text => render_scan_text(result, diagnostics, stats),
-        OutputFormat::Json => emit_json(
-            &AggregateOutput::success(CommandName::Scan, result, diagnostics).with_stats(stats),
+        output::contract::Format::Text => render_scan_text(result, diagnostics, stats),
+        output::contract::Format::Json => emit_json(
+            &output::envelope::Aggregate::success(
+                output::contract::Command::Scan,
+                result,
+                diagnostics,
+            )
+            .with_stats(stats),
         ),
-        OutputFormat::Ndjson => render_scan_stream(result, diagnostics, stats),
+        output::contract::Format::Ndjson => render_scan_stream(result, diagnostics, stats),
         _ => Err(CliError::classified(
-            OutputContractError::UnsupportedFormat {
-                command: CommandName::Scan,
+            output::contract::Error::UnsupportedFormat {
+                command: output::contract::Command::Scan,
                 format: output,
             },
         )),
     }
 }
 
-fn validate_live_interface_selector(command: &str, selector: Option<&str>) -> Result<(), CliError> {
+pub(super) fn validate_live_interface_selector(
+    command: &str,
+    selector: Option<&str>,
+) -> Result<(), CliError> {
     validate_interface_selector(command, selector).map(|_| ())
 }
 
 struct CliScanExecutor {
-    registry: Arc<crate::packet::internal::ProtocolRegistry>,
-    policy: TrafficPolicy,
-    exchange: ExchangeOptions,
+    registry: Arc<packet::registry::Registry>,
+    policy: client::policy::Policy,
+    exchange: client::exchange::Options,
     interface: DeferredInterface,
 }
 
-impl ScanExecutor for CliScanExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+impl workflow::scan::Executor for CliScanExecutor {
+    fn execute(
+        &mut self,
+        batch: &workflow::scan::Batch,
+    ) -> Result<workflow::scan::Execution, workflow::scan::ExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(|error| {
-                ScanExecutionError::new(error.message, error.classification, error.causes)
+                workflow::scan::ExecutionError::new(
+                    error.message,
+                    error.classification,
+                    error.causes,
+                )
             })?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        ClientScanExecutor::new(&client, self.exchange.clone()).execute(batch)
+        workflow::scan::ClientExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
 }
 
-fn scan_cli_error(error: ScanError) -> CliError {
+pub(super) fn scan_cli_error(error: workflow::scan::Error) -> CliError {
     let sequence = error.sequence();
     let mut error = CliError::classified(error);
     if let Some(sequence) = sequence {
@@ -143,9 +181,9 @@ fn scan_cli_error(error: ScanError) -> CliError {
 }
 
 fn render_scan_text(
-    result: ScanCommandResult,
-    diagnostics: Vec<crate::packet::internal::Diagnostic>,
-    stats: crate::output::envelope::Stats,
+    result: output::scan::Result,
+    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
     write_stdout_line(format_args!(
         "target={} resolved={}",
@@ -224,30 +262,30 @@ fn render_scan_text(
     render_diagnostics_text(&diagnostics)
 }
 
-fn scan_classification_name(value: crate::output::scan::Classification) -> &'static str {
+fn scan_classification_name(value: output::scan::Classification) -> &'static str {
     match value {
-        crate::output::scan::Classification::Open => "open",
-        crate::output::scan::Classification::Closed => "closed",
-        crate::output::scan::Classification::Filtered => "filtered",
-        crate::output::scan::Classification::Unreachable => "unreachable",
-        crate::output::scan::Classification::Unknown => "unknown",
-        crate::output::scan::Classification::Timeout => "timeout",
+        output::scan::Classification::Open => "open",
+        output::scan::Classification::Closed => "closed",
+        output::scan::Classification::Filtered => "filtered",
+        output::scan::Classification::Unreachable => "unreachable",
+        output::scan::Classification::Unknown => "unknown",
+        output::scan::Classification::Timeout => "timeout",
     }
 }
 
-fn scan_probe_status_name(value: crate::output::scan::ProbeStatus) -> &'static str {
+fn scan_probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
     match value {
-        crate::output::scan::ProbeStatus::Response => "response",
-        crate::output::scan::ProbeStatus::Timeout => "timeout",
+        output::scan::ProbeStatus::Response => "response",
+        output::scan::ProbeStatus::Timeout => "timeout",
     }
 }
 
 fn render_scan_stream(
-    result: ScanCommandResult,
-    diagnostics: Vec<crate::packet::internal::Diagnostic>,
-    stats: crate::output::envelope::Stats,
+    result: output::scan::Result,
+    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
-    let ScanCommandResult {
+    let output::scan::Result {
         target,
         resolved_addresses,
         ports,
@@ -264,7 +302,7 @@ fn render_scan_stream(
             })?;
         emit_scan_record(
             &mut sequence,
-            ScanStreamCommandResult::Port {
+            output::scan::Event::Port {
                 target: target.clone(),
                 resolved_address,
                 port,
@@ -272,13 +310,13 @@ fn render_scan_stream(
         )?;
     }
     for frame in undecoded {
-        emit_scan_record(&mut sequence, ScanStreamCommandResult::Undecoded { frame })?;
+        emit_scan_record(&mut sequence, output::scan::Event::Undecoded { frame })?;
     }
     emit_json_compact(
-        &StreamRecord::success(
-            CommandName::Scan,
+        &output::envelope::Stream::success(
+            output::contract::Command::Scan,
             sequence,
-            ScanStreamCommandResult::Complete {
+            output::scan::Event::Complete {
                 target,
                 resolved_addresses,
             },
@@ -289,16 +327,16 @@ fn render_scan_stream(
     .map_err(|error| error.at_sequence(sequence))
 }
 
-fn emit_scan_record(sequence: &mut u64, result: ScanStreamCommandResult) -> Result<(), CliError> {
-    emit_json_compact(&StreamRecord::success(
-        CommandName::Scan,
+fn emit_scan_record(sequence: &mut u64, result: output::scan::Event) -> Result<(), CliError> {
+    emit_json_compact(&output::envelope::Stream::success(
+        output::contract::Command::Scan,
         *sequence,
         result,
         Vec::new(),
     ))
     .map_err(|error| error.at_sequence(*sequence))?;
     *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(OutputContractError::SequenceOverflow).at_sequence(*sequence)
+        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
     })?;
     Ok(())
 }

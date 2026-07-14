@@ -1,3 +1,13 @@
+use std::net::{IpAddr, ToSocketAddrs};
+use std::str::FromStr;
+
+use serde::Serialize;
+use thiserror::Error;
+
+use crate::error::{Classification, Classified, Kind};
+
+use super::policy::TrafficPolicyError;
+
 /// Validated, canonical ASCII DNS hostname used by live target resolution.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
@@ -104,8 +114,8 @@ impl IpVersion {
 /// authorization token.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ResolvedTarget {
-    declared: LiveTarget,
-    addresses: Vec<IpAddr>,
+    pub(super) declared: LiveTarget,
+    pub(super) addresses: Vec<IpAddr>,
 }
 
 impl ResolvedTarget {
@@ -160,22 +170,24 @@ pub enum TargetResolutionError {
 impl Classified for TargetResolutionError {
     fn classification(&self) -> Classification {
         match self {
-            Self::InvalidHostname { .. } | Self::InvalidAddressLimit { .. } => {
-                Classification::new(
-                    "cli.live_target",
-                    Kind::Cli,
-                    Some("use a valid IP address or bounded ASCII DNS hostname"),
-                )
-            }
+            Self::InvalidHostname { .. } | Self::InvalidAddressLimit { .. } => Classification::new(
+                "cli.live_target",
+                Kind::Cli,
+                Some("use a valid IP address or bounded ASCII DNS hostname"),
+            ),
             Self::Resolver { .. } | Self::NoAddresses { .. } => Classification::new(
                 "io.hostname_resolution",
                 Kind::Io,
-                Some("inspect resolver configuration and retry; no route lookup or transmission was attempted"),
+                Some(
+                    "inspect resolver configuration and retry; no route lookup or transmission was attempted",
+                ),
             ),
             Self::AddressLimit { .. } => Classification::new(
                 "io.hostname_address_limit",
                 Kind::Io,
-                Some("reduce the resolver result set or deliberately raise the bounded address limit"),
+                Some(
+                    "reduce the resolver result set or deliberately raise the bounded address limit",
+                ),
             ),
             Self::AddressFamilyUnavailable { .. } => Classification::new(
                 "packet.target_address_family",

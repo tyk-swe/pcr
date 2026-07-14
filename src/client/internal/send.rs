@@ -1,3 +1,16 @@
+use std::net::IpAddr;
+
+use bytes::Bytes;
+use thiserror::Error;
+
+use crate::error::{Category, Classification, Classified, Kind};
+use crate::net::{LiveIoError, MaterializedRoute, NeighborError, PlanError, PlanOptions};
+use crate::packet::internal::{BuildError, BuildOptions, BuiltPacket};
+
+use super::policy::TrafficPolicyError;
+use super::stats::OperationStats;
+use super::target::TargetResolutionError;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SendOptions {
     pub destination: Option<IpAddr>,
@@ -49,7 +62,9 @@ pub enum ClientError {
         field: &'static str,
         message: String,
     },
-    #[error("network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform")]
+    #[error(
+        "network packet length {actual} exceeds route MTU {mtu}; apply an explicit fragmentation transform"
+    )]
     PacketExceedsMtu { actual: usize, mtu: u32 },
     #[error("invalid exchange option {field}: {message}")]
     InvalidExchangeOption {
@@ -67,7 +82,9 @@ impl Classified for ClientError {
             Self::Build(_) => Classification::new(
                 "packet.build",
                 Kind::Packet,
-                Some("correct the packet fields or select permissive mode with the required live opt-ins"),
+                Some(
+                    "correct the packet fields or select permissive mode with the required live opt-ins",
+                ),
             ),
             Self::Decode(_) => Classification::new(
                 "packet.decode",
@@ -78,12 +95,14 @@ impl Classified for ClientError {
             Self::PermissiveLiveOptInRequired => Classification::new(
                 "policy.permissive_live_opt_in",
                 Kind::Policy,
-                Some("set the explicit per-operation malformed-live opt-in in addition to policy approval"),
+                Some(
+                    "set the explicit per-operation malformed-live opt-in in addition to policy approval",
+                ),
             ),
             Self::Io(error) => error.classification(),
-            Self::OperationAndCaptureShutdown { operation, .. } => operation
-                .classification()
-                .with_category(Category::Cleanup),
+            Self::OperationAndCaptureShutdown { operation, .. } => {
+                operation.classification().with_category(Category::Cleanup)
+            }
             Self::HeterogeneousExchangeRoute => Classification::new(
                 "cli.heterogeneous_exchange_route",
                 Kind::Cli,
@@ -97,7 +116,9 @@ impl Classified for ClientError {
             Self::PacketMaterialization { .. } => Classification::new(
                 "packet.materialization",
                 Kind::Packet,
-                Some("correct the route-dependent packet fields; post-build shape changes are rejected"),
+                Some(
+                    "correct the route-dependent packet fields; post-build shape changes are rejected",
+                ),
             ),
             Self::PacketExceedsMtu { .. } => Classification::new(
                 "packet.mtu",
@@ -107,7 +128,9 @@ impl Classified for ClientError {
             Self::InvalidExchangeOption { .. } => Classification::new(
                 "cli.exchange_limit",
                 Kind::Cli,
-                Some("use finite exchange timeout and retention limits no larger than the aggregate capture ceiling"),
+                Some(
+                    "use finite exchange timeout and retention limits no larger than the aggregate capture ceiling",
+                ),
             ),
         }
     }

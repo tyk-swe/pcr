@@ -234,7 +234,7 @@ impl LayerCodec for HopByHopCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["hop", "hopopts", "hbh"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -281,7 +281,7 @@ impl LayerCodec for DestinationOptionsCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["destopts", "destination_options"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -439,7 +439,7 @@ impl LayerCodec for Ipv6FragmentCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["fragment6", "frag6"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -731,7 +731,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["srh", "segment_routing"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

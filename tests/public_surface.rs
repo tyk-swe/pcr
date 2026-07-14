@@ -89,7 +89,7 @@ fn canonical_runtime_domain_namespaces_are_downstream_usable() {
 
     let frame =
         capture::Frame::new(UNIX_EPOCH, capture::LinkType::ETHERNET, vec![0xde, 0xad]).unwrap();
-    assert_eq!(frame.bytes.as_ref(), &[0xde, 0xad]);
+    assert_eq!(frame.bytes().as_ref(), &[0xde, 0xad]);
     assert_ne!(capture::LinkType::BSD_RAW, capture::LinkType::RAW);
 
     let interface = net::interface::Id {

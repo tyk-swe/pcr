@@ -1,4 +1,18 @@
-fn read_pcap_header<R: Read>(
+use std::io::Read;
+use std::time::{Duration, UNIX_EPOCH};
+
+use bytes::Bytes;
+
+use crate::capture::{Frame, LinkType};
+
+use super::models::{Endianness, Error, Format, TimestampPrecision};
+use super::reader::ReaderState;
+use super::wire::{
+    PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_counted,
+    read_exact_or_eof, validate_declared_lengths,
+};
+
+pub(super) fn read_pcap_header<R: Read>(
     reader: &mut R,
     endianness: Endianness,
     precision: TimestampPrecision,
@@ -34,7 +48,7 @@ fn read_pcap_header<R: Read>(
     })
 }
 
-fn read_next_pcap_frame<R: Read>(
+pub(super) fn read_next_pcap_frame<R: Read>(
     reader: &mut R,
     endianness: Endianness,
     precision: TimestampPrecision,
@@ -81,13 +95,11 @@ fn read_next_pcap_frame<R: Read>(
             format: Format::Pcap,
         })?;
 
-    Ok(Some(Frame {
+    Ok(Some(Frame::try_with_lengths(
         timestamp,
+        link_type,
         captured_length,
         original_length,
-        link_type,
-        interface: None,
-        direction: None,
-        bytes: Bytes::from(bytes),
-    }))
+        Bytes::from(bytes),
+    )?))
 }

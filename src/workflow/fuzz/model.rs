@@ -213,8 +213,8 @@ impl FuzzRequest {
                 reason: format!("at most {MAX_FUZZ_STRATEGIES} strategies may be selected"),
             });
         }
-        let final_case_offset = u64::try_from(self.cases - 1)
-            .map_err(|_| FuzzError::CaseIndexOverflow)?;
+        let final_case_offset =
+            u64::try_from(self.cases - 1).map_err(|_| FuzzError::CaseIndexOverflow)?;
         self.first_case
             .checked_add(final_case_offset)
             .ok_or(FuzzError::CaseIndexOverflow)?;
@@ -253,20 +253,21 @@ impl Default for FuzzLiveOptions {
 
 impl FuzzLiveOptions {
     pub fn validate(self) -> Result<Self, FuzzError> {
-        if self.timeout.is_zero() || self.timeout > MAX_CAPTURE_TIMEOUT {
+        if self.timeout.is_zero() || self.timeout > crate::net::capture::MAX_TIMEOUT {
             return Err(FuzzError::InvalidTimeout {
                 value: self.timeout,
-                maximum: MAX_CAPTURE_TIMEOUT,
+                maximum: crate::net::capture::MAX_TIMEOUT,
             });
         }
         if let Some(rate) = self.cases_per_second
-            && (rate == 0 || rate > MAX_FUZZ_RATE) {
-                return Err(FuzzError::InvalidLimit {
-                    field: "cases_per_second",
-                    value: u64::from(rate),
-                    reason: format!("must be within 1..={MAX_FUZZ_RATE}"),
-                });
-            }
+            && (rate == 0 || rate > MAX_FUZZ_RATE)
+        {
+            return Err(FuzzError::InvalidLimit {
+                field: "cases_per_second",
+                value: u64::from(rate),
+                reason: format!("must be within 1..={MAX_FUZZ_RATE}"),
+            });
+        }
         Ok(self)
     }
 }
@@ -395,26 +396,7 @@ pub struct FuzzExecutionCase {
     pub packet: Packet,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct FuzzExecutionStats {
-    pub packets_attempted: u64,
-    pub packets_completed: u64,
-    pub bytes: u64,
-    pub elapsed: Duration,
-    pub capture: CaptureStatistics,
-}
-
-impl From<crate::client::Stats> for FuzzExecutionStats {
-    fn from(stats: crate::client::Stats) -> Self {
-        Self {
-            packets_attempted: stats.packets_attempted,
-            packets_completed: stats.packets_completed,
-            bytes: stats.bytes,
-            elapsed: stats.elapsed,
-            capture: stats.capture,
-        }
-    }
-}
+pub use crate::workflow::Stats as FuzzExecutionStats;
 
 #[derive(Clone, Debug)]
 pub struct FuzzCaseExecution {
@@ -427,91 +409,8 @@ pub struct FuzzCaseExecution {
     pub stats: FuzzExecutionStats,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FuzzAuthorizationError {
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-}
-
-impl FuzzAuthorizationError {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-        }
-    }
-
-    pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
-        Self::new(error.to_string(), error.classification(), error.causes())
-    }
-}
-
-impl fmt::Display for FuzzAuthorizationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for FuzzAuthorizationError {}
-
-impl Classified for FuzzAuthorizationError {
-    fn classification(&self) -> Classification {
-        self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        self.causes.clone()
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FuzzExecutionError {
-    message: String,
-    classification: Classification,
-    causes: Vec<String>,
-}
-
-impl FuzzExecutionError {
-    pub fn new(
-        message: impl Into<String>,
-        classification: Classification,
-        causes: Vec<String>,
-    ) -> Self {
-        Self {
-            message: message.into(),
-            classification,
-            causes,
-        }
-    }
-
-    pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
-        Self::new(error.to_string(), error.classification(), error.causes())
-    }
-}
-
-impl fmt::Display for FuzzExecutionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.message)
-    }
-}
-
-impl Error for FuzzExecutionError {}
-
-impl Classified for FuzzExecutionError {
-    fn classification(&self) -> Classification {
-        self.classification
-    }
-
-    fn causes(&self) -> Vec<String> {
-        self.causes.clone()
-    }
-}
+pub use crate::workflow::BoundaryError as FuzzAuthorizationError;
+pub use crate::workflow::BoundaryError as FuzzExecutionError;
 
 pub trait FuzzAuthorizer {
     /// Authorize the complete packet set, optional route destination, and
@@ -532,3 +431,14 @@ pub trait FuzzExecutor {
         timeout: Duration,
     ) -> Result<FuzzCaseExecution, FuzzExecutionError>;
 }
+use super::{
+    BuildOptions, BuiltPacket, CaptureStatistics, Classification, Classified,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_FUZZ_CASES,
+    DEFAULT_MAX_FUZZ_CASES, DEFAULT_MAX_FUZZ_FIELD_BYTES, DEFAULT_MAX_FUZZ_LIST_ITEMS,
+    DEFAULT_MAX_FUZZ_SHRINK_STEPS, DEFAULT_MAX_PACKET_SIZE, DecodedPacket, Diagnostic, Duration,
+    Error, FieldValue, Frame, FuzzError, IpAddr, MAX_FUZZ_CASES, MAX_FUZZ_DURATION,
+    MAX_FUZZ_FIELD_BYTES, MAX_FUZZ_LIST_ITEMS, MAX_FUZZ_RATE, MAX_FUZZ_SHRINK_STEPS,
+    MAX_FUZZ_STRATEGIES, Packet, Serialize, fmt,
+};
+use serde::Deserialize;
+use std::str::FromStr;

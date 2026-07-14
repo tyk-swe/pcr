@@ -1,3 +1,9 @@
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::{Classification, Classified, Kind};
+
 /// Version identifier emitted by every structured CLI record.
 pub const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
 
@@ -161,14 +167,14 @@ const CAPTURE_FORMATS: &[OutputFormat] = &[
     OutputFormat::Pcap,
     OutputFormat::Pcapng,
 ];
-const READ_FORMATS: &[OutputFormat] = &[
+pub(super) const READ_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Ndjson,
     OutputFormat::Hex,
     OutputFormat::Pcap,
     OutputFormat::Pcapng,
 ];
-const REPLAY_FORMATS: &[OutputFormat] = &[
+pub(super) const REPLAY_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Json,
     OutputFormat::Ndjson,

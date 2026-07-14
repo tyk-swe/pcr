@@ -5,28 +5,12 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+mod cache;
+mod options;
+mod provider;
+#[cfg(test)]
+mod tests;
+mod wire;
 
-use bytes::Bytes;
-
-use crate::capture::{Frame, LinkType};
-
-use super::{
-    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
-    CapturedFrame, DestinationScope, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport,
-    Layer2Frame, Layer2Io, LinkCapability, LinkMode, LiveIoError, MAX_NEIGHBOR_VLAN_TAGS,
-    MacAddress, MaterializedRoute, NeighborError, NeighborRequest, NeighborResolution,
-    NeighborResolver, NeighborVlanKind, NeighborVlanTag, PlannedRoute, RouteDecision,
-    RouteSelectionReason, SystemCaptureProvider, SystemInterfaceProvider, SystemLayer2Io,
-};
-
-// Active resolution is split by responsibility while retaining one private
-// implementation scope for the cache, wire parser, and provider state machine.
-include!("options.rs");
-include!("cache.rs");
-include!("wire.rs");
-include!("provider.rs");
-include!("tests.rs");
+pub use options::NeighborResolutionOptions;
+pub use provider::{ActiveNeighborResolver, SystemNeighborResolver};

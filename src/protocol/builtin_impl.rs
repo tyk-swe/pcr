@@ -80,20 +80,25 @@ impl ProtocolModule for BuiltinProtocols {
         builder.register_codec(TcpCodec)?;
         builder.register_codec(Icmpv4Codec)?;
         builder.register_codec(Icmpv6Codec)?;
-        builder.register_matcher("tcp", matcher::ReverseFlowMatcher::new("tcp"))?;
-        builder.register_matcher("udp", matcher::ReverseFlowMatcher::new("udp"))?;
-        builder.register_matcher("icmpv4", matcher::EchoMatcher::v4())?;
-        builder.register_matcher("icmpv6", matcher::EchoMatcher::v6())?;
+        for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.matcher) {
+            match support.protocol {
+                "tcp" | "udp" => builder.register_matcher(
+                    support.protocol,
+                    matcher::ReverseFlowMatcher::new(support.protocol),
+                )?,
+                "icmpv4" => {
+                    builder.register_matcher(support.protocol, matcher::EchoMatcher::v4())?
+                }
+                "icmpv6" => {
+                    builder.register_matcher(support.protocol, matcher::EchoMatcher::v6())?
+                }
+                protocol => panic!("missing built-in matcher implementation for {protocol}"),
+            };
+        }
 
-        builder.bind_link_type(crate::capture::LinkType::ETHERNET.0, "ethernet")?;
-        builder.bind_link_type(crate::capture::LinkType::NULL.0, "bsd_null")?;
-        builder.bind_link_type(crate::capture::LinkType::LOOP.0, "bsd_loop")?;
-        builder.bind_link_type(crate::capture::LinkType::LINUX_SLL.0, "linux_sll")?;
-        builder.bind_link_type(crate::capture::LinkType::LINUX_SLL2.0, "linux_sll2")?;
-        builder.bind_link_type(crate::capture::LinkType::BSD_RAW.0, "raw_ip")?;
-        builder.bind_link_type(crate::capture::LinkType::RAW.0, "raw_ip")?;
-        builder.bind_link_type(crate::capture::LinkType::IPV4.0, "ipv4")?;
-        builder.bind_link_type(crate::capture::LinkType::IPV6.0, "ipv6")?;
+        for root in BUILTIN_CAPTURE_ROOTS {
+            builder.bind_link_type(root.link_type, root.protocol)?;
+        }
 
         bind_link_children(builder, "ethernet")?;
         bind_link_children(builder, "vlan")?;

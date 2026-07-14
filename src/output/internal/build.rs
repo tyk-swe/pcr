@@ -1,3 +1,10 @@
+use bytes::Bytes;
+use serde::Serialize;
+
+use crate::packet::internal::{BuiltPacket, Diagnostic, PacketDocument, PacketLayout};
+
+use super::common::compact_hex;
+
 /// Structured result of `build`.
 #[derive(Clone, Debug, Serialize)]
 pub struct BuildCommandResult {

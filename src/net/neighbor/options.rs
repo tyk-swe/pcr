@@ -1,3 +1,7 @@
+use std::time::Duration;
+
+use crate::net::{CaptureOverflowPolicy, CaptureQueueLimits, NeighborError};
+
 const MAX_CONFIGURED_ATTEMPTS: u32 = 10;
 const MAX_CONFIGURED_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONFIGURED_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
@@ -79,4 +83,8 @@ impl NeighborResolutionOptions {
         .map_err(|error| invalid_configuration(error.to_string()))?;
         Ok(self)
     }
+}
+
+fn invalid_configuration(message: String) -> NeighborError {
+    NeighborError::InvalidConfiguration { message }
 }

@@ -1,3 +1,18 @@
+use std::net::IpAddr;
+use std::time::Instant;
+
+use bytes::Bytes;
+
+use crate::net::{
+    CaptureQueueLimits, CaptureSession, IoSendReport, LiveIoError, MaterializedRoute, PlannedRoute,
+};
+use crate::packet::internal::{BuildContext, BuiltPacket, FieldValue, Packet, Padding};
+use crate::protocol::internal::Ethernet;
+
+use super::exchange::{CaptureGuard, ExchangeOptions, MAX_EXCHANGE_TIMEOUT};
+use super::send::ClientError;
+use super::target::IpVersion;
+
 impl ExchangeOptions {
     /// Validates every finite timeout and aggregate retention bound before a
     /// resolver, route, neighbor, capture, or transmission provider is used.
@@ -45,7 +60,10 @@ impl ExchangeOptions {
     }
 }
 
-fn validate_send_report(expected: &Bytes, report: &IoSendReport) -> Result<(), LiveIoError> {
+pub(super) fn validate_send_report(
+    expected: &Bytes,
+    report: &IoSendReport,
+) -> Result<(), LiveIoError> {
     if report.bytes_sent != expected.len() {
         return Err(LiveIoError::PartialSend {
             expected: expected.len(),
@@ -68,7 +86,7 @@ fn validate_send_report(expected: &Bytes, report: &IoSendReport) -> Result<(), L
     Ok(())
 }
 
-fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
+pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
     let network_layer = built.packet.iter().enumerate().find_map(|(index, layer)| {
         matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6").then_some(index)
     });
@@ -95,13 +113,14 @@ fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
             .checked_sub(start)
     });
     if let Some(actual) = network_length
-        && actual > mtu as usize {
-            return Err(ClientError::PacketExceedsMtu { actual, mtu });
-        }
+        && actual > mtu as usize
+    {
+        return Err(ClientError::PacketExceedsMtu { actual, mtu });
+    }
     Ok(())
 }
 
-fn error_after_shutdown<C: CaptureSession>(
+pub(super) fn error_after_shutdown<C: CaptureSession>(
     capture: &mut CaptureGuard<C>,
     operation: LiveIoError,
 ) -> ClientError {
@@ -114,7 +133,7 @@ fn error_after_shutdown<C: CaptureSession>(
     }
 }
 
-fn push_diagnostic_once(
+pub(super) fn push_diagnostic_once(
     diagnostics: &mut Vec<crate::packet::internal::Diagnostic>,
     diagnostic: crate::packet::internal::Diagnostic,
 ) {
@@ -126,7 +145,7 @@ fn push_diagnostic_once(
     }
 }
 
-fn reserve_capture_evidence(
+pub(super) fn reserve_capture_evidence(
     retained_frames: &mut usize,
     retained_bytes: &mut usize,
     additional: usize,
@@ -183,7 +202,7 @@ fn reserve_capture_evidence(
     true
 }
 
-fn build_context(plan: &PlannedRoute) -> BuildContext {
+pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
     BuildContext {
         source: plan.packet_source,
         destination: plan.final_destination,
@@ -193,7 +212,10 @@ fn build_context(plan: &PlannedRoute) -> BuildContext {
     }
 }
 
-fn materialize_link_structure(packet: &mut Packet, plan: &PlannedRoute) -> Result<(), ClientError> {
+pub(super) fn materialize_link_structure(
+    packet: &mut Packet,
+    plan: &PlannedRoute,
+) -> Result<(), ClientError> {
     if !plan.synthesized_ethernet
         || packet
             .iter()
@@ -211,7 +233,10 @@ fn materialize_link_structure(packet: &mut Packet, plan: &PlannedRoute) -> Resul
     Ok(())
 }
 
-fn materialize_network_fields(packet: &mut Packet, plan: &PlannedRoute) -> Result<(), ClientError> {
+pub(super) fn materialize_network_fields(
+    packet: &mut Packet,
+    plan: &PlannedRoute,
+) -> Result<(), ClientError> {
     for index in 0..packet.len() {
         let Some(layer) = packet.layer_mut(index) else {
             continue;
@@ -236,7 +261,7 @@ fn materialize_network_fields(packet: &mut Packet, plan: &PlannedRoute) -> Resul
                         layer: index,
                         field: "source",
                         message: "route source family does not match the packet layer".to_owned(),
-                    })
+                    });
                 }
             };
             layer.set_field("source", value).map_err(|source| {
@@ -263,7 +288,7 @@ fn materialize_network_fields(packet: &mut Packet, plan: &PlannedRoute) -> Resul
                         field: "destination",
                         message: "route destination family does not match the packet layer"
                             .to_owned(),
-                    })
+                    });
                 }
             };
             layer.set_field("destination", value).map_err(|source| {
@@ -278,7 +303,7 @@ fn materialize_network_fields(packet: &mut Packet, plan: &PlannedRoute) -> Resul
     Ok(())
 }
 
-fn materialize_link_fields(
+pub(super) fn materialize_link_fields(
     packet: &mut Packet,
     route: &MaterializedRoute,
 ) -> Result<bool, ClientError> {
@@ -342,7 +367,7 @@ fn materialize_link_fields(
     Ok(changed)
 }
 
-fn require_fixed_width_link_materialization(
+pub(super) fn require_fixed_width_link_materialization(
     preliminary_len: usize,
     materialized_len: usize,
 ) -> Result<(), ClientError> {
@@ -361,7 +386,7 @@ fn require_fixed_width_link_materialization(
     Ok(())
 }
 
-fn is_public(address: IpAddr) -> bool {
+pub(super) fn is_public(address: IpAddr) -> bool {
     match address {
         IpAddr::V4(address) => {
             address.is_multicast()

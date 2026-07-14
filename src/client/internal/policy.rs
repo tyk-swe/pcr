@@ -1,3 +1,9 @@
+use std::net::IpAddr;
+
+use thiserror::Error;
+
+use crate::error::{Classification, Classified, Kind};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrafficPolicy {
     pub allow_public_destinations: bool,

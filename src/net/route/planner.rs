@@ -1,3 +1,22 @@
+use std::net::IpAddr;
+
+use thiserror::Error;
+
+use crate::capture::Frame;
+use crate::error::{Category, Classification, Classified, Kind};
+use crate::net::provider_impl::{CaptureStatistics, LiveIoError};
+use crate::packet::internal::{FieldValue, Packet, ProtocolId};
+
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+use super::models::DestinationScope;
+use super::models::{
+    InterfaceId, LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborRequest, NeighborResolution,
+    NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute, RouteProvider,
+};
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum PlanError {
@@ -42,7 +61,9 @@ pub enum PlanError {
     MissingNeighborSource,
     #[error("route source address family does not match destination {destination}")]
     SourceFamilyMismatch { destination: IpAddr },
-    #[error("preferred route source {preferred_source} has a different address family than destination {destination}")]
+    #[error(
+        "preferred route source {preferred_source} has a different address family than destination {destination}"
+    )]
     PreferredSourceFamilyMismatch {
         preferred_source: IpAddr,
         destination: IpAddr,
@@ -74,7 +95,9 @@ impl Classified for PlanError {
             | Self::Layer3Unsupported => Classification::new(
                 "capability.link_mode",
                 Kind::Capability,
-                Some("select a provider and interface that support the explicitly requested link mode"),
+                Some(
+                    "select a provider and interface that support the explicitly requested link mode",
+                ),
             ),
             Self::OfflineOnlyLinkHeader { .. } => Classification::new(
                 "packet.offline_link_header",
@@ -90,7 +113,9 @@ impl Classified for PlanError {
             | Self::InvalidNeighborVlan { .. } => Classification::new(
                 "packet.plan",
                 Kind::Packet,
-                Some("correct the packet destination, address family, or link-layer intent before planning again"),
+                Some(
+                    "correct the packet destination, address family, or link-layer intent before planning again",
+                ),
             ),
             Self::InterfaceMismatch { .. }
             | Self::MissingNeighborSource
@@ -98,7 +123,9 @@ impl Classified for PlanError {
             | Self::MissingPacketSource => Classification::new(
                 "internal.route_contract",
                 Kind::Internal,
-                Some("do not transmit with the inconsistent route result; inspect or replace the route provider"),
+                Some(
+                    "do not transmit with the inconsistent route result; inspect or replace the route provider",
+                ),
             ),
         }
     }
@@ -162,12 +189,13 @@ impl RoutePlanner {
 
         if let (Some(preferred_source), Some(lookup_destination)) =
             (options.preferred_source, lookup_destination)
-            && preferred_source.is_ipv4() != lookup_destination.is_ipv4() {
-                return Err(PlanError::PreferredSourceFamilyMismatch {
-                    preferred_source,
-                    destination: lookup_destination,
-                });
-            }
+            && preferred_source.is_ipv4() != lookup_destination.is_ipv4()
+        {
+            return Err(PlanError::PreferredSourceFamilyMismatch {
+                preferred_source,
+                destination: lookup_destination,
+            });
+        }
 
         if final_destination.is_none() && (has_ip || options.link_mode == LinkMode::Layer3) {
             return Err(PlanError::MissingDestination);
@@ -203,23 +231,24 @@ impl RoutePlanner {
             }
         };
         if let Some(requested) = &options.interface
-            && route.interface != *requested {
-                return Err(PlanError::InterfaceMismatch {
-                    requested: requested.name.clone(),
-                    requested_index: requested.index,
-                    selected: route.interface.name.clone(),
-                    selected_index: route.interface.index,
-                });
-            }
+            && route.interface != *requested
+        {
+            return Err(PlanError::InterfaceMismatch {
+                requested: requested.name.clone(),
+                requested_index: requested.index,
+                selected: route.interface.name.clone(),
+                selected_index: route.interface.index,
+            });
+        }
         if let Some(requested) = options.preferred_source
             && route.selected_address != Some(requested)
-                && route.preferred_source != Some(requested)
-            {
-                return Err(PlanError::PreferredSourceNotSelected {
-                    requested,
-                    selected: route.selected_address.or(route.preferred_source),
-                });
-            }
+            && route.preferred_source != Some(requested)
+        {
+            return Err(PlanError::PreferredSourceNotSelected {
+                requested,
+                selected: route.selected_address.or(route.preferred_source),
+            });
+        }
 
         let mode = match options.link_mode {
             LinkMode::Layer3 => LinkMode::Layer3,
@@ -244,11 +273,12 @@ impl RoutePlanner {
             })
             .flatten();
         if let (Some(source), Some(final_destination)) = (packet_source, final_destination)
-            && source.is_ipv4() != final_destination.is_ipv4() {
-                return Err(PlanError::SourceFamilyMismatch {
-                    destination: final_destination,
-                });
-            }
+            && source.is_ipv4() != final_destination.is_ipv4()
+        {
+            return Err(PlanError::SourceFamilyMismatch {
+                destination: final_destination,
+            });
+        }
         if has_ip && packet_source.is_none() {
             return Err(PlanError::MissingPacketSource);
         }
@@ -371,7 +401,7 @@ impl RoutePlanner {
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-pub(super) fn classify_destination(address: IpAddr) -> DestinationScope {
+pub(in crate::net) fn classify_destination(address: IpAddr) -> DestinationScope {
     if address.is_unspecified() {
         return DestinationScope::Unspecified;
     }
@@ -456,7 +486,9 @@ pub enum NeighborError {
         operation: &'static str,
         source: LiveIoError,
     },
-    #[error("neighbor resolution for {target} on {interface} completed but capture cleanup failed: {source}")]
+    #[error(
+        "neighbor resolution for {target} on {interface} completed but capture cleanup failed: {source}"
+    )]
     Cleanup {
         interface: String,
         target: IpAddr,
@@ -553,7 +585,7 @@ fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, P
             _ => {
                 return Err(PlanError::InvalidNeighborVlan {
                     message: "priority is missing or is not unsigned".to_owned(),
-                })
+                });
             }
         };
         let drop_eligible = match layer.field("drop_eligible") {
@@ -561,7 +593,7 @@ fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, P
             _ => {
                 return Err(PlanError::InvalidNeighborVlan {
                     message: "drop_eligible is missing or is not boolean".to_owned(),
-                })
+                });
             }
         };
         let vlan_id = match layer.field("vlan_id") {
@@ -574,7 +606,7 @@ fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, P
             _ => {
                 return Err(PlanError::InvalidNeighborVlan {
                     message: "vlan_id is missing or is not unsigned".to_owned(),
-                })
+                });
             }
         };
         tags.push(NeighborVlanTag {
@@ -684,7 +716,7 @@ fn srh_route(packet: &Packet) -> Result<Option<SrhRoute>, PlanError> {
         _ => {
             return Err(PlanError::InvalidSegmentRouting {
                 message: "segments_left must be Auto, Exact, or one raw byte".to_owned(),
-            })
+            });
         }
     };
     if segments_left > last {

@@ -3,22 +3,23 @@
 
 #![forbid(unsafe_code)]
 
-use std::fmt;
-use std::net::IpAddr;
+mod models;
+mod planner;
+mod provider;
+#[cfg(test)]
+mod tests;
 
-use serde::{Deserialize, Serialize};
-use thiserror::Error;
+pub use models::{
+    DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, NeighborRequest,
+    NeighborResolution, NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute,
+    RouteDecision, RouteProvider, RouteSelectionReason,
+};
+pub use planner::{MaterializedRoute, NeighborError, NeighborResolver, PlanError, RoutePlanner};
+pub use provider::{NativeRouteError, SystemRouteProvider};
 
-use crate::capture::{Frame, LinkType};
-use crate::error::{Category, Classification, Classified, Kind};
-use crate::packet::internal::{FieldValue, Packet, ProtocolId};
-
-use super::provider_impl::{CaptureStatistics, LiveIoError};
-
-// These responsibility fragments intentionally share this module scope. The
-// route planner's private helpers are part of one implementation contract, and
-// keeping the scope flat avoids widening them merely to support the file split.
-include!("models.rs");
-include!("provider.rs");
-include!("planner.rs");
-include!("tests.rs");
+pub(crate) use models::MAX_NEIGHBOR_VLAN_TAGS;
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub(super) use planner::classify_destination;

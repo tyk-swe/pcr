@@ -80,7 +80,7 @@ where
             unsolicited,
             undecoded,
             diagnostics,
-            stats: stats.into(),
+            stats,
         })
     }
 }
@@ -96,3 +96,7 @@ fn invalid_client_execution(message: impl Into<String>) -> DnsExecutionError {
         Vec::new(),
     )
 }
+use super::{
+    Classification, DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor,
+    DnsMatchedResponse, ExchangeIo, Kind, NeighborResolver, PacketTemplate, RouteProvider,
+};

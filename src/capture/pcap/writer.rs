@@ -1,4 +1,21 @@
-enum WriterState {
+use std::io::Write;
+use std::time::UNIX_EPOCH;
+
+use crate::capture::{Direction, Frame, LinkType};
+
+use super::models::{
+    DEFAULT_INTERFACE_LIMIT, DEFAULT_SIZE_LIMIT, Endianness, Error, Format, Interface, Limits,
+    TimestampPrecision, TimestampResolution,
+};
+use super::wire::{
+    PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
+    PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS, PCAPNG_OPTION_IF_TSOFFSET,
+    PCAPNG_OPTION_IF_TSRESOL, PCAPNG_SECTION_HEADER_BLOCK, WRITER_TIMESTAMP_RESOLUTION,
+    align_to_u32, timestamp_to_ticks, usize_to_u32_limit, validate_frame_lengths,
+    validate_timestamp_resolution, write_i64, write_padding, write_u16, write_u32,
+};
+
+pub(super) enum WriterState {
     Pcap {
         endianness: Endianness,
         precision: TimestampPrecision,
@@ -21,7 +38,7 @@ struct InterfacePlan {
 /// A streaming capture writer over any [`Write`] implementation.
 pub struct Writer<W> {
     inner: W,
-    state: WriterState,
+    pub(super) state: WriterState,
     max_size: usize,
     max_interfaces: usize,
     stream_limits: Limits,
@@ -437,7 +454,7 @@ impl<W: Write> Writer<W> {
         }
         let next_bytes = self
             .captured_bytes_written
-            .checked_add(u64::from(frame.captured_length))
+            .checked_add(u64::from(frame.captured_length()))
             .ok_or(Error::StreamByteLimitExceeded {
                 actual: u64::MAX,
                 limit: self.stream_limits.max_bytes,
@@ -507,10 +524,10 @@ impl<W: Write> Writer<W> {
                 actual: frame.link_type.0,
             });
         }
-        if snap_len != 0 && frame.captured_length > snap_len {
+        if snap_len != 0 && frame.captured_length() > snap_len {
             return Err(Error::SizeLimitExceeded {
                 kind: "pcap captured packet",
-                declared: u64::from(frame.captured_length),
+                declared: u64::from(frame.captured_length()),
                 limit: snap_len as usize,
             });
         }
@@ -539,9 +556,9 @@ impl<W: Write> Writer<W> {
 
         write_u32(&mut self.inner, endianness, seconds)?;
         write_u32(&mut self.inner, endianness, fraction)?;
-        write_u32(&mut self.inner, endianness, frame.captured_length)?;
-        write_u32(&mut self.inner, endianness, frame.original_length)?;
-        self.inner.write_all(&frame.bytes)?;
+        write_u32(&mut self.inner, endianness, frame.captured_length())?;
+        write_u32(&mut self.inner, endianness, frame.original_length())?;
+        self.inner.write_all(frame.bytes())?;
         Ok(())
     }
 
@@ -551,10 +568,10 @@ impl<W: Write> Writer<W> {
         let interface = plan.description;
         let endianness = self.endianness();
 
-        if interface.snap_len != 0 && frame.captured_length > interface.snap_len {
+        if interface.snap_len != 0 && frame.captured_length() > interface.snap_len {
             return Err(Error::SizeLimitExceeded {
                 kind: "pcapng captured packet",
-                declared: u64::from(frame.captured_length),
+                declared: u64::from(frame.captured_length()),
                 limit: interface.snap_len as usize,
             });
         }
@@ -564,7 +581,7 @@ impl<W: Write> Writer<W> {
             interface.timestamp_resolution,
             interface.timestamp_offset,
         )?;
-        let padded_packet_length = align_to_u32(frame.captured_length)?;
+        let padded_packet_length = align_to_u32(frame.captured_length())?;
         let option_length = if frame.direction.is_some() { 12_u32 } else { 0 };
         let block_length = 32_u32
             .checked_add(padded_packet_length)
@@ -588,10 +605,10 @@ impl<W: Write> Writer<W> {
         write_u32(&mut self.inner, endianness, interface_id)?;
         write_u32(&mut self.inner, endianness, (timestamp >> 32) as u32)?;
         write_u32(&mut self.inner, endianness, timestamp as u32)?;
-        write_u32(&mut self.inner, endianness, frame.captured_length)?;
-        write_u32(&mut self.inner, endianness, frame.original_length)?;
-        self.inner.write_all(&frame.bytes)?;
-        write_padding(&mut self.inner, frame.captured_length)?;
+        write_u32(&mut self.inner, endianness, frame.captured_length())?;
+        write_u32(&mut self.inner, endianness, frame.original_length())?;
+        self.inner.write_all(frame.bytes())?;
+        write_padding(&mut self.inner, frame.captured_length())?;
 
         if let Some(direction) = frame.direction {
             write_u16(&mut self.inner, endianness, PCAPNG_OPTION_EPB_FLAGS)?;

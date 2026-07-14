@@ -3,14 +3,12 @@
 
 //! Bounded, policy-gated capture replay over injectable timing and I/O seams.
 
-use std::error::Error;
-use std::fmt;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 use super::clock::Clock as WorkflowClock;
@@ -21,10 +19,9 @@ use crate::capture::{
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
     DestinationScope, DispatchPacketIo, InterfaceId, InterfaceInfo, InterfaceProvider,
-    IoSendReport, LinkCapability, LinkMode, LiveIoError, MAX_CAPTURE_TIMEOUT, MaterializedRoute,
-    PacketIo, PlannedRoute, RouteDecision, RouteProvider, RouteSelectionReason,
-    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemRouteProvider,
-    TransmissionFrame,
+    IoSendReport, LinkCapability, LinkMode, LiveIoError, MaterializedRoute, PacketIo, PlannedRoute,
+    RouteDecision, RouteProvider, RouteSelectionReason, SystemInterfaceProvider, SystemLayer2Io,
+    SystemLayer3Io, SystemRouteProvider, TransmissionFrame,
 };
 use crate::packet::build::{
     Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions,
@@ -32,9 +29,25 @@ use crate::packet::build::{
 use crate::packet::decode::{Decoder, Options as DecodeOptions};
 use crate::packet::internal::{NetworkEnvelope, ProtocolRegistry};
 
-include!("replay/model.rs");
-include!("replay/adapter.rs");
-include!("replay/error.rs");
-include!("replay/engine.rs");
-include!("replay/wire.rs");
-include!("replay/tests.rs");
+#[path = "replay/adapter.rs"]
+mod adapter;
+#[path = "replay/engine.rs"]
+mod engine;
+#[path = "replay/error.rs"]
+mod error;
+#[path = "replay/model.rs"]
+mod model;
+#[cfg(test)]
+#[path = "replay/tests.rs"]
+mod tests;
+#[path = "replay/wire.rs"]
+mod wire;
+
+pub use adapter::{SystemAuthorizer, SystemTransmitter};
+pub use engine::replay_capture;
+pub use error::ReplayError;
+pub use model::{
+    MAX_REPLAY_DURATION, ReplayAuthorizationError, ReplayAuthorizer, ReplayFrameEvidence,
+    ReplayLimits, ReplayOptions, ReplaySummary, ReplayTiming, ReplayTransmission,
+    ReplayTransmitter,
+};

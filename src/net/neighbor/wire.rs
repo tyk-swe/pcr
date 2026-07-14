@@ -1,22 +1,34 @@
-const ETHERNET_HEADER_LENGTH: usize = 14;
-const ETHERNET_MINIMUM_WITHOUT_FCS: usize = 60;
-const VLAN_HEADER_LENGTH: usize = 4;
-const ARP_PAYLOAD_LENGTH: usize = 28;
-const IPV6_HEADER_LENGTH: usize = 40;
-const NEIGHBOR_SOLICITATION_LENGTH: usize = 32;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-const ETHERTYPE_ARP: u16 = 0x0806;
-const ETHERTYPE_IPV6: u16 = 0x86dd;
+use bytes::Bytes;
+
+use crate::capture::{Frame, LinkType};
+use crate::net::{
+    MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborError, NeighborRequest, NeighborVlanKind,
+    NeighborVlanTag,
+};
+
+pub(super) const ETHERNET_HEADER_LENGTH: usize = 14;
+pub(super) const ETHERNET_MINIMUM_WITHOUT_FCS: usize = 60;
+pub(super) const VLAN_HEADER_LENGTH: usize = 4;
+pub(super) const ARP_PAYLOAD_LENGTH: usize = 28;
+pub(super) const IPV6_HEADER_LENGTH: usize = 40;
+pub(super) const NEIGHBOR_SOLICITATION_LENGTH: usize = 32;
+
+pub(super) const ETHERTYPE_ARP: u16 = 0x0806;
+pub(super) const ETHERTYPE_IPV6: u16 = 0x86dd;
 const ETHERTYPE_VLAN: u16 = 0x8100;
-const ETHERTYPE_SERVICE_VLAN: u16 = 0x88a8;
-const IPV6_NEXT_HEADER_ICMP: u8 = 58;
-const NEIGHBOR_SOLICITATION_TYPE: u8 = 135;
-const NEIGHBOR_ADVERTISEMENT_TYPE: u8 = 136;
-const SOURCE_LINK_LAYER_OPTION: u8 = 1;
-const TARGET_LINK_LAYER_OPTION: u8 = 2;
-const SOLICITED_ADVERTISEMENT_FLAG: u32 = 1 << 30;
+pub(super) const ETHERTYPE_SERVICE_VLAN: u16 = 0x88a8;
+pub(super) const IPV6_NEXT_HEADER_ICMP: u8 = 58;
+pub(super) const NEIGHBOR_SOLICITATION_TYPE: u8 = 135;
+pub(super) const NEIGHBOR_ADVERTISEMENT_TYPE: u8 = 136;
+pub(super) const SOURCE_LINK_LAYER_OPTION: u8 = 1;
+pub(super) const TARGET_LINK_LAYER_OPTION: u8 = 2;
+pub(super) const SOLICITED_ADVERTISEMENT_FLAG: u32 = 1 << 30;
 
-fn build_request_frame(request: &NeighborRequest) -> Result<(Bytes, MacAddress), NeighborError> {
+pub(super) fn build_request_frame(
+    request: &NeighborRequest,
+) -> Result<(Bytes, MacAddress), NeighborError> {
     match (request.interface_source, request.target) {
         (IpAddr::V4(source), IpAddr::V4(target)) => {
             if ARP_PAYLOAD_LENGTH > request.mtu as usize {
@@ -107,7 +119,7 @@ fn build_neighbor_solicitation(
     Bytes::from(frame)
 }
 
-fn ethernet_prefix(
+pub(super) fn ethernet_prefix(
     destination: MacAddress,
     source: MacAddress,
     tags: &[NeighborVlanTag],
@@ -137,7 +149,10 @@ fn ethernet_prefix(
     frame
 }
 
-fn match_neighbor_response(request: &NeighborRequest, frame: &Frame) -> Option<MacAddress> {
+pub(super) fn match_neighbor_response(
+    request: &NeighborRequest,
+    frame: &Frame,
+) -> Option<MacAddress> {
     if frame.link_type != LinkType::ETHERNET
         || frame
             .interface
@@ -145,9 +160,8 @@ fn match_neighbor_response(request: &NeighborRequest, frame: &Frame) -> Option<M
     {
         return None;
     }
-    let ethernet = parse_ethernet(&frame.bytes)?;
-    if (ethernet.destination != request.interface_mac)
-        || (ethernet.vlan_tags != request.vlan_tags)
+    let ethernet = parse_ethernet(frame.bytes())?;
+    if (ethernet.destination != request.interface_mac) || (ethernet.vlan_tags != request.vlan_tags)
     {
         return None;
     }
@@ -164,6 +178,10 @@ fn match_neighbor_response(request: &NeighborRequest, frame: &Frame) -> Option<M
         }
         _ => None,
     }
+}
+
+pub(super) fn is_unicast_mac(address: MacAddress) -> bool {
+    address.0 != [0; 6] && address.0 != [0xff; 6] && address.0[0] & 1 == 0
 }
 
 struct EthernetView<'a> {
@@ -329,13 +347,13 @@ fn ipv6_multicast_mac(address: Ipv6Addr) -> MacAddress {
     ])
 }
 
-fn ipv6_address(bytes: &[u8]) -> Ipv6Addr {
+pub(super) fn ipv6_address(bytes: &[u8]) -> Ipv6Addr {
     let mut address = [0; 16];
     address.copy_from_slice(bytes);
     Ipv6Addr::from(address)
 }
 
-fn icmpv6_checksum(source: Ipv6Addr, destination: Ipv6Addr, message: &[u8]) -> u16 {
+pub(super) fn icmpv6_checksum(source: Ipv6Addr, destination: Ipv6Addr, message: &[u8]) -> u16 {
     let length = u32::try_from(message.len())
         .unwrap_or(u32::MAX)
         .to_be_bytes();
@@ -348,7 +366,7 @@ fn icmpv6_checksum(source: Ipv6Addr, destination: Ipv6Addr, message: &[u8]) -> u
     ])
 }
 
-fn checksum(parts: &[&[u8]]) -> u16 {
+pub(super) fn checksum(parts: &[&[u8]]) -> u16 {
     let mut sum = 0_u64;
     let mut pending = None;
     for part in parts {

@@ -1,3 +1,32 @@
+use std::net::IpAddr;
+use std::sync::Arc;
+use std::time::{Instant, SystemTime};
+
+use crate::capture::{Frame, LinkType};
+use crate::net::{
+    CaptureOverflowPolicy, CaptureStatistics, ExchangeIo, LiveIoError, NeighborResolver, PacketIo,
+    PlanOptions, PlannedRoute, RoutePlanner, RouteProvider, TransmissionFrame,
+};
+use crate::packet::internal::{
+    Builder, BuiltPacket, Dissector, Packet, PacketTemplate, ProtocolRegistry,
+};
+
+use super::exchange::{
+    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext, ExchangeResult,
+    PlannedExchangePacket, PreparedExchangePacket, drain_available,
+};
+use super::helpers::{
+    build_context, error_after_shutdown, materialize_link_fields, materialize_link_structure,
+    materialize_network_fields, push_diagnostic_once, require_fixed_width_link_materialization,
+    validate_mtu, validate_send_report,
+};
+use super::policy::{TrafficPolicy, TrafficPolicyError};
+use super::send::{ClientError, SendOptions, SendReport};
+use super::stats::OperationStats;
+use super::target::{
+    HostnameResolver, IpVersion, LiveTarget, ResolvedTarget, TargetResolutionError,
+};
+
 /// High-level composition of packet construction, passive route planning,
 /// explicit neighbor materialization, policy, and packet I/O.
 #[derive(Debug)]
@@ -258,9 +287,9 @@ where
             if let Some(first_packet) = planned_packets.first()
                 && (first_packet.plan.route.interface != plan.route.interface
                     || first_packet.plan.mode != plan.mode)
-                {
-                    return Err(ClientError::HeterogeneousExchangeRoute);
-                }
+            {
+                return Err(ClientError::HeterogeneousExchangeRoute);
+            }
             planned_packets.push(PlannedExchangePacket {
                 packet: packet_to_send,
                 plan,
@@ -312,7 +341,7 @@ where
                     LiveIoError::DeadlineExceeded {
                         operation: "waiting for capture readiness",
                     },
-                ))
+                ));
             }
         };
         if let Err(error) = capture.wait_ready(readiness_timeout) {
@@ -352,7 +381,7 @@ where
                 ));
             }
             let send_started = Instant::now();
-            let send_wall_time = std::time::SystemTime::now();
+            let send_wall_time = SystemTime::now();
             let frame = match TransmissionFrame::try_new(&built.bytes, route) {
                 Ok(frame) => frame,
                 Err(error) => return Err(error_after_shutdown(&mut capture, error)),
@@ -366,12 +395,12 @@ where
             }
             let link_type = match route.plan.mode {
                 crate::net::LinkMode::Layer2 => route.plan.route.link_type,
-                crate::net::LinkMode::Layer3 => crate::capture::LinkType::RAW,
+                crate::net::LinkMode::Layer3 => LinkType::RAW,
                 crate::net::LinkMode::Auto => {
                     return Err(error_after_shutdown(
                         &mut capture,
                         LiveIoError::UnresolvedLinkMode,
-                    ))
+                    ));
                 }
             };
             let evidence = match Frame::new(send_wall_time, link_type, built.bytes.clone()) {
@@ -382,7 +411,7 @@ where
                         LiveIoError::InvalidSendEvidence {
                             message: source.to_string(),
                         },
-                    ))
+                    ));
                 }
             };
             sent_at.push(send_started);

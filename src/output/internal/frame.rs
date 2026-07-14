@@ -1,3 +1,13 @@
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use bytes::Bytes;
+use serde::Serialize;
+
+use crate::capture::Frame;
+
+use super::common::compact_hex;
+use super::contract::OutputContractError;
+
 /// Canonical signed Unix timestamp used by output records, including pre-epoch captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct OutputTimestamp {
@@ -21,7 +31,7 @@ impl TryFrom<SystemTime> for OutputTimestamp {
 }
 
 impl OutputTimestamp {
-    fn from_pre_epoch_duration(duration: Duration) -> Result<Self, OutputContractError> {
+    pub(super) fn from_pre_epoch_duration(duration: Duration) -> Result<Self, OutputContractError> {
         if duration.subsec_nanos() == 0 {
             let unix_seconds = if duration.as_secs() == i64::MAX as u64 + 1 {
                 i64::MIN
@@ -124,13 +134,13 @@ impl FrameOutput {
             })?;
         Ok(Self {
             timestamp: frame.timestamp.try_into()?,
-            captured_length: frame.captured_length,
-            original_length: frame.original_length,
+            captured_length: frame.captured_length(),
+            original_length: frame.original_length(),
             link_type: frame.link_type.0,
             interface: frame.interface,
             direction: frame.direction.map(Into::into),
-            bytes_hex: compact_hex(&frame.bytes),
-            bytes: frame.bytes,
+            bytes_hex: compact_hex(frame.bytes()),
+            bytes: frame.bytes().clone(),
         })
     }
 

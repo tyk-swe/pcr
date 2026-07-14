@@ -125,7 +125,7 @@ where
                 .collect(),
             undecoded,
             diagnostics,
-            stats: stats.into(),
+            stats,
         })
     }
 }
@@ -141,3 +141,8 @@ fn invalid_client_execution(message: impl Into<String>) -> FuzzExecutionError {
         Vec::new(),
     )
 }
+use super::{
+    Classification, Duration, ExchangeIo, FuzzAuthorizationError, FuzzAuthorizer,
+    FuzzCaseExecution, FuzzExecutionCase, FuzzExecutionError, FuzzExecutor, IpAddr, Kind,
+    NeighborResolver, Packet, PacketTemplate, RouteProvider,
+};

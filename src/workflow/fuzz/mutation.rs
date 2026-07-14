@@ -1,4 +1,14 @@
-fn prepare(
+use super::engine::{PreparedFuzz, ResolvedField};
+use super::execution::{SplitMix64, case_seed};
+use super::{
+    Arc, BuildContext, Builder, BuiltPacket, Bytes, Classification, DecodeOptions, DecodedPacket,
+    Diagnostic, Dissector, Duration, FieldKind, FieldValue, Frame, FuzzCase, FuzzCaseFailure,
+    FuzzCaseOutcome, FuzzError, FuzzLimits, FuzzMutation, FuzzReproduction, FuzzRequest,
+    FuzzStrategy, FuzzTarget, Instant, Ipv4Addr, Ipv6Addr, Kind, LinkType, MAX_FUZZ_TARGET_FIELDS,
+    Packet, ProtocolRegistry,
+};
+
+pub(super) fn prepare(
     request: &FuzzRequest,
     packet: Packet,
     registry: Arc<ProtocolRegistry>,
@@ -97,7 +107,9 @@ fn prepare(
                 Classification::new(
                     "packet.fuzz_mutation",
                     Kind::Packet,
-                    Some("select a type/range accepted by the target field or retain the rejected case as fuzz evidence"),
+                    Some(
+                        "select a type/range accepted by the target field or retain the rejected case as fuzz evidence",
+                    ),
                 ),
                 Vec::new(),
             ));
@@ -151,7 +163,9 @@ fn prepare(
                     Classification::new(
                         "packet.fuzz_build",
                         Kind::Packet,
-                        Some("reproduce the case in permissive offline mode when malformed dependent fields are intentional"),
+                        Some(
+                            "reproduce the case in permissive offline mode when malformed dependent fields are intentional",
+                        ),
                     ),
                     Vec::new(),
                 ));
@@ -179,7 +193,7 @@ fn enforce_preparation_deadline(started: Instant, limit: Duration) -> Result<(),
     Ok(())
 }
 
-fn enforce_operation_deadline(
+pub(super) fn enforce_operation_deadline(
     started: Instant,
     accounted_elapsed: Duration,
     limit: Duration,
@@ -481,7 +495,7 @@ fn boundary_value(
     }
 }
 
-fn random_value(
+pub(super) fn random_value(
     kind: FieldKind,
     original: &FieldValue,
     random: &mut SplitMix64,
@@ -553,7 +567,7 @@ fn random_value(
     }
 }
 
-fn bounded_value_size(
+pub(super) fn bounded_value_size(
     value: &FieldValue,
     remaining: usize,
     max_list_items: usize,
@@ -703,7 +717,7 @@ fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValue> {
     values
 }
 
-fn dissect_built(
+pub(super) fn dissect_built(
     dissector: &Dissector,
     built: &BuiltPacket,
     limits: FuzzLimits,
@@ -762,7 +776,7 @@ fn packet_link_type(packet: &Packet) -> Option<LinkType> {
     })
 }
 
-fn has_link_root(packet: &Packet) -> bool {
+pub(super) fn has_link_root(packet: &Packet) -> bool {
     packet.layer(0).is_some_and(|layer| {
         matches!(
             layer.protocol_id().as_str(),

@@ -1,5 +1,11 @@
+use std::net::IpAddr;
+use std::time::Instant;
+
+use crate::capture::{Frame, LinkType};
+use crate::net::{InterfaceId, MacAddress, NeighborRequest, NeighborVlanTag};
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct NeighborCacheKey {
+pub(super) struct NeighborCacheKey {
     interface: InterfaceId,
     interface_source: IpAddr,
     interface_mac: MacAddress,
@@ -22,15 +28,15 @@ impl From<&NeighborRequest> for NeighborCacheKey {
 }
 
 #[derive(Debug)]
-struct NeighborCacheEntry {
-    mac_address: MacAddress,
-    inserted_at: Instant,
-    expires_at: Instant,
+pub(super) struct NeighborCacheEntry {
+    pub(super) mac_address: MacAddress,
+    pub(super) inserted_at: Instant,
+    pub(super) expires_at: Instant,
 }
 
-struct NeighborExchangeOutcome {
-    mac_address: Option<MacAddress>,
-    attempts: u32,
-    captured: Vec<Frame>,
-    evidence_truncated: bool,
+pub(super) struct NeighborExchangeOutcome {
+    pub(super) mac_address: Option<MacAddress>,
+    pub(super) attempts: u32,
+    pub(super) captured: Vec<Frame>,
+    pub(super) evidence_truncated: bool,
 }

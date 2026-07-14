@@ -3,6 +3,12 @@
 
 // Clap argument and command models.
 
+use std::net::IpAddr;
+use std::path::PathBuf;
+
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use packetcraftr::{capture, client, net, output, packet, workflow};
+
 #[derive(Debug, Parser)]
 #[command(
     name = "packetcraftr",
@@ -11,15 +17,15 @@
     about = "Reflective packet construction, dissection, capture, and network tools",
     long_about = "PacketcraftR builds and dissects arbitrary packet stacks with exact bytes, bounded parsing, passive route planning, and policy-gated live workflows. Native features, dependencies, and privileges determine which live paths are available."
 )]
-struct Cli {
+pub(super) struct Cli {
     #[arg(long, global = true, value_enum, default_value_t = CliOutputFormat::Text)]
-    output: CliOutputFormat,
+    pub(super) output: CliOutputFormat,
     #[command(subcommand)]
-    command: Command,
+    pub(super) command: Command,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliOutputFormat {
+pub(super) enum CliOutputFormat {
     #[default]
     Text,
     Json,
@@ -32,11 +38,11 @@ enum CliOutputFormat {
 
 impl std::fmt::Display for CliOutputFormat {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(OutputFormat::from(*self).as_str())
+        formatter.write_str(output::contract::Format::from(*self).as_str())
     }
 }
 
-impl From<CliOutputFormat> for OutputFormat {
+impl From<CliOutputFormat> for output::contract::Format {
     fn from(value: CliOutputFormat) -> Self {
         match value {
             CliOutputFormat::Text => Self::Text,
@@ -51,7 +57,7 @@ impl From<CliOutputFormat> for OutputFormat {
 }
 
 #[derive(Debug, Subcommand)]
-enum Command {
+pub(super) enum Command {
     /// Build exact packet bytes from an expression or document.
     Build(BuildArgs),
     /// Decode a frame with bounded, registry-driven dissection.
@@ -83,104 +89,104 @@ enum Command {
 }
 
 #[derive(Debug, Args)]
-struct RecipeArgs {
+pub(super) struct RecipeArgs {
     /// One-off layer expression.
     #[arg(long, conflicts_with = "packet_file")]
-    packet: Option<String>,
+    pub(super) packet: Option<String>,
     /// Versioned JSON/YAML packet document.
     #[arg(long, value_name = "PATH", conflicts_with = "packet")]
-    packet_file: Option<PathBuf>,
+    pub(super) packet_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
-struct BuildArgs {
+pub(super) struct BuildArgs {
     #[command(flatten)]
-    recipe: RecipeArgs,
+    pub(super) recipe: RecipeArgs,
     #[arg(long, value_enum, default_value_t = CliBuildMode::Strict)]
-    mode: CliBuildMode,
+    pub(super) mode: CliBuildMode,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliBuildMode {
+pub(super) enum CliBuildMode {
     #[default]
     Strict,
     Permissive,
 }
 
 #[derive(Debug, Args)]
-struct DissectArgs {
+pub(super) struct DissectArgs {
     /// Whole-frame hexadecimal bytes.
     #[arg(long, conflicts_with = "file")]
-    hex: Option<String>,
+    pub(super) hex: Option<String>,
     /// File containing raw frame bytes.
     #[arg(long, value_name = "PATH", conflicts_with = "hex")]
-    file: Option<PathBuf>,
+    pub(super) file: Option<PathBuf>,
     /// Open numeric DLT/link type (defaults to Ethernet/DLT 1).
     #[arg(long, default_value_t = 1)]
-    link_type: u32,
+    pub(super) link_type: u32,
 }
 
 #[derive(Debug, Args)]
-struct ReadArgs {
-    path: PathBuf,
+pub(super) struct ReadArgs {
+    pub(super) path: PathBuf,
     /// Maximum frames read or copied from the capture stream.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_STREAM_FRAMES)]
-    max_frames: u64,
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
+    pub(super) max_frames: u64,
     /// Maximum aggregate captured payload bytes read or copied.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_STREAM_BYTES)]
-    max_bytes: u64,
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
+    pub(super) max_bytes: u64,
     /// Maximum bytes accepted from any one captured frame or PCAPNG block.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_SIZE_LIMIT)]
-    max_frame_bytes: usize,
+    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
+    pub(super) max_frame_bytes: usize,
     /// Maximum PCAPNG interfaces accepted from the input.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_INTERFACE_LIMIT)]
-    max_interfaces: usize,
+    #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
+    pub(super) max_interfaces: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliReplayTiming {
+pub(super) enum CliReplayTiming {
     #[default]
     Original,
     Immediate,
 }
 
 #[derive(Debug, Args)]
-struct ReplayArgs {
+pub(super) struct ReplayArgs {
     /// Classic PCAP or PCAPNG input path.
-    path: PathBuf,
+    pub(super) path: PathBuf,
     /// Exact interface name or numeric index used for every transmission.
     #[arg(long, value_name = "NAME_OR_INDEX")]
-    interface: String,
+    pub(super) interface: String,
     /// Automatic, Layer 2, or raw Layer 3 replay intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    link_mode: CliLinkMode,
+    pub(super) link_mode: CliLinkMode,
     /// Preserve captured intervals or send immediately.
     #[arg(long, value_enum, default_value_t = CliReplayTiming::Original)]
-    timing: CliReplayTiming,
+    pub(super) timing: CliReplayTiming,
     /// Positive multiplier for captured replay speed (2 means twice as fast).
     #[arg(long, conflicts_with = "rate")]
-    speed: Option<f64>,
+    pub(super) speed: Option<f64>,
     /// Positive fixed frame rate, overriding captured intervals.
     #[arg(long, conflicts_with = "speed")]
-    rate: Option<f64>,
+    pub(super) rate: Option<f64>,
     /// Maximum cumulative intentional replay delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
-    max_duration_ms: u64,
+    pub(super) max_duration_ms: u64,
     /// Maximum bytes accepted from any one captured frame or PCAPNG block.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_SIZE_LIMIT)]
-    max_frame_bytes: usize,
+    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
+    pub(super) max_frame_bytes: usize,
     /// Maximum PCAPNG interfaces accepted from the input.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_INTERFACE_LIMIT)]
-    max_interfaces: usize,
+    #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
+    pub(super) max_interfaces: usize,
     /// Per-operation opt-in required when dissection preserves malformed bytes.
     #[arg(long)]
-    allow_malformed_live: bool,
+    pub(super) allow_malformed_live: bool,
     #[command(flatten)]
-    policy: ReplayPolicyArgs,
+    pub(super) policy: ReplayPolicyArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliFuzzStrategy {
+pub(super) enum CliFuzzStrategy {
     #[default]
     Boundary,
     Random,
@@ -188,7 +194,7 @@ enum CliFuzzStrategy {
     Malformed,
 }
 
-impl From<CliFuzzStrategy> for FuzzStrategy {
+impl From<CliFuzzStrategy> for workflow::fuzz::Strategy {
     fn from(value: CliFuzzStrategy) -> Self {
         match value {
             CliFuzzStrategy::Boundary => Self::Boundary,
@@ -200,18 +206,18 @@ impl From<CliFuzzStrategy> for FuzzStrategy {
 }
 
 #[derive(Debug, Args)]
-struct FuzzArgs {
+pub(super) struct FuzzArgs {
     #[command(flatten)]
-    recipe: RecipeArgs,
+    pub(super) recipe: RecipeArgs,
     /// Stable operation seed used to derive each case independently.
     #[arg(long, default_value_t = 0)]
-    seed: u64,
+    pub(super) seed: u64,
     /// Absolute first case index; combine with --cases 1 to reproduce a case.
     #[arg(long, default_value_t = 0)]
-    first_case: u64,
+    pub(super) first_case: u64,
     /// Number of ordered cases to generate.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_FUZZ_CASES)]
-    cases: usize,
+    #[arg(long, default_value_t = workflow::fuzz::DEFAULT_FUZZ_CASES)]
+    pub(super) cases: usize,
     /// Comma-separated field-aware mutation strategies.
     #[arg(
         long = "strategy",
@@ -219,70 +225,70 @@ struct FuzzArgs {
         value_delimiter = ',',
         default_value = "boundary,random,bit-flip,malformed"
     )]
-    strategies: Vec<CliFuzzStrategy>,
+    pub(super) strategies: Vec<CliFuzzStrategy>,
     /// Restrict mutation to repeated LAYER.FIELD targets; defaults to all fields.
     #[arg(long = "field", value_delimiter = ',')]
-    fields: Vec<String>,
+    pub(super) fields: Vec<String>,
     /// Strict or permissive packet construction for generated cases.
     #[arg(long, value_enum, default_value_t = CliBuildMode::Strict)]
-    mode: CliBuildMode,
+    pub(super) mode: CliBuildMode,
     /// Explicitly enable route, capture, and transmission; offline is the default.
     #[arg(long)]
-    live: bool,
+    pub(super) live: bool,
     /// Independent per-operation opt-in for permissive/malformed live cases.
     #[arg(long)]
-    allow_malformed_live: bool,
+    pub(super) allow_malformed_live: bool,
     /// Optional route destination when the packet has no fixed destination.
     #[arg(long)]
-    destination: Option<IpAddr>,
+    pub(super) destination: Option<IpAddr>,
     /// Response window for each capture-ready live case.
     #[arg(long, default_value_t = 1_000)]
-    timeout_ms: u64,
+    pub(super) timeout_ms: u64,
     /// Optional average live-case rate ceiling.
     #[arg(long)]
-    rate: Option<u32>,
+    pub(super) rate: Option<u32>,
     /// Maximum cases accepted by this operation.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_FUZZ_CASES)]
-    max_cases: usize,
+    #[arg(long, default_value_t = workflow::fuzz::DEFAULT_MAX_FUZZ_CASES)]
+    pub(super) max_cases: usize,
     /// Maximum aggregate retained case data and live wire bytes.
-    #[arg(long, default_value_t = crate::net::DEFAULT_CAPTURE_QUEUE_BYTES)]
-    max_total_bytes: usize,
+    #[arg(long, default_value_t = net::capture::Limits::default().max_bytes)]
+    pub(super) max_total_bytes: usize,
     /// Maximum bytes allocated for one generated field value.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_FUZZ_FIELD_BYTES)]
-    max_field_bytes: usize,
+    #[arg(long, default_value_t = workflow::fuzz::DEFAULT_MAX_FUZZ_FIELD_BYTES)]
+    pub(super) max_field_bytes: usize,
     /// Maximum list elements generated by one mutation.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_FUZZ_LIST_ITEMS)]
-    max_list_items: usize,
+    #[arg(long, default_value_t = workflow::fuzz::DEFAULT_MAX_FUZZ_LIST_ITEMS)]
+    pub(super) max_list_items: usize,
     /// Maximum deterministic shrink candidates returned per case.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_FUZZ_SHRINK_STEPS)]
-    max_shrink_steps: usize,
+    #[arg(long, default_value_t = workflow::fuzz::DEFAULT_MAX_FUZZ_SHRINK_STEPS)]
+    pub(super) max_shrink_steps: usize,
     /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
-    max_duration_ms: u64,
+    pub(super) max_duration_ms: u64,
     /// Interface name or numeric index used as an exact live route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
-    interface: Option<String>,
+    pub(super) interface: Option<String>,
     /// Interface-owned source preference used only for live route selection.
     #[arg(long)]
-    source: Option<IpAddr>,
+    pub(super) source: Option<IpAddr>,
     /// Automatic, Layer 2, or raw Layer 3 live transmission intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    link_mode: CliLinkMode,
+    pub(super) link_mode: CliLinkMode,
     #[command(flatten)]
-    limits: CaptureLimitArgs,
+    pub(super) limits: CaptureLimitArgs,
     #[command(flatten)]
-    policy: TrafficPolicyArgs,
+    pub(super) policy: TrafficPolicyArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliScanTransport {
+pub(super) enum CliScanTransport {
     #[default]
     Tcp,
     Udp,
     Icmp,
 }
 
-impl From<CliScanTransport> for ScanTransport {
+impl From<CliScanTransport> for workflow::scan::Transport {
     fn from(value: CliScanTransport) -> Self {
         match value {
             CliScanTransport::Tcp => Self::Tcp,
@@ -293,14 +299,14 @@ impl From<CliScanTransport> for ScanTransport {
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliAddressFamily {
+pub(super) enum CliAddressFamily {
     #[default]
     Any,
     Ipv4,
     Ipv6,
 }
 
-impl From<CliAddressFamily> for AddressFamily {
+impl From<CliAddressFamily> for workflow::AddressFamily {
     fn from(value: CliAddressFamily) -> Self {
         match value {
             CliAddressFamily::Any => Self::Any,
@@ -311,60 +317,60 @@ impl From<CliAddressFamily> for AddressFamily {
 }
 
 #[derive(Debug, Args)]
-struct ScanArgs {
+pub(super) struct ScanArgs {
     /// Explicit IP address or hostname to scan.
     #[arg(value_name = "ADDRESS_OR_HOSTNAME")]
-    target: String,
+    pub(super) target: String,
     /// TCP SYN, UDP, or ICMP echo probes.
     #[arg(long, value_enum, default_value_t = CliScanTransport::Tcp)]
-    transport: CliScanTransport,
+    pub(super) transport: CliScanTransport,
     /// Select all authorized addresses or only one IP family.
     #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
-    family: CliAddressFamily,
+    pub(super) family: CliAddressFamily,
     /// Comma-separated TCP/UDP destination ports; omitted for ICMP.
     #[arg(long, value_delimiter = ',', num_args = 1..)]
-    ports: Vec<u16>,
+    pub(super) ports: Vec<u16>,
     /// Number of bounded attempts per selected endpoint.
     #[arg(long, default_value_t = 1)]
-    attempts: u32,
+    pub(super) attempts: u32,
     /// Response window for each capture-ready batch.
     #[arg(long, default_value_t = 1_000)]
-    timeout_ms: u64,
+    pub(super) timeout_ms: u64,
     /// Optional average probe-rate ceiling; batches remain deliberate bursts.
     #[arg(long)]
-    rate: Option<u32>,
+    pub(super) rate: Option<u32>,
     /// Maximum probes sent by one shared-capture exchange batch.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_SCAN_BATCH_SIZE)]
-    batch_size: usize,
+    #[arg(long, default_value_t = workflow::scan::DEFAULT_SCAN_BATCH_SIZE)]
+    pub(super) batch_size: usize,
     /// Maximum distinct destination ports accepted by the request.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_SCAN_PORTS)]
-    max_ports: usize,
+    #[arg(long, default_value_t = workflow::scan::DEFAULT_MAX_SCAN_PORTS)]
+    pub(super) max_ports: usize,
     /// Maximum generated probes after target resolution and attempts.
-    #[arg(long, default_value_t = crate::packet::internal::DEFAULT_MAX_TEMPLATE_PACKETS)]
-    max_probes: usize,
+    #[arg(long, default_value_t = packet::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
+    pub(super) max_probes: usize,
     /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
-    max_duration_ms: u64,
+    pub(super) max_duration_ms: u64,
     /// Maximum undecodable exact frames retained across the scan.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
-    max_undecoded: usize,
+    #[arg(long, default_value_t = workflow::scan::DEFAULT_MAX_UNDECODED_SCAN_FRAMES)]
+    pub(super) max_undecoded: usize,
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
-    interface: Option<String>,
+    pub(super) interface: Option<String>,
     /// Interface-owned source preference used only for route selection.
     #[arg(long)]
-    source: Option<IpAddr>,
+    pub(super) source: Option<IpAddr>,
     /// Automatic, Layer 2, or raw Layer 3 transmission intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    link_mode: CliLinkMode,
+    pub(super) link_mode: CliLinkMode,
     #[command(flatten)]
-    limits: CaptureLimitArgs,
+    pub(super) limits: CaptureLimitArgs,
     #[command(flatten)]
-    policy: TrafficPolicyArgs,
+    pub(super) policy: TrafficPolicyArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliDnsQueryType {
+pub(super) enum CliDnsQueryType {
     #[default]
     A,
     Aaaa,
@@ -378,7 +384,7 @@ enum CliDnsQueryType {
     Any,
 }
 
-impl From<CliDnsQueryType> for DnsQueryType {
+impl From<CliDnsQueryType> for workflow::dns::QueryType {
     fn from(value: CliDnsQueryType) -> Self {
         match value {
             CliDnsQueryType::A => Self::A,
@@ -396,88 +402,88 @@ impl From<CliDnsQueryType> for DnsQueryType {
 }
 
 #[derive(Debug, Args)]
-struct DnsArgs {
+pub(super) struct DnsArgs {
     /// Explicit DNS server IP address or hostname.
     #[arg(value_name = "SERVER")]
-    server: String,
+    pub(super) server: String,
     /// Bounded ASCII DNS owner name to query.
     #[arg(value_name = "NAME")]
-    name: String,
+    pub(super) name: String,
     /// DNS question type.
     #[arg(long = "type", value_enum, default_value_t = CliDnsQueryType::A)]
-    query_type: CliDnsQueryType,
+    pub(super) query_type: CliDnsQueryType,
     /// Select the first authorized server address or one IP family.
     #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
-    family: CliAddressFamily,
+    pub(super) family: CliAddressFamily,
     /// DNS server UDP port.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_DNS_SERVER_PORT)]
-    port: u16,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_DNS_SERVER_PORT)]
+    pub(super) port: u16,
     /// Explicit 16-bit transaction ID; a process-local value is generated when omitted.
     #[arg(long)]
-    transaction_id: Option<u16>,
+    pub(super) transaction_id: Option<u16>,
     /// First UDP source port; an ephemeral-range value is generated when omitted.
     #[arg(long)]
-    source_port: Option<u16>,
+    pub(super) source_port: Option<u16>,
     /// Disable the recursion-desired query flag.
     #[arg(long)]
-    no_recursion: bool,
+    pub(super) no_recursion: bool,
     /// Number of independently re-resolved and re-authorized attempts.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_DNS_ATTEMPTS)]
-    attempts: u32,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_DNS_ATTEMPTS)]
+    pub(super) attempts: u32,
     /// Response window for each capture-ready query.
     #[arg(long, default_value_t = 1_000)]
-    timeout_ms: u64,
+    pub(super) timeout_ms: u64,
     /// Optional average query-rate ceiling.
     #[arg(long)]
-    rate: Option<u32>,
+    pub(super) rate: Option<u32>,
     /// Maximum worst-case timeout plus intentional retry delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
-    max_duration_ms: u64,
+    pub(super) max_duration_ms: u64,
     /// Maximum complete DNS message bytes decoded.
-    #[arg(long, default_value_t = crate::workflow_api::MAX_DNS_MESSAGE_BYTES)]
-    max_message_bytes: usize,
+    #[arg(long, default_value_t = workflow::dns::MAX_DNS_MESSAGE_BYTES)]
+    pub(super) max_message_bytes: usize,
     /// Maximum total answer, authority, and additional records decoded.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_DNS_RECORDS)]
-    max_records: usize,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_RECORDS)]
+    pub(super) max_records: usize,
     /// Maximum compression-pointer traversals for any decoded DNS name.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_DNS_NAME_POINTERS)]
-    max_name_pointers: usize,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_NAME_POINTERS)]
+    pub(super) max_name_pointers: usize,
     /// Maximum TXT character strings in one record.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_DNS_TXT_STRINGS)]
-    max_txt_strings: usize,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_TXT_STRINGS)]
+    pub(super) max_txt_strings: usize,
     /// Maximum aggregate TXT data bytes in one record.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_DNS_TXT_BYTES)]
-    max_txt_bytes: usize,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_DNS_TXT_BYTES)]
+    pub(super) max_txt_bytes: usize,
     /// Maximum rejected-record metadata entries retained.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_REJECTED_DNS_RECORDS)]
-    max_rejected_records: usize,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_REJECTED_DNS_RECORDS)]
+    pub(super) max_rejected_records: usize,
     /// Maximum undecodable exact frames retained across attempts.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_UNDECODED_DNS_FRAMES)]
-    max_undecoded: usize,
+    #[arg(long, default_value_t = workflow::dns::DEFAULT_MAX_UNDECODED_DNS_FRAMES)]
+    pub(super) max_undecoded: usize,
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
-    interface: Option<String>,
+    pub(super) interface: Option<String>,
     /// Interface-owned source preference used only for route selection.
     #[arg(long)]
-    source: Option<IpAddr>,
+    pub(super) source: Option<IpAddr>,
     /// Automatic, Layer 2, or raw Layer 3 transmission intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    link_mode: CliLinkMode,
+    pub(super) link_mode: CliLinkMode,
     #[command(flatten)]
-    limits: CaptureLimitArgs,
+    pub(super) limits: CaptureLimitArgs,
     #[command(flatten)]
-    policy: TrafficPolicyArgs,
+    pub(super) policy: TrafficPolicyArgs,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliTracerouteStrategy {
+pub(super) enum CliTracerouteStrategy {
     #[default]
     Udp,
     Icmp,
     Tcp,
 }
 
-impl From<CliTracerouteStrategy> for TracerouteStrategy {
+impl From<CliTracerouteStrategy> for workflow::traceroute::Strategy {
     fn from(value: CliTracerouteStrategy) -> Self {
         match value {
             CliTracerouteStrategy::Udp => Self::Udp,
@@ -488,120 +494,120 @@ impl From<CliTracerouteStrategy> for TracerouteStrategy {
 }
 
 #[derive(Debug, Args)]
-struct TracerouteArgs {
+pub(super) struct TracerouteArgs {
     /// Explicit IP address or hostname to trace.
     #[arg(value_name = "ADDRESS_OR_HOSTNAME")]
-    target: String,
+    pub(super) target: String,
     /// UDP, ICMP echo, or TCP SYN probes.
     #[arg(long, value_enum, default_value_t = CliTracerouteStrategy::Udp)]
-    strategy: CliTracerouteStrategy,
+    pub(super) strategy: CliTracerouteStrategy,
     /// Select the first authorized address or only one IP family.
     #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
-    family: CliAddressFamily,
+    pub(super) family: CliAddressFamily,
     /// UDP base destination port or fixed TCP destination port.
     #[arg(long)]
-    port: Option<u16>,
+    pub(super) port: Option<u16>,
     /// First non-zero IPv4 TTL or IPv6 hop limit.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_TRACEROUTE_FIRST_HOP)]
-    first_hop: u8,
+    #[arg(long, default_value_t = workflow::traceroute::DEFAULT_TRACEROUTE_FIRST_HOP)]
+    pub(super) first_hop: u8,
     /// Last IPv4 TTL or IPv6 hop limit attempted.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_TRACEROUTE_MAX_HOPS)]
-    max_hops: u8,
+    #[arg(long, default_value_t = workflow::traceroute::DEFAULT_TRACEROUTE_MAX_HOPS)]
+    pub(super) max_hops: u8,
     /// Number of attempts retained for every hop.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_TRACEROUTE_PROBES_PER_HOP)]
-    attempts: u32,
+    #[arg(long, default_value_t = workflow::traceroute::DEFAULT_TRACEROUTE_PROBES_PER_HOP)]
+    pub(super) attempts: u32,
     /// Response window for each capture-ready hop batch.
     #[arg(long, default_value_t = 1_000)]
-    timeout_ms: u64,
+    pub(super) timeout_ms: u64,
     /// Optional average probe-rate ceiling; each hop remains one deliberate burst.
     #[arg(long)]
-    rate: Option<u32>,
+    pub(super) rate: Option<u32>,
     /// Maximum generated probes across all hops.
-    #[arg(long, default_value_t = crate::packet::internal::DEFAULT_MAX_TEMPLATE_PACKETS)]
-    max_probes: usize,
+    #[arg(long, default_value_t = packet::template::DEFAULT_MAX_TEMPLATE_PACKETS)]
+    pub(super) max_probes: usize,
     /// Maximum worst-case timeout plus intentional rate delay in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
-    max_duration_ms: u64,
+    pub(super) max_duration_ms: u64,
     /// Maximum hop-scoped undecodable exact frames retained.
-    #[arg(long, default_value_t = crate::workflow_api::DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES)]
-    max_undecoded: usize,
+    #[arg(long, default_value_t = workflow::traceroute::DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES)]
+    pub(super) max_undecoded: usize,
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
-    interface: Option<String>,
+    pub(super) interface: Option<String>,
     /// Interface-owned source preference used only for route selection.
     #[arg(long)]
-    source: Option<IpAddr>,
+    pub(super) source: Option<IpAddr>,
     /// Automatic, Layer 2, or raw Layer 3 transmission intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    link_mode: CliLinkMode,
+    pub(super) link_mode: CliLinkMode,
     #[command(flatten)]
-    limits: CaptureLimitArgs,
+    pub(super) limits: CaptureLimitArgs,
     #[command(flatten)]
-    policy: TrafficPolicyArgs,
+    pub(super) policy: TrafficPolicyArgs,
 }
 
 #[derive(Debug, Args)]
-struct RouteArgs {
+pub(super) struct RouteArgs {
     #[command(flatten)]
-    recipe: RecipeArgs,
+    pub(super) recipe: RecipeArgs,
     /// Explicit address or hostname when the packet has no fixed destination.
     #[arg(long, value_name = "ADDRESS_OR_HOSTNAME")]
-    destination: Option<String>,
+    pub(super) destination: Option<String>,
     /// Interface name or numeric index used as an exact route constraint.
     #[arg(long, value_name = "NAME_OR_INDEX")]
-    interface: Option<String>,
+    pub(super) interface: Option<String>,
     /// Interface-owned source preference used only for route selection.
     #[arg(long)]
-    source: Option<IpAddr>,
+    pub(super) source: Option<IpAddr>,
     /// Automatic, Layer 2, or raw Layer 3 transmission intent.
     #[arg(long, value_enum, default_value_t = CliLinkMode::Auto)]
-    link_mode: CliLinkMode,
+    pub(super) link_mode: CliLinkMode,
     #[command(flatten)]
-    policy: TrafficPolicyArgs,
+    pub(super) policy: TrafficPolicyArgs,
 }
 
 #[derive(Debug, Args)]
-struct SendArgs {
+pub(super) struct SendArgs {
     #[command(flatten)]
-    route: RouteArgs,
+    pub(super) route: RouteArgs,
     /// Strict or permissive packet construction.
     #[arg(long, value_enum, default_value_t = CliBuildMode::Strict)]
-    mode: CliBuildMode,
+    pub(super) mode: CliBuildMode,
     /// Per-operation opt-in required for a permissively built live frame.
     #[arg(long)]
-    allow_permissive_live: bool,
+    pub(super) allow_permissive_live: bool,
 }
 
 #[derive(Debug, Args)]
-struct CaptureArgs {
+pub(super) struct CaptureArgs {
     #[command(flatten)]
-    route: RouteArgs,
+    pub(super) route: RouteArgs,
     /// Overall capture window in milliseconds.
     #[arg(long, default_value_t = 3_000)]
-    timeout_ms: u64,
+    pub(super) timeout_ms: u64,
     #[command(flatten)]
-    limits: CaptureLimitArgs,
+    pub(super) limits: CaptureLimitArgs,
 }
 
 #[derive(Debug, Args)]
-struct ExchangeArgs {
+pub(super) struct ExchangeArgs {
     #[command(flatten)]
-    send: SendArgs,
+    pub(super) send: SendArgs,
     /// Overall response window in milliseconds.
     #[arg(long, default_value_t = 3_000)]
-    timeout_ms: u64,
+    pub(super) timeout_ms: u64,
     /// Maximum matched responses retained across the exchange.
-    #[arg(long, default_value_t = crate::client::exchange::DEFAULT_MAX_UNSOLICITED_FRAMES)]
-    max_responses: usize,
+    #[arg(long, default_value_t = client::exchange::DEFAULT_MAX_UNSOLICITED_FRAMES)]
+    pub(super) max_responses: usize,
     /// Maximum unsolicited decoded frames retained across the exchange.
-    #[arg(long, default_value_t = crate::client::exchange::DEFAULT_MAX_UNSOLICITED_FRAMES)]
-    max_unsolicited: usize,
+    #[arg(long, default_value_t = client::exchange::DEFAULT_MAX_UNSOLICITED_FRAMES)]
+    pub(super) max_unsolicited: usize,
     #[command(flatten)]
-    limits: CaptureLimitArgs,
+    pub(super) limits: CaptureLimitArgs,
 }
 
 #[derive(Clone, Debug, Args)]
-struct TrafficPolicyArgs {
+pub(super) struct TrafficPolicyArgs {
     /// Deliberately authorize globally routable destinations.
     #[arg(long)]
     allow_public_destinations: bool,
@@ -615,15 +621,15 @@ struct TrafficPolicyArgs {
     #[arg(long, default_value_t = 10_000)]
     max_packets: u64,
     /// Maximum wire bytes authorized for one operation.
-    #[arg(long, default_value_t = crate::net::DEFAULT_CAPTURE_QUEUE_BYTES as u64)]
+    #[arg(long, default_value_t = net::capture::Limits::default().max_bytes as u64)]
     max_bytes: u64,
     /// Maximum distinct addresses accepted from one hostname resolution.
-    #[arg(long, default_value_t = crate::client::target::DEFAULT_MAX_RESOLVED_ADDRESSES)]
+    #[arg(long, default_value_t = client::target::DEFAULT_MAX_RESOLVED_ADDRESSES)]
     max_resolved_addresses: usize,
 }
 
 #[derive(Clone, Debug, Args)]
-struct ReplayPolicyArgs {
+pub(super) struct ReplayPolicyArgs {
     /// Deliberately authorize globally routable destinations.
     #[arg(long)]
     allow_public_destinations: bool,
@@ -631,23 +637,23 @@ struct ReplayPolicyArgs {
     #[arg(long)]
     allow_permissive_packets: bool,
     /// Maximum packets authorized for one operation.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_STREAM_FRAMES)]
-    max_packets: u64,
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
+    pub(super) max_packets: u64,
     /// Maximum wire bytes authorized for one operation.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_STREAM_BYTES)]
-    max_bytes: u64,
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
+    pub(super) max_bytes: u64,
 }
 
 #[derive(Clone, Debug, Args)]
-struct CaptureLimitArgs {
+pub(super) struct CaptureLimitArgs {
     /// Aggregate backend capture-queue frame bound.
-    #[arg(long, default_value_t = crate::net::DEFAULT_CAPTURE_QUEUE_FRAMES)]
+    #[arg(long, default_value_t = net::capture::Limits::default().max_frames)]
     max_queue_frames: usize,
     /// Aggregate retained/queued capture byte bound.
-    #[arg(long, default_value_t = crate::net::DEFAULT_CAPTURE_QUEUE_BYTES)]
+    #[arg(long, default_value_t = net::capture::Limits::default().max_bytes)]
     max_captured_bytes: usize,
     /// Maximum bytes retained from any one captured frame.
-    #[arg(long, default_value_t = crate::capture::DEFAULT_SIZE_LIMIT)]
+    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
     snap_length: usize,
     /// Backend queue behavior when a configured bound is reached.
     #[arg(long, value_enum, default_value_t = CliCaptureOverflowPolicy::Fail)]
@@ -655,7 +661,7 @@ struct CaptureLimitArgs {
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliCaptureOverflowPolicy {
+pub(super) enum CliCaptureOverflowPolicy {
     #[default]
     Fail,
     DropNewest,
@@ -663,14 +669,14 @@ enum CliCaptureOverflowPolicy {
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
-enum CliLinkMode {
+pub(super) enum CliLinkMode {
     #[default]
     Auto,
     Layer2,
     Layer3,
 }
 
-impl From<CliLinkMode> for LinkMode {
+impl From<CliLinkMode> for net::link::Mode {
     fn from(value: CliLinkMode) -> Self {
         match value {
             CliLinkMode::Auto => Self::Auto,
@@ -680,7 +686,7 @@ impl From<CliLinkMode> for LinkMode {
     }
 }
 
-impl From<CliCaptureOverflowPolicy> for CaptureOverflowPolicy {
+impl From<CliCaptureOverflowPolicy> for net::capture::OverflowPolicy {
     fn from(value: CliCaptureOverflowPolicy) -> Self {
         match value {
             CliCaptureOverflowPolicy::Fail => Self::Fail,
@@ -691,8 +697,8 @@ impl From<CliCaptureOverflowPolicy> for CaptureOverflowPolicy {
 }
 
 impl TrafficPolicyArgs {
-    fn into_policy(self) -> TrafficPolicy {
-        TrafficPolicy {
+    pub(super) fn into_policy(self) -> client::policy::Policy {
+        client::policy::Policy {
             allow_public_destinations: self.allow_public_destinations,
             allow_hostname_resolution: self.allow_hostname_resolution,
             allow_permissive_packets: self.allow_permissive_packets,
@@ -704,20 +710,20 @@ impl TrafficPolicyArgs {
 }
 
 impl ReplayPolicyArgs {
-    fn into_policy(self) -> TrafficPolicy {
-        TrafficPolicy {
+    pub(super) fn into_policy(self) -> client::policy::Policy {
+        client::policy::Policy {
             allow_public_destinations: self.allow_public_destinations,
             allow_permissive_packets: self.allow_permissive_packets,
             max_packets_per_operation: self.max_packets,
             max_bytes_per_operation: self.max_bytes,
-            ..TrafficPolicy::default()
+            ..client::policy::Policy::default()
         }
     }
 }
 
 impl CaptureLimitArgs {
-    fn into_limits(self) -> CaptureQueueLimits {
-        CaptureQueueLimits {
+    pub(super) fn into_limits(self) -> net::capture::Limits {
+        net::capture::Limits {
             max_frames: self.max_queue_frames,
             max_bytes: self.max_captured_bytes,
             snap_length: self.snap_length,

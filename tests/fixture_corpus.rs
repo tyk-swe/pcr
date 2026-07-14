@@ -271,7 +271,7 @@ fn every_capture_truncation_is_bounded_and_errors_are_terminal() {
                 Err(_) => {}
                 Ok(mut reader) => loop {
                     match reader.next_frame() {
-                        Ok(Some(frame)) => assert!(frame.bytes.len() <= 16 * 1024 * 1024),
+                        Ok(Some(frame)) => assert!(frame.bytes().len() <= 16 * 1024 * 1024),
                         Ok(None) => break,
                         Err(_) => {
                             assert!(reader.next_frame().unwrap().is_none(), "{relative}@{end}");

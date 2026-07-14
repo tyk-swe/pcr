@@ -1,3 +1,9 @@
+use std::io::{Read, Write};
+
+use super::models::{Error, Format, Limits, TranscodeReport};
+use super::reader::Reader;
+use super::writer::{Writer, WriterState};
+
 pub fn transcode<R: Read, W: Write>(
     reader: &mut Reader<R>,
     output: W,

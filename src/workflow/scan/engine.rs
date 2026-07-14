@@ -140,13 +140,7 @@ where
             .map_err(|source| ScanError::Execution { sequence, source })?;
         validate_exchange_evidence(batch, &exchange, request.limits)?;
         add_stats(&mut stats, &exchange.stats, sequence)?;
-        process_batch(
-            batch,
-            exchange,
-            registry,
-            request.limits,
-            &mut output,
-        );
+        process_batch(batch, exchange, registry, request.limits, &mut output);
     }
     stats.elapsed =
         stats
@@ -166,7 +160,7 @@ where
     })
 }
 
-fn build_batches(
+pub(super) fn build_batches(
     request: &ScanRequest,
     addresses: &[IpAddr],
     endpoint_ports: &[Option<u16>],
@@ -254,14 +248,14 @@ fn worst_case_duration(
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, ScanError> {
-    super::clock::rate_delay(probes, rate).ok_or(ScanError::InvalidLimit {
+    crate::workflow::clock::rate_delay(probes, rate).ok_or(ScanError::InvalidLimit {
         field: "probes_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),
     })
 }
 
-fn probe_packet(probe: &ScanProbe) -> Packet {
+pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
         IpAddr::V4(destination) => {
@@ -317,142 +311,100 @@ fn icmp_identity(sequence: u64) -> Bytes {
     Bytes::copy_from_slice(&[0x50, 0x43, (sequence >> 8) as u8, sequence as u8])
 }
 
-fn validate_exchange_evidence(
+pub(super) fn validate_exchange_evidence(
     batch: &ScanBatch,
     exchange: &ScanBatchExecution,
     limits: ScanLimits,
 ) -> Result<(), ScanError> {
-    let sequence = batch.probes[0].sequence;
-    if exchange.sent.len() != batch.probes.len()
-        || exchange.sent_evidence.len() != batch.probes.len()
-    {
-        return Err(ScanError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "expected {} sent packets and frames, received {} packets and {} frames",
-                batch.probes.len(),
-                exchange.sent.len(),
-                exchange.sent_evidence.len()
-            ),
-        });
-    }
-    if exchange
-        .responses
-        .iter()
-        .any(|response| response.request_index >= batch.probes.len())
-    {
-        return Err(ScanError::InvalidEvidence {
-            sequence,
-            message: "matched response references a request outside the batch".to_owned(),
-        });
-    }
-    let captured_frames = checked_frame_count(&[
-        exchange.responses.len(),
-        exchange.unsolicited.len(),
-        exchange.undecoded.len(),
-    ])
-    .ok_or_else(|| ScanError::InvalidEvidence {
-        sequence,
-        message: "executor capture frame-count accounting overflowed".to_owned(),
-    })?;
-    if captured_frames > limits.max_evidence_frames {
-        return Err(ScanError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "executor returned {captured_frames} captured frames beyond max_evidence_frames={}",
-                limits.max_evidence_frames
-            ),
-        });
-    }
-    let captured_bytes = checked_frame_bytes(
-        exchange
-            .responses
-            .iter()
-            .map(|response| &response.response.frame)
-            .chain(exchange.unsolicited.iter().map(|response| &response.frame))
-            .chain(exchange.undecoded.iter()),
+    validate_shared_exchange_evidence(
+        ExchangeEvidence {
+            request_count: batch.probes.len(),
+            sent_packets: &exchange.sent,
+            sent_frames: &exchange.sent_evidence,
+            matched_responses: &exchange.responses,
+            unsolicited: &exchange.unsolicited,
+            undecoded: &exchange.undecoded,
+            timeout: batch.timeout,
+            stats: &exchange.stats,
+        },
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+        |request_index, sent| sent_scan_probe_matches(&batch.probes[request_index], sent),
     )
-    .ok_or_else(|| ScanError::InvalidEvidence {
-        sequence,
-        message: "executor capture byte accounting overflowed".to_owned(),
-    })?;
-    if captured_bytes > limits.max_evidence_bytes {
-        return Err(ScanError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "executor returned {captured_bytes} captured bytes beyond max_evidence_bytes={}",
-                limits.max_evidence_bytes
-            ),
-        });
-    }
-    for (probe, (sent, evidence)) in batch
-        .probes
-        .iter()
-        .zip(exchange.sent.iter().zip(&exchange.sent_evidence))
-    {
-        if !sent_scan_probe_matches(probe, sent) {
-            return Err(ScanError::InvalidEvidence {
-                sequence: probe.sequence,
-                message: "sent packet does not preserve the scan destination and probe identity"
-                    .to_owned(),
-            });
-        }
-        validate_frame(evidence, "sent").map_err(|message| ScanError::InvalidEvidence {
-            sequence: probe.sequence,
-            message,
-        })?;
-    }
-    let sent_bytes = checked_sent_frame_bytes(&exchange.sent_evidence).ok_or_else(|| {
-        ScanError::InvalidEvidence {
-            sequence,
-            message: "sent frame byte accounting overflowed".to_owned(),
-        }
-    })?;
-    if exchange.stats.bytes != sent_bytes {
-        return Err(ScanError::InvalidEvidence {
-            sequence,
-            message: format!(
-                "successful exchange reported {} sent bytes for {sent_bytes} exact frame bytes",
-                exchange.stats.bytes
-            ),
-        });
-    }
-    for response in &exchange.responses {
-        validate_decoded_frame(&response.response, "matched response")
-            .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
-        if response.latency > batch.timeout {
-            return Err(ScanError::InvalidEvidence {
-                sequence,
-                message: format!(
-                    "matched response latency {:?} exceeds timeout {:?}",
-                    response.latency, batch.timeout
-                ),
-            });
-        }
-    }
-    for response in &exchange.unsolicited {
-        validate_decoded_frame(response, "unsolicited response")
-            .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
-    }
-    for frame in &exchange.undecoded {
-        validate_frame(frame, "undecoded")
-            .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
-    }
-    validate_capture_statistics(exchange.stats.capture)
-        .map_err(|message| ScanError::InvalidEvidence { sequence, message })?;
-    if exchange.stats.packets_attempted != batch.probes.len() as u64
-        || exchange.stats.packets_completed != batch.probes.len() as u64
-    {
-        return Err(ScanError::InvalidEvidence {
-            sequence,
-            message: "successful exchange statistics do not account for every scan probe"
-                .to_owned(),
-        });
-    }
-    Ok(())
+    .map_err(|error| map_scan_evidence_error(batch, error))
 }
 
-fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
+impl MatchedResponseEvidence for ScanMatchedResponse {
+    fn request_index(&self) -> usize {
+        self.request_index
+    }
+
+    fn response(&self) -> &DecodedPacket {
+        &self.response
+    }
+
+    fn latency(&self) -> Duration {
+        self.latency
+    }
+}
+
+fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> ScanError {
+    let batch_sequence = batch.probes[0].sequence;
+    let sequence = match &error {
+        ExchangeEvidenceError::SentPacketMismatch { request_index }
+        | ExchangeEvidenceError::InvalidSentFrame { request_index, .. } => {
+            batch.probes[*request_index].sequence
+        }
+        _ => batch_sequence,
+    };
+    let message = match error {
+        ExchangeEvidenceError::SentCardinality {
+            expected,
+            packets,
+            frames,
+        } => format!(
+            "expected {expected} sent packets and frames, received {packets} packets and {frames} frames"
+        ),
+        ExchangeEvidenceError::MatchedResponseOutsideBatch => {
+            "matched response references a request outside the batch".to_owned()
+        }
+        ExchangeEvidenceError::CapturedFrameCountOverflow => {
+            "executor capture frame-count accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedFrameLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} captured frames beyond max_evidence_frames={limit}")
+        }
+        ExchangeEvidenceError::CapturedByteCountOverflow => {
+            "executor capture byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedByteLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")
+        }
+        ExchangeEvidenceError::SentPacketMismatch { .. } => {
+            "sent packet does not preserve the scan destination and probe identity".to_owned()
+        }
+        ExchangeEvidenceError::InvalidSentFrame { message, .. }
+        | ExchangeEvidenceError::InvalidMatchedResponse { message }
+        | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
+        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
+        | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
+        ExchangeEvidenceError::SentByteCountOverflow => {
+            "sent frame byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
+            "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
+        ),
+        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
+            format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
+        }
+        ExchangeEvidenceError::IncompleteStatistics => {
+            "successful exchange statistics do not account for every scan probe".to_owned()
+        }
+    };
+    ScanError::InvalidEvidence { sequence, message }
+}
+
+pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         "ipv4"
     } else {
@@ -464,7 +416,8 @@ fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
         ScanTransport::Icmp if probe.address.is_ipv4() => "icmpv4",
         ScanTransport::Icmp => "icmpv6",
     };
-    if !super::probe::packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
+    if !crate::workflow::probe::packet_shape_matches(sent, &[network_protocol, transport_protocol])
+    {
         return false;
     }
     let network_matches = match probe.address {
@@ -520,11 +473,7 @@ fn retain_scan_evidence(
     limits: ScanLimits,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
-    let error = match budget.retain(
-        frame,
-        limits.max_evidence_frames,
-        limits.max_evidence_bytes,
-    ) {
+    let error = match budget.retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes) {
         Ok(()) => return true,
         Err(error) => error,
     };
@@ -638,7 +587,7 @@ fn process_batch(
                 limits,
                 &mut output.diagnostics,
             )
-                .then(|| candidate.decoded.frame.clone());
+            .then(|| candidate.decoded.frame.clone());
             if candidate.observation.classification.rank() > endpoint.classification.rank() {
                 endpoint.classification = candidate.observation.classification;
             }
@@ -732,9 +681,10 @@ fn candidate_precedes(candidate: &ResponseCandidate<'_>, current: &ResponseCandi
                 || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
                     && (candidate.observation.responder < current.observation.responder
                         || (candidate.observation.responder == current.observation.responder
-                            && (candidate.decoded.frame.bytes < current.decoded.frame.bytes
-                                || (candidate.decoded.frame.bytes
-                                    == current.decoded.frame.bytes
+                            && (candidate.decoded.frame.bytes()
+                                < current.decoded.frame.bytes()
+                                || (candidate.decoded.frame.bytes()
+                                    == current.decoded.frame.bytes()
                                     && preferred_latency(candidate.latency, current.latency))))))))
 }
 
@@ -743,3 +693,13 @@ fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), Scan
         .checked_add(batch)
         .ok_or(ScanError::StatisticsOverflow { sequence })
 }
+use super::{
+    Authorizer, Bytes, Clock, DecodedPacket, Diagnostic, Duration, EvidenceBudget,
+    EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError, Frame, IPV4_PROBE_BYTES,
+    IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
+    ProtocolRegistry, ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult,
+    ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence,
+    ScanProbeStatus, ScanRequest, ScanResponseClassification, ScanResult, ScanTransport, Stats,
+    SystemTime, Tcp, Udp, classify_scan_response, nonzero_ipv4_identification, preferred_latency,
+    push_diagnostic_once, response_within_deadline, validate_shared_exchange_evidence,
+};

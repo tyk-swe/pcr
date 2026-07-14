@@ -1,3 +1,15 @@
+use std::fmt;
+
+use serde::Serialize;
+
+use crate::error::Classified;
+use crate::packet::internal::{Diagnostic, PacketDocument};
+use crate::workflow::fuzz::Result as FuzzResult;
+
+use super::contract::OutputContractError;
+use super::envelope::{DiagnosticOutput, OperationStats, OutputError};
+use super::frame::{FrameOutput, WireFrameOutput};
+
 /// Output-v1 fuzz execution mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -168,7 +168,7 @@ impl LayerCodec for Icmpv4Codec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["icmp", "icmp4"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -265,7 +265,7 @@ impl LayerCodec for Icmpv6Codec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        &["icmp6"]
+        super::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(

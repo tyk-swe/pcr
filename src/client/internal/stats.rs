@@ -1,3 +1,9 @@
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+use crate::net::CaptureStatistics;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OperationStats {
     pub packets_attempted: u64,

@@ -4,20 +4,19 @@
 //! Bounded DNS query construction, response validation, relevance filtering,
 //! and retry execution over the shared target-policy and exchange seams.
 
-use std::error::Error;
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use thiserror::Error;
 
 use crate::capture::Frame;
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo, MAX_CAPTURE_TIMEOUT,
-    NeighborResolver, RouteProvider,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, ExchangeIo, NeighborResolver,
+    RouteProvider,
 };
 use crate::packet::internal::{
     DecodedPacket, Diagnostic, DiagnosticSeverity, FieldValue, NetworkEnvelope, Packet,
@@ -51,7 +50,7 @@ pub const MAX_DNS_ATTEMPTS: u32 = 32;
 pub const MAX_DNS_MESSAGE_BYTES: usize = u16::MAX as usize;
 pub const MAX_DNS_RECORDS: usize = 4_096;
 pub const MAX_DNS_NAME_POINTERS: usize = 128;
-pub const MAX_DNS_DURATION: Duration = MAX_CAPTURE_TIMEOUT;
+pub const MAX_DNS_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
 
 const DNS_FLAG_RESPONSE: u16 = 0x8000;
 const DNS_FLAG_AUTHORITATIVE: u16 = 0x0400;
@@ -69,10 +68,30 @@ const DNS_CLASS_IN: u16 = 1;
 const DNS_TYPE_OPT: u16 = 41;
 const MAX_DNS_PROBE_OVERHEAD: u64 = 14 + 40 + 8;
 
-include!("dns/model.rs");
-include!("dns/error.rs");
-include!("dns/wire.rs");
-include!("dns/adapter.rs");
-include!("dns/test_helpers.rs");
-include!("dns/engine.rs");
-include!("dns/tests.rs");
+#[path = "dns/adapter.rs"]
+mod adapter;
+#[path = "dns/engine.rs"]
+mod engine;
+#[path = "dns/error.rs"]
+mod error;
+#[path = "dns/model.rs"]
+mod model;
+#[cfg(test)]
+#[path = "dns/tests.rs"]
+mod tests;
+#[path = "dns/wire.rs"]
+mod wire;
+
+pub use adapter::ClientExecutor;
+pub use engine::dns;
+pub use error::{DnsError, DnsWireError};
+pub use model::{
+    DnsAttemptEvidence, DnsAttemptStatus, DnsEdns, DnsEdnsOption, DnsExchange,
+    DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsName,
+    DnsOutcome, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsRequest,
+    DnsResult, DnsSection, DnsTransport, DnsUndecodedEvidence, ValidatedDnsResponse,
+};
+pub use wire::{
+    DnsResponseClassification, canonical_query_name, classify_dns_response, decode_dns_response,
+    decode_dns_tcp_frame, encode_dns_query, response_code_name,
+};

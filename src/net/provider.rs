@@ -21,8 +21,6 @@ use super::{InterfaceId, LinkCapability, LinkMode, MacAddress, MaterializedRoute
 pub(crate) const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
 /// Aggregate backend capture-queue byte capacity used by default.
 pub(crate) const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
-/// Maximum blocking wait accepted by an owned capture session.
-pub(crate) const MAX_CAPTURE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 /// One address assigned to an interface, without any operating-system type in
 /// the public provider boundary.
@@ -474,10 +472,10 @@ impl CaptureQueueLimits {
 }
 
 pub(crate) fn validate_capture_timeout(timeout: Duration) -> Result<(), LiveIoError> {
-    if timeout > MAX_CAPTURE_TIMEOUT {
+    if timeout > super::capture::MAX_TIMEOUT {
         return Err(LiveIoError::InvalidCaptureTimeout {
             timeout,
-            maximum: MAX_CAPTURE_TIMEOUT,
+            maximum: super::capture::MAX_TIMEOUT,
         });
     }
     std::time::Instant::now()
@@ -485,7 +483,7 @@ pub(crate) fn validate_capture_timeout(timeout: Duration) -> Result<(), LiveIoEr
         .map(|_| ())
         .ok_or(LiveIoError::InvalidCaptureTimeout {
             timeout,
-            maximum: MAX_CAPTURE_TIMEOUT,
+            maximum: super::capture::MAX_TIMEOUT,
         })
 }
 
@@ -794,12 +792,12 @@ mod tests {
 
     #[test]
     fn capture_timeout_is_bounded_before_a_backend_wait() {
-        assert!(validate_capture_timeout(MAX_CAPTURE_TIMEOUT).is_ok());
+        assert!(validate_capture_timeout(crate::net::capture::MAX_TIMEOUT).is_ok());
         let error = validate_capture_timeout(Duration::MAX).unwrap_err();
         assert!(matches!(
             &error,
             LiveIoError::InvalidCaptureTimeout {
-                maximum: MAX_CAPTURE_TIMEOUT,
+                maximum: crate::net::capture::MAX_TIMEOUT,
                 ..
             }
         ));

@@ -1,3 +1,13 @@
+use std::fmt;
+use std::time::Duration;
+
+use serde::Serialize;
+
+use crate::error::{Classification, Classified, Kind};
+use crate::packet::internal::Diagnostic;
+
+use super::contract::{CommandName, OUTPUT_SCHEMA_V1, OutputMode};
+
 /// Stable structured error carried by aggregate and streaming envelopes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -107,18 +117,6 @@ pub struct OperationStats {
 
 impl From<crate::client::Stats> for OperationStats {
     fn from(value: crate::client::Stats) -> Self {
-        Self {
-            packets_attempted: value.packets_attempted,
-            packets_completed: value.packets_completed,
-            bytes: value.bytes,
-            elapsed: value.elapsed,
-            capture: value.capture.into(),
-        }
-    }
-}
-
-impl From<crate::workflow::Stats> for OperationStats {
-    fn from(value: crate::workflow::Stats) -> Self {
         Self {
             packets_attempted: value.packets_attempted,
             packets_completed: value.packets_completed,

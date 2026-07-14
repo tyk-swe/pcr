@@ -16,7 +16,7 @@ pub fn classify_scan_response(
     response: &DecodedPacket,
 ) -> Option<ScanResponseClassification> {
     let observation =
-        super::probe::observe(registry, transport.probe_transport(), request, response)?;
+        crate::workflow::probe::observe(registry, transport.probe_transport(), request, response)?;
     let classification = match observation.correlation {
         Correlation::TcpReset | Correlation::PortUnreachable => ScanClassification::Closed,
         Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {
@@ -35,3 +35,6 @@ pub fn classify_scan_response(
         correlation: observation.correlation,
     })
 }
+use super::{
+    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, ScanClassification, ScanTransport,
+};

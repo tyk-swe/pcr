@@ -106,6 +106,58 @@ mod tests {
         }
     }
 
+    fn system_interface(name: &str, index: u32) -> InterfaceInfo {
+        InterfaceInfo {
+            id: InterfaceId {
+                name: name.to_owned(),
+                index,
+            },
+            description: None,
+            mac_address: None,
+            addresses: Vec::new(),
+            flags: crate::net::interface::Flags {
+                up: true,
+                ..crate::net::interface::Flags::default()
+            },
+            mtu: Some(1_500),
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+        }
+    }
+
+    #[test]
+    fn reused_system_transmitter_revalidates_a_changed_interface_selector() {
+        let first = system_interface("first0", 7);
+        let second = system_interface("second0", 8);
+        let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0_u8; 14]).unwrap();
+        let mut transmitter = SystemTransmitter::new();
+
+        assert_eq!(
+            transmitter
+                .resolve_with(&first.id, LinkMode::Layer2, &frame, || {
+                    Ok(vec![first.clone(), second.clone()])
+                })
+                .unwrap(),
+            first.id
+        );
+        assert_eq!(
+            transmitter
+                .resolve_with(&second.id, LinkMode::Layer2, &frame, || {
+                    Ok(vec![first.clone(), second.clone()])
+                })
+                .unwrap(),
+            second.id
+        );
+        assert_eq!(
+            transmitter
+                .resolve_with(&second.id, LinkMode::Layer2, &frame, || {
+                    panic!("an unchanged selector must reuse its validated interface")
+                })
+                .unwrap(),
+            second.id
+        );
+    }
+
     #[derive(Default)]
     struct Allow {
         calls: usize,

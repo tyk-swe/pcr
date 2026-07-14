@@ -5,6 +5,8 @@
 //! socket. Route lookup is passive: it does not perform neighbor discovery,
 //! capture, or transmission.
 
+#![allow(unsafe_code)]
+
 #[cfg(feature = "native-route")]
 use std::collections::BTreeMap;
 #[cfg(feature = "native-route")]

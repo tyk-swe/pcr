@@ -102,6 +102,7 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup toolchain install 1.96.0 --profile minimal
       - run: rustup component add rustfmt
+      - run: rustup target add x86_64-unknown-freebsd
       - run: cargo install cargo-hack --locked --version 0.6.45
       - name: Minimum supported Rust 1.96 portable profile
         run: cargo +1.96.0 check --locked --all-targets --no-default-features
@@ -115,6 +116,12 @@ jobs:
         run: cargo hack check --locked --feature-powerset --depth 2 --all-targets
       - name: Complete feature profile
         run: cargo check --locked --all-targets --all-features
+      - name: Unsupported-target capability fallbacks
+        env:
+          RUSTFLAGS: -D warnings
+        run: >-
+          cargo check --locked --all-targets --all-features
+          --target x86_64-unknown-freebsd
 
   coverage:
     name: Linux line coverage

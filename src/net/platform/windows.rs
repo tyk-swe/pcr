@@ -5,6 +5,8 @@
 //! supplies route/source selection and `GetAdaptersAddresses` supplies the
 //! portable interface snapshot. Neither API emits neighbor traffic.
 
+#![allow(unsafe_code)]
+
 #[cfg(any(feature = "live", feature = "native-route"))]
 use std::mem::{align_of, size_of};
 #[cfg(any(feature = "live", feature = "native-route"))]

@@ -6,13 +6,14 @@
 //! This directory is the only location in the crate permitted to contain FFI
 //! or narrowly reviewed unsafe code. Public traits and values live in `net`.
 
-#![allow(unsafe_code)]
-
 use std::net::IpAddr;
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(feature = "native-layer2")]
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 mod live_capture;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -35,7 +36,10 @@ mod windows;
 
 use super::provider_impl::{InterfaceInfo, LiveIoError};
 use super::route_impl::{InterfaceId, NativeRouteError, RouteDecision};
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 use super::route_impl::{RouteSelectionReason, classify_destination};
 
 #[cfg(feature = "native-layer2")]
@@ -46,19 +50,25 @@ pub(super) fn system_capture(
     // Reject invalid bounds before opening a device or allocating native
     // resources. NativeCaptureSession validates again at its ownership seam.
     let validated_limits = limits.validate()?;
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    let parts = pcap_backend::open_capture(&route.route.interface, validated_limits)?;
-    #[cfg(windows)]
-    let parts = npcap::open_capture(&route.route.interface, validated_limits)?;
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    return Err(LiveIoError::Unsupported {
-        message: "native Layer 2 capture is unsupported on this target".to_owned(),
-    });
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let parts = pcap_backend::open_capture(&route.route.interface, validated_limits)?;
+        #[cfg(windows)]
+        let parts = npcap::open_capture(&route.route.interface, validated_limits)?;
 
-    Ok(Box::new(live_capture::NativeCaptureSession::spawn(
-        parts,
-        validated_limits,
-    )?))
+        Ok(Box::new(live_capture::NativeCaptureSession::spawn(
+            parts,
+            validated_limits,
+        )?))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = (route, validated_limits);
+        Err(LiveIoError::Unsupported {
+            message: "native Layer 2 capture is unsupported on this target".to_owned(),
+        })
+    }
 }
 
 #[cfg(not(feature = "native-layer2"))]
@@ -174,7 +184,13 @@ fn validate_native_interfaces(
     Ok(interfaces)
 }
 
-#[cfg(any(feature = "native-route", all(feature = "live", windows)))]
+#[cfg(any(
+    all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos", windows)
+    ),
+    all(feature = "live", windows)
+))]
 fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), NativeRouteError> {
     if interface.id.name.is_empty() || interface.id.index == 0 {
         return Err(NativeRouteError::InvalidResponse {
@@ -200,6 +216,16 @@ pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     Ok(pnet_enumeration::interfaces())
 }
 
+#[cfg(all(
+    feature = "native-route",
+    not(any(target_os = "linux", target_os = "macos", windows))
+))]
+pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
+    Err(LiveIoError::Unsupported {
+        message: "native interface enumeration is unsupported on this target".to_owned(),
+    })
+}
+
 #[cfg(all(not(feature = "native-route"), not(feature = "live")))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     Err(LiveIoError::Unsupported {
@@ -223,7 +249,10 @@ fn interface_error(error: NativeRouteError) -> LiveIoError {
     }
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 fn validate_preferred_source_family(
     destination: IpAddr,
     preferred_source: Option<IpAddr>,
@@ -278,6 +307,20 @@ pub(super) fn system_route(
     })
 }
 
+#[cfg(all(
+    feature = "native-route",
+    not(any(target_os = "linux", target_os = "macos", windows))
+))]
+pub(super) fn system_route(
+    _destination: IpAddr,
+    _interface_hint: Option<&InterfaceId>,
+    _preferred_source: Option<IpAddr>,
+) -> Result<RouteDecision, NativeRouteError> {
+    Err(NativeRouteError::Unsupported {
+        message: "native route selection is unsupported on this target".to_owned(),
+    })
+}
+
 #[cfg(all(feature = "native-route", target_os = "linux"))]
 pub(super) fn system_interface_route(
     interface: &InterfaceId,
@@ -309,7 +352,22 @@ pub(super) fn system_interface_route(
     })
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    not(any(target_os = "linux", target_os = "macos", windows))
+))]
+pub(super) fn system_interface_route(
+    _interface: &InterfaceId,
+) -> Result<RouteDecision, NativeRouteError> {
+    Err(NativeRouteError::Unsupported {
+        message: "native interface route selection is unsupported on this target".to_owned(),
+    })
+}
+
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(super) struct NativeRouteSnapshot {
     pub interface: InterfaceInfo,
     pub selected_address: Option<IpAddr>,
@@ -318,7 +376,10 @@ pub(super) struct NativeRouteSnapshot {
     pub selection_reason: RouteSelectionReason,
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(super) fn finish_route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -397,7 +458,10 @@ pub(super) fn finish_route(
     })
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct SourceAddressRank {
     prefix_match: bool,
@@ -405,7 +469,10 @@ struct SourceAddressRank {
     scope_match: bool,
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 fn fallback_source(
     addresses: &[super::provider_impl::InterfaceAddress],
     destination: IpAddr,
@@ -436,7 +503,10 @@ fn fallback_source(
     best.map(|(address, _)| address)
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 fn prefix_matches(source: IpAddr, destination: IpAddr, prefix_length: u8) -> bool {
     match (source, destination) {
         (IpAddr::V4(source), IpAddr::V4(destination)) if prefix_length <= 32 => {
@@ -453,7 +523,10 @@ fn prefix_matches(source: IpAddr, destination: IpAddr, prefix_length: u8) -> boo
     }
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 fn address_scope(address: IpAddr) -> u8 {
     match address {
         IpAddr::V4(address) if address.is_loopback() => 1,
@@ -466,7 +539,10 @@ fn address_scope(address: IpAddr) -> u8 {
     }
 }
 
-#[cfg(all(feature = "native-route", not(windows)))]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos")
+))]
 pub(super) fn find_interface(
     interfaces: Vec<InterfaceInfo>,
     requested: &InterfaceId,
@@ -493,7 +569,10 @@ pub(super) fn find_interface(
     })
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 pub(super) fn interface_decision(
     interface: InterfaceInfo,
 ) -> Result<RouteDecision, NativeRouteError> {
@@ -519,7 +598,10 @@ pub(super) fn interface_decision(
     })
 }
 
-#[cfg(feature = "native-route")]
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 fn validate_interface_hint(
     requested: &InterfaceId,
     actual: &InterfaceId,
@@ -535,7 +617,11 @@ fn validate_interface_hint(
     })
 }
 
-#[cfg(all(test, feature = "native-route"))]
+#[cfg(all(
+    test,
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
 mod tests {
     use super::*;
     use crate::capture::LinkType;

@@ -183,17 +183,29 @@ impl SystemTransmitter {
         mode: LinkMode,
         frame: &Frame,
     ) -> Result<InterfaceId, LiveIoError> {
-        if self.validated_interface.is_none() {
-            let interfaces = SystemInterfaceProvider.interfaces()?;
-            let selected = interfaces
+        self.resolve_with(requested, mode, frame, || {
+            SystemInterfaceProvider.interfaces()
+        })
+    }
+
+    fn resolve_with<F>(
+        &mut self,
+        requested: &InterfaceId,
+        mode: LinkMode,
+        frame: &Frame,
+        interfaces: F,
+    ) -> Result<InterfaceId, LiveIoError>
+    where
+        F: FnOnce() -> Result<Vec<InterfaceInfo>, LiveIoError>,
+    {
+        if !self
+            .validated_interface
+            .as_ref()
+            .is_some_and(|selected| interface_matches_selector(requested, &selected.id))
+        {
+            let selected = interfaces()?
                 .into_iter()
-                .find(|interface| {
-                    if requested.index != 0 {
-                        interface.id.index == requested.index
-                    } else {
-                        interface.id.name == requested.name
-                    }
-                })
+                .find(|interface| interface_matches_selector(requested, &interface.id))
                 .ok_or_else(|| LiveIoError::Device {
                     interface: requested.name.clone(),
                     message: "no interface matches the requested name or index".to_owned(),
@@ -317,6 +329,14 @@ impl SystemTransmitter {
             plan,
             neighbor_resolution: None,
         })
+    }
+}
+
+fn interface_matches_selector(requested: &InterfaceId, actual: &InterfaceId) -> bool {
+    if requested.index != 0 {
+        actual.index == requested.index
+    } else {
+        actual.name == requested.name
     }
 }
 

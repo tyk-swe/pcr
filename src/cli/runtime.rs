@@ -18,18 +18,13 @@ use packetcraftr::{
 };
 
 use super::arguments::{Cli, Command, RouteArgs};
-use super::capture::{run_capture, run_exchange};
-use super::dns::run_dns;
+use super::commands::{
+    run_build, run_capture, run_dissect, run_dns, run_exchange, run_fuzz, run_interfaces, run_plan,
+    run_read, run_replay, run_routes, run_scan, run_send, run_traceroute,
+};
 use super::errors::{CliError, command_from_env, exit_code, machine_format_from_env};
-use super::fuzz::run_fuzz;
 use super::input::read_recipe;
-use super::interfaces::run_interfaces;
-use super::network::{run_plan, run_routes, run_send};
-use super::offline::{run_build, run_dissect, run_read};
 use super::rendering::{emit_json, emit_json_compact, emit_stderr_error, emit_stderr_message};
-use super::replay::run_replay;
-use super::scan::run_scan;
-use super::traceroute::run_traceroute;
 
 pub(super) struct PreparedRouteRequest {
     pub(super) packet: Packet,

@@ -7,10 +7,14 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use crate::packet::internal::{
-    BuildMode, CodecError, Diagnostic, Discriminator, FieldError, FieldLayout, FieldValue, Layer,
-    LayerEncodeContext, LayerSchema, MalformedLayer, NetworkEnvelope, Padding, ProtocolId,
-    WireValue,
+use crate::packet::{
+    build::BuildMode,
+    codec::{CodecError, LayerEncodeContext, NetworkEnvelope},
+    diagnostic::Diagnostic,
+    field::{FieldValue, WireValue},
+    layer::{FieldError, Layer, LayerSchema, MalformedLayer, Padding, ProtocolId},
+    layout::FieldLayout,
+    registry::Discriminator,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,7 +94,7 @@ pub(crate) fn out_of_range(schema: &'static LayerSchema, field: &str) -> FieldEr
 pub(crate) fn field_layout(name: &str, start: usize, end: usize) -> FieldLayout {
     FieldLayout {
         name: name.to_owned(),
-        range: crate::packet::internal::ByteRange::new(start, end),
+        range: crate::packet::layout::ByteRange::new(start, end),
     }
 }
 

@@ -3,7 +3,12 @@
 
 use std::net::IpAddr;
 
-use crate::packet::internal::{FieldValue, MatchResult, NetworkEnvelope, Packet, ResponseMatcher};
+use crate::packet::{
+    Packet,
+    codec::NetworkEnvelope,
+    field::FieldValue,
+    matcher::{MatchResult, ResponseMatcher},
+};
 
 #[derive(Clone, Debug)]
 pub(crate) struct ReverseFlowMatcher {
@@ -332,8 +337,13 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::packet::internal::Raw;
-    use crate::protocol::internal::{Icmpv4, Ipv4, Ipv6, SegmentRoutingHeader, Tcp, Udp};
+    use crate::packet::layer::Raw;
+    use crate::protocol::{
+        icmp::Icmpv4,
+        ipv6::SegmentRoutingHeader,
+        network::{Ipv4, Ipv6},
+        transport::{Tcp, Udp},
+    };
 
     fn echo(source: Ipv4Addr, destination: Ipv4Addr, icmp_type: u8) -> Packet {
         let mut packet = Packet::new();

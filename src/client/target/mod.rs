@@ -1,0 +1,11 @@
+//! Live target resolution.
+
+mod contract;
+
+pub use super::policy::{DEFAULT_MAX_RESOLVED_ADDRESSES, MAX_RESOLVED_ADDRESSES};
+pub use contract::{
+    Hostname, HostnameResolver as Resolver, IpVersion, LiveTarget as Target,
+    ResolvedTarget as Resolved, SystemHostnameResolver as SystemResolver,
+    TargetResolutionError as Error,
+};
+pub(crate) use contract::{HostnameResolver, LiveTarget, ResolvedTarget, TargetResolutionError};

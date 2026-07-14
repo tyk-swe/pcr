@@ -13,15 +13,15 @@ use packetcraftr::{
     client, net, output, packet,
 };
 
-use super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs};
-use super::errors::CliError;
-use super::rendering::{
+use super::super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs};
+use super::super::errors::CliError;
+use super::super::rendering::{
     capture_file_format, capture_file_frame, emit_json, emit_json_compact, emit_stderr_message,
     emit_stream_record, spaced_hex, write_capture_file, write_stdout_line,
 };
-use super::runtime::{default_registry_arc, prepare_route_request, system_client};
+use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
-pub(super) fn cli_build_mode(mode: CliBuildMode) -> packet::build::Mode {
+pub(in crate::cli) fn cli_build_mode(mode: CliBuildMode) -> packet::build::Mode {
     match mode {
         CliBuildMode::Strict => packet::build::Mode::Strict,
         CliBuildMode::Permissive => packet::build::Mode::Permissive,
@@ -29,15 +29,15 @@ pub(super) fn cli_build_mode(mode: CliBuildMode) -> packet::build::Mode {
 }
 
 #[derive(Debug)]
-pub(super) struct CaptureOutcome {
+pub(in crate::cli) struct CaptureOutcome {
     diagnostics: Vec<packet::diagnostic::Diagnostic>,
-    pub(super) stats: output::envelope::Stats,
+    pub(in crate::cli) stats: output::envelope::Stats,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct CaptureBudget {
-    pub(super) max_frames: u64,
-    pub(super) max_bytes: u64,
+pub(in crate::cli) struct CaptureBudget {
+    pub(in crate::cli) max_frames: u64,
+    pub(in crate::cli) max_bytes: u64,
 }
 
 impl From<&client::policy::Policy> for CaptureBudget {
@@ -49,7 +49,7 @@ impl From<&client::policy::Policy> for CaptureBudget {
     }
 }
 
-pub(super) fn run_capture(
+pub(in crate::cli) fn run_capture(
     arguments: CaptureArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -190,7 +190,7 @@ fn validate_capture_window(timeout: Duration) -> Result<(), CliError> {
     Ok(())
 }
 
-pub(super) fn drive_capture<C, F>(
+pub(in crate::cli) fn drive_capture<C, F>(
     mut capture: C,
     timeout: Duration,
     limits: net::capture::Limits,
@@ -320,7 +320,7 @@ fn shutdown_after_error<C: net::capture::Session>(capture: &mut C, error: CliErr
     }
 }
 
-pub(super) fn render_diagnostics_text(
+pub(in crate::cli) fn render_diagnostics_text(
     diagnostics: &[packet::diagnostic::Diagnostic],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
@@ -332,7 +332,7 @@ pub(super) fn render_diagnostics_text(
     Ok(())
 }
 
-pub(super) fn render_output_diagnostics_text(
+pub(in crate::cli) fn render_output_diagnostics_text(
     diagnostics: &[output::envelope::Diagnostic],
 ) -> Result<(), CliError> {
     for diagnostic in diagnostics {
@@ -356,7 +356,7 @@ fn render_diagnostics_stderr(
     Ok(())
 }
 
-pub(super) fn run_exchange(
+pub(in crate::cli) fn run_exchange(
     arguments: ExchangeArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {

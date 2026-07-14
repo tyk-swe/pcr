@@ -11,11 +11,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 
-use super::super::provider_impl::validate_capture_timeout;
 use crate::capture::{Frame, LinkType};
 use crate::net::{
-    CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
-    InterfaceId, LiveIoError,
+    Error as LiveIoError,
+    capture::{
+        CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics,
+        CapturedFrame, validate_timeout,
+    },
+    route::InterfaceId,
 };
 
 const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
@@ -103,7 +106,7 @@ impl NativeCaptureSession {
 
 impl CaptureSession for NativeCaptureSession {
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
-        validate_capture_timeout(timeout)?;
+        validate_timeout(timeout)?;
         let deadline = Instant::now()
             .checked_add(timeout)
             .expect("validated bounded capture timeout must fit Instant");
@@ -144,7 +147,7 @@ impl CaptureSession for NativeCaptureSession {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<CapturedFrame>, LiveIoError> {
-        validate_capture_timeout(timeout)?;
+        validate_timeout(timeout)?;
         let deadline = Instant::now()
             .checked_add(timeout)
             .expect("validated bounded capture timeout must fit Instant");
@@ -786,7 +789,7 @@ mod tests {
         assert_eq!(statistics.overflow_events, 0);
         assert_eq!(
             statistics.evidence_completeness(),
-            crate::net::CaptureEvidenceCompleteness::Incomplete
+            crate::net::capture::CaptureEvidenceCompleteness::Incomplete
         );
     }
 

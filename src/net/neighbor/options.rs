@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use crate::net::{CaptureOverflowPolicy, CaptureQueueLimits, NeighborError};
+use crate::net::{
+    capture::{CaptureOverflowPolicy, CaptureQueueLimits},
+    neighbor::Error as NeighborError,
+};
 
 const MAX_CONFIGURED_ATTEMPTS: u32 = 10;
 const MAX_CONFIGURED_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);

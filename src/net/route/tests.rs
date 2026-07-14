@@ -13,9 +13,13 @@ use super::{
 #[cfg(not(feature = "native-route"))]
 use super::{NativeRouteError, SystemRouteProvider};
 use crate::capture::{Frame, LinkType};
-use crate::net::provider_impl::CaptureStatistics;
-use crate::packet::internal::{Packet, Raw, WireValue};
-use crate::protocol::internal::{Ethernet, Ipv4, Ipv6, SegmentRoutingHeader, Vlan, Vlan8021ad};
+use crate::net::capture::CaptureStatistics;
+use crate::packet::{Packet, field::WireValue, layer::Raw};
+use crate::protocol::{
+    ipv6::SegmentRoutingHeader,
+    link::{Ethernet, Vlan, Vlan8021ad},
+    network::{Ipv4, Ipv6},
+};
 
 struct FixedRoute(RouteDecision);
 
@@ -568,10 +572,10 @@ fn fully_specified_layer2_frame_needs_no_neighbor_source() {
     let destination = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1));
     let mut packet = Packet::new();
     packet
-        .push(crate::protocol::internal::Ethernet {
+        .push(crate::protocol::link::Ethernet {
             source: [2, 0, 0, 0, 0, 1],
             destination: [2, 0, 0, 0, 0, 2],
-            ..crate::protocol::internal::Ethernet::default()
+            ..crate::protocol::link::Ethernet::default()
         })
         .push(Raw::new(Bytes::from_static(b"frame")));
     let route = RouteDecision {
@@ -603,7 +607,7 @@ fn fully_specified_layer2_frame_needs_no_neighbor_source() {
 fn destination_free_custom_ethernet_uses_only_interface_lookup() {
     let mut packet = Packet::new();
     packet
-        .push(crate::protocol::internal::Ethernet {
+        .push(crate::protocol::link::Ethernet {
             source: [2, 0, 0, 0, 0, 1],
             destination: [2, 0, 0, 0, 0, 2],
             ether_type: WireValue::Exact(0x88b5),
@@ -644,7 +648,7 @@ fn destination_free_custom_ethernet_uses_only_interface_lookup() {
 #[test]
 fn destination_free_layer2_requires_explicit_interface() {
     let mut packet = Packet::new();
-    packet.push(crate::protocol::internal::Ethernet {
+    packet.push(crate::protocol::link::Ethernet {
         source: [2, 0, 0, 0, 0, 1],
         destination: [2, 0, 0, 0, 0, 2],
         ether_type: WireValue::Exact(0x88b5),
@@ -663,11 +667,11 @@ fn destination_free_layer2_requires_explicit_interface() {
 #[test]
 fn complete_arp_synthesizes_broadcast_envelope_without_ip_route() {
     let mut packet = Packet::new();
-    packet.push(crate::protocol::internal::Arp {
+    packet.push(crate::protocol::link::Arp {
         sender_hardware: [2, 0, 0, 0, 0, 1],
         sender_protocol: Ipv4Addr::new(192, 0, 2, 10),
         target_protocol: Ipv4Addr::new(192, 0, 2, 20),
-        ..crate::protocol::internal::Arp::default()
+        ..crate::protocol::link::Arp::default()
     });
     let decision = RouteDecision {
         source_mac: None,

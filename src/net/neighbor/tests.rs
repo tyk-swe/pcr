@@ -12,14 +12,21 @@ use super::wire::{
     SOLICITED_ADVERTISEMENT_FLAG, SOURCE_LINK_LAYER_OPTION, TARGET_LINK_LAYER_OPTION,
     VLAN_HEADER_LENGTH, checksum, ethernet_prefix, icmpv6_checksum, ipv6_address,
 };
-use super::{ActiveNeighborResolver, NeighborResolutionOptions};
+use super::{ActiveResolver as ActiveNeighborResolver, Options as NeighborResolutionOptions};
 use crate::capture::{Direction, Frame, LinkType};
 use crate::error::Classified;
 use crate::net::{
-    CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
-    InterfaceAddress, InterfaceFlags, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport,
-    Layer2Frame, Layer2Io, LinkCapability, LinkMode, LiveIoError, MacAddress, NeighborError,
-    NeighborRequest, NeighborResolver, NeighborVlanKind, NeighborVlanTag, PlannedRoute,
+    Error as LiveIoError,
+    capture::{
+        CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
+    },
+    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo, InterfaceProvider},
+    link::{LinkCapability, LinkMode, MacAddress},
+    route::{
+        InterfaceId, NeighborError, NeighborRequest, NeighborResolver, NeighborVlanKind,
+        NeighborVlanTag, PlannedRoute,
+    },
+    transmit::{IoSendReport, Layer2Frame, Layer2Io},
 };
 
 type FrameResponseScript = dyn Fn(&Bytes) -> Vec<Frame> + Send + Sync;

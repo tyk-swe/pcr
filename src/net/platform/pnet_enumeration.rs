@@ -3,8 +3,11 @@
 
 //! Legacy Unix interface-enumeration adapter used by the default feature.
 
-use super::super::provider_impl::{InterfaceAddress, InterfaceFlags, InterfaceInfo};
-use super::super::{InterfaceId, LinkCapability, MacAddress};
+use super::super::{
+    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    link::{LinkCapability, MacAddress},
+    route::InterfaceId,
+};
 use crate::capture::LinkType;
 
 pub(super) fn interfaces() -> Vec<InterfaceInfo> {

@@ -4,8 +4,8 @@ use thiserror::Error;
 
 use crate::capture::Frame;
 use crate::error::{Category, Classification, Classified, Kind};
-use crate::net::provider_impl::{CaptureStatistics, LiveIoError};
-use crate::packet::internal::{FieldValue, Packet, ProtocolId};
+use crate::net::{Error as LiveIoError, capture::CaptureStatistics};
+use crate::packet::{Packet, field::FieldValue, layer::ProtocolId};
 
 #[cfg(all(
     feature = "native-route",

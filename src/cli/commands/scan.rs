@@ -8,19 +8,19 @@ use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use super::arguments::ScanArgs;
-use super::capture::render_diagnostics_text;
-use super::errors::CliError;
-use super::rendering::{
+use super::super::arguments::ScanArgs;
+use super::super::errors::CliError;
+use super::super::rendering::{
     emit_json, emit_json_compact, emit_stream_record, output_timestamp_text, spaced_hex,
     write_stdout_line,
 };
-use super::runtime::{
+use super::super::runtime::{
     DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
     validate_interface_selector, workflow_exchange_options,
 };
+use super::capture::render_diagnostics_text;
 
-pub(super) fn run_scan(
+pub(in crate::cli) fn run_scan(
     arguments: ScanArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -125,7 +125,7 @@ pub(super) fn run_scan(
     }
 }
 
-pub(super) fn validate_live_interface_selector(
+pub(in crate::cli) fn validate_live_interface_selector(
     command: &str,
     selector: Option<&str>,
 ) -> Result<(), CliError> {
@@ -152,7 +152,7 @@ impl workflow::scan::Executor for CliScanExecutor {
     }
 }
 
-pub(super) fn scan_cli_error(error: workflow::scan::Error) -> CliError {
+pub(in crate::cli) fn scan_cli_error(error: workflow::scan::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

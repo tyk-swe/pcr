@@ -5,10 +5,11 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
-use crate::packet::internal::{
-    DecodedPacket, DiagnosticSeverity, FieldValue, NetworkEnvelope, Packet, ProtocolRegistry,
+use crate::packet::{
+    Packet, codec::NetworkEnvelope, decode::DecodedPacket, diagnostic::DiagnosticSeverity,
+    field::FieldValue, registry::ProtocolRegistry,
 };
-use crate::protocol::internal::Tcp;
+use crate::protocol::transport::Tcp;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Transport {

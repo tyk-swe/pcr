@@ -2,7 +2,10 @@ use std::net::IpAddr;
 use std::time::Instant;
 
 use crate::capture::{Frame, LinkType};
-use crate::net::{InterfaceId, MacAddress, NeighborRequest, NeighborVlanTag};
+use crate::net::{
+    link::MacAddress,
+    route::{InterfaceId, NeighborRequest, NeighborVlanTag},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct NeighborCacheKey {

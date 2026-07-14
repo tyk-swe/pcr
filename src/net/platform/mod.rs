@@ -43,19 +43,20 @@ mod raw_ip;
 #[cfg(windows)]
 mod windows;
 
-use super::provider_impl::{InterfaceInfo, LiveIoError};
-use super::route_impl::{InterfaceId, NativeRouteError, RouteDecision};
+use super::Error as LiveIoError;
+use super::interface::InterfaceInfo;
+use super::route::{InterfaceId, NativeRouteError, RouteDecision};
 #[cfg(all(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-use super::route_impl::{RouteSelectionReason, classify_destination};
+use super::route::{RouteSelectionReason, classify_destination};
 
 #[cfg(feature = "native-layer2")]
 pub(super) fn system_capture(
-    _route: &super::route_impl::PlannedRoute,
-    limits: super::provider_impl::CaptureQueueLimits,
-) -> Result<Box<dyn super::provider_impl::CaptureSession>, LiveIoError> {
+    _route: &super::route::PlannedRoute,
+    limits: super::capture::CaptureQueueLimits,
+) -> Result<Box<dyn super::capture::CaptureSession>, LiveIoError> {
     // Reject invalid bounds before opening a device or allocating native
     // resources. NativeCaptureSession validates again at its ownership seam.
     let _validated_limits = limits.validate()?;
@@ -80,9 +81,9 @@ pub(super) fn system_capture(
 
 #[cfg(not(feature = "native-layer2"))]
 pub(super) fn system_capture(
-    _route: &super::route_impl::PlannedRoute,
-    _limits: super::provider_impl::CaptureQueueLimits,
-) -> Result<Box<dyn super::provider_impl::CaptureSession>, LiveIoError> {
+    _route: &super::route::PlannedRoute,
+    _limits: super::capture::CaptureQueueLimits,
+) -> Result<Box<dyn super::capture::CaptureSession>, LiveIoError> {
     Err(LiveIoError::Unsupported {
         message: "enable the native-layer2 feature for native packet capture".to_owned(),
     })
@@ -93,8 +94,8 @@ pub(super) fn system_capture(
     any(target_os = "linux", target_os = "macos")
 ))]
 pub(super) fn system_send_layer2(
-    frame: super::provider_impl::Layer2Frame<'_>,
-) -> Result<super::provider_impl::IoSendReport, LiveIoError> {
+    frame: super::transmit::Layer2Frame<'_>,
+) -> Result<super::transmit::IoSendReport, LiveIoError> {
     pcap_backend::send_layer2(frame)
 }
 
@@ -103,8 +104,8 @@ pub(super) fn system_send_layer2(
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub(super) fn system_send_layer3(
-    frame: super::provider_impl::Layer3Frame<'_>,
-) -> Result<super::provider_impl::IoSendReport, LiveIoError> {
+    frame: super::transmit::Layer3Frame<'_>,
+) -> Result<super::transmit::IoSendReport, LiveIoError> {
     raw_ip::send_layer3(frame)
 }
 
@@ -113,8 +114,8 @@ pub(super) fn system_send_layer3(
     any(target_os = "linux", target_os = "macos", windows)
 )))]
 pub(super) fn system_send_layer3(
-    _frame: super::provider_impl::Layer3Frame<'_>,
-) -> Result<super::provider_impl::IoSendReport, LiveIoError> {
+    _frame: super::transmit::Layer3Frame<'_>,
+) -> Result<super::transmit::IoSendReport, LiveIoError> {
     Err(LiveIoError::Unsupported {
         message:
             "enable the native-layer3 feature on Linux, macOS, or Windows for raw IP transmission"
@@ -124,8 +125,8 @@ pub(super) fn system_send_layer3(
 
 #[cfg(all(feature = "native-layer2", windows))]
 pub(super) fn system_send_layer2(
-    frame: super::provider_impl::Layer2Frame<'_>,
-) -> Result<super::provider_impl::IoSendReport, LiveIoError> {
+    frame: super::transmit::Layer2Frame<'_>,
+) -> Result<super::transmit::IoSendReport, LiveIoError> {
     npcap::send_layer2(frame)
 }
 
@@ -137,8 +138,8 @@ pub(super) fn system_send_layer2(
     )
 ))]
 pub(super) fn system_send_layer2(
-    _frame: super::provider_impl::Layer2Frame<'_>,
-) -> Result<super::provider_impl::IoSendReport, LiveIoError> {
+    _frame: super::transmit::Layer2Frame<'_>,
+) -> Result<super::transmit::IoSendReport, LiveIoError> {
     Err(LiveIoError::Unsupported {
         message: "enable the native-layer2 feature on a supported target for Layer 2 injection"
             .to_owned(),
@@ -489,7 +490,7 @@ struct SourceAddressRank {
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 fn fallback_source(
-    addresses: &[super::provider_impl::InterfaceAddress],
+    addresses: &[super::interface::InterfaceAddress],
     destination: IpAddr,
 ) -> Option<IpAddr> {
     let mut best: Option<(IpAddr, SourceAddressRank)> = None;
@@ -606,7 +607,7 @@ pub(super) fn interface_decision(
         preferred_source: None,
         next_hop: None,
         selection_reason: RouteSelectionReason::InterfaceOnly,
-        destination_scope: super::route_impl::DestinationScope::Unspecified,
+        destination_scope: super::route::DestinationScope::Unspecified,
         mtu,
         capability: interface.capability,
         link_type: interface.link_type,
@@ -640,7 +641,10 @@ fn validate_interface_hint(
 mod tests {
     use super::*;
     use crate::capture::LinkType;
-    use crate::net::{InterfaceAddress, InterfaceFlags, LinkCapability, MacAddress};
+    use crate::net::{
+        interface::{InterfaceAddress, InterfaceFlags},
+        link::{LinkCapability, MacAddress},
+    };
     use std::net::{Ipv4Addr, Ipv6Addr};
 
     fn interface() -> InterfaceInfo {

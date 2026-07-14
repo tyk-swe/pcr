@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capture::{Frame, LinkType};
 use crate::error::{Classification, Kind};
-use crate::net::provider_impl::CaptureStatistics;
+use crate::net::capture::CaptureStatistics;
 
 /// Maximum explicit VLAN headers copied into a neighbor-discovery request.
 pub(crate) const MAX_NEIGHBOR_VLAN_TAGS: usize = 8;

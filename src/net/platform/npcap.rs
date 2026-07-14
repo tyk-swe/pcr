@@ -4,7 +4,12 @@
 //! Runtime-loaded Npcap adapter for Windows.
 
 use super::live_capture::NativeCaptureParts;
-use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};
+use crate::net::{
+    Error as LiveIoError,
+    capture::CaptureQueueLimits,
+    route::InterfaceId,
+    transmit::{IoSendReport, Layer2Frame},
+};
 
 #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
 mod supported {
@@ -31,7 +36,12 @@ mod supported {
         NativeCaptureStatistics, NativeCapturedPacket, system_time,
     };
     use crate::capture::LinkType;
-    use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};
+    use crate::net::{
+        Error as LiveIoError,
+        capture::CaptureQueueLimits,
+        route::InterfaceId,
+        transmit::{IoSendReport, Layer2Frame},
+    };
 
     const NPCAP_DEPENDENCY: &str = "Npcap 1.88 runtime";
     const PCAP_ERROR_BUFFER_SIZE: usize = 256;

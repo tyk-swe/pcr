@@ -5,9 +5,15 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 
-use crate::packet::internal::{
-    CodecError, DecodedLayerValue, Diagnostic, EncodedLayer, FieldValue, Layer, LayerCodec,
-    LayerDecodeContext, LayerEncodeContext, MalformedLayer, Padding, ProtocolId, Raw, decode_hex,
+use crate::packet::{
+    codec::{
+        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        LayerEncodeContext,
+    },
+    diagnostic::Diagnostic,
+    expression::decode_hex,
+    field::FieldValue,
+    layer::{Layer, MalformedLayer, Padding, ProtocolId, Raw},
 };
 
 use super::common::{

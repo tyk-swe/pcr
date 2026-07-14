@@ -28,8 +28,9 @@ use super::{
 use crate::capture::LinkType;
 #[cfg(feature = "native-route")]
 use crate::net::{
-    InterfaceAddress, InterfaceFlags, InterfaceId, InterfaceInfo, LinkCapability, MacAddress,
-    NativeRouteError, RouteDecision, RouteSelectionReason,
+    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    link::{LinkCapability, MacAddress},
+    route::{InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason},
 };
 
 #[cfg(feature = "native-route")]
@@ -325,14 +326,14 @@ fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRou
 #[cfg(all(test, feature = "native-route"))]
 mod tests {
     use super::*;
-    use crate::net::RouteProvider;
+    use crate::net::route::Provider as RouteProvider;
 
     #[test]
     fn native_linux_provider_finds_loopback_routes_and_interfaces() {
         let interfaces = interfaces().unwrap();
         assert!(interfaces.iter().any(|interface| interface.flags.loopback));
 
-        let provider = crate::net::SystemRouteProvider;
+        let provider = crate::net::route::SystemProvider;
         let ipv4 = provider
             .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
             .unwrap();
@@ -354,7 +355,7 @@ mod tests {
             .unwrap();
         runtime.block_on(async {
             tokio::spawn(async {
-                crate::net::SystemRouteProvider
+                crate::net::route::SystemProvider
                     .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
                     .unwrap()
             })
@@ -366,7 +367,7 @@ mod tests {
             let workers = (0..4)
                 .map(|_| {
                     scope.spawn(|| {
-                        crate::net::SystemRouteProvider
+                        crate::net::route::SystemProvider
                             .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
                             .unwrap()
                     })

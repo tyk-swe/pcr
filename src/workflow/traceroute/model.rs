@@ -43,7 +43,7 @@ pub struct TracerouteLimits {
 impl Default for TracerouteLimits {
     fn default() -> Self {
         Self {
-            max_probes: crate::packet::internal::DEFAULT_MAX_TEMPLATE_PACKETS,
+            max_probes: crate::packet::template::DEFAULT_MAX_TEMPLATE_PACKETS,
             max_duration: MAX_TRACEROUTE_DURATION,
             max_evidence_frames: DEFAULT_CAPTURE_QUEUE_FRAMES,
             max_evidence_bytes: DEFAULT_CAPTURE_QUEUE_BYTES,

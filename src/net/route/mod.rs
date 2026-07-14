@@ -3,19 +3,29 @@
 
 #![forbid(unsafe_code)]
 
-mod models;
-mod planner;
+pub(crate) mod models;
+pub(crate) mod planner;
 mod provider;
 #[cfg(test)]
 mod tests;
 
 pub use models::{
-    DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, NeighborRequest,
-    NeighborResolution, NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute,
-    RouteDecision, RouteProvider, RouteSelectionReason,
+    DestinationScope as Scope, InterfaceId as Id, LinkCapability as Capability, LinkMode as Mode,
+    MacAddress, PlanOptions as Options, PlannedRoute as Plan, RouteDecision as Decision,
+    RouteProvider as Provider, RouteSelectionReason as SelectionReason,
 };
-pub use planner::{MaterializedRoute, NeighborError, NeighborResolver, PlanError, RoutePlanner};
-pub use provider::{NativeRouteError, SystemRouteProvider};
+pub use planner::{MaterializedRoute as Materialized, PlanError as Error, RoutePlanner as Planner};
+pub use provider::{NativeRouteError as SystemError, SystemRouteProvider as SystemProvider};
+
+pub(crate) use models::{
+    DestinationScope, InterfaceId, LinkCapability, LinkMode, NeighborRequest, NeighborResolution,
+    NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute, RouteDecision, RouteProvider,
+    RouteSelectionReason,
+};
+pub(crate) use planner::{
+    MaterializedRoute, NeighborError, NeighborResolver, PlanError, RoutePlanner,
+};
+pub(crate) use provider::{NativeRouteError, SystemRouteProvider};
 
 pub(crate) use models::MAX_NEIGHBOR_VLAN_TAGS;
 #[cfg(all(

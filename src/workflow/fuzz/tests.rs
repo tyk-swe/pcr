@@ -3,8 +3,9 @@ use std::convert::Infallible;
 use super::execution::SplitMix64;
 use super::mutation::{bounded_value_size, random_value};
 use super::*;
-use crate::packet::internal::{BuildMode, PacketDocument, Raw, WireValue};
-use crate::protocol::internal::{Ipv4, Udp, default_registry};
+use crate::packet::{build::BuildMode, document::PacketDocument, field::WireValue, layer::Raw};
+use crate::protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
+use std::result::Result;
 
 fn fuzz_protocol_registry() -> Arc<ProtocolRegistry> {
     Arc::new(default_registry().unwrap())

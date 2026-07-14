@@ -11,11 +11,12 @@ use super::engine::{
 use super::*;
 use crate::client::policy::Policy as TrafficPolicy;
 use crate::client::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
-use crate::net::CaptureStatistics;
-use crate::packet::internal::PacketLayout;
-use crate::protocol::internal::default_registry;
+use crate::net::capture::CaptureStatistics;
+use crate::packet::layout::PacketLayout;
+use crate::protocol::builtin::registry as default_registry;
 use crate::workflow::target::Authorized;
 use crate::workflow::target_adapter::PolicyAuthorizer;
+use std::result::Result;
 
 fn private_traceroute_policy() -> TrafficPolicy {
     TrafficPolicy {
@@ -255,10 +256,10 @@ fn executor_cannot_replace_the_authorized_traceroute_probe() {
     let mut execution = UndecodedExecutor.execute(&batch).unwrap();
     let mut layer2 = execution.sent[0].clone();
     layer2
-        .insert(0, crate::protocol::internal::Ethernet::default())
+        .insert(0, crate::protocol::link::Ethernet::default())
         .unwrap();
     assert!(sent_traceroute_probe_matches(&batch.probes[0], &layer2));
-    layer2.push(crate::protocol::internal::Ethernet::default());
+    layer2.push(crate::protocol::link::Ethernet::default());
     assert!(!sent_traceroute_probe_matches(&batch.probes[0], &layer2));
     execution.stats.bytes = 0;
     let sent_bytes = execution

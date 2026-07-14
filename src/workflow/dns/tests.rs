@@ -12,9 +12,10 @@ use crate::client::target::{
     Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
 };
 use crate::error::Classified;
-use crate::protocol::internal::default_registry;
+use crate::protocol::builtin::registry as default_registry;
 use crate::workflow::target::Authorized;
 use crate::workflow::target_adapter::PolicyAuthorizer;
+use std::result::Result;
 
 fn wire_name(name: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -704,7 +705,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
             packet,
             original: Bytes::from(bytes.clone()),
             frame: Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap(),
-            layout: crate::packet::internal::PacketLayout::default(),
+            layout: crate::packet::layout::PacketLayout::default(),
             diagnostics,
         }
     };
@@ -811,7 +812,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
         packet: response_packet_v6,
         original: Bytes::from(response_v6.clone()),
         frame: Frame::new(UNIX_EPOCH, LinkType::RAW, response_v6).unwrap(),
-        layout: crate::packet::internal::PacketLayout::default(),
+        layout: crate::packet::layout::PacketLayout::default(),
         diagnostics: Vec::new(),
     };
     assert!(matches!(
@@ -888,7 +889,7 @@ impl DnsExecutor for PayloadExecutor {
                     packet: response_packet,
                     original: self.payload.clone(),
                     frame,
-                    layout: crate::packet::internal::PacketLayout::default(),
+                    layout: crate::packet::layout::PacketLayout::default(),
                     diagnostics: Vec::new(),
                 },
                 latency: Duration::from_millis(2),

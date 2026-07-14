@@ -46,12 +46,12 @@ impl ScanError {
 }
 
 impl Classified for ScanError {
-    fn classification(&self) -> Classification {
+    fn classification(&self) -> ErrorClassification {
         match self {
             Self::InvalidLimit { .. }
             | Self::InvalidPorts { .. }
             | Self::InvalidTimeout { .. }
-            | Self::InvalidDuration { .. } => Classification::new(
+            | Self::InvalidDuration { .. } => ErrorClassification::new(
                 "cli.scan_limit",
                 Kind::Cli,
                 Some(
@@ -59,12 +59,12 @@ impl Classified for ScanError {
                 ),
             ),
             Self::Authorization(error) => error.classification(),
-            Self::AddressFamily { .. } => Classification::new(
+            Self::AddressFamily { .. } => ErrorClassification::new(
                 "packet.target_address_family",
                 Kind::Packet,
                 Some("select a scan address family returned by the authorized target resolution"),
             ),
-            Self::DurationLimit { .. } => Classification::new(
+            Self::DurationLimit { .. } => ErrorClassification::new(
                 "policy.scan_duration_limit",
                 Kind::Policy,
                 Some(
@@ -72,16 +72,18 @@ impl Classified for ScanError {
                 ),
             ),
             Self::Execution { source, .. } => source.classification(),
-            Self::Clock { .. } => Classification::new(
+            Self::Clock { .. } => ErrorClassification::new(
                 "io.scan_clock",
                 Kind::Io,
                 Some("inspect the scan timer and account for probes already transmitted"),
             ),
-            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => Classification::new(
-                "internal.scan_evidence",
-                Kind::Internal,
-                Some("treat the scan as incomplete because executor evidence was inconsistent"),
-            ),
+            Self::InvalidEvidence { .. } | Self::StatisticsOverflow { .. } => {
+                ErrorClassification::new(
+                    "internal.scan_evidence",
+                    Kind::Internal,
+                    Some("treat the scan as incomplete because executor evidence was inconsistent"),
+                )
+            }
         }
     }
 
@@ -93,6 +95,5 @@ impl Classified for ScanError {
         }
     }
 }
-use super::{
-    AuthorizationError, Classification, Classified, Duration, Error, Kind, ScanExecutionError,
-};
+use super::{AuthorizationError, Classified, Duration, Error, Kind, ScanExecutionError};
+use crate::error::Classification as ErrorClassification;

@@ -4,8 +4,10 @@ use bytes::Bytes;
 
 use crate::capture::{Frame, LinkType};
 use crate::net::{
-    MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborError, NeighborRequest, NeighborVlanKind,
-    NeighborVlanTag,
+    link::MacAddress,
+    route::{
+        MAX_NEIGHBOR_VLAN_TAGS, NeighborError, NeighborRequest, NeighborVlanKind, NeighborVlanTag,
+    },
 };
 
 pub(super) const ETHERNET_HEADER_LENGTH: usize = 14;

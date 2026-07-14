@@ -10,20 +10,20 @@ use std::time::{Duration, SystemTime};
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use super::arguments::DnsArgs;
-use super::capture::render_diagnostics_text;
-use super::errors::CliError;
-use super::rendering::{
+use super::super::arguments::DnsArgs;
+use super::super::errors::CliError;
+use super::super::rendering::{
     emit_json, emit_json_compact, emit_stream_record, output_timestamp_text, spaced_hex,
     write_stdout_line,
 };
-use super::runtime::{
+use super::super::runtime::{
     DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
     workflow_exchange_options,
 };
+use super::capture::render_diagnostics_text;
 use super::scan::validate_live_interface_selector;
 
-pub(super) fn run_dns(
+pub(in crate::cli) fn run_dns(
     arguments: DnsArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -183,7 +183,7 @@ impl workflow::dns::Executor for CliDnsExecutor {
     }
 }
 
-pub(super) fn dns_cli_error(error: workflow::dns::Error) -> CliError {
+pub(in crate::cli) fn dns_cli_error(error: workflow::dns::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

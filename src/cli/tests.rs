@@ -16,19 +16,16 @@ use super::arguments::{
     Cli, CliAddressFamily, CliDnsQueryType, CliLinkMode, CliScanTransport, CliTracerouteStrategy,
     Command,
 };
-use super::capture::{CaptureBudget, drive_capture};
-use super::dns::dns_cli_error;
+use super::commands::{
+    CaptureBudget, dns_cli_error, drive_capture, fuzz_cli_error, replay_cli_error, scan_cli_error,
+    send_capture_link_type, traceroute_cli_error, write_replay_capture_evidence,
+};
 use super::errors::CliError;
-use super::fuzz::fuzz_cli_error;
 use super::input::read_bounded_allow_empty;
-use super::network::send_capture_link_type;
 use super::rendering::{encode_capture_file, output_timestamp_text, terminal_safe};
-use super::replay::{replay_cli_error, write_replay_capture_evidence};
 use super::runtime::{
     parse_workflow_target, run, validate_interface_selector, workflow_exchange_options,
 };
-use super::scan::scan_cli_error;
-use super::traceroute::traceroute_cli_error;
 
 struct ScriptedCapture {
     ready: Option<Result<(), net::Error>>,

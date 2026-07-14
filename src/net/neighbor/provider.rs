@@ -7,12 +7,19 @@ use bytes::Bytes;
 
 use crate::capture::{Frame, LinkType};
 use crate::net::{
-    CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics,
-    CapturedFrame, DestinationScope, InterfaceId, InterfaceInfo, InterfaceProvider, IoSendReport,
-    Layer2Frame, Layer2Io, LinkCapability, LinkMode, LiveIoError, MAX_NEIGHBOR_VLAN_TAGS,
-    MacAddress, MaterializedRoute, NeighborError, NeighborRequest, NeighborResolution,
-    NeighborResolver, PlannedRoute, RouteDecision, RouteSelectionReason, SystemCaptureProvider,
-    SystemInterfaceProvider, SystemLayer2Io,
+    Error as LiveIoError,
+    capture::{
+        CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession,
+        CaptureStatistics, CapturedFrame, SystemCaptureProvider,
+    },
+    interface::{InterfaceInfo, InterfaceProvider, SystemInterfaceProvider},
+    link::{LinkCapability, LinkMode, MacAddress},
+    route::{
+        DestinationScope, InterfaceId, MAX_NEIGHBOR_VLAN_TAGS, MaterializedRoute, NeighborError,
+        NeighborRequest, NeighborResolution, NeighborResolver, PlannedRoute, RouteDecision,
+        RouteSelectionReason,
+    },
+    transmit::{IoSendReport, Layer2Frame, Layer2Io, SystemLayer2Io},
 };
 
 use super::cache::{NeighborCacheEntry, NeighborCacheKey, NeighborExchangeOutcome};

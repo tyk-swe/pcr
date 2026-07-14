@@ -14,16 +14,23 @@ use crate::client::Client;
 use crate::client::exchange::Options as ExchangeOptions;
 use crate::client::policy::Policy as TrafficPolicy;
 use crate::client::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
+use crate::error::Classification as ErrorClassification;
 use crate::net::{
-    CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, DestinationScope,
-    InterfaceId, IoSendReport, LinkCapability, LinkMode, LiveIoError, NeighborResolver, PacketIo,
-    PlanOptions, RouteDecision, RouteProvider, RouteSelectionReason, TransmissionFrame,
+    Error as LiveIoError,
+    capture::{CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics},
+    link::{LinkCapability, LinkMode, MacAddress},
+    route::{
+        DestinationScope, InterfaceId, NeighborError, NeighborResolver, PlanOptions, PlannedRoute,
+        RouteDecision, RouteProvider, RouteSelectionReason,
+    },
+    transmit::{IoSendReport, PacketIo, TransmissionFrame},
 };
-use crate::packet::internal::PacketLayout;
-use crate::protocol::internal::default_registry;
-use crate::workflow::dns_impl::ClientExecutor as DnsClientExecutor;
+use crate::packet::layout::PacketLayout;
+use crate::protocol::builtin::registry as default_registry;
+use crate::workflow::dns::ClientExecutor as DnsClientExecutor;
 use crate::workflow::target_adapter::PolicyAuthorizer;
-use crate::workflow::traceroute_impl::ClientExecutor as TracerouteClientExecutor;
+use crate::workflow::traceroute::ClientExecutor as TracerouteClientExecutor;
+use std::result::Result;
 
 #[derive(Clone, Copy, Debug, Default)]
 struct NoNeighbors;
@@ -34,8 +41,8 @@ impl NeighborResolver for NoNeighbors {
         interface: &InterfaceId,
         _interface_source: IpAddr,
         target: IpAddr,
-    ) -> Result<crate::net::MacAddress, crate::net::NeighborError> {
-        Err(crate::net::NeighborError::Resolution {
+    ) -> Result<MacAddress, NeighborError> {
+        Err(NeighborError::Resolution {
             interface: interface.name.clone(),
             target,
             message: "test does not configure neighbor resolution".to_owned(),
@@ -114,7 +121,7 @@ impl ScanExecutor for CountingRejectExecutor {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Err(ScanExecutionError::new(
             "stop after authorization",
-            Classification::new("io.test", Kind::Io, None),
+            ErrorClassification::new("io.test", Kind::Io, None),
             Vec::new(),
         ))
     }
@@ -561,10 +568,10 @@ fn executor_cannot_replace_the_authorized_scan_probe() {
     let mut execution = TimeoutExecutor::new().execute(&batch).unwrap();
     let mut layer2 = execution.sent[0].clone();
     layer2
-        .insert(0, crate::protocol::internal::Ethernet::default())
+        .insert(0, crate::protocol::link::Ethernet::default())
         .unwrap();
     assert!(sent_scan_probe_matches(&batch.probes[0], &layer2));
-    layer2.push(crate::protocol::internal::Ethernet::default());
+    layer2.push(crate::protocol::link::Ethernet::default());
     assert!(!sent_scan_probe_matches(&batch.probes[0], &layer2));
     execution.stats.bytes = 0;
     let sent_bytes = execution.sent_evidence[0].bytes().len() as u64;
@@ -1188,7 +1195,7 @@ impl CaptureProvider for LifecycleIo {
 
     fn arm_capture(
         &self,
-        _route: &crate::net::PlannedRoute,
+        _route: &PlannedRoute,
         _limits: CaptureQueueLimits,
     ) -> Result<Self::Capture, LiveIoError> {
         self.events.lock().unwrap().push("arm");

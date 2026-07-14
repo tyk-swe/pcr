@@ -13,7 +13,12 @@ use super::live_capture::{
     NativeCaptureStatistics, NativeCapturedPacket, system_time,
 };
 use crate::capture::LinkType;
-use crate::net::{CaptureQueueLimits, InterfaceId, IoSendReport, Layer2Frame, LiveIoError};
+use crate::net::{
+    Error as LiveIoError,
+    capture::CaptureQueueLimits,
+    route::InterfaceId,
+    transmit::{IoSendReport, Layer2Frame},
+};
 
 const READ_TIMEOUT_MILLIS: i32 = 50;
 

@@ -8,19 +8,19 @@ use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use super::arguments::{CliBuildMode, FuzzArgs};
-use super::capture::{render_diagnostics_text, render_output_diagnostics_text};
-use super::errors::CliError;
-use super::input::read_recipe;
-use super::rendering::{
+use super::super::arguments::{CliBuildMode, FuzzArgs};
+use super::super::errors::CliError;
+use super::super::input::read_recipe;
+use super::super::rendering::{
     emit_json, emit_json_compact, emit_stream_record, spaced_hex, write_stdout_line,
 };
-use super::runtime::{
+use super::super::runtime::{
     DeferredInterface, default_registry_arc, system_client, workflow_exchange_options,
 };
+use super::capture::{render_diagnostics_text, render_output_diagnostics_text};
 use super::scan::validate_live_interface_selector;
 
-pub(super) fn run_fuzz(
+pub(in crate::cli) fn run_fuzz(
     arguments: FuzzArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -179,7 +179,7 @@ impl workflow::fuzz::Executor for CliFuzzExecutor {
     }
 }
 
-pub(super) fn fuzz_cli_error(error: workflow::fuzz::Error) -> CliError {
+pub(in crate::cli) fn fuzz_cli_error(error: workflow::fuzz::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

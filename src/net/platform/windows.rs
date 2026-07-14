@@ -45,13 +45,14 @@ use super::{
 };
 #[cfg(any(feature = "live", feature = "native-route"))]
 use crate::capture::LinkType;
+#[cfg(feature = "native-route")]
+use crate::net::route::{RouteDecision, RouteSelectionReason};
 #[cfg(any(feature = "live", feature = "native-route"))]
 use crate::net::{
-    InterfaceAddress, InterfaceFlags, InterfaceId, InterfaceInfo, LinkCapability, MacAddress,
-    NativeRouteError,
+    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
+    link::{LinkCapability, MacAddress},
+    route::{InterfaceId, NativeRouteError},
 };
-#[cfg(feature = "native-route")]
-use crate::net::{RouteDecision, RouteSelectionReason};
 
 #[cfg(any(feature = "live", feature = "native-route"))]
 pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
@@ -667,7 +668,7 @@ fn win32_error(operation: &'static str, error: WIN32_ERROR) -> NativeRouteError 
 #[cfg(all(test, feature = "native-route"))]
 mod tests {
     use super::*;
-    use crate::net::RouteProvider;
+    use crate::net::route::Provider as RouteProvider;
 
     #[test]
     fn adapter_buffer_bounds_reject_misaligned_and_out_of_range_pointers() {
@@ -694,7 +695,7 @@ mod tests {
         let interfaces = interfaces().unwrap();
         assert!(interfaces.iter().any(|interface| interface.flags.loopback));
 
-        let provider = crate::net::SystemRouteProvider;
+        let provider = crate::net::route::SystemProvider;
         let ipv4 = provider
             .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
             .unwrap();

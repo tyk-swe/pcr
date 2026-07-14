@@ -18,7 +18,10 @@ use windows::Win32::Networking::WinSock::{
     SOCKET, SOCKET_ERROR, WSAGetLastError, setsockopt,
 };
 
-use super::super::{IoSendReport, Layer3Frame, LiveIoError};
+use super::super::{
+    Error as LiveIoError,
+    transmit::{IoSendReport, Layer3Frame},
+};
 use super::InterfaceId;
 
 const IPV4_MINIMUM_HEADER: usize = 20;
@@ -469,8 +472,10 @@ mod tests {
     use super::*;
     use crate::capture::LinkType;
     use crate::net::{
-        DestinationScope, LinkCapability, LinkMode, MaterializedRoute, PlannedRoute, RouteDecision,
-        RouteSelectionReason,
+        link::{LinkCapability, LinkMode},
+        route::{
+            DestinationScope, MaterializedRoute, PlannedRoute, RouteDecision, RouteSelectionReason,
+        },
     };
 
     struct RecordingBackend {

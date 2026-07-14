@@ -5,10 +5,10 @@
 
 use packetcraftr::{net, output};
 
-use super::errors::CliError;
-use super::rendering::{emit_json, write_stdout_line};
+use super::super::errors::CliError;
+use super::super::rendering::{emit_json, write_stdout_line};
 
-pub(super) fn run_interfaces(output: output::contract::Format) -> Result<(), CliError> {
+pub(in crate::cli) fn run_interfaces(output: output::contract::Format) -> Result<(), CliError> {
     let interfaces = net::interface::Provider::interfaces(&net::interface::SystemProvider)
         .map_err(CliError::classified)?;
     let result = output::network::interfaces::Result::new(interfaces);

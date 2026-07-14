@@ -13,15 +13,15 @@ use packetcraftr::{
     output, packet,
 };
 
-use super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
-use super::errors::CliError;
-use super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
-use super::rendering::{
+use super::super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
+use super::super::errors::CliError;
+use super::super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
+use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_raw, write_stdout_line,
 };
-use super::runtime::default_registry_arc;
+use super::super::runtime::default_registry_arc;
 
-pub(super) fn run_build(
+pub(in crate::cli) fn run_build(
     arguments: BuildArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -69,7 +69,7 @@ pub(super) fn run_build(
     }
 }
 
-pub(super) fn run_dissect(
+pub(in crate::cli) fn run_dissect(
     arguments: DissectArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -126,7 +126,7 @@ pub(super) fn run_dissect(
     }
 }
 
-pub(super) fn run_read(
+pub(in crate::cli) fn run_read(
     arguments: ReadArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -230,7 +230,7 @@ pub(super) fn run_read(
     }
 }
 
-pub(super) fn validate_capture_stream_limits(
+pub(in crate::cli) fn validate_capture_stream_limits(
     max_frames: u64,
     max_bytes: u64,
     max_frame_bytes: usize,

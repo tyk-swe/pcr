@@ -3,7 +3,7 @@ use super::{
     NetworkEnvelope, ReplayError, RouteProvider, SystemRouteProvider,
 };
 
-pub(super) fn map_replay_route_error(source: crate::net::NativeRouteError) -> LiveIoError {
+pub(super) fn map_replay_route_error(source: crate::net::route::NativeRouteError) -> LiveIoError {
     let classification = SystemRouteProvider.classify_error(&source);
     match classification.kind {
         Kind::Capability => LiveIoError::Unsupported {
@@ -58,7 +58,7 @@ pub(super) struct ReplayWireDestinations {
 
 pub(super) fn replay_wire_destinations(
     frame: &Frame,
-) -> Result<ReplayWireDestinations, crate::protocol::internal::Ipv4OptionsError> {
+) -> Result<ReplayWireDestinations, crate::protocol::network::Ipv4OptionsError> {
     let bytes = frame.bytes().as_ref();
     let (network_offset, protocol) = match frame.link_type.0 {
         12 | 101 => (0, bytes.first().map(|byte| byte >> 4).unwrap_or(0)),
@@ -102,7 +102,7 @@ fn collect_ipv4_wire_destinations(
     bytes: &[u8],
     offset: usize,
     output: &mut Vec<IpAddr>,
-) -> Result<(), crate::protocol::internal::Ipv4OptionsError> {
+) -> Result<(), crate::protocol::network::Ipv4OptionsError> {
     let Some(header) = bytes.get(offset..offset.saturating_add(20)) else {
         return Ok(());
     };
@@ -116,7 +116,7 @@ fn collect_ipv4_wire_destinations(
     let Some(header) = bytes.get(offset..offset.saturating_add(header_length)) else {
         return Ok(());
     };
-    for destination in crate::protocol::internal::ipv4_source_route_destinations(&header[20..])? {
+    for destination in crate::protocol::network::ipv4_source_route_destinations(&header[20..])? {
         output.push(IpAddr::V4(destination));
     }
     Ok(())

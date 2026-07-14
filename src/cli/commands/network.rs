@@ -12,13 +12,13 @@ use packetcraftr::{
     client, net, output, packet,
 };
 
-use super::arguments::{RouteArgs, SendArgs};
+use super::super::arguments::{RouteArgs, SendArgs};
+use super::super::errors::CliError;
+use super::super::rendering::{emit_json, write_capture_file, write_raw, write_stdout_line};
+use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 use super::capture::cli_build_mode;
-use super::errors::CliError;
-use super::rendering::{emit_json, write_capture_file, write_raw, write_stdout_line};
-use super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
-pub(super) fn run_plan(
+pub(in crate::cli) fn run_plan(
     arguments: RouteArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -75,7 +75,7 @@ fn optional_display<T: std::fmt::Display>(value: Option<T>) -> String {
         .unwrap_or_else(|| "none".to_owned())
 }
 
-pub(super) fn run_routes(output: output::contract::Format) -> Result<(), CliError> {
+pub(in crate::cli) fn run_routes(output: output::contract::Format) -> Result<(), CliError> {
     let interfaces = net::interface::SystemProvider
         .interfaces()
         .map_err(CliError::classified)?;
@@ -130,7 +130,7 @@ pub(super) fn run_routes(output: output::contract::Format) -> Result<(), CliErro
     }
 }
 
-pub(super) fn run_send(
+pub(in crate::cli) fn run_send(
     arguments: SendArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -207,7 +207,7 @@ pub(super) fn run_send(
     }
 }
 
-pub(super) fn send_capture_link_type(
+pub(in crate::cli) fn send_capture_link_type(
     mode: net::link::Mode,
     route_link_type: LinkType,
 ) -> Result<LinkType, CliError> {

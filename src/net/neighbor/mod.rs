@@ -12,5 +12,12 @@ mod provider;
 mod tests;
 mod wire;
 
-pub use options::NeighborResolutionOptions;
-pub use provider::{ActiveNeighborResolver, SystemNeighborResolver};
+pub use super::route::models::{
+    NeighborRequest as Request, NeighborResolution as Resolution, NeighborVlanKind as VlanKind,
+    NeighborVlanTag as VlanTag,
+};
+pub use super::route::planner::{NeighborError as Error, NeighborResolver as Resolver};
+pub use options::NeighborResolutionOptions as Options;
+pub use provider::{
+    ActiveNeighborResolver as ActiveResolver, SystemNeighborResolver as SystemResolver,
+};

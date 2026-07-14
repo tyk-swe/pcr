@@ -61,6 +61,61 @@ fn domain_files(root: &Path, domain: &str) -> Vec<PathBuf> {
     files
 }
 
+fn source_files(root: &Path) -> Vec<PathBuf> {
+    fn visit(path: &Path, files: &mut Vec<PathBuf>) {
+        if path.is_file() {
+            if path.extension().is_some_and(|extension| extension == "rs") {
+                files.push(path.to_owned());
+            }
+            return;
+        }
+        if !path.is_dir() {
+            return;
+        }
+
+        let mut entries: Vec<_> = std::fs::read_dir(path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+            .map(|entry| entry.expect("source entry should be readable").path())
+            .collect();
+        entries.sort();
+        for entry in entries {
+            visit(&entry, files);
+        }
+    }
+
+    let mut files = Vec::new();
+    visit(&root.join("src"), &mut files);
+    files
+}
+
+struct LayoutVisitor<'a> {
+    file: &'a Path,
+    violations: &'a mut Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for LayoutVisitor<'_> {
+    fn visit_item_mod(&mut self, module: &'ast syn::ItemMod) {
+        let name = module.ident.to_string();
+        if name == "internal" || name.ends_with("_impl") {
+            self.violations.push(format!(
+                "non-canonical source module `{name}` in {}",
+                self.file.display()
+            ));
+        }
+        if module
+            .attrs
+            .iter()
+            .any(|attribute| attribute.path().is_ident("path"))
+        {
+            self.violations.push(format!(
+                "path-selected source module `{name}` in {}",
+                self.file.display()
+            ));
+        }
+        syn::visit::visit_item_mod(self, module);
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CfgValue {
     True,
@@ -508,6 +563,50 @@ fn library_root_contains_only_canonical_modules() {
         validate_library_root(include_str!("../src/lib.rs")).is_ok(),
         "the library root must expose only the canonical modules; CLI code, removed facades, and \
          flat reexports belong outside it"
+    );
+}
+
+#[test]
+fn source_modules_follow_the_canonical_filesystem_layout() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut violations = Vec::new();
+
+    for file in source_files(root) {
+        let relative = file.strip_prefix(root).unwrap_or(&file);
+        if relative
+            .components()
+            .any(|component| component.as_os_str() == "internal")
+        {
+            violations.push(format!(
+                "generic internal source tree remains at {}",
+                relative.display()
+            ));
+        }
+        if file
+            .file_stem()
+            .is_some_and(|stem| stem.to_string_lossy().ends_with("_impl"))
+        {
+            violations.push(format!(
+                "implementation-suffixed source file remains at {}",
+                relative.display()
+            ));
+        }
+
+        let source = std::fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
+        let syntax = syn::parse_file(&source)
+            .unwrap_or_else(|error| panic!("failed to parse {}: {error}", file.display()));
+        LayoutVisitor {
+            file: relative,
+            violations: &mut violations,
+        }
+        .visit_file(&syntax);
+    }
+
+    assert!(
+        violations.is_empty(),
+        "non-canonical source layout:\n{}",
+        violations.join("\n")
     );
 }
 

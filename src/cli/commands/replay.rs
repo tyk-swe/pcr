@@ -12,16 +12,16 @@ use packetcraftr::{
     net, output, workflow,
 };
 
-use super::arguments::{CliReplayTiming, ReplayArgs};
-use super::errors::CliError;
-use super::offline::validate_capture_stream_limits;
-use super::rendering::{
+use super::super::arguments::{CliReplayTiming, ReplayArgs};
+use super::super::errors::CliError;
+use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_stdout_line,
 };
-use super::runtime::{default_registry_arc, validate_interface_selector};
+use super::super::runtime::{default_registry_arc, validate_interface_selector};
+use super::offline::validate_capture_stream_limits;
 
 #[derive(Clone, Copy, Debug)]
-pub(super) struct ReplayInterfaceMapping {
+pub(in crate::cli) struct ReplayInterfaceMapping {
     source_id: Option<u32>,
     output_id: u32,
 }
@@ -60,7 +60,7 @@ fn requested_replay_interface(selector: &str) -> Result<net::interface::Id, CliE
     })
 }
 
-pub(super) fn run_replay(
+pub(in crate::cli) fn run_replay(
     arguments: ReplayArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
@@ -295,7 +295,7 @@ fn replay_capture_writer<W: Write>(
     Ok(writer)
 }
 
-pub(super) fn write_replay_capture_evidence<W: Write>(
+pub(in crate::cli) fn write_replay_capture_evidence<W: Write>(
     writer: &mut Writer<W>,
     format: Format,
     interfaces: &mut Vec<ReplayInterfaceMapping>,
@@ -342,7 +342,7 @@ fn replay_stats(summary: &workflow::replay::Summary, elapsed: Duration) -> outpu
     }
 }
 
-pub(super) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
+pub(in crate::cli) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
 }

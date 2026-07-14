@@ -7,6 +7,7 @@ use bytes::Bytes;
 use super::wire::replay_wire_destinations;
 use super::*;
 use crate::capture::Writer;
+use std::result::Result;
 
 #[test]
 fn replay_timing_for_valid_modes_calculates_expected_delay() {
@@ -89,7 +90,7 @@ fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
         replay_wire_destinations(&frame).unwrap().addresses,
         [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
     );
-    let registry = Arc::new(crate::protocol::internal::default_registry().unwrap());
+    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
     let mut authorizer = SystemAuthorizer::new(
         crate::client::policy::Policy::default(),
         Arc::clone(&registry),
@@ -101,7 +102,7 @@ fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
 
 #[test]
 fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
-    let registry = Arc::new(crate::protocol::internal::default_registry().unwrap());
+    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
     for mut unsupported in [vec![0_u8; 48], vec![0_u8; 40]] {
         unsupported[0] = 0x60;
         unsupported[6] = 43;

@@ -33,7 +33,7 @@ type FrameCase = (
     bool,
 );
 
-fn fixture(relative: &str) -> Vec<u8> {
+fn read_fixture(relative: &str) -> Vec<u8> {
     fs::read(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures")
@@ -56,7 +56,7 @@ fn diagnostic_codes(diagnostics: &[Diagnostic]) -> Vec<String> {
         .collect()
 }
 
-fn strings(values: &[&str]) -> Vec<String> {
+fn to_owned_strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_owned()).collect()
 }
 
@@ -174,7 +174,7 @@ fn frame_corpus_decodes_and_rebuilds() {
     ];
 
     for &(relative, link_type, expected_layers, expected_diagnostics, exact) in frames {
-        let bytes = fixture(relative);
+        let bytes = read_fixture(relative);
         let decoded = dissector
             .decode(
                 CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType(link_type), bytes.clone())
@@ -184,12 +184,12 @@ fn frame_corpus_decodes_and_rebuilds() {
             .unwrap();
         assert_eq!(
             layer_names(&decoded.packet),
-            strings(expected_layers),
+            to_owned_strings(expected_layers),
             "{relative}"
         );
         assert_eq!(
             diagnostic_codes(&decoded.diagnostics),
-            strings(expected_diagnostics),
+            to_owned_strings(expected_diagnostics),
             "{relative}"
         );
         if exact {
@@ -212,7 +212,7 @@ fn bsd_null_corpus_preserves_both_captured_host_byte_orders() {
         ("frames/null/ipv4-icmp.bin", CaptureByteOrder::Little),
         ("frames/null/ipv6-big-endian.bin", CaptureByteOrder::Big),
     ] {
-        let bytes = fixture(relative);
+        let bytes = read_fixture(relative);
         let decoded = Dissector::new(Arc::clone(&registry))
             .decode(
                 CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::NULL, bytes.clone()).unwrap(),
@@ -241,7 +241,7 @@ fn capture_corpus_streams_valid_files_and_rejects_malformed_input() {
         ("captures/pcapng/multi-link.pcapng", &[1, 101]),
     ];
     for &(relative, expected_link_types) in captures {
-        let mut reader = CaptureReader::new(Cursor::new(fixture(relative))).unwrap();
+        let mut reader = CaptureReader::new(Cursor::new(read_fixture(relative))).unwrap();
         let mut observed = Vec::new();
         while let Some(frame) = reader.next_frame().unwrap() {
             observed.push(frame.link_type.0);
@@ -253,7 +253,7 @@ fn capture_corpus_streams_valid_files_and_rejects_malformed_input() {
         "captures/malformed/truncated-record.pcap",
         "captures/malformed/oversized-block.pcapng",
     ] {
-        let mut reader = CaptureReader::new(Cursor::new(fixture(relative))).unwrap();
+        let mut reader = CaptureReader::new(Cursor::new(read_fixture(relative))).unwrap();
         assert!(reader.next_frame().is_err(), "{relative}");
         assert!(reader.next_frame().unwrap().is_none(), "{relative}");
     }
@@ -265,7 +265,7 @@ fn every_capture_truncation_is_bounded_and_errors_are_terminal() {
         "captures/pcap/ethernet-ipv4-udp.pcap",
         "captures/pcapng/multi-link.pcapng",
     ] {
-        let bytes = fixture(relative);
+        let bytes = read_fixture(relative);
         for end in 0..bytes.len() {
             match CaptureReader::new(Cursor::new(&bytes[..end])) {
                 Err(_) => {}
@@ -293,7 +293,7 @@ fn frame_truncations_and_corruptions_preserve_layout_and_permissive_bytes() {
         ("frames/raw/ipv6-udp.bin", LinkType::RAW),
         ("frames/sll2/ipv6-udp.bin", LinkType::LINUX_SLL2),
     ] {
-        let original = fixture(relative);
+        let original = read_fixture(relative);
         let mut cases = (0..=original.len())
             .map(|end| original[..end].to_vec())
             .collect::<Vec<_>>();
@@ -346,11 +346,15 @@ fn document_corpus_parses_and_builds() {
         ("documents/raw.yaml", DocumentFormat::Yaml, &["raw"]),
     ];
     for &(relative, format, expected_layers) in documents {
-        let bytes = fixture(relative);
+        let bytes = read_fixture(relative);
         let input = std::str::from_utf8(&bytes).unwrap();
         let document = PacketDocument::parse(input, format, 16 * 1024 * 1024).unwrap();
         let packet = document.to_packet(&registry, 64).unwrap();
-        assert_eq!(layer_names(&packet), strings(expected_layers), "{relative}");
+        assert_eq!(
+            layer_names(&packet),
+            to_owned_strings(expected_layers),
+            "{relative}"
+        );
         Builder::new(Arc::clone(&registry))
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap();
@@ -358,10 +362,10 @@ fn document_corpus_parses_and_builds() {
 }
 
 #[test]
-fn expected_decode_is_an_independent_semantic_assertion() {
-    let frame = fixture("frames/ethernet/ipv4-udp.bin");
+fn expected_decode_fixture_matches_independent_semantic_assertions() {
+    let frame = read_fixture("frames/ethernet/ipv4-udp.bin");
     let expected: serde_json::Value =
-        serde_json::from_slice(&fixture("expected/ethernet-ipv4-udp.json")).unwrap();
+        serde_json::from_slice(&read_fixture("expected/ethernet-ipv4-udp.json")).unwrap();
     let decoded = Dissector::new(Arc::new(default_registry().unwrap()))
         .decode(
             CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, frame).unwrap(),
@@ -374,7 +378,7 @@ fn expected_decode_is_an_independent_semantic_assertion() {
 
     assert_eq!(
         layer_names(&decoded.packet),
-        strings(&["ethernet", "ipv4", "udp", "raw"])
+        to_owned_strings(&["ethernet", "ipv4", "udp", "raw"])
     );
     assert_eq!(ipv4.source.to_string(), expected["source"]);
     assert_eq!(ipv4.destination.to_string(), expected["destination"]);

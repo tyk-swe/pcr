@@ -6,11 +6,11 @@ use super::*;
 use crate::packet::internal::{BuildMode, PacketDocument, Raw, WireValue};
 use crate::protocol::internal::{Ipv4, Udp, default_registry};
 
-fn registry() -> Arc<ProtocolRegistry> {
+fn fuzz_protocol_registry() -> Arc<ProtocolRegistry> {
     Arc::new(default_registry().unwrap())
 }
 
-fn packet() -> Packet {
+fn udp_fuzz_packet() -> Packet {
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -34,8 +34,8 @@ fn same_seed_and_configuration_produce_identical_cases_and_bytes() {
         cases: 128,
         ..FuzzRequest::default()
     };
-    let first = fuzz(&request, packet(), registry()).unwrap();
-    let second = fuzz(&request, packet(), registry()).unwrap();
+    let first = fuzz(&request, udp_fuzz_packet(), fuzz_protocol_registry()).unwrap();
+    let second = fuzz(&request, udp_fuzz_packet(), fuzz_protocol_registry()).unwrap();
     assert_eq!(first.cases.len(), second.cases.len());
     for (left, right) in first.cases.iter().zip(&second.cases) {
         assert_eq!(left.index, right.index);
@@ -58,7 +58,7 @@ fn first_case_reproduces_one_case_without_replaying_predecessors() {
         strategies: vec![FuzzStrategy::Random],
         ..FuzzRequest::default()
     };
-    let campaign = fuzz(&request, packet(), registry()).unwrap();
+    let campaign = fuzz(&request, udp_fuzz_packet(), fuzz_protocol_registry()).unwrap();
     let expected = &campaign.cases[19];
     let reproduced = fuzz(
         &FuzzRequest {
@@ -66,8 +66,8 @@ fn first_case_reproduces_one_case_without_replaying_predecessors() {
             cases: 1,
             ..request
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
     )
     .unwrap();
     let actual = &reproduced.cases[0];
@@ -113,8 +113,8 @@ fn shrink_data_is_finite_deterministic_and_strictly_simpler() {
             },
             ..FuzzRequest::default()
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
     )
     .unwrap();
     for case in result.cases {
@@ -186,8 +186,8 @@ fn limits_reject_before_unbounded_case_or_byte_growth() {
             },
             ..FuzzRequest::default()
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
     )
     .unwrap_err();
     assert!(matches!(error, FuzzError::ByteLimit { .. }));
@@ -214,8 +214,8 @@ fn rejected_case_recipes_and_shrink_data_share_the_aggregate_byte_budget() {
             },
             ..FuzzRequest::default()
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
     )
     .unwrap_err();
     assert!(matches!(error, FuzzError::ByteLimit { .. }));
@@ -227,7 +227,7 @@ fn oversized_base_packet_is_rejected_before_case_cloning() {
     for _ in 0..=BuildOptions::default().max_layers {
         oversized.push(Raw::new(Bytes::new()));
     }
-    let error = fuzz(&FuzzRequest::default(), oversized, registry()).unwrap_err();
+    let error = fuzz(&FuzzRequest::default(), oversized, fuzz_protocol_registry()).unwrap_err();
     assert!(matches!(error, FuzzError::InvalidBasePacket { .. }));
 }
 
@@ -249,7 +249,7 @@ fn strategy_expansion_is_hard_bounded() {
 
 #[test]
 fn malformed_derived_fields_are_rejected_strictly_and_built_permissively() {
-    let base = packet();
+    let base = udp_fuzz_packet();
     let strict = fuzz(
         &FuzzRequest {
             seed: 1,
@@ -259,7 +259,7 @@ fn malformed_derived_fields_are_rejected_strictly_and_built_permissively() {
             ..FuzzRequest::default()
         },
         base.clone(),
-        registry(),
+        fuzz_protocol_registry(),
     )
     .unwrap();
     assert!(
@@ -282,7 +282,7 @@ fn malformed_derived_fields_are_rejected_strictly_and_built_permissively() {
             ..FuzzRequest::default()
         },
         base,
-        registry(),
+        fuzz_protocol_registry(),
     )
     .unwrap();
     assert!(permissive.cases.iter().any(|case| {
@@ -338,7 +338,7 @@ impl FuzzExecutor for RecordingExecutor {
         if let Some(delay) = self.sleep {
             std::thread::sleep(delay);
         }
-        let built = Builder::new(registry())
+        let built = Builder::new(fuzz_protocol_registry())
             .build(
                 case.packet.clone(),
                 BuildContext::default(),
@@ -421,8 +421,8 @@ fn authorization_denial_precedes_every_live_execution() {
             ..FuzzRequest::default()
         },
         FuzzLiveOptions::default(),
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut clock,
@@ -450,8 +450,8 @@ fn malformed_call_site_opt_in_precedes_authorizer_and_executor() {
             ..FuzzRequest::default()
         },
         FuzzLiveOptions::default(),
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut clock,
@@ -481,8 +481,8 @@ fn worst_case_duration_is_rejected_before_authorization_or_execution() {
             timeout: Duration::from_secs(1),
             ..FuzzLiveOptions::default()
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut clock,
@@ -515,8 +515,8 @@ fn actual_executor_wall_time_cannot_evade_the_duration_limit() {
             timeout: Duration::from_millis(1),
             ..FuzzLiveOptions::default()
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut clock,
@@ -548,8 +548,8 @@ fn live_rate_and_timeout_are_bounded_before_execution() {
             destination: None,
             allow_malformed_live: true,
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut clock,
@@ -586,8 +586,8 @@ fn evidence_truncation_never_turns_a_correlated_response_into_timeout() {
             ..FuzzRequest::default()
         },
         FuzzLiveOptions::default(),
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut clock,
@@ -619,8 +619,8 @@ fn inconsistent_executor_statistics_fail_closed() {
             ..FuzzRequest::default()
         },
         FuzzLiveOptions::default(),
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut clock,
@@ -647,8 +647,8 @@ fn executor_cannot_turn_a_response_after_the_case_deadline_into_success() {
             timeout: Duration::from_millis(1),
             ..FuzzLiveOptions::default()
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
         &mut authorizer,
         &mut executor,
         &mut RecordingClock::default(),
@@ -671,8 +671,8 @@ fn malformed_raw_wire_values_remain_explicit_in_reproduction_recipe() {
             },
             ..FuzzRequest::default()
         },
-        packet(),
-        registry(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
     )
     .unwrap();
     let recipe = PacketDocument::from_packet(&result.cases[0].recipe);

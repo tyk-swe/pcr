@@ -1,0 +1,336 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: validate release metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      prerelease: ${{ steps.metadata.outputs.prerelease }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Validate tag and extract changelog section
+        id: metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cargo metadata --locked --no-deps --format-version 1 \
+            > "$RUNNER_TEMP/cargo-metadata.json"
+          version="$(
+            python3 - "$RUNNER_TEMP/cargo-metadata.json" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          metadata = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          root_manifest = pathlib.Path(metadata["workspace_root"]) / "Cargo.toml"
+          root_packages = [
+              package
+              for package in metadata["packages"]
+              if pathlib.Path(package["manifest_path"]) == root_manifest
+          ]
+          if len(root_packages) != 1:
+              raise SystemExit("could not identify exactly one root Cargo package")
+          print(root_packages[0]["version"])
+          PY
+          )"
+
+          expected_tag="v${version}"
+          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
+            echo "tag '$GITHUB_REF_NAME' does not match root package version '$expected_tag'" >&2
+            exit 1
+          fi
+
+          mkdir -p "$RUNNER_TEMP/release-metadata"
+          python3 - "$version" "$RUNNER_TEMP/release-metadata/changelog.md" <<'PY'
+          import datetime
+          import pathlib
+          import re
+          import sys
+
+          version = sys.argv[1]
+          destination = pathlib.Path(sys.argv[2])
+          changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          heading = re.compile(
+              rf"^## \[{re.escape(version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})$",
+              re.MULTILINE,
+          )
+          matches = list(heading.finditer(changelog))
+          if len(matches) != 1:
+              raise SystemExit(
+                  f"expected exactly one dated CHANGELOG.md section for {version}, "
+                  f"found {len(matches)}"
+              )
+
+          try:
+              datetime.date.fromisoformat(matches[0].group(1))
+          except ValueError as error:
+              raise SystemExit(f"invalid changelog date for {version}: {error}") from error
+
+          section_start = matches[0].end()
+          next_heading = re.search(r"^## \[", changelog[section_start:], re.MULTILINE)
+          section_end = (
+              section_start + next_heading.start() if next_heading else len(changelog)
+          )
+          section = changelog[section_start:section_end].strip()
+          if not section:
+              raise SystemExit(f"CHANGELOG.md section for {version} is empty")
+          destination.write_text(f"{section}\n", encoding="utf-8")
+          PY
+
+          prerelease=false
+          if [[ "$version" == *-* ]]; then
+            prerelease=true
+          fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Upload release metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-metadata
+          path: ${{ runner.temp }}/release-metadata/changelog.md
+          if-no-files-found: error
+          retention-days: 1
+
+  build:
+    name: build (${{ matrix.target.triple }}, ${{ matrix.variant.name }})
+    needs: preflight
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - triple: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+            archive_extension: tar.gz
+          - triple: x86_64-apple-darwin
+            os: macos-15-intel
+            archive_extension: tar.gz
+          - triple: aarch64-apple-darwin
+            os: macos-14
+            archive_extension: tar.gz
+          - triple: x86_64-pc-windows-msvc
+            os: windows-2022
+            archive_extension: zip
+        variant:
+          - name: all-features
+            cargo_args: --all-features
+          - name: pcap-free
+            cargo_args: --no-default-features --features live,native-route,native-layer3
+    runs-on: ${{ matrix.target.os }}
+    timeout-minutes: 30
+    env:
+      ARCHIVE_BASENAME: packetcraftr-v${{ needs.preflight.outputs.version }}-${{ matrix.target.triple }}-${{ matrix.variant.name }}
+      TARGET: ${{ matrix.target.triple }}
+      VARIANT: ${{ matrix.variant.name }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-release-v1-${{ matrix.target.triple }}-${{ matrix.variant.name }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-release-v1-${{ matrix.target.triple }}-${{ matrix.variant.name }}-${{ hashFiles('rust-toolchain.toml') }}-
+      - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
+        name: Install libpcap development files
+        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install Rust target
+        run: rustup target add ${{ matrix.target.triple }}
+      - name: Build release binary
+        run: >-
+          cargo build --locked --release --target ${{ matrix.target.triple }}
+          ${{ matrix.variant.cargo_args }}
+      - if: runner.os != 'Windows'
+        name: Package Unix archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          staging="$RUNNER_TEMP/$ARCHIVE_BASENAME"
+          mkdir -p "$staging"
+          cp "target/$TARGET/release/packetcraftr" "$staging/packetcraftr"
+          cp LICENSE "$staging/LICENSE"
+          tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz" \
+            "$ARCHIVE_BASENAME"
+      - if: runner.os == 'Windows'
+        name: Package Windows archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $staging = Join-Path $env:RUNNER_TEMP $env:ARCHIVE_BASENAME
+          $archive = Join-Path $env:RUNNER_TEMP "$($env:ARCHIVE_BASENAME).zip"
+          New-Item -ItemType Directory -Path $staging | Out-Null
+          Copy-Item "target/$env:TARGET/release/packetcraftr.exe" $staging
+          Copy-Item "LICENSE" $staging
+          Compress-Archive -Path $staging -DestinationPath $archive
+      - if: runner.os != 'Windows'
+        name: Smoke-test Unix archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          extraction="$RUNNER_TEMP/archive-smoke-test"
+          mkdir -p "$extraction"
+          tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
+          executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
+          test -x "$executable"
+          test -f "$extraction/$ARCHIVE_BASENAME/LICENSE"
+          test "$("$executable" --version)" = "packetcraftr $VERSION"
+      - if: runner.os == 'Windows'
+        name: Smoke-test Windows archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $extraction = Join-Path $env:RUNNER_TEMP "archive-smoke-test"
+          $archive = Join-Path $env:RUNNER_TEMP "$($env:ARCHIVE_BASENAME).zip"
+          Expand-Archive -Path $archive -DestinationPath $extraction
+          $packagedPath = "$($env:ARCHIVE_BASENAME)/packetcraftr.exe"
+          $executable = Join-Path $extraction $packagedPath
+          if (-not (Test-Path -PathType Leaf $executable)) {
+            throw "packaged executable is missing"
+          }
+          $license = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/LICENSE"
+          if (-not (Test-Path -PathType Leaf $license)) {
+            throw "packaged license is missing"
+          }
+          $reportedVersion = (& $executable --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw "packaged executable failed with exit code $LASTEXITCODE"
+          }
+          if ($reportedVersion -ne "packetcraftr $env:VERSION") {
+            throw "unexpected packaged version: $reportedVersion"
+          }
+      - if: runner.os == 'Linux' && matrix.variant.name == 'all-features'
+        name: Verify full Linux binary links libpcap
+        shell: bash
+        run: ldd "target/$TARGET/release/packetcraftr" | grep -Eq 'libpcap\.so'
+      - if: runner.os == 'Linux' && matrix.variant.name == 'pcap-free'
+        name: Verify pcap-free Linux binary does not link libpcap
+        shell: bash
+        run: "! ldd \"target/$TARGET/release/packetcraftr\" | grep -Eq 'libpcap\\.so'"
+      - name: Upload binary archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.ARCHIVE_BASENAME }}
+          path: ${{ runner.temp }}/${{ env.ARCHIVE_BASENAME }}.${{ matrix.target.archive_extension }}
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: publish GitHub release
+    needs: [preflight, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      VERSION: ${{ needs.preflight.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Download binary archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: packetcraftr-v${{ needs.preflight.outputs.version }}-*
+          path: dist
+          merge-multiple: true
+      - name: Download release metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-metadata
+          path: release-metadata
+      - name: Validate assets and generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t archives < <(
+            find dist -maxdepth 1 -type f \
+              \( -name '*.tar.gz' -o -name '*.zip' \) -printf '%f\n' |
+              LC_ALL=C sort
+          )
+          if [[ "${#archives[@]}" -ne 8 ]]; then
+            echo "expected exactly eight release archives, found ${#archives[@]}" >&2
+            printf 'found: %s\n' "${archives[@]}" >&2
+            exit 1
+          fi
+
+          targets=(
+            x86_64-unknown-linux-gnu
+            x86_64-apple-darwin
+            aarch64-apple-darwin
+            x86_64-pc-windows-msvc
+          )
+          variants=(all-features pcap-free)
+          for target in "${targets[@]}"; do
+            extension=tar.gz
+            if [[ "$target" == x86_64-pc-windows-msvc ]]; then
+              extension=zip
+            fi
+            for variant in "${variants[@]}"; do
+              asset="dist/packetcraftr-v${VERSION}-${target}-${variant}.${extension}"
+              if [[ ! -f "$asset" ]]; then
+                echo "missing expected release archive: $asset" >&2
+                exit 1
+              fi
+            done
+          done
+
+          (
+            cd dist
+            printf '%s\n' "${archives[@]}" |
+              while IFS= read -r archive; do
+                sha256sum "$archive"
+              done > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+      - name: Compose release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp release-metadata/changelog.md release-notes.md
+          cat >> release-notes.md <<'EOF'
+
+          ### Binary variants
+
+          - `all-features` includes Layer 2 capture and injection. Linux and macOS
+            require libpcap at runtime; Windows requires Npcap 1.88 at runtime.
+          - `pcap-free` retains interface enumeration, native routing, and raw
+            Layer 3 support without Layer 2 capture/injection or a libpcap/Npcap
+            runtime dependency.
+
+          ### Checksums
+
+          Download `SHA256SUMS` with the archives and verify it with
+          `sha256sum --check SHA256SUMS` (or `shasum -a 256 -c SHA256SUMS` on
+          macOS).
+          EOF
+      - name: Create GitHub release
+        shell: bash
+        env:
+          PRERELEASE: ${{ needs.preflight.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          prerelease_args=()
+          if [[ "$PRERELEASE" == true ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --title "PacketcraftR v${VERSION}" \
+            --notes-file release-notes.md \
+            "${prerelease_args[@]}"

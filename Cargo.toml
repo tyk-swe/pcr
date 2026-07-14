@@ -1,6 +1,6 @@
 [package]
 name = "packetcraftr"
-version = "0.2.0"
+version = "0.3.0"
 description = "Rust library and CLI for building, dissecting, capturing, and testing network packets"
 edition = "2024"
 resolver = "2"

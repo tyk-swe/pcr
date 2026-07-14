@@ -35,6 +35,16 @@ use crate::protocol::internal::{
     Ethernet, Ipv4, Ipv6, SegmentRoutingHeader, Udp, Vlan, Vlan8021ad, default_registry,
 };
 
+struct NoopExchangeObserver;
+
+impl super::exchange::ProgressObserver for NoopExchangeObserver {
+    type Error = Infallible;
+
+    fn observe(&mut self, _progress: super::exchange::Progress<'_>) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct RejectingPacketIo;
 
@@ -1388,25 +1398,31 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
 
     let dissector = Dissector::new(Arc::clone(&registry));
     let options = ExchangeOptions::default();
+    let mut observer = NoopExchangeObserver;
     let mut accumulator = ExchangeAccumulator::new(1);
-    accumulator.process(
-        CapturedFrame::new(
-            Frame::new(
-                std::time::UNIX_EPOCH,
-                LinkType::IPV4,
-                response.bytes.clone(),
+    assert!(
+        accumulator
+            .process(
+                CapturedFrame::new(
+                    Frame::new(
+                        std::time::UNIX_EPOCH,
+                        LinkType::IPV4,
+                        response.bytes.clone(),
+                    )
+                    .unwrap(),
+                    received_at,
+                ),
+                ExchangeProcessContext {
+                    registry: &registry,
+                    dissector: &dissector,
+                    prepared: &prepared,
+                    sent_at: &sent_at,
+                    deadline,
+                    options: &options,
+                },
+                &mut observer,
             )
-            .unwrap(),
-            received_at,
-        ),
-        ExchangeProcessContext {
-            registry: &registry,
-            dissector: &dissector,
-            prepared: &prepared,
-            sent_at: &sent_at,
-            deadline,
-            options: &options,
-        },
+            .is_ok()
     );
 
     assert_eq!(accumulator.responses.len(), 1);
@@ -1417,18 +1433,23 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
     );
 
     let mut fallback = ExchangeAccumulator::new(1);
-    fallback.process(
-        CapturedFrame::without_ingress_time(
-            Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
-        ),
-        ExchangeProcessContext {
-            registry: &registry,
-            dissector: &dissector,
-            prepared: &prepared,
-            sent_at: &sent_at,
-            deadline,
-            options: &options,
-        },
+    assert!(
+        fallback
+            .process(
+                CapturedFrame::without_ingress_time(
+                    Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
+                ),
+                ExchangeProcessContext {
+                    registry: &registry,
+                    dissector: &dissector,
+                    prepared: &prepared,
+                    sent_at: &sent_at,
+                    deadline,
+                    options: &options,
+                },
+                &mut observer,
+            )
+            .is_ok()
     );
     assert!(fallback.responses.is_empty());
     assert_eq!(fallback.unsolicited.len(), 1);

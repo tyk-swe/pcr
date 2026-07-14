@@ -55,7 +55,9 @@ fn read_section_header_with_length<R: Read>(
 
     let major = decode_u16(endianness, &remaining[0..2]);
     let minor = decode_u16(endianness, &remaining[2..4]);
-    if (major, minor) != (1, 0) {
+    // Some established writers emitted 1.2 without an incompatible format
+    // change. The pcapng specification requires readers to treat it as 1.0.
+    if major != 1 || (minor != 0 && minor != 2) {
         return Err(Error::UnsupportedVersion {
             format: Format::PcapNg,
             major,
@@ -67,6 +69,12 @@ fn read_section_header_with_length<R: Read>(
         return Err(Error::InvalidData {
             format: Format::PcapNg,
             reason: "section length is negative but is not the unknown-length sentinel",
+        });
+    }
+    if section_length >= 0 && section_length % 4 != 0 {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "section length is not a multiple of four",
         });
     }
     visit_options(
@@ -97,12 +105,6 @@ fn parse_interface_description(body: &[u8], endianness: Endianness) -> Result<In
         return Err(Error::InvalidData {
             format: Format::PcapNg,
             reason: "interface description block is shorter than 8 bytes",
-        });
-    }
-    if body[2..4] != [0, 0] {
-        return Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "interface description reserved field is non-zero",
         });
     }
     let link_type = LinkType(u32::from(decode_u16(endianness, &body[0..2])));

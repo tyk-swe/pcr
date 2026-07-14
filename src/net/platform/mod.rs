@@ -24,7 +24,14 @@ mod npcap;
     any(target_os = "linux", target_os = "macos")
 ))]
 mod pcap_backend;
-#[cfg(all(feature = "live", not(feature = "native-route"), not(windows)))]
+#[cfg(all(
+    feature = "live",
+    not(windows),
+    not(all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos")
+    ))
+))]
 mod pnet_enumeration;
 #[cfg(all(
     feature = "native-layer3",
@@ -159,6 +166,17 @@ pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
         .map_err(interface_error)
 }
 
+#[cfg(all(
+    feature = "native-route",
+    not(any(target_os = "linux", target_os = "macos", windows)),
+    not(feature = "live")
+))]
+pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
+    Err(LiveIoError::Unsupported {
+        message: "native route and interface discovery is unsupported on this target".to_owned(),
+    })
+}
+
 #[cfg(any(
     all(
         feature = "native-route",
@@ -187,9 +205,9 @@ fn validate_native_interfaces(
 #[cfg(any(
     all(
         feature = "native-route",
-        any(target_os = "linux", target_os = "macos", windows)
+        any(target_os = "linux", target_os = "macos")
     ),
-    all(feature = "live", windows)
+    all(any(feature = "live", feature = "native-route"), windows)
 ))]
 fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), NativeRouteError> {
     if interface.id.name.is_empty() || interface.id.index == 0 {
@@ -211,7 +229,14 @@ fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), NativeRout
     Ok(())
 }
 
-#[cfg(all(not(feature = "native-route"), feature = "live", not(windows)))]
+#[cfg(all(
+    feature = "live",
+    not(windows),
+    not(all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos")
+    ))
+))]
 pub(super) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     Ok(pnet_enumeration::interfaces())
 }
@@ -295,18 +320,6 @@ pub(super) fn system_route(
     windows::route(destination, interface_hint, preferred_source)
 }
 
-#[cfg(not(feature = "native-route"))]
-pub(super) fn system_route(
-    _destination: IpAddr,
-    _interface_hint: Option<&InterfaceId>,
-    _preferred_source: Option<IpAddr>,
-) -> Result<RouteDecision, NativeRouteError> {
-    Err(NativeRouteError::Unsupported {
-        message: "enable the native-route feature for passive operating-system route selection"
-            .to_owned(),
-    })
-}
-
 #[cfg(all(
     feature = "native-route",
     not(any(target_os = "linux", target_os = "macos", windows))
@@ -318,6 +331,18 @@ pub(super) fn system_route(
 ) -> Result<RouteDecision, NativeRouteError> {
     Err(NativeRouteError::Unsupported {
         message: "native route selection is unsupported on this target".to_owned(),
+    })
+}
+
+#[cfg(not(feature = "native-route"))]
+pub(super) fn system_route(
+    _destination: IpAddr,
+    _interface_hint: Option<&InterfaceId>,
+    _preferred_source: Option<IpAddr>,
+) -> Result<RouteDecision, NativeRouteError> {
+    Err(NativeRouteError::Unsupported {
+        message: "enable the native-route feature for passive operating-system route selection"
+            .to_owned(),
     })
 }
 
@@ -342,16 +367,6 @@ pub(super) fn system_interface_route(
     windows::interface_route(interface)
 }
 
-#[cfg(not(feature = "native-route"))]
-pub(super) fn system_interface_route(
-    _interface: &InterfaceId,
-) -> Result<RouteDecision, NativeRouteError> {
-    Err(NativeRouteError::Unsupported {
-        message: "enable the native-route feature for passive operating-system interface selection"
-            .to_owned(),
-    })
-}
-
 #[cfg(all(
     feature = "native-route",
     not(any(target_os = "linux", target_os = "macos", windows))
@@ -360,7 +375,17 @@ pub(super) fn system_interface_route(
     _interface: &InterfaceId,
 ) -> Result<RouteDecision, NativeRouteError> {
     Err(NativeRouteError::Unsupported {
-        message: "native interface route selection is unsupported on this target".to_owned(),
+        message: "native interface selection is unsupported on this target".to_owned(),
+    })
+}
+
+#[cfg(not(feature = "native-route"))]
+pub(super) fn system_interface_route(
+    _interface: &InterfaceId,
+) -> Result<RouteDecision, NativeRouteError> {
+    Err(NativeRouteError::Unsupported {
+        message: "enable the native-route feature for passive operating-system interface selection"
+            .to_owned(),
     })
 }
 

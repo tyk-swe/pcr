@@ -103,26 +103,28 @@ const fn exit_code_for_kind(kind: Kind) -> u8 {
 }
 
 fn machine_format_from_env() -> Option<OutputFormat> {
-    let arguments = std::env::args().collect::<Vec<_>>();
+    let arguments = std::env::args_os().collect::<Vec<_>>();
     machine_format(&arguments)
 }
 
-fn machine_format(arguments: &[String]) -> Option<OutputFormat> {
+fn machine_format(arguments: &[std::ffi::OsString]) -> Option<OutputFormat> {
     arguments
         .iter()
-        .take_while(|argument| argument.as_str() != "--")
+        .take_while(|argument| argument.as_os_str() != "--")
         .enumerate()
         .find_map(|(index, argument)| {
-        let value = if argument == "--output" {
-            arguments.get(index + 1).map(String::as_str)
-        } else {
-            argument.strip_prefix("--output=")
-        }?;
-        match value {
-            "json" => Some(OutputFormat::Json),
-            "ndjson" => Some(OutputFormat::Ndjson),
-            _ => None,
-        }
+            let value = if argument.as_os_str() == "--output" {
+                arguments.get(index + 1).and_then(|value| value.to_str())
+            } else {
+                argument
+                    .to_str()
+                    .and_then(|argument| argument.strip_prefix("--output="))
+            }?;
+            match value {
+                "json" => Some(OutputFormat::Json),
+                "ndjson" => Some(OutputFormat::Ndjson),
+                _ => None,
+            }
         })
 }
 
@@ -143,9 +145,10 @@ fn command_from_env() -> Option<CommandName> {
         ("interfaces", CommandName::Interfaces),
         ("routes", CommandName::Routes),
     ];
-    std::env::args()
-        .take_while(|argument| argument != "--")
+    std::env::args_os()
+        .take_while(|argument| argument.as_os_str() != "--")
         .find_map(|argument| {
+            let argument = argument.to_str()?;
             COMMANDS
                 .iter()
                 .find_map(|(name, command)| (*name == argument).then_some(*command))

@@ -1132,6 +1132,26 @@ fn cli_parse_errors_requested_as_ndjson_are_sequence_zero_records() {
     assert_eq!(value["error"]["kind"], "cli");
 }
 
+#[cfg(unix)]
+#[test]
+fn non_utf8_arguments_do_not_panic_the_structured_parse_error_path() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let invalid = std::ffi::OsString::from_vec(b"bad\xff".to_vec());
+    let output = binary()
+        .args(["--output", "json", "build", "--unknown-option"])
+        .arg(invalid)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "build");
+    assert_eq!(value["status"], "error");
+    assert_eq!(value["error"]["kind"], "cli");
+}
+
 #[test]
 fn read_ndjson_success_records_have_frozen_sequences() {
     let path = write_capture(&[&[0, 1], &[2, 3, 4]], false);

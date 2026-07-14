@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added tag-driven GitHub Releases with full and pcap-free binary archives for
+  Linux x86-64, macOS x86-64 and Arm64, and Windows x86-64, plus SHA-256
+  checksums for every release asset.
+
 ## [0.3.0] - 2026-07-14
 
 ### Changed

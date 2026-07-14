@@ -140,6 +140,24 @@ pub(super) fn emit_json_compact(value: &impl Serialize) -> Result<(), CliError> 
     write_machine_line(&rendered)
 }
 
+pub(super) fn emit_stream_record<T: Serialize>(
+    command: output::contract::Command,
+    sequence: &mut u64,
+    result: T,
+) -> Result<(), CliError> {
+    emit_json_compact(&output::envelope::Stream::success(
+        command,
+        *sequence,
+        result,
+        Vec::new(),
+    ))
+    .map_err(|error| error.at_sequence(*sequence))?;
+    *sequence = sequence.checked_add(1).ok_or_else(|| {
+        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
+    })?;
+    Ok(())
+}
+
 pub(super) fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
     let rendered = terminal_safe(&arguments.to_string());
     write_machine_line(&rendered)

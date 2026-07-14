@@ -24,7 +24,9 @@ use super::input::read_bounded_allow_empty;
 use super::network::send_capture_link_type;
 use super::rendering::{encode_capture_file, output_timestamp_text, terminal_safe};
 use super::replay::{replay_cli_error, write_replay_capture_evidence};
-use super::runtime::{run, validate_interface_selector};
+use super::runtime::{
+    parse_workflow_target, run, validate_interface_selector, workflow_exchange_options,
+};
 use super::scan::scan_cli_error;
 use super::traceroute::traceroute_cli_error;
 
@@ -288,6 +290,64 @@ fn pre_epoch_timestamp_text_uses_conventional_signed_decimal_notation() {
             nanoseconds: 500_000_000,
         }),
         "-0.500000000"
+    );
+}
+
+#[test]
+fn workflow_target_parsing_uses_the_shared_client_target_grammar() {
+    let address = parse_workflow_target("192.0.2.1".to_owned()).unwrap();
+    assert!(matches!(
+        address,
+        workflow::target::Target::Address(std::net::IpAddr::V4(_))
+    ));
+
+    let hostname = parse_workflow_target("example.test".to_owned()).unwrap();
+    assert_eq!(
+        hostname,
+        workflow::target::Target::Hostname("example.test".to_owned())
+    );
+    assert!(parse_workflow_target("invalid target".to_owned()).is_err());
+}
+
+#[test]
+fn workflow_exchange_options_share_capture_bounds_and_decode_limit() {
+    let limits = net::capture::Limits::default();
+    let timeout = Duration::from_millis(25);
+    let options =
+        workflow_exchange_options(client::send::Options::default(), timeout, 3, limits).unwrap();
+
+    assert_eq!(options.timeout, timeout);
+    assert_eq!(options.max_template_packets, 3);
+    assert_eq!(options.max_unsolicited, limits.max_frames);
+    assert_eq!(options.max_responses, limits.max_frames);
+    assert_eq!(options.max_capture_queue_frames, limits.max_frames);
+    assert_eq!(options.max_captured_bytes, limits.max_bytes);
+    assert_eq!(options.capture_overflow_policy, limits.overflow_policy);
+    assert_eq!(options.decode.max_packet_size, limits.snap_length);
+}
+
+#[test]
+fn cli_errors_preserve_classification_when_crossing_a_workflow_boundary() {
+    let classification = packetcraftr::error::Classification::new(
+        "io.test_boundary",
+        packetcraftr::error::Kind::Io,
+        None,
+    );
+    let boundary = CliError::from_classification(
+        classification,
+        "boundary failed",
+        vec!["underlying failure".to_owned()],
+    )
+    .into_boundary_error();
+
+    assert_eq!(boundary.to_string(), "boundary failed");
+    assert_eq!(
+        packetcraftr::error::Classified::classification(&boundary),
+        classification
+    );
+    assert_eq!(
+        packetcraftr::error::Classified::causes(&boundary),
+        ["underlying failure"]
     );
 }
 

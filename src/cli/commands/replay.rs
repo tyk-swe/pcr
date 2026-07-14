@@ -344,9 +344,5 @@ fn replay_stats(summary: &workflow::replay::Summary, elapsed: Duration) -> outpu
 
 pub(super) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
     let sequence = error.sequence();
-    let mut error = CliError::classified(error);
-    if let Some(sequence) = sequence {
-        error = error.at_sequence(sequence);
-    }
-    error
+    CliError::classified_at_optional_sequence(error, sequence)
 }

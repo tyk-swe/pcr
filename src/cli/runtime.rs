@@ -6,6 +6,7 @@
 use std::net::IpAddr;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use packetcraftr::{
@@ -13,7 +14,7 @@ use packetcraftr::{
     net::{self, exchange::Composite},
     output,
     packet::{self, Packet},
-    protocol,
+    protocol, workflow,
 };
 
 use super::arguments::{Cli, Command, RouteArgs};
@@ -218,6 +219,40 @@ pub(super) fn system_client(
         ),
         policy,
     )
+}
+
+pub(super) fn parse_workflow_target(target: String) -> Result<workflow::target::Target, CliError> {
+    match target
+        .parse::<client::target::Target>()
+        .map_err(CliError::classified)?
+    {
+        client::target::Target::Address(address) => Ok(workflow::target::Target::Address(address)),
+        client::target::Target::Hostname(hostname) => {
+            Ok(workflow::target::Target::Hostname(hostname.to_string()))
+        }
+    }
+}
+
+pub(super) fn workflow_exchange_options(
+    send: client::send::Options,
+    timeout: Duration,
+    max_template_packets: usize,
+    limits: net::capture::Limits,
+) -> Result<client::exchange::Options, CliError> {
+    let mut options = client::exchange::Options {
+        send,
+        timeout,
+        max_template_packets,
+        max_unsolicited: limits.max_frames,
+        max_responses: limits.max_frames,
+        max_capture_queue_frames: limits.max_frames,
+        max_captured_bytes: limits.max_bytes,
+        capture_overflow_policy: limits.overflow_policy,
+        decode: packet::decode::Options::default(),
+    };
+    options.decode.max_packet_size = limits.snap_length;
+    options.validate().map_err(CliError::classified)?;
+    Ok(options)
 }
 
 pub(super) fn prepare_route_request(

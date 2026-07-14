@@ -12,10 +12,12 @@ use super::arguments::ScanArgs;
 use super::capture::render_diagnostics_text;
 use super::errors::CliError;
 use super::rendering::{
-    emit_json, emit_json_compact, output_timestamp_text, spaced_hex, write_stdout_line,
+    emit_json, emit_json_compact, emit_stream_record, output_timestamp_text, spaced_hex,
+    write_stdout_line,
 };
 use super::runtime::{
-    DeferredInterface, default_registry_arc, system_client, validate_interface_selector,
+    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
+    validate_interface_selector, workflow_exchange_options,
 };
 
 pub(super) fn run_scan(
@@ -41,15 +43,7 @@ pub(super) fn run_scan(
         limits,
         policy,
     } = arguments;
-    let target = match target
-        .parse::<client::target::Target>()
-        .map_err(CliError::classified)?
-    {
-        client::target::Target::Address(address) => workflow::target::Target::Address(address),
-        client::target::Target::Hostname(hostname) => {
-            workflow::target::Target::Hostname(hostname.to_string())
-        }
-    };
+    let target = parse_workflow_target(target)?;
     let queue_limits = limits.into_limits();
     let scan_limits = workflow::scan::Limits {
         max_ports,
@@ -75,8 +69,8 @@ pub(super) fn run_scan(
         limits: scan_limits,
     };
     let registry = default_registry_arc()?;
-    let mut exchange = client::exchange::Options {
-        send: client::send::Options {
+    let exchange = workflow_exchange_options(
+        client::send::Options {
             destination: None,
             plan: net::route::Options {
                 link_mode: link_mode.into(),
@@ -86,17 +80,10 @@ pub(super) fn run_scan(
             build: packet::build::Options::default(),
             allow_permissive_live: false,
         },
-        timeout: request.timeout,
-        max_template_packets: batch_size,
-        max_unsolicited: queue_limits.max_frames,
-        max_responses: queue_limits.max_frames,
-        max_capture_queue_frames: queue_limits.max_frames,
-        max_captured_bytes: queue_limits.max_bytes,
-        capture_overflow_policy: queue_limits.overflow_policy,
-        decode: packet::decode::Options::default(),
-    };
-    exchange.decode.max_packet_size = queue_limits.snap_length;
-    exchange.validate().map_err(CliError::classified)?;
+        request.timeout,
+        batch_size,
+        queue_limits,
+    )?;
 
     let mut executor = CliScanExecutor {
         registry: Arc::clone(&registry),
@@ -159,13 +146,7 @@ impl workflow::scan::Executor for CliScanExecutor {
     ) -> Result<workflow::scan::Execution, workflow::scan::ExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
-            .map_err(|error| {
-                workflow::scan::ExecutionError::new(
-                    error.message,
-                    error.classification,
-                    error.causes,
-                )
-            })?;
+            .map_err(CliError::into_boundary_error)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         workflow::scan::ClientExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
@@ -173,11 +154,7 @@ impl workflow::scan::Executor for CliScanExecutor {
 
 pub(super) fn scan_cli_error(error: workflow::scan::Error) -> CliError {
     let sequence = error.sequence();
-    let mut error = CliError::classified(error);
-    if let Some(sequence) = sequence {
-        error = error.at_sequence(sequence);
-    }
-    error
+    CliError::classified_at_optional_sequence(error, sequence)
 }
 
 fn render_scan_text(
@@ -300,7 +277,8 @@ fn render_scan_stream(
             .ok_or_else(|| {
                 CliError::new(70, "scan endpoint has no attempt evidence").at_sequence(sequence)
             })?;
-        emit_scan_record(
+        emit_stream_record(
+            output::contract::Command::Scan,
             &mut sequence,
             output::scan::Event::Port {
                 target: target.clone(),
@@ -310,7 +288,11 @@ fn render_scan_stream(
         )?;
     }
     for frame in undecoded {
-        emit_scan_record(&mut sequence, output::scan::Event::Undecoded { frame })?;
+        emit_stream_record(
+            output::contract::Command::Scan,
+            &mut sequence,
+            output::scan::Event::Undecoded { frame },
+        )?;
     }
     emit_json_compact(
         &output::envelope::Stream::success(
@@ -325,18 +307,4 @@ fn render_scan_stream(
         .with_stats(stats),
     )
     .map_err(|error| error.at_sequence(sequence))
-}
-
-fn emit_scan_record(sequence: &mut u64, result: output::scan::Event) -> Result<(), CliError> {
-    emit_json_compact(&output::envelope::Stream::success(
-        output::contract::Command::Scan,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|error| error.at_sequence(*sequence))?;
-    *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
-    })?;
-    Ok(())
 }

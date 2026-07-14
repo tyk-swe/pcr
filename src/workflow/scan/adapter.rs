@@ -104,18 +104,14 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> ScanExecutionError {
-    ScanExecutionError::new(
+    ScanExecutionError::execution_validation(
         message,
-        Classification::new(
-            "cli.scan_executor",
-            Kind::Cli,
-            Some("use homogeneous bounded scan batches and retain at least one response per probe"),
-        ),
-        Vec::new(),
+        "cli.scan_executor",
+        "use homogeneous bounded scan batches and retain at least one response per probe",
     )
 }
 use super::{
-    Classification, ExchangeIo, FieldValue, Kind, NeighborResolver, PacketTemplate, RouteProvider,
-    ScanBatch, ScanBatchExecution, ScanExecutionError, ScanExecutor, ScanMatchedResponse,
-    ScanTransport, TemplateValues,
+    ExchangeIo, FieldValue, NeighborResolver, PacketTemplate, RouteProvider, ScanBatch,
+    ScanBatchExecution, ScanExecutionError, ScanExecutor, ScanMatchedResponse, ScanTransport,
+    TemplateValues,
 };

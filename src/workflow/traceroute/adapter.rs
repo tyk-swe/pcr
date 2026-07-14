@@ -112,18 +112,14 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> TracerouteExecutionError {
-    TracerouteExecutionError::new(
+    TracerouteExecutionError::execution_validation(
         message,
-        Classification::new(
-            "cli.traceroute_executor",
-            Kind::Cli,
-            Some("use homogeneous bounded hop batches and retain at least one response per probe"),
-        ),
-        Vec::new(),
+        "cli.traceroute_executor",
+        "use homogeneous bounded hop batches and retain at least one response per probe",
     )
 }
 use super::{
-    Classification, ExchangeIo, Kind, NeighborResolver, PacketTemplate, RouteProvider,
-    TemplateValues, TracerouteBatch, TracerouteBatchExecution, TracerouteExecutionError,
-    TracerouteExecutor, TracerouteMatchedResponse, TracerouteStrategy,
+    ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues, TracerouteBatch,
+    TracerouteBatchExecution, TracerouteExecutionError, TracerouteExecutor,
+    TracerouteMatchedResponse, TracerouteStrategy,
 };

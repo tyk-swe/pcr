@@ -56,12 +56,12 @@ where
             stats,
         } = result;
         if sent.len() != 1 || sent_evidence.len() != 1 {
-            return Err(invalid_client_execution(
+            return Err(invalid_client_result(
                 "single-query DNS exchange returned an invalid sent-evidence count",
             ));
         }
         if responses.iter().any(|response| response.request_index != 0) {
-            return Err(invalid_client_execution(
+            return Err(invalid_client_result(
                 "single-query DNS exchange returned a response for an unknown request index",
             ));
         }
@@ -86,17 +86,21 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> DnsExecutionError {
-    DnsExecutionError::new(
+    DnsExecutionError::execution_validation(
         message,
-        Classification::new(
-            "cli.dns_executor",
-            Kind::Cli,
-            Some("use one bounded UDP DNS query and retain at least one response"),
-        ),
-        Vec::new(),
+        "cli.dns_executor",
+        "use one bounded UDP DNS query and retain at least one response",
+    )
+}
+
+fn invalid_client_result(message: impl Into<String>) -> DnsExecutionError {
+    DnsExecutionError::internal_execution(
+        message,
+        "internal.dns_executor",
+        "treat the DNS operation as incomplete because client evidence was inconsistent",
     )
 }
 use super::{
-    Classification, DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor,
-    DnsMatchedResponse, ExchangeIo, Kind, NeighborResolver, PacketTemplate, RouteProvider,
+    DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsMatchedResponse,
+    ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider,
 };

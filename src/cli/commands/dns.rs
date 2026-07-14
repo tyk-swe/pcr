@@ -14,9 +14,13 @@ use super::arguments::DnsArgs;
 use super::capture::render_diagnostics_text;
 use super::errors::CliError;
 use super::rendering::{
-    emit_json, emit_json_compact, output_timestamp_text, spaced_hex, write_stdout_line,
+    emit_json, emit_json_compact, emit_stream_record, output_timestamp_text, spaced_hex,
+    write_stdout_line,
 };
-use super::runtime::{DeferredInterface, default_registry_arc, system_client};
+use super::runtime::{
+    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
+    workflow_exchange_options,
+};
 use super::scan::validate_live_interface_selector;
 
 pub(super) fn run_dns(
@@ -49,15 +53,7 @@ pub(super) fn run_dns(
         limits,
         policy,
     } = arguments;
-    let server = match server
-        .parse::<client::target::Target>()
-        .map_err(CliError::classified)?
-    {
-        client::target::Target::Address(address) => workflow::target::Target::Address(address),
-        client::target::Target::Hostname(hostname) => {
-            workflow::target::Target::Hostname(hostname.to_string())
-        }
-    };
+    let server = parse_workflow_target(server)?;
     let queue_limits = limits.into_limits();
     let request = workflow::dns::Request {
         server,
@@ -89,8 +85,8 @@ pub(super) fn run_dns(
     validate_live_interface_selector("dns", interface.as_deref())?;
 
     let registry = default_registry_arc()?;
-    let mut exchange = client::exchange::Options {
-        send: client::send::Options {
+    let exchange = workflow_exchange_options(
+        client::send::Options {
             destination: None,
             plan: net::route::Options {
                 link_mode: link_mode.into(),
@@ -100,17 +96,10 @@ pub(super) fn run_dns(
             build: packet::build::Options::default(),
             allow_permissive_live: false,
         },
-        timeout: request.timeout,
-        max_template_packets: 1,
-        max_unsolicited: queue_limits.max_frames,
-        max_responses: queue_limits.max_frames,
-        max_capture_queue_frames: queue_limits.max_frames,
-        max_captured_bytes: queue_limits.max_bytes,
-        capture_overflow_policy: queue_limits.overflow_policy,
-        decode: packet::decode::Options::default(),
-    };
-    exchange.decode.max_packet_size = queue_limits.snap_length;
-    exchange.validate().map_err(CliError::classified)?;
+        request.timeout,
+        1,
+        queue_limits,
+    )?;
 
     let mut executor = CliDnsExecutor {
         registry: Arc::clone(&registry),
@@ -188,13 +177,7 @@ impl workflow::dns::Executor for CliDnsExecutor {
     ) -> Result<workflow::dns::Execution, workflow::dns::ExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
-            .map_err(|error| {
-                workflow::dns::ExecutionError::new(
-                    error.message,
-                    error.classification,
-                    error.causes,
-                )
-            })?;
+            .map_err(CliError::into_boundary_error)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         workflow::dns::ClientExecutor::new(&client, self.exchange.clone()).execute(exchange)
     }
@@ -202,11 +185,7 @@ impl workflow::dns::Executor for CliDnsExecutor {
 
 pub(super) fn dns_cli_error(error: workflow::dns::Error) -> CliError {
     let sequence = error.sequence();
-    let mut error = CliError::classified(error);
-    if let Some(sequence) = sequence {
-        error = error.at_sequence(sequence);
-    }
-    error
+    CliError::classified_at_optional_sequence(error, sequence)
 }
 
 fn render_dns_text(
@@ -363,7 +342,8 @@ fn render_dns_stream(
     } = result;
     let mut sequence = 0_u64;
     for evidence in attempts {
-        emit_dns_record(
+        emit_stream_record(
+            output::contract::Command::Dns,
             &mut sequence,
             output::dns::Event::Attempt {
                 server: server.clone(),
@@ -380,7 +360,8 @@ fn render_dns_stream(
         (output::dns::Section::Additional, additionals),
     ] {
         for record in records {
-            emit_dns_record(
+            emit_stream_record(
+                output::contract::Command::Dns,
                 &mut sequence,
                 output::dns::Event::Record {
                     server: server.clone(),
@@ -394,7 +375,8 @@ fn render_dns_stream(
         }
     }
     for record in rejected_records {
-        emit_dns_record(
+        emit_stream_record(
+            output::contract::Command::Dns,
             &mut sequence,
             output::dns::Event::Rejected {
                 server: server.clone(),
@@ -406,7 +388,11 @@ fn render_dns_stream(
         )?;
     }
     for evidence in undecoded {
-        emit_dns_record(&mut sequence, output::dns::Event::Undecoded { evidence })?;
+        emit_stream_record(
+            output::contract::Command::Dns,
+            &mut sequence,
+            output::dns::Event::Undecoded { evidence },
+        )?;
     }
     emit_json_compact(
         &output::envelope::Stream::success(
@@ -437,20 +423,6 @@ fn render_dns_stream(
         .with_stats(stats),
     )
     .map_err(|error| error.at_sequence(sequence))
-}
-
-fn emit_dns_record(sequence: &mut u64, result: output::dns::Event) -> Result<(), CliError> {
-    emit_json_compact(&output::envelope::Stream::success(
-        output::contract::Command::Dns,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|error| error.at_sequence(*sequence))?;
-    *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
-    })?;
-    Ok(())
 }
 
 fn dns_attempt_status_name(value: output::dns::AttemptStatus) -> &'static str {

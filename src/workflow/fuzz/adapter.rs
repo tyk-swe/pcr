@@ -131,18 +131,14 @@ where
 }
 
 fn invalid_client_execution(message: impl Into<String>) -> FuzzExecutionError {
-    FuzzExecutionError::new(
+    FuzzExecutionError::internal_execution(
         message,
-        Classification::new(
-            "cli.fuzz_executor",
-            Kind::Cli,
-            Some("execute exactly one bounded fuzz case per capture-ready exchange"),
-        ),
-        Vec::new(),
+        "internal.fuzz_executor",
+        "execute exactly one bounded fuzz case per capture-ready exchange",
     )
 }
 use super::{
-    Classification, Duration, ExchangeIo, FuzzAuthorizationError, FuzzAuthorizer,
-    FuzzCaseExecution, FuzzExecutionCase, FuzzExecutionError, FuzzExecutor, IpAddr, Kind,
-    NeighborResolver, Packet, PacketTemplate, RouteProvider,
+    Duration, ExchangeIo, FuzzAuthorizationError, FuzzAuthorizer, FuzzCaseExecution,
+    FuzzExecutionCase, FuzzExecutionError, FuzzExecutor, IpAddr, NeighborResolver, Packet,
+    PacketTemplate, RouteProvider,
 };

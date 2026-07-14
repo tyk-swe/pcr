@@ -17,7 +17,7 @@ use super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs};
 use super::errors::CliError;
 use super::rendering::{
     capture_file_format, capture_file_frame, emit_json, emit_json_compact, emit_stderr_message,
-    spaced_hex, write_capture_file, write_stdout_line,
+    emit_stream_record, spaced_hex, write_capture_file, write_stdout_line,
 };
 use super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
@@ -474,7 +474,8 @@ fn render_exchange_stream(
     for (request_index, frame) in sent.into_iter().enumerate() {
         let request_index = u64::try_from(request_index)
             .map_err(|_| CliError::classified(output::contract::Error::SequenceOverflow))?;
-        emit_exchange_record(
+        emit_stream_record(
+            output::contract::Command::Exchange,
             &mut sequence,
             output::network::exchange::Event::Sent {
                 request_index,
@@ -483,7 +484,8 @@ fn render_exchange_stream(
         )?;
     }
     for response in responses {
-        emit_exchange_record(
+        emit_stream_record(
+            output::contract::Command::Exchange,
             &mut sequence,
             output::network::exchange::Event::Response {
                 request_index: response.request_index,
@@ -493,7 +495,8 @@ fn render_exchange_stream(
         )?;
     }
     for request_index in &unanswered {
-        emit_exchange_record(
+        emit_stream_record(
+            output::contract::Command::Exchange,
             &mut sequence,
             output::network::exchange::Event::Unanswered {
                 request_index: *request_index,
@@ -501,13 +504,15 @@ fn render_exchange_stream(
         )?;
     }
     for frame in unsolicited {
-        emit_exchange_record(
+        emit_stream_record(
+            output::contract::Command::Exchange,
             &mut sequence,
             output::network::exchange::Event::Unsolicited { frame },
         )?;
     }
     for frame in undecoded {
-        emit_exchange_record(
+        emit_stream_record(
+            output::contract::Command::Exchange,
             &mut sequence,
             output::network::exchange::Event::Undecoded { frame },
         )?;
@@ -522,21 +527,4 @@ fn render_exchange_stream(
         .with_stats(stats),
     )
     .map_err(|error| error.at_sequence(sequence))
-}
-
-fn emit_exchange_record(
-    sequence: &mut u64,
-    result: output::network::exchange::Event,
-) -> Result<(), CliError> {
-    emit_json_compact(&output::envelope::Stream::success(
-        output::contract::Command::Exchange,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|error| error.at_sequence(*sequence))?;
-    *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
-    })?;
-    Ok(())
 }

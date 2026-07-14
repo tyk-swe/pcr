@@ -12,9 +12,13 @@ use super::arguments::TracerouteArgs;
 use super::capture::render_diagnostics_text;
 use super::errors::CliError;
 use super::rendering::{
-    emit_json, emit_json_compact, output_timestamp_text, spaced_hex, write_stdout_line,
+    emit_json, emit_json_compact, emit_stream_record, output_timestamp_text, spaced_hex,
+    write_stdout_line,
 };
-use super::runtime::{DeferredInterface, default_registry_arc, system_client};
+use super::runtime::{
+    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
+    workflow_exchange_options,
+};
 use super::scan::validate_live_interface_selector;
 
 pub(super) fn run_traceroute(
@@ -40,15 +44,7 @@ pub(super) fn run_traceroute(
         limits,
         policy,
     } = arguments;
-    let target = match target
-        .parse::<client::target::Target>()
-        .map_err(CliError::classified)?
-    {
-        client::target::Target::Address(address) => workflow::target::Target::Address(address),
-        client::target::Target::Hostname(hostname) => {
-            workflow::target::Target::Hostname(hostname.to_string())
-        }
-    };
+    let target = parse_workflow_target(target)?;
     let strategy: workflow::traceroute::Strategy = strategy.into();
     let destination_port = match strategy {
         workflow::traceroute::Strategy::Udp => {
@@ -91,8 +87,8 @@ pub(super) fn run_traceroute(
     })?;
 
     let registry = default_registry_arc()?;
-    let mut exchange = client::exchange::Options {
-        send: client::send::Options {
+    let exchange = workflow_exchange_options(
+        client::send::Options {
             destination: None,
             plan: net::route::Options {
                 link_mode: link_mode.into(),
@@ -102,17 +98,10 @@ pub(super) fn run_traceroute(
             build: packet::build::Options::default(),
             allow_permissive_live: false,
         },
-        timeout: request.timeout,
+        request.timeout,
         max_template_packets,
-        max_unsolicited: queue_limits.max_frames,
-        max_responses: queue_limits.max_frames,
-        max_capture_queue_frames: queue_limits.max_frames,
-        max_captured_bytes: queue_limits.max_bytes,
-        capture_overflow_policy: queue_limits.overflow_policy,
-        decode: packet::decode::Options::default(),
-    };
-    exchange.decode.max_packet_size = queue_limits.snap_length;
-    exchange.validate().map_err(CliError::classified)?;
+        queue_limits,
+    )?;
 
     let mut executor = CliTracerouteExecutor {
         registry: Arc::clone(&registry),
@@ -168,13 +157,7 @@ impl workflow::traceroute::Executor for CliTracerouteExecutor {
     ) -> Result<workflow::traceroute::Execution, workflow::traceroute::ExecutionError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
-            .map_err(|error| {
-                workflow::traceroute::ExecutionError::new(
-                    error.message,
-                    error.classification,
-                    error.causes,
-                )
-            })?;
+            .map_err(CliError::into_boundary_error)?;
         let client = system_client(Arc::clone(&self.registry), self.policy.clone());
         workflow::traceroute::ClientExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
@@ -182,11 +165,7 @@ impl workflow::traceroute::Executor for CliTracerouteExecutor {
 
 pub(super) fn traceroute_cli_error(error: workflow::traceroute::Error) -> CliError {
     let sequence = error.sequence();
-    let mut error = CliError::classified(error);
-    if let Some(sequence) = sequence {
-        error = error.at_sequence(sequence);
-    }
-    error
+    CliError::classified_at_optional_sequence(error, sequence)
 }
 
 fn render_traceroute_text(
@@ -313,7 +292,8 @@ fn render_traceroute_stream(
     } = result;
     let mut sequence = 0_u64;
     for hop in hops {
-        emit_traceroute_record(
+        emit_stream_record(
+            output::contract::Command::Traceroute,
             &mut sequence,
             output::traceroute::Event::Hop {
                 target: target.clone(),
@@ -323,7 +303,8 @@ fn render_traceroute_stream(
         )?;
     }
     for evidence in undecoded {
-        emit_traceroute_record(
+        emit_stream_record(
+            output::contract::Command::Traceroute,
             &mut sequence,
             output::traceroute::Event::Undecoded {
                 hop_limit: evidence.hop_limit,
@@ -348,21 +329,4 @@ fn render_traceroute_stream(
         .with_stats(stats),
     )
     .map_err(|error| error.at_sequence(sequence))
-}
-
-fn emit_traceroute_record(
-    sequence: &mut u64,
-    result: output::traceroute::Event,
-) -> Result<(), CliError> {
-    emit_json_compact(&output::envelope::Stream::success(
-        output::contract::Command::Traceroute,
-        *sequence,
-        result,
-        Vec::new(),
-    ))
-    .map_err(|error| error.at_sequence(*sequence))?;
-    *sequence = sequence.checked_add(1).ok_or_else(|| {
-        CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
-    })?;
-    Ok(())
 }

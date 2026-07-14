@@ -55,6 +55,15 @@ impl CliError {
         Self::from_classification(classification, error.to_string(), causes)
     }
 
+    pub(super) fn classified_at_optional_sequence(
+        error: impl Classified + std::fmt::Display,
+        sequence: Option<u64>,
+    ) -> Self {
+        let mut error = Self::classified(error);
+        error.sequence = sequence;
+        error
+    }
+
     pub(super) fn from_classification(
         classification: Classification,
         message: impl Into<String>,
@@ -77,6 +86,10 @@ impl CliError {
     pub(super) fn at_sequence_if_absent(mut self, sequence: u64) -> Self {
         self.sequence.get_or_insert(sequence);
         self
+    }
+
+    pub(super) fn into_boundary_error(self) -> packetcraftr::workflow::BoundaryError {
+        packetcraftr::workflow::BoundaryError::new(self.message, self.classification, self.causes)
     }
 
     pub(super) fn with_cleanup(mut self, cleanup: net::Error) -> Self {

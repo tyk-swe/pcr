@@ -348,6 +348,36 @@ mod tests {
     }
 
     #[test]
+    fn ipv4_udp_odd_payload_emits_known_checksum() {
+        let registry = Arc::new(default_registry().unwrap());
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(198, 51, 100, 2),
+                ..Ipv4::default()
+            })
+            .push(Udp {
+                source_port: 5_000,
+                destination_port: 53,
+                ..Udp::default()
+            })
+            .push(Raw::new(Bytes::from_static(&[
+                0xde, 0xad, 0xbe, 0xef, 0x01,
+            ])));
+
+        let built = Builder::new(Arc::clone(&registry))
+            .build(packet, BuildContext::default(), BuildOptions::default())
+            .unwrap();
+        assert_eq!(&built.bytes[26..28], &[0x61, 0x42]);
+
+        let decoded = Dissector::new(registry)
+            .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+            .unwrap();
+        assert!(decoded.diagnostics.is_empty());
+    }
+
+    #[test]
     fn icmpv4_and_icmpv6_codec_paths_round_trip_exact_bytes() {
         let registry = Arc::new(default_registry().unwrap());
         let builder = Builder::new(Arc::clone(&registry));

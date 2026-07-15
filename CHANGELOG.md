@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reduced packet build and decode allocations by composing checksums across
+  byte slices and preserving decoder fallback bytes without copying them.
 - Clarified traceroute probe identity, timeout, rate, policy, and output-format
   behavior in CLI help.
 

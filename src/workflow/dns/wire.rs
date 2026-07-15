@@ -255,7 +255,7 @@ pub fn decode_dns_response(
         authorities,
         non_opt_additionals,
         limits.max_rejected_records,
-    );
+    )?;
     Ok(ValidatedDnsResponse {
         transaction_id,
         response_code,
@@ -609,6 +609,61 @@ struct RelevantRecords {
     rejected_record_count: usize,
 }
 
+#[cfg(test)]
+thread_local! {
+    static FILTER_WORK: std::cell::Cell<(usize, usize)> = const {
+        std::cell::Cell::new((0, 0))
+    };
+}
+
+#[cfg(test)]
+pub(super) fn reset_filter_work() {
+    FILTER_WORK.set((0, 0));
+}
+
+#[cfg(test)]
+pub(super) fn filter_work() -> (usize, usize) {
+    FILTER_WORK.get()
+}
+
+#[cfg(test)]
+fn count_indexed_answer() {
+    FILTER_WORK.with(|work| {
+        let (indexed, inspected) = work.get();
+        work.set((indexed + 1, inspected));
+    });
+}
+
+#[cfg(test)]
+fn count_reachable_inspection() {
+    FILTER_WORK.with(|work| {
+        let (indexed, inspected) = work.get();
+        work.set((indexed, inspected + 1));
+    });
+}
+
+/// Hashable DNS equality key. Label lengths make boundaries unambiguous;
+/// ASCII letters are folded while all other wire octets remain unchanged.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct NameKey(Vec<u8>);
+
+impl NameKey {
+    fn from_name(name: &DnsName) -> Self {
+        Self::from_labels(&name.labels)
+    }
+
+    fn from_labels(labels: &[Bytes]) -> Self {
+        let mut key = Vec::with_capacity(labels.iter().fold(0usize, |length, label| {
+            length.saturating_add(label.len() + 1)
+        }));
+        for label in labels {
+            key.push(label.len() as u8);
+            key.extend(label.iter().map(u8::to_ascii_lowercase));
+        }
+        Self(key)
+    }
+}
+
 fn filter_relevant_records(
     query_name: &DnsName,
     query_type: DnsQueryType,
@@ -616,24 +671,46 @@ fn filter_relevant_records(
     authorities: Vec<DnsRecord>,
     additionals: Vec<DnsRecord>,
     rejected_limit: usize,
-) -> RelevantRecords {
-    let mut relevant_names = vec![query_name.clone()];
+) -> Result<RelevantRecords, DnsWireError> {
+    let mut answer_owners: HashMap<NameKey, Vec<usize>> = HashMap::new();
+    for (index, record) in answers.iter().enumerate() {
+        #[cfg(test)]
+        count_indexed_answer();
+        answer_owners
+            .entry(NameKey::from_name(&record.owner))
+            .or_default()
+            .push(index);
+    }
+
+    let query_key = NameKey::from_name(query_name);
+    let mut relevant_names = HashSet::from([query_key.clone()]);
+    let mut pending_names = VecDeque::from([query_key]);
     let mut accepted_answers = vec![false; answers.len()];
-    let mut changed = true;
-    while changed {
-        changed = false;
-        for (index, record) in answers.iter().enumerate() {
-            if record.class != DNS_CLASS_IN || !relevant_names.contains(&record.owner) {
+    while let Some(owner) = pending_names.pop_front() {
+        let Some(indices) = answer_owners.get(&owner) else {
+            continue;
+        };
+        for &index in indices {
+            #[cfg(test)]
+            count_reachable_inspection();
+            let record = &answers[index];
+            if record.class != DNS_CLASS_IN {
                 continue;
             }
             let type_code = record.value.type_code();
             if type_code == DnsQueryType::Cname.code() {
                 accepted_answers[index] = true;
-                if let DnsRecordValue::Cname(target) = &record.value
-                    && !relevant_names.contains(target)
-                {
-                    relevant_names.push(target.clone());
-                    changed = true;
+                if let DnsRecordValue::Cname(ref target) = record.value {
+                    let target = NameKey::from_name(target);
+                    if relevant_names.insert(target.clone()) {
+                        if relevant_names.len() > MAX_DNS_RELEVANT_NAMES {
+                            return Err(DnsWireError::RelevantNameLimit {
+                                actual: relevant_names.len(),
+                                limit: MAX_DNS_RELEVANT_NAMES,
+                            });
+                        }
+                        pending_names.push_back(target);
+                    }
                 }
             } else if query_type == DnsQueryType::Any || type_code == query_type.code() {
                 accepted_answers[index] = true;
@@ -641,14 +718,23 @@ fn filter_relevant_records(
         }
     }
 
-    let mut references = Vec::new();
+    let mut relevant_ancestors = HashSet::new();
+    relevant_ancestors.insert(NameKey(Vec::new()));
+    for name in &relevant_names {
+        // Each key is length-prefixed, so every label boundary is found
+        // without reconstructing or comparing allocated DnsName values.
+        let mut offset = 0usize;
+        while offset < name.0.len() {
+            relevant_ancestors.insert(NameKey(name.0[offset..].to_vec()));
+            offset += 1 + usize::from(name.0[offset]);
+        }
+    }
+
+    let mut references = HashSet::new();
     let mut accepted_authorities = vec![false; authorities.len()];
     for (index, record) in authorities.iter().enumerate() {
-        let relevant_owner = relevant_names
-            .iter()
-            .any(|name| is_same_or_ancestor(&record.owner, name));
         if record.class == DNS_CLASS_IN
-            && relevant_owner
+            && relevant_ancestors.contains(&NameKey::from_name(&record.owner))
             && matches!(
                 record.value,
                 DnsRecordValue::Ns(_) | DnsRecordValue::Soa { .. }
@@ -661,21 +747,21 @@ fn filter_relevant_records(
         if accepted_answers[index]
             && let Some(name) = record.value.referenced_name()
         {
-            push_unique(&mut references, name);
+            references.insert(NameKey::from_name(name));
         }
     }
     for (index, record) in authorities.iter().enumerate() {
         if accepted_authorities[index]
             && let Some(name) = record.value.referenced_name()
         {
-            push_unique(&mut references, name);
+            references.insert(NameKey::from_name(name));
         }
     }
     let accepted_additionals = additionals
         .iter()
         .map(|record| {
             record.class == DNS_CLASS_IN
-                && references.contains(&record.owner)
+                && references.contains(&NameKey::from_name(&record.owner))
                 && matches!(record.value, DnsRecordValue::A(_) | DnsRecordValue::Aaaa(_))
         })
         .collect::<Vec<_>>();
@@ -734,7 +820,7 @@ fn filter_relevant_records(
         }
     }
 
-    RelevantRecords {
+    Ok(RelevantRecords {
         answers: answers
             .into_iter()
             .enumerate()
@@ -752,7 +838,7 @@ fn filter_relevant_records(
             .collect(),
         rejected_records,
         rejected_record_count,
-    }
+    })
 }
 
 fn rejection_reason<'a>(record: &DnsRecord, default: &'a str) -> &'a str {
@@ -763,29 +849,6 @@ fn rejection_reason<'a>(record: &DnsRecord, default: &'a str) -> &'a str {
     } else {
         default
     }
-}
-
-fn push_unique(values: &mut Vec<DnsName>, value: &DnsName) {
-    if !values.iter().any(|existing| existing == value) {
-        values.push(value.to_owned());
-    }
-}
-
-fn is_same_or_ancestor(zone: &DnsName, name: &DnsName) -> bool {
-    zone.is_root()
-        || (zone.labels.len() <= name.labels.len()
-            && zone
-                .labels
-                .iter()
-                .rev()
-                .zip(name.labels.iter().rev())
-                .all(|(left, right)| {
-                    DnsName {
-                        labels: vec![left.clone()],
-                    } == DnsName {
-                        labels: vec![right.clone()],
-                    }
-                }))
 }
 
 pub const fn response_code_name(code: u16) -> &'static str {
@@ -906,12 +969,14 @@ pub(super) fn raw_payload(packet: &Packet) -> Option<Bytes> {
         _ => None,
     }
 }
+use std::collections::{HashMap, HashSet, VecDeque};
+
 use super::{
     Bytes, DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE,
     DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
     DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK,
     DNS_RESERVED_MASK, DNS_TYPE_OPT, DecodedPacket, DiagnosticSeverity, DnsEdns, DnsEdnsOption,
     DnsLimits, DnsName, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord,
-    DnsSection, DnsWireError, FieldValue, Ipv4Addr, Ipv6Addr, Packet, ProbeTransport,
-    ProtocolRegistry, ValidatedDnsResponse, probe,
+    DnsSection, DnsWireError, FieldValue, Ipv4Addr, Ipv6Addr, MAX_DNS_RELEVANT_NAMES, Packet,
+    ProbeTransport, ProtocolRegistry, ValidatedDnsResponse, probe,
 };

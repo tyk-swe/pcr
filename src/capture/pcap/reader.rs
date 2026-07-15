@@ -2,21 +2,19 @@ use std::io::Read;
 
 use crate::capture::{Frame, LinkType};
 
-use super::classic::{read_next_pcap_frame, read_pcap_header};
+use super::classic::{PcapFrameOptions, read_next_pcap_frame, read_pcap_header};
 use super::models::{
-    DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT, DEFAULT_SIZE_LIMIT,
-    DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Error, Format, Interface, TimestampPrecision,
-    TimestampResolution,
+    Endianness, Error, Format, Interface, ReaderLimits, TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{
     parse_enhanced_packet, parse_interface_description, parse_obsolete_packet, parse_simple_packet,
     read_pcapng_block_header, read_section_header_after_type, read_section_header_with_length,
-    validate_pcapng_block_length,
+    stream_unknown_block, validate_pcapng_block_length,
 };
 use super::wire::{
-    PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_PACKET_BLOCK,
-    PCAPNG_SECTION_HEADER, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32, read_exact_counted,
-    read_exact_or_eof,
+    PCAP_GLOBAL_HEADER_LEN, PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
+    PCAPNG_PACKET_BLOCK, PCAPNG_SECTION_HEADER, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32,
+    read_exact_counted, read_exact_or_eof,
 };
 
 pub(super) enum ReaderState {
@@ -30,43 +28,53 @@ pub(super) enum ReaderState {
         endianness: Endianness,
         interfaces: Vec<Interface>,
         interface_base: u32,
+        remaining_section_bytes: Option<u64>,
     },
 }
 
 /// A streaming capture reader over any [`Read`] implementation.
 ///
-/// Construction consumes only the container header.  Each call to
-/// [`next_frame`](Self::next_frame) then reads at most one packet plus any
-/// intervening metadata blocks.
+/// Construction consumes only the container header. Each call to
+/// [`next_frame`](Self::next_frame) reads at most one packet plus bounded
+/// intervening metadata.
 pub struct Reader<R> {
     inner: R,
     state: ReaderState,
     interfaces: Vec<Interface>,
-    max_size: usize,
-    max_interfaces: usize,
+    limits: ReaderLimits,
     pub(super) max_total_interfaces: usize,
-    max_metadata_blocks_per_frame: usize,
+    total_wire_bytes: u64,
+    metadata_blocks_before_frame: usize,
+    metadata_bytes_before_frame: u64,
     finished: bool,
 }
 
 impl<R: Read> Reader<R> {
-    /// Opens a capture with the default 16 MiB packet/block limit.
+    /// Opens a capture with the default reader limits.
     pub fn new(inner: R) -> Result<Self, Error> {
-        Self::with_limit(inner, DEFAULT_SIZE_LIMIT)
+        Self::with_reader_limits(inner, ReaderLimits::default())
     }
 
     /// Opens a capture with a caller-provided packet/block size limit.
     pub fn with_limit(inner: R, max_size: usize) -> Result<Self, Error> {
-        Self::with_limits(inner, max_size, DEFAULT_INTERFACE_LIMIT)
+        Self::with_reader_limits(
+            inner,
+            ReaderLimits {
+                max_block_bytes: max_size,
+                ..ReaderLimits::default()
+            },
+        )
     }
 
     /// Opens a capture with caller-provided packet/block and interface limits.
     pub fn with_limits(inner: R, max_size: usize, max_interfaces: usize) -> Result<Self, Error> {
-        Self::with_resource_limits(
+        Self::with_reader_limits(
             inner,
-            max_size,
-            max_interfaces,
-            DEFAULT_METADATA_BLOCK_LIMIT,
+            ReaderLimits {
+                max_block_bytes: max_size,
+                max_interfaces_per_section: max_interfaces,
+                ..ReaderLimits::default()
+            },
         )
     }
 
@@ -76,54 +84,114 @@ impl<R: Read> Reader<R> {
         max_interfaces: usize,
         max_metadata_blocks_per_frame: usize,
     ) -> Result<Self, Error> {
-        Self::with_all_resource_limits(
+        Self::with_reader_limits(
             inner,
-            max_size,
-            max_interfaces,
-            DEFAULT_TOTAL_INTERFACE_LIMIT,
-            max_metadata_blocks_per_frame,
+            ReaderLimits {
+                max_block_bytes: max_size,
+                max_interfaces_per_section: max_interfaces,
+                max_metadata_blocks_before_frame: max_metadata_blocks_per_frame,
+                ..ReaderLimits::default()
+            },
         )
     }
 
     /// Opens a capture with independent per-section and aggregate retained
     /// interface limits.
     pub fn with_all_resource_limits(
-        mut inner: R,
+        inner: R,
         max_size: usize,
         max_interfaces: usize,
         max_total_interfaces: usize,
         max_metadata_blocks_per_frame: usize,
     ) -> Result<Self, Error> {
+        Self::with_reader_limits(
+            inner,
+            ReaderLimits {
+                max_block_bytes: max_size,
+                max_interfaces_per_section: max_interfaces,
+                max_total_interfaces,
+                max_metadata_blocks_before_frame: max_metadata_blocks_per_frame,
+                ..ReaderLimits::default()
+            },
+        )
+    }
+
+    /// Opens a capture with independent block, interface, metadata, and total
+    /// wire-byte limits.
+    pub fn with_reader_limits(mut inner: R, limits: ReaderLimits) -> Result<Self, Error> {
         let mut magic = [0_u8; 4];
         if !read_exact_or_eof(&mut inner, &mut magic, "capture magic")? {
             return Err(Error::EmptyInput);
         }
 
+        let total_wire_bytes;
+        let mut metadata_blocks_before_frame = 0usize;
+        let mut metadata_bytes_before_frame = 0_u64;
         let state = match magic {
-            [0xd4, 0xc3, 0xb2, 0xa1] => read_pcap_header(
-                &mut inner,
-                Endianness::Little,
-                TimestampPrecision::Microseconds,
-            )?,
-            [0xa1, 0xb2, 0xc3, 0xd4] => read_pcap_header(
-                &mut inner,
-                Endianness::Big,
-                TimestampPrecision::Microseconds,
-            )?,
-            [0x4d, 0x3c, 0xb2, 0xa1] => read_pcap_header(
-                &mut inner,
-                Endianness::Little,
-                TimestampPrecision::Nanoseconds,
-            )?,
+            [0xd4, 0xc3, 0xb2, 0xa1] => {
+                total_wire_bytes = checked_wire_total(
+                    0,
+                    PCAP_GLOBAL_HEADER_LEN as u64,
+                    limits.max_total_wire_bytes,
+                )?;
+                read_pcap_header(
+                    &mut inner,
+                    Endianness::Little,
+                    TimestampPrecision::Microseconds,
+                )?
+            }
+            [0xa1, 0xb2, 0xc3, 0xd4] => {
+                total_wire_bytes = checked_wire_total(
+                    0,
+                    PCAP_GLOBAL_HEADER_LEN as u64,
+                    limits.max_total_wire_bytes,
+                )?;
+                read_pcap_header(
+                    &mut inner,
+                    Endianness::Big,
+                    TimestampPrecision::Microseconds,
+                )?
+            }
+            [0x4d, 0x3c, 0xb2, 0xa1] => {
+                total_wire_bytes = checked_wire_total(
+                    0,
+                    PCAP_GLOBAL_HEADER_LEN as u64,
+                    limits.max_total_wire_bytes,
+                )?;
+                read_pcap_header(
+                    &mut inner,
+                    Endianness::Little,
+                    TimestampPrecision::Nanoseconds,
+                )?
+            }
             [0xa1, 0xb2, 0x3c, 0x4d] => {
+                total_wire_bytes = checked_wire_total(
+                    0,
+                    PCAP_GLOBAL_HEADER_LEN as u64,
+                    limits.max_total_wire_bytes,
+                )?;
                 read_pcap_header(&mut inner, Endianness::Big, TimestampPrecision::Nanoseconds)?
             }
             PCAPNG_SECTION_HEADER => {
-                let endianness = read_section_header_after_type(&mut inner, max_size)?;
+                if limits.max_metadata_blocks_before_frame == 0 {
+                    return Err(Error::MetadataBlockLimit { limit: 0 });
+                }
+                let section = read_section_header_after_type(
+                    &mut inner,
+                    limits.max_block_bytes,
+                    0,
+                    limits.max_total_wire_bytes,
+                    0,
+                    limits.max_metadata_bytes_before_frame,
+                )?;
+                total_wire_bytes = u64::from(section.block_length);
+                metadata_blocks_before_frame = 1;
+                metadata_bytes_before_frame = u64::from(section.block_length);
                 ReaderState::PcapNg {
-                    endianness,
+                    endianness: section.endianness,
                     interfaces: Vec::new(),
                     interface_base: 0,
+                    remaining_section_bytes: section.remaining_section_bytes,
                 }
             }
             unknown_magic => {
@@ -150,9 +218,9 @@ impl<R: Read> Reader<R> {
             }],
             ReaderState::PcapNg { .. } => Vec::new(),
         };
-        if interfaces.len() > max_total_interfaces {
+        if interfaces.len() > limits.max_total_interfaces {
             return Err(Error::TotalInterfaceLimit {
-                limit: max_total_interfaces,
+                limit: limits.max_total_interfaces,
             });
         }
 
@@ -160,10 +228,11 @@ impl<R: Read> Reader<R> {
             inner,
             state,
             interfaces,
-            max_size,
-            max_interfaces,
-            max_total_interfaces,
-            max_metadata_blocks_per_frame,
+            limits,
+            max_total_interfaces: limits.max_total_interfaces,
+            total_wire_bytes,
+            metadata_blocks_before_frame,
+            metadata_bytes_before_frame,
             finished: false,
         })
     }
@@ -187,14 +256,15 @@ impl<R: Read> Reader<R> {
 
     /// Returns the configured packet/block limit.
     pub fn size_limit(&self) -> usize {
-        self.max_size
+        self.limits.max_block_bytes
+    }
+
+    /// Returns all configured reader limits.
+    pub fn reader_limits(&self) -> ReaderLimits {
+        self.limits
     }
 
     /// Interface metadata parsed so far.
-    ///
-    /// Classic PCAP exposes its single global interface immediately. PCAPNG
-    /// descriptions are appended while [`next_frame`](Self::next_frame)
-    /// advances the stream, before any frame that references them is returned.
     pub fn interfaces(&self) -> &[Interface] {
         &self.interfaces
     }
@@ -213,18 +283,25 @@ impl<R: Read> Reader<R> {
                 link_type,
             } => read_next_pcap_frame(
                 &mut self.inner,
-                *endianness,
-                *precision,
-                *snap_len,
-                *link_type,
-                self.max_size,
+                &mut self.total_wire_bytes,
+                PcapFrameOptions {
+                    endianness: *endianness,
+                    precision: *precision,
+                    snap_len: *snap_len,
+                    link_type: *link_type,
+                    max_size: self.limits.max_block_bytes,
+                    max_total_wire_bytes: self.limits.max_total_wire_bytes,
+                },
             ),
             ReaderState::PcapNg { .. } => self.next_pcapng_frame(),
         };
 
         match result {
             Ok(frame) => {
-                if frame.is_none() {
+                if frame.is_some() {
+                    self.metadata_blocks_before_frame = 0;
+                    self.metadata_bytes_before_frame = 0;
+                } else {
                     self.finished = true;
                 }
                 Ok(frame)
@@ -242,102 +319,176 @@ impl<R: Read> Reader<R> {
     }
 
     fn next_pcapng_frame(&mut self) -> Result<Option<Frame>, Error> {
-        let mut metadata_blocks = 0usize;
         loop {
-            let (section_endianness, section_interfaces, section_interface_base) = match &self.state
-            {
+            let (section_endianness, section_remaining) = match &self.state {
                 ReaderState::PcapNg {
                     endianness,
-                    interfaces,
-                    interface_base,
-                } => (*endianness, interfaces, *interface_base),
+                    remaining_section_bytes,
+                    ..
+                } => (*endianness, *remaining_section_bytes),
                 ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
             };
 
             let Some(raw_header) = read_pcapng_block_header(&mut self.inner)? else {
-                return Ok(None);
+                return match section_remaining {
+                    Some(remaining) if remaining != 0 => Err(Error::TruncatedSection { remaining }),
+                    _ => Ok(None),
+                };
             };
 
             if raw_header[..4] == PCAPNG_SECTION_HEADER {
-                metadata_blocks = metadata_blocks.saturating_add(1);
-                if metadata_blocks > self.max_metadata_blocks_per_frame {
-                    return Err(Error::MetadataBlockLimit {
-                        limit: self.max_metadata_blocks_per_frame,
-                    });
+                if let Some(remaining) = section_remaining
+                    && remaining != 0
+                {
+                    return Err(Error::PrematureSectionHeader { remaining });
                 }
-                let new_endianness = read_section_header_with_length(
+                let next_metadata_blocks = self.checked_metadata_block_count()?;
+                let section = read_section_header_with_length(
                     &mut self.inner,
                     raw_header[4..8].try_into().expect("four-byte slice"),
-                    self.max_size,
+                    self.limits.max_block_bytes,
+                    self.total_wire_bytes,
+                    self.limits.max_total_wire_bytes,
+                    self.metadata_bytes_before_frame,
+                    self.limits.max_metadata_bytes_before_frame,
+                )?;
+                let next_wire = checked_wire_total(
+                    self.total_wire_bytes,
+                    u64::from(section.block_length),
+                    self.limits.max_total_wire_bytes,
+                )?;
+                let next_metadata_bytes = checked_metadata_bytes(
+                    self.metadata_bytes_before_frame,
+                    u64::from(section.block_length),
+                    self.limits.max_metadata_bytes_before_frame,
                 )?;
                 match &mut self.state {
                     ReaderState::PcapNg {
                         endianness,
                         interfaces,
                         interface_base,
+                        remaining_section_bytes,
                     } => {
                         *interface_base = interface_base
                             .checked_add(u32::try_from(interfaces.len()).map_err(|_| {
                                 Error::InterfaceLimit {
-                                    limit: self.max_interfaces,
+                                    limit: self.limits.max_interfaces_per_section,
                                 }
                             })?)
-                            .ok_or(Error::InterfaceLimit {
-                                limit: self.max_interfaces,
+                            .ok_or(Error::AccountingOverflow {
+                                resource: "global interface identifiers",
                             })?;
-                        *endianness = new_endianness;
+                        *endianness = section.endianness;
+                        *remaining_section_bytes = section.remaining_section_bytes;
                         interfaces.clear();
                     }
                     ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                 }
+                self.total_wire_bytes = next_wire;
+                self.metadata_blocks_before_frame = next_metadata_blocks;
+                self.metadata_bytes_before_frame = next_metadata_bytes;
                 continue;
             }
 
+            if section_remaining == Some(0) {
+                return Err(Error::DataAfterSectionEnd);
+            }
             let block_type = decode_u32(section_endianness, &raw_header[..4]);
             let block_length = decode_u32(section_endianness, &raw_header[4..8]);
-            validate_pcapng_block_length(block_length, self.max_size)?;
-            let remaining =
-                usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
-                    length: block_length,
-                })? - 8;
-            let mut block = vec![0_u8; remaining];
-            read_exact_counted(&mut self.inner, &mut block, "pcapng block")?;
-
-            let body_length = block.len() - 4;
-            let trailing_length = decode_u32(section_endianness, &block[body_length..]);
-            if trailing_length != block_length {
-                return Err(Error::BlockLengthMismatch {
-                    leading: block_length,
-                    trailing: trailing_length,
+            validate_pcapng_block_length(block_length, self.limits.max_block_bytes)?;
+            if let Some(remaining) = section_remaining
+                && u64::from(block_length) > remaining
+            {
+                return Err(Error::SectionBoundary {
+                    declared: u64::from(block_length),
+                    remaining,
                 });
             }
-            let body = &block[..body_length];
-
-            if !matches!(
+            let next_wire = checked_wire_total(
+                self.total_wire_bytes,
+                u64::from(block_length),
+                self.limits.max_total_wire_bytes,
+            )?;
+            let is_packet = matches!(
                 block_type,
                 PCAPNG_ENHANCED_PACKET_BLOCK | PCAPNG_PACKET_BLOCK | PCAPNG_SIMPLE_PACKET_BLOCK
-            ) {
-                metadata_blocks = metadata_blocks.saturating_add(1);
-                if metadata_blocks > self.max_metadata_blocks_per_frame {
-                    return Err(Error::MetadataBlockLimit {
-                        limit: self.max_metadata_blocks_per_frame,
+            );
+            let next_metadata = if is_packet {
+                None
+            } else {
+                Some((
+                    self.checked_metadata_block_count()?,
+                    checked_metadata_bytes(
+                        self.metadata_bytes_before_frame,
+                        u64::from(block_length),
+                        self.limits.max_metadata_bytes_before_frame,
+                    )?,
+                ))
+            };
+
+            let body_length =
+                usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
+                    length: block_length,
+                })? - 12;
+            let known = matches!(
+                block_type,
+                PCAPNG_INTERFACE_DESCRIPTION_BLOCK
+                    | PCAPNG_ENHANCED_PACKET_BLOCK
+                    | PCAPNG_PACKET_BLOCK
+                    | PCAPNG_SIMPLE_PACKET_BLOCK
+            );
+            let body = if known {
+                let mut body = vec![0_u8; body_length];
+                read_exact_counted(&mut self.inner, &mut body, "pcapng block body")?;
+                let mut footer = [0_u8; 4];
+                read_exact_counted(&mut self.inner, &mut footer, "pcapng block footer")?;
+                let trailing_length = decode_u32(section_endianness, &footer);
+                if trailing_length != block_length {
+                    return Err(Error::BlockLengthMismatch {
+                        leading: block_length,
+                        trailing: trailing_length,
                     });
                 }
+                Some(body)
+            } else {
+                stream_unknown_block(
+                    &mut self.inner,
+                    body_length,
+                    section_endianness,
+                    block_length,
+                )?;
+                None
+            };
+
+            self.total_wire_bytes = next_wire;
+            if let ReaderState::PcapNg {
+                remaining_section_bytes: Some(remaining),
+                ..
+            } = &mut self.state
+            {
+                *remaining -= u64::from(block_length);
+            }
+            if let Some((blocks, bytes)) = next_metadata {
+                self.metadata_blocks_before_frame = blocks;
+                self.metadata_bytes_before_frame = bytes;
             }
 
             match block_type {
                 PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
-                    let description = parse_interface_description(body, section_endianness)?;
+                    let description = parse_interface_description(
+                        body.as_deref().expect("known block body"),
+                        section_endianness,
+                    )?;
                     match &mut self.state {
                         ReaderState::PcapNg { interfaces, .. } => {
-                            if interfaces.len() >= self.max_interfaces {
+                            if interfaces.len() >= self.limits.max_interfaces_per_section {
                                 return Err(Error::InterfaceLimit {
-                                    limit: self.max_interfaces,
+                                    limit: self.limits.max_interfaces_per_section,
                                 });
                             }
-                            if self.interfaces.len() >= self.max_total_interfaces {
+                            if self.interfaces.len() >= self.limits.max_total_interfaces {
                                 return Err(Error::TotalInterfaceLimit {
-                                    limit: self.max_total_interfaces,
+                                    limit: self.limits.max_total_interfaces,
                                 });
                             }
                             interfaces.push(description);
@@ -346,42 +497,60 @@ impl<R: Read> Reader<R> {
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     }
                 }
-                PCAPNG_ENHANCED_PACKET_BLOCK => {
-                    return parse_enhanced_packet(
-                        body,
-                        section_endianness,
-                        section_interfaces,
-                        section_interface_base,
-                        self.max_size,
-                    )
-                    .map(Some);
+                PCAPNG_ENHANCED_PACKET_BLOCK | PCAPNG_PACKET_BLOCK | PCAPNG_SIMPLE_PACKET_BLOCK => {
+                    let (interfaces, interface_base) = match &self.state {
+                        ReaderState::PcapNg {
+                            interfaces,
+                            interface_base,
+                            ..
+                        } => (interfaces.as_slice(), *interface_base),
+                        ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
+                    };
+                    let body = body.as_deref().expect("known block body");
+                    let frame = match block_type {
+                        PCAPNG_ENHANCED_PACKET_BLOCK => parse_enhanced_packet(
+                            body,
+                            section_endianness,
+                            interfaces,
+                            interface_base,
+                            self.limits.max_block_bytes,
+                        ),
+                        PCAPNG_PACKET_BLOCK => parse_obsolete_packet(
+                            body,
+                            section_endianness,
+                            interfaces,
+                            interface_base,
+                            self.limits.max_block_bytes,
+                        ),
+                        PCAPNG_SIMPLE_PACKET_BLOCK => parse_simple_packet(
+                            body,
+                            section_endianness,
+                            interfaces,
+                            interface_base,
+                            self.limits.max_block_bytes,
+                        ),
+                        _ => unreachable!("packet block checked above"),
+                    }?;
+                    return Ok(Some(frame));
                 }
-                PCAPNG_PACKET_BLOCK => {
-                    return parse_obsolete_packet(
-                        body,
-                        section_endianness,
-                        section_interfaces,
-                        section_interface_base,
-                        self.max_size,
-                    )
-                    .map(Some);
-                }
-                PCAPNG_SIMPLE_PACKET_BLOCK => {
-                    return parse_simple_packet(
-                        body,
-                        section_endianness,
-                        section_interfaces,
-                        section_interface_base,
-                        self.max_size,
-                    )
-                    .map(Some);
-                }
-                _ => {
-                    // Metadata and extension blocks are length-delimited, so an
-                    // unknown block can be skipped without guessing its layout.
-                }
+                _ => {}
             }
         }
+    }
+
+    fn checked_metadata_block_count(&self) -> Result<usize, Error> {
+        let actual =
+            self.metadata_blocks_before_frame
+                .checked_add(1)
+                .ok_or(Error::AccountingOverflow {
+                    resource: "metadata block count",
+                })?;
+        if actual > self.limits.max_metadata_blocks_before_frame {
+            return Err(Error::MetadataBlockLimit {
+                limit: self.limits.max_metadata_blocks_before_frame,
+            });
+        }
+        Ok(actual)
     }
 
     pub fn get_ref(&self) -> &R {
@@ -395,6 +564,30 @@ impl<R: Read> Reader<R> {
     pub fn into_inner(self) -> R {
         self.inner
     }
+}
+
+fn checked_wire_total(current: u64, addition: u64, limit: u64) -> Result<u64, Error> {
+    let actual = current
+        .checked_add(addition)
+        .ok_or(Error::AccountingOverflow {
+            resource: "total wire bytes",
+        })?;
+    if actual > limit {
+        return Err(Error::TotalWireByteLimit { actual, limit });
+    }
+    Ok(actual)
+}
+
+fn checked_metadata_bytes(current: u64, addition: u64, limit: u64) -> Result<u64, Error> {
+    let actual = current
+        .checked_add(addition)
+        .ok_or(Error::AccountingOverflow {
+            resource: "metadata bytes",
+        })?;
+    if actual > limit {
+        return Err(Error::MetadataByteLimit { actual, limit });
+    }
+    Ok(actual)
 }
 
 impl<R: Read> Iterator for Reader<R> {

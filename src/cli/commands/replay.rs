@@ -18,7 +18,7 @@ use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, validate_interface_selector};
-use super::offline::validate_capture_stream_limits;
+use super::offline::{capture_reader_limits, validate_capture_stream_limits};
 
 #[derive(Clone, Copy, Debug)]
 pub(in crate::cli) struct ReplayInterfaceMapping {
@@ -70,6 +70,13 @@ pub(in crate::cli) fn run_replay(
         arguments.max_frame_bytes,
         arguments.max_interfaces,
     )?;
+    let reader_limits = capture_reader_limits(
+        arguments.max_frame_bytes,
+        arguments.max_interfaces,
+        arguments.max_metadata_blocks,
+        arguments.max_metadata_bytes,
+        arguments.max_wire_bytes,
+    )?;
     let timing = replay_timing(&arguments)?;
     let requested_interface = requested_replay_interface(&arguments.interface)?;
     let policy = arguments.policy.clone().into_policy();
@@ -88,8 +95,8 @@ pub(in crate::cli) fn run_replay(
             format!("open {} failed: {source}", arguments.path.display()),
         )
     })?;
-    let mut reader = Reader::with_limits(file, arguments.max_frame_bytes, arguments.max_interfaces)
-        .map_err(CliError::classified)?;
+    let mut reader =
+        Reader::with_reader_limits(file, reader_limits).map_err(CliError::classified)?;
     let registry = default_registry_arc()?;
     let mut authorizer =
         workflow::replay::SystemAuthorizer::new(policy, registry, arguments.allow_malformed_live);

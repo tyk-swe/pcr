@@ -1,0 +1,32 @@
+name: Security waiver audit
+
+on:
+  schedule:
+    - cron: "17 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rustsec-waivers:
+    name: dated RustSec waivers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          key: cargo-tools-deny-v3-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-0.20.2-${{ hashFiles('Cargo.lock') }}
+      - name: Install pinned cargo-deny
+        run: cargo install cargo-deny --locked --version 0.20.2
+      - name: Validate dated RustSec waivers
+        run: ./scripts/check-rustsec-waivers.py
+      - name: Check dependency policy
+        run: cargo deny check

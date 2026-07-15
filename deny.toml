@@ -12,7 +12,7 @@ yanked = "deny"
 unmaintained = "all"
 unsound = "all"
 ignore = [
-    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is an unmaintained build-time transitive dependency of rtnetlink/netlink-packet-core; exact lockfile exception expires 2026-10-12" },
+    { id = "RUSTSEC-2024-0436", reason = "paste 1.0.15 is an unmaintained build-time transitive dependency of rtnetlink 0.21.0 via netlink-packet-core 0.8.1; warning begins 2026-09-12 and exact lockfile exception expires 2026-10-12" },
 ]
 
 [licenses]

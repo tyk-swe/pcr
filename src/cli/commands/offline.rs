@@ -136,12 +136,22 @@ pub(in crate::cli) fn run_read(
         max_bytes,
         max_frame_bytes,
         max_interfaces,
+        max_metadata_blocks,
+        max_metadata_bytes,
+        max_wire_bytes,
     } = arguments;
     validate_capture_stream_limits(max_frames, max_bytes, max_frame_bytes, max_interfaces)?;
+    let reader_limits = capture_reader_limits(
+        max_frame_bytes,
+        max_interfaces,
+        max_metadata_blocks,
+        max_metadata_bytes,
+        max_wire_bytes,
+    )?;
     let file = File::open(&path)
         .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
     let mut reader =
-        Reader::with_limits(file, max_frame_bytes, max_interfaces).map_err(CliError::classified)?;
+        Reader::with_reader_limits(file, reader_limits).map_err(CliError::classified)?;
     let stream_limits = Limits {
         max_frames,
         max_bytes,
@@ -259,4 +269,35 @@ pub(in crate::cli) fn validate_capture_stream_limits(
         ));
     }
     Ok(())
+}
+
+pub(in crate::cli) fn capture_reader_limits(
+    max_block_bytes: usize,
+    max_interfaces_per_section: usize,
+    max_metadata_blocks_before_frame: usize,
+    max_metadata_bytes_before_frame: u64,
+    max_total_wire_bytes: u64,
+) -> Result<capture::ReaderLimits, CliError> {
+    if max_metadata_blocks_before_frame == 0
+        || max_metadata_bytes_before_frame == 0
+        || max_total_wire_bytes == 0
+    {
+        return Err(CliError::from_classification(
+            Classification::new(
+                "cli.capture_limit",
+                Kind::Cli,
+                Some("use non-zero finite capture reader limits"),
+            ),
+            "capture metadata-block, metadata-byte, and wire-byte limits must be non-zero",
+            Vec::new(),
+        ));
+    }
+    Ok(capture::ReaderLimits {
+        max_block_bytes,
+        max_interfaces_per_section,
+        max_total_interfaces: capture::DEFAULT_TOTAL_INTERFACE_LIMIT,
+        max_metadata_blocks_before_frame,
+        max_metadata_bytes_before_frame,
+        max_total_wire_bytes,
+    })
 }

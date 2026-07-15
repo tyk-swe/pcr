@@ -3,10 +3,8 @@
 
 // DNS command execution and presentation.
 
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
@@ -53,16 +51,17 @@ pub(in crate::cli) fn run_dns(
         limits,
         policy,
     } = arguments;
+    let (transaction_id, source_port) = dns_identifiers(transaction_id, source_port)?;
     let server = parse_workflow_target(server)?;
     let queue_limits = limits.into_limits();
     let request = workflow::dns::Request {
         server,
         address_family: family.into(),
         server_port: port,
-        source_port: source_port.unwrap_or_else(generated_dns_source_port),
+        source_port,
         query_name: name,
         query_type: query_type.into(),
-        transaction_id: transaction_id.unwrap_or_else(generated_dns_transaction_id),
+        transaction_id,
         recursion_desired: !no_recursion,
         attempts,
         timeout: Duration::from_millis(timeout_ms),
@@ -140,27 +139,39 @@ pub(in crate::cli) fn run_dns(
     }
 }
 
-fn generated_dns_transaction_id() -> u16 {
-    let bytes = generated_dns_entropy().to_le_bytes();
-    u16::from_le_bytes([bytes[0], bytes[1]])
+fn dns_identifiers(
+    transaction_id: Option<u16>,
+    source_port: Option<u16>,
+) -> Result<(u16, u16), CliError> {
+    dns_identifiers_with(transaction_id, source_port, getrandom::fill)
 }
 
-fn generated_dns_source_port() -> u16 {
+fn dns_identifiers_with<E>(
+    transaction_id: Option<u16>,
+    source_port: Option<u16>,
+    fill: impl FnOnce(&mut [u8]) -> Result<(), E>,
+) -> Result<(u16, u16), CliError>
+where
+    E: std::fmt::Display,
+{
+    if let (Some(transaction_id), Some(source_port)) = (transaction_id, source_port) {
+        return Ok((transaction_id, source_port));
+    }
+    let mut entropy = [0_u8; 4];
+    fill(&mut entropy).map_err(|source| {
+        CliError::new(
+            5,
+            format!("could not obtain operating-system entropy for DNS identifiers: {source}"),
+        )
+    })?;
     const WIDTH: u16 = u16::MAX - workflow::dns::DNS_EPHEMERAL_SOURCE_PORT_BASE + 1;
-    let offset = u16::try_from(generated_dns_entropy() % u64::from(WIDTH))
-        .expect("ephemeral source-port offset is bounded to u16");
-    workflow::dns::DNS_EPHEMERAL_SOURCE_PORT_BASE + offset
-}
-
-fn generated_dns_entropy() -> u64 {
-    let time = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let mut hasher = RandomState::new().build_hasher();
-    hasher.write_u128(time);
-    hasher.write_u32(std::process::id());
-    hasher.finish()
+    let generated_transaction_id = u16::from_le_bytes([entropy[0], entropy[1]]);
+    let generated_source_port = workflow::dns::DNS_EPHEMERAL_SOURCE_PORT_BASE
+        + u16::from_le_bytes([entropy[2], entropy[3]]) % WIDTH;
+    Ok((
+        transaction_id.unwrap_or(generated_transaction_id),
+        source_port.unwrap_or(generated_source_port),
+    ))
 }
 
 struct CliDnsExecutor {
@@ -452,5 +463,41 @@ fn dns_section_name(value: output::dns::Section) -> &'static str {
         output::dns::Section::Answer => "answer",
         output::dns::Section::Authority => "authority",
         output::dns::Section::Additional => "additional",
+    }
+}
+
+#[cfg(test)]
+mod entropy_tests {
+    use super::*;
+
+    #[test]
+    fn one_entropy_read_supplies_both_dns_defaults() {
+        let mut calls = 0;
+        let identifiers = dns_identifiers_with(None, None, |output| {
+            calls += 1;
+            output.copy_from_slice(&[0x34, 0x12, 0xff, 0xff]);
+            Ok::<_, &'static str>(())
+        })
+        .unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(identifiers.0, 0x1234);
+        assert_eq!(identifiers.1, u16::MAX);
+    }
+
+    #[test]
+    fn explicit_dns_identifiers_do_not_request_entropy() {
+        let identifiers = dns_identifiers_with(Some(7), Some(50_000), |_| {
+            Err::<(), _>("entropy must not be requested")
+        })
+        .unwrap();
+        assert_eq!(identifiers, (7, 50_000));
+    }
+
+    #[test]
+    fn entropy_failure_is_an_io_class_cli_error() {
+        let error =
+            dns_identifiers_with(None, Some(50_000), |_| Err::<(), _>("unavailable")).unwrap_err();
+        assert_eq!(error.exit_code, 5);
+        assert_eq!(error.classification.kind, packetcraftr::error::Kind::Io);
     }
 }

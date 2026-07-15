@@ -867,6 +867,7 @@ dependencies = [
  "bytes",
  "clap",
  "futures-util",
+ "getrandom",
  "jsonschema",
  "libc",
  "libloading 0.9.0",

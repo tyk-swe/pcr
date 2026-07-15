@@ -5,7 +5,7 @@ use std::sync::Arc;
 use libfuzzer_sys::fuzz_target;
 use packetcraftr::packet::{
     build::{Builder, Context as BuildContext, Options as BuildOptions},
-    document::{Format, Packet as PacketDocument},
+    document::{Format, Limits as DocumentLimits, Packet as PacketDocument},
     expression::{Options as ExpressionOptions, parse},
 };
 use packetcraftr::protocol::builtin::registry;
@@ -30,10 +30,38 @@ fuzz_target!(|data: &[u8]| {
             },
         )
         .ok(),
-        1 => PacketDocument::parse(text, Format::Json, 64 * 1024)
+        1 => PacketDocument::parse_with_options(
+            text,
+            Format::Json,
+            DocumentLimits {
+                max_bytes: 64 * 1024,
+                max_layers: 64,
+                max_nesting: 16,
+                max_fields_per_layer: 64,
+                max_total_fields: 512,
+                max_ast_nodes: 1024,
+                max_collection_items: 64 * 1024,
+                max_key_bytes: 128,
+                max_owned_scalar_bytes: 64 * 1024,
+            },
+        )
             .ok()
             .and_then(|document| document.to_packet(&registry, 64).ok()),
-        _ => PacketDocument::parse(text, Format::Yaml, 64 * 1024)
+        _ => PacketDocument::parse_with_options(
+            text,
+            Format::Yaml,
+            DocumentLimits {
+                max_bytes: 64 * 1024,
+                max_layers: 64,
+                max_nesting: 16,
+                max_fields_per_layer: 64,
+                max_total_fields: 512,
+                max_ast_nodes: 1024,
+                max_collection_items: 64 * 1024,
+                max_key_bytes: 128,
+                max_owned_scalar_bytes: 64 * 1024,
+            },
+        )
             .ok()
             .and_then(|document| document.to_packet(&registry, 64).ok()),
     };

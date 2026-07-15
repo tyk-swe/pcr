@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux x86-64, macOS x86-64 and Arm64, and Windows x86-64, plus SHA-256
   checksums for every release asset.
 
+### Security
+
+- Bounded DNS relevance traversal with randomized owner/reference indexes and a
+  2,048-name ceiling, and replaced predictable DNS CLI identifiers with one
+  fail-closed operating-system CSPRNG read while preserving explicit overrides.
+- Added PCAP/PCAPNG block, interface, metadata-block, metadata-byte, total-wire,
+  and finite-section boundary enforcement, including streamed unknown blocks
+  and matching `read`/`replay` CLI controls.
+- Added allocation preflight budgets for packet-document layers, nesting,
+  fields, AST nodes, collection items, keys, and owned scalar data before JSON
+  or YAML semantic construction.
+- Added exact dependency-path and dated expiry governance for the temporary
+  `RUSTSEC-2024-0436` `paste` waiver in pull requests, weekly audits, and release
+  preflight.
+
 ## [0.3.0] - 2026-07-14
 
 ### Changed

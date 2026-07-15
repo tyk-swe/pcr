@@ -60,6 +60,7 @@ pub const MAX_DNS_ATTEMPTS: u32 = 32;
 pub const MAX_DNS_MESSAGE_BYTES: usize = u16::MAX as usize;
 pub const MAX_DNS_RECORDS: usize = 4_096;
 pub const MAX_DNS_NAME_POINTERS: usize = 128;
+pub const MAX_DNS_RELEVANT_NAMES: usize = 2_048;
 pub const MAX_DNS_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
 
 const DNS_FLAG_RESPONSE: u16 = 0x8000;

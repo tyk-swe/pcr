@@ -13,6 +13,13 @@ use super::wire::{
     validate_declared_lengths,
 };
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SectionHeader {
+    pub(super) endianness: Endianness,
+    pub(super) block_length: u32,
+    pub(super) remaining_section_bytes: Option<u64>,
+}
+
 pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option<[u8; 8]>, Error> {
     let mut header = [0_u8; 8];
     if read_exact_or_eof(reader, &mut header, "pcapng block header")? {
@@ -25,17 +32,33 @@ pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option
 pub(super) fn read_section_header_after_type<R: Read>(
     reader: &mut R,
     max_size: usize,
-) -> Result<Endianness, Error> {
+    total_wire_bytes: u64,
+    max_total_wire_bytes: u64,
+    metadata_bytes: u64,
+    max_metadata_bytes: u64,
+) -> Result<SectionHeader, Error> {
     let mut length = [0_u8; 4];
     read_exact_counted(reader, &mut length, "pcapng section header length")?;
-    read_section_header_with_length(reader, length, max_size)
+    read_section_header_with_length(
+        reader,
+        length,
+        max_size,
+        total_wire_bytes,
+        max_total_wire_bytes,
+        metadata_bytes,
+        max_metadata_bytes,
+    )
 }
 
 pub(super) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
-) -> Result<Endianness, Error> {
+    total_wire_bytes: u64,
+    max_total_wire_bytes: u64,
+    metadata_bytes: u64,
+    max_metadata_bytes: u64,
+) -> Result<SectionHeader, Error> {
     let mut raw_bom = [0_u8; 4];
     read_exact_counted(reader, &mut raw_bom, "pcapng byte-order magic")?;
     let endianness = match raw_bom {
@@ -55,6 +78,20 @@ pub(super) fn read_section_header_with_length<R: Read>(
             length: block_length,
         });
     }
+    validate_budget_addition(
+        total_wire_bytes,
+        u64::from(block_length),
+        max_total_wire_bytes,
+        "total wire bytes",
+        |actual, limit| Error::TotalWireByteLimit { actual, limit },
+    )?;
+    validate_budget_addition(
+        metadata_bytes,
+        u64::from(block_length),
+        max_metadata_bytes,
+        "metadata bytes",
+        |actual, limit| Error::MetadataByteLimit { actual, limit },
+    )?;
 
     let remaining_length = block_length as usize - 12;
     let mut remaining = vec![0_u8; remaining_length];
@@ -98,7 +135,52 @@ pub(super) fn read_section_header_with_length<R: Read>(
         "pcapng section options",
         |_, _| Ok(()),
     )?;
-    Ok(endianness)
+    Ok(SectionHeader {
+        endianness,
+        block_length,
+        remaining_section_bytes: (section_length >= 0).then_some(section_length as u64),
+    })
+}
+
+fn validate_budget_addition(
+    current: u64,
+    addition: u64,
+    limit: u64,
+    resource: &'static str,
+    exceeded: impl FnOnce(u64, u64) -> Error,
+) -> Result<(), Error> {
+    let actual = current
+        .checked_add(addition)
+        .ok_or(Error::AccountingOverflow { resource })?;
+    if actual > limit {
+        return Err(exceeded(actual, limit));
+    }
+    Ok(())
+}
+
+pub(super) fn stream_unknown_block<R: Read>(
+    reader: &mut R,
+    body_length: usize,
+    endianness: Endianness,
+    block_length: u32,
+) -> Result<(), Error> {
+    let mut remaining = body_length;
+    let mut scratch = [0_u8; 8 * 1024];
+    while remaining != 0 {
+        let chunk = remaining.min(scratch.len());
+        read_exact_counted(reader, &mut scratch[..chunk], "pcapng block body")?;
+        remaining -= chunk;
+    }
+    let mut footer = [0_u8; 4];
+    read_exact_counted(reader, &mut footer, "pcapng block footer")?;
+    let trailing_length = decode_u32(endianness, &footer);
+    if trailing_length != block_length {
+        return Err(Error::BlockLengthMismatch {
+            leading: block_length,
+            trailing: trailing_length,
+        });
+    }
+    Ok(())
 }
 
 pub(super) fn validate_pcapng_block_length(length: u32, max_size: usize) -> Result<(), Error> {

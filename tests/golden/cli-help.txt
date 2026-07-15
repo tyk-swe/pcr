@@ -74,6 +74,12 @@ Options:
           Maximum bytes accepted from any one captured frame or PCAPNG block [default: 16777216]
       --max-interfaces <MAX_INTERFACES>
           Maximum PCAPNG interfaces accepted from the input [default: 4096]
+      --max-metadata-blocks <MAX_METADATA_BLOCKS>
+          Maximum PCAPNG metadata blocks accepted before each frame [default: 4096]
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          Maximum PCAPNG metadata bytes accepted before each frame [default: 67108864]
+      --max-wire-bytes <MAX_WIRE_BYTES>
+          Maximum total container bytes consumed from the capture input [default: 1073741824]
   -h, --help
           Print help
 
@@ -285,6 +291,12 @@ Options:
           Maximum bytes accepted from any one captured frame or PCAPNG block [default: 16777216]
       --max-interfaces <MAX_INTERFACES>
           Maximum PCAPNG interfaces accepted from the input [default: 4096]
+      --max-metadata-blocks <MAX_METADATA_BLOCKS>
+          Maximum PCAPNG metadata blocks accepted before each frame [default: 4096]
+      --max-metadata-bytes <MAX_METADATA_BYTES>
+          Maximum PCAPNG metadata bytes accepted before each frame [default: 67108864]
+      --max-wire-bytes <MAX_WIRE_BYTES>
+          Maximum total container bytes consumed from the capture input [default: 1073741824]
       --allow-malformed-live
           Per-operation opt-in required when dissection preserves malformed bytes
       --allow-public-destinations

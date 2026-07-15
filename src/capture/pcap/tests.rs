@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{Cursor, Read};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -7,7 +7,7 @@ use crate::capture::{Direction, Frame, LinkType};
 
 use super::models::{
     DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT, DEFAULT_SIZE_LIMIT, Endianness, Error,
-    Format, Interface, Limits, TimestampResolution, TranscodeReport,
+    Format, Interface, Limits, ReaderLimits, TimestampResolution, TranscodeReport,
 };
 use super::reader::Reader;
 use super::transcode::transcode;
@@ -820,6 +820,197 @@ fn pcapng_accepts_compatible_minor_version_two_and_rejects_unaligned_section_len
         Err(Error::InvalidData {
             format: Format::PcapNg,
             reason: "section length is not a multiple of four",
+        })
+    ));
+}
+
+fn finite_section(mut bytes: Vec<u8>, following_bytes: i64) -> Vec<u8> {
+    bytes[16..24].copy_from_slice(&following_bytes.to_le_bytes());
+    bytes
+}
+
+#[test]
+fn pcapng_finite_section_boundaries_are_enforced() {
+    let empty = finite_section(Writer::pcapng(Vec::new()).unwrap().into_inner(), 0);
+    let mut reader = Reader::new(Cursor::new(empty)).unwrap();
+    assert_eq!(reader.next_frame().unwrap(), None);
+
+    let mut interface_writer = Writer::pcapng(Vec::new()).unwrap();
+    interface_writer.add_interface(LinkType::ETHERNET).unwrap();
+    let interface_section = interface_writer.into_inner();
+    let mut exact =
+        Reader::new(Cursor::new(finite_section(interface_section.clone(), 32))).unwrap();
+    assert_eq!(exact.next_frame().unwrap(), None);
+
+    let mut short =
+        Reader::new(Cursor::new(finite_section(interface_section.clone(), 36))).unwrap();
+    assert!(matches!(
+        short.next_frame(),
+        Err(Error::TruncatedSection { remaining: 4 })
+    ));
+
+    let mut crossing =
+        Reader::new(Cursor::new(finite_section(interface_section.clone(), 28))).unwrap();
+    assert!(matches!(
+        crossing.next_frame(),
+        Err(Error::SectionBoundary {
+            declared: 32,
+            remaining: 28
+        })
+    ));
+
+    let second = Writer::pcapng(Vec::new()).unwrap().into_inner();
+    let mut exact_then_section = finite_section(interface_section.clone(), 32);
+    exact_then_section.extend_from_slice(&second);
+    let mut reader = Reader::new(Cursor::new(exact_then_section)).unwrap();
+    assert_eq!(reader.next_frame().unwrap(), None);
+
+    let mut premature = finite_section(interface_section, 36);
+    premature.extend_from_slice(&second);
+    let mut reader = Reader::new(Cursor::new(premature)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::PrematureSectionHeader { remaining: 4 })
+    ));
+}
+
+#[test]
+fn pcapng_rejects_data_after_a_finite_section_ends() {
+    let mut writer = Writer::new(Vec::new(), Format::PcapNg, LinkType::ETHERNET).unwrap();
+    let mut packet = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]);
+    packet.interface = Some(0);
+    writer.write_frame(&packet).unwrap();
+    let bytes = finite_section(writer.into_inner(), 32);
+    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::DataAfterSectionEnd)
+    ));
+}
+
+#[test]
+fn capture_total_wire_and_metadata_byte_limits_are_independent() {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    writer.add_interface(LinkType::ETHERNET).unwrap();
+    let bytes = writer.into_inner();
+
+    let mut metadata_limited = Reader::with_reader_limits(
+        Cursor::new(bytes.clone()),
+        ReaderLimits {
+            max_metadata_bytes_before_frame: 59,
+            ..ReaderLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        metadata_limited.next_frame(),
+        Err(Error::MetadataByteLimit {
+            actual: 60,
+            limit: 59
+        })
+    ));
+
+    let mut wire_limited = Reader::with_reader_limits(
+        Cursor::new(bytes),
+        ReaderLimits {
+            max_total_wire_bytes: 59,
+            ..ReaderLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        wire_limited.next_frame(),
+        Err(Error::TotalWireByteLimit {
+            actual: 60,
+            limit: 59
+        })
+    ));
+}
+
+struct CountingRead {
+    inner: Cursor<Vec<u8>>,
+    bytes_read: usize,
+}
+
+impl CountingRead {
+    fn new(bytes: Vec<u8>) -> Self {
+        Self {
+            inner: Cursor::new(bytes),
+            bytes_read: 0,
+        }
+    }
+}
+
+impl Read for CountingRead {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(output)?;
+        self.bytes_read += read;
+        Ok(read)
+    }
+}
+
+#[test]
+fn pcapng_declared_budgets_fail_after_the_header_before_body_reads() {
+    let mut bytes = Writer::pcapng(Vec::new()).unwrap().into_inner();
+    bytes.extend_from_slice(&0xdead_beef_u32.to_le_bytes());
+    bytes.extend_from_slice(&4096_u32.to_le_bytes());
+
+    let mut metadata = Reader::with_reader_limits(
+        CountingRead::new(bytes.clone()),
+        ReaderLimits {
+            max_metadata_bytes_before_frame: 100,
+            ..ReaderLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        metadata.next_frame(),
+        Err(Error::MetadataByteLimit { .. })
+    ));
+    assert_eq!(metadata.get_ref().bytes_read, 36);
+
+    let mut wire = Reader::with_reader_limits(
+        CountingRead::new(bytes),
+        ReaderLimits {
+            max_total_wire_bytes: 100,
+            ..ReaderLimits::default()
+        },
+    )
+    .unwrap();
+    assert!(matches!(
+        wire.next_frame(),
+        Err(Error::TotalWireByteLimit { .. })
+    ));
+    assert_eq!(wire.get_ref().bytes_read, 36);
+}
+
+#[test]
+fn streamed_unknown_pcapng_blocks_validate_truncation_and_footer_length() {
+    let section = Writer::pcapng(Vec::new()).unwrap().into_inner();
+    let mut truncated = section.clone();
+    truncated.extend_from_slice(&0xdead_beef_u32.to_le_bytes());
+    truncated.extend_from_slice(&20_u32.to_le_bytes());
+    truncated.extend_from_slice(&[0_u8; 4]);
+    let mut reader = Reader::new(Cursor::new(truncated)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::Truncated {
+            context: "pcapng block body",
+            ..
+        })
+    ));
+
+    let mut mismatch = section;
+    mismatch.extend_from_slice(&0xdead_beef_u32.to_le_bytes());
+    mismatch.extend_from_slice(&20_u32.to_le_bytes());
+    mismatch.extend_from_slice(&[0_u8; 8]);
+    mismatch.extend_from_slice(&16_u32.to_le_bytes());
+    let mut reader = Reader::new(Cursor::new(mismatch)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::BlockLengthMismatch {
+            leading: 20,
+            trailing: 16
         })
     ));
 }

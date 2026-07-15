@@ -14,10 +14,38 @@ pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
 pub const DEFAULT_TOTAL_INTERFACE_LIMIT: usize = 65_536;
 /// Default maximum metadata blocks consumed before one packet is returned.
 pub const DEFAULT_METADATA_BLOCK_LIMIT: usize = 4_096;
+/// Default maximum PCAPNG metadata bytes consumed before one packet is returned.
+pub const DEFAULT_METADATA_BYTE_LIMIT: u64 = 64 * 1024 * 1024;
+/// Default maximum container bytes consumed by one capture reader.
+pub const DEFAULT_TOTAL_WIRE_BYTE_LIMIT: u64 = 1024 * 1024 * 1024;
 /// Default maximum frames accepted by one streaming capture writer or copy.
 pub const DEFAULT_STREAM_FRAMES: u64 = 10_000;
 /// Default maximum captured payload bytes accepted by one streaming writer or copy.
 pub const DEFAULT_STREAM_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Independent resource ceilings for streaming capture input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReaderLimits {
+    pub max_block_bytes: usize,
+    pub max_interfaces_per_section: usize,
+    pub max_total_interfaces: usize,
+    pub max_metadata_blocks_before_frame: usize,
+    pub max_metadata_bytes_before_frame: u64,
+    pub max_total_wire_bytes: u64,
+}
+
+impl Default for ReaderLimits {
+    fn default() -> Self {
+        Self {
+            max_block_bytes: DEFAULT_SIZE_LIMIT,
+            max_interfaces_per_section: DEFAULT_INTERFACE_LIMIT,
+            max_total_interfaces: DEFAULT_TOTAL_INTERFACE_LIMIT,
+            max_metadata_blocks_before_frame: DEFAULT_METADATA_BLOCK_LIMIT,
+            max_metadata_bytes_before_frame: DEFAULT_METADATA_BYTE_LIMIT,
+            max_total_wire_bytes: DEFAULT_TOTAL_WIRE_BYTE_LIMIT,
+        }
+    }
+}
 
 /// Aggregate frame and captured-byte ceilings for a streaming capture operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +180,26 @@ pub enum Error {
     TotalInterfaceLimit { limit: usize },
     #[error("pcapng stream exceeded {limit} metadata blocks before the next packet")]
     MetadataBlockLimit { limit: usize },
+    #[error(
+        "pcapng metadata consumed {actual} bytes before the next packet, exceeding limit {limit}"
+    )]
+    MetadataByteLimit { actual: u64, limit: u64 },
+    #[error("capture input consumed {actual} wire bytes, exceeding limit {limit}")]
+    TotalWireByteLimit { actual: u64, limit: u64 },
+    #[error("capture resource accounting overflowed while tracking {resource}")]
+    AccountingOverflow { resource: &'static str },
+    #[error(
+        "pcapng block of {declared} bytes crosses the section boundary with {remaining} bytes remaining"
+    )]
+    SectionBoundary { declared: u64, remaining: u64 },
+    #[error(
+        "pcapng section header appeared with {remaining} bytes remaining in the current section"
+    )]
+    PrematureSectionHeader { remaining: u64 },
+    #[error("pcapng non-section block appeared after the finite section ended")]
+    DataAfterSectionEnd,
+    #[error("pcapng input ended with {remaining} bytes remaining in the finite section")]
+    TruncatedSection { remaining: u64 },
     #[error("frame link type {actual} does not match interface {interface} link type {expected}")]
     InterfaceLinkTypeMismatch {
         interface: u32,

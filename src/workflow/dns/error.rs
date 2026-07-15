@@ -25,6 +25,8 @@ pub enum DnsWireError {
     QuestionClassMismatch { actual: u16 },
     #[error("DNS record count {actual} exceeds limit {limit}")]
     RecordLimit { actual: usize, limit: usize },
+    #[error("DNS relevance traversal reached {actual} distinct names; limit is {limit}")]
+    RelevantNameLimit { actual: usize, limit: usize },
     #[error("DNS field {field} is truncated at byte {offset}")]
     TruncatedField { field: &'static str, offset: usize },
     #[error("DNS name compression pointer at byte {offset} is truncated")]

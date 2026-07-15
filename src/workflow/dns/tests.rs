@@ -191,6 +191,106 @@ fn valid_response_accepts_only_question_relevant_records() {
 }
 
 #[test]
+fn reverse_cname_traversal_is_indexed_once_and_preserves_wire_order() {
+    const LINKS: usize = 1_900;
+    let mut answers = (0..LINKS)
+        .rev()
+        .map(|index| {
+            FixtureRecord::in_class(
+                &format!("N{index}.X"),
+                DnsQueryType::Cname.code(),
+                wire_name(&format!("n{}.x", index + 1)),
+            )
+        })
+        .collect::<Vec<_>>();
+    answers.push(FixtureRecord::in_class(
+        &format!("n{LINKS}.x"),
+        DnsQueryType::A.code(),
+        vec![192, 0, 2, 1],
+    ));
+    let message = fixture_response(0x1900, 0, "n0.x", DnsQueryType::A, &answers, &[], &[]);
+    super::wire::reset_filter_work();
+    let response = decode_dns_response(
+        &message,
+        "n0.x",
+        DnsQueryType::A,
+        0x1900,
+        DnsLimits {
+            max_records: answers.len(),
+            ..DnsLimits::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(response.answers.len(), answers.len());
+    assert_eq!(response.answers[0].owner.to_string(), "N1899.X.");
+    assert_eq!(
+        response.answers.last().unwrap().owner.to_string(),
+        "n1900.x."
+    );
+    assert_eq!(super::wire::filter_work(), (answers.len(), answers.len()));
+}
+
+#[test]
+fn branching_and_cyclic_cnames_terminate_without_duplicate_visits() {
+    let answers = vec![
+        FixtureRecord::in_class("start.example", 5, wire_name("left.example")),
+        FixtureRecord::in_class("START.EXAMPLE", 5, wire_name("right.example")),
+        FixtureRecord::in_class("left.example", 5, wire_name("start.example")),
+        FixtureRecord::in_class("right.example", 1, vec![192, 0, 2, 2]),
+    ];
+    let message = fixture_response(
+        0x2222,
+        0,
+        "start.example",
+        DnsQueryType::A,
+        &answers,
+        &[],
+        &[],
+    );
+    super::wire::reset_filter_work();
+    let response = decode_dns_response(
+        &message,
+        "start.example",
+        DnsQueryType::A,
+        0x2222,
+        DnsLimits::default(),
+    )
+    .unwrap();
+    assert_eq!(response.answers.len(), answers.len());
+    assert_eq!(super::wire::filter_work(), (answers.len(), answers.len()));
+}
+
+#[test]
+fn cname_relevance_has_a_distinct_name_ceiling() {
+    let answers = (0..MAX_DNS_RELEVANT_NAMES)
+        .map(|index| {
+            FixtureRecord::in_class(
+                &format!("n{index}.x"),
+                DnsQueryType::Cname.code(),
+                wire_name(&format!("n{}.x", index + 1)),
+            )
+        })
+        .collect::<Vec<_>>();
+    let message = fixture_response(0x2048, 0, "n0.x", DnsQueryType::A, &answers, &[], &[]);
+    assert!(matches!(
+        decode_dns_response(
+            &message,
+            "n0.x",
+            DnsQueryType::A,
+            0x2048,
+            DnsLimits {
+                max_records: answers.len(),
+                ..DnsLimits::default()
+            },
+        ),
+        Err(DnsWireError::RelevantNameLimit {
+            actual: 2_049,
+            limit: MAX_DNS_RELEVANT_NAMES
+        })
+    ));
+}
+
+#[test]
 fn compressed_owner_and_dnssec_header_bits_are_validated_without_rejection() {
     let mut message = fixture_response(
         0x1234,

@@ -91,6 +91,22 @@ fn canonical_runtime_domain_namespaces_are_downstream_usable() {
         capture::Frame::new(UNIX_EPOCH, capture::LinkType::ETHERNET, vec![0xde, 0xad]).unwrap();
     assert_eq!(frame.bytes().as_ref(), &[0xde, 0xad]);
     assert_ne!(capture::LinkType::BSD_RAW, capture::LinkType::RAW);
+    let reader_limits = capture::ReaderLimits::default();
+    let _reader = capture::Reader::with_reader_limits(
+        std::io::Cursor::new(include_bytes!(
+            "fixtures/captures/pcap/ethernet-ipv4-udp.pcap"
+        )),
+        reader_limits,
+    )
+    .unwrap();
+    let document_limits = packet::document::Limits::default();
+    let document = packet::document::Packet::parse_with_options(
+        r#"{"schema":"packetcraftr.packet/v1","layers":[]}"#,
+        packet::document::Format::Json,
+        document_limits,
+    )
+    .unwrap();
+    assert!(document.layers.is_empty());
 
     let interface = net::interface::Id {
         name: "external0".to_owned(),

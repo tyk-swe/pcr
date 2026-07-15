@@ -50,22 +50,24 @@ pub(super) fn read_pcap_header<R: Read>(
 
 pub(super) fn read_next_pcap_frame<R: Read>(
     reader: &mut R,
-    endianness: Endianness,
-    precision: TimestampPrecision,
-    snap_len: u32,
-    link_type: LinkType,
-    max_size: usize,
+    total_wire_bytes: &mut u64,
+    options: PcapFrameOptions,
 ) -> Result<Option<Frame>, Error> {
     let mut header = [0_u8; PCAP_RECORD_HEADER_LEN];
     if !read_exact_or_eof(reader, &mut header, "pcap packet header")? {
         return Ok(None);
     }
+    *total_wire_bytes = checked_wire_total(
+        *total_wire_bytes,
+        PCAP_RECORD_HEADER_LEN as u64,
+        options.max_total_wire_bytes,
+    )?;
 
-    let seconds = decode_u32(endianness, &header[0..4]);
-    let fraction = decode_u32(endianness, &header[4..8]);
-    let captured_length = decode_u32(endianness, &header[8..12]);
-    let original_length = decode_u32(endianness, &header[12..16]);
-    let denominator = match precision {
+    let seconds = decode_u32(options.endianness, &header[0..4]);
+    let fraction = decode_u32(options.endianness, &header[4..8]);
+    let captured_length = decode_u32(options.endianness, &header[8..12]);
+    let original_length = decode_u32(options.endianness, &header[12..16]);
+    let denominator = match options.precision {
         TimestampPrecision::Microseconds => 1_000_000,
         TimestampPrecision::Nanoseconds => 1_000_000_000,
     };
@@ -75,17 +77,28 @@ pub(super) fn read_next_pcap_frame<R: Read>(
             denominator,
         });
     }
-    validate_declared_lengths(captured_length, original_length, max_size, "pcap packet")?;
-    if snap_len != 0 && captured_length > snap_len {
+    validate_declared_lengths(
+        captured_length,
+        original_length,
+        options.max_size,
+        "pcap packet",
+    )?;
+    if options.snap_len != 0 && captured_length > options.snap_len {
         return Err(Error::InvalidData {
             format: Format::Pcap,
             reason: "captured packet exceeds the file snap length",
         });
     }
 
+    *total_wire_bytes = checked_wire_total(
+        *total_wire_bytes,
+        u64::from(captured_length),
+        options.max_total_wire_bytes,
+    )?;
+
     let mut bytes = vec![0_u8; captured_length as usize];
     read_exact_counted(reader, &mut bytes, "pcap packet data")?;
-    let nanoseconds = match precision {
+    let nanoseconds = match options.precision {
         TimestampPrecision::Microseconds => fraction * 1_000,
         TimestampPrecision::Nanoseconds => fraction,
     };
@@ -97,9 +110,31 @@ pub(super) fn read_next_pcap_frame<R: Read>(
 
     Ok(Some(Frame::try_with_lengths(
         timestamp,
-        link_type,
+        options.link_type,
         captured_length,
         original_length,
         Bytes::from(bytes),
     )?))
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct PcapFrameOptions {
+    pub(super) endianness: Endianness,
+    pub(super) precision: TimestampPrecision,
+    pub(super) snap_len: u32,
+    pub(super) link_type: LinkType,
+    pub(super) max_size: usize,
+    pub(super) max_total_wire_bytes: u64,
+}
+
+fn checked_wire_total(current: u64, addition: u64, limit: u64) -> Result<u64, Error> {
+    let actual = current
+        .checked_add(addition)
+        .ok_or(Error::AccountingOverflow {
+            resource: "total wire bytes",
+        })?;
+    if actual > limit {
+        return Err(Error::TotalWireByteLimit { actual, limit });
+    }
+    Ok(actual)
 }

@@ -141,6 +141,15 @@ pub(super) struct ReadArgs {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(super) max_interfaces: usize,
+    /// Maximum PCAPNG metadata blocks accepted before each frame.
+    #[arg(long, default_value_t = capture::DEFAULT_METADATA_BLOCK_LIMIT)]
+    pub(super) max_metadata_blocks: usize,
+    /// Maximum PCAPNG metadata bytes accepted before each frame.
+    #[arg(long, default_value_t = capture::DEFAULT_METADATA_BYTE_LIMIT)]
+    pub(super) max_metadata_bytes: u64,
+    /// Maximum total container bytes consumed from the capture input.
+    #[arg(long, default_value_t = capture::DEFAULT_TOTAL_WIRE_BYTE_LIMIT)]
+    pub(super) max_wire_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -178,6 +187,15 @@ pub(super) struct ReplayArgs {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(super) max_interfaces: usize,
+    /// Maximum PCAPNG metadata blocks accepted before each frame.
+    #[arg(long, default_value_t = capture::DEFAULT_METADATA_BLOCK_LIMIT)]
+    pub(super) max_metadata_blocks: usize,
+    /// Maximum PCAPNG metadata bytes accepted before each frame.
+    #[arg(long, default_value_t = capture::DEFAULT_METADATA_BYTE_LIMIT)]
+    pub(super) max_metadata_bytes: u64,
+    /// Maximum total container bytes consumed from the capture input.
+    #[arg(long, default_value_t = capture::DEFAULT_TOTAL_WIRE_BYTE_LIMIT)]
+    pub(super) max_wire_bytes: u64,
     /// Per-operation opt-in required when dissection preserves malformed bytes.
     #[arg(long)]
     pub(super) allow_malformed_live: bool,

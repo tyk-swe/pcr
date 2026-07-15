@@ -168,7 +168,12 @@ impl Dissector {
                         protocol: current_protocol,
                     });
                 }
-                append_raw(&mut packet, &mut layouts, current, absolute_offset);
+                append_raw(
+                    &mut packet,
+                    &mut layouts,
+                    slice_original(&original, absolute_offset, current.len()),
+                    absolute_offset,
+                );
                 diagnostics.push(Diagnostic::warning(
                     "decode.missing_codec",
                     format!("no codec registered for {current_protocol}"),
@@ -196,7 +201,7 @@ impl Dissector {
                     let message = source.to_string();
                     packet.push_boxed(Box::new(MalformedLayer::new(
                         Some(current_protocol.clone()),
-                        Bytes::copy_from_slice(current),
+                        slice_original(&original, absolute_offset, current.len()),
                         message.clone(),
                     )));
                     layouts.push(LayerLayout {
@@ -213,7 +218,6 @@ impl Dissector {
                     break;
                 }
             };
-            let payload_end = decoded.payload_offset.checked_add(decoded.payload_len);
             let actual_protocol = decoded.layer.protocol_id();
             if !codec.accepts_decoded_protocol(&actual_protocol) {
                 return Err(DecodeError::CodecLayerMismatch {
@@ -231,14 +235,19 @@ impl Dissector {
             if decoded.consumed > current.len()
                 || decoded.payload_offset > current.len()
                 || decoded.consumed != decoded.payload_offset
-                || payload_end.is_none_or(|end| end > current.len())
                 || (!decoded.stop && decoded.payload_offset == 0)
             {
                 return Err(DecodeError::InvalidCodecCursor {
                     protocol: current_protocol,
                 });
             }
-            let payload_end = payload_end.expect("validated payload range has an end");
+            let payload_end = decoded
+                .payload_offset
+                .checked_add(decoded.payload_len)
+                .filter(|end| *end <= current.len())
+                .ok_or_else(|| DecodeError::InvalidCodecCursor {
+                    protocol: current_protocol.clone(),
+                })?;
             if payload_end < current.len() {
                 let trailing_offset =
                     absolute_offset.checked_add(payload_end).ok_or_else(|| {
@@ -248,7 +257,7 @@ impl Dissector {
                     })?;
                 trailing.push((
                     trailing_offset,
-                    Bytes::copy_from_slice(&current[payload_end..]),
+                    slice_original(&original, trailing_offset, current.len() - payload_end),
                     index,
                 ));
                 let message = format!(
@@ -332,49 +341,43 @@ impl Dissector {
                 break;
             }
             if decoded.stop {
-                if decoded.payload_len != 0 {
-                    if packet.len() >= options.max_layers {
-                        return Err(DecodeError::LayerLimit {
-                            limit: options.max_layers,
-                        });
-                    }
-                    let raw_offset = absolute_offset
-                        .checked_add(decoded.payload_offset)
-                        .ok_or_else(|| DecodeError::InvalidCodecCursor {
-                            protocol: current_protocol.clone(),
-                        })?;
-                    append_raw(
-                        &mut packet,
-                        &mut layouts,
-                        &current[decoded.payload_offset..payload_end],
-                        raw_offset,
-                    );
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            "decode.terminal_payload",
-                            format!(
-                                "codec for {current_protocol} stopped with {} unconsumed payload byte(s); preserved as Raw",
-                                decoded.payload_len
-                            ),
-                        )
-                        .at_layer(index),
-                    );
+                if packet.len() >= options.max_layers {
+                    return Err(DecodeError::LayerLimit {
+                        limit: options.max_layers,
+                    });
                 }
+                append_raw(
+                    &mut packet,
+                    &mut layouts,
+                    slice_original(&original, layer_end, decoded.payload_len),
+                    layer_end,
+                );
+                diagnostics.push(
+                    Diagnostic::warning(
+                        "decode.terminal_payload",
+                        format!(
+                            "codec for {current_protocol} stopped with {} unconsumed payload byte(s); preserved as Raw",
+                            decoded.payload_len
+                        ),
+                    )
+                    .at_layer(index),
+                );
                 break;
             }
             let payload = &current[decoded.payload_offset..payload_end];
-            absolute_offset = absolute_offset
-                .checked_add(decoded.payload_offset)
-                .ok_or_else(|| DecodeError::InvalidCodecCursor {
-                    protocol: current_protocol.clone(),
-                })?;
+            absolute_offset = layer_end;
             let Some(next_protocol) = next_protocol else {
                 if packet.len() >= options.max_layers {
                     return Err(DecodeError::LayerLimit {
                         limit: options.max_layers,
                     });
                 }
-                append_raw(&mut packet, &mut layouts, payload, absolute_offset);
+                append_raw(
+                    &mut packet,
+                    &mut layouts,
+                    slice_original(&original, absolute_offset, decoded.payload_len),
+                    absolute_offset,
+                );
                 diagnostics.push(Diagnostic::warning(
                     "decode.unknown_binding",
                     format!("unknown child discriminator after {binding_parent}"),
@@ -417,36 +420,46 @@ fn append_padding(
     outside_layer: usize,
 ) {
     let index = packet.len();
-    let end = absolute_offset.saturating_add(bytes.len());
+    let layout = bytes_layer_layout(index, "padding", absolute_offset, bytes.len());
     packet.push(Padding::after_layer(bytes, outside_layer));
-    layouts.push(LayerLayout {
-        index,
-        protocol: ProtocolId::new("padding"),
-        range: ByteRange::new(absolute_offset, end),
-        fields: vec![FieldLayout {
-            name: "bytes".to_owned(),
-            range: ByteRange::new(absolute_offset, end),
-        }],
-    });
+    layouts.push(layout);
 }
 
 fn append_raw(
     packet: &mut Packet,
     layouts: &mut Vec<LayerLayout>,
-    bytes: &[u8],
+    bytes: Bytes,
     absolute_offset: usize,
 ) {
     let index = packet.len();
-    packet.push(Raw::new(Bytes::copy_from_slice(bytes)));
-    layouts.push(LayerLayout {
+    let layout = bytes_layer_layout(index, "raw", absolute_offset, bytes.len());
+    packet.push(Raw::new(bytes));
+    layouts.push(layout);
+}
+
+fn bytes_layer_layout(
+    index: usize,
+    protocol: &str,
+    absolute_offset: usize,
+    byte_length: usize,
+) -> LayerLayout {
+    let end = absolute_offset.saturating_add(byte_length);
+    LayerLayout {
         index,
-        protocol: ProtocolId::new("raw"),
-        range: ByteRange::new(absolute_offset, absolute_offset.saturating_add(bytes.len())),
+        protocol: ProtocolId::new(protocol),
+        range: ByteRange::new(absolute_offset, end),
         fields: vec![FieldLayout {
             name: "bytes".to_owned(),
-            range: ByteRange::new(absolute_offset, absolute_offset.saturating_add(bytes.len())),
+            range: ByteRange::new(absolute_offset, end),
         }],
-    });
+    }
+}
+
+fn slice_original(original: &Bytes, offset: usize, length: usize) -> Bytes {
+    let end = offset
+        .checked_add(length)
+        .expect("decoder cursor ranges were validated before preserving bytes");
+    original.slice(offset..end)
 }
 
 fn append_missing_required_layer(
@@ -555,6 +568,8 @@ mod tests {
         StopWithPayload,
         CursorGap,
         InvalidLayout,
+        Trailing,
+        Reject,
     }
 
     #[derive(Clone, Copy, Debug)]
@@ -603,6 +618,13 @@ mod tests {
                         range: ByteRange::new(0, 2),
                     });
                 }
+                ProbeMode::Trailing => value.payload_len = 0,
+                ProbeMode::Reject => {
+                    return Err(CodecError::Invalid {
+                        protocol: ProtocolId::new("probe"),
+                        message: "rejected test input".to_owned(),
+                    });
+                }
             }
             Ok(value)
         }
@@ -637,6 +659,10 @@ mod tests {
             decoded.packet.get::<Raw>().unwrap().bytes,
             Bytes::from_static(&[2, 3])
         );
+        assert_eq!(
+            decoded.packet.get::<Raw>().unwrap().bytes.as_ptr(),
+            decoded.original[1..].as_ptr()
+        );
 
         assert!(matches!(
             dissector(ProbeMode::StopWithPayload).decode_with_root(
@@ -649,6 +675,38 @@ mod tests {
             ),
             Err(DecodeError::LayerLimit { limit: 1 })
         ));
+    }
+
+    #[test]
+    fn preserved_decoder_bytes_share_original_backing() {
+        let malformed = dissector(ProbeMode::Reject)
+            .decode_with_root(
+                Bytes::from(vec![1, 2, 3]),
+                ProtocolId::new("probe"),
+                DecodeOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            malformed
+                .packet
+                .get::<MalformedLayer>()
+                .unwrap()
+                .bytes
+                .as_ptr(),
+            malformed.original.as_ptr()
+        );
+
+        let trailing = dissector(ProbeMode::Trailing)
+            .decode_with_root(
+                Bytes::from(vec![1, 2, 3]),
+                ProtocolId::new("probe"),
+                DecodeOptions::default(),
+            )
+            .unwrap();
+        assert_eq!(
+            trailing.packet.get::<Padding>().unwrap().bytes.as_ptr(),
+            trailing.original[1..].as_ptr()
+        );
     }
 
     #[test]

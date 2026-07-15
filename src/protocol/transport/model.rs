@@ -21,7 +21,8 @@ use crate::packet::{
 use super::super::common::{
     ValueExpectation, aliased_fields, bytes, field_layout, impl_layer_boilerplate, invalid,
     make_layer, out_of_range, payload_without_padding, protocol, resolve_u16, set_wire_u16,
-    transport_checksum, truncated, unknown_field, wire_u16, wrong_layer, wrong_type,
+    transport_checksum, transport_checksum_parts, truncated, unknown_field, wire_u16, wrong_layer,
+    wrong_type,
 };
 use super::super::network::encode_network;
 
@@ -164,13 +165,12 @@ impl LayerCodec for UdpCodec {
             &mut diagnostics,
         )?;
         let network = encode_network(context)?;
-        let mut segment = Vec::with_capacity(usize::from(expected_length));
-        segment.extend_from_slice(&layer.source_port.to_be_bytes());
-        segment.extend_from_slice(&layer.destination_port.to_be_bytes());
-        segment.extend_from_slice(&length.to_be_bytes());
-        segment.extend_from_slice(&[0, 0]);
-        segment.extend_from_slice(covered_payload);
-        let mut checksum_expected = transport_checksum(network, 17, &segment)?;
+        let mut header = [0_u8; UDP_LEN];
+        header[0..2].copy_from_slice(&layer.source_port.to_be_bytes());
+        header[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
+        header[4..6].copy_from_slice(&length.to_be_bytes());
+        let mut checksum_expected =
+            transport_checksum_parts(network, 17, &[&header, covered_payload])?;
         if checksum_expected == 0 {
             checksum_expected = 0xffff;
         }
@@ -188,13 +188,12 @@ impl LayerCodec for UdpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        let mut prefix = segment[..UDP_LEN].to_vec();
-        prefix[6..8].copy_from_slice(&checksum.to_be_bytes());
+        header[6..8].copy_from_slice(&checksum.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.length = materialized_length;
         materialized.checksum = materialized_checksum;
         Ok(EncodedLayer {
-            prefix,
+            prefix: header.to_vec(),
             suffix: Vec::new(),
             materialized: Box::new(materialized),
             fields: vec![
@@ -548,20 +547,20 @@ impl LayerCodec for TcpCodec {
         let header_len = TCP_MIN_LEN + options.len();
         let data_offset =
             u8::try_from(header_len / 4).map_err(|_| invalid("tcp", "header length overflow"))?;
-        let mut segment = vec![0u8; header_len];
-        segment[0..2].copy_from_slice(&layer.source_port.to_be_bytes());
-        segment[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
-        segment[4..8].copy_from_slice(&layer.sequence.to_be_bytes());
-        segment[8..12].copy_from_slice(&layer.acknowledgment.to_be_bytes());
-        segment[12] =
+        let mut prefix = vec![0_u8; header_len];
+        prefix[0..2].copy_from_slice(&layer.source_port.to_be_bytes());
+        prefix[2..4].copy_from_slice(&layer.destination_port.to_be_bytes());
+        prefix[4..8].copy_from_slice(&layer.sequence.to_be_bytes());
+        prefix[8..12].copy_from_slice(&layer.acknowledgment.to_be_bytes());
+        prefix[12] =
             (data_offset << 4) | ((layer.reserved_bits & 7) << 1) | ((layer.flags >> 8) as u8 & 1);
-        segment[13] = layer.flags as u8;
-        segment[14..16].copy_from_slice(&layer.window.to_be_bytes());
-        segment[18..20].copy_from_slice(&layer.urgent_pointer.to_be_bytes());
-        segment[20..].copy_from_slice(&options);
-        segment.extend_from_slice(payload_without_padding("tcp", payload, context)?);
+        prefix[13] = layer.flags as u8;
+        prefix[14..16].copy_from_slice(&layer.window.to_be_bytes());
+        prefix[18..20].copy_from_slice(&layer.urgent_pointer.to_be_bytes());
+        prefix[20..].copy_from_slice(&options);
+        let covered_payload = payload_without_padding("tcp", payload, context)?;
         let network = encode_network(context)?;
-        let checksum_expected = transport_checksum(network, 6, &segment)?;
+        let checksum_expected = transport_checksum_parts(network, 6, &[&prefix, covered_payload])?;
         let (checksum, materialized_checksum) = resolve_u16(
             "tcp",
             "checksum",
@@ -570,7 +569,6 @@ impl LayerCodec for TcpCodec {
             context.mode,
             &mut diagnostics,
         )?;
-        let mut prefix = segment[..header_len].to_vec();
         prefix[16..18].copy_from_slice(&checksum.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;

@@ -17,13 +17,26 @@ use crate::packet::{
 };
 
 use super::super::common::{
-    ValueExpectation, bytes, checksum, ensure_encode_budget, field_layout, impl_layer_boilerplate,
-    invalid, make_layer, out_of_range, payload_without_padding, protocol, resolve_u16,
-    set_wire_u16, transport_checksum, truncated, unknown_field, wire_u16, wrong_layer, wrong_type,
+    ValueExpectation, bytes, checksum, checksum_parts, ensure_encode_budget, field_layout,
+    impl_layer_boilerplate, invalid, make_layer, out_of_range, payload_without_padding, protocol,
+    resolve_u16, set_wire_u16, transport_checksum, transport_checksum_parts, truncated,
+    unknown_field, wire_u16, wrong_layer, wrong_type,
 };
 use super::super::network::encode_network;
 
 const ICMP_MIN_LEN: usize = 4;
+
+fn ensure_message_length(
+    name: &str,
+    contribution: usize,
+    payload_len: usize,
+) -> Result<(), CodecError> {
+    // Validate the full input before trailing padding is excluded from the checksum.
+    contribution
+        .checked_add(payload_len)
+        .ok_or_else(|| invalid(name, "message length overflow"))?;
+    Ok(())
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Icmpv4 {
@@ -189,14 +202,12 @@ impl LayerCodec for Icmpv4Codec {
             .checked_add(layer.body.len())
             .ok_or_else(|| invalid("icmpv4", "message length overflow"))?;
         ensure_encode_budget("icmpv4", contribution, context)?;
-        let capacity = contribution
-            .checked_add(payload.len())
-            .ok_or_else(|| invalid("icmpv4", "message length overflow"))?;
-        let mut message = Vec::with_capacity(capacity);
-        message.extend_from_slice(&[layer.icmp_type, layer.code, 0, 0]);
-        message.extend_from_slice(&layer.body);
-        message.extend_from_slice(payload_without_padding("icmpv4", payload, context)?);
-        let expected = checksum(&message);
+        ensure_message_length("icmpv4", contribution, payload.len())?;
+        let covered_payload = payload_without_padding("icmpv4", payload, context)?;
+        let mut prefix = Vec::with_capacity(contribution);
+        prefix.extend_from_slice(&[layer.icmp_type, layer.code, 0, 0]);
+        prefix.extend_from_slice(&layer.body);
+        let expected = checksum_parts(&[&prefix, covered_payload]);
         let mut diagnostics = Vec::new();
         let (checksum, materialized_checksum) = resolve_u16(
             "icmpv4",
@@ -206,7 +217,6 @@ impl LayerCodec for Icmpv4Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        let mut prefix = message[..ICMP_MIN_LEN + layer.body.len()].to_vec();
         prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;
@@ -286,14 +296,13 @@ impl LayerCodec for Icmpv6Codec {
             .checked_add(layer.body.len())
             .ok_or_else(|| invalid("icmpv6", "message length overflow"))?;
         ensure_encode_budget("icmpv6", contribution, context)?;
-        let capacity = contribution
-            .checked_add(payload.len())
-            .ok_or_else(|| invalid("icmpv6", "message length overflow"))?;
-        let mut message = Vec::with_capacity(capacity);
-        message.extend_from_slice(&[layer.icmp_type, layer.code, 0, 0]);
-        message.extend_from_slice(&layer.body);
-        message.extend_from_slice(payload_without_padding("icmpv6", payload, context)?);
-        let expected = transport_checksum(encode_network(context)?, 58, &message)?;
+        ensure_message_length("icmpv6", contribution, payload.len())?;
+        let covered_payload = payload_without_padding("icmpv6", payload, context)?;
+        let mut prefix = Vec::with_capacity(contribution);
+        prefix.extend_from_slice(&[layer.icmp_type, layer.code, 0, 0]);
+        prefix.extend_from_slice(&layer.body);
+        let expected =
+            transport_checksum_parts(encode_network(context)?, 58, &[&prefix, covered_payload])?;
         let mut diagnostics = Vec::new();
         let (checksum, materialized_checksum) = resolve_u16(
             "icmpv6",
@@ -303,7 +312,6 @@ impl LayerCodec for Icmpv6Codec {
             context.mode,
             &mut diagnostics,
         )?;
-        let mut prefix = message[..ICMP_MIN_LEN + layer.body.len()].to_vec();
         prefix[2..4].copy_from_slice(&checksum.to_be_bytes());
         let mut materialized = layer.clone();
         materialized.checksum = materialized_checksum;

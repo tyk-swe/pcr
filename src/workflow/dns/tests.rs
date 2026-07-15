@@ -13,6 +13,7 @@ use crate::client::target::{
 };
 use crate::error::Classified;
 use crate::protocol::builtin::registry as default_registry;
+use crate::protocol::icmp::{Icmpv4, Icmpv6};
 use crate::workflow::target::Authorized;
 use crate::workflow::target_adapter::PolicyAuthorizer;
 use std::result::Result;
@@ -825,6 +826,109 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
         ),
         Some(DnsResponseClassification::Response(_))
     ));
+    assert!(matches!(
+        classify_dns_response(
+            &registry,
+            &probe,
+            &sent,
+            &quoted_icmp_time_exceeded(&sent, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 254))),
+            DnsLimits::default(),
+        ),
+        Some(DnsResponseClassification::NetworkFailure { reason })
+            if reason == "ICMPv4 time exceeded before reaching the endpoint"
+    ));
+    let mut corrupt_icmp =
+        quoted_icmp_time_exceeded(&sent, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 254)));
+    corrupt_icmp
+        .diagnostics
+        .push(Diagnostic::error("icmpv4.checksum", "invalid checksum"));
+    assert!(
+        classify_dns_response(
+            &registry,
+            &probe,
+            &sent,
+            &corrupt_icmp,
+            DnsLimits::default(),
+        )
+        .is_none()
+    );
+
+    assert!(matches!(
+        classify_dns_response(
+            &registry,
+            &probe_v6,
+            &sent_v6,
+            &quoted_icmp_time_exceeded(&sent_v6, IpAddr::V6("fd00::fe".parse().unwrap())),
+            DnsLimits::default(),
+        ),
+        Some(DnsResponseClassification::NetworkFailure { reason })
+            if reason == "ICMPv6 time exceeded before reaching the endpoint"
+    ));
+}
+
+fn quoted_icmp_time_exceeded(request: &Packet, responder: IpAddr) -> DecodedPacket {
+    let udp = request.get::<Udp>().unwrap();
+    let (packet, bytes) = match responder {
+        IpAddr::V4(responder) => {
+            let network = request.get::<Ipv4>().unwrap();
+            let mut quote = vec![0_u8; 28];
+            quote[0] = 0x45;
+            quote[2..4].copy_from_slice(&28_u16.to_be_bytes());
+            quote[9] = 17;
+            quote[12..16].copy_from_slice(&network.source.octets());
+            quote[16..20].copy_from_slice(&network.destination.octets());
+            quote[20..22].copy_from_slice(&udp.source_port.to_be_bytes());
+            quote[22..24].copy_from_slice(&udp.destination_port.to_be_bytes());
+            let mut body = vec![0_u8; 4];
+            body.extend(quote);
+            let mut packet = Packet::new();
+            packet
+                .push(Ipv4 {
+                    source: responder,
+                    destination: network.source,
+                    ..Ipv4::default()
+                })
+                .push(Icmpv4 {
+                    icmp_type: 11,
+                    body: body.into(),
+                    ..Icmpv4::default()
+                });
+            (packet, Bytes::from_static(&[0x45]))
+        }
+        IpAddr::V6(responder) => {
+            let network = request.get::<Ipv6>().unwrap();
+            let mut quote = vec![0_u8; 48];
+            quote[0] = 0x60;
+            quote[4..6].copy_from_slice(&8_u16.to_be_bytes());
+            quote[6] = 17;
+            quote[8..24].copy_from_slice(&network.source.octets());
+            quote[24..40].copy_from_slice(&network.destination.octets());
+            quote[40..42].copy_from_slice(&udp.source_port.to_be_bytes());
+            quote[42..44].copy_from_slice(&udp.destination_port.to_be_bytes());
+            let mut body = vec![0_u8; 4];
+            body.extend(quote);
+            let mut packet = Packet::new();
+            packet
+                .push(Ipv6 {
+                    source: responder,
+                    destination: network.source,
+                    ..Ipv6::default()
+                })
+                .push(Icmpv6 {
+                    icmp_type: 3,
+                    body: body.into(),
+                    ..Icmpv6::default()
+                });
+            (packet, Bytes::from_static(&[0x60]))
+        }
+    };
+    DecodedPacket {
+        packet,
+        original: bytes.clone(),
+        frame: Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap(),
+        layout: crate::packet::layout::PacketLayout::default(),
+        diagnostics: Vec::new(),
+    }
 }
 
 struct LocalAuthorizer;

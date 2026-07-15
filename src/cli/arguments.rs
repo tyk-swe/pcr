@@ -78,7 +78,10 @@ pub(super) enum Command {
     Replay(ReplayArgs),
     /// Run a structured network scan.
     Scan(ScanArgs),
-    /// Run structured traceroute probes.
+    /// Run bounded, policy-gated traceroute probes.
+    #[command(
+        long_about = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options."
+    )]
     Traceroute(TracerouteArgs),
     /// Run a structured DNS operation.
     Dns(DnsArgs),
@@ -504,7 +507,7 @@ pub(super) struct TracerouteArgs {
     /// Select the first authorized address or only one IP family.
     #[arg(long, value_enum, default_value_t = CliAddressFamily::Any)]
     pub(super) family: CliAddressFamily,
-    /// UDP base destination port or fixed TCP destination port.
+    /// Non-zero UDP base port (incremented per probe) or fixed TCP destination port.
     #[arg(long)]
     pub(super) port: Option<u16>,
     /// First non-zero IPv4 TTL or IPv6 hop limit.
@@ -516,7 +519,7 @@ pub(super) struct TracerouteArgs {
     /// Number of attempts retained for every hop.
     #[arg(long, default_value_t = workflow::traceroute::DEFAULT_TRACEROUTE_PROBES_PER_HOP)]
     pub(super) attempts: u32,
-    /// Response window for each capture-ready hop batch.
+    /// Shared response window for every capture-ready hop batch.
     #[arg(long, default_value_t = 1_000)]
     pub(super) timeout_ms: u64,
     /// Optional average probe-rate ceiling; each hop remains one deliberate burst.

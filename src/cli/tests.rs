@@ -231,6 +231,43 @@ fn traceroute_request_validation_fails_before_route_or_live_io() {
 }
 
 #[test]
+fn traceroute_rejects_zero_udp_and_tcp_ports_before_live_io() {
+    for strategy in ["udp", "tcp"] {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "traceroute",
+            "192.168.56.10",
+            "--strategy",
+            strategy,
+            "--port",
+            "0",
+        ])
+        .unwrap();
+        let error = run(cli).unwrap_err();
+        assert_eq!(error.classification.code, "cli.traceroute_limit");
+        assert!(
+            error
+                .message
+                .contains("UDP and TCP traceroute require a non-zero destination port")
+        );
+    }
+}
+
+#[test]
+fn traceroute_rejects_unsupported_output_before_request_validation_or_live_io() {
+    let cli = Cli::try_parse_from([
+        "packetcraftr",
+        "--output",
+        "pcap",
+        "traceroute",
+        "not a valid target",
+    ])
+    .unwrap();
+    let error = run(cli).unwrap_err();
+    assert_eq!(error.classification.code, "cli.output_format");
+}
+
+#[test]
 fn whole_frame_hex_is_not_truncated() {
     let bytes = (0u8..=255).collect::<Vec<_>>();
     assert_eq!(output::frame::Wire::new(bytes).bytes_hex.len(), 512);

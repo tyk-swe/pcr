@@ -1370,7 +1370,7 @@ fn client_traceroute_executor_waits_for_capture_and_always_shuts_it_down() {
 }
 
 #[test]
-fn client_traceroute_executor_expands_unique_udp_tcp_and_icmp_probe_identities() {
+fn client_traceroute_executor_preserves_hop_identity_and_unique_transport_probes() {
     use crate::workflow::traceroute::{
         Batch as TracerouteBatch, Executor as TracerouteExecutor, Probe as TracerouteProbe,
         Strategy as TracerouteStrategy,
@@ -1394,10 +1394,10 @@ fn client_traceroute_executor_expands_unique_udp_tcp_and_icmp_probe_identities()
             private_scan_policy(),
         );
         let mut options = lifecycle_exchange_options();
-        options.max_template_packets = 2;
+        options.max_template_packets = 3;
         let mut executor = TracerouteClientExecutor::new(&client, options);
         let batch = TracerouteBatch {
-            probes: (0_u64..2)
+            probes: (0_u64..3)
                 .map(|sequence| TracerouteProbe {
                     sequence,
                     address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
@@ -1415,21 +1415,32 @@ fn client_traceroute_executor_expands_unique_udp_tcp_and_icmp_probe_identities()
         };
 
         let result = executor.execute(&batch).unwrap();
-        assert_eq!(result.sent.len(), 2);
-        assert_eq!(result.sent[0].get::<Ipv4>().unwrap().ttl, 4);
-        assert_eq!(result.sent[1].get::<Ipv4>().unwrap().ttl, 4);
+        assert_eq!(result.sent.len(), 3);
+        assert!(
+            result
+                .sent
+                .iter()
+                .all(|packet| packet.get::<Ipv4>().unwrap().ttl == 4)
+        );
+        assert!(
+            result
+                .sent
+                .windows(2)
+                .all(|packets| packets[0].get::<Ipv4>().unwrap().identification
+                    == packets[1].get::<Ipv4>().unwrap().identification)
+        );
         let field = match strategy {
             TracerouteStrategy::Udp => "destination_port",
             TracerouteStrategy::Tcp => "sequence",
             TracerouteStrategy::Icmp => "body",
         };
-        assert_ne!(
-            result.sent[0].iter().nth(1).unwrap().field(field),
-            result.sent[1].iter().nth(1).unwrap().field(field)
-        );
+        assert!(result.sent.windows(2).all(|packets| {
+            packets[0].iter().nth(1).unwrap().field(field)
+                != packets[1].iter().nth(1).unwrap().field(field)
+        }));
         assert_eq!(
             events.lock().unwrap().as_slice(),
-            ["arm", "ready", "send", "send", "shutdown"]
+            ["arm", "ready", "send", "send", "send", "shutdown"]
         );
     }
 }
@@ -1470,5 +1481,64 @@ fn client_traceroute_executor_rejects_unsupported_link_capability_before_capture
 
     let error = executor.execute(&batch).unwrap_err();
     assert_eq!(error.classification().kind, Kind::Capability);
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn client_traceroute_executor_rejects_invalid_strategy_ports_before_capture_or_send() {
+    use crate::workflow::traceroute::{
+        Batch as TracerouteBatch, Executor as TracerouteExecutor, Probe as TracerouteProbe,
+        Strategy as TracerouteStrategy,
+    };
+
+    let registry = Arc::new(default_registry().unwrap());
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        Arc::clone(&registry),
+        FixedRoute(lifecycle_route()),
+        NoNeighbors,
+        LifecycleIo {
+            events: Arc::clone(&events),
+            fail_send: false,
+        },
+        private_scan_policy(),
+    );
+    let mut executor = TracerouteClientExecutor::new(&client, lifecycle_exchange_options());
+    for (strategy, destination_port) in [
+        (TracerouteStrategy::Udp, None),
+        (TracerouteStrategy::Tcp, Some(0)),
+        (TracerouteStrategy::Icmp, Some(33_434)),
+    ] {
+        let batch = TracerouteBatch {
+            probes: vec![TracerouteProbe {
+                sequence: 0,
+                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                strategy,
+                destination_port,
+                hop_limit: 1,
+                attempt: 1,
+            }],
+            timeout: Duration::from_millis(1),
+        };
+        let error = executor.execute(&batch).unwrap_err();
+        assert_eq!(error.classification().code, "cli.traceroute_executor");
+    }
+    let mixed_tcp_ports = TracerouteBatch {
+        probes: [80, 443]
+            .into_iter()
+            .enumerate()
+            .map(|(index, destination_port)| TracerouteProbe {
+                sequence: index as u64,
+                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                strategy: TracerouteStrategy::Tcp,
+                destination_port: Some(destination_port),
+                hop_limit: 1,
+                attempt: index as u32 + 1,
+            })
+            .collect(),
+        timeout: Duration::from_millis(1),
+    };
+    let error = executor.execute(&mixed_tcp_ports).unwrap_err();
+    assert_eq!(error.classification().code, "cli.traceroute_executor");
     assert!(events.lock().unwrap().is_empty());
 }

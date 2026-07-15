@@ -29,13 +29,28 @@ where
                 "traceroute executor received an empty hop batch",
             ));
         };
+        if batch
+            .probes
+            .iter()
+            .any(|probe| !match (probe.strategy, probe.destination_port) {
+                (TracerouteStrategy::Udp | TracerouteStrategy::Tcp, Some(port)) => port != 0,
+                (TracerouteStrategy::Icmp, None) => true,
+                _ => false,
+            })
+        {
+            return Err(invalid_client_execution(
+                "traceroute probe strategy and destination port are inconsistent",
+            ));
+        }
         if batch.probes.iter().any(|probe| {
             probe.address != first.address
                 || probe.strategy != first.strategy
                 || probe.hop_limit != first.hop_limit
+                || (probe.strategy == TracerouteStrategy::Tcp
+                    && probe.destination_port != first.destination_port)
         }) {
             return Err(invalid_client_execution(
-                "traceroute batches must share address, strategy, and hop limit",
+                "traceroute batches must share address, strategy, hop limit, and TCP destination port",
             ));
         }
         if self.options.max_responses < batch.probes.len() {

@@ -163,6 +163,12 @@ impl TracerouteRequest {
                     message: "UDP and TCP traceroute require a destination port".to_owned(),
                 });
             }
+            (TracerouteStrategy::Udp | TracerouteStrategy::Tcp, Some(0)) => {
+                return Err(TracerouteError::InvalidPort {
+                    message: "UDP and TCP traceroute require a non-zero destination port"
+                        .to_owned(),
+                });
+            }
             (TracerouteStrategy::Icmp, Some(_)) => {
                 return Err(TracerouteError::InvalidPort {
                     message: "ICMP traceroute is portless".to_owned(),

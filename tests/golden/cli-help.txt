@@ -14,7 +14,7 @@ Commands:
   capture     Stream live captured frames
   replay      Replay a PCAP/PCAPNG stream
   scan        Run a structured network scan
-  traceroute  Run structured traceroute probes
+  traceroute  Run bounded, policy-gated traceroute probes
   dns         Run a structured DNS operation
   fuzz        Run bounded field-aware packet fuzzing
   routes      Enumerate passive interface-bound route decisions
@@ -361,66 +361,131 @@ Options:
           Print help
 
 ===== packetcraftr traceroute --help =====
-Run structured traceroute probes
+Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.
 
 Usage: packetcraftr traceroute [OPTIONS] <ADDRESS_OR_HOSTNAME>
 
 Arguments:
-  <ADDRESS_OR_HOSTNAME>  Explicit IP address or hostname to trace
+  <ADDRESS_OR_HOSTNAME>
+          Explicit IP address or hostname to trace
 
 Options:
       --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
       --strategy <STRATEGY>
-          UDP, ICMP echo, or TCP SYN probes [default: udp] [possible values: udp, icmp, tcp]
+          UDP, ICMP echo, or TCP SYN probes
+
+          [default: udp]
+          [possible values: udp, icmp, tcp]
+
       --family <FAMILY>
-          Select the first authorized address or only one IP family [default: any] [possible values: any, ipv4, ipv6]
+          Select the first authorized address or only one IP family
+
+          [default: any]
+          [possible values: any, ipv4, ipv6]
+
       --port <PORT>
-          UDP base destination port or fixed TCP destination port
+          Non-zero UDP base port (incremented per probe) or fixed TCP destination port
+
       --first-hop <FIRST_HOP>
-          First non-zero IPv4 TTL or IPv6 hop limit [default: 1]
+          First non-zero IPv4 TTL or IPv6 hop limit
+
+          [default: 1]
+
       --max-hops <MAX_HOPS>
-          Last IPv4 TTL or IPv6 hop limit attempted [default: 30]
+          Last IPv4 TTL or IPv6 hop limit attempted
+
+          [default: 30]
+
       --attempts <ATTEMPTS>
-          Number of attempts retained for every hop [default: 3]
+          Number of attempts retained for every hop
+
+          [default: 3]
+
       --timeout-ms <TIMEOUT_MS>
-          Response window for each capture-ready hop batch [default: 1000]
+          Shared response window for every capture-ready hop batch
+
+          [default: 1000]
+
       --rate <RATE>
           Optional average probe-rate ceiling; each hop remains one deliberate burst
+
       --max-probes <MAX_PROBES>
-          Maximum generated probes across all hops [default: 10000]
+          Maximum generated probes across all hops
+
+          [default: 10000]
+
       --max-duration-ms <MAX_DURATION_MS>
-          Maximum worst-case timeout plus intentional rate delay in milliseconds [default: 3600000]
+          Maximum worst-case timeout plus intentional rate delay in milliseconds
+
+          [default: 3600000]
+
       --max-undecoded <MAX_UNDECODED>
-          Maximum hop-scoped undecodable exact frames retained [default: 64]
+          Maximum hop-scoped undecodable exact frames retained
+
+          [default: 64]
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --max-queue-frames <MAX_QUEUE_FRAMES>
-          Aggregate backend capture-queue frame bound [default: 4096]
+          Aggregate backend capture-queue frame bound
+
+          [default: 4096]
+
       --max-captured-bytes <MAX_CAPTURED_BYTES>
-          Aggregate retained/queued capture byte bound [default: 268435456]
+          Aggregate retained/queued capture byte bound
+
+          [default: 268435456]
+
       --snap-length <SNAP_LENGTH>
-          Maximum bytes retained from any one captured frame [default: 16777216]
+          Maximum bytes retained from any one captured frame
+
+          [default: 16777216]
+
       --overflow-policy <OVERFLOW_POLICY>
-          Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+          Backend queue behavior when a configured bound is reached
+
+          [default: fail]
+          [possible values: fail, drop-newest, drop-oldest]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
 
 ===== packetcraftr dns --help =====
 Run a structured DNS operation

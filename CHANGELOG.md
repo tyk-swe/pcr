@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux x86-64, macOS x86-64 and Arm64, and Windows x86-64, plus SHA-256
   checksums for every release asset.
 
+### Changed
+
+- Clarified traceroute probe identity, timeout, rate, policy, and output-format
+  behavior in CLI help.
+
+### Fixed
+
+- Preserved per-hop network-layer identity across multi-attempt traceroutes,
+  matched quoted ICMP errors with monotonic capture timing, rejected zero
+  traceroute ports, and reused live client state across hops.
+
 ## [0.3.0] - 2026-07-14
 
 ### Changed

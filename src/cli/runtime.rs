@@ -189,7 +189,7 @@ pub(super) fn run(cli: Cli) -> Result<(), CliError> {
 type SystemPacketIo =
     net::transmit::Dispatch<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
 type SystemExchangeIo = Composite<SystemPacketIo, net::capture::SystemProvider>;
-type SystemClient =
+pub(super) type SystemClient =
     Client<net::route::SystemProvider, net::neighbor::SystemResolver, SystemExchangeIo>;
 
 pub(super) fn default_registry_arc() -> Result<Arc<packet::registry::Registry>, CliError> {

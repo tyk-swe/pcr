@@ -45,6 +45,7 @@ use crate::packet::{
 };
 use crate::protocol::{
     builtin::registry as default_registry,
+    icmp::Icmpv4,
     ipv6::SegmentRoutingHeader,
     link::{Ethernet, Vlan, Vlan8021ad},
     network::{Ipv4, Ipv6},
@@ -1454,6 +1455,82 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
             .iter()
             .any(|diagnostic| diagnostic.code == "capture.ingress_time_unavailable")
     );
+}
+
+#[test]
+fn quoted_icmp_error_uses_monotonic_ingress_latency() {
+    let registry = Arc::new(default_registry().unwrap());
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let destination = Ipv4Addr::new(10, 0, 0, 2);
+    let request = Builder::new(Arc::clone(&registry))
+        .build(
+            packet(source, destination, 12_345, 9),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    let mut quote = vec![0_u8; 4];
+    quote.extend_from_slice(&request.bytes[..28]);
+    let mut error = Packet::new();
+    error
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 254),
+            destination: source,
+            ..Ipv4::default()
+        })
+        .push(Icmpv4 {
+            icmp_type: 11,
+            body: Bytes::from(quote),
+            ..Icmpv4::default()
+        });
+    let error = Builder::new(Arc::clone(&registry))
+        .build(error, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    let prepared = vec![PreparedExchangePacket {
+        built: request,
+        route: MaterializedRoute {
+            plan: PlannedRoute {
+                route: route(LinkCapability::Layer3),
+                mode: LinkMode::Layer3,
+                lookup_destination: Some(IpAddr::V4(destination)),
+                final_destination: Some(IpAddr::V4(destination)),
+                visited_destinations: vec![IpAddr::V4(destination)],
+                packet_source: Some(IpAddr::V4(source)),
+                neighbor_source: Some(IpAddr::V4(source)),
+                neighbor_target: Some(IpAddr::V4(destination)),
+                destination_mac: None,
+                source_mac: None,
+                neighbor_vlan_tags: Vec::new(),
+                synthesized_ethernet: false,
+            },
+            neighbor_resolution: None,
+        },
+    }];
+    let sent_at = vec![Instant::now()];
+    let received_at = sent_at[0].checked_add(Duration::from_millis(1)).unwrap();
+    let deadline = sent_at[0].checked_add(Duration::from_millis(10)).unwrap();
+    let dissector = Dissector::new(Arc::clone(&registry));
+    let options = ExchangeOptions::default();
+    let mut accumulator = ExchangeAccumulator::new(1);
+
+    accumulator.process(
+        CapturedFrame::new(
+            Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, error.bytes).unwrap(),
+            received_at,
+        ),
+        ExchangeProcessContext {
+            registry: &registry,
+            dissector: &dissector,
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            options: &options,
+        },
+    );
+
+    assert_eq!(accumulator.responses.len(), 1);
+    assert_eq!(accumulator.responses[0].latency, Duration::from_millis(1));
+    assert!(accumulator.unsolicited.is_empty());
 }
 
 #[test]

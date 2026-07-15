@@ -843,6 +843,13 @@ pub fn classify_dns_response(
     response: &DecodedPacket,
     limits: DnsLimits,
 ) -> Option<DnsResponseClassification> {
+    if let Some(observation) = probe::observe(registry, ProbeTransport::Udp, sent, response)
+        && observation.correlation.is_network_failure()
+    {
+        return Some(DnsResponseClassification::NetworkFailure {
+            reason: observation.reason.to_owned(),
+        });
+    }
     if direct_udp_match(registry, sent, &response.packet) {
         if response.diagnostics.iter().any(|diagnostic| {
             diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
@@ -875,16 +882,16 @@ pub fn classify_dns_response(
         );
     }
 
-    probe::observe(registry, ProbeTransport::Udp, sent, response).and_then(|observation| {
-        observation.correlation.is_network_failure().then(|| {
-            DnsResponseClassification::NetworkFailure {
-                reason: observation.reason.to_owned(),
-            }
-        })
-    })
+    None
 }
 
 fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Packet) -> bool {
+    if !response
+        .iter()
+        .any(|layer| layer.protocol_id().as_str() == "udp")
+    {
+        return false;
+    }
     let Some(udp) = request
         .iter()
         .find(|layer| layer.protocol_id().as_str() == "udp")

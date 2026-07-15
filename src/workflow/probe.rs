@@ -3,7 +3,7 @@
 
 //! Private wire correlation shared by probe-based workflows.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 
 use crate::packet::{
     Packet, codec::NetworkEnvelope, decode::DecodedPacket, diagnostic::DiagnosticSeverity,
@@ -90,6 +90,10 @@ pub(super) fn observe(
         return None;
     }
     let responder = network_envelope(&response.packet)?.source;
+    if let Some(observation) = classify_icmp_error(transport, request, &response.packet, responder)
+    {
+        return Some(observation);
+    }
     let direct_match = request
         .iter()
         .filter_map(|layer| registry.matcher(&layer.protocol_id()))
@@ -145,7 +149,7 @@ pub(super) fn observe(
         return Some(observation);
     }
 
-    classify_icmp_error(transport, request, &response.packet, responder)
+    None
 }
 
 fn classify_icmp_error(
@@ -154,212 +158,50 @@ fn classify_icmp_error(
     response: &Packet,
     responder: IpAddr,
 ) -> Option<Observation> {
-    let request_source = network_envelope(request)?.source;
-    let response_destination = network_envelope(response)?.destination;
-    if request_source != response_destination {
-        return None;
-    }
-    let layer = response
-        .iter()
-        .find(|layer| matches!(layer.protocol_id().as_str(), "icmpv4" | "icmpv6"))?;
-    let icmp_type = u8::try_from(layer.field("type")?.as_u64()?).ok()?;
-    let code = u8::try_from(layer.field("code")?.as_u64()?).ok()?;
-    let FieldValue::Bytes(body) = layer.field("body")? else {
-        return None;
+    let expected_transport = match transport {
+        Transport::Tcp => crate::protocol::matcher::QuotedProbeTransport::Tcp,
+        Transport::Udp => crate::protocol::matcher::QuotedProbeTransport::Udp,
+        Transport::Icmp => crate::protocol::matcher::QuotedProbeTransport::Icmp,
     };
-    let quote = body.get(4..)?;
-    if !quoted_probe_matches(transport, request, quote) {
-        return None;
-    }
-    let observation = |correlation, reason| Some(Observation::new(responder, correlation, reason));
-    match layer.protocol_id().as_str() {
-        "icmpv4" if icmp_type == 3 => match code {
-            3 if transport == Transport::Udp => {
-                observation(Correlation::PortUnreachable, "ICMPv4 port unreachable")
-            }
-            9 | 10 | 13 => observation(
-                Correlation::AdministrativelyProhibited,
-                "ICMPv4 administratively prohibited",
-            ),
-            _ => observation(
-                Correlation::DestinationUnreachable,
-                "ICMPv4 destination unreachable",
-            ),
-        },
-        "icmpv4" if icmp_type == 11 => observation(
+    let kind =
+        crate::protocol::matcher::quoted_icmp_error_kind(request, response, expected_transport)?;
+    let ipv6 = response
+        .iter()
+        .find(|layer| matches!(layer.protocol_id().as_str(), "icmpv4" | "icmpv6"))
+        .is_some_and(|layer| layer.protocol_id().as_str() == "icmpv6");
+    let (correlation, reason) = match (kind, ipv6) {
+        (crate::protocol::matcher::QuotedIcmpError::PortUnreachable, false) => {
+            (Correlation::PortUnreachable, "ICMPv4 port unreachable")
+        }
+        (crate::protocol::matcher::QuotedIcmpError::PortUnreachable, true) => {
+            (Correlation::PortUnreachable, "ICMPv6 port unreachable")
+        }
+        (crate::protocol::matcher::QuotedIcmpError::AdministrativelyProhibited, false) => (
+            Correlation::AdministrativelyProhibited,
+            "ICMPv4 administratively prohibited",
+        ),
+        (crate::protocol::matcher::QuotedIcmpError::AdministrativelyProhibited, true) => (
+            Correlation::AdministrativelyProhibited,
+            "ICMPv6 policy or administrative rejection",
+        ),
+        (crate::protocol::matcher::QuotedIcmpError::DestinationUnreachable, false) => (
+            Correlation::DestinationUnreachable,
+            "ICMPv4 destination unreachable",
+        ),
+        (crate::protocol::matcher::QuotedIcmpError::DestinationUnreachable, true) => (
+            Correlation::DestinationUnreachable,
+            "ICMPv6 destination unreachable",
+        ),
+        (crate::protocol::matcher::QuotedIcmpError::TimeExceeded, false) => (
             Correlation::TimeExceeded,
             "ICMPv4 time exceeded before reaching the endpoint",
         ),
-        "icmpv6" if icmp_type == 1 => match code {
-            4 if transport == Transport::Udp => {
-                observation(Correlation::PortUnreachable, "ICMPv6 port unreachable")
-            }
-            1 | 5 | 6 => observation(
-                Correlation::AdministrativelyProhibited,
-                "ICMPv6 policy or administrative rejection",
-            ),
-            _ => observation(
-                Correlation::DestinationUnreachable,
-                "ICMPv6 destination unreachable",
-            ),
-        },
-        "icmpv6" if icmp_type == 3 => observation(
+        (crate::protocol::matcher::QuotedIcmpError::TimeExceeded, true) => (
             Correlation::TimeExceeded,
             "ICMPv6 time exceeded before reaching the endpoint",
         ),
-        _ => None,
-    }
-}
-
-fn quoted_probe_matches(transport: Transport, request: &Packet, quote: &[u8]) -> bool {
-    let Some(quoted) = parse_quoted_probe(quote) else {
-        return false;
     };
-    let Some(network) = network_envelope(request) else {
-        return false;
-    };
-    if quoted.source != network.source || quoted.destination != network.destination {
-        return false;
-    }
-    match transport {
-        Transport::Tcp | Transport::Udp => {
-            let (protocol_name, protocol_number) = if transport == Transport::Tcp {
-                ("tcp", 6)
-            } else {
-                ("udp", 17)
-            };
-            if quoted.protocol != protocol_number {
-                return false;
-            }
-            let Some(layer) = request
-                .iter()
-                .find(|layer| layer.protocol_id().as_str() == protocol_name)
-            else {
-                return false;
-            };
-            let Some(source_port) = layer
-                .field("source_port")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u16::try_from(value).ok())
-            else {
-                return false;
-            };
-            let Some(destination_port) = layer
-                .field("destination_port")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u16::try_from(value).ok())
-            else {
-                return false;
-            };
-            let source_port = source_port.to_be_bytes();
-            let destination_port = destination_port.to_be_bytes();
-            if quoted.payload.get(..4)
-                != Some(
-                    &[
-                        source_port[0],
-                        source_port[1],
-                        destination_port[0],
-                        destination_port[1],
-                    ][..],
-                )
-            {
-                return false;
-            }
-            if transport == Transport::Tcp {
-                let Some(sequence) = layer
-                    .field("sequence")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u32::try_from(value).ok())
-                else {
-                    return false;
-                };
-                quoted.payload.get(4..8) == Some(&sequence.to_be_bytes()[..])
-            } else {
-                true
-            }
-        }
-        Transport::Icmp => {
-            let (protocol, name) = if network.source.is_ipv4() {
-                (1, "icmpv4")
-            } else {
-                (58, "icmpv6")
-            };
-            if quoted.protocol != protocol {
-                return false;
-            }
-            let Some(layer) = request
-                .iter()
-                .find(|layer| layer.protocol_id().as_str() == name)
-            else {
-                return false;
-            };
-            let Some(icmp_type) = layer
-                .field("type")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u8::try_from(value).ok())
-            else {
-                return false;
-            };
-            let Some(code) = layer
-                .field("code")
-                .and_then(|value| value.as_u64())
-                .and_then(|value| u8::try_from(value).ok())
-            else {
-                return false;
-            };
-            let Some(FieldValue::Bytes(body)) = layer.field("body") else {
-                return false;
-            };
-            quoted.payload.len() >= 8
-                && quoted.payload[0] == icmp_type
-                && quoted.payload[1] == code
-                && body.len() >= 4
-                && quoted.payload[4..8] == body[..4]
-        }
-    }
-}
-
-struct QuotedProbe<'a> {
-    source: IpAddr,
-    destination: IpAddr,
-    protocol: u8,
-    payload: &'a [u8],
-}
-
-fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
-    match bytes.first()? >> 4 {
-        4 => {
-            if bytes.len() < 20 {
-                return None;
-            }
-            let header_len = usize::from(bytes[0] & 0x0f).checked_mul(4)?;
-            if header_len < 20 || bytes.len() < header_len + 8 {
-                return None;
-            }
-            let fragment_offset = u16::from_be_bytes([bytes[6], bytes[7]]) & 0x1fff;
-            if fragment_offset != 0 {
-                return None;
-            }
-            Some(QuotedProbe {
-                source: IpAddr::V4(Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15])),
-                destination: IpAddr::V4(Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19])),
-                protocol: bytes[9],
-                payload: &bytes[header_len..],
-            })
-        }
-        6 => {
-            if bytes.len() < 48 {
-                return None;
-            }
-            Some(QuotedProbe {
-                source: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[8..24]).ok()?)),
-                destination: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[24..40]).ok()?)),
-                protocol: bytes[6],
-                payload: &bytes[40..],
-            })
-        }
-        _ => None,
-    }
+    Some(Observation::new(responder, correlation, reason))
 }
 
 fn network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {

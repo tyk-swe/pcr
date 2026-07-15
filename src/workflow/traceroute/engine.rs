@@ -241,7 +241,9 @@ pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
             packet.push(Ipv4 {
                 destination,
                 ttl: probe.hop_limit,
-                identification: nonzero_ipv4_identification(probe.sequence),
+                identification: nonzero_ipv4_identification(u64::from(
+                    probe.hop_limit.saturating_sub(1),
+                )),
                 ..Ipv4::default()
             });
             match probe.strategy {
@@ -267,7 +269,7 @@ pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
             packet.push(Ipv6 {
                 destination,
                 hop_limit: probe.hop_limit,
-                flow_label: (probe.sequence as u32) & 0x000f_ffff,
+                flow_label: u32::from(probe.hop_limit),
                 ..Ipv6::default()
             });
             match probe.strategy {
@@ -418,7 +420,10 @@ pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Pack
                 == 1
                 && sent.get::<Ipv4>().is_some_and(|ipv4| {
                     ipv4.destination == destination
-                        && ipv4.identification == nonzero_ipv4_identification(probe.sequence)
+                        && ipv4.identification
+                            == nonzero_ipv4_identification(u64::from(
+                                probe.hop_limit.saturating_sub(1),
+                            ))
                         && ipv4.ttl == probe.hop_limit
                 })
         }
@@ -429,7 +434,7 @@ pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Pack
                 == 1
                 && sent.get::<Ipv6>().is_some_and(|ipv6| {
                     ipv6.destination == destination
-                        && ipv6.flow_label == (probe.sequence as u32) & 0x000f_ffff
+                        && ipv6.flow_label == u32::from(probe.hop_limit)
                         && ipv6.hop_limit == probe.hop_limit
                 })
         }

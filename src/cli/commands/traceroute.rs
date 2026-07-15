@@ -15,7 +15,7 @@ use super::super::rendering::{
     write_stdout_line,
 };
 use super::super::runtime::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
+    DeferredInterface, SystemClient, default_registry_arc, parse_workflow_target, system_client,
     workflow_exchange_options,
 };
 use super::capture::render_diagnostics_text;
@@ -104,8 +104,7 @@ pub(in crate::cli) fn run_traceroute(
     )?;
 
     let mut executor = CliTracerouteExecutor {
-        registry: Arc::clone(&registry),
-        policy: policy.clone(),
+        client: system_client(Arc::clone(&registry), policy.clone()),
         exchange,
         interface: DeferredInterface::new(interface),
     };
@@ -144,8 +143,7 @@ pub(in crate::cli) fn run_traceroute(
 }
 
 struct CliTracerouteExecutor {
-    registry: Arc<packet::registry::Registry>,
-    policy: client::policy::Policy,
+    client: SystemClient,
     exchange: client::exchange::Options,
     interface: DeferredInterface,
 }
@@ -158,8 +156,8 @@ impl workflow::traceroute::Executor for CliTracerouteExecutor {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
-        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        workflow::traceroute::ClientExecutor::new(&client, self.exchange.clone()).execute(batch)
+        workflow::traceroute::ClientExecutor::new(&self.client, self.exchange.clone())
+            .execute(batch)
     }
 }
 

@@ -917,7 +917,7 @@
         },
         "destination_port": {
           "type": "integer",
-          "minimum": 0,
+          "minimum": 1,
           "maximum": 65535
         },
         "hops": {
@@ -957,6 +957,29 @@
           ]
         }
       },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "icmp"
+              }
+            }
+          },
+          "then": {
+            "not": {
+              "required": [
+                "destination_port"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "destination_port"
+            ]
+          }
+        }
+      ],
       "additionalProperties": false
     },
     "dnsResult": {
@@ -1446,7 +1469,7 @@
             },
             "destination_port": {
               "type": "integer",
-              "minimum": 0,
+              "minimum": 1,
               "maximum": 65535
             },
             "completion": {
@@ -1459,6 +1482,29 @@
               ]
             }
           },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "strategy": {
+                    "const": "icmp"
+                  }
+                }
+              },
+              "then": {
+                "not": {
+                  "required": [
+                    "destination_port"
+                  ]
+                }
+              },
+              "else": {
+                "required": [
+                  "destination_port"
+                ]
+              }
+            }
+          ],
           "additionalProperties": false
         }
       ]
@@ -2507,7 +2553,7 @@
               },
               "destination_port": {
                 "type": "integer",
-                "minimum": 0,
+                "minimum": 1,
                 "maximum": 65535
               },
               "status": {
@@ -2545,6 +2591,29 @@
                 "minLength": 1
               }
             },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "strategy": {
+                      "const": "icmp"
+                    }
+                  }
+                },
+                "then": {
+                  "not": {
+                    "required": [
+                      "destination_port"
+                    ]
+                  }
+                },
+                "else": {
+                  "required": [
+                    "destination_port"
+                  ]
+                }
+              }
+            ],
             "additionalProperties": false
           }
         }

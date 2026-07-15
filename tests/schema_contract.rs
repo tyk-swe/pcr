@@ -122,4 +122,64 @@ fn schemas_reject_representative_contract_violations() {
             "accepted malformed output {malformed}"
         );
     }
+
+    let mut traceroute =
+        json_file(root().join("examples/documents/output-traceroute-success.json"));
+    traceroute["result"]["destination_port"] = json!(0);
+    assert!(
+        !output.is_valid(&traceroute),
+        "accepted traceroute result with port zero"
+    );
+    traceroute["result"]["destination_port"] = json!(33_434);
+    traceroute["result"]["hops"][0]["probes"][0]["destination_port"] = json!(0);
+    assert!(
+        !output.is_valid(&traceroute),
+        "accepted traceroute probe with port zero"
+    );
+
+    let mut traceroute_complete =
+        json_file(root().join("examples/documents/output-traceroute-complete.json"));
+    traceroute_complete["result"]["destination_port"] = json!(0);
+    assert!(
+        !output.is_valid(&traceroute_complete),
+        "accepted traceroute completion with port zero"
+    );
+
+    let mut missing_result_port =
+        json_file(root().join("examples/documents/output-traceroute-success.json"));
+    missing_result_port["result"]
+        .as_object_mut()
+        .unwrap()
+        .remove("destination_port");
+    assert!(
+        !output.is_valid(&missing_result_port),
+        "accepted UDP traceroute result without a destination port"
+    );
+
+    let mut icmp_result_port =
+        json_file(root().join("examples/documents/output-traceroute-success.json"));
+    icmp_result_port["result"]["strategy"] = json!("icmp");
+    assert!(
+        !output.is_valid(&icmp_result_port),
+        "accepted ICMP traceroute result with a destination port"
+    );
+
+    let mut missing_probe_port =
+        json_file(root().join("examples/documents/output-traceroute-success.json"));
+    missing_probe_port["result"]["hops"][0]["probes"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("destination_port");
+    assert!(
+        !output.is_valid(&missing_probe_port),
+        "accepted UDP traceroute probe without a destination port"
+    );
+
+    let mut icmp_complete_port =
+        json_file(root().join("examples/documents/output-traceroute-complete.json"));
+    icmp_complete_port["result"]["strategy"] = json!("icmp");
+    assert!(
+        !output.is_valid(&icmp_complete_port),
+        "accepted ICMP traceroute completion with a destination port"
+    );
 }

@@ -11,7 +11,7 @@ mod common;
 pub mod icmp;
 pub mod ipv6;
 pub mod link;
-mod matcher;
+pub(crate) mod matcher;
 pub mod network;
 mod raw;
 pub mod support;

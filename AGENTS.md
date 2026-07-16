@@ -23,7 +23,7 @@ Use rustfmt defaults and four-space indentation. Name modules, functions, and te
 
 Tests use Rust's built-in `#[test]` harness and descriptive behavior names, such as `classic_pcap_rejects_zero_snapshot_length`. Add focused regression tests. Update fixtures, goldens, examples, and schemas together when serialized or CLI contracts change. CI enforces 75% line coverage with `cargo llvm-cov --locked --all-features --workspace --fail-under-lines 75` and smoke-tests every fuzz target.
 
-## Commits, Changelog & Pull Requests
+## Commits, Changelog & Pull Requests - IMPORTANT
 
 Use Conventional Commits: `<type>(<scope>): <description>`, for example `fix(session): handle reassembly timeout`. Common types are `feat`, `fix`, `docs`, `refactor`, `test`, `chore`, `ci`, and `build`. Mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Keep commits focused.
 

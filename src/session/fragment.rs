@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
+use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -89,7 +90,7 @@ pub enum Error {
     BeyondFinalLength { final_length: u32 },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct DatagramState {
     segments: BTreeMap<u32, Bytes>,
     final_length: Option<u32>,
@@ -136,77 +137,98 @@ impl Reassembler {
     }
 
     pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Option<Event>, Error> {
-        if fragment.bytes.is_empty() {
+        let Fragment {
+            key,
+            offset,
+            more_fragments,
+            bytes,
+        } = fragment;
+
+        if bytes.is_empty() {
             return Err(Error::EmptyFragment);
         }
-        let end = fragment
-            .offset
-            .checked_add(u32::try_from(fragment.bytes.len()).map_err(|_| Error::OffsetOverflow)?)
+        let end = offset
+            .checked_add(u32::try_from(bytes.len()).map_err(|_| Error::OffsetOverflow)?)
             .ok_or(Error::OffsetOverflow)?;
         if end as usize > self.limits.max_bytes_per_flow {
             return Err(Error::FlowByteLimit {
                 limit: self.limits.max_bytes_per_flow,
             });
         }
-        if !self.flows.contains_key(&fragment.key) && self.flows.len() >= self.limits.max_flows {
+        let has_existing_flow = self.flows.contains_key(&key);
+        if !has_existing_flow && self.flows.len() >= self.limits.max_flows {
             return Err(Error::FlowLimit {
                 limit: self.limits.max_flows,
             });
         }
 
-        let existing_state = self.flows.get(&fragment.key);
-        let old_memory_charge = existing_state.and_then(datagram_memory_charge).unwrap_or(0);
-        let mut candidate = existing_state.cloned().unwrap_or_else(|| DatagramState {
-            segments: BTreeMap::new(),
-            final_length: None,
-            fragment_count: 0,
-            stored_bytes: 0,
-            last_update: now,
-            had_conflicting_overlap: false,
-        });
-        if candidate.fragment_count >= self.limits.max_fragments_per_datagram {
-            return Err(Error::FragmentLimit {
-                limit: self.limits.max_fragments_per_datagram,
-            });
-        }
-        if let Some(final_length) = candidate.final_length
-            && end > final_length
-        {
-            return Err(Error::BeyondFinalLength { final_length });
-        }
-        if !fragment.more_fragments {
-            match candidate.final_length {
-                Some(existing_length) if existing_length != end => {
-                    return Err(Error::ConflictingFinalLength {
-                        existing_length,
-                        new_length: end,
-                    });
-                }
-                _ => {
-                    let prior_fragment_extends_past_end =
-                        candidate.segments.iter().any(|(offset, bytes)| {
-                            u64::from(*offset) + bytes.len() as u64 > u64::from(end)
+        let (
+            old_memory_charge,
+            previous_stored_bytes,
+            previous_fragment_count,
+            final_length,
+            merge,
+        ) = {
+            let existing_state = self.flows.get(&key);
+            let old_memory_charge = existing_state.and_then(datagram_memory_charge).unwrap_or(0);
+            let previous_stored_bytes = existing_state.map_or(0, |state| state.stored_bytes);
+            let previous_fragment_count = existing_state.map_or(0, |state| state.fragment_count);
+            let existing_final_length = existing_state.and_then(|state| state.final_length);
+
+            if previous_fragment_count >= self.limits.max_fragments_per_datagram {
+                return Err(Error::FragmentLimit {
+                    limit: self.limits.max_fragments_per_datagram,
+                });
+            }
+            if let Some(final_length) = existing_final_length
+                && end > final_length
+            {
+                return Err(Error::BeyondFinalLength { final_length });
+            }
+            if !more_fragments {
+                match existing_final_length {
+                    Some(existing_length) if existing_length != end => {
+                        return Err(Error::ConflictingFinalLength {
+                            existing_length,
+                            new_length: end,
                         });
-                    if prior_fragment_extends_past_end {
-                        return Err(Error::BeyondFinalLength { final_length: end });
                     }
-                    candidate.final_length = Some(end);
+                    _ => {
+                        let prior_fragment_extends_past_end = existing_state.is_some_and(|state| {
+                            state
+                                .segments
+                                .last_key_value()
+                                .is_some_and(|(offset, bytes)| {
+                                    u64::from(*offset) + bytes.len() as u64 > u64::from(end)
+                                })
+                        });
+                        if prior_fragment_extends_past_end {
+                            return Err(Error::BeyondFinalLength { final_length: end });
+                        }
+                    }
                 }
             }
-        }
 
-        let merge = plan_fragment_merge(
-            &candidate.segments,
-            fragment.offset,
-            &fragment.bytes,
-            self.overlap_policy,
-        )?;
-        let stored_bytes = candidate
-            .stored_bytes
-            .checked_add(merge.added_bytes)
-            .ok_or(Error::AggregateByteLimit {
+            let merge = match existing_state {
+                Some(state) => {
+                    plan_fragment_merge(&state.segments, offset, &bytes, self.overlap_policy)?
+                }
+                None => FragmentMergePlan::disjoint(bytes.len(), offset, end, 1),
+            };
+            (
+                old_memory_charge,
+                previous_stored_bytes,
+                previous_fragment_count,
+                (!more_fragments).then_some(end).or(existing_final_length),
+                merge,
+            )
+        };
+
+        let stored_bytes = previous_stored_bytes.checked_add(merge.added_bytes).ok_or(
+            Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
-            })?;
+            },
+        )?;
         let aggregate = self.aggregate_bytes.checked_add(merge.added_bytes).ok_or(
             Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
@@ -233,45 +255,83 @@ impl Reassembler {
                 limit: self.limits.max_aggregate_bytes,
             });
         }
-        let segments = merge_fragment(
-            &candidate.segments,
-            fragment.offset,
-            &fragment.bytes,
-            &merge,
-        )
-        .ok_or(Error::FlowByteLimit {
-            limit: self.limits.max_bytes_per_flow,
-        })?;
-        self.aggregate_bytes = aggregate;
-        self.aggregate_memory_charge = aggregate_memory_charge;
-        candidate.segments = segments;
-        candidate.stored_bytes = stored_bytes;
-        candidate.fragment_count += 1;
-        candidate.last_update = now;
-        candidate.had_conflicting_overlap |= merge.has_conflicting_overlap;
+        let fragment_count = previous_fragment_count + 1;
 
-        let complete = candidate
-            .final_length
-            .filter(|length| is_complete(&candidate.segments, *length));
-        if let Some(length) = complete {
-            self.flows.remove(&fragment.key);
-            self.aggregate_bytes = self.aggregate_bytes.saturating_sub(candidate.stored_bytes);
-            self.aggregate_memory_charge = self
-                .aggregate_memory_charge
-                .saturating_sub(new_memory_charge);
-            let mut bytes = Vec::with_capacity(length as usize);
-            for segment in candidate.segments.values() {
-                bytes.extend_from_slice(segment);
-            }
-            bytes.truncate(length as usize);
+        if !has_existing_flow && !more_fragments && offset == 0 {
             return Ok(Some(Event::Complete(Datagram {
-                key: fragment.key,
-                bytes: Bytes::from(bytes),
-                fragment_count: candidate.fragment_count,
-                had_conflicting_overlap: candidate.had_conflicting_overlap,
+                key,
+                bytes,
+                fragment_count,
+                had_conflicting_overlap: false,
             })));
         }
-        self.flows.insert(fragment.key, candidate);
+
+        if has_existing_flow {
+            let complete = {
+                let state = self
+                    .flows
+                    .get_mut(&key)
+                    .expect("validated fragment flow remains present");
+                commit_fragment(&mut state.segments, offset, bytes, merge);
+                state.final_length = final_length;
+                state.stored_bytes = stored_bytes;
+                state.fragment_count = fragment_count;
+                state.last_update = now;
+                state.had_conflicting_overlap |= merge.has_conflicting_overlap;
+                state
+                    .final_length
+                    .filter(|length| is_complete(&state.segments, *length))
+            };
+
+            self.aggregate_bytes = aggregate;
+            self.aggregate_memory_charge = aggregate_memory_charge;
+            if let Some(length) = complete {
+                let state = self
+                    .flows
+                    .remove(&key)
+                    .expect("completed fragment flow remains present");
+                self.aggregate_bytes = self.aggregate_bytes.saturating_sub(state.stored_bytes);
+                self.aggregate_memory_charge = self
+                    .aggregate_memory_charge
+                    .saturating_sub(new_memory_charge);
+                let datagram_bytes = if state.segments.len() == 1 {
+                    let (_, bytes) = state
+                        .segments
+                        .into_iter()
+                        .next()
+                        .expect("complete datagram retains its coalesced segment");
+                    debug_assert_eq!(bytes.len(), length as usize);
+                    bytes
+                } else {
+                    let mut bytes = Vec::with_capacity(length as usize);
+                    for segment in state.segments.values() {
+                        bytes.extend_from_slice(segment);
+                    }
+                    bytes.truncate(length as usize);
+                    Bytes::from(bytes)
+                };
+                return Ok(Some(Event::Complete(Datagram {
+                    key,
+                    bytes: datagram_bytes,
+                    fragment_count: state.fragment_count,
+                    had_conflicting_overlap: state.had_conflicting_overlap,
+                })));
+            }
+            return Ok(None);
+        }
+
+        let mut state = DatagramState {
+            segments: BTreeMap::new(),
+            final_length,
+            fragment_count,
+            stored_bytes,
+            last_update: now,
+            had_conflicting_overlap: merge.has_conflicting_overlap,
+        };
+        commit_fragment(&mut state.segments, offset, bytes, merge);
+        self.flows.insert(key, state);
+        self.aggregate_bytes = aggregate;
+        self.aggregate_memory_charge = aggregate_memory_charge;
         Ok(None)
     }
 
@@ -352,6 +412,24 @@ struct FragmentMergePlan {
     added_bytes: usize,
     has_conflicting_overlap: bool,
     segment_count: usize,
+    first_affected: Option<u32>,
+    affected_segment_count: usize,
+    union_start: u32,
+    union_end: u32,
+}
+
+impl FragmentMergePlan {
+    fn disjoint(added_bytes: usize, offset: u32, end: u32, segment_count: usize) -> Self {
+        Self {
+            added_bytes,
+            has_conflicting_overlap: false,
+            segment_count,
+            first_affected: None,
+            affected_segment_count: 0,
+            union_start: offset,
+            union_end: end,
+        }
+    }
 }
 
 fn plan_fragment_merge(
@@ -364,102 +442,119 @@ fn plan_fragment_merge(
     let new_end = offset
         .checked_add(u32::try_from(fragment.len()).map_err(|_| Error::OffsetOverflow)?)
         .ok_or(Error::OffsetOverflow)?;
+    let segment_count = existing.len().checked_add(1).ok_or(Error::OffsetOverflow)?;
+    let mut plan = FragmentMergePlan::disjoint(fragment.len(), offset, new_end, segment_count);
     let mut overlapping_bytes = 0usize;
-    let mut connected_segment_count = 0usize;
-    let mut has_conflicting_overlap = false;
-    for (start, existing_bytes) in existing {
-        let end = start
-            .checked_add(u32::try_from(existing_bytes.len()).map_err(|_| Error::OffsetOverflow)?)
-            .ok_or(Error::OffsetOverflow)?;
-        if end >= offset && *start <= new_end {
-            connected_segment_count += 1;
-        }
-        let overlap_start = (*start).max(offset);
-        let overlap_end = end.min(new_end);
-        if overlap_start < overlap_end {
-            let length = (overlap_end - overlap_start) as usize;
-            let existing_start = (overlap_start - *start) as usize;
-            let fragment_start = (overlap_start - offset) as usize;
-            overlapping_bytes = overlapping_bytes
-                .checked_add(length)
+    {
+        let mut consider = |start: u32, existing_bytes: &[u8]| -> Result<(), Error> {
+            let end = start
+                .checked_add(
+                    u32::try_from(existing_bytes.len()).map_err(|_| Error::OffsetOverflow)?,
+                )
                 .ok_or(Error::OffsetOverflow)?;
-            if existing_bytes[existing_start..existing_start + length]
-                != fragment[fragment_start..fragment_start + length]
-            {
-                has_conflicting_overlap = true;
-                if policy == OverlapPolicy::RejectConflicting {
-                    let mismatch = existing_bytes[existing_start..existing_start + length]
-                        .iter()
-                        .zip(&fragment[fragment_start..fragment_start + length])
-                        .position(|(left, right)| left != right)
-                        .unwrap_or(0);
-                    return Err(Error::ConflictingOverlap {
-                        offset: overlap_start + mismatch as u32,
-                    });
+            if end < offset || start > new_end {
+                return Ok(());
+            }
+
+            if plan.first_affected.is_none() {
+                plan.first_affected = Some(start);
+            }
+            plan.affected_segment_count = plan
+                .affected_segment_count
+                .checked_add(1)
+                .ok_or(Error::OffsetOverflow)?;
+            plan.union_start = plan.union_start.min(start);
+            plan.union_end = plan.union_end.max(end);
+
+            let overlap_start = start.max(offset);
+            let overlap_end = end.min(new_end);
+            if overlap_start < overlap_end {
+                let length = (overlap_end - overlap_start) as usize;
+                let existing_start = (overlap_start - start) as usize;
+                let fragment_start = (overlap_start - offset) as usize;
+                overlapping_bytes = overlapping_bytes
+                    .checked_add(length)
+                    .ok_or(Error::OffsetOverflow)?;
+                let existing_overlap = &existing_bytes[existing_start..existing_start + length];
+                let fragment_overlap = &fragment[fragment_start..fragment_start + length];
+                if existing_overlap != fragment_overlap {
+                    plan.has_conflicting_overlap = true;
+                    if policy == OverlapPolicy::RejectConflicting {
+                        let mismatch = existing_overlap
+                            .iter()
+                            .zip(fragment_overlap)
+                            .position(|(left, right)| left != right)
+                            .unwrap_or(0);
+                        return Err(Error::ConflictingOverlap {
+                            offset: overlap_start + mismatch as u32,
+                        });
+                    }
                 }
             }
+            Ok(())
+        };
+
+        // Coalesced ranges have gaps between them, so only the predecessor can reach `offset`.
+        if let Some((start, existing_bytes)) = existing.range(..=offset).next_back() {
+            consider(*start, existing_bytes)?;
+        }
+        for (start, existing_bytes) in existing.range((Excluded(offset), Included(new_end))) {
+            consider(*start, existing_bytes)?;
         }
     }
-    Ok(FragmentMergePlan {
-        added_bytes: fragment
-            .len()
-            .checked_sub(overlapping_bytes)
-            .ok_or(Error::OffsetOverflow)?,
-        has_conflicting_overlap,
-        segment_count: existing
-            .len()
-            .checked_add(1)
-            .and_then(|count| count.checked_sub(connected_segment_count))
-            .ok_or(Error::OffsetOverflow)?,
-    })
+    plan.added_bytes = plan
+        .added_bytes
+        .checked_sub(overlapping_bytes)
+        .ok_or(Error::OffsetOverflow)?;
+    plan.segment_count = plan
+        .segment_count
+        .checked_sub(plan.affected_segment_count)
+        .ok_or(Error::OffsetOverflow)?;
+    Ok(plan)
 }
 
-fn merge_fragment(
-    existing: &BTreeMap<u32, Bytes>,
+fn commit_fragment(
+    segments: &mut BTreeMap<u32, Bytes>,
     offset: u32,
-    fragment: &[u8],
-    plan: &FragmentMergePlan,
-) -> Option<BTreeMap<u32, Bytes>> {
-    let new_end = offset.checked_add(u32::try_from(fragment.len()).ok()?)?;
-    let affected = existing
-        .iter()
-        .filter_map(|(start, bytes)| {
-            let end = start.checked_add(u32::try_from(bytes.len()).ok()?)?;
-            (end >= offset && *start <= new_end).then_some((*start, end, bytes.clone()))
-        })
-        .collect::<Vec<_>>();
-    let mut segments = existing.clone();
-    if affected.is_empty() {
-        segments.insert(offset, Bytes::copy_from_slice(fragment));
+    fragment: Bytes,
+    plan: FragmentMergePlan,
+) {
+    let Some(mut current) = plan.first_affected else {
+        // A short Bytes slice can retain an arbitrarily large caller-owned
+        // allocation. Retained fragment accounting is by logical byte count,
+        // so normalize disjoint input to a right-sized backing buffer too.
+        let replaced = segments.insert(offset, Bytes::copy_from_slice(&fragment));
+        debug_assert!(replaced.is_none());
         debug_assert_eq!(segments.len(), plan.segment_count);
-        return Some(segments);
+        return;
+    };
+    if plan.added_bytes == 0 {
+        debug_assert_eq!(plan.affected_segment_count, 1);
+        debug_assert_eq!(segments.len(), plan.segment_count);
+        return;
     }
 
-    let union_start = affected
-        .iter()
-        .map(|(start, _, _)| *start)
-        .min()
-        .unwrap_or(offset)
-        .min(offset);
-    let union_end = affected
-        .iter()
-        .map(|(_, end, _)| *end)
-        .max()
-        .unwrap_or(new_end)
-        .max(new_end);
-    let mut bytes = vec![0u8; (union_end - union_start) as usize];
-    let fragment_start = (offset - union_start) as usize;
-    bytes[fragment_start..fragment_start + fragment.len()].copy_from_slice(fragment);
-    for (start, _, value) in &affected {
-        let relative = (*start - union_start) as usize;
+    let mut bytes = vec![0u8; (plan.union_end - plan.union_start) as usize];
+    let fragment_start = (offset - plan.union_start) as usize;
+    bytes[fragment_start..fragment_start + fragment.len()].copy_from_slice(&fragment);
+    for index in 0..plan.affected_segment_count {
+        let value = segments
+            .remove(&current)
+            .expect("merge plan contains each affected segment");
+        let relative = (current - plan.union_start) as usize;
         // Existing bytes win under KeepFirst; RejectConflicting reached here
         // only when the overlapping bytes were equal.
-        bytes[relative..relative + value.len()].copy_from_slice(value);
-        segments.remove(start);
+        bytes[relative..relative + value.len()].copy_from_slice(&value);
+        if index + 1 < plan.affected_segment_count {
+            current = *segments
+                .range((Excluded(current), Unbounded))
+                .next()
+                .map(|(start, _)| start)
+                .expect("merge plan affected segments remain contiguous");
+        }
     }
-    segments.insert(union_start, Bytes::from(bytes));
+    segments.insert(plan.union_start, Bytes::from(bytes));
     debug_assert_eq!(segments.len(), plan.segment_count);
-    Some(segments)
 }
 
 fn is_complete(segments: &BTreeMap<u32, Bytes>, final_length: u32) -> bool {
@@ -532,7 +627,145 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_overlap_rejects_by_default() {
+    fn adjacent_fragments_coalesce() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 0,
+                    more_fragments: true,
+                    bytes: Bytes::from_static(b"ab"),
+                },
+                now,
+            )
+            .unwrap();
+        reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 2,
+                    more_fragments: true,
+                    bytes: Bytes::from_static(b"cd"),
+                },
+                now,
+            )
+            .unwrap();
+
+        let state = reassembler.flows.get(&key()).unwrap();
+        assert_eq!(state.segments.len(), 1);
+        assert_eq!(&state.segments[&0][..], b"abcd");
+        assert_eq!(state.fragment_count, 2);
+    }
+
+    #[test]
+    fn bridging_fragments_coalesce_both_neighbors() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        for (offset, bytes) in [
+            (0, b"ab".as_slice()),
+            (4, b"ef".as_slice()),
+            (2, b"cd".as_slice()),
+        ] {
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset,
+                        more_fragments: true,
+                        bytes: Bytes::copy_from_slice(bytes),
+                    },
+                    now,
+                )
+                .unwrap();
+        }
+
+        let state = reassembler.flows.get(&key()).unwrap();
+        assert_eq!(state.segments.len(), 1);
+        assert_eq!(&state.segments[&0][..], b"abcdef");
+        assert_eq!(state.fragment_count, 3);
+        assert_eq!(
+            reassembler.aggregate_memory_charge(),
+            DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE + 6
+        );
+    }
+
+    #[test]
+    fn keep_first_preserves_existing_overlapping_bytes() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
+        reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 0,
+                    more_fragments: true,
+                    bytes: Bytes::from_static(b"abc"),
+                },
+                now,
+            )
+            .unwrap();
+        let event = reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 1,
+                    more_fragments: false,
+                    bytes: Bytes::from_static(b"XYZ"),
+                },
+                now,
+            )
+            .unwrap()
+            .unwrap();
+
+        assert!(matches!(
+            event,
+            Event::Complete(Datagram {
+                bytes,
+                fragment_count: 2,
+                had_conflicting_overlap: true,
+                ..
+            }) if bytes == Bytes::from_static(b"abcZ")
+        ));
+    }
+
+    #[test]
+    fn fully_covered_keep_first_fragment_keeps_the_retained_segment() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
+        reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 10,
+                    more_fragments: true,
+                    bytes: Bytes::from_static(b"abc"),
+                },
+                now,
+            )
+            .unwrap();
+        let pointer = reassembler.flows[&key()].segments[&10].as_ptr();
+
+        reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 10,
+                    more_fragments: true,
+                    bytes: Bytes::from_static(b"abc"),
+                },
+                now,
+            )
+            .unwrap();
+
+        let state = &reassembler.flows[&key()];
+        assert_eq!(state.segments.len(), 1);
+        assert_eq!(state.segments[&10].as_ptr(), pointer);
+    }
+
+    #[test]
+    fn conflicting_overlap_rejection_preserves_state() {
         let now = Instant::now();
         let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
         reassembler
@@ -546,6 +779,11 @@ mod tests {
                 now,
             )
             .unwrap();
+        let before = (
+            reassembler.flow_count(),
+            reassembler.aggregate_bytes(),
+            reassembler.aggregate_memory_charge(),
+        );
         let error = reassembler
             .push(
                 Fragment {
@@ -558,6 +796,18 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(error, Error::ConflictingOverlap { offset: 2 }));
+        assert_eq!(
+            before,
+            (
+                reassembler.flow_count(),
+                reassembler.aggregate_bytes(),
+                reassembler.aggregate_memory_charge(),
+            )
+        );
+        let state = reassembler.flows.get(&key()).unwrap();
+        assert_eq!(state.final_length, None);
+        assert_eq!(state.fragment_count, 1);
+        assert_eq!(&state.segments[&0][..], b"abcd");
     }
 
     #[test]
@@ -683,6 +933,31 @@ mod tests {
             Error::EmptyFragment
         );
         assert_eq!(reassembler.flow_count(), 0);
+    }
+
+    #[test]
+    fn disjoint_fragments_do_not_retain_a_large_input_slice() {
+        let now = Instant::now();
+        let backing = Bytes::from(vec![7_u8; 4_096]);
+        let slice = backing.slice(2_048..2_049);
+        let slice_pointer = slice.as_ptr();
+        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+
+        reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 10,
+                    more_fragments: true,
+                    bytes: slice,
+                },
+                now,
+            )
+            .unwrap();
+
+        let stored = &reassembler.flows[&key()].segments[&10];
+        assert_eq!(stored.as_ref(), b"\x07");
+        assert_ne!(stored.as_ptr(), slice_pointer);
     }
 
     #[test]

@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Reduced packet build and decode allocations by composing checksums across
   byte slices and preserving decoder fallback bytes without copying them.
+- Reused passive route decisions within one exchange, stopped preparation from
+  starting additional work after its deadline, and localized TCP and fragment
+  reassembly updates to the affected pending ranges.
+- Made packet assembly grow amortized-contiguously and patched resolved MAC
+  addresses directly into built-in Ethernet frames while retaining full rebuilds
+  for external codecs.
 - Clarified traceroute probe identity, timeout, rate, policy, and output-format
   behavior in CLI help.
 

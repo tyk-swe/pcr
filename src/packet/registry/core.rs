@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::Arc;
 
@@ -57,6 +57,7 @@ struct ReverseBinding {
 #[derive(Clone, Default)]
 pub struct ProtocolRegistry {
     codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
+    builtin_codecs: BTreeSet<ProtocolId>,
     aliases: HashMap<String, ProtocolId>,
     roots: HashMap<u32, ProtocolId>,
     bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
@@ -88,6 +89,10 @@ impl ProtocolRegistry {
         let normalized = name.trim().to_ascii_lowercase();
         let protocol = self.aliases.get(&normalized)?;
         self.codecs.get(protocol)
+    }
+
+    pub(crate) fn is_builtin_codec(&self, protocol: &ProtocolId) -> bool {
+        self.builtin_codecs.contains(protocol)
     }
 
     pub fn protocol_named(&self, name: &str) -> Option<&ProtocolId> {
@@ -144,6 +149,7 @@ impl ProtocolRegistry {
 #[derive(Default)]
 pub struct RegistryBuilder {
     codecs: BTreeMap<ProtocolId, Arc<dyn LayerCodec>>,
+    builtin_codecs: BTreeSet<ProtocolId>,
     aliases: HashMap<String, ProtocolId>,
     roots: HashMap<u32, ProtocolId>,
     bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
@@ -159,12 +165,27 @@ impl RegistryBuilder {
     where
         C: LayerCodec + 'static,
     {
-        self.register_codec_arc(Arc::new(codec))
+        self.register_codec_with_origin(Arc::new(codec), false)
     }
 
     pub fn register_codec_arc(
         &mut self,
         codec: Arc<dyn LayerCodec>,
+    ) -> Result<&mut Self, RegistryError> {
+        self.register_codec_with_origin(codec, false)
+    }
+
+    pub(crate) fn register_builtin_codec<C>(&mut self, codec: C) -> Result<&mut Self, RegistryError>
+    where
+        C: LayerCodec + 'static,
+    {
+        self.register_codec_with_origin(Arc::new(codec), true)
+    }
+
+    fn register_codec_with_origin(
+        &mut self,
+        codec: Arc<dyn LayerCodec>,
+        builtin: bool,
     ) -> Result<&mut Self, RegistryError> {
         let protocol = codec.protocol_id();
         if self.codecs.contains_key(&protocol) {
@@ -187,6 +208,9 @@ impl RegistryBuilder {
         }
         for alias in aliases {
             self.aliases.insert(alias, protocol.clone());
+        }
+        if builtin {
+            self.builtin_codecs.insert(protocol.clone());
         }
         self.codecs.insert(protocol, codec);
         Ok(self)
@@ -311,6 +335,7 @@ impl RegistryBuilder {
         }
         Ok(ProtocolRegistry {
             codecs: self.codecs,
+            builtin_codecs: self.builtin_codecs,
             aliases: self.aliases,
             roots: self.roots,
             bindings: self.bindings,

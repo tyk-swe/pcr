@@ -114,6 +114,146 @@ impl BuiltPacket {
     }
 }
 
+/// A contiguous payload accumulator for the reverse encoder walk.
+///
+/// Codecs still receive one contiguous child slice, but outer headers grow
+/// into front slack instead of rebuilding that child slice for every layer.
+#[derive(Debug, Default)]
+struct PacketBuffer {
+    storage: Vec<u8>,
+    start: usize,
+    end: usize,
+}
+
+impl PacketBuffer {
+    const MINIMUM_CAPACITY: usize = 64;
+
+    fn len(&self) -> usize {
+        self.end.saturating_sub(self.start)
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.storage[self.start..self.end]
+    }
+
+    fn wrap(&mut self, prefix: &[u8], suffix: &[u8], maximum: usize) -> Result<(), BuildError> {
+        let total = prefix
+            .len()
+            .checked_add(self.len())
+            .and_then(|value| value.checked_add(suffix.len()))
+            .ok_or(BuildError::LengthOverflow)?;
+        if total > maximum {
+            return Err(BuildError::PacketSizeLimit {
+                actual: total,
+                limit: maximum,
+            });
+        }
+        if self.start < prefix.len() || self.storage.len().saturating_sub(self.end) < suffix.len() {
+            let additional = prefix
+                .len()
+                .checked_add(suffix.len())
+                .ok_or(BuildError::LengthOverflow)?;
+            if self.storage.len().saturating_sub(self.len()) >= additional {
+                self.recenter_and_wrap(prefix, suffix, total)?;
+            } else {
+                self.grow_and_wrap(prefix, suffix, total, maximum)?;
+            }
+            return Ok(());
+        }
+
+        let start = self.start - prefix.len();
+        self.storage[start..self.start].copy_from_slice(prefix);
+        self.storage[self.end..self.end + suffix.len()].copy_from_slice(suffix);
+        self.start = start;
+        self.end += suffix.len();
+        Ok(())
+    }
+
+    fn recenter_and_wrap(
+        &mut self,
+        prefix: &[u8],
+        suffix: &[u8],
+        total: usize,
+    ) -> Result<(), BuildError> {
+        let spare = self
+            .storage
+            .len()
+            .checked_sub(total)
+            .ok_or(BuildError::LengthOverflow)?;
+        let start = spare / 2;
+        let prefix_end = start
+            .checked_add(prefix.len())
+            .ok_or(BuildError::LengthOverflow)?;
+        let payload_end = prefix_end
+            .checked_add(self.len())
+            .ok_or(BuildError::LengthOverflow)?;
+        let end = payload_end
+            .checked_add(suffix.len())
+            .ok_or(BuildError::LengthOverflow)?;
+        self.storage.copy_within(self.start..self.end, prefix_end);
+        self.storage[start..prefix_end].copy_from_slice(prefix);
+        self.storage[payload_end..end].copy_from_slice(suffix);
+        self.start = start;
+        self.end = end;
+        Ok(())
+    }
+
+    fn grow_and_wrap(
+        &mut self,
+        prefix: &[u8],
+        suffix: &[u8],
+        total: usize,
+        maximum: usize,
+    ) -> Result<(), BuildError> {
+        let minimum = Self::MINIMUM_CAPACITY.min(maximum);
+        let doubled = self.storage.len().checked_mul(2).unwrap_or(maximum);
+        let capacity = doubled.max(minimum).max(total).min(maximum);
+        if capacity < total {
+            return Err(BuildError::PacketSizeLimit {
+                actual: total,
+                limit: maximum,
+            });
+        }
+
+        let mut storage = vec![0_u8; capacity];
+        let spare = capacity - total;
+        // The reverse encoder walk normally adds headers, but custom codecs
+        // may add suffixes. Reserve the unused space on the active side for
+        // one-sided codecs and split it for codecs that add both.
+        let start = match (prefix.is_empty(), suffix.is_empty()) {
+            (false, true) => spare,
+            (true, false) => 0,
+            _ => spare / 2,
+        };
+        let prefix_end = start
+            .checked_add(prefix.len())
+            .ok_or(BuildError::LengthOverflow)?;
+        let payload_end = prefix_end
+            .checked_add(self.len())
+            .ok_or(BuildError::LengthOverflow)?;
+        let end = payload_end
+            .checked_add(suffix.len())
+            .ok_or(BuildError::LengthOverflow)?;
+        storage[start..prefix_end].copy_from_slice(prefix);
+        storage[prefix_end..payload_end].copy_from_slice(self.as_slice());
+        storage[payload_end..end].copy_from_slice(suffix);
+        self.storage = storage;
+        self.start = start;
+        self.end = end;
+        Ok(())
+    }
+
+    fn into_bytes(self) -> Bytes {
+        if self.start == 0 && self.end == self.storage.len() {
+            return Bytes::from(self.storage);
+        }
+        // Do not retain a geometric-growth allocation behind a small packet.
+        // This bounded final flattening also returns exact-sized bytes when
+        // the active packet is offset within the assembly buffer.
+        Bytes::copy_from_slice(&self.storage[self.start..self.end])
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Builder {
     registry: Arc<ProtocolRegistry>,
@@ -168,7 +308,7 @@ impl Builder {
         self.validate_bindings(&packet, options.mode, &mut diagnostics)?;
 
         let mut materialized = packet.clone();
-        let mut bytes = Vec::new();
+        let mut bytes = PacketBuffer::default();
         let mut layouts: Vec<Option<LayerLayout>> = vec![None; packet.len()];
         let mut encoded_payload_lengths = vec![None; packet.len()];
 
@@ -195,7 +335,7 @@ impl Builder {
             let encoded = codec
                 .encode(
                     layer,
-                    &bytes,
+                    bytes.as_slice(),
                     &LayerEncodeContext {
                         packet: &packet,
                         index,
@@ -225,28 +365,10 @@ impl Builder {
                     source,
                 })?;
 
-            let total = encoded
-                .prefix
-                .len()
-                .checked_add(bytes.len())
-                .and_then(|value| value.checked_add(encoded.suffix.len()))
-                .ok_or(BuildError::LengthOverflow)?;
-            if total > options.max_packet_size {
-                return Err(BuildError::PacketSizeLimit {
-                    actual: total,
-                    limit: options.max_packet_size,
-                });
-            }
-
             if encoded.fields.iter().any(|field| {
                 field.range.start > field.range.end || field.range.end > encoded.prefix.len()
             }) {
                 return Err(BuildError::InvalidCodecLayout { protocol });
-            }
-            for layout in layouts.iter_mut().flatten() {
-                if !layout.checked_shift(encoded.prefix.len()) {
-                    return Err(BuildError::LengthOverflow);
-                }
             }
             let fields = encoded.fields;
             layouts[index] = Some(LayerLayout {
@@ -256,11 +378,7 @@ impl Builder {
                 fields,
             });
 
-            let mut combined = Vec::with_capacity(total);
-            combined.extend_from_slice(&encoded.prefix);
-            combined.extend_from_slice(&bytes);
-            combined.extend_from_slice(&encoded.suffix);
-            bytes = combined;
+            bytes.wrap(&encoded.prefix, &encoded.suffix, options.max_packet_size)?;
             materialized
                 .replace_boxed(index, encoded.materialized)
                 .expect("materialized packet keeps source packet shape");
@@ -272,6 +390,15 @@ impl Builder {
             }));
         }
 
+        let mut layout_offset = 0usize;
+        for layout in layouts.iter_mut().flatten() {
+            if !layout.checked_shift(layout_offset) {
+                return Err(BuildError::LengthOverflow);
+            }
+            layout_offset = layout_offset
+                .checked_add(layout.range.len())
+                .ok_or(BuildError::LengthOverflow)?;
+        }
         let layout = PacketLayout {
             layers: layouts.into_iter().flatten().collect(),
         };
@@ -290,7 +417,7 @@ impl Builder {
                 })
         });
         Ok(BuiltPacket {
-            bytes: Bytes::from(bytes),
+            bytes: bytes.into_bytes(),
             packet: materialized,
             layout,
             diagnostics,
@@ -512,7 +639,13 @@ mod tests {
             _payload: &[u8],
             _context: &LayerEncodeContext<'_>,
         ) -> Result<EncodedLayer, CodecError> {
-            Ok(EncodedLayer::header(vec![0], layer.clone_box()))
+            Ok(EncodedLayer {
+                prefix: vec![0],
+                suffix: vec![255],
+                materialized: layer.clone_box(),
+                fields: Vec::new(),
+                diagnostics: Vec::new(),
+            })
         }
 
         fn decode(
@@ -571,12 +704,91 @@ mod tests {
                 packet,
                 BuildContext::default(),
                 BuildOptions {
-                    max_packet_size: 1,
+                    max_packet_size: 2,
                     ..BuildOptions::default()
                 },
             )
             .unwrap();
-        assert_eq!(built.bytes.as_ref(), &[0]);
+        assert_eq!(built.bytes.as_ref(), &[0, 255]);
+    }
+
+    #[test]
+    fn nested_prefixes_and_suffixes_keep_layouts_and_payload_lengths() {
+        let mut packet = Packet::new();
+        packet
+            .push(ExternalMetadata(Bytes::new()))
+            .push(ExternalMetadata(Bytes::new()));
+        let mut registry = RegistryBuilder::new();
+        registry.register_codec(ExternalMetadataCodec).unwrap();
+        let built = Builder::new(Arc::new(registry.build().unwrap()))
+            .build(
+                packet,
+                BuildContext::default(),
+                BuildOptions {
+                    mode: BuildMode::Permissive,
+                    ..BuildOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(built.bytes.as_ref(), &[0, 0, 255, 255]);
+        assert_eq!(built.layout.layers[0].range, ByteRange::new(0, 1));
+        assert_eq!(built.layout.layers[1].range, ByteRange::new(1, 2));
+        assert_eq!(built.packet.encoded_payload_length(0), Some(2));
+        assert_eq!(built.packet.encoded_payload_length(1), Some(0));
+    }
+
+    #[test]
+    fn deep_prefix_and_suffix_stack_preserves_bytes() {
+        let mut packet = Packet::new();
+        for _ in 0..DEFAULT_MAX_LAYERS {
+            packet.push(ExternalMetadata(Bytes::new()));
+        }
+        let mut registry = RegistryBuilder::new();
+        registry.register_codec(ExternalMetadataCodec).unwrap();
+        let built = Builder::new(Arc::new(registry.build().unwrap()))
+            .build(
+                packet,
+                BuildContext::default(),
+                BuildOptions {
+                    mode: BuildMode::Permissive,
+                    ..BuildOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(built.bytes.len(), DEFAULT_MAX_LAYERS * 2);
+        assert!(
+            built.bytes[..DEFAULT_MAX_LAYERS]
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+        assert!(
+            built.bytes[DEFAULT_MAX_LAYERS..]
+                .iter()
+                .all(|byte| *byte == 255)
+        );
+        let storage = built
+            .into_bytes()
+            .try_into_mut()
+            .expect("built bytes are uniquely owned");
+        assert!(storage.capacity() <= DEFAULT_MAX_LAYERS * 2);
+    }
+
+    #[test]
+    fn alternating_one_sided_extensions_recenter_before_growing() {
+        let mut buffer = PacketBuffer::default();
+        for index in 0..64 {
+            let byte = [index as u8];
+            if index % 2 == 0 {
+                buffer.wrap(&byte, &[], 1_024).unwrap();
+            } else {
+                buffer.wrap(&[], &byte, 1_024).unwrap();
+            }
+        }
+
+        assert_eq!(buffer.len(), 64);
+        assert!(buffer.storage.len() <= 128);
     }
 
     #[test]

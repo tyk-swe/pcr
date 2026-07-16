@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::IpAddr;
+use std::ops::Range;
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -101,7 +102,7 @@ pub enum Error {
     BeyondFinalSequence { final_offset: u64 },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct TcpFlowState {
     base_sequence: u32,
     next_offset: u64,
@@ -114,6 +115,21 @@ struct TcpFlowState {
     pending_bytes: usize,
     fin_offset: Option<u64>,
     last_update: Instant,
+}
+
+impl TcpFlowState {
+    fn new(base_sequence: u32, now: Instant) -> Self {
+        Self {
+            base_sequence,
+            next_offset: 0,
+            history_start_offset: 0,
+            emitted_history: Bytes::new(),
+            pending: BTreeMap::new(),
+            pending_bytes: 0,
+            fin_offset: None,
+            last_update: now,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -159,84 +175,80 @@ impl Reassembler {
                 limit: self.limits.max_flows,
             });
         }
-        self.flows.insert(
-            flow,
-            TcpFlowState {
-                base_sequence: first_payload_sequence,
-                next_offset: 0,
-                history_start_offset: 0,
-                emitted_history: Bytes::new(),
-                pending: BTreeMap::new(),
-                pending_bytes: 0,
-                fin_offset: None,
-                last_update: now,
-            },
-        );
+        self.flows
+            .insert(flow, TcpFlowState::new(first_payload_sequence, now));
         Ok(())
     }
 
     pub fn push(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
-        // Opening a previously unseen tuple (or replacing a tuple generation
-        // on SYN) mutates the table before payload validation. Preserve the
-        // prior entry and counters so a rejected first segment cannot leave
-        // an empty flow behind or discard an established generation.
-        let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
-        let changes_generation = (segment.syn || !self.flows.contains_key(&segment.flow))
-            && self
-                .flows
-                .get(&segment.flow)
-                .is_none_or(|state| state.base_sequence != first_payload_sequence);
-        let rollback = changes_generation.then(|| {
-            (
-                segment.flow.clone(),
-                self.flows.get(&segment.flow).cloned(),
-                self.aggregate_bytes,
-                self.aggregate_memory_charge,
-            )
-        });
-        let push_result = self.push_inner(segment, now);
-        if push_result.is_err()
-            && let Some((flow, prior, aggregate_bytes, aggregate_memory_charge)) = rollback
-        {
-            match prior {
-                Some(state) => {
-                    self.flows.insert(flow, state);
-                }
-                None => {
-                    self.flows.remove(&flow);
-                }
-            }
-            self.aggregate_bytes = aggregate_bytes;
-            self.aggregate_memory_charge = aggregate_memory_charge;
-        }
-        push_result
-    }
-
-    fn push_inner(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
         self.validate_limits()?;
         let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
-        if segment.syn || !self.flows.contains_key(&segment.flow) {
-            self.open_flow(segment.flow.clone(), first_payload_sequence, now)?;
-        }
-        let state = self
-            .flows
-            .get(&segment.flow)
-            .expect("flow was inserted above")
-            .clone();
-        let mut candidate = state;
-        candidate.last_update = now;
+        let (changes_generation, aggregate_bytes, aggregate_memory_charge) = {
+            let existing = self.flows.get(&segment.flow);
+            let changes_generation = (segment.syn || existing.is_none())
+                && existing.is_none_or(|state| state.base_sequence != first_payload_sequence);
+            if changes_generation
+                && self
+                    .flows
+                    .len()
+                    .saturating_sub(usize::from(existing.is_some()))
+                    >= self.limits.max_flows
+            {
+                return Err(Error::FlowLimit {
+                    limit: self.limits.max_flows,
+                });
+            }
 
+            let (aggregate_bytes, aggregate_memory_charge) = if changes_generation {
+                match existing {
+                    Some(stale) => (
+                        self.aggregate_bytes
+                            .saturating_sub(retained_bytes(stale).unwrap_or(0)),
+                        self.aggregate_memory_charge
+                            .saturating_sub(flow_memory_charge(stale).unwrap_or(0)),
+                    ),
+                    None => (self.aggregate_bytes, self.aggregate_memory_charge),
+                }
+            } else {
+                (self.aggregate_bytes, self.aggregate_memory_charge)
+            };
+            (changes_generation, aggregate_bytes, aggregate_memory_charge)
+        };
+
+        let plan = {
+            // A replacement generation is planned against an empty state. The
+            // established entry remains untouched until that plan succeeds.
+            let empty = TcpFlowState::new(first_payload_sequence, now);
+            let state = if changes_generation {
+                &empty
+            } else {
+                self.flows
+                    .get(&segment.flow)
+                    .expect("an unchanged generation has an established flow")
+            };
+            self.plan_push(state, aggregate_bytes, aggregate_memory_charge, &segment)?
+        };
+
+        Ok(self.commit_push(segment, now, changes_generation, plan))
+    }
+
+    fn plan_push(
+        &self,
+        state: &TcpFlowState,
+        aggregate_base_bytes: usize,
+        aggregate_base_memory_charge: usize,
+        segment: &Segment,
+    ) -> Result<PushPlan, Error> {
         let payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
+
         // Unwrap the 32-bit sequence number around the current receive
         // cursor. TCP windows are bounded well below the signed half-space,
         // so this remains unambiguous across the 4 GiB wrap boundary and
         // treats packets preceding the capture base as old data rather than a
         // multi-gigabyte forward gap.
-        let expected_sequence = candidate
-            .base_sequence
-            .wrapping_add(candidate.next_offset as u32);
+        let expected_sequence = state.base_sequence.wrapping_add(state.next_offset as u32);
         let signed_delta = i64::from(payload_sequence.wrapping_sub(expected_sequence) as i32);
-        let absolute = i128::from(candidate.next_offset) + i128::from(signed_delta);
+        let absolute = i128::from(state.next_offset) + i128::from(signed_delta);
         let original_payload_len = segment.payload.len() as i128;
         let incoming_fin_offset = if segment.fin {
             let absolute_fin =
@@ -252,7 +264,6 @@ impl Reassembler {
             None
         };
         let mut payload = segment.payload.as_ref();
-        let mut events = Vec::new();
         let mut retransmitted = 0usize;
         let mut conflicting = false;
         let before_base = if absolute < 0 {
@@ -260,22 +271,27 @@ impl Reassembler {
         } else {
             0
         };
+        let mut payload_start = before_base;
         retransmitted += before_base;
         payload = &payload[before_base..];
         let mut offset = u64::try_from(absolute.max(0)).map_err(|_| Error::FlowByteLimit {
             limit: self.limits.max_bytes_per_flow,
         })?;
-        if offset < candidate.next_offset {
-            let consumed =
-                usize::try_from((candidate.next_offset - offset).min(payload.len() as u64))
-                    .unwrap_or(payload.len());
-            conflicting |= emitted_history_conflicts(&candidate, offset, &payload[..consumed]);
+        if offset < state.next_offset {
+            let consumed = usize::try_from((state.next_offset - offset).min(payload.len() as u64))
+                .unwrap_or(payload.len());
+            conflicting |= emitted_history_conflicts(state, offset, &payload[..consumed]);
             retransmitted += consumed;
+            payload_start = payload_start
+                .checked_add(consumed)
+                .ok_or(Error::FlowByteLimit {
+                    limit: self.limits.max_bytes_per_flow,
+                })?;
             payload = &payload[consumed..];
-            offset = candidate.next_offset;
+            offset = state.next_offset;
         }
 
-        let window_end = candidate
+        let window_end = state
             .next_offset
             .checked_add(self.limits.max_bytes_per_flow as u64)
             .ok_or(Error::FlowByteLimit {
@@ -287,7 +303,7 @@ impl Reassembler {
                 .ok_or(Error::FlowByteLimit {
                     limit: self.limits.max_bytes_per_flow,
                 })?;
-        if let Some(final_offset) = candidate.fin_offset {
+        if let Some(final_offset) = state.fin_offset {
             if incoming_fin_offset.is_some_and(|fin_offset| fin_offset != final_offset) {
                 return Err(Error::ConflictingFinalSequence {
                     existing_offset: final_offset,
@@ -299,7 +315,7 @@ impl Reassembler {
             }
         }
         if let Some(fin_offset) = incoming_fin_offset
-            && candidate.next_offset > fin_offset
+            && state.next_offset > fin_offset
         {
             return Err(Error::BeyondFinalSequence {
                 final_offset: fin_offset,
@@ -311,23 +327,23 @@ impl Reassembler {
             });
         }
 
-        let old_retained_bytes = retained_bytes(&candidate).ok_or(Error::AggregateByteLimit {
+        let old_retained_bytes = retained_bytes(state).ok_or(Error::AggregateByteLimit {
             limit: self.limits.max_aggregate_bytes,
         })?;
-        let old_memory_charge =
-            flow_memory_charge(&candidate).ok_or(Error::AggregateByteLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-        let merge = plan_pending_merge(&candidate.pending, offset, payload, candidate.next_offset)
+        let old_memory_charge = flow_memory_charge(state).ok_or(Error::AggregateByteLimit {
+            limit: self.limits.max_aggregate_bytes,
+        })?;
+        let mut merge = plan_pending_merge(&state.pending, offset, payload, state.next_offset)
             .ok_or(Error::FlowByteLimit {
                 limit: self.limits.max_bytes_per_flow,
             })?;
-        let pending_bytes = candidate
-            .pending_bytes
-            .checked_add(merge.added_bytes)
-            .ok_or(Error::FlowByteLimit {
-                limit: self.limits.max_bytes_per_flow,
-            })?;
+        let pending_bytes =
+            state
+                .pending_bytes
+                .checked_add(merge.added_bytes)
+                .ok_or(Error::FlowByteLimit {
+                    limit: self.limits.max_bytes_per_flow,
+                })?;
         if pending_bytes > self.limits.max_bytes_per_flow {
             return Err(Error::FlowByteLimit {
                 limit: self.limits.max_bytes_per_flow,
@@ -339,11 +355,15 @@ impl Reassembler {
             });
         }
         if let Some(fin_offset) = incoming_fin_offset
-            && (candidate.pending.iter().any(|(start, bytes)| {
-                start
-                    .checked_add(bytes.len() as u64)
-                    .is_none_or(|end| end > fin_offset)
-            }) || remaining_end > fin_offset)
+            && (state
+                .pending
+                .last_key_value()
+                .is_some_and(|(start, bytes)| {
+                    start
+                        .checked_add(bytes.len() as u64)
+                        .is_none_or(|end| end > fin_offset)
+                })
+                || remaining_end > fin_offset)
         {
             return Err(Error::BeyondFinalSequence {
                 final_offset: fin_offset,
@@ -358,7 +378,7 @@ impl Reassembler {
             .limits
             .max_bytes_per_flow
             .saturating_sub(final_pending_bytes);
-        let prospective_history = candidate
+        let prospective_history = state
             .emitted_history
             .len()
             .min(initial_history_capacity)
@@ -374,15 +394,13 @@ impl Reassembler {
             .ok_or(Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
             })?;
-        let prospective_aggregate_bytes = self
-            .aggregate_bytes
+        let prospective_aggregate_bytes = aggregate_base_bytes
             .checked_sub(old_retained_bytes)
             .and_then(|bytes| bytes.checked_add(prospective_retained))
             .ok_or(Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
             })?;
-        let prospective_aggregate_memory = self
-            .aggregate_memory_charge
+        let prospective_aggregate_memory = aggregate_base_memory_charge
             .checked_sub(old_memory_charge)
             .and_then(|charge| charge.checked_add(prospective_memory))
             .ok_or(Error::AggregateByteLimit {
@@ -396,117 +414,113 @@ impl Reassembler {
             });
         }
 
-        retransmitted += merge.overlapping_bytes;
-        conflicting |= merge.has_conflicting_overlap;
-        trim_emitted_history(&mut candidate, initial_history_capacity);
-        candidate.pending = merge_pending(&candidate.pending, offset, payload, &merge).ok_or(
+        materialize_pending_merge(&state.pending, offset, payload, &mut merge).ok_or(
             Error::FlowByteLimit {
                 limit: self.limits.max_bytes_per_flow,
             },
         )?;
-        candidate.pending_bytes = pending_bytes;
-        if candidate.fin_offset.is_none() {
-            candidate.fin_offset = incoming_fin_offset;
-        }
-
-        if retransmitted != 0 || conflicting {
-            events.push(Event::Retransmission {
-                flow: segment.flow.clone(),
-                sequence: payload_sequence,
-                bytes: retransmitted,
-                conflicting,
-            });
-        }
-
-        loop {
-            let next = candidate
-                .pending
-                .range(..=candidate.next_offset)
-                .next_back()
-                .map(|(start, bytes)| (*start, bytes.clone()));
-            let Some((start, bytes)) = next else {
-                break;
-            };
-            let end = start + bytes.len() as u64;
-            if end <= candidate.next_offset {
-                candidate.pending.remove(&start);
-                candidate.pending_bytes = candidate.pending_bytes.saturating_sub(bytes.len());
-                continue;
-            }
-            let skip = (candidate.next_offset - start) as usize;
-            let output = bytes.slice(skip..);
-            let sequence = candidate
-                .base_sequence
-                .wrapping_add(candidate.next_offset as u32);
-            let output_start = candidate.next_offset;
-            candidate.next_offset += output.len() as u64;
-            candidate.pending.remove(&start);
-            candidate.pending_bytes = candidate.pending_bytes.saturating_sub(bytes.len());
-            let history_capacity = self
-                .limits
-                .max_bytes_per_flow
-                .saturating_sub(candidate.pending_bytes);
-            append_emitted_history(
-                &mut candidate,
-                output_start,
-                output.as_ref(),
-                history_capacity,
-            );
-            events.push(Event::Data {
-                flow: segment.flow.clone(),
-                sequence,
-                bytes: output,
-            });
-        }
-        let closed = segment.rst
-            || candidate
-                .fin_offset
-                .is_some_and(|fin_offset| candidate.next_offset >= fin_offset);
-        let (new_retained_bytes, new_memory_charge) = if closed {
-            (0, 0)
+        let direct_payload = if merge.direct_output {
+            let end = payload_start
+                .checked_add(payload.len())
+                .ok_or(Error::FlowByteLimit {
+                    limit: self.limits.max_bytes_per_flow,
+                })?;
+            Some(payload_start..end)
         } else {
+            None
+        };
+
+        let final_next_offset = state
+            .next_offset
+            .checked_add(merge.emitted_segment_bytes as u64)
+            .ok_or(Error::FlowByteLimit {
+                limit: self.limits.max_bytes_per_flow,
+            })?;
+        let final_fin_offset = state.fin_offset.or(incoming_fin_offset);
+        let closed = segment.rst
+            || final_fin_offset.is_some_and(|fin_offset| final_next_offset >= fin_offset);
+        let (aggregate_bytes, aggregate_memory_charge) = if closed {
             (
-                retained_bytes(&candidate).ok_or(Error::AggregateByteLimit {
-                    limit: self.limits.max_aggregate_bytes,
-                })?,
-                flow_memory_charge(&candidate).ok_or(Error::AggregateByteLimit {
-                    limit: self.limits.max_aggregate_bytes,
-                })?,
+                aggregate_base_bytes.checked_sub(old_retained_bytes).ok_or(
+                    Error::AggregateByteLimit {
+                        limit: self.limits.max_aggregate_bytes,
+                    },
+                )?,
+                aggregate_base_memory_charge
+                    .checked_sub(old_memory_charge)
+                    .ok_or(Error::AggregateByteLimit {
+                        limit: self.limits.max_aggregate_bytes,
+                    })?,
+            )
+        } else {
+            (prospective_aggregate_bytes, prospective_aggregate_memory)
+        };
+        Ok(PushPlan {
+            payload_sequence,
+            incoming_fin_offset,
+            retransmitted,
+            conflicting,
+            merge,
+            direct_payload,
+            pending_bytes,
+            initial_history_capacity,
+            closed,
+            aggregate_bytes,
+            aggregate_memory_charge,
+        })
+    }
+
+    fn commit_push(
+        &mut self,
+        segment: Segment,
+        now: Instant,
+        changes_generation: bool,
+        plan: PushPlan,
+    ) -> Vec<Event> {
+        let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
+        let closed = plan.closed;
+        let aggregate_bytes = plan.aggregate_bytes;
+        let aggregate_memory_charge = plan.aggregate_memory_charge;
+        let max_bytes_per_flow = self.limits.max_bytes_per_flow;
+        let Segment {
+            flow, rst, payload, ..
+        } = segment;
+        let direct_payload = plan
+            .direct_payload
+            .as_ref()
+            .map(|range| payload.slice(range.clone()));
+
+        let (replacement, mut events) = if changes_generation {
+            let mut state = TcpFlowState::new(first_payload_sequence, now);
+            let events = commit_flow_push(
+                &mut state,
+                &flow,
+                now,
+                max_bytes_per_flow,
+                plan,
+                direct_payload,
+            );
+            (Some(state), events)
+        } else {
+            let state = self
+                .flows
+                .get_mut(&flow)
+                .expect("an unchanged generation has an established flow");
+            (
+                None,
+                commit_flow_push(state, &flow, now, max_bytes_per_flow, plan, direct_payload),
             )
         };
-        let aggregate_bytes = self
-            .aggregate_bytes
-            .checked_sub(old_retained_bytes)
-            .and_then(|bytes| bytes.checked_add(new_retained_bytes))
-            .ok_or(Error::AggregateByteLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-        let aggregate_memory_charge = self
-            .aggregate_memory_charge
-            .checked_sub(old_memory_charge)
-            .and_then(|charge| charge.checked_add(new_memory_charge))
-            .ok_or(Error::AggregateByteLimit {
-                limit: self.limits.max_aggregate_bytes,
-            })?;
-        if aggregate_bytes > self.limits.max_aggregate_bytes
-            || aggregate_memory_charge > self.limits.max_aggregate_bytes
-        {
-            return Err(Error::AggregateByteLimit {
-                limit: self.limits.max_aggregate_bytes,
-            });
-        }
+
         self.aggregate_bytes = aggregate_bytes;
         self.aggregate_memory_charge = aggregate_memory_charge;
         if closed {
-            self.flows.remove(&segment.flow);
-            events.push(Event::Closed {
-                flow: segment.flow,
-                reset: segment.rst,
-            });
-        } else {
-            self.flows.insert(segment.flow, candidate);
+            self.flows.remove(&flow);
+            events.push(Event::Closed { flow, reset: rst });
+        } else if let Some(state) = replacement {
+            self.flows.insert(flow, state);
         }
-        Ok(events)
+        events
     }
 
     pub fn expire(&mut self, now: Instant) -> Vec<Event> {
@@ -660,13 +674,40 @@ fn append_emitted_history(
     state.emitted_history = Bytes::from(retained);
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
+struct PushPlan {
+    payload_sequence: u32,
+    incoming_fin_offset: Option<u64>,
+    retransmitted: usize,
+    conflicting: bool,
+    merge: PendingMergePlan,
+    direct_payload: Option<Range<usize>>,
+    pending_bytes: usize,
+    initial_history_capacity: usize,
+    closed: bool,
+    aggregate_bytes: usize,
+    aggregate_memory_charge: usize,
+}
+
+#[derive(Debug)]
+struct PendingReplacement {
+    start: u64,
+    bytes: Bytes,
+}
+
+#[derive(Debug)]
 struct PendingMergePlan {
     added_bytes: usize,
     overlapping_bytes: usize,
     has_conflicting_overlap: bool,
     segment_count: usize,
     emitted_segment_bytes: usize,
+    direct_output: bool,
+    first_affected: Option<u64>,
+    affected_segment_count: usize,
+    union_start: u64,
+    union_end: u64,
+    replacement: Option<PendingReplacement>,
 }
 
 fn plan_pending_merge(
@@ -682,95 +723,249 @@ fn plan_pending_merge(
             has_conflicting_overlap: false,
             segment_count: existing.len(),
             emitted_segment_bytes: 0,
+            direct_output: false,
+            first_affected: None,
+            affected_segment_count: 0,
+            union_start: offset,
+            union_end: offset,
+            replacement: None,
         });
     }
     let payload_end = offset.checked_add(payload.len() as u64)?;
     let mut overlapping_bytes = 0usize;
     let mut has_conflicting_overlap = false;
-    let mut connected_segment_count = 0usize;
-    let mut connected_end = payload_end;
-    for (start, value) in existing {
-        let end = start.checked_add(value.len() as u64)?;
-        if end >= offset && *start <= payload_end {
-            connected_segment_count += 1;
-            connected_end = connected_end.max(end);
+    let mut first_affected = None;
+    let mut affected_segment_count = 0usize;
+    let mut union_start = offset;
+    let mut union_end = payload_end;
+    {
+        let mut record_affected = |start: u64, value: &Bytes| -> Option<()> {
+            let end = start.checked_add(value.len() as u64)?;
+            if end < offset || start > payload_end {
+                return Some(());
+            }
+
+            if first_affected.is_none() {
+                first_affected = Some(start);
+            }
+            affected_segment_count = affected_segment_count.checked_add(1)?;
+            union_start = union_start.min(start);
+            union_end = union_end.max(end);
+
+            let overlap_start = start.max(offset);
+            let overlap_end = end.min(payload_end);
+            if overlap_start < overlap_end {
+                let length = usize::try_from(overlap_end - overlap_start).ok()?;
+                let existing_start = usize::try_from(overlap_start - start).ok()?;
+                let payload_start = usize::try_from(overlap_start - offset).ok()?;
+                let existing_end = existing_start.checked_add(length)?;
+                let payload_end = payload_start.checked_add(length)?;
+                overlapping_bytes = overlapping_bytes.checked_add(length)?;
+                has_conflicting_overlap |= value.get(existing_start..existing_end)?
+                    != payload.get(payload_start..payload_end)?;
+            }
+            Some(())
+        };
+
+        // Pending ranges are coalesced, so only the predecessor can reach the
+        // incoming start before the bounded forward range begins.
+        if let Some((start, value)) = existing.range(..offset).next_back() {
+            record_affected(*start, value)?;
         }
-        let overlap_start = (*start).max(offset);
-        let overlap_end = end.min(payload_end);
-        if overlap_start < overlap_end {
-            let length = usize::try_from(overlap_end - overlap_start).ok()?;
-            let existing_start = usize::try_from(overlap_start - *start).ok()?;
-            let payload_start = usize::try_from(overlap_start - offset).ok()?;
-            overlapping_bytes = overlapping_bytes.checked_add(length)?;
-            has_conflicting_overlap |= value[existing_start..existing_start + length]
-                != payload[payload_start..payload_start + length];
+        for (start, value) in existing.range(offset..=payload_end) {
+            record_affected(*start, value)?;
         }
     }
+    let added_bytes = payload.len().checked_sub(overlapping_bytes)?;
+    let direct_output = offset == next_offset && first_affected.is_none();
     Some(PendingMergePlan {
-        added_bytes: payload.len().checked_sub(overlapping_bytes)?,
+        added_bytes,
         overlapping_bytes,
         has_conflicting_overlap,
         segment_count: existing
             .len()
             .checked_add(1)?
-            .checked_sub(connected_segment_count)?,
+            .checked_sub(affected_segment_count)?,
         emitted_segment_bytes: (offset == next_offset)
-            .then(|| usize::try_from(connected_end.checked_sub(next_offset)?).ok())
+            .then(|| usize::try_from(union_end.checked_sub(next_offset)?).ok())
             .flatten()
             .unwrap_or(0),
+        direct_output,
+        first_affected,
+        affected_segment_count,
+        union_start,
+        union_end,
+        replacement: None,
     })
 }
 
-fn merge_pending(
+fn materialize_pending_merge(
     existing: &BTreeMap<u64, Bytes>,
     offset: u64,
     payload: &[u8],
-    plan: &PendingMergePlan,
-) -> Option<BTreeMap<u64, Bytes>> {
-    if payload.is_empty() {
-        return Some(existing.clone());
+    plan: &mut PendingMergePlan,
+) -> Option<()> {
+    if plan.added_bytes == 0 || plan.direct_output {
+        return Some(());
     }
-    let payload_end = offset.checked_add(payload.len() as u64)?;
-    let affected = existing
-        .iter()
-        .filter_map(|(start, bytes)| {
-            let end = start.checked_add(bytes.len() as u64)?;
-            (end >= offset && *start <= payload_end).then_some((*start, end, bytes.clone()))
-        })
-        .collect::<Vec<_>>();
-    let mut pending = existing.clone();
-    if affected.is_empty() {
-        pending.insert(offset, Bytes::copy_from_slice(payload));
-        debug_assert_eq!(pending.len(), plan.segment_count);
-        return Some(pending);
-    }
-
-    let union_start = affected
-        .iter()
-        .map(|(start, _, _)| *start)
-        .min()
-        .unwrap_or(offset)
-        .min(offset);
-    let union_end = affected
-        .iter()
-        .map(|(_, end, _)| *end)
-        .max()
-        .unwrap_or(payload_end)
-        .max(payload_end);
-    let union_len = usize::try_from(union_end.checked_sub(union_start)?).ok()?;
+    let union_len = usize::try_from(plan.union_end.checked_sub(plan.union_start)?).ok()?;
     let mut bytes = vec![0u8; union_len];
-    let payload_start = usize::try_from(offset.checked_sub(union_start)?).ok()?;
-    bytes[payload_start..payload_start + payload.len()].copy_from_slice(payload);
-    for (start, _, value) in &affected {
-        let relative = usize::try_from(start.checked_sub(union_start)?).ok()?;
+    let payload_start = usize::try_from(offset.checked_sub(plan.union_start)?).ok()?;
+    let payload_end = payload_start.checked_add(payload.len())?;
+    bytes
+        .get_mut(payload_start..payload_end)?
+        .copy_from_slice(payload);
+    let mut current = plan.first_affected;
+    for index in 0..plan.affected_segment_count {
+        let start = current?;
+        let value = existing.get(&start)?;
+        let relative = usize::try_from(start.checked_sub(plan.union_start)?).ok()?;
+        let end = relative.checked_add(value.len())?;
         // Retained bytes win overlaps, preserving the existing retransmission
         // semantics after conflict detection.
-        bytes[relative..relative + value.len()].copy_from_slice(value);
-        pending.remove(start);
+        bytes.get_mut(relative..end)?.copy_from_slice(value);
+        if index + 1 < plan.affected_segment_count {
+            current = existing
+                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+                .next()
+                .map(|(start, _)| *start);
+        }
     }
-    pending.insert(union_start, Bytes::from(bytes));
-    debug_assert_eq!(pending.len(), plan.segment_count);
-    Some(pending)
+    plan.replacement = Some(PendingReplacement {
+        start: plan.union_start,
+        bytes: Bytes::from(bytes),
+    });
+    Some(())
+}
+
+fn commit_flow_push(
+    state: &mut TcpFlowState,
+    flow: &FlowKey,
+    now: Instant,
+    max_bytes_per_flow: usize,
+    plan: PushPlan,
+    direct_payload: Option<Bytes>,
+) -> Vec<Event> {
+    let PushPlan {
+        payload_sequence,
+        incoming_fin_offset,
+        mut retransmitted,
+        mut conflicting,
+        merge,
+        pending_bytes,
+        initial_history_capacity,
+        ..
+    } = plan;
+    retransmitted += merge.overlapping_bytes;
+    conflicting |= merge.has_conflicting_overlap;
+
+    state.last_update = now;
+    trim_emitted_history(state, initial_history_capacity);
+    apply_pending_merge(state, merge);
+    state.pending_bytes = pending_bytes;
+    if state.fin_offset.is_none() {
+        state.fin_offset = incoming_fin_offset;
+    }
+
+    let mut events = Vec::new();
+    if retransmitted != 0 || conflicting {
+        events.push(Event::Retransmission {
+            flow: flow.clone(),
+            sequence: payload_sequence,
+            bytes: retransmitted,
+            conflicting,
+        });
+    }
+
+    if let Some(bytes) = direct_payload {
+        state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
+        emit_data(state, flow, bytes, max_bytes_per_flow, &mut events);
+    }
+
+    loop {
+        let next_start = state
+            .pending
+            .range(..=state.next_offset)
+            .next_back()
+            .map(|(start, _)| *start);
+        let Some(start) = next_start else {
+            break;
+        };
+        let (_, bytes) = state
+            .pending
+            .remove_entry(&start)
+            .expect("pending entry selected for emission exists");
+        let end = start
+            .checked_add(bytes.len() as u64)
+            .expect("pending entry end was validated while planning");
+        if end <= state.next_offset {
+            state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
+            continue;
+        }
+        let skip = usize::try_from(state.next_offset - start)
+            .expect("pending entry skip fits its byte length");
+        let output = bytes.slice(skip..);
+        state.pending_bytes = state.pending_bytes.saturating_sub(bytes.len());
+        emit_data(state, flow, output, max_bytes_per_flow, &mut events);
+    }
+    events
+}
+
+fn emit_data(
+    state: &mut TcpFlowState,
+    flow: &FlowKey,
+    bytes: Bytes,
+    max_bytes_per_flow: usize,
+    events: &mut Vec<Event>,
+) {
+    let sequence = state.base_sequence.wrapping_add(state.next_offset as u32);
+    let output_start = state.next_offset;
+    state.next_offset = state
+        .next_offset
+        .checked_add(bytes.len() as u64)
+        .expect("pending emission was validated while planning");
+    let history_capacity = max_bytes_per_flow.saturating_sub(state.pending_bytes);
+    append_emitted_history(state, output_start, bytes.as_ref(), history_capacity);
+    events.push(Event::Data {
+        flow: flow.clone(),
+        sequence,
+        bytes,
+    });
+}
+
+fn apply_pending_merge(state: &mut TcpFlowState, merge: PendingMergePlan) {
+    let PendingMergePlan {
+        first_affected,
+        affected_segment_count,
+        replacement,
+        segment_count,
+        direct_output,
+        ..
+    } = merge;
+    if let Some(replacement) = replacement {
+        let mut current = first_affected;
+        for index in 0..affected_segment_count {
+            let start = current.expect("pending merge entry was validated while planning");
+            state
+                .pending
+                .remove(&start)
+                .expect("pending merge entry was validated while planning");
+            if index + 1 < affected_segment_count {
+                current = state
+                    .pending
+                    .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+                    .next()
+                    .map(|(start, _)| *start);
+            }
+        }
+        let replaced = state.pending.insert(replacement.start, replacement.bytes);
+        debug_assert!(replaced.is_none());
+    }
+    if direct_output {
+        debug_assert_eq!(state.pending.len().saturating_add(1), segment_count);
+    } else {
+        debug_assert_eq!(state.pending.len(), segment_count);
+    }
 }
 
 #[cfg(test)]
@@ -822,6 +1017,54 @@ mod tests {
     }
 
     #[test]
+    fn in_order_data_emits_the_input_bytes_without_pending_storage() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default());
+        reassembler.open_flow(flow(), 100, now).unwrap();
+        let payload = Bytes::from_static(b"abc");
+        let pointer = payload.as_ptr();
+
+        let events = reassembler
+            .push(
+                Segment {
+                    flow: flow(),
+                    sequence: 100,
+                    payload,
+                    syn: false,
+                    fin: false,
+                    rst: false,
+                },
+                now,
+            )
+            .unwrap();
+
+        let output = events
+            .into_iter()
+            .find_map(|event| match event {
+                Event::Data { bytes, .. } => Some(bytes),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(output.as_ref(), b"abc");
+        assert_eq!(output.as_ptr(), pointer);
+        assert!(reassembler.flows[&flow()].pending.is_empty());
+    }
+
+    #[test]
+    fn ack_only_segment_leaves_pending_data_intact() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default());
+        reassembler.open_flow(flow(), 100, now).unwrap();
+        reassembler.push(segment(103, b"def"), now).unwrap();
+
+        assert!(reassembler.push(segment(100, b""), now).unwrap().is_empty());
+        let events = reassembler.push(segment(100, b"abc"), now).unwrap();
+        assert!(events.iter().any(
+            |event| matches!(event, Event::Data { sequence: 100, bytes, .. } if bytes.as_ref() == b"abcdef")
+        ));
+    }
+
+    #[test]
     fn retransmission_is_reported_without_duplicate_data() {
         let now = Instant::now();
         let mut reassembler = Reassembler::new(Limits::default());
@@ -841,6 +1084,27 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, Event::Data { .. }))
         );
+    }
+
+    #[test]
+    fn fully_covered_pending_retransmission_keeps_the_retained_segment() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(Limits::default());
+        reassembler.open_flow(flow(), 100, now).unwrap();
+        reassembler.push(segment(102, b"abc"), now).unwrap();
+        let pointer = reassembler.flows[&flow()].pending[&2].as_ptr();
+
+        let events = reassembler.push(segment(102, b"abc"), now).unwrap();
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            Event::Retransmission {
+                bytes: 3,
+                conflicting: false,
+                ..
+            }
+        )));
+        assert_eq!(reassembler.flows[&flow()].pending[&2].as_ptr(), pointer);
     }
 
     #[test]
@@ -986,6 +1250,33 @@ mod tests {
                 .any(|event| matches!(event, Event::Data { sequence: 100, .. }))
         );
         assert_eq!(reassembler.aggregate_bytes(), 3);
+    }
+
+    #[test]
+    fn reset_still_must_pass_prospective_resource_check() {
+        let now = Instant::now();
+        let limits = Limits {
+            max_bytes_per_flow: 4,
+            max_aggregate_bytes: 3,
+            ..Limits::default()
+        };
+        let mut reassembler = Reassembler::new(limits);
+        reassembler.open_flow(flow(), 100, now).unwrap();
+        let mut reset = segment(100, b"abcd");
+        reset.rst = true;
+
+        assert_eq!(
+            reassembler.push(reset, now).unwrap_err(),
+            Error::AggregateByteLimit { limit: 3 }
+        );
+        assert_eq!(reassembler.aggregate_bytes(), 0);
+        assert!(matches!(
+            reassembler.flush().as_slice(),
+            [Event::Evicted {
+                pending_bytes: 0,
+                ..
+            }]
+        ));
     }
 
     #[test]

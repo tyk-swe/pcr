@@ -22,11 +22,7 @@ impl SystemAuthorizer {
 }
 
 impl ReplayAuthorizer for SystemAuthorizer {
-    fn authorize(
-        &mut self,
-        frame: &Frame,
-        _mode: LinkMode,
-    ) -> Result<(), ReplayAuthorizationError> {
+    fn authorize(&mut self, frame: &Frame, mode: LinkMode) -> Result<(), ReplayAuthorizationError> {
         if frame.captured_length() != frame.original_length() {
             return Err(ReplayAuthorizationError::new(
                 format!(
@@ -43,6 +39,19 @@ impl ReplayAuthorizer for SystemAuthorizer {
                 ),
                 Vec::new(),
             ));
+        }
+        if mode == LinkMode::Layer3 {
+            replay_network_envelope(frame).map_err(|source| {
+                ReplayAuthorizationError::new(
+                    source.to_string(),
+                    Classification::new(
+                        "packet.replay_network",
+                        Kind::Packet,
+                        Some("repair the raw IP header or capture link type before live replay"),
+                    ),
+                    Vec::new(),
+                )
+            })?;
         }
         let ReplayWireDestinations {
             addresses,
@@ -167,6 +176,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
 /// Layer 2/Layer 3 providers.
 pub struct SystemTransmitter {
     validated_interface: Option<InterfaceInfo>,
+    validated_network: Option<(Frame, NetworkEnvelope)>,
     packet_io: DispatchPacketIo<SystemLayer2Io, SystemLayer3Io>,
 }
 
@@ -174,6 +184,7 @@ impl SystemTransmitter {
     pub fn new() -> Self {
         Self {
             validated_interface: None,
+            validated_network: None,
             packet_io: DispatchPacketIo::new(SystemLayer2Io, SystemLayer3Io),
         }
     }
@@ -184,6 +195,10 @@ impl SystemTransmitter {
         mode: LinkMode,
         frame: &Frame,
     ) -> Result<InterfaceId, LiveIoError> {
+        self.validated_network = match mode {
+            LinkMode::Layer3 => Some((frame.clone(), replay_network_envelope(frame)?)),
+            LinkMode::Layer2 | LinkMode::Auto => None,
+        };
         if self.validated_interface.is_none() {
             let interfaces = SystemInterfaceProvider.interfaces()?;
             let selected = interfaces
@@ -272,7 +287,14 @@ impl SystemTransmitter {
                 synthesized_ethernet: false,
             },
             LinkMode::Layer3 => {
-                let network = replay_network_envelope(frame.bytes())?;
+                let network = self
+                    .validated_network
+                    .as_ref()
+                    .filter(|(validated, _)| validated == frame)
+                    .map(|(_, network)| *network)
+                    .ok_or_else(|| LiveIoError::InvalidTransmissionFrame {
+                        message: "frame was not validated before replay transmission".to_owned(),
+                    })?;
                 let route = SystemRouteProvider
                     .lookup_with_preferences(network.destination, Some(&interface.id), None)
                     .map_err(map_replay_route_error)?;
@@ -369,8 +391,9 @@ use super::wire::{
 use super::{
     Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, Classified, DecodeOptions,
     Decoder, DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo,
-    InterfaceProvider, Kind, LinkCapability, LinkMode, LiveIoError, MaterializedRoute, PacketIo,
-    PlannedRoute, ProtocolRegistry, ReplayAuthorizationError, ReplayAuthorizer, ReplayTransmission,
-    ReplayTransmitter, RouteDecision, RouteProvider, RouteSelectionReason, SystemInterfaceProvider,
-    SystemLayer2Io, SystemLayer3Io, SystemRouteProvider, TransmissionFrame,
+    InterfaceProvider, Kind, LinkCapability, LinkMode, LiveIoError, MaterializedRoute,
+    NetworkEnvelope, PacketIo, PlannedRoute, ProtocolRegistry, ReplayAuthorizationError,
+    ReplayAuthorizer, ReplayTransmission, ReplayTransmitter, RouteDecision, RouteProvider,
+    RouteSelectionReason, SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io,
+    SystemRouteProvider, TransmissionFrame,
 };

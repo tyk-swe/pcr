@@ -309,14 +309,16 @@ impl RegistryBuilder {
                         protocol: entry.child.clone(),
                     });
                 }
-                reverse_bindings
-                    .entry((parent.clone(), entry.child.clone()))
-                    .or_default()
-                    .push(ReverseBinding {
-                        discriminator: *discriminator,
-                        priority: entry.priority,
-                    });
             }
+            entries.truncate(1);
+            let winner = entries.first().expect("bindings are never empty");
+            reverse_bindings
+                .entry((parent.clone(), winner.child.clone()))
+                .or_default()
+                .push(ReverseBinding {
+                    discriminator: *discriminator,
+                    priority: winner.priority,
+                });
         }
         for entries in reverse_bindings.values_mut() {
             entries.sort_by(|left, right| {
@@ -348,6 +350,7 @@ impl RegistryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::builtin::Module as BuiltinProtocols;
 
     #[test]
     fn rebinding_a_child_is_idempotent_only_at_the_same_priority() {
@@ -361,6 +364,59 @@ mod tests {
                 priority: 20,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn build_canonicalizes_priority_winners_in_both_directions() {
+        for candidates in [[("arp", 150), ("ipv6", 200)], [("ipv6", 200), ("arp", 150)]] {
+            let mut builder = RegistryBuilder::new();
+            builder.module(&BuiltinProtocols).unwrap();
+            for (child, priority) in candidates {
+                builder.bind("ethernet", 0x0800, child, priority).unwrap();
+            }
+
+            let registry = builder.build().unwrap();
+
+            assert_eq!(
+                registry.child_for(&ProtocolId::new("ethernet"), Discriminator(0x0800)),
+                Some(&ProtocolId::new("ipv6"))
+            );
+            assert_eq!(
+                registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("ipv6")),
+                Some(Discriminator(0x0800))
+            );
+            assert_eq!(
+                registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("arp")),
+                Some(Discriminator(0x0806))
+            );
+            assert_eq!(
+                registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("ipv4")),
+                None
+            );
+            assert_eq!(
+                registry
+                    .bindings
+                    .get(&(ProtocolId::new("ethernet"), Discriminator(0x0800)))
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn build_still_rejects_an_unknown_shadowed_child() {
+        let mut builder = RegistryBuilder::new();
+        builder.module(&BuiltinProtocols).unwrap();
+        builder
+            .bind("ethernet", 0x0800, "example.unknown", 0)
+            .unwrap();
+
+        assert!(matches!(
+            builder.build(),
+            Err(RegistryError::UnknownProtocol { protocol })
+                if protocol == ProtocolId::new("example.unknown")
         ));
     }
 }

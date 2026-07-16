@@ -15,6 +15,7 @@ use packetcraftr::session::{
 
 const FRAGMENT_SEGMENTS: usize = 255;
 const TCP_SEGMENTS: usize = 4_095;
+const TCP_SMALL_SEGMENTS: usize = 4_096;
 
 fn fragment_key() -> DatagramKey {
     DatagramKey {
@@ -96,6 +97,32 @@ fn in_order_tcp_state() -> (TcpReassembler, Instant) {
     reassembler
         .open_flow(tcp_key(), 100, now)
         .expect("benchmark flow should open");
+    (reassembler, now)
+}
+
+fn bounded_history_tcp_state() -> (TcpReassembler, Instant) {
+    const HISTORY_BYTES: usize = 256;
+    let now = Instant::now();
+    let mut reassembler = TcpReassembler::new(ReassemblyLimits {
+        max_bytes_per_flow: HISTORY_BYTES,
+        ..ReassemblyLimits::default()
+    });
+    reassembler
+        .open_flow(tcp_key(), 100, now)
+        .expect("benchmark flow should open");
+    reassembler
+        .push(
+            Segment {
+                flow: tcp_key(),
+                sequence: 100,
+                payload: Bytes::from(vec![0xa5; HISTORY_BYTES]),
+                syn: false,
+                fin: false,
+                rst: false,
+            },
+            now,
+        )
+        .expect("benchmark history should be prefilled");
     (reassembler, now)
 }
 
@@ -203,6 +230,35 @@ fn bench_reassembly(criterion: &mut Criterion) {
                         )
                         .expect("benchmark segment should be accepted"),
                 );
+            },
+            BatchSize::SmallInput,
+        );
+    });
+    in_order.throughput(criterion::Throughput::Bytes(TCP_SMALL_SEGMENTS as u64));
+    in_order.bench_function("many_small_segments", |bench| {
+        bench.iter_batched_ref(
+            bounded_history_tcp_state,
+            |(reassembler, now)| {
+                for index in 0..TCP_SMALL_SEGMENTS {
+                    let sequence = 356_u32
+                        .checked_add(u32::try_from(index).expect("benchmark sequence fits u32"))
+                        .expect("benchmark sequence fits u32");
+                    black_box(
+                        reassembler
+                            .push(
+                                Segment {
+                                    flow: tcp_key(),
+                                    sequence,
+                                    payload: Bytes::from_static(b"x"),
+                                    syn: false,
+                                    fin: false,
+                                    rst: false,
+                                },
+                                *now,
+                            )
+                            .expect("benchmark segment should be accepted"),
+                    );
+                }
             },
             BatchSize::SmallInput,
         );

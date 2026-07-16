@@ -15,11 +15,27 @@ pub(super) fn map_replay_route_error(source: crate::net::route::NativeRouteError
     }
 }
 
-pub(super) fn replay_network_envelope(bytes: &[u8]) -> Result<NetworkEnvelope, LiveIoError> {
+pub(super) fn replay_network_envelope(frame: &Frame) -> Result<NetworkEnvelope, LiveIoError> {
     let invalid = |message: String| LiveIoError::InvalidTransmissionFrame { message };
+    let bytes = frame.bytes().as_ref();
     let Some(version) = bytes.first().map(|byte| byte >> 4) else {
         return Err(invalid("replay frame is empty".to_owned()));
     };
+    match (frame.link_type, version) {
+        (LinkType::IPV4, actual) if actual != 4 => {
+            return Err(invalid(format!(
+                "capture link type {} declares IPv4 but the frame contains IP version {actual}",
+                frame.link_type.0
+            )));
+        }
+        (LinkType::IPV6, actual) if actual != 6 => {
+            return Err(invalid(format!(
+                "capture link type {} declares IPv6 but the frame contains IP version {actual}",
+                frame.link_type.0
+            )));
+        }
+        _ => {}
+    }
     match version {
         4 if bytes.len() >= 20 => {
             let source = Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15]);

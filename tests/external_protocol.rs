@@ -298,6 +298,53 @@ fn external_module_builds_and_decodes_ethernet_foo_raw() {
 }
 
 #[test]
+fn shadowed_binding_cannot_encode_a_winning_external_discriminator() {
+    let mut builder = ProtocolRegistry::builder();
+    builder.module(&BuiltinProtocols).unwrap();
+    builder.module(&FooModule).unwrap();
+    builder.bind("ethernet", 0x88b5, "ipv4", 150).unwrap();
+    let registry = Arc::new(builder.build().unwrap());
+
+    assert_eq!(
+        registry.child_for(&ProtocolId::new("ethernet"), Discriminator(0x88b5)),
+        Some(&ProtocolId::new("example.foo"))
+    );
+    assert_eq!(
+        registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("ipv4")),
+        Some(Discriminator(0x0800))
+    );
+
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet {
+            destination: [0, 1, 2, 3, 4, 5],
+            source: [6, 7, 8, 9, 10, 11],
+            ether_type: WireValue::Auto,
+        })
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        })
+        .push(Tcp {
+            source_port: 40_000,
+            destination_port: 443,
+            ..Tcp::default()
+        });
+
+    let built = Builder::new(Arc::clone(&registry))
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    assert_eq!(&built.bytes[12..14], &[0x08, 0x00]);
+
+    let decoded = Dissector::new(registry)
+        .decode_with_root(built.bytes, ProtocolId::new("ethernet"), Default::default())
+        .unwrap();
+    assert!(decoded.packet.get::<Ipv4>().is_some());
+    assert!(decoded.packet.get::<Foo>().is_none());
+}
+
+#[test]
 fn tcp_matcher_counts_an_external_protocol_payload() {
     let mut registry_builder = ProtocolRegistry::builder();
     registry_builder.module(&BuiltinProtocols).unwrap();

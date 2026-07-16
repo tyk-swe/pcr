@@ -13,6 +13,12 @@ use super::wire::{
     validate_declared_lengths,
 };
 
+#[derive(Clone, Copy)]
+pub(super) struct SectionHeader {
+    pub endianness: Endianness,
+    pub length: Option<u64>,
+}
+
 pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option<[u8; 8]>, Error> {
     let mut header = [0_u8; 8];
     if read_exact_or_eof(reader, &mut header, "pcapng block header")? {
@@ -25,7 +31,7 @@ pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option
 pub(super) fn read_section_header_after_type<R: Read>(
     reader: &mut R,
     max_size: usize,
-) -> Result<Endianness, Error> {
+) -> Result<SectionHeader, Error> {
     let mut length = [0_u8; 4];
     read_exact_counted(reader, &mut length, "pcapng section header length")?;
     read_section_header_with_length(reader, length, max_size)
@@ -35,7 +41,7 @@ pub(super) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
-) -> Result<Endianness, Error> {
+) -> Result<SectionHeader, Error> {
     let mut raw_bom = [0_u8; 4];
     read_exact_counted(reader, &mut raw_bom, "pcapng byte-order magic")?;
     let endianness = match raw_bom {
@@ -98,7 +104,10 @@ pub(super) fn read_section_header_with_length<R: Read>(
         "pcapng section options",
         |_, _| Ok(()),
     )?;
-    Ok(endianness)
+    Ok(SectionHeader {
+        endianness,
+        length: u64::try_from(section_length).ok(),
+    })
 }
 
 pub(super) fn validate_pcapng_block_length(length: u32, max_size: usize) -> Result<(), Error> {

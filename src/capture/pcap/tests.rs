@@ -20,6 +20,11 @@ fn frame(timestamp: SystemTime, link_type: LinkType, bytes: &[u8]) -> Frame {
     Frame::new(timestamp, link_type, Bytes::copy_from_slice(bytes)).unwrap()
 }
 
+fn declare_little_endian_section_length(bytes: &mut [u8]) {
+    let section_length = i64::try_from(bytes.len() - 28).unwrap();
+    bytes[16..24].copy_from_slice(&section_length.to_le_bytes());
+}
+
 #[test]
 fn classic_pcap_round_trip_preserves_full_record() {
     let timestamp = UNIX_EPOCH + Duration::new(1_700_000_000, 123_456_789);
@@ -822,6 +827,100 @@ fn pcapng_accepts_compatible_minor_version_two_and_rejects_unaligned_section_len
             reason: "section length is not a multiple of four",
         })
     ));
+}
+
+#[test]
+fn pcapng_finite_section_accepts_exact_boundary_at_eof() {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    writer.add_interface(LinkType::ETHERNET).unwrap();
+    let mut bytes = writer.into_inner();
+    declare_little_endian_section_length(&mut bytes);
+
+    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    assert_eq!(reader.next_frame().unwrap(), None);
+    assert_eq!(reader.interfaces().len(), 1);
+}
+
+#[test]
+fn pcapng_finite_section_rejects_block_overrun() {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    writer.add_interface(LinkType::ETHERNET).unwrap();
+    let mut bytes = writer.into_inner();
+    bytes[16..24].copy_from_slice(&28_i64.to_le_bytes());
+
+    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::BlockCrossesSectionBoundary {
+            block_length: 32,
+            remaining: 28,
+        })
+    ));
+}
+
+#[test]
+fn pcapng_finite_section_rejects_premature_eof() {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    writer.add_interface(LinkType::ETHERNET).unwrap();
+    let mut bytes = writer.into_inner();
+    bytes[16..24].copy_from_slice(&44_i64.to_le_bytes());
+
+    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::SectionEndedEarly { remaining: 12 })
+    ));
+}
+
+#[test]
+fn pcapng_finite_section_rejects_new_section_before_boundary() {
+    let mut first = Writer::pcapng(Vec::new()).unwrap().into_inner();
+    first[16..24].copy_from_slice(&12_i64.to_le_bytes());
+    first.extend_from_slice(&Writer::pcapng(Vec::new()).unwrap().into_inner());
+
+    let mut reader = Reader::new(Cursor::new(first)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::SectionHeaderBeforeBoundary { remaining: 12 })
+    ));
+}
+
+#[test]
+fn pcapng_finite_section_rejects_short_remainder_without_reading_past_boundary() {
+    let mut bytes = Writer::pcapng(Vec::new()).unwrap().into_inner();
+    bytes[16..24].copy_from_slice(&4_i64.to_le_bytes());
+    bytes.extend_from_slice(&[0xa5; 8]);
+
+    let mut reader = Reader::new(Cursor::new(bytes)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::SectionRemainderTooSmall { remaining: 4 })
+    ));
+    assert_eq!(reader.get_ref().position(), 28);
+}
+
+#[test]
+fn pcapng_finite_sections_can_be_adjacent() {
+    let mut first_writer = Writer::new(Vec::new(), Format::PcapNg, LinkType::ETHERNET).unwrap();
+    let mut first_frame = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]);
+    first_frame.interface = Some(0);
+    first_writer.write_frame(&first_frame).unwrap();
+    let mut first = first_writer.into_inner();
+    declare_little_endian_section_length(&mut first);
+
+    let mut second_writer = Writer::new(Vec::new(), Format::PcapNg, LinkType::LINUX_SLL).unwrap();
+    let mut second_frame = frame(UNIX_EPOCH, LinkType::LINUX_SLL, &[2]);
+    second_frame.interface = Some(0);
+    second_writer.write_frame(&second_frame).unwrap();
+    let mut second = second_writer.into_inner();
+    declare_little_endian_section_length(&mut second);
+    first.extend_from_slice(&second);
+
+    let mut reader = Reader::new(Cursor::new(first)).unwrap();
+    assert_eq!(reader.next_frame().unwrap(), Some(first_frame));
+    second_frame.interface = Some(1);
+    assert_eq!(reader.next_frame().unwrap(), Some(second_frame));
+    assert_eq!(reader.next_frame().unwrap(), None);
 }
 
 #[test]

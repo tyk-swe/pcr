@@ -30,6 +30,7 @@ pub(super) enum ReaderState {
         endianness: Endianness,
         interfaces: Vec<Interface>,
         interface_base: u32,
+        remaining_in_section: Option<u64>,
     },
 }
 
@@ -119,11 +120,12 @@ impl<R: Read> Reader<R> {
                 read_pcap_header(&mut inner, Endianness::Big, TimestampPrecision::Nanoseconds)?
             }
             PCAPNG_SECTION_HEADER => {
-                let endianness = read_section_header_after_type(&mut inner, max_size)?;
+                let header = read_section_header_after_type(&mut inner, max_size)?;
                 ReaderState::PcapNg {
-                    endianness,
+                    endianness: header.endianness,
                     interfaces: Vec::new(),
                     interface_base: 0,
+                    remaining_in_section: header.length,
                 }
             }
             unknown_magic => {
@@ -244,28 +246,41 @@ impl<R: Read> Reader<R> {
     fn next_pcapng_frame(&mut self) -> Result<Option<Frame>, Error> {
         let mut metadata_blocks = 0usize;
         loop {
-            let (section_endianness, section_interfaces, section_interface_base) = match &self.state
-            {
-                ReaderState::PcapNg {
-                    endianness,
-                    interfaces,
-                    interface_base,
-                } => (*endianness, interfaces, *interface_base),
-                ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
-            };
+            let (section_endianness, section_interface_base, remaining_in_section) =
+                match &self.state {
+                    ReaderState::PcapNg {
+                        endianness,
+                        interface_base,
+                        remaining_in_section,
+                        ..
+                    } => (*endianness, *interface_base, *remaining_in_section),
+                    ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
+                };
 
+            if let Some(remaining) = remaining_in_section
+                && remaining != 0
+                && remaining < 12
+            {
+                return Err(Error::SectionRemainderTooSmall { remaining });
+            }
             let Some(raw_header) = read_pcapng_block_header(&mut self.inner)? else {
+                if let Some(remaining) = remaining_in_section.filter(|remaining| *remaining != 0) {
+                    return Err(Error::SectionEndedEarly { remaining });
+                }
                 return Ok(None);
             };
 
             if raw_header[..4] == PCAPNG_SECTION_HEADER {
+                if let Some(remaining) = remaining_in_section.filter(|remaining| *remaining != 0) {
+                    return Err(Error::SectionHeaderBeforeBoundary { remaining });
+                }
                 metadata_blocks = metadata_blocks.saturating_add(1);
                 if metadata_blocks > self.max_metadata_blocks_per_frame {
                     return Err(Error::MetadataBlockLimit {
                         limit: self.max_metadata_blocks_per_frame,
                     });
                 }
-                let new_endianness = read_section_header_with_length(
+                let header = read_section_header_with_length(
                     &mut self.inner,
                     raw_header[4..8].try_into().expect("four-byte slice"),
                     self.max_size,
@@ -275,6 +290,7 @@ impl<R: Read> Reader<R> {
                         endianness,
                         interfaces,
                         interface_base,
+                        remaining_in_section,
                     } => {
                         *interface_base = interface_base
                             .checked_add(u32::try_from(interfaces.len()).map_err(|_| {
@@ -285,8 +301,9 @@ impl<R: Read> Reader<R> {
                             .ok_or(Error::InterfaceLimit {
                                 limit: self.max_interfaces,
                             })?;
-                        *endianness = new_endianness;
+                        *endianness = header.endianness;
                         interfaces.clear();
+                        *remaining_in_section = header.length;
                     }
                     ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                 }
@@ -296,6 +313,14 @@ impl<R: Read> Reader<R> {
             let block_type = decode_u32(section_endianness, &raw_header[..4]);
             let block_length = decode_u32(section_endianness, &raw_header[4..8]);
             validate_pcapng_block_length(block_length, self.max_size)?;
+            if let Some(remaining) = remaining_in_section
+                && u64::from(block_length) > remaining
+            {
+                return Err(Error::BlockCrossesSectionBoundary {
+                    block_length,
+                    remaining,
+                });
+            }
             let remaining =
                 usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
                     length: block_length,
@@ -312,6 +337,14 @@ impl<R: Read> Reader<R> {
                 });
             }
             let body = &block[..body_length];
+
+            if let ReaderState::PcapNg {
+                remaining_in_section: Some(remaining),
+                ..
+            } = &mut self.state
+            {
+                *remaining -= u64::from(block_length);
+            }
 
             if !matches!(
                 block_type,
@@ -347,30 +380,42 @@ impl<R: Read> Reader<R> {
                     }
                 }
                 PCAPNG_ENHANCED_PACKET_BLOCK => {
+                    let interfaces = match &self.state {
+                        ReaderState::PcapNg { interfaces, .. } => interfaces,
+                        ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
+                    };
                     return parse_enhanced_packet(
                         body,
                         section_endianness,
-                        section_interfaces,
+                        interfaces,
                         section_interface_base,
                         self.max_size,
                     )
                     .map(Some);
                 }
                 PCAPNG_PACKET_BLOCK => {
+                    let interfaces = match &self.state {
+                        ReaderState::PcapNg { interfaces, .. } => interfaces,
+                        ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
+                    };
                     return parse_obsolete_packet(
                         body,
                         section_endianness,
-                        section_interfaces,
+                        interfaces,
                         section_interface_base,
                         self.max_size,
                     )
                     .map(Some);
                 }
                 PCAPNG_SIMPLE_PACKET_BLOCK => {
+                    let interfaces = match &self.state {
+                        ReaderState::PcapNg { interfaces, .. } => interfaces,
+                        ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
+                    };
                     return parse_simple_packet(
                         body,
                         section_endianness,
-                        section_interfaces,
+                        interfaces,
                         section_interface_base,
                         self.max_size,
                     )

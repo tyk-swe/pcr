@@ -928,37 +928,64 @@ fn read_exposes_bounded_capture_file_writers() {
 }
 
 #[test]
-fn empty_replay_is_a_typed_aggregate_without_live_side_effects() {
+fn empty_replay_supports_every_output_without_live_side_effects() {
     let path = write_capture(&[], false);
-    let output = binary()
-        .args([
-            "--output",
-            "json",
-            "replay",
-            path.to_str().unwrap(),
-            "--interface",
-            "definitely-missing-interface",
-            "--timing",
-            "immediate",
-        ])
-        .output()
-        .unwrap();
+    for format in ["text", "json", "ndjson", "pcap", "pcapng"] {
+        let output = binary()
+            .args([
+                "--output",
+                format,
+                "replay",
+                path.to_str().unwrap(),
+                "--interface",
+                "definitely-missing-interface",
+                "--timing",
+                "immediate",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty(), "{format}");
+        match format {
+            "text" => assert_eq!(
+                std::str::from_utf8(&output.stdout).unwrap(),
+                "replayed 0 frame(s), 0 byte(s), scheduled delay 0ns\n"
+            ),
+            "json" | "ndjson" => {
+                let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(value["command"], "replay");
+                assert_eq!(value["result"]["frames_attempted"], 0);
+                assert_eq!(value["result"]["frames_completed"], 0);
+                assert_eq!(value["result"]["bytes_completed"], 0);
+                assert_eq!(
+                    value["result"]["requested_interface"]["name"],
+                    "definitely-missing-interface"
+                );
+                assert_eq!(value["result"]["frames"], serde_json::json!([]));
+                if format == "ndjson" {
+                    assert_eq!(value["sequence"], 0);
+                }
+            }
+            "pcap" | "pcapng" => {
+                let mut reader = Reader::new(std::io::Cursor::new(output.stdout)).unwrap();
+                assert_eq!(
+                    reader.format(),
+                    if format == "pcap" {
+                        CaptureFormat::Pcap
+                    } else {
+                        CaptureFormat::PcapNg
+                    }
+                );
+                assert!(reader.next_frame().unwrap().is_none(), "{format}");
+            }
+            _ => unreachable!(),
+        }
+    }
     std::fs::remove_file(&path).unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["command"], "replay");
-    assert_eq!(value["result"]["frames_attempted"], 0);
-    assert_eq!(value["result"]["frames_completed"], 0);
-    assert_eq!(value["result"]["bytes_completed"], 0);
-    assert_eq!(
-        value["result"]["requested_interface"]["name"],
-        "definitely-missing-interface"
-    );
-    assert_eq!(value["result"]["frames"], serde_json::json!([]));
 }
 
 #[test]

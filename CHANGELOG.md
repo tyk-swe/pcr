@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Made packet assembly grow amortized-contiguously and patched resolved MAC
   addresses directly into built-in Ethernet frames while retaining full rebuilds
   for external codecs.
+- Kept bounded TCP retransmission history in a ring buffer so long-lived streams
+  no longer copy the retained history for every small in-order segment.
 - Clarified traceroute probe identity, timeout, rate, policy, and output-format
   behavior in CLI help.
 
@@ -31,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserved per-hop network-layer identity across multi-attempt traceroutes,
   matched quoted ICMP errors with monotonic capture timing, rejected zero
   traceroute ports, and reused live client state across hops.
+- Enforced finite PCAPNG section boundaries, rejected raw IPv4/IPv6 replay when
+  the capture link type disagrees with the packet version, and made protocol
+  binding priority winners consistent for both decoding and packet building.
 
 ## [0.3.0] - 2026-07-14
 

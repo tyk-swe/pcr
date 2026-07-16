@@ -132,6 +132,16 @@ pub enum Error {
     InvalidBlockLength { length: u32 },
     #[error("pcapng block length footer {trailing} does not match header {leading}")]
     BlockLengthMismatch { leading: u32, trailing: u32 },
+    #[error(
+        "pcapng block of {block_length} bytes crosses the section boundary with {remaining} bytes remaining"
+    )]
+    BlockCrossesSectionBoundary { block_length: u32, remaining: u64 },
+    #[error("pcapng section ended with {remaining} declared bytes remaining")]
+    SectionEndedEarly { remaining: u64 },
+    #[error("new pcapng section begins with {remaining} declared bytes remaining")]
+    SectionHeaderBeforeBoundary { remaining: u64 },
+    #[error("pcapng section has {remaining} bytes remaining, fewer than a complete block header")]
+    SectionRemainderTooSmall { remaining: u64 },
     #[error("captured frame contains {actual} bytes, exceeding the u32 capture-record limit")]
     CapturedLengthTooLarge { actual: usize },
     #[error("frame captured length says {declared} bytes but contains {actual}")]

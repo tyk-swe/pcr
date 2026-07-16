@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 
-use super::wire::replay_wire_destinations;
+use super::wire::{replay_network_envelope, replay_wire_destinations};
 use super::*;
 use crate::capture::Writer;
 use std::result::Result;
@@ -127,6 +127,28 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
             error.classification().code,
             "capability.replay_routing_header"
         );
+    }
+}
+
+#[test]
+fn raw_ip_link_types_must_match_the_packet_version() {
+    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
+    for (link_type, bytes, declared) in [
+        (LinkType::IPV4, vec![0x60], "IPv4"),
+        (LinkType::IPV6, vec![0x45], "IPv6"),
+    ] {
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, link_type, bytes).unwrap();
+        let error = replay_network_envelope(&frame).unwrap_err();
+        assert!(error.to_string().contains(declared));
+
+        let mut authorizer = SystemAuthorizer::new(
+            crate::client::policy::Policy::default(),
+            Arc::clone(&registry),
+            true,
+        );
+        let error = authorizer.authorize(&frame, LinkMode::Layer3).unwrap_err();
+        assert_eq!(error.classification().code, "packet.replay_network");
+        assert!(error.to_string().contains(declared));
     }
 }
 

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::net::IpAddr;
 use std::ops::Range;
 use std::time::Instant;
@@ -110,7 +110,7 @@ struct TcpFlowState {
     // by the same per-flow budget as pending data so retransmission checking
     // cannot turn a long-lived stream into an unbounded byte log.
     history_start_offset: u64,
-    emitted_history: Bytes,
+    emitted_history: VecDeque<u8>,
     pending: BTreeMap<u64, Bytes>,
     pending_bytes: usize,
     fin_offset: Option<u64>,
@@ -123,7 +123,7 @@ impl TcpFlowState {
             base_sequence,
             next_offset: 0,
             history_start_offset: 0,
-            emitted_history: Bytes::new(),
+            emitted_history: VecDeque::new(),
             pending: BTreeMap::new(),
             pending_bytes: 0,
             fin_offset: None,
@@ -384,13 +384,18 @@ impl Reassembler {
             .min(initial_history_capacity)
             .saturating_add(merge.emitted_segment_bytes)
             .min(final_history_capacity);
+        let history_allocation = planned_history_allocation(
+            state.emitted_history.capacity(),
+            prospective_history,
+            final_history_capacity,
+        );
         let prospective_retained = final_pending_bytes.checked_add(prospective_history).ok_or(
             Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
             },
         )?;
         let prospective_memory = pending_memory_charge(final_pending_bytes, final_pending_segments)
-            .and_then(|charge| charge.checked_add(prospective_history))
+            .and_then(|charge| charge.checked_add(history_allocation))
             .ok_or(Error::AggregateByteLimit {
                 limit: self.limits.max_aggregate_bytes,
             })?;
@@ -464,6 +469,7 @@ impl Reassembler {
             direct_payload,
             pending_bytes,
             initial_history_capacity,
+            history_allocation,
             closed,
             aggregate_bytes,
             aggregate_memory_charge,
@@ -609,7 +615,15 @@ fn retained_bytes(state: &TcpFlowState) -> Option<usize> {
 
 fn flow_memory_charge(state: &TcpFlowState) -> Option<usize> {
     pending_memory_charge(state.pending_bytes, state.pending.len())?
-        .checked_add(state.emitted_history.len())
+        .checked_add(state.emitted_history.capacity())
+}
+
+fn planned_history_allocation(current: usize, required: usize, limit: usize) -> usize {
+    let retained = current.min(limit);
+    if required <= retained {
+        return retained;
+    }
+    retained.saturating_mul(2).max(required).min(limit)
 }
 
 fn emitted_history_conflicts(state: &TcpFlowState, offset: u64, payload: &[u8]) -> bool {
@@ -627,17 +641,27 @@ fn emitted_history_conflicts(state: &TcpFlowState, offset: u64, payload: &[u8]) 
     let payload_start = (overlap_start - offset) as usize;
     let history_start = (overlap_start - state.history_start_offset) as usize;
     let length = (overlap_end - overlap_start) as usize;
-    payload[payload_start..payload_start + length]
-        != state.emitted_history[history_start..history_start + length]
+    !state
+        .emitted_history
+        .range(history_start..history_start + length)
+        .eq(payload[payload_start..payload_start + length].iter())
 }
 
 fn trim_emitted_history(state: &mut TcpFlowState, capacity: usize) {
-    if state.emitted_history.len() <= capacity {
+    if state.emitted_history.len() > capacity {
+        let remove = state.emitted_history.len() - capacity;
+        state.history_start_offset = state.history_start_offset.saturating_add(remove as u64);
+        state.emitted_history.drain(..remove);
+    }
+}
+
+fn resize_emitted_history(state: &mut TcpFlowState, capacity: usize) {
+    if state.emitted_history.capacity() == capacity {
         return;
     }
-    let remove = state.emitted_history.len() - capacity;
-    state.history_start_offset = state.history_start_offset.saturating_add(remove as u64);
-    state.emitted_history = Bytes::copy_from_slice(&state.emitted_history[remove..]);
+    let mut resized = VecDeque::with_capacity(capacity);
+    resized.extend(state.emitted_history.drain(..));
+    state.emitted_history = resized;
 }
 
 fn append_emitted_history(
@@ -649,7 +673,7 @@ fn append_emitted_history(
     let output_end = output_start.saturating_add(output.len() as u64);
     if capacity == 0 {
         state.history_start_offset = output_end;
-        state.emitted_history = Bytes::new();
+        state.emitted_history.clear();
         return;
     }
 
@@ -663,15 +687,17 @@ fn append_emitted_history(
         .saturating_add(output.len())
         .min(capacity);
     let history_start_offset = output_end.saturating_sub(keep as u64);
-    let mut retained = Vec::with_capacity(keep);
     if !state.emitted_history.is_empty() && history_start_offset < output_start {
         let old_start = (history_start_offset - state.history_start_offset) as usize;
-        retained.extend_from_slice(&state.emitted_history[old_start..]);
+        state.emitted_history.drain(..old_start);
+    } else {
+        state.emitted_history.clear();
     }
     let output_skip = history_start_offset.saturating_sub(output_start) as usize;
-    retained.extend_from_slice(&output[output_skip..]);
+    state
+        .emitted_history
+        .extend(output[output_skip..].iter().copied());
     state.history_start_offset = history_start_offset;
-    state.emitted_history = Bytes::from(retained);
 }
 
 #[derive(Debug)]
@@ -684,6 +710,7 @@ struct PushPlan {
     direct_payload: Option<Range<usize>>,
     pending_bytes: usize,
     initial_history_capacity: usize,
+    history_allocation: usize,
     closed: bool,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
@@ -854,6 +881,7 @@ fn commit_flow_push(
         merge,
         pending_bytes,
         initial_history_capacity,
+        history_allocation,
         ..
     } = plan;
     retransmitted += merge.overlapping_bytes;
@@ -861,6 +889,7 @@ fn commit_flow_push(
 
     state.last_update = now;
     trim_emitted_history(state, initial_history_capacity);
+    resize_emitted_history(state, history_allocation);
     apply_pending_merge(state, merge);
     state.pending_bytes = pending_bytes;
     if state.fin_offset.is_none() {
@@ -992,6 +1021,79 @@ mod tests {
             fin: false,
             rst: false,
         }
+    }
+
+    fn emitted_bytes(state: &TcpFlowState) -> Vec<u8> {
+        state.emitted_history.iter().copied().collect()
+    }
+
+    #[test]
+    fn emitted_history_wraparound_preserves_byte_order() {
+        let mut state = TcpFlowState::new(100, Instant::now());
+        state.emitted_history.reserve_exact(4);
+        let capacity = state.emitted_history.capacity();
+        let initial = (0..capacity).map(|value| value as u8).collect::<Vec<_>>();
+
+        append_emitted_history(&mut state, 0, &initial, capacity);
+        append_emitted_history(&mut state, capacity as u64, &[0xfe, 0xff], capacity);
+
+        let mut expected = initial[2..].to_vec();
+        expected.extend_from_slice(&[0xfe, 0xff]);
+        assert_eq!(emitted_bytes(&state), expected);
+        assert_eq!(state.history_start_offset, 2);
+        assert!(!state.emitted_history.as_slices().1.is_empty());
+    }
+
+    #[test]
+    fn emitted_history_trimming_discards_the_oldest_bytes() {
+        let mut state = TcpFlowState::new(100, Instant::now());
+        append_emitted_history(&mut state, 0, b"abcdef", 6);
+
+        trim_emitted_history(&mut state, 3);
+
+        assert_eq!(state.history_start_offset, 3);
+        assert_eq!(emitted_bytes(&state), b"def");
+    }
+
+    #[test]
+    fn emitted_history_conflict_detection_crosses_wraparound() {
+        let mut state = TcpFlowState::new(100, Instant::now());
+        state.emitted_history.reserve_exact(4);
+        let capacity = state.emitted_history.capacity();
+        let initial = vec![b'a'; capacity];
+        append_emitted_history(&mut state, 0, &initial, capacity);
+        append_emitted_history(&mut state, capacity as u64, b"bc", capacity);
+        assert!(!state.emitted_history.as_slices().1.is_empty());
+        let retained = emitted_bytes(&state);
+
+        assert!(!emitted_history_conflicts(
+            &state,
+            state.history_start_offset,
+            &retained
+        ));
+        let mut conflicting = retained;
+        conflicting[capacity - 2] = b'x';
+        assert!(emitted_history_conflicts(
+            &state,
+            state.history_start_offset,
+            &conflicting
+        ));
+    }
+
+    #[test]
+    fn emitted_history_zero_capacity_retains_no_bytes() {
+        let mut state = TcpFlowState::new(100, Instant::now());
+        append_emitted_history(&mut state, 0, b"abc", 3);
+
+        trim_emitted_history(&mut state, 0);
+        assert!(state.emitted_history.is_empty());
+        assert_eq!(state.history_start_offset, 3);
+
+        append_emitted_history(&mut state, 3, b"de", 0);
+
+        assert!(state.emitted_history.is_empty());
+        assert_eq!(state.history_start_offset, 5);
+        assert!(!emitted_history_conflicts(&state, 3, b"XX"));
     }
 
     #[test]
@@ -1224,6 +1326,27 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[test]
+    fn pending_data_releases_excess_history_allocation() {
+        let now = Instant::now();
+        let limits = Limits {
+            max_bytes_per_flow: 8,
+            max_aggregate_bytes: 72,
+            ..Limits::default()
+        };
+        let mut reassembler = Reassembler::new(limits);
+        reassembler.open_flow(flow(), 100, now).unwrap();
+        reassembler.push(segment(100, b"abcdefgh"), now).unwrap();
+
+        reassembler.push(segment(109, b"1234567"), now).unwrap();
+
+        let state = reassembler.flows.get(&flow()).unwrap();
+        assert_eq!(state.pending_bytes, 7);
+        assert_eq!(state.emitted_history.len(), 1);
+        assert!(state.emitted_history.capacity() <= 1);
+        assert_eq!(reassembler.aggregate_memory_charge(), 72);
     }
 
     #[test]

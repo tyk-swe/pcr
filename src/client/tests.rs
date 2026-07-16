@@ -1,8 +1,9 @@
-use std::collections::VecDeque;
+use std::any::Any;
+use std::collections::{BTreeMap, VecDeque};
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -12,7 +13,7 @@ use super::exchange::{
     CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext, ExchangeResult,
     MAX_EXCHANGE_TIMEOUT, PreparedExchangePacket,
 };
-use super::helpers::reserve_capture_evidence;
+use super::helpers::{patch_builtin_ethernet, reserve_capture_evidence};
 use super::policy::{TrafficPolicy, TrafficPolicyError};
 use super::send::{ClientError, SendOptions};
 use super::target::{
@@ -38,13 +39,18 @@ use crate::net::{
 use crate::packet::{
     Packet,
     build::{BuildContext, BuildOptions, Builder},
+    codec::{
+        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        LayerEncodeContext,
+    },
     decode::Dissector,
     field::{FieldValue, WireValue},
-    layer::Raw,
+    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId, Raw},
+    registry::RegistryBuilder,
     template::{PacketTemplate, TemplateValues},
 };
 use crate::protocol::{
-    builtin::registry as default_registry,
+    builtin::{Module as BuiltinProtocols, registry as default_registry},
     icmp::Icmpv4,
     ipv6::SegmentRoutingHeader,
     link::{Ethernet, Vlan, Vlan8021ad},
@@ -94,6 +100,139 @@ impl RouteProvider for CountingRoutes {
     ) -> Result<RouteDecision, Self::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(self.decision.clone())
+    }
+}
+
+#[derive(Clone)]
+struct SlowRoutes {
+    decision: RouteDecision,
+    calls: Arc<AtomicUsize>,
+    delay: Duration,
+}
+
+impl RouteProvider for SlowRoutes {
+    type Error = Infallible;
+
+    fn lookup(
+        &self,
+        _destination: IpAddr,
+        _interface_hint: Option<&InterfaceId>,
+    ) -> Result<RouteDecision, Self::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        std::thread::sleep(self.delay);
+        Ok(self.decision.clone())
+    }
+}
+
+#[derive(Clone)]
+struct DestinationRoutes {
+    calls: Arc<AtomicUsize>,
+}
+
+impl RouteProvider for DestinationRoutes {
+    type Error = Infallible;
+
+    fn lookup(
+        &self,
+        destination: IpAddr,
+        _interface_hint: Option<&InterfaceId>,
+    ) -> Result<RouteDecision, Self::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut decision = route(LinkCapability::Layer3);
+        if destination == IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3)) {
+            decision.interface = InterfaceId {
+                name: "other0".to_owned(),
+                index: 8,
+            };
+        }
+        Ok(decision)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct MacSensitiveLayer;
+
+fn mac_sensitive_schema() -> &'static LayerSchema {
+    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
+    static FIELDS: &[FieldSchema] = &[];
+    SCHEMA.get_or_init(|| LayerSchema {
+        protocol: ProtocolId::new("test.mac_sensitive"),
+        name: "MAC-sensitive test layer",
+        fields: FIELDS,
+    })
+}
+
+impl Layer for MacSensitiveLayer {
+    fn schema(&self) -> &'static LayerSchema {
+        mac_sensitive_schema()
+    }
+
+    fn clone_box(&self) -> Box<dyn Layer> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn field(&self, _name: &str) -> Option<FieldValue> {
+        None
+    }
+
+    fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
+        Err(FieldError::UnknownField {
+            protocol: self.protocol_id(),
+            field: name.to_owned(),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct MacSensitiveCodec;
+
+impl LayerCodec for MacSensitiveCodec {
+    fn protocol_id(&self) -> ProtocolId {
+        ProtocolId::new("test.mac_sensitive")
+    }
+
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        _payload: &[u8],
+        context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, CodecError> {
+        let source = context
+            .packet
+            .get::<Ethernet>()
+            .expect("test packet has Ethernet")
+            .source;
+        Ok(EncodedLayer::header(vec![source[0]], layer.clone_box()))
+    }
+
+    fn decode(
+        &self,
+        input: &[u8],
+        _context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayerValue, CodecError> {
+        if input.is_empty() {
+            return Err(CodecError::Truncated {
+                protocol: self.protocol_id(),
+                needed: 1,
+                available: 0,
+            });
+        }
+        Ok(DecodedLayerValue::terminal(Box::new(MacSensitiveLayer), 1))
+    }
+
+    fn make_layer(
+        &self,
+        _fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, CodecError> {
+        Ok(Box::new(MacSensitiveLayer))
     }
 }
 
@@ -965,6 +1104,283 @@ fn invalid_exchange_limits_fail_before_route_or_live_side_effects() {
     }
     assert_eq!(route_calls.load(Ordering::SeqCst), 0);
     assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn exchange_reuses_route_lookup_for_transport_only_template_variants() {
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        CountingRoutes {
+            decision: route(LinkCapability::Layer3),
+            calls: Arc::clone(&route_calls),
+        },
+        CountingNeighbors::default(),
+        ScriptedExchangeIo {
+            events: Arc::new(Mutex::new(Vec::new())),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        },
+        TrafficPolicy::default(),
+    );
+    let template = PacketTemplate::new(packet(
+        Ipv4Addr::new(10, 0, 0, 1),
+        Ipv4Addr::new(10, 0, 0, 2),
+        12_345,
+        1,
+    ))
+    .axis(
+        1,
+        "destination_port",
+        TemplateValues::UnsignedRange {
+            start: 1,
+            end_inclusive: 64,
+        },
+    );
+    let options = ExchangeOptions {
+        send: SendOptions {
+            plan: PlanOptions {
+                link_mode: LinkMode::Layer3,
+                ..PlanOptions::default()
+            },
+            ..SendOptions::default()
+        },
+        ..ExchangeOptions::default()
+    };
+
+    let result = client.exchange(&template, options.clone()).unwrap();
+    assert_eq!(result.sent.len(), 64);
+    assert_eq!(route_calls.load(Ordering::SeqCst), 1);
+
+    client.exchange(&template, options).unwrap();
+    assert_eq!(route_calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn exchange_uses_one_route_lookup_per_distinct_lookup_destination() {
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        CountingRoutes {
+            decision: route(LinkCapability::Layer3),
+            calls: Arc::clone(&route_calls),
+        },
+        CountingNeighbors::default(),
+        ScriptedExchangeIo {
+            events: Arc::new(Mutex::new(Vec::new())),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        },
+        TrafficPolicy::default(),
+    );
+    let template = PacketTemplate::new(packet(
+        Ipv4Addr::new(10, 0, 0, 1),
+        Ipv4Addr::new(10, 0, 0, 2),
+        12_345,
+        9,
+    ))
+    .axis(
+        0,
+        "destination",
+        TemplateValues::Values(vec![
+            FieldValue::Ipv4(Ipv4Addr::new(10, 0, 0, 2)),
+            FieldValue::Ipv4(Ipv4Addr::new(10, 0, 0, 3)),
+        ]),
+    );
+
+    let result = client
+        .exchange(
+            &template,
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                ..ExchangeOptions::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(result.sent.len(), 2);
+    assert_eq!(route_calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn heterogeneous_exchange_routes_fail_before_capture_or_transmission() {
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        DestinationRoutes {
+            calls: Arc::clone(&route_calls),
+        },
+        CountingNeighbors::default(),
+        ScriptedExchangeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        },
+        TrafficPolicy::default(),
+    );
+    let template = PacketTemplate::new(packet(
+        Ipv4Addr::new(10, 0, 0, 1),
+        Ipv4Addr::new(10, 0, 0, 2),
+        12_345,
+        9,
+    ))
+    .axis(
+        0,
+        "destination",
+        TemplateValues::Values(vec![
+            FieldValue::Ipv4(Ipv4Addr::new(10, 0, 0, 2)),
+            FieldValue::Ipv4(Ipv4Addr::new(10, 0, 0, 3)),
+        ]),
+    );
+
+    assert!(matches!(
+        client.exchange(
+            &template,
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                ..ExchangeOptions::default()
+            },
+        ),
+        Err(ClientError::HeterogeneousExchangeRoute)
+    ));
+    assert_eq!(route_calls.load(Ordering::SeqCst), 2);
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn exchange_policy_checks_are_not_bypassed_by_cached_route_decisions() {
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        CountingRoutes {
+            decision: route(LinkCapability::Layer3),
+            calls: Arc::clone(&route_calls),
+        },
+        CountingNeighbors::default(),
+        ScriptedExchangeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        },
+        TrafficPolicy::default(),
+    );
+    let template = PacketTemplate::new(packet(
+        Ipv4Addr::new(10, 0, 0, 1),
+        Ipv4Addr::new(10, 0, 0, 2),
+        12_345,
+        9,
+    ))
+    .axis(
+        0,
+        "options",
+        TemplateValues::Values(vec![
+            FieldValue::Bytes(Bytes::new()),
+            FieldValue::Bytes(Bytes::from_static(&[131, 7, 4, 8, 8, 8, 8])),
+        ]),
+    );
+
+    assert!(matches!(
+        client.exchange(
+            &template,
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                ..ExchangeOptions::default()
+            },
+        ),
+        Err(ClientError::Policy(TrafficPolicyError::PublicDestination { destination }))
+            if destination == IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
+    ));
+    assert_eq!(route_calls.load(Ordering::SeqCst), 1);
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn expired_preparation_does_not_start_a_second_route_lookup() {
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        SlowRoutes {
+            decision: route(LinkCapability::Layer3),
+            calls: Arc::clone(&route_calls),
+            delay: Duration::from_millis(300),
+        },
+        CountingNeighbors::default(),
+        ScriptedExchangeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        },
+        TrafficPolicy::default(),
+    );
+    let template = PacketTemplate::new(packet(
+        Ipv4Addr::new(10, 0, 0, 1),
+        Ipv4Addr::new(10, 0, 0, 2),
+        12_345,
+        9,
+    ))
+    .axis(
+        1,
+        "destination_port",
+        TemplateValues::UnsignedRange {
+            start: 9,
+            end_inclusive: 10,
+        },
+    );
+    let error = client
+        .exchange(
+            &template,
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                timeout: Duration::from_millis(100),
+                ..ExchangeOptions::default()
+            },
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::Io(LiveIoError::DeadlineExceeded {
+            operation: "preparing the exchange"
+        })
+    ));
+    assert_eq!(route_calls.load(Ordering::SeqCst), 1);
     assert!(events.lock().unwrap().is_empty());
 }
 
@@ -1858,6 +2274,119 @@ fn send_materializes_resolved_and_interface_owned_macs() {
     assert_eq!(&report.built.bytes[..6], &[0, 1, 2, 3, 4, 5]);
     assert_eq!(&report.built.bytes[6..12], &[2, 0, 0, 0, 0, 1]);
     assert_eq!(neighbors.0.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn built_in_ethernet_mac_patch_matches_a_full_rebuild_and_keeps_metadata() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let mut packet = packet(
+        Ipv4Addr::new(10, 0, 0, 1),
+        Ipv4Addr::new(10, 0, 0, 2),
+        12_345,
+        9,
+    );
+    packet.insert(0, Ethernet::default()).unwrap();
+    let mut patched = builder
+        .build(
+            packet.clone(),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    let mut materialized = packet;
+    let ethernet = materialized.get_mut::<Ethernet>().unwrap();
+    ethernet.destination = [0, 1, 2, 3, 4, 5];
+    ethernet.source = [2, 0, 0, 0, 0, 1];
+
+    assert!(patch_builtin_ethernet(
+        &registry,
+        &mut patched,
+        &materialized
+    ));
+    let rebuilt = builder
+        .build(
+            materialized,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+
+    assert_eq!(patched.bytes, rebuilt.bytes);
+    assert!(patched.packet.structurally_eq(&rebuilt.packet));
+    assert_eq!(patched.layout, rebuilt.layout);
+    assert_eq!(patched.diagnostics, rebuilt.diagnostics);
+    assert_eq!(
+        (0..patched.packet.len())
+            .map(|index| patched.packet.encoded_payload_length(index))
+            .collect::<Vec<_>>(),
+        (0..rebuilt.packet.len())
+            .map(|index| rebuilt.packet.encoded_payload_length(index))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn external_codec_dependent_on_ethernet_macs_uses_the_rebuild_fallback() {
+    let mut builder = RegistryBuilder::new();
+    builder.module(&BuiltinProtocols).unwrap();
+    builder.register_codec(MacSensitiveCodec).unwrap();
+    builder
+        .bind("ethernet", 0x88b5, "test.mac_sensitive", 200)
+        .unwrap();
+    let registry = Arc::new(builder.build().unwrap());
+    let mut decision = RouteDecision {
+        selected_address: None,
+        preferred_source: None,
+        next_hop: None,
+        capability: LinkCapability::Layer2,
+        link_type: LinkType::ETHERNET,
+        ..route(LinkCapability::Layer2)
+    };
+    decision.source_mac = Some(MacAddress([2, 0, 0, 0, 0, 1]));
+    let interface = decision.interface.clone();
+    let ip_lookups = Arc::new(AtomicUsize::new(0));
+    let interface_lookups = Arc::new(AtomicUsize::new(0));
+    let io = RecordingIo::default();
+    let client = Client::new(
+        registry,
+        InterfaceRoutes {
+            decision,
+            ip_lookups: Arc::clone(&ip_lookups),
+            interface_lookups: Arc::clone(&interface_lookups),
+        },
+        CountingNeighbors::default(),
+        io.clone(),
+        TrafficPolicy::default(),
+    );
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet {
+            destination: [2, 0, 0, 0, 0, 2],
+            source: [0; 6],
+            ether_type: WireValue::Exact(0x88b5),
+        })
+        .push(MacSensitiveLayer);
+
+    let report = client
+        .send(
+            packet,
+            SendOptions {
+                plan: PlanOptions {
+                    link_mode: LinkMode::Layer2,
+                    interface: Some(interface),
+                    preferred_source: None,
+                },
+                ..SendOptions::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(ip_lookups.load(Ordering::SeqCst), 0);
+    assert_eq!(interface_lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(&report.built.bytes[6..12], &[2, 0, 0, 0, 0, 1]);
+    assert_eq!(report.built.bytes[14], 2);
+    assert_eq!(io.0.lock().unwrap().as_slice(), &[report.built.bytes]);
 }
 
 #[test]

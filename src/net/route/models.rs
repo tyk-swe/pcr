@@ -76,6 +76,10 @@ pub trait RouteProvider: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Passive lookup only. Implementations must not emit neighbor traffic.
+    ///
+    /// A client may reuse a successful decision for identical arguments during
+    /// one exchange, so implementations should provide a consistent snapshot
+    /// for the duration of that operation.
     fn lookup(
         &self,
         destination: IpAddr,

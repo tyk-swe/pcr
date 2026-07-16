@@ -213,6 +213,23 @@ impl Packet {
         }
     }
 
+    /// Mutates a layer whose encoded payload boundary is known to be unchanged.
+    /// Callers must update only fixed-width fields covered by an existing layout.
+    pub(crate) fn mutate_fixed_width_layer<T: Layer + 'static>(
+        &mut self,
+        index: usize,
+        mutate: impl FnOnce(&mut T),
+    ) -> bool {
+        let Some(layer) = self.layers.get_mut(index) else {
+            return false;
+        };
+        let Some(layer) = layer.as_any_mut().downcast_mut::<T>() else {
+            return false;
+        };
+        mutate(layer);
+        true
+    }
+
     pub fn iter(&self) -> impl ExactSizeIterator<Item = &dyn Layer> + DoubleEndedIterator {
         self.layers.iter().map(Box::as_ref)
     }

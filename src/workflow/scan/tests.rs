@@ -1145,6 +1145,25 @@ impl RouteProvider for FixedRoute {
 }
 
 #[derive(Clone)]
+struct CountingRoute {
+    decision: RouteDecision,
+    calls: Arc<AtomicUsize>,
+}
+
+impl RouteProvider for CountingRoute {
+    type Error = Infallible;
+
+    fn lookup(
+        &self,
+        _destination: IpAddr,
+        _interface_hint: Option<&InterfaceId>,
+    ) -> Result<RouteDecision, Self::Error> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(self.decision.clone())
+    }
+}
+
+#[derive(Clone)]
 struct LifecycleIo {
     events: Arc<Mutex<Vec<&'static str>>>,
     fail_send: bool,
@@ -1278,6 +1297,54 @@ fn client_scan_executor_waits_for_capture_and_always_shuts_it_down() {
             ["arm", "ready", "send", "shutdown"]
         );
     }
+}
+
+#[test]
+fn client_scan_executor_reuses_a_route_lookup_for_a_port_batch() {
+    let registry = Arc::new(default_registry().unwrap());
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::clone(&registry),
+        CountingRoute {
+            decision: lifecycle_route(),
+            calls: Arc::clone(&route_calls),
+        },
+        NoNeighbors,
+        LifecycleIo {
+            events: Arc::clone(&events),
+            fail_send: false,
+        },
+        private_scan_policy(),
+    );
+    let mut executor = ClientExecutor::new(&client, lifecycle_exchange_options());
+    let batch = ScanBatch {
+        probes: vec![
+            ScanProbe {
+                sequence: 0,
+                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                transport: ScanTransport::Tcp,
+                port: Some(80),
+                attempt: 1,
+            },
+            ScanProbe {
+                sequence: 1,
+                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                transport: ScanTransport::Tcp,
+                port: Some(443),
+                attempt: 1,
+            },
+        ],
+        timeout: Duration::from_secs(1),
+    };
+
+    let result = executor.execute(&batch).unwrap();
+    assert_eq!(result.sent.len(), 2);
+    assert_eq!(route_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        events.lock().unwrap().as_slice(),
+        ["arm", "ready", "send", "send", "shutdown"]
+    );
 }
 
 #[test]

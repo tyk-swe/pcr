@@ -15,7 +15,12 @@ use packetcraftr::{
         decode::{Decoder as Dissector, Options as DecodeOptions},
         layer::Raw,
     },
-    protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp},
+    protocol::{
+        builtin::registry as default_registry,
+        ipv6::DestinationOptions,
+        network::{Ipv4, Ipv6},
+        transport::Udp,
+    },
 };
 
 const CASES: &[(&str, usize)] = &[("64_b", 64), ("mtu", 1_472), ("60_kib", 60 * 1024)];
@@ -28,6 +33,24 @@ fn ipv4_udp_packet(payload_len: usize) -> Packet {
             destination: Ipv4Addr::new(198, 51, 100, 2),
             ..Ipv4::default()
         })
+        .push(Udp::default())
+        .push(Raw::new(vec![0xa5; payload_len]));
+    packet
+}
+
+fn deep_ipv6_udp_packet(payload_len: usize) -> Packet {
+    let mut packet = Packet::with_capacity(64);
+    packet.push(Ipv6 {
+        source: "2001:db8::1".parse().expect("benchmark source is valid"),
+        destination: "2001:db8::2"
+            .parse()
+            .expect("benchmark destination is valid"),
+        ..Ipv6::default()
+    });
+    for _ in 0..61 {
+        packet.push(DestinationOptions::default());
+    }
+    packet
         .push(Udp::default())
         .push(Raw::new(vec![0xa5; payload_len]));
     packet
@@ -81,6 +104,36 @@ fn bench_packet_pipeline(criterion: &mut Criterion) {
             );
         });
     }
+    let deep_packet = deep_ipv6_udp_packet(60 * 1024);
+    let deep_built = builder
+        .build(
+            deep_packet.clone(),
+            build_context.clone(),
+            build_options.clone(),
+        )
+        .expect("deep benchmark packet should build");
+    group.throughput(Throughput::Bytes(deep_built.bytes.len() as u64));
+    group.bench_with_input(
+        BenchmarkId::new("build", "deep_60_kib"),
+        &deep_packet,
+        |bench, packet| {
+            bench.iter_batched(
+                || (packet.clone(), build_context.clone(), build_options.clone()),
+                |(packet, build_context, build_options)| {
+                    black_box(
+                        builder
+                            .build(
+                                black_box(packet),
+                                black_box(build_context),
+                                black_box(build_options),
+                            )
+                            .expect("deep benchmark packet should build"),
+                    )
+                },
+                BatchSize::PerIteration,
+            );
+        },
+    );
     group.finish();
 }
 

@@ -41,28 +41,28 @@ pub struct BuiltinProtocols;
 
 impl ProtocolModule for BuiltinProtocols {
     fn register(&self, builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
-        builder.register_codec(RawCodec)?;
-        builder.register_codec(PaddingCodec)?;
-        builder.register_codec(MalformedCodec)?;
-        builder.register_codec(BsdNullCodec)?;
-        builder.register_codec(BsdLoopCodec)?;
-        builder.register_codec(LinuxSllCodec)?;
-        builder.register_codec(LinuxSll2Codec)?;
-        builder.register_codec(EthernetCodec)?;
-        builder.register_codec(VlanCodec)?;
-        builder.register_codec(Vlan8021adCodec)?;
-        builder.register_codec(ArpCodec)?;
-        builder.register_codec(Ipv4Codec)?;
-        builder.register_codec(Ipv6Codec)?;
-        builder.register_codec(HopByHopCodec)?;
-        builder.register_codec(DestinationOptionsCodec)?;
-        builder.register_codec(Ipv6FragmentCodec)?;
-        builder.register_codec(SegmentRoutingHeaderCodec)?;
-        builder.register_codec(RawIpCodec)?;
-        builder.register_codec(UdpCodec)?;
-        builder.register_codec(TcpCodec)?;
-        builder.register_codec(Icmpv4Codec)?;
-        builder.register_codec(Icmpv6Codec)?;
+        builder.register_builtin_codec(RawCodec)?;
+        builder.register_builtin_codec(PaddingCodec)?;
+        builder.register_builtin_codec(MalformedCodec)?;
+        builder.register_builtin_codec(BsdNullCodec)?;
+        builder.register_builtin_codec(BsdLoopCodec)?;
+        builder.register_builtin_codec(LinuxSllCodec)?;
+        builder.register_builtin_codec(LinuxSll2Codec)?;
+        builder.register_builtin_codec(EthernetCodec)?;
+        builder.register_builtin_codec(VlanCodec)?;
+        builder.register_builtin_codec(Vlan8021adCodec)?;
+        builder.register_builtin_codec(ArpCodec)?;
+        builder.register_builtin_codec(Ipv4Codec)?;
+        builder.register_builtin_codec(Ipv6Codec)?;
+        builder.register_builtin_codec(HopByHopCodec)?;
+        builder.register_builtin_codec(DestinationOptionsCodec)?;
+        builder.register_builtin_codec(Ipv6FragmentCodec)?;
+        builder.register_builtin_codec(SegmentRoutingHeaderCodec)?;
+        builder.register_builtin_codec(RawIpCodec)?;
+        builder.register_builtin_codec(UdpCodec)?;
+        builder.register_builtin_codec(TcpCodec)?;
+        builder.register_builtin_codec(Icmpv4Codec)?;
+        builder.register_builtin_codec(Icmpv6Codec)?;
         for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.matcher) {
             match support.protocol {
                 "tcp" | "udp" => builder.register_matcher(

@@ -76,3 +76,7 @@ syn = { version = "2", default-features = false, features = ["full", "parsing", 
 [[bench]]
 name = "packet_pipeline"
 harness = false
+
+[[bench]]
+name = "reassembly"
+harness = false

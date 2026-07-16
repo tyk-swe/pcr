@@ -14,6 +14,7 @@ use crate::packet::{
     build::{BuildContext, BuiltPacket},
     field::FieldValue,
     layer::Padding,
+    registry::ProtocolRegistry,
 };
 use crate::protocol::link::Ethernet;
 
@@ -373,6 +374,98 @@ pub(super) fn materialize_link_fields(
         changed = true;
     }
     Ok(changed)
+}
+
+/// Applies resolved MAC addresses to a preliminary build when every encoder is
+/// a crate-provided codec. External codecs may derive arbitrary bytes from the
+/// Ethernet model, so they must use the full rebuild path.
+pub(super) fn patch_builtin_ethernet(
+    registry: &ProtocolRegistry,
+    preliminary: &mut BuiltPacket,
+    packet: &Packet,
+) -> bool {
+    if !packet
+        .iter()
+        .all(|layer| registry.is_builtin_codec(&layer.schema().protocol))
+    {
+        return false;
+    }
+    let Some(materialized) = packet
+        .layer(0)
+        .and_then(|layer| layer.as_any().downcast_ref::<Ethernet>())
+        .cloned()
+    else {
+        return false;
+    };
+    let Some(existing) = preliminary
+        .packet
+        .layer(0)
+        .and_then(|layer| layer.as_any().downcast_ref::<Ethernet>())
+        .cloned()
+    else {
+        return false;
+    };
+    let Some(layout) = preliminary.layout.layer(0) else {
+        return false;
+    };
+    if layout.protocol.as_str() != "ethernet" || layout.range.start != 0 || layout.range.end != 14 {
+        return false;
+    }
+    let field_range = |name: &str| {
+        let mut fields = layout.fields.iter().filter(|field| field.name == name);
+        let range = fields.next()?.range;
+        fields.next().is_none().then_some(range)
+    };
+    let (Some(destination), Some(source)) = (field_range("destination"), field_range("source"))
+    else {
+        return false;
+    };
+    if destination.start != 0
+        || destination.end != 6
+        || source.start != 6
+        || source.end != 12
+        || source.end > preliminary.bytes.len()
+        || preliminary.bytes[destination.start..destination.end] != existing.destination
+        || preliminary.bytes[source.start..source.end] != existing.source
+    {
+        return false;
+    }
+
+    let destination_changed = existing.destination != materialized.destination;
+    let source_changed = existing.source != materialized.source;
+    if (!destination_changed && !source_changed)
+        || (destination_changed
+            && (existing.destination != [0; 6] || materialized.destination == [0; 6]))
+        || (source_changed && (existing.source != [0; 6] || materialized.source == [0; 6]))
+    {
+        return false;
+    }
+
+    let patched = preliminary
+        .packet
+        .mutate_fixed_width_layer(0, |ethernet: &mut Ethernet| {
+            ethernet.destination = materialized.destination;
+            ethernet.source = materialized.source;
+        });
+    if !patched {
+        return false;
+    }
+
+    let bytes = std::mem::take(&mut preliminary.bytes);
+    preliminary.bytes = match bytes.try_into_mut() {
+        Ok(mut mutable) => {
+            mutable[destination.start..destination.end].copy_from_slice(&materialized.destination);
+            mutable[source.start..source.end].copy_from_slice(&materialized.source);
+            mutable.freeze()
+        }
+        Err(bytes) => {
+            let mut copied = bytes.to_vec();
+            copied[destination.start..destination.end].copy_from_slice(&materialized.destination);
+            copied[source.start..source.end].copy_from_slice(&materialized.source);
+            Bytes::from(copied)
+        }
+    };
+    true
 }
 
 pub(super) fn require_fixed_width_link_materialization(

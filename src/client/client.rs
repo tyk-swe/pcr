@@ -1,5 +1,6 @@
+use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
 use crate::capture::{Frame, LinkType};
@@ -7,7 +8,10 @@ use crate::net::{
     Error as LiveIoError,
     capture::{CaptureOverflowPolicy, CaptureStatistics},
     exchange::ExchangeIo,
-    route::{NeighborResolver, PlanOptions, PlannedRoute, RoutePlanner, RouteProvider},
+    route::{
+        InterfaceId, NeighborResolver, PlanOptions, PlannedRoute, RouteDecision, RoutePlanner,
+        RouteProvider,
+    },
     transmit::{PacketIo, TransmissionFrame},
 };
 use crate::packet::{
@@ -24,8 +28,8 @@ use super::exchange::{
 };
 use super::helpers::{
     build_context, error_after_shutdown, materialize_link_fields, materialize_link_structure,
-    materialize_network_fields, push_diagnostic_once, require_fixed_width_link_materialization,
-    validate_mtu, validate_send_report,
+    materialize_network_fields, patch_builtin_ethernet, push_diagnostic_once,
+    require_fixed_width_link_materialization, validate_mtu, validate_send_report,
 };
 use super::policy::{TrafficPolicy, TrafficPolicyError};
 use super::send::{ClientError, SendOptions, SendReport};
@@ -44,6 +48,115 @@ pub struct Client<R, N, I> {
     io: I,
     policy: TrafficPolicy,
     planner: RoutePlanner,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum ExchangeRouteLookupKey {
+    Lookup {
+        destination: IpAddr,
+        interface_hint: Option<InterfaceId>,
+    },
+    LookupWithPreferences {
+        destination: IpAddr,
+        interface_hint: Option<InterfaceId>,
+        preferred_source: Option<IpAddr>,
+    },
+    Interface {
+        interface: InterfaceId,
+    },
+}
+
+/// Memoizes passive route decisions for one exchange without retaining an
+/// operating-system route snapshot beyond that operation.
+struct ExchangeRouteProvider<'a, R> {
+    inner: &'a R,
+    decisions: Mutex<HashMap<ExchangeRouteLookupKey, Option<RouteDecision>>>,
+}
+
+impl<'a, R: RouteProvider> ExchangeRouteProvider<'a, R> {
+    fn new(inner: &'a R) -> Self {
+        Self {
+            inner,
+            decisions: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn get_or_lookup(
+        &self,
+        key: ExchangeRouteLookupKey,
+        lookup: impl FnOnce() -> Result<Option<RouteDecision>, R::Error>,
+    ) -> Result<Option<RouteDecision>, R::Error> {
+        let cached = self
+            .decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(&key)
+            .cloned();
+        if let Some(decision) = cached {
+            return Ok(decision);
+        }
+
+        let decision = lookup()?;
+        self.decisions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(key, decision.clone());
+        Ok(decision)
+    }
+}
+
+impl<R: RouteProvider> RouteProvider for ExchangeRouteProvider<'_, R> {
+    type Error = R::Error;
+
+    fn lookup(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+    ) -> Result<RouteDecision, Self::Error> {
+        let key = ExchangeRouteLookupKey::Lookup {
+            destination,
+            interface_hint: interface_hint.cloned(),
+        };
+        Ok(self
+            .get_or_lookup(key, || {
+                self.inner.lookup(destination, interface_hint).map(Some)
+            })?
+            .expect("route provider lookup always returns a decision"))
+    }
+
+    fn lookup_with_preferences(
+        &self,
+        destination: IpAddr,
+        interface_hint: Option<&InterfaceId>,
+        preferred_source: Option<IpAddr>,
+    ) -> Result<RouteDecision, Self::Error> {
+        let key = ExchangeRouteLookupKey::LookupWithPreferences {
+            destination,
+            interface_hint: interface_hint.cloned(),
+            preferred_source,
+        };
+        Ok(self
+            .get_or_lookup(key, || {
+                self.inner
+                    .lookup_with_preferences(destination, interface_hint, preferred_source)
+                    .map(Some)
+            })?
+            .expect("route provider lookup always returns a decision"))
+    }
+
+    fn lookup_interface(
+        &self,
+        interface: &InterfaceId,
+    ) -> Result<Option<RouteDecision>, Self::Error> {
+        let key = ExchangeRouteLookupKey::Interface {
+            interface: interface.clone(),
+        };
+        self.get_or_lookup(key, || self.inner.lookup_interface(interface))
+    }
+
+    fn classify_error(&self, error: &Self::Error) -> crate::error::Classification {
+        self.inner.classify_error(error)
+    }
 }
 
 impl<R, N, I> Client<R, N, I>
@@ -111,6 +224,17 @@ where
         destination: Option<IpAddr>,
         options: &PlanOptions,
     ) -> Result<PlannedRoute, ClientError> {
+        self.plan_with_provider(packet, destination, options, &self.routes, None)
+    }
+
+    fn plan_with_provider<P: RouteProvider>(
+        &self,
+        packet: &Packet,
+        destination: Option<IpAddr>,
+        options: &PlanOptions,
+        provider: &P,
+        deadline: Option<Instant>,
+    ) -> Result<PlannedRoute, ClientError> {
         if let Some(destination) = destination {
             self.policy.authorize_destination(destination)?;
         }
@@ -118,9 +242,10 @@ where
         // provider can observe one. The completed plan is checked again below
         // so provider-derived selections cannot bypass policy either.
         self.policy.authorize_packet_destinations(packet)?;
-        let plan = self
-            .planner
-            .plan(packet, destination, options, &self.routes)?;
+        if let Some(deadline) = deadline {
+            ensure_preparation_deadline(deadline)?;
+        }
+        let plan = self.planner.plan(packet, destination, options, provider)?;
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
         }
@@ -143,7 +268,7 @@ where
         let builder = Builder::new(Arc::clone(&self.registry));
         let context = build_context(&plan);
         // Validate all packet fields before neighbor discovery emits traffic.
-        let preliminary = builder.build(
+        let mut preliminary = builder.build(
             packet_to_send.clone(),
             context.clone(),
             options.build.clone(),
@@ -155,7 +280,12 @@ where
         let route = self.planner.materialize(plan, &self.neighbors)?;
         let link_changed = materialize_link_fields(&mut packet_to_send, &route)?;
         let built = if link_changed {
-            let built = builder.build(packet_to_send, context, options.build)?;
+            let built = if patch_builtin_ethernet(&self.registry, &mut preliminary, &packet_to_send)
+            {
+                preliminary
+            } else {
+                builder.build(packet_to_send, context, options.build)?
+            };
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             self.authorize_built(&built, options.allow_permissive_live)?;
             self.authorize_byte_count(built.bytes.len() as u64)?;
@@ -215,6 +345,16 @@ where
     }
 }
 
+fn ensure_preparation_deadline(deadline: Instant) -> Result<(), ClientError> {
+    if deadline.checked_duration_since(Instant::now()).is_none() {
+        return Err(LiveIoError::DeadlineExceeded {
+            operation: "preparing the exchange",
+        }
+        .into());
+    }
+    Ok(())
+}
+
 impl<R, N, I> Client<R, N, I>
 where
     R: RouteProvider,
@@ -250,32 +390,45 @@ where
                 message: "template expanded to no packets".to_owned(),
             });
         }
-        let expanded_packets = template
-            .expand(options.max_template_packets)
-            .map_err(|source| ClientError::Template {
-                message: source.to_string(),
-            })?;
+        let mut expanded_packets =
+            template
+                .expand(options.max_template_packets)
+                .map_err(|source| ClientError::Template {
+                    message: source.to_string(),
+                })?;
         let packet_count = expansion_len as u64;
         let builder = Builder::new(Arc::clone(&self.registry));
+        let routes = ExchangeRouteProvider::new(&self.routes);
         let mut planned_packets: Vec<PlannedExchangePacket> = Vec::with_capacity(expansion_len);
         let mut total_bytes = 0u64;
-        for expanded_packet in expanded_packets {
+        loop {
+            ensure_preparation_deadline(deadline)?;
+            let Some(expanded_packet) = expanded_packets.next() else {
+                break;
+            };
+            ensure_preparation_deadline(deadline)?;
             let mut packet_to_send = expanded_packet.map_err(|source| ClientError::Template {
                 message: source.to_string(),
             })?;
-            let plan = self.plan(
+            ensure_preparation_deadline(deadline)?;
+            let plan = self.plan_with_provider(
                 &packet_to_send,
                 options.send.destination,
                 &options.send.plan,
+                &routes,
+                Some(deadline),
             )?;
+            ensure_preparation_deadline(deadline)?;
             materialize_network_fields(&mut packet_to_send, &plan)?;
             materialize_link_structure(&mut packet_to_send, &plan)?;
+            ensure_preparation_deadline(deadline)?;
             let context = build_context(&plan);
             let preliminary = builder.build(
                 packet_to_send.clone(),
                 context.clone(),
                 options.send.build.clone(),
             )?;
+            ensure_preparation_deadline(deadline)?;
             validate_mtu(&preliminary, plan.route.mtu)?;
             self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
             total_bytes = total_bytes
@@ -309,20 +462,28 @@ where
         // route, permissive-build, and aggregate byte-policy checks.
         let mut prepared_packets = Vec::with_capacity(planned_packets.len());
         for planned_packet in planned_packets {
+            ensure_preparation_deadline(deadline)?;
             let PlannedExchangePacket {
                 mut packet,
                 plan,
                 build_context,
-                preliminary_build,
+                mut preliminary_build,
             } = planned_packet;
             let preliminary_len = preliminary_build.bytes.len();
             let route = self.planner.materialize(plan, &self.neighbors)?;
+            ensure_preparation_deadline(deadline)?;
             let link_changed = materialize_link_fields(&mut packet, &route)?;
             let built = if link_changed {
-                builder.build(packet, build_context, options.send.build.clone())?
+                if patch_builtin_ethernet(&self.registry, &mut preliminary_build, &packet) {
+                    preliminary_build
+                } else {
+                    ensure_preparation_deadline(deadline)?;
+                    builder.build(packet, build_context, options.send.build.clone())?
+                }
             } else {
                 preliminary_build
             };
+            ensure_preparation_deadline(deadline)?;
             self.authorize_built(&built, options.send.allow_permissive_live)?;
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             prepared_packets.push(PreparedExchangePacket { built, route });
@@ -333,12 +494,7 @@ where
             .expect("non-empty prepared exchange")
             .route
             .plan;
-        if deadline.checked_duration_since(Instant::now()).is_none() {
-            return Err(LiveIoError::DeadlineExceeded {
-                operation: "preparing the exchange",
-            }
-            .into());
-        }
+        ensure_preparation_deadline(deadline)?;
         let mut capture = CaptureGuard::new(self.io.arm_capture(first_route, capture_limits)?);
         let readiness_timeout = match deadline.checked_duration_since(Instant::now()) {
             Some(remaining) => remaining,

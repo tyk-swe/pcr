@@ -990,7 +990,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "packetcraftr"
-version = "0.3.0"
+version = "0.4.0-beta.1"
 dependencies = [
  "bytes",
  "clap",

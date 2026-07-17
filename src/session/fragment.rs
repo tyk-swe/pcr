@@ -10,8 +10,6 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[cfg(test)]
-use super::Limits;
 use super::ReassemblyLimits;
 
 const DATAGRAM_STATE_METADATA_CHARGE: usize = 128;
@@ -24,9 +22,6 @@ pub struct DatagramKey {
     pub identification: u32,
     pub next_header: u8,
 }
-
-/// Backward-compatible name for [`DatagramKey`].
-pub use DatagramKey as Key;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Fragment {
@@ -593,7 +588,10 @@ mod tests {
     #[test]
     fn out_of_order_fragments_reassemble() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
         assert!(
             reassembler
                 .push(
@@ -629,7 +627,10 @@ mod tests {
     #[test]
     fn adjacent_fragments_coalesce() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
         reassembler
             .push(
                 Fragment {
@@ -662,7 +663,10 @@ mod tests {
     #[test]
     fn bridging_fragments_coalesce_both_neighbors() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
         for (offset, bytes) in [
             (0, b"ab".as_slice()),
             (4, b"ef".as_slice()),
@@ -694,7 +698,8 @@ mod tests {
     #[test]
     fn keep_first_preserves_existing_overlapping_bytes() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
+        let mut reassembler =
+            Reassembler::new(ReassemblyLimits::default(), OverlapPolicy::KeepFirst);
         reassembler
             .push(
                 Fragment {
@@ -733,7 +738,8 @@ mod tests {
     #[test]
     fn fully_covered_keep_first_fragment_keeps_the_retained_segment() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::KeepFirst);
+        let mut reassembler =
+            Reassembler::new(ReassemblyLimits::default(), OverlapPolicy::KeepFirst);
         reassembler
             .push(
                 Fragment {
@@ -767,7 +773,10 @@ mod tests {
     #[test]
     fn conflicting_overlap_rejection_preserves_state() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
         reassembler
             .push(
                 Fragment {
@@ -813,9 +822,9 @@ mod tests {
     #[test]
     fn expiry_emits_incomplete_event_and_releases_bytes() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             fragment_expiry: Duration::from_secs(1),
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
         reassembler
@@ -836,7 +845,10 @@ mod tests {
     #[test]
     fn final_length_rejects_prior_fragment_beyond_end_atomically() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
         reassembler
             .push(
                 Fragment {
@@ -878,9 +890,9 @@ mod tests {
     #[test]
     fn aggregate_limit_charges_sparse_fragment_metadata() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_aggregate_bytes: 193,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
         reassembler
@@ -917,7 +929,10 @@ mod tests {
     #[test]
     fn empty_fragments_are_rejected_without_creating_state() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
         assert_eq!(
             reassembler
                 .push(
@@ -941,7 +956,10 @@ mod tests {
         let backing = Bytes::from(vec![7_u8; 4_096]);
         let slice = backing.slice(2_048..2_049);
         let slice_pointer = slice.as_ptr();
-        let mut reassembler = Reassembler::new(Limits::default(), OverlapPolicy::RejectConflicting);
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
 
         reassembler
             .push(
@@ -963,10 +981,10 @@ mod tests {
     #[test]
     fn sparse_aggregate_rejection_precedes_span_sized_scratch_allocation() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 10_000_001,
             max_aggregate_bytes: DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
         assert_eq!(

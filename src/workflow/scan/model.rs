@@ -290,10 +290,11 @@ pub struct ScanBatchExecution {
     pub stats: Stats,
 }
 
-pub use crate::workflow::BoundaryError as ScanExecutionError;
-
 pub trait ScanExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError>;
+    fn execute(
+        &mut self,
+        batch: &ScanBatch,
+    ) -> Result<ScanBatchExecution, crate::workflow::BoundaryError>;
 }
 use super::{
     AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,

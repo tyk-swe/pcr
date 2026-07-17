@@ -4,9 +4,7 @@ use crate::capture::{Frame, LinkType};
 
 use super::classic::{read_next_pcap_frame, read_pcap_header};
 use super::models::{
-    DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT, DEFAULT_SIZE_LIMIT,
-    DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Error, Format, Interface, TimestampPrecision,
-    TimestampResolution,
+    Endianness, Error, Format, Interface, ReaderOptions, TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{
     parse_enhanced_packet, parse_interface_description, parse_obsolete_packet, parse_simple_packet,
@@ -51,50 +49,19 @@ pub struct Reader<R> {
 }
 
 impl<R: Read> Reader<R> {
-    /// Opens a capture with the default 16 MiB packet/block limit.
+    /// Opens a capture with the default resource limits.
     pub fn new(inner: R) -> Result<Self, Error> {
-        Self::with_limit(inner, DEFAULT_SIZE_LIMIT)
+        Self::with_options(inner, ReaderOptions::default())
     }
 
-    /// Opens a capture with a caller-provided packet/block size limit.
-    pub fn with_limit(inner: R, max_size: usize) -> Result<Self, Error> {
-        Self::with_limits(inner, max_size, DEFAULT_INTERFACE_LIMIT)
-    }
-
-    /// Opens a capture with caller-provided packet/block and interface limits.
-    pub fn with_limits(inner: R, max_size: usize, max_interfaces: usize) -> Result<Self, Error> {
-        Self::with_resource_limits(
-            inner,
+    /// Opens a capture with explicit resource limits.
+    pub fn with_options(mut inner: R, options: ReaderOptions) -> Result<Self, Error> {
+        let ReaderOptions {
             max_size,
-            max_interfaces,
-            DEFAULT_METADATA_BLOCK_LIMIT,
-        )
-    }
-
-    pub fn with_resource_limits(
-        inner: R,
-        max_size: usize,
-        max_interfaces: usize,
-        max_metadata_blocks_per_frame: usize,
-    ) -> Result<Self, Error> {
-        Self::with_all_resource_limits(
-            inner,
-            max_size,
-            max_interfaces,
-            DEFAULT_TOTAL_INTERFACE_LIMIT,
+            max_interfaces_per_section: max_interfaces,
+            max_total_interfaces,
             max_metadata_blocks_per_frame,
-        )
-    }
-
-    /// Opens a capture with independent per-section and aggregate retained
-    /// interface limits.
-    pub fn with_all_resource_limits(
-        mut inner: R,
-        max_size: usize,
-        max_interfaces: usize,
-        max_total_interfaces: usize,
-        max_metadata_blocks_per_frame: usize,
-    ) -> Result<Self, Error> {
+        } = options;
         let mut magic = [0_u8; 4];
         if !read_exact_or_eof(&mut inner, &mut magic, "capture magic")? {
             return Err(Error::EmptyInput);
@@ -236,11 +203,6 @@ impl<R: Read> Reader<R> {
                 Err(error)
             }
         }
-    }
-
-    /// Alias for [`next_frame`](Self::next_frame).
-    pub fn read_frame(&mut self) -> Result<Option<Frame>, Error> {
-        self.next_frame()
     }
 
     fn next_pcapng_frame(&mut self) -> Result<Option<Frame>, Error> {

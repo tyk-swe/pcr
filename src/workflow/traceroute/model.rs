@@ -312,13 +312,11 @@ pub struct TracerouteBatchExecution {
     pub stats: Stats,
 }
 
-pub use crate::workflow::BoundaryError as TracerouteExecutionError;
-
 pub trait TracerouteExecutor {
     fn execute(
         &mut self,
         batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, TracerouteExecutionError>;
+    ) -> Result<TracerouteBatchExecution, crate::workflow::BoundaryError>;
 }
 use super::{
     AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,

@@ -47,18 +47,17 @@ pub use adapter::{SystemAuthorizer, SystemTransmitter};
 pub use engine::replay_capture as run;
 pub use error::ReplayError as Error;
 pub use model::{
-    MAX_REPLAY_DURATION, ReplayAuthorizationError as AuthorizationError,
-    ReplayAuthorizer as Authorizer, ReplayFrameEvidence as FrameEvidence, ReplayLimits as Limits,
-    ReplayOptions as Options, ReplaySummary as Summary, ReplayTiming as Timing,
-    ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
+    MAX_REPLAY_DURATION, ReplayAuthorizer as Authorizer, ReplayFrameEvidence as FrameEvidence,
+    ReplayLimits as Limits, ReplayOptions as Options, ReplaySummary as Summary,
+    ReplayTiming as Timing, ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
 };
 
 #[cfg(test)]
 use engine::replay_capture;
 use error::ReplayError;
 use model::{
-    ReplayAuthorizationError, ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions, ReplaySummary,
-    ReplayTransmission, ReplayTransmitter,
+    ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions, ReplaySummary, ReplayTransmission,
+    ReplayTransmitter,
 };
 #[cfg(test)]
 use model::{ReplayLimits, ReplayTiming};

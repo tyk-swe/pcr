@@ -637,6 +637,30 @@ mod tests {
     }
 
     #[test]
+    fn native_session_defends_direct_timeout_entry_points() {
+        let mut session = session(
+            Vec::new(),
+            CaptureQueueLimits {
+                max_frames: 1,
+                max_bytes: 4,
+                snap_length: 4,
+                overflow_policy: CaptureOverflowPolicy::Fail,
+            },
+            Arc::new(AtomicUsize::new(0)),
+        );
+
+        assert!(matches!(
+            session.wait_ready(Duration::MAX),
+            Err(LiveIoError::InvalidCaptureTimeout { .. })
+        ));
+        assert!(matches!(
+            session.next_frame(Duration::MAX),
+            Err(LiveIoError::InvalidCaptureTimeout { .. })
+        ));
+        session.shutdown().unwrap();
+    }
+
+    #[test]
     fn fail_policy_reports_queue_loss() {
         let mut session = session(
             vec![packet(1, 4), packet(2, 4)],

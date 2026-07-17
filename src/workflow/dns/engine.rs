@@ -65,7 +65,6 @@ where
         query_name,
         query_type: request.query_type,
         transaction_id: request.transaction_id,
-        transport: DnsTransport::Udp,
         outcome: DnsOutcome::Timeout,
         response: None,
         attempts: Vec::with_capacity(request.attempts as usize),
@@ -621,8 +620,8 @@ use super::wire::raw_payload;
 use super::{
     Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DecodedPacket, Diagnostic, DnsAttemptEvidence,
     DnsAttemptStatus, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
-    DnsOutcome, DnsProbe, DnsRequest, DnsResponseClassification, DnsResult, DnsTransport,
-    DnsUndecodedEvidence, Duration, EvidenceBudget, EvidenceBudgetError, FieldValue, Frame, IpAddr,
+    DnsOutcome, DnsProbe, DnsRequest, DnsResponseClassification, DnsResult, DnsUndecodedEvidence,
+    Duration, EvidenceBudget, EvidenceBudgetError, FieldValue, Frame, IpAddr,
     MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet, ProtocolRegistry, Stats, SystemTime,
     checked_frame_bytes, checked_frame_count, classify_dns_response, encode_dns_query,
     preferred_latency, push_diagnostic_once, response_within_deadline, validate_capture_statistics,

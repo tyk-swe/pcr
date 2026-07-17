@@ -4,8 +4,8 @@ use std::time::UNIX_EPOCH;
 use crate::capture::{Direction, Frame, LinkType};
 
 use super::models::{
-    DEFAULT_INTERFACE_LIMIT, DEFAULT_SIZE_LIMIT, Endianness, Error, Format, Interface, Limits,
-    TimestampPrecision, TimestampResolution,
+    DEFAULT_INTERFACE_LIMIT, Endianness, Error, Format, Interface, Limits, PcapNgOptions,
+    PcapOptions, TimestampPrecision, TimestampResolution,
 };
 use super::wire::{
     PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
@@ -47,71 +47,24 @@ pub struct Writer<W> {
 }
 
 impl<W: Write> Writer<W> {
-    /// Creates a writer with a default interface and the 16 MiB size limit.
+    /// Creates a writer with the default format configuration.
     ///
     /// A PCAPNG writer created this way starts with interface zero.  Use
     /// [`pcapng`](Self::pcapng) followed by [`add_interface`](Self::add_interface)
     /// when all interface descriptions need to be declared explicitly.
     pub fn new(inner: W, format: Format, link_type: LinkType) -> Result<Self, Error> {
-        Self::with_limit(inner, format, link_type, DEFAULT_SIZE_LIMIT)
-    }
-
-    /// Creates a writer with a default interface and a caller-provided limit.
-    pub fn with_limit(
-        inner: W,
-        format: Format,
-        link_type: LinkType,
-        max_size: usize,
-    ) -> Result<Self, Error> {
-        Self::with_limits(inner, format, link_type, max_size, DEFAULT_INTERFACE_LIMIT)
-    }
-
-    /// Creates a writer with caller-provided packet/block and PCAPNG
-    /// interface limits.
-    pub fn with_limits(
-        inner: W,
-        format: Format,
-        link_type: LinkType,
-        max_size: usize,
-        max_interfaces: usize,
-    ) -> Result<Self, Error> {
         match format {
-            Format::Pcap => {
-                Self::pcap_with_options(inner, link_type, Endianness::Little, max_size, max_size)
-            }
+            Format::Pcap => Self::pcap(inner, link_type),
             Format::PcapNg => {
                 // Validate the mandatory default interface before the section
                 // header is committed to the caller's output.
-                if max_size < 28 {
-                    return Err(Error::SizeLimitExceeded {
-                        kind: "pcapng section header",
-                        declared: 28,
-                        limit: max_size,
-                    });
-                }
-                let snap_len = usize_to_u32_limit(max_size)?;
-                if max_size < 32 {
-                    return Err(Error::SizeLimitExceeded {
-                        kind: "pcapng interface description",
-                        declared: 32,
-                        limit: max_size,
-                    });
-                }
-                if max_interfaces == 0 {
-                    return Err(Error::InterfaceLimit { limit: 0 });
-                }
                 if link_type.0 > u16::MAX as u32 {
                     return Err(Error::LinkTypeOutOfRange {
                         link_type: link_type.0,
                     });
                 }
-                let mut writer = Self::pcapng_with_resource_limits(
-                    inner,
-                    Endianness::Little,
-                    max_size,
-                    max_interfaces,
-                )?;
-                writer.add_interface_with_snaplen(link_type, snap_len)?;
+                let mut writer = Self::pcapng(inner)?;
+                writer.add_interface(link_type)?;
                 Ok(writer)
             }
         }
@@ -119,53 +72,21 @@ impl<W: Write> Writer<W> {
 
     /// Creates a little-endian, nanosecond-resolution classic PCAP writer.
     pub fn pcap(inner: W, link_type: LinkType) -> Result<Self, Error> {
-        Self::pcap_with_endianness(inner, link_type, Endianness::Little)
+        Self::pcap_with_options(inner, link_type, PcapOptions::default())
     }
 
-    /// Creates a nanosecond-resolution classic PCAP writer.
-    pub fn pcap_with_endianness(
-        inner: W,
-        link_type: LinkType,
-        endianness: Endianness,
-    ) -> Result<Self, Error> {
-        Self::pcap_with_options(
-            inner,
-            link_type,
-            endianness,
-            DEFAULT_SIZE_LIMIT,
-            DEFAULT_SIZE_LIMIT,
-        )
-    }
-
-    /// Creates a classic PCAP writer with explicit byte order, snap length,
-    /// and packet limit.
+    /// Creates a classic PCAP writer with explicit format options.
     pub fn pcap_with_options(
-        inner: W,
-        link_type: LinkType,
-        endianness: Endianness,
-        snap_len: usize,
-        max_size: usize,
-    ) -> Result<Self, Error> {
-        Self::pcap_with_metadata(
-            inner,
-            link_type,
-            endianness,
-            TimestampResolution::Decimal(9),
-            snap_len,
-            max_size,
-        )
-    }
-
-    /// Creates a classic PCAP writer with explicit byte order, timestamp
-    /// resolution, snap length, and packet limit.
-    pub fn pcap_with_metadata(
         mut inner: W,
         link_type: LinkType,
-        endianness: Endianness,
-        timestamp_resolution: TimestampResolution,
-        snap_len: usize,
-        max_size: usize,
+        options: PcapOptions,
     ) -> Result<Self, Error> {
+        let PcapOptions {
+            endianness,
+            timestamp_resolution,
+            snap_len,
+            max_size,
+        } = options;
         if link_type.0 > u16::MAX as u32 {
             return Err(Error::LinkTypeOutOfRange {
                 link_type: link_type.0,
@@ -207,31 +128,16 @@ impl<W: Write> Writer<W> {
 
     /// Creates a little-endian PCAPNG writer without an interface block.
     pub fn pcapng(inner: W) -> Result<Self, Error> {
-        Self::pcapng_with_endianness(inner, Endianness::Little)
+        Self::pcapng_with_options(inner, PcapNgOptions::default())
     }
 
-    /// Creates a PCAPNG writer without an interface block.
-    pub fn pcapng_with_endianness(inner: W, endianness: Endianness) -> Result<Self, Error> {
-        Self::pcapng_with_options(inner, endianness, DEFAULT_SIZE_LIMIT)
-    }
-
-    /// Creates a PCAPNG writer with explicit byte order and block limit.
-    pub fn pcapng_with_options(
-        inner: W,
-        endianness: Endianness,
-        max_size: usize,
-    ) -> Result<Self, Error> {
-        Self::pcapng_with_resource_limits(inner, endianness, max_size, DEFAULT_INTERFACE_LIMIT)
-    }
-
-    /// Creates a PCAPNG writer with explicit byte-order, block-size, and
-    /// per-stream interface limits.
-    pub fn pcapng_with_resource_limits(
-        mut inner: W,
-        endianness: Endianness,
-        max_size: usize,
-        max_interfaces: usize,
-    ) -> Result<Self, Error> {
+    /// Creates a PCAPNG writer without an interface block using explicit options.
+    pub fn pcapng_with_options(mut inner: W, options: PcapNgOptions) -> Result<Self, Error> {
+        let PcapNgOptions {
+            endianness,
+            max_size,
+            max_interfaces,
+        } = options;
         if max_size < 28 {
             return Err(Error::SizeLimitExceeded {
                 kind: "pcapng section header",
@@ -315,47 +221,11 @@ impl<W: Write> Writer<W> {
     /// its snap length and returns its numeric interface ID.
     pub fn add_interface(&mut self, link_type: LinkType) -> Result<u32, Error> {
         let snap_len = usize_to_u32_limit(self.max_size)?;
-        self.add_interface_with_snaplen(link_type, snap_len)
-    }
-
-    /// Adds a PCAPNG interface with a signed timestamp offset in seconds.
-    ///
-    /// PCAPNG packet timestamps are unsigned counters relative to the
-    /// interface's `if_tsoffset`.  Choose an offset no later than the earliest
-    /// frame that will use this interface to represent pre-Unix-epoch times.
-    /// An offset of zero produces the same interface block as
-    /// [`add_interface`](Self::add_interface).
-    pub fn add_interface_with_timestamp_offset(
-        &mut self,
-        link_type: LinkType,
-        timestamp_offset: i64,
-    ) -> Result<u32, Error> {
-        let snap_len = usize_to_u32_limit(self.max_size)?;
-        self.add_interface_with_snaplen_and_timestamp_offset(link_type, snap_len, timestamp_offset)
-    }
-
-    /// Adds a PCAPNG interface with an explicit snap length.
-    pub fn add_interface_with_snaplen(
-        &mut self,
-        link_type: LinkType,
-        snap_len: u32,
-    ) -> Result<u32, Error> {
-        self.add_interface_with_snaplen_and_timestamp_offset(link_type, snap_len, 0)
-    }
-
-    /// Adds a PCAPNG interface with an explicit snap length and signed
-    /// timestamp offset in seconds.
-    pub fn add_interface_with_snaplen_and_timestamp_offset(
-        &mut self,
-        link_type: LinkType,
-        snap_len: u32,
-        timestamp_offset: i64,
-    ) -> Result<u32, Error> {
         self.add_interface_description(Interface {
             link_type,
             snap_len,
             timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
-            timestamp_offset,
+            timestamp_offset: 0,
         })
     }
 
@@ -490,11 +360,6 @@ impl<W: Write> Writer<W> {
         self.frames_written = next_frames;
         self.captured_bytes_written = next_bytes;
         Ok(())
-    }
-
-    /// Alias for [`write_frame`](Self::write_frame).
-    pub fn write(&mut self, frame: &Frame) -> Result<(), Error> {
-        self.write_frame(frame)
     }
 
     fn write_pcap_frame(

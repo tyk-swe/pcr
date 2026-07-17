@@ -67,10 +67,9 @@ pub use adapter::{ClientExecutor, PolicyAuthorizer};
 pub use engine::{fuzz as run, fuzz_live as run_live};
 pub use error::FuzzError as Error;
 pub use model::{
-    FuzzAuthorizationError as AuthorizationError, FuzzAuthorizer as Authorizer, FuzzCase as Case,
-    FuzzCaseExecution as Execution, FuzzCaseFailure as CaseFailure, FuzzCaseOutcome as CaseOutcome,
-    FuzzExecutionCase as ExecutionCase, FuzzExecutionError as ExecutionError,
-    FuzzExecutionStats as ExecutionStats, FuzzExecutor as Executor, FuzzLimits as Limits,
+    FuzzAuthorizer as Authorizer, FuzzCase as Case, FuzzCaseExecution as Execution,
+    FuzzCaseFailure as CaseFailure, FuzzCaseOutcome as CaseOutcome,
+    FuzzExecutionCase as ExecutionCase, FuzzExecutor as Executor, FuzzLimits as Limits,
     FuzzLiveOptions as LiveOptions, FuzzMode as Mode, FuzzMutation as Mutation,
     FuzzReproduction as Reproduction, FuzzRequest as Request, FuzzResult as Result,
     FuzzStats as Stats, FuzzStrategy as Strategy, FuzzTarget as Target,
@@ -81,8 +80,7 @@ pub use model::{
 use engine::{fuzz, fuzz_live};
 use error::FuzzError;
 use model::{
-    FuzzAuthorizationError, FuzzAuthorizer, FuzzCase, FuzzCaseExecution, FuzzCaseFailure,
-    FuzzCaseOutcome, FuzzExecutionCase, FuzzExecutionError, FuzzExecutionStats, FuzzExecutor,
-    FuzzLimits, FuzzLiveOptions, FuzzMode, FuzzMutation, FuzzReproduction, FuzzRequest, FuzzResult,
-    FuzzStats, FuzzStrategy, FuzzTarget,
+    FuzzAuthorizer, FuzzCase, FuzzCaseExecution, FuzzCaseFailure, FuzzCaseOutcome,
+    FuzzExecutionCase, FuzzExecutor, FuzzLimits, FuzzLiveOptions, FuzzMode, FuzzMutation,
+    FuzzReproduction, FuzzRequest, FuzzResult, FuzzStats, FuzzStrategy, FuzzTarget,
 };

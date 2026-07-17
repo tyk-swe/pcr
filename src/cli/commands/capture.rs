@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use packetcraftr::net::capture::Provider as _;
 use packetcraftr::{
-    capture::{Frame, Limits, Writer},
+    capture::{self, Frame, Limits, PcapNgOptions, PcapOptions, Writer},
     client, net, output, packet,
 };
 
@@ -138,12 +138,43 @@ pub(in crate::cli) fn run_capture(
                 .arm_capture(&route, limits)
                 .map_err(CliError::classified)?;
             let stdout = io::stdout();
-            let mut writer = match Writer::with_limit(
-                stdout.lock(),
-                format,
-                route.route.link_type,
-                limits.snap_length,
-            ) {
+            let writer = match format {
+                capture::Format::Pcap => Writer::pcap_with_options(
+                    stdout.lock(),
+                    route.route.link_type,
+                    PcapOptions {
+                        snap_len: limits.snap_length,
+                        max_size: limits.snap_length,
+                        ..PcapOptions::default()
+                    },
+                ),
+                capture::Format::PcapNg => (|| {
+                    // Reject mandatory-interface configuration before the
+                    // section header is committed to stdout.
+                    if limits.snap_length < 32 {
+                        return Err(capture::Error::SizeLimitExceeded {
+                            kind: "pcapng interface description",
+                            declared: 32,
+                            limit: limits.snap_length,
+                        });
+                    }
+                    if route.route.link_type.0 > u16::MAX as u32 {
+                        return Err(capture::Error::LinkTypeOutOfRange {
+                            link_type: route.route.link_type.0,
+                        });
+                    }
+                    let mut writer = Writer::pcapng_with_options(
+                        stdout.lock(),
+                        PcapNgOptions {
+                            max_size: limits.snap_length,
+                            ..PcapNgOptions::default()
+                        },
+                    )?;
+                    writer.add_interface(route.route.link_type)?;
+                    Ok(writer)
+                })(),
+            };
+            let mut writer = match writer {
                 Ok(writer) => writer,
                 Err(source) => {
                     let error =

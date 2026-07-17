@@ -35,6 +35,123 @@ impl Default for Limits {
     }
 }
 
+/// Resource ceilings applied while streaming an offline capture.
+///
+/// Limits are enforced where their corresponding input is encountered. A zero
+/// value therefore disables that class of input rather than being rejected
+/// uniformly during construction.
+///
+/// ```
+/// use std::io::Cursor;
+/// use packetcraftr::capture::{LinkType, Reader, ReaderOptions, Writer};
+///
+/// # fn example() -> Result<(), packetcraftr::capture::Error> {
+/// let bytes = Writer::pcap(Vec::new(), LinkType::ETHERNET)?.into_inner();
+/// let options = ReaderOptions {
+///     max_size: 64 * 1024,
+///     ..ReaderOptions::default()
+/// };
+/// let _reader = Reader::with_options(Cursor::new(bytes), options)?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReaderOptions {
+    /// Maximum packet or PCAPNG block size, in bytes.
+    pub max_size: usize,
+    /// Maximum interface descriptions retained from one PCAPNG section.
+    pub max_interfaces_per_section: usize,
+    /// Maximum interface descriptions retained across all PCAPNG sections.
+    pub max_total_interfaces: usize,
+    /// Maximum metadata blocks consumed while seeking the next frame.
+    pub max_metadata_blocks_per_frame: usize,
+}
+
+impl Default for ReaderOptions {
+    fn default() -> Self {
+        Self {
+            max_size: DEFAULT_SIZE_LIMIT,
+            max_interfaces_per_section: DEFAULT_INTERFACE_LIMIT,
+            max_total_interfaces: DEFAULT_TOTAL_INTERFACE_LIMIT,
+            max_metadata_blocks_per_frame: DEFAULT_METADATA_BLOCK_LIMIT,
+        }
+    }
+}
+
+/// Classic PCAP file configuration.
+///
+/// ```
+/// use packetcraftr::capture::{Endianness, LinkType, PcapOptions, Writer};
+///
+/// # fn example() -> Result<(), packetcraftr::capture::Error> {
+/// let options = PcapOptions {
+///     endianness: Endianness::Big,
+///     snap_len: 65_535,
+///     max_size: 65_535,
+///     ..PcapOptions::default()
+/// };
+/// let _writer = Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, options)?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PcapOptions {
+    /// Byte order used for the global header and every packet record.
+    pub endianness: Endianness,
+    /// Timestamp precision. Classic PCAP supports decimal microseconds or nanoseconds.
+    pub timestamp_resolution: TimestampResolution,
+    /// Snapshot length written to the global header, in bytes.
+    pub snap_len: usize,
+    /// Maximum captured packet size accepted by the writer, in bytes.
+    pub max_size: usize,
+}
+
+impl Default for PcapOptions {
+    fn default() -> Self {
+        Self {
+            endianness: Endianness::Little,
+            timestamp_resolution: TimestampResolution::Decimal(9),
+            snap_len: DEFAULT_SIZE_LIMIT,
+            max_size: DEFAULT_SIZE_LIMIT,
+        }
+    }
+}
+
+/// PCAPNG section configuration.
+///
+/// ```
+/// use packetcraftr::capture::{LinkType, PcapNgOptions, Writer};
+///
+/// # fn example() -> Result<(), packetcraftr::capture::Error> {
+/// let options = PcapNgOptions {
+///     max_interfaces: 8,
+///     ..PcapNgOptions::default()
+/// };
+/// let mut writer = Writer::pcapng_with_options(Vec::new(), options)?;
+/// writer.add_interface(LinkType::ETHERNET)?;
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PcapNgOptions {
+    /// Byte order used for the section and its blocks.
+    pub endianness: Endianness,
+    /// Maximum block and captured packet size, in bytes.
+    pub max_size: usize,
+    /// Maximum number of interface descriptions in the section.
+    pub max_interfaces: usize,
+}
+
+impl Default for PcapNgOptions {
+    fn default() -> Self {
+        Self {
+            endianness: Endianness::Little,
+            max_size: DEFAULT_SIZE_LIMIT,
+            max_interfaces: DEFAULT_INTERFACE_LIMIT,
+        }
+    }
+}
+
 /// Capture container format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

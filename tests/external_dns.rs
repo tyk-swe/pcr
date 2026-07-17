@@ -9,19 +9,17 @@ use packetcraftr::{
     capture::{Frame, LinkType},
     protocol::builtin::registry,
     workflow::{
-        AddressFamily, Stats,
+        AddressFamily, BoundaryError, Stats,
         clock::Clock,
-        dns::{
-            Exchange, Execution, ExecutionError, Executor, Limits, Outcome, QueryType, Request, run,
-        },
-        target::{AuthorizationError, Authorized, Authorizer, Target},
+        dns::{Exchange, Execution, Executor, Limits, Outcome, QueryType, Request, run},
+        target::{Authorized, Authorizer, Target},
     },
 };
 
 struct LabAuthorizer;
 
 impl Authorizer for LabAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, AuthorizationError> {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         assert_eq!(target, &Target::Hostname("resolver.lab".to_owned()));
         Ok(Authorized {
             declared: "resolver.lab".to_owned(),
@@ -33,7 +31,7 @@ impl Authorizer for LabAuthorizer {
         &mut self,
         packets: u64,
         maximum_wire_bytes: u64,
-    ) -> Result<(), AuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         assert_eq!(packets, 1);
         assert!(maximum_wire_bytes >= 12 + 14 + 20 + 8);
         Ok(())
@@ -43,7 +41,7 @@ impl Authorizer for LabAuthorizer {
 struct TimeoutExecutor;
 
 impl Executor for TimeoutExecutor {
-    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, ExecutionError> {
+    fn execute(&mut self, exchange: &Exchange) -> Result<Execution, BoundaryError> {
         assert_eq!(
             exchange.probe.server_address,
             IpAddr::V4(Ipv4Addr::new(192, 168, 56, 53))

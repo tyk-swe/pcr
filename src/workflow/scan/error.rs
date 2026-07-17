@@ -14,7 +14,7 @@ pub enum ScanError {
     #[error("scan duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("scan authorization failed: {0}")]
-    Authorization(#[from] AuthorizationError),
+    Authorization(#[from] BoundaryError),
     #[error("resolved target has no {family} address selected for this scan")]
     AddressFamily { family: &'static str },
     #[error("scan worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
@@ -23,7 +23,7 @@ pub enum ScanError {
     Execution {
         sequence: u64,
         #[source]
-        source: ScanExecutionError,
+        source: BoundaryError,
     },
     #[error("scan rate clock failed before probe {sequence}: {message}")]
     Clock { sequence: u64, message: String },
@@ -95,5 +95,5 @@ impl Classified for ScanError {
         }
     }
 }
-use super::{AuthorizationError, Classified, Duration, Error, Kind, ScanExecutionError};
+use super::{BoundaryError, Classified, Duration, Error, Kind};
 use crate::error::Classification as ErrorClassification;

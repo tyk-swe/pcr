@@ -22,7 +22,7 @@ use super::commands::{
     run_build, run_capture, run_dissect, run_dns, run_exchange, run_fuzz, run_interfaces, run_plan,
     run_read, run_replay, run_routes, run_scan, run_send, run_traceroute,
 };
-use super::errors::{CliError, command_from_env, exit_code, machine_format_from_env};
+use super::errors::{CliError, command_from_env, machine_format_from_env};
 use super::input::read_recipe;
 use super::rendering::{emit_json, emit_json_compact, emit_stderr_error, emit_stderr_message};
 
@@ -88,10 +88,10 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                     _ => unreachable!("machine_format_from_env returns structured formats"),
                 };
                 return match emitted {
-                    Ok(()) => exit_code(code),
+                    Ok(()) => ExitCode::from(code),
                     Err(write_error) => {
                         let _ = emit_stderr_error(&write_error.message);
-                        exit_code(write_error.exit_code)
+                        ExitCode::from(write_error.exit_code)
                     }
                 };
             }
@@ -99,12 +99,12 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                 if error.print().is_ok() {
                     ExitCode::SUCCESS
                 } else {
-                    exit_code(5)
+                    ExitCode::from(5)
                 }
             } else {
                 match emit_stderr_message(&error.to_string()) {
-                    Ok(()) => exit_code(code),
-                    Err(_) => exit_code(5),
+                    Ok(()) => ExitCode::from(code),
+                    Err(_) => ExitCode::from(5),
                 }
             };
         }
@@ -134,9 +134,9 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                 ) {
                     let _ = emit_stderr_error(&write_error.message);
                 }
-                return exit_code(write_error.exit_code);
+                return ExitCode::from(write_error.exit_code);
             }
-            exit_code(error.exit_code)
+            ExitCode::from(error.exit_code)
         }
     }
 }

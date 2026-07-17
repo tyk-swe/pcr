@@ -41,8 +41,8 @@ use super::evidence::{
 };
 use super::nonzero_ipv4_identification;
 use super::probe::Correlation;
-use super::target::{AuthorizationError, Authorizer, Target};
-use super::{AddressFamily, Stats, push_diagnostic_once};
+use super::target::{Authorizer, Target};
+use super::{AddressFamily, BoundaryError, Stats, push_diagnostic_once};
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;
@@ -77,10 +77,10 @@ pub use engine::scan as run;
 pub use error::ScanError as Error;
 pub use model::{
     ScanBatch as Batch, ScanBatchExecution as Execution, ScanClassification as Classification,
-    ScanEndpointResult as Endpoint, ScanExecutionError as ExecutionError, ScanExecutor as Executor,
-    ScanLimits as Limits, ScanMatchedResponse as MatchedResponse, ScanProbe as Probe,
-    ScanProbeEvidence as ProbeEvidence, ScanProbeStatus as ProbeStatus, ScanRequest as Request,
-    ScanResult as Result, ScanTransport as Transport,
+    ScanEndpointResult as Endpoint, ScanExecutor as Executor, ScanLimits as Limits,
+    ScanMatchedResponse as MatchedResponse, ScanProbe as Probe, ScanProbeEvidence as ProbeEvidence,
+    ScanProbeStatus as ProbeStatus, ScanRequest as Request, ScanResult as Result,
+    ScanTransport as Transport,
 };
 
 use classification::{ScanResponseClassification, classify_scan_response};
@@ -88,7 +88,7 @@ use classification::{ScanResponseClassification, classify_scan_response};
 use engine::scan;
 use error::ScanError;
 use model::{
-    ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanExecutionError,
-    ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus,
-    ScanRequest, ScanResult, ScanTransport,
+    ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanExecutor,
+    ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest,
+    ScanResult, ScanTransport,
 };

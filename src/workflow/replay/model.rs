@@ -162,12 +162,13 @@ pub struct ReplaySummary {
     pub scheduled_duration: Duration,
 }
 
-/// Policy decision returned before a replay transmitter can observe a frame.
-pub use crate::workflow::BoundaryError as ReplayAuthorizationError;
-
 /// Explicit policy seam invoked before delay or transmission.
 pub trait ReplayAuthorizer {
-    fn authorize(&mut self, frame: &Frame, mode: LinkMode) -> Result<(), ReplayAuthorizationError>;
+    fn authorize(
+        &mut self,
+        frame: &Frame,
+        mode: LinkMode,
+    ) -> Result<(), crate::workflow::BoundaryError>;
 }
 
 /// Exact-frame transmitter seam used by native adapters and deterministic tests.

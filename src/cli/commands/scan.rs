@@ -93,7 +93,7 @@ pub(in crate::cli) fn run_scan(
     };
     let resolver = client::target::SystemResolver;
     let mut authorizer = workflow::scan::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::System;
+    let mut clock = workflow::clock::SystemClock;
     let result = workflow::scan::run(
         &request,
         &mut authorizer,
@@ -143,7 +143,7 @@ impl workflow::scan::Executor for CliScanExecutor {
     fn execute(
         &mut self,
         batch: &workflow::scan::Batch,
-    ) -> Result<workflow::scan::Execution, workflow::scan::ExecutionError> {
+    ) -> Result<workflow::scan::Execution, workflow::BoundaryError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;

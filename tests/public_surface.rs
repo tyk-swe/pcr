@@ -91,6 +91,16 @@ fn canonical_runtime_domain_namespaces_are_downstream_usable() {
         capture::Frame::new(UNIX_EPOCH, capture::LinkType::ETHERNET, vec![0xde, 0xad]).unwrap();
     assert_eq!(frame.bytes().as_ref(), &[0xde, 0xad]);
     assert_ne!(capture::LinkType::BSD_RAW, capture::LinkType::RAW);
+    let reader_options = capture::ReaderOptions::default();
+    assert_eq!(reader_options.max_size, capture::DEFAULT_SIZE_LIMIT);
+    assert_eq!(
+        capture::PcapOptions::default().snap_len,
+        capture::DEFAULT_SIZE_LIMIT
+    );
+    assert_eq!(
+        capture::PcapNgOptions::default().max_interfaces,
+        capture::DEFAULT_INTERFACE_LIMIT
+    );
 
     let interface = net::interface::Id {
         name: "external0".to_owned(),
@@ -100,7 +110,7 @@ fn canonical_runtime_domain_namespaces_are_downstream_usable() {
     assert_eq!(net::link::MacAddress([2, 0, 0, 0, 0, 7]).0[5], 7);
     assert_eq!(net::link::Mode::default(), net::link::Mode::Auto);
 
-    let limits = session::Limits::default();
+    let limits = session::ReassemblyLimits::default();
     let fragments = session::fragment::Reassembler::new(
         limits.clone(),
         session::fragment::OverlapPolicy::RejectConflicting,

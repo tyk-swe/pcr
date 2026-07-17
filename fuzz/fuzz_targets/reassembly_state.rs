@@ -4,10 +4,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::session::{Limits, fragment, tcp};
+use packetcraftr::session::{ReassemblyLimits, fragment, tcp};
 
 fuzz_target!(|data: &[u8]| {
-    let limits = Limits {
+    let limits = ReassemblyLimits {
         max_flows: 16,
         max_bytes_per_flow: 4096,
         max_aggregate_bytes: 64 * 1024,
@@ -32,7 +32,7 @@ fuzz_target!(|data: &[u8]| {
             );
             let result = fragments.push(
                 fragment::Fragment {
-                    key: fragment::Key {
+                    key: fragment::DatagramKey {
                         source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
                         destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
                         identification: (word >> 8) as u32 % 24,

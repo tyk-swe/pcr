@@ -72,7 +72,7 @@ pub enum ReplayError {
     Authorization {
         sequence: u64,
         #[source]
-        source: ReplayAuthorizationError,
+        source: crate::workflow::BoundaryError,
     },
     #[error("replay transmission failed at source frame {sequence}: {source}")]
     Transmission {
@@ -192,5 +192,4 @@ impl Classified for ReplayError {
 }
 use super::{
     CaptureError, Classification, Classified, Duration, Error, Kind, LinkMode, LiveIoError,
-    ReplayAuthorizationError,
 };

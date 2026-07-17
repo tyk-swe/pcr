@@ -23,7 +23,7 @@ where
     fn execute(
         &mut self,
         batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+    ) -> Result<TracerouteBatchExecution, BoundaryError> {
         let Some(first) = batch.probes.first() else {
             return Err(invalid_client_execution(
                 "traceroute executor received an empty hop batch",
@@ -96,7 +96,7 @@ where
         let exchange = self
             .client
             .exchange(&template, options)
-            .map_err(|error| TracerouteExecutionError::classified(&error))?;
+            .map_err(|error| BoundaryError::classified(&error))?;
         let crate::client::exchange::Result {
             sent,
             sent_evidence,
@@ -126,15 +126,15 @@ where
     }
 }
 
-fn invalid_client_execution(message: impl Into<String>) -> TracerouteExecutionError {
-    TracerouteExecutionError::execution_validation(
+fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
+    BoundaryError::execution_validation(
         message,
         "cli.traceroute_executor",
         "use homogeneous bounded hop batches and retain at least one response per probe",
     )
 }
 use super::{
-    ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues, TracerouteBatch,
-    TracerouteBatchExecution, TracerouteExecutionError, TracerouteExecutor,
-    TracerouteMatchedResponse, TracerouteStrategy,
+    BoundaryError, ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
+    TracerouteStrategy,
 };

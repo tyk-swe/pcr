@@ -214,22 +214,8 @@ impl From<LinkMode> for RouteModeOutput {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(transparent)]
-pub struct RouteLinkTypeOutput(pub u32);
-
-impl From<crate::capture::LinkType> for RouteLinkTypeOutput {
-    fn from(value: crate::capture::LinkType) -> Self {
-        Self(value.0)
-    }
-}
-
-impl From<RouteLinkTypeOutput> for crate::capture::LinkType {
-    fn from(value: RouteLinkTypeOutput) -> Self {
-        Self(value.0)
-    }
-}
-
+/// Output-owned MAC representation that keeps the versioned JSON contract
+/// independent from the routing model's representation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(transparent)]
 pub struct RouteMacAddressOutput(pub [u8; 6]);
@@ -298,7 +284,7 @@ pub struct RouteDecisionOutput {
     pub destination_scope: RouteScopeOutput,
     pub mtu: u32,
     pub capability: RouteCapabilityOutput,
-    pub link_type: RouteLinkTypeOutput,
+    pub link_type: u32,
 }
 
 impl From<RouteDecision> for RouteDecisionOutput {
@@ -313,7 +299,7 @@ impl From<RouteDecision> for RouteDecisionOutput {
             destination_scope: value.destination_scope.into(),
             mtu: value.mtu,
             capability: value.capability.into(),
-            link_type: value.link_type.into(),
+            link_type: value.link_type.0,
         }
     }
 }

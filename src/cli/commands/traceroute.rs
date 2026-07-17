@@ -110,7 +110,7 @@ pub(in crate::cli) fn run_traceroute(
     };
     let resolver = client::target::SystemResolver;
     let mut authorizer = workflow::traceroute::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::System;
+    let mut clock = workflow::clock::SystemClock;
     let result = workflow::traceroute::run(
         &request,
         &mut authorizer,
@@ -152,7 +152,7 @@ impl workflow::traceroute::Executor for CliTracerouteExecutor {
     fn execute(
         &mut self,
         batch: &workflow::traceroute::Batch,
-    ) -> Result<workflow::traceroute::Execution, workflow::traceroute::ExecutionError> {
+    ) -> Result<workflow::traceroute::Execution, workflow::BoundaryError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;

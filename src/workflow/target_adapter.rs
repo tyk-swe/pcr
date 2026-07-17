@@ -4,7 +4,8 @@
 use crate::client::policy::Error as PolicyError;
 use crate::client::target::{Hostname, Target as ClientTarget};
 
-use super::target::{AuthorizationError, Authorized, Authorizer, Target};
+use super::BoundaryError;
+use super::target::{Authorized, Authorizer, Target};
 
 /// Applies a client traffic policy and hostname resolver to the shared target
 /// authorization contract.
@@ -20,19 +21,19 @@ impl<'a, R> PolicyAuthorizer<'a, R> {
 }
 
 impl<R: crate::client::target::Resolver> Authorizer for PolicyAuthorizer<'_, R> {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, AuthorizationError> {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         let target = match target {
             Target::Address(address) => ClientTarget::Address(*address),
             Target::Hostname(hostname) => ClientTarget::Hostname(
                 hostname
                     .parse::<Hostname>()
-                    .map_err(|error| AuthorizationError::classified(&error))?,
+                    .map_err(|error| BoundaryError::classified(&error))?,
             ),
         };
         let resolved = self
             .policy
             .resolve_target(&target, self.resolver)
-            .map_err(|error| AuthorizationError::classified(&error))?;
+            .map_err(|error| BoundaryError::classified(&error))?;
         let declared = match resolved.declared() {
             ClientTarget::Address(address) => address.to_string(),
             ClientTarget::Hostname(hostname) => hostname.to_string(),
@@ -47,15 +48,15 @@ impl<R: crate::client::target::Resolver> Authorizer for PolicyAuthorizer<'_, R> 
         &mut self,
         packets: u64,
         maximum_wire_bytes: u64,
-    ) -> Result<(), AuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         if packets > self.policy.max_packets_per_operation {
-            return Err(AuthorizationError::classified(&PolicyError::PacketLimit {
+            return Err(BoundaryError::classified(&PolicyError::PacketLimit {
                 actual: packets,
                 limit: self.policy.max_packets_per_operation,
             }));
         }
         if maximum_wire_bytes > self.policy.max_bytes_per_operation {
-            return Err(AuthorizationError::classified(&PolicyError::ByteLimit {
+            return Err(BoundaryError::classified(&PolicyError::ByteLimit {
                 actual: maximum_wire_bytes,
                 limit: self.policy.max_bytes_per_operation,
             }));

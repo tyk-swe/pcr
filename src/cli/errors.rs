@@ -3,8 +3,6 @@
 
 // CLI error classification and exit-code mapping.
 
-use std::process::ExitCode;
-
 use packetcraftr::{
     error::{Classification, Classified, Kind},
     net, output,
@@ -173,8 +171,4 @@ pub(super) fn command_from_env() -> Option<output::contract::Command> {
                 .iter()
                 .find_map(|(name, command)| (*name == argument).then_some(*command))
         })
-}
-
-pub(super) fn exit_code(code: u8) -> ExitCode {
-    ExitCode::from(code)
 }

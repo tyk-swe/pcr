@@ -1,26 +1,5 @@
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum DnsTransport {
-    #[default]
-    Udp,
-}
-
-impl DnsTransport {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Udp => "udp",
-        }
-    }
-}
-
-impl fmt::Display for DnsTransport {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub enum DnsQueryType {
     #[default]
     A,
@@ -523,7 +502,6 @@ pub struct DnsResult {
     pub query_name: String,
     pub query_type: DnsQueryType,
     pub transaction_id: u16,
-    pub transport: DnsTransport,
     pub outcome: DnsOutcome,
     pub response: Option<ValidatedDnsResponse>,
     pub attempts: Vec<DnsAttemptEvidence>,
@@ -598,13 +576,11 @@ pub struct DnsExchangeExecution {
     pub stats: Stats,
 }
 
-pub use crate::workflow::BoundaryError as DnsExecutionError;
-
 pub trait DnsExecutor {
     fn execute(
         &mut self,
         exchange: &DnsExchange,
-    ) -> Result<DnsExchangeExecution, DnsExecutionError>;
+    ) -> Result<DnsExchangeExecution, crate::workflow::BoundaryError>;
 }
 use super::{
     AddressFamily, Bytes, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,

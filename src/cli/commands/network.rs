@@ -54,7 +54,7 @@ fn render_planned_route(route: &output::network::plan::Plan) -> Result<(), CliEr
         route.route.interface.index,
         route.mode,
         route.route.mtu,
-        route.route.link_type.0
+        route.route.link_type
     ))?;
     write_stdout_line(format_args!(
         "lookup_destination={} final_destination={} source={} next_hop={} destination_mac={}",
@@ -111,7 +111,7 @@ pub(in crate::cli) fn run_routes(output: output::contract::Format) -> Result<(),
                     optional_display(route.selected_address.or(route.preferred_source)),
                     route.mtu,
                     route.capability,
-                    route.link_type.0
+                    route.link_type
                 ))?;
             }
             Ok(())

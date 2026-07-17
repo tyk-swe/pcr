@@ -17,11 +17,11 @@ use packetcraftr::{
     },
     protocol::builtin::registry,
     workflow::{
+        BoundaryError, Stats,
         clock::Clock as FuzzClock,
         fuzz::{
-            AuthorizationError, Authorizer as FuzzAuthorizer, CaseOutcome, Execution,
-            ExecutionCase, ExecutionError, ExecutionStats, Executor as FuzzExecutor, LiveOptions,
-            Request, Strategy, Target, run, run_live,
+            Authorizer as FuzzAuthorizer, CaseOutcome, Execution, ExecutionCase,
+            Executor as FuzzExecutor, LiveOptions, Request, Strategy, Target, run, run_live,
         },
     },
 };
@@ -37,7 +37,7 @@ impl FuzzAuthorizer for Authorizer {
         _destination: Option<IpAddr>,
         maximum_wire_bytes: u64,
         requires_malformed_live: bool,
-    ) -> Result<(), AuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         self.calls += 1;
         assert_eq!(packets.len(), 2);
         assert!(maximum_wire_bytes >= 2);
@@ -56,12 +56,12 @@ impl FuzzExecutor for Executor {
         &mut self,
         case: &ExecutionCase,
         _timeout: Duration,
-    ) -> Result<Execution, ExecutionError> {
+    ) -> Result<Execution, BoundaryError> {
         self.calls += 1;
         let built = Builder::new(Arc::clone(&self.registry))
             .build(case.packet.clone(), Context::default(), Options::default())
             .map_err(|source| {
-                ExecutionError::new(
+                BoundaryError::new(
                     source.to_string(),
                     Classification::new("packet.external_fuzz", Kind::Packet, None),
                     Vec::new(),
@@ -69,11 +69,11 @@ impl FuzzExecutor for Executor {
             })?;
         let sent = Frame::new(std::time::UNIX_EPOCH, LinkType(147), built.bytes.clone()).unwrap();
         Ok(Execution {
-            stats: ExecutionStats {
+            stats: Stats {
                 packets_attempted: 1,
                 packets_completed: 1,
                 bytes: built.bytes.len() as u64,
-                ..ExecutionStats::default()
+                ..Stats::default()
             },
             built,
             sent,

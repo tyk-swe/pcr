@@ -115,7 +115,7 @@ pub(in crate::cli) fn run_fuzz(
             interface: DeferredInterface::new(interface),
         };
         let mut authorizer = workflow::fuzz::PolicyAuthorizer::new(&policy);
-        let mut clock = workflow::clock::System;
+        let mut clock = workflow::clock::SystemClock;
         workflow::fuzz::run_live(
             &request,
             workflow::fuzz::LiveOptions {
@@ -170,7 +170,7 @@ impl workflow::fuzz::Executor for CliFuzzExecutor {
         &mut self,
         case: &workflow::fuzz::ExecutionCase,
         timeout: Duration,
-    ) -> Result<workflow::fuzz::Execution, workflow::fuzz::ExecutionError> {
+    ) -> Result<workflow::fuzz::Execution, workflow::BoundaryError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;

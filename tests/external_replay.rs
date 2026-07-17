@@ -9,10 +9,11 @@ use packetcraftr::{
     capture::{Frame, LinkType, Reader, Writer},
     net::{Error as LiveIoError, interface::Id, link::Mode, transmit::Report},
     workflow::{
+        BoundaryError,
         clock::Clock as ReplayClock,
         replay::{
-            AuthorizationError, Authorizer as ReplayAuthorizer, Limits, Options, Timing,
-            Transmission, Transmitter as ReplayTransmitter, run,
+            Authorizer as ReplayAuthorizer, Limits, Options, Timing, Transmission,
+            Transmitter as ReplayTransmitter, run,
         },
     },
 };
@@ -20,7 +21,7 @@ use packetcraftr::{
 struct Authorizer;
 
 impl ReplayAuthorizer for Authorizer {
-    fn authorize(&mut self, _frame: &Frame, _mode: Mode) -> Result<(), AuthorizationError> {
+    fn authorize(&mut self, _frame: &Frame, _mode: Mode) -> Result<(), BoundaryError> {
         Ok(())
     }
 }

@@ -10,8 +10,6 @@ use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[cfg(test)]
-use super::Limits;
 use super::ReassemblyLimits;
 
 // Conservative accounting for a BTree node, key, and Bytes handle. The
@@ -1099,7 +1097,7 @@ mod tests {
     #[test]
     fn out_of_order_segments_emit_in_sequence() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         assert!(
             reassembler
@@ -1121,7 +1119,7 @@ mod tests {
     #[test]
     fn in_order_data_emits_the_input_bytes_without_pending_storage() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         let payload = Bytes::from_static(b"abc");
         let pointer = payload.as_ptr();
@@ -1155,7 +1153,7 @@ mod tests {
     #[test]
     fn ack_only_segment_leaves_pending_data_intact() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(103, b"def"), now).unwrap();
 
@@ -1169,7 +1167,7 @@ mod tests {
     #[test]
     fn retransmission_is_reported_without_duplicate_data() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(100, b"abc"), now).unwrap();
         let events = reassembler.push(segment(101, b"bc"), now).unwrap();
@@ -1191,7 +1189,7 @@ mod tests {
     #[test]
     fn fully_covered_pending_retransmission_keeps_the_retained_segment() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(102, b"abc"), now).unwrap();
         let pointer = reassembler.flows[&flow()].pending[&2].as_ptr();
@@ -1212,7 +1210,7 @@ mod tests {
     #[test]
     fn contradictory_retransmission_of_emitted_bytes_is_reported() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(100, b"abcdef"), now).unwrap();
 
@@ -1236,7 +1234,7 @@ mod tests {
     #[test]
     fn sequence_numbers_unwrap_across_u32_boundary() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), u32::MAX - 1, now).unwrap();
         reassembler.push(segment(u32::MAX - 1, b"ab"), now).unwrap();
         let events = reassembler.push(segment(0, b"cd"), now).unwrap();
@@ -1259,7 +1257,7 @@ mod tests {
     #[test]
     fn data_before_capture_base_is_old_not_a_four_gibibyte_gap() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(100, b"abc"), now).unwrap();
         let events = reassembler.push(segment(99, b"z"), now).unwrap();
@@ -1273,9 +1271,9 @@ mod tests {
     #[test]
     fn byte_limit_bounds_buffered_window_not_flow_lifetime() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 4,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();
@@ -1296,9 +1294,9 @@ mod tests {
     #[test]
     fn emitted_history_shares_per_flow_and_aggregate_limits_with_pending_data() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 4,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();
@@ -1331,10 +1329,10 @@ mod tests {
     #[test]
     fn pending_data_releases_excess_history_allocation() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 8,
             max_aggregate_bytes: 72,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();
@@ -1352,10 +1350,10 @@ mod tests {
     #[test]
     fn aggregate_limit_rejects_emitted_history_atomically() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 4,
             max_aggregate_bytes: 3,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();
@@ -1378,10 +1376,10 @@ mod tests {
     #[test]
     fn reset_still_must_pass_prospective_resource_check() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 4,
             max_aggregate_bytes: 3,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();
@@ -1405,10 +1403,10 @@ mod tests {
     #[test]
     fn rejected_first_segment_does_not_leave_an_empty_flow() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 4,
             max_aggregate_bytes: 3,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
 
@@ -1424,9 +1422,9 @@ mod tests {
     #[test]
     fn rejected_replacement_syn_restores_the_established_generation() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits {
+        let mut reassembler = Reassembler::new(ReassemblyLimits {
             max_bytes_per_flow: 4,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         });
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(102, b"cd"), now).unwrap();
@@ -1447,9 +1445,9 @@ mod tests {
     #[test]
     fn pending_segment_limit_is_typed_and_atomic() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_tcp_segments_per_flow: 2,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();
@@ -1480,9 +1478,9 @@ mod tests {
     #[test]
     fn aggregate_limit_charges_sparse_segment_metadata() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_aggregate_bytes: 130,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();
@@ -1501,7 +1499,7 @@ mod tests {
     #[test]
     fn established_fin_bounds_later_data_and_conflicting_fin() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         let mut fin = segment(105, b"x");
         fin.fin = true;
@@ -1525,7 +1523,7 @@ mod tests {
     #[test]
     fn stale_fin_before_base_is_ignored_but_exact_and_partially_trimmed_fin_are_kept() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         reassembler.open_flow(flow(), 100, now).unwrap();
         reassembler.push(segment(100, b"abc"), now).unwrap();
         let mut stale = segment(90, b"12345");
@@ -1544,7 +1542,7 @@ mod tests {
                 .any(|event| matches!(event, Event::Data { sequence: 103, .. }))
         );
 
-        let mut exact = Reassembler::new(Limits::default());
+        let mut exact = Reassembler::new(ReassemblyLimits::default());
         exact.open_flow(flow(), 100, now).unwrap();
         let mut at_base = segment(90, b"0123456789");
         at_base.fin = true;
@@ -1556,7 +1554,7 @@ mod tests {
                 .any(|event| matches!(event, Event::Closed { reset: false, .. }))
         );
 
-        let mut partial = Reassembler::new(Limits::default());
+        let mut partial = Reassembler::new(ReassemblyLimits::default());
         partial.open_flow(flow(), 100, now).unwrap();
         let mut crosses_base = segment(98, b"abcd");
         crosses_base.fin = true;
@@ -1574,7 +1572,7 @@ mod tests {
     #[test]
     fn a_new_syn_replaces_an_incompatible_tuple_generation() {
         let now = Instant::now();
-        let mut reassembler = Reassembler::new(Limits::default());
+        let mut reassembler = Reassembler::new(ReassemblyLimits::default());
         let mut original = segment(99, b"old");
         original.syn = true;
         reassembler.push(original.clone(), now).unwrap();
@@ -1605,9 +1603,9 @@ mod tests {
     #[test]
     fn serial_half_space_limits_are_rejected_at_public_entry_points() {
         let now = Instant::now();
-        let mut invalid = Reassembler::new(Limits {
+        let mut invalid = Reassembler::new(ReassemblyLimits {
             max_bytes_per_flow: TCP_SERIAL_HALF_SPACE,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         });
         assert_eq!(
             invalid.open_flow(flow(), 100, now),
@@ -1622,9 +1620,9 @@ mod tests {
             })
         );
 
-        let mut valid = Reassembler::new(Limits {
+        let mut valid = Reassembler::new(ReassemblyLimits {
             max_bytes_per_flow: TCP_SERIAL_HALF_SPACE - 1,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         });
         valid.open_flow(flow(), 100, now).unwrap();
     }
@@ -1632,10 +1630,10 @@ mod tests {
     #[test]
     fn sparse_aggregate_rejection_precedes_span_sized_scratch_allocation() {
         let now = Instant::now();
-        let limits = Limits {
+        let limits = ReassemblyLimits {
             max_bytes_per_flow: 10_000_001,
             max_aggregate_bytes: PENDING_SEGMENT_METADATA_CHARGE,
-            ..Limits::default()
+            ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits);
         reassembler.open_flow(flow(), 100, now).unwrap();

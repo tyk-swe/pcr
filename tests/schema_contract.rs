@@ -182,4 +182,8 @@ fn schemas_reject_representative_contract_violations() {
         !output.is_valid(&icmp_complete_port),
         "accepted ICMP traceroute completion with a destination port"
     );
+
+    let mut dns = json_file(root().join("examples/documents/output-dns-success.json"));
+    dns["result"]["transport"] = json!("tcp");
+    assert!(!output.is_valid(&dns), "accepted unsupported DNS transport");
 }

@@ -16,8 +16,8 @@ pub mod plan {
     pub use super::model::{
         PlanCommandResult as Result, PlannedRouteOutput as Plan,
         RouteCapabilityOutput as Capability, RouteDecisionOutput as Decision,
-        RouteInterfaceOutput as Interface, RouteLinkTypeOutput as LinkType,
-        RouteMacAddressOutput as MacAddress, RouteModeOutput as Mode, RouteScopeOutput as Scope,
+        RouteInterfaceOutput as Interface, RouteMacAddressOutput as MacAddress,
+        RouteModeOutput as Mode, RouteScopeOutput as Scope,
         RouteSelectionOutput as SelectionReason, RouteVlanKindOutput as VlanKind,
         RouteVlanTagOutput as VlanTag,
     };

@@ -20,10 +20,7 @@ where
     N: NeighborResolver,
     I: ExchangeIo,
 {
-    fn execute(
-        &mut self,
-        exchange: &DnsExchange,
-    ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+    fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
         if exchange.max_responses == 0 {
             return Err(invalid_client_execution(
                 "DNS exchange must retain at least one response",
@@ -44,7 +41,7 @@ where
         let result = self
             .client
             .exchange(&PacketTemplate::new(exchange.probe.packet()), options)
-            .map_err(|error| DnsExecutionError::classified(&error))?;
+            .map_err(|error| BoundaryError::classified(&error))?;
         let crate::client::exchange::Result {
             mut sent,
             mut sent_evidence,
@@ -85,22 +82,22 @@ where
     }
 }
 
-fn invalid_client_execution(message: impl Into<String>) -> DnsExecutionError {
-    DnsExecutionError::execution_validation(
+fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
+    BoundaryError::execution_validation(
         message,
         "cli.dns_executor",
         "use one bounded UDP DNS query and retain at least one response",
     )
 }
 
-fn invalid_client_result(message: impl Into<String>) -> DnsExecutionError {
-    DnsExecutionError::internal_execution(
+fn invalid_client_result(message: impl Into<String>) -> BoundaryError {
+    BoundaryError::internal_execution(
         message,
         "internal.dns_executor",
         "treat the DNS operation as incomplete because client evidence was inconsistent",
     )
 }
 use super::{
-    DnsExchange, DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsMatchedResponse,
-    ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider,
+    BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse, ExchangeIo,
+    NeighborResolver, PacketTemplate, RouteProvider,
 };

@@ -263,7 +263,9 @@ pub trait Provider: Send + Sync {
 }
 
 /// Owned native capture session. The native handle and capture worker remain
-/// private behind this platform-neutral session wrapper.
+/// private behind this platform-neutral session wrapper. Timeout policy is
+/// enforced here before delegation; native backends also defend their direct
+/// crate-internal entry points.
 pub struct SystemSession {
     inner: Box<dyn Session>,
 }
@@ -276,6 +278,7 @@ impl SystemSession {
 
 impl Session for SystemSession {
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
+        validate_timeout(timeout)?;
         self.inner.wait_ready(timeout)
     }
 
@@ -326,6 +329,9 @@ pub(crate) use Completeness as CaptureEvidenceCompleteness;
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use bytes::Bytes;
 
     use super::*;
@@ -352,18 +358,54 @@ mod tests {
         }
     }
 
+    struct CountingCapture {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl Session for CountingCapture {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn next_frame(&mut self, _timeout: Duration) -> Result<Option<CaptureFrame>, Error> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(None)
+        }
+
+        fn shutdown(&mut self) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn statistics(&self) -> Statistics {
+            Statistics::default()
+        }
+    }
+
     #[test]
-    fn capture_timeout_is_bounded_before_a_backend_wait() {
+    fn system_session_rejects_invalid_timeouts_before_delegation() {
         assert!(validate_timeout(MAX_TIMEOUT).is_ok());
-        let error = validate_timeout(Duration::MAX).unwrap_err();
-        assert!(matches!(
-            &error,
-            Error::InvalidCaptureTimeout {
-                maximum: MAX_TIMEOUT,
-                ..
-            }
-        ));
-        assert_eq!(error.classification().code, "cli.capture_timeout");
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut session = SystemSession::new(Box::new(CountingCapture {
+            calls: Arc::clone(&calls),
+        }));
+
+        let errors = [
+            session.wait_ready(Duration::MAX).unwrap_err(),
+            session.next_frame(Duration::MAX).unwrap_err(),
+            session.next_captured_frame(Duration::MAX).unwrap_err(),
+        ];
+        for error in errors {
+            assert!(matches!(
+                &error,
+                Error::InvalidCaptureTimeout {
+                    maximum: MAX_TIMEOUT,
+                    ..
+                }
+            ));
+            assert_eq!(error.classification().code, "cli.capture_timeout");
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

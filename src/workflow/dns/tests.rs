@@ -934,7 +934,7 @@ fn quoted_icmp_time_exceeded(request: &Packet, responder: IpAddr) -> DecodedPack
 struct LocalAuthorizer;
 
 impl Authorizer for LocalAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, AuthorizationError> {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         assert_eq!(
             target,
             &Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53)))
@@ -949,7 +949,7 @@ impl Authorizer for LocalAuthorizer {
         &mut self,
         packets: u64,
         _maximum_wire_bytes: u64,
-    ) -> Result<(), AuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         assert_eq!(packets, 1);
         Ok(())
     }
@@ -960,10 +960,7 @@ struct PayloadExecutor {
 }
 
 impl DnsExecutor for PayloadExecutor {
-    fn execute(
-        &mut self,
-        exchange: &DnsExchange,
-    ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+    fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
         let sent_at = UNIX_EPOCH + Duration::from_secs(10);
         let mut response_packet = Packet::new();
         response_packet
@@ -1100,7 +1097,7 @@ fn unsolicited_dns_response_after_the_deadline_remains_a_timeout() {
         fn execute(
             &mut self,
             exchange: &DnsExchange,
-        ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+        ) -> Result<DnsExchangeExecution, BoundaryError> {
             let mut execution = PayloadExecutor {
                 payload: self.payload.clone(),
             }
@@ -1151,7 +1148,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
         fn execute(
             &mut self,
             exchange: &DnsExchange,
-        ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+        ) -> Result<DnsExchangeExecution, BoundaryError> {
             let mut execution = PayloadExecutor {
                 payload: self.payload.clone(),
             }
@@ -1242,10 +1239,7 @@ struct TimeoutExecutor {
 }
 
 impl DnsExecutor for TimeoutExecutor {
-    fn execute(
-        &mut self,
-        exchange: &DnsExchange,
-    ) -> Result<DnsExchangeExecution, DnsExecutionError> {
+    fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
         self.calls += 1;
         self.addresses.push(exchange.probe.server_address);
         Ok(DnsExchangeExecution {
@@ -1430,10 +1424,7 @@ fn aggregate_duration_is_rejected_before_operation_authorization() {
     }
 
     impl Authorizer for CountingAuthorizer {
-        fn resolve_and_authorize(
-            &mut self,
-            _target: &Target,
-        ) -> Result<Authorized, AuthorizationError> {
+        fn resolve_and_authorize(&mut self, _target: &Target) -> Result<Authorized, BoundaryError> {
             panic!("duration validation must precede resolution")
         }
 
@@ -1441,7 +1432,7 @@ fn aggregate_duration_is_rejected_before_operation_authorization() {
             &mut self,
             _packets: u64,
             _maximum_wire_bytes: u64,
-        ) -> Result<(), AuthorizationError> {
+        ) -> Result<(), BoundaryError> {
             self.operation_calls += 1;
             Ok(())
         }

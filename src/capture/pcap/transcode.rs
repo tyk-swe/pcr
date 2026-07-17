@@ -1,6 +1,6 @@
 use std::io::{Read, Write};
 
-use super::models::{Error, Format, Limits, TranscodeReport};
+use super::models::{Error, Format, Limits, PcapNgOptions, PcapOptions, TranscodeReport};
 use super::reader::Reader;
 use super::writer::{Writer, WriterState};
 
@@ -28,24 +28,28 @@ pub fn transcode<R: Read, W: Write>(
                     format: Format::Pcap,
                     reason: "classic capture has no global interface metadata",
                 })?;
-            Writer::pcap_with_metadata(
+            Writer::pcap_with_options(
                 output,
                 interface.link_type,
-                endianness,
-                interface.timestamp_resolution,
-                interface.snap_len as usize,
-                reader.size_limit(),
+                PcapOptions {
+                    endianness,
+                    timestamp_resolution: interface.timestamp_resolution,
+                    snap_len: interface.snap_len as usize,
+                    max_size: reader.size_limit(),
+                },
             )?
         }
-        Format::PcapNg => Writer::pcapng_with_resource_limits(
+        Format::PcapNg => Writer::pcapng_with_options(
             output,
-            endianness,
-            reader.size_limit(),
-            // Multiple input sections are normalized into one output
-            // section. Its interface table therefore needs the reader's
-            // aggregate retained-interface allowance, not the per-section
-            // allowance of any one source section.
-            reader.max_total_interfaces,
+            PcapNgOptions {
+                endianness,
+                max_size: reader.size_limit(),
+                // Multiple input sections are normalized into one output
+                // section. Its interface table therefore needs the reader's
+                // aggregate retained-interface allowance, not the per-section
+                // allowance of any one source section.
+                max_interfaces: reader.max_total_interfaces,
+            },
         )?,
     };
     writer.set_stream_limits(limits)?;

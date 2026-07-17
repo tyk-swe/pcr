@@ -25,9 +25,6 @@ impl Clock for SystemClock {
     }
 }
 
-/// Backward-compatible name for [`SystemClock`].
-pub use SystemClock as System;
-
 pub(super) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
     let Some(rate) = rate else {
         return Some(Duration::ZERO);
@@ -59,13 +56,6 @@ mod tests {
     #[test]
     fn system_clock_implements_the_public_clock_trait() {
         let mut clock = crate::workflow::clock::SystemClock;
-        assert_eq!(clock.sleep(Duration::ZERO), Ok(()));
-    }
-
-    #[test]
-    fn legacy_system_clock_alias_remains_usable() {
-        let canonical = crate::workflow::clock::SystemClock;
-        let mut clock: crate::workflow::clock::System = canonical;
         assert_eq!(clock.sleep(Duration::ZERO), Ok(()));
     }
 }

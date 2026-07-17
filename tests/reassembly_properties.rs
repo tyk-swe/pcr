@@ -5,10 +5,10 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr::session::{Limits, fragment, tcp};
+use packetcraftr::session::{ReassemblyLimits, fragment, tcp};
 
-fn limits() -> Limits {
-    Limits {
+fn limits() -> ReassemblyLimits {
+    ReassemblyLimits {
         max_flows: 8,
         max_bytes_per_flow: 128,
         max_aggregate_bytes: 2_048,
@@ -19,8 +19,8 @@ fn limits() -> Limits {
     }
 }
 
-fn fragment_key(id: u32) -> fragment::Key {
-    fragment::Key {
+fn fragment_key(id: u32) -> fragment::DatagramKey {
+    fragment::DatagramKey {
         source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
         identification: id,

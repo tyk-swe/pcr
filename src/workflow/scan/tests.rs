@@ -117,9 +117,9 @@ struct CountingRejectExecutor {
 }
 
 impl ScanExecutor for CountingRejectExecutor {
-    fn execute(&mut self, _batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+    fn execute(&mut self, _batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
-        Err(ScanExecutionError::new(
+        Err(BoundaryError::new(
             "stop after authorization",
             ErrorClassification::new("io.test", Kind::Io, None),
             Vec::new(),
@@ -269,7 +269,7 @@ fn aggregate_duration_precedes_operation_authorization() {
         fn resolve_and_authorize(
             &mut self,
             target: &Target,
-        ) -> Result<crate::workflow::target::Authorized, AuthorizationError> {
+        ) -> Result<crate::workflow::target::Authorized, BoundaryError> {
             Ok(crate::workflow::target::Authorized {
                 declared: target.to_string(),
                 addresses: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))],
@@ -280,7 +280,7 @@ fn aggregate_duration_precedes_operation_authorization() {
             &mut self,
             _packets: u64,
             _maximum_wire_bytes: u64,
-        ) -> Result<(), AuthorizationError> {
+        ) -> Result<(), BoundaryError> {
             self.operation_calls += 1;
             Ok(())
         }
@@ -317,7 +317,7 @@ impl TimeoutExecutor {
 }
 
 impl ScanExecutor for TimeoutExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
         self.batches.push(vec![(
             batch.probes[0].attempt,
             batch.probes.iter().map(|probe| probe.port).collect(),
@@ -368,7 +368,7 @@ impl ScanExecutor for TimeoutExecutor {
 struct UndecodedExecutor(TimeoutExecutor);
 
 impl ScanExecutor for UndecodedExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
         let mut result = self.0.execute(batch)?;
         result.undecoded = [2_u64, 3]
             .into_iter()
@@ -388,7 +388,7 @@ impl ScanExecutor for UndecodedExecutor {
 struct OpenTcpExecutor(TimeoutExecutor);
 
 impl ScanExecutor for OpenTcpExecutor {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
         let mut result = self.0.execute(batch)?;
         let local = Ipv4Addr::new(10, 0, 0, 1);
         let remote = Ipv4Addr::new(10, 0, 0, 2);
@@ -529,7 +529,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
     struct PreSendMatchedExecutor;
 
     impl ScanExecutor for PreSendMatchedExecutor {
-        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
             let mut execution = OpenTcpExecutor(TimeoutExecutor::new()).execute(batch)?;
             execution.responses[0].response.frame.timestamp = execution.sent_evidence[0]
                 .timestamp
@@ -636,7 +636,7 @@ fn unsolicited_response_after_the_probe_deadline_remains_a_timeout() {
     struct LateResponseExecutor(TimeoutExecutor);
 
     impl ScanExecutor for LateResponseExecutor {
-        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
             let mut execution = self.0.execute(batch)?;
             execution.unsolicited.push(decoded(
                 tcp_packet(
@@ -677,7 +677,7 @@ fn equal_rank_candidates_choose_earliest_evidence_independent_of_source_list() {
     struct ReorderedResponses(TimeoutExecutor);
 
     impl ScanExecutor for ReorderedResponses {
-        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
             let mut execution = self.0.execute(batch)?;
             let reply = || {
                 decoded(

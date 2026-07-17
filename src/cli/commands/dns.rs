@@ -109,7 +109,7 @@ pub(in crate::cli) fn run_dns(
     };
     let resolver = client::target::SystemResolver;
     let mut authorizer = workflow::dns::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::System;
+    let mut clock = workflow::clock::SystemClock;
     let result = workflow::dns::run(
         &request,
         &mut authorizer,
@@ -174,7 +174,7 @@ impl workflow::dns::Executor for CliDnsExecutor {
     fn execute(
         &mut self,
         exchange: &workflow::dns::Exchange,
-    ) -> Result<workflow::dns::Execution, workflow::dns::ExecutionError> {
+    ) -> Result<workflow::dns::Execution, workflow::BoundaryError> {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;

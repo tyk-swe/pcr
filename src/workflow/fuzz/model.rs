@@ -396,8 +396,6 @@ pub struct FuzzExecutionCase {
     pub packet: Packet,
 }
 
-pub use crate::workflow::Stats as FuzzExecutionStats;
-
 #[derive(Clone, Debug)]
 pub struct FuzzCaseExecution {
     pub built: BuiltPacket,
@@ -406,11 +404,8 @@ pub struct FuzzCaseExecution {
     pub unmatched: Vec<Frame>,
     pub undecoded: Vec<Frame>,
     pub diagnostics: Vec<Diagnostic>,
-    pub stats: FuzzExecutionStats,
+    pub stats: crate::workflow::Stats,
 }
-
-pub use crate::workflow::BoundaryError as FuzzAuthorizationError;
-pub use crate::workflow::BoundaryError as FuzzExecutionError;
 
 pub trait FuzzAuthorizer {
     /// Authorize the complete packet set, optional route destination, and
@@ -421,7 +416,7 @@ pub trait FuzzAuthorizer {
         destination: Option<IpAddr>,
         maximum_wire_bytes: u64,
         requires_malformed_live: bool,
-    ) -> Result<(), FuzzAuthorizationError>;
+    ) -> Result<(), crate::workflow::BoundaryError>;
 }
 
 pub trait FuzzExecutor {
@@ -429,7 +424,7 @@ pub trait FuzzExecutor {
         &mut self,
         case: &FuzzExecutionCase,
         timeout: Duration,
-    ) -> Result<FuzzCaseExecution, FuzzExecutionError>;
+    ) -> Result<FuzzCaseExecution, crate::workflow::BoundaryError>;
 }
 use super::{
     BuildOptions, BuiltPacket, CaptureStatistics, Classification, Classified,

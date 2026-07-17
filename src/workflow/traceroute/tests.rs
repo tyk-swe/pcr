@@ -59,7 +59,7 @@ struct FixedAuthorizer {
 }
 
 impl Authorizer for FixedAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, AuthorizationError> {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         Ok(Authorized {
             declared: target.to_string(),
             addresses: vec![self.address],
@@ -70,7 +70,7 @@ impl Authorizer for FixedAuthorizer {
         &mut self,
         packets: u64,
         maximum_wire_bytes: u64,
-    ) -> Result<(), AuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         self.operations.push((packets, maximum_wire_bytes));
         Ok(())
     }
@@ -82,7 +82,7 @@ impl TracerouteExecutor for MixedHopExecutor {
     fn execute(
         &mut self,
         batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+    ) -> Result<TracerouteBatchExecution, BoundaryError> {
         let local = Ipv4Addr::new(10, 0, 0, 1);
         let remote = Ipv4Addr::new(10, 0, 0, 9);
         let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -139,7 +139,7 @@ impl TracerouteExecutor for UndecodedExecutor {
     fn execute(
         &mut self,
         batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+    ) -> Result<TracerouteBatchExecution, BoundaryError> {
         let mut sent = Vec::new();
         let mut sent_evidence = Vec::new();
         for probe in &batch.probes {
@@ -324,7 +324,7 @@ fn unsolicited_hop_response_after_the_deadline_cannot_finish_the_trace() {
         fn execute(
             &mut self,
             batch: &TracerouteBatch,
-        ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+        ) -> Result<TracerouteBatchExecution, BoundaryError> {
             let mut execution = MixedHopExecutor.execute(batch)?;
             for response in &mut execution.unsolicited {
                 response.frame.timestamp += Duration::from_secs(1);
@@ -365,7 +365,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
         fn execute(
             &mut self,
             batch: &TracerouteBatch,
-        ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+        ) -> Result<TracerouteBatchExecution, BoundaryError> {
             let mut execution = MixedHopExecutor.execute(batch)?;
             let mut response = execution.unsolicited.remove(0);
             response.frame.timestamp = execution.sent_evidence[0]
@@ -435,9 +435,9 @@ impl TracerouteExecutor for CountingRejectExecutor {
     fn execute(
         &mut self,
         _batch: &TracerouteBatch,
-    ) -> Result<TracerouteBatchExecution, TracerouteExecutionError> {
+    ) -> Result<TracerouteBatchExecution, BoundaryError> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Err(TracerouteExecutionError::new(
+        Err(BoundaryError::new(
             "stop after authorization",
             Classification::new("io.test", Kind::Io, None),
             Vec::new(),

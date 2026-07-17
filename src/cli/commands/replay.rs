@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use std::time::{Duration, Instant};
 
 use packetcraftr::{
-    capture::{self, Format, Limits, Reader, Writer},
+    capture::{self, Format, Limits, Reader, ReaderOptions, Writer},
     net, output, workflow,
 };
 
@@ -88,8 +88,15 @@ pub(in crate::cli) fn run_replay(
             format!("open {} failed: {source}", arguments.path.display()),
         )
     })?;
-    let mut reader = Reader::with_limits(file, arguments.max_frame_bytes, arguments.max_interfaces)
-        .map_err(CliError::classified)?;
+    let mut reader = Reader::with_options(
+        file,
+        ReaderOptions {
+            max_size: arguments.max_frame_bytes,
+            max_interfaces_per_section: arguments.max_interfaces,
+            ..ReaderOptions::default()
+        },
+    )
+    .map_err(CliError::classified)?;
     let registry = default_registry_arc()?;
     let mut authorizer =
         workflow::replay::SystemAuthorizer::new(policy, registry, arguments.allow_malformed_live);
@@ -100,7 +107,7 @@ pub(in crate::cli) fn run_replay(
         limits,
     };
     let mut transmitter = workflow::replay::SystemTransmitter::new();
-    let mut clock = workflow::clock::System;
+    let mut clock = workflow::clock::SystemClock;
     let started = Instant::now();
 
     match output {
@@ -209,7 +216,7 @@ fn execute_replay<F>(
     options: &workflow::replay::Options,
     authorizer: &mut workflow::replay::SystemAuthorizer,
     transmitter: &mut workflow::replay::SystemTransmitter,
-    clock: &mut workflow::clock::System,
+    clock: &mut workflow::clock::SystemClock,
     sink: F,
 ) -> Result<workflow::replay::Summary, CliError>
 where
@@ -287,20 +294,24 @@ fn replay_capture_writer<W: Write>(
             let snap_length = usize::try_from(interface.snap_len).map_err(|_| {
                 CliError::new(2, "capture snap length exceeds the platform size limit")
             })?;
-            Writer::pcap_with_metadata(
+            Writer::pcap_with_options(
                 output,
                 interface.link_type,
-                reader.endianness(),
-                interface.timestamp_resolution,
-                snap_length,
-                limits.max_frame_bytes,
+                capture::PcapOptions {
+                    endianness: reader.endianness(),
+                    timestamp_resolution: interface.timestamp_resolution,
+                    snap_len: snap_length,
+                    max_size: limits.max_frame_bytes,
+                },
             )
         }
-        Format::PcapNg => Writer::pcapng_with_resource_limits(
+        Format::PcapNg => Writer::pcapng_with_options(
             output,
-            reader.endianness(),
-            limits.max_frame_bytes,
-            max_interfaces,
+            capture::PcapNgOptions {
+                endianness: reader.endianness(),
+                max_size: limits.max_frame_bytes,
+                max_interfaces,
+            },
         ),
     }
     .map_err(CliError::classified)?;

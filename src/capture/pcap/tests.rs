@@ -6,8 +6,8 @@ use bytes::Bytes;
 use crate::capture::{Direction, Frame, LinkType};
 
 use super::models::{
-    DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT, DEFAULT_SIZE_LIMIT, Endianness, Error,
-    Format, Interface, Limits, TimestampResolution, TranscodeReport,
+    DEFAULT_SIZE_LIMIT, Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions,
+    ReaderOptions, TimestampResolution, TranscodeReport,
 };
 use super::reader::Reader;
 use super::transcode::transcode;
@@ -36,8 +36,15 @@ fn classic_pcap_round_trip_preserves_full_record() {
         Bytes::from_static(&[1, 2, 3, 4, 5]),
     )
     .unwrap();
-    let mut writer =
-        Writer::pcap_with_endianness(Vec::new(), LinkType::ETHERNET, Endianness::Big).unwrap();
+    let mut writer = Writer::pcap_with_options(
+        Vec::new(),
+        LinkType::ETHERNET,
+        PcapOptions {
+            endianness: Endianness::Big,
+            ..PcapOptions::default()
+        },
+    )
+    .unwrap();
     writer.write_frame(&original).unwrap();
     let bytes = writer.into_inner();
 
@@ -54,9 +61,10 @@ fn classic_pcap_rejects_zero_snapshot_length() {
         Writer::pcap_with_options(
             Vec::new(),
             LinkType::ETHERNET,
-            Endianness::Little,
-            0,
-            DEFAULT_SIZE_LIMIT,
+            PcapOptions {
+                snap_len: 0,
+                ..PcapOptions::default()
+            },
         ),
         Err(Error::InvalidData {
             format: Format::Pcap,
@@ -100,7 +108,14 @@ fn classic_pcap_reads_little_endian_microsecond_fixture() {
 
 #[test]
 fn pcapng_round_trip_preserves_multiple_interfaces_and_direction() {
-    let mut writer = Writer::pcapng_with_endianness(Vec::new(), Endianness::Big).unwrap();
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            endianness: Endianness::Big,
+            ..PcapNgOptions::default()
+        },
+    )
+    .unwrap();
     let ethernet = writer.add_interface(LinkType::ETHERNET).unwrap();
     let cooked = writer.add_interface(LinkType::LINUX_SLL2).unwrap();
     assert_eq!((ethernet, cooked), (0, 1));
@@ -132,7 +147,14 @@ fn pcapng_round_trip_preserves_multiple_interfaces_and_direction() {
 
 #[test]
 fn bounded_transcode_preserves_pcapng_interface_metadata_and_frames() {
-    let mut writer = Writer::pcapng_with_endianness(Vec::new(), Endianness::Big).unwrap();
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            endianness: Endianness::Big,
+            ..PcapNgOptions::default()
+        },
+    )
+    .unwrap();
     let ethernet = writer
         .add_interface_description(Interface {
             link_type: LinkType::ETHERNET,
@@ -221,7 +243,12 @@ fn bounded_transcode_preserves_pcapng_interface_metadata_and_frames() {
 fn bounded_transcode_preserves_snaplen_larger_than_actual_block_limit() {
     let mut writer = Writer::pcapng(Vec::new()).unwrap();
     let interface = writer
-        .add_interface_with_snaplen(LinkType::ETHERNET, 65_535)
+        .add_interface_description(Interface {
+            link_type: LinkType::ETHERNET,
+            snap_len: 65_535,
+            timestamp_resolution: TimestampResolution::Decimal(9),
+            timestamp_offset: 0,
+        })
         .unwrap();
     let mut original = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]);
     original.interface = Some(interface);
@@ -229,12 +256,16 @@ fn bounded_transcode_preserves_snaplen_larger_than_actual_block_limit() {
 
     // The 64-byte processing limit bounds allocated blocks and actual
     // records, not the interface's advertised wire snap length.
-    let mut source = Reader::with_limit(Cursor::new(writer.into_inner()), 64).unwrap();
+    let options = ReaderOptions {
+        max_size: 64,
+        ..ReaderOptions::default()
+    };
+    let mut source = Reader::with_options(Cursor::new(writer.into_inner()), options).unwrap();
     let (bytes, report) =
         transcode(&mut source, Vec::new(), Format::PcapNg, Limits::default()).unwrap();
     assert_eq!(report.interfaces, 1);
 
-    let mut copied = Reader::with_limit(Cursor::new(bytes), 64).unwrap();
+    let mut copied = Reader::with_options(Cursor::new(bytes), options).unwrap();
     assert_eq!(copied.next_frame().unwrap(), Some(original));
     assert_eq!(copied.interfaces()[0].snap_len, 65_535);
     assert_eq!(copied.next_frame().unwrap(), None);
@@ -247,13 +278,15 @@ fn classic_transcode_preserves_endianness_and_microsecond_resolution() {
         LinkType::ETHERNET,
         &[1, 2, 3],
     );
-    let mut writer = Writer::pcap_with_metadata(
+    let mut writer = Writer::pcap_with_options(
         Vec::new(),
         LinkType::ETHERNET,
-        Endianness::Big,
-        TimestampResolution::Decimal(6),
-        64,
-        64,
+        PcapOptions {
+            endianness: Endianness::Big,
+            timestamp_resolution: TimestampResolution::Decimal(6),
+            snap_len: 64,
+            max_size: 64,
+        },
     )
     .unwrap();
     writer.write_frame(&original).unwrap();
@@ -271,13 +304,15 @@ fn classic_transcode_preserves_endianness_and_microsecond_resolution() {
         TimestampResolution::Decimal(6)
     );
 
-    let mut writer = Writer::pcap_with_metadata(
+    let mut writer = Writer::pcap_with_options(
         Vec::new(),
         LinkType::ETHERNET,
-        Endianness::Little,
-        TimestampResolution::Decimal(6),
-        64,
-        64,
+        PcapOptions {
+            endianness: Endianness::Little,
+            timestamp_resolution: TimestampResolution::Decimal(6),
+            snap_len: 64,
+            max_size: 64,
+        },
     )
     .unwrap();
     assert!(matches!(
@@ -366,9 +401,21 @@ fn pcapng_round_trip_preserves_pre_epoch_timestamps() {
         .unwrap();
 
     for endianness in [Endianness::Little, Endianness::Big] {
-        let mut writer = Writer::pcapng_with_endianness(Vec::new(), endianness).unwrap();
+        let mut writer = Writer::pcapng_with_options(
+            Vec::new(),
+            PcapNgOptions {
+                endianness,
+                ..PcapNgOptions::default()
+            },
+        )
+        .unwrap();
         let interface = writer
-            .add_interface_with_timestamp_offset(LinkType::ETHERNET, -3)
+            .add_interface_description(Interface {
+                link_type: LinkType::ETHERNET,
+                snap_len: DEFAULT_SIZE_LIMIT as u32,
+                timestamp_resolution: TimestampResolution::Decimal(9),
+                timestamp_offset: -3,
+            })
             .unwrap();
         let mut first = frame(whole_second, LinkType::ETHERNET, &[1]);
         first.interface = Some(interface);
@@ -388,7 +435,12 @@ fn pcapng_round_trip_preserves_pre_epoch_timestamps() {
 fn pcapng_writer_rejects_a_timestamp_before_its_interface_offset() {
     let mut writer = Writer::pcapng(Vec::new()).unwrap();
     let interface = writer
-        .add_interface_with_timestamp_offset(LinkType::ETHERNET, -1)
+        .add_interface_description(Interface {
+            link_type: LinkType::ETHERNET,
+            snap_len: DEFAULT_SIZE_LIMIT as u32,
+            timestamp_resolution: TimestampResolution::Decimal(9),
+            timestamp_offset: -1,
+        })
         .unwrap();
     let mut original = frame(
         UNIX_EPOCH.checked_sub(Duration::from_secs(2)).unwrap(),
@@ -423,7 +475,14 @@ fn rejected_auto_interface_frame_leaves_pcapng_bytes_and_numbering_unchanged() {
         0
     );
 
-    let mut size_writer = Writer::pcapng_with_options(Vec::new(), Endianness::Little, 40).unwrap();
+    let mut size_writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            max_size: 40,
+            ..PcapNgOptions::default()
+        },
+    )
+    .unwrap();
     let original_len = size_writer.get_ref().len();
     let mut invalid = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]);
     invalid.direction = Some(Direction::Inbound);
@@ -444,8 +503,14 @@ fn pcapng_reader_bounds_interface_descriptions() {
     let mut writer = Writer::pcapng(Vec::new()).unwrap();
     writer.add_interface(LinkType::ETHERNET).unwrap();
     writer.add_interface(LinkType::LINUX_SLL).unwrap();
-    let mut reader =
-        Reader::with_limits(Cursor::new(writer.into_inner()), DEFAULT_SIZE_LIMIT, 1).unwrap();
+    let mut reader = Reader::with_options(
+        Cursor::new(writer.into_inner()),
+        ReaderOptions {
+            max_interfaces_per_section: 1,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
 
     assert!(matches!(
         reader.next_frame(),
@@ -455,9 +520,14 @@ fn pcapng_reader_bounds_interface_descriptions() {
 
 #[test]
 fn pcapng_writer_bounds_interfaces_atomically() {
-    let mut writer =
-        Writer::pcapng_with_resource_limits(Vec::new(), Endianness::Little, DEFAULT_SIZE_LIMIT, 1)
-            .unwrap();
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            max_interfaces: 1,
+            ..PcapNgOptions::default()
+        },
+    )
+    .unwrap();
     assert_eq!(writer.interface_limit(), 1);
     assert_eq!(writer.add_interface(LinkType::ETHERNET).unwrap(), 0);
     let bytes_after_first = writer.get_ref().len();
@@ -474,9 +544,14 @@ fn pcapng_writer_bounds_interfaces_atomically() {
     let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
     assert_eq!(reader.next_frame().unwrap(), Some(original));
 
-    let mut zero_limit =
-        Writer::pcapng_with_resource_limits(Vec::new(), Endianness::Little, DEFAULT_SIZE_LIMIT, 0)
-            .unwrap();
+    let mut zero_limit = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            max_interfaces: 0,
+            ..PcapNgOptions::default()
+        },
+    )
+    .unwrap();
     let section_length = zero_limit.get_ref().len();
     assert!(matches!(
         zero_limit.add_interface(LinkType::ETHERNET),
@@ -487,51 +562,34 @@ fn pcapng_writer_bounds_interfaces_atomically() {
 
 #[test]
 fn pcapng_default_interface_constructor_validates_before_writing() {
-    let mut undersized = vec![0xaa];
-    {
-        let result = Writer::with_limits(
-            &mut undersized,
-            Format::PcapNg,
-            LinkType::ETHERNET,
-            31,
-            DEFAULT_INTERFACE_LIMIT,
-        );
-        assert!(matches!(
-            result,
-            Err(Error::SizeLimitExceeded {
-                kind: "pcapng interface description",
-                declared: 32,
-                limit: 31,
-            })
-        ));
-    }
-    assert_eq!(undersized, [0xaa]);
-
-    let mut no_interfaces = Vec::new();
-    {
-        let result = Writer::with_limits(
-            &mut no_interfaces,
-            Format::PcapNg,
-            LinkType::ETHERNET,
-            64,
-            0,
-        );
-        assert!(matches!(result, Err(Error::InterfaceLimit { limit: 0 })));
-    }
-    assert!(no_interfaces.is_empty());
-
     let mut invalid_link_type = Vec::new();
     {
-        let result = Writer::with_limits(
+        let result = Writer::new(
             &mut invalid_link_type,
             Format::PcapNg,
             LinkType(u32::from(u16::MAX) + 1),
-            64,
-            DEFAULT_INTERFACE_LIMIT,
         );
         assert!(matches!(result, Err(Error::LinkTypeOutOfRange { .. })));
     }
     assert!(invalid_link_type.is_empty());
+}
+
+#[test]
+fn writer_option_defaults_match_convenience_constructors() {
+    let pcap = Writer::pcap(Vec::new(), LinkType::ETHERNET)
+        .unwrap()
+        .into_inner();
+    let configured_pcap =
+        Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, PcapOptions::default())
+            .unwrap()
+            .into_inner();
+    assert_eq!(configured_pcap, pcap);
+
+    let pcapng = Writer::pcapng(Vec::new()).unwrap().into_inner();
+    let configured_pcapng = Writer::pcapng_with_options(Vec::new(), PcapNgOptions::default())
+        .unwrap()
+        .into_inner();
+    assert_eq!(configured_pcapng, pcapng);
 }
 
 #[test]
@@ -567,37 +625,51 @@ fn pcapng_reader_keeps_section_interface_namespaces_distinct() {
 
     let mut bytes = first_writer.into_inner();
     bytes.extend_from_slice(&second_writer.into_inner());
-    let mut reader =
-        Reader::with_limits(Cursor::new(bytes.clone()), DEFAULT_SIZE_LIMIT, 1).unwrap();
+    let mut reader = Reader::with_options(
+        Cursor::new(bytes.clone()),
+        ReaderOptions {
+            max_interfaces_per_section: 1,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
     assert_eq!(reader.next_frame().unwrap(), Some(first.clone()));
     let mut global_second = second;
     global_second.interface = Some(1);
     assert_eq!(reader.next_frame().unwrap(), Some(global_second.clone()));
     assert_eq!(reader.next_frame().unwrap(), None);
 
-    let mut source = Reader::with_all_resource_limits(
+    let mut source = Reader::with_options(
         Cursor::new(bytes.clone()),
-        DEFAULT_SIZE_LIMIT,
-        1,
-        2,
-        DEFAULT_METADATA_BLOCK_LIMIT,
+        ReaderOptions {
+            max_interfaces_per_section: 1,
+            max_total_interfaces: 2,
+            ..ReaderOptions::default()
+        },
     )
     .unwrap();
     let (transcoded, report) =
         transcode(&mut source, Vec::new(), Format::PcapNg, Limits::default()).unwrap();
     assert_eq!(report.interfaces, 2);
-    let mut normalized =
-        Reader::with_limits(Cursor::new(transcoded), DEFAULT_SIZE_LIMIT, 2).unwrap();
+    let mut normalized = Reader::with_options(
+        Cursor::new(transcoded),
+        ReaderOptions {
+            max_interfaces_per_section: 2,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
     assert_eq!(normalized.next_frame().unwrap(), Some(first));
     assert_eq!(normalized.next_frame().unwrap(), Some(global_second));
     assert_eq!(normalized.next_frame().unwrap(), None);
 
-    let mut total_limited = Reader::with_all_resource_limits(
+    let mut total_limited = Reader::with_options(
         Cursor::new(bytes),
-        DEFAULT_SIZE_LIMIT,
-        1,
-        1,
-        DEFAULT_METADATA_BLOCK_LIMIT,
+        ReaderOptions {
+            max_interfaces_per_section: 1,
+            max_total_interfaces: 1,
+            ..ReaderOptions::default()
+        },
     )
     .unwrap();
     assert!(total_limited.next_frame().unwrap().is_some());
@@ -609,7 +681,14 @@ fn pcapng_reader_keeps_section_interface_namespaces_distinct() {
 
 #[test]
 fn pcapng_interface_block_honors_writer_size_limit() {
-    let mut writer = Writer::pcapng_with_options(Vec::new(), Endianness::Little, 31).unwrap();
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            max_size: 31,
+            ..PcapNgOptions::default()
+        },
+    )
+    .unwrap();
     assert!(matches!(
         writer.add_interface(LinkType::ETHERNET),
         Err(Error::SizeLimitExceeded {
@@ -620,9 +699,21 @@ fn pcapng_interface_block_honors_writer_size_limit() {
     ));
     assert_eq!(writer.into_inner().len(), 28);
 
-    let mut writer = Writer::pcapng_with_options(Vec::new(), Endianness::Little, 43).unwrap();
+    let mut writer = Writer::pcapng_with_options(
+        Vec::new(),
+        PcapNgOptions {
+            max_size: 43,
+            ..PcapNgOptions::default()
+        },
+    )
+    .unwrap();
     assert!(matches!(
-        writer.add_interface_with_timestamp_offset(LinkType::ETHERNET, -1),
+        writer.add_interface_description(Interface {
+            link_type: LinkType::ETHERNET,
+            snap_len: 43,
+            timestamp_resolution: TimestampResolution::Decimal(9),
+            timestamp_offset: -1,
+        }),
         Err(Error::SizeLimitExceeded {
             declared: 44,
             limit: 43,
@@ -714,7 +805,14 @@ fn pcapng_block_limit_is_checked_before_allocation() {
     bytes.extend_from_slice(&1_u32.to_le_bytes());
     bytes.extend_from_slice(&2048_u32.to_le_bytes());
 
-    let mut reader = Reader::with_limit(Cursor::new(bytes), 1024).unwrap();
+    let mut reader = Reader::with_options(
+        Cursor::new(bytes),
+        ReaderOptions {
+            max_size: 1024,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
     assert!(matches!(
         reader.next_frame(),
         Err(Error::SizeLimitExceeded {
@@ -731,11 +829,12 @@ fn pcapng_metadata_work_is_bounded_per_read() {
     let mut bytes = section.clone();
     bytes.extend_from_slice(&section);
     bytes.extend_from_slice(&section);
-    let mut reader = Reader::with_resource_limits(
+    let mut reader = Reader::with_options(
         Cursor::new(bytes),
-        DEFAULT_SIZE_LIMIT,
-        DEFAULT_INTERFACE_LIMIT,
-        1,
+        ReaderOptions {
+            max_metadata_blocks_per_frame: 1,
+            ..ReaderOptions::default()
+        },
     )
     .unwrap();
     assert!(matches!(
@@ -971,7 +1070,14 @@ fn limit_is_checked_before_packet_allocation() {
     bytes.extend_from_slice(&1025_u32.to_le_bytes());
     bytes.extend_from_slice(&1025_u32.to_le_bytes());
 
-    let mut reader = Reader::with_limit(Cursor::new(bytes), 1024).unwrap();
+    let mut reader = Reader::with_options(
+        Cursor::new(bytes),
+        ReaderOptions {
+            max_size: 1024,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
     assert!(matches!(
         reader.next_frame(),
         Err(Error::SizeLimitExceeded {

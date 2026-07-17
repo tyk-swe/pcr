@@ -7,6 +7,7 @@ use bytes::Bytes;
 use super::wire::{replay_network_envelope, replay_wire_destinations};
 use super::*;
 use crate::capture::Writer;
+use crate::workflow::BoundaryError;
 use std::result::Result;
 
 #[test]
@@ -159,14 +160,10 @@ struct ConfigurableRecordingAuthorizer {
 }
 
 impl ReplayAuthorizer for ConfigurableRecordingAuthorizer {
-    fn authorize(
-        &mut self,
-        _frame: &Frame,
-        _mode: LinkMode,
-    ) -> Result<(), ReplayAuthorizationError> {
+    fn authorize(&mut self, _frame: &Frame, _mode: LinkMode) -> Result<(), BoundaryError> {
         self.authorization_calls += 1;
         if self.deny_authorization {
-            Err(ReplayAuthorizationError::new(
+            Err(BoundaryError::new(
                 "denied by test policy",
                 Classification::new("policy.test", Kind::Policy, None),
                 Vec::new(),

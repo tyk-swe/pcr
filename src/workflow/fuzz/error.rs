@@ -28,12 +28,12 @@ pub enum FuzzError {
     #[error("fuzz worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("fuzz authorization failed: {0}")]
-    Authorization(#[from] FuzzAuthorizationError),
+    Authorization(#[from] crate::workflow::BoundaryError),
     #[error("fuzz execution failed at case {case_index}: {source}")]
     Execution {
         case_index: u64,
         #[source]
-        source: FuzzExecutionError,
+        source: crate::workflow::BoundaryError,
     },
     #[error("fuzz rate clock failed before case {case_index}: {message}")]
     Clock { case_index: u64, message: String },
@@ -121,7 +121,4 @@ impl Classified for FuzzError {
         }
     }
 }
-use super::{
-    Classification, Classified, Duration, Error, FuzzAuthorizationError, FuzzExecutionError,
-    FuzzTarget, Kind,
-};
+use super::{Classification, Classified, Duration, Error, FuzzTarget, Kind};

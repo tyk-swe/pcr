@@ -99,7 +99,7 @@ pub enum DnsError {
     #[error("DNS query construction failed: {0}")]
     Query(DnsWireError),
     #[error("DNS authorization failed: {0}")]
-    Authorization(#[from] AuthorizationError),
+    Authorization(#[from] BoundaryError),
     #[error("resolved DNS server has no {family} address selected")]
     AddressFamily { family: &'static str },
     #[error("DNS worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
@@ -108,7 +108,7 @@ pub enum DnsError {
     Execution {
         attempt: u32,
         #[source]
-        source: DnsExecutionError,
+        source: BoundaryError,
     },
     #[error("DNS retry clock failed before attempt {attempt}: {message}")]
     Clock { attempt: u32, message: String },
@@ -186,6 +186,4 @@ impl Classified for DnsError {
         }
     }
 }
-use super::{
-    AuthorizationError, Classification, Classified, DnsExecutionError, Duration, Error, Kind,
-};
+use super::{BoundaryError, Classification, Classified, Duration, Error, Kind};

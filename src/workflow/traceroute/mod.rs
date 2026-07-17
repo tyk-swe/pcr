@@ -42,8 +42,8 @@ use super::evidence::{
 use super::nonzero_ipv4_identification;
 use super::probe::{self, Correlation, Transport as ProbeTransport};
 use super::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
-use super::target::{AuthorizationError, Authorizer, Target};
-use super::{AddressFamily, Stats, push_diagnostic_once};
+use super::target::{Authorizer, Target};
+use super::{AddressFamily, BoundaryError, Stats, push_diagnostic_once};
 
 pub const DEFAULT_TRACEROUTE_FIRST_HOP: u8 = 1;
 pub const DEFAULT_TRACEROUTE_MAX_HOPS: u8 = 30;
@@ -78,13 +78,12 @@ pub use engine::traceroute as run;
 pub use error::TracerouteError as Error;
 pub use model::{
     TracerouteBatch as Batch, TracerouteBatchExecution as Execution,
-    TracerouteCompletion as Completion, TracerouteExecutionError as ExecutionError,
-    TracerouteExecutor as Executor, TracerouteHopResult as Hop, TracerouteLimits as Limits,
-    TracerouteMatchedResponse as MatchedResponse, TracerouteProbe as Probe,
-    TracerouteProbeEvidence as ProbeEvidence, TracerouteProbeStatus as ProbeStatus,
-    TracerouteRequest as Request, TracerouteResponseKind as ResponseKind,
-    TracerouteResult as Result, TracerouteStrategy as Strategy,
-    TracerouteUndecodedEvidence as UndecodedEvidence,
+    TracerouteCompletion as Completion, TracerouteExecutor as Executor, TracerouteHopResult as Hop,
+    TracerouteLimits as Limits, TracerouteMatchedResponse as MatchedResponse,
+    TracerouteProbe as Probe, TracerouteProbeEvidence as ProbeEvidence,
+    TracerouteProbeStatus as ProbeStatus, TracerouteRequest as Request,
+    TracerouteResponseKind as ResponseKind, TracerouteResult as Result,
+    TracerouteStrategy as Strategy, TracerouteUndecodedEvidence as UndecodedEvidence,
 };
 
 use classification::{TracerouteResponseClassification, classify_traceroute_response};
@@ -92,8 +91,8 @@ use classification::{TracerouteResponseClassification, classify_traceroute_respo
 use engine::traceroute;
 use error::TracerouteError;
 use model::{
-    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutionError,
-    TracerouteExecutor, TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse,
-    TracerouteProbe, TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest,
-    TracerouteResponseKind, TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteExecutor,
+    TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe,
+    TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest, TracerouteResponseKind,
+    TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence,
 };

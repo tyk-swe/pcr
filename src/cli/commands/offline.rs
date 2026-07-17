@@ -8,7 +8,7 @@ use std::io;
 use std::time::SystemTime;
 
 use packetcraftr::{
-    capture::{self, Frame, Limits, LinkType, Reader, transcode},
+    capture::{self, Frame, Limits, LinkType, Reader, ReaderOptions, transcode},
     error::{Classification, Kind},
     output, packet,
 };
@@ -140,8 +140,15 @@ pub(in crate::cli) fn run_read(
     validate_capture_stream_limits(max_frames, max_bytes, max_frame_bytes, max_interfaces)?;
     let file = File::open(&path)
         .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
-    let mut reader =
-        Reader::with_limits(file, max_frame_bytes, max_interfaces).map_err(CliError::classified)?;
+    let mut reader = Reader::with_options(
+        file,
+        ReaderOptions {
+            max_size: max_frame_bytes,
+            max_interfaces_per_section: max_interfaces,
+            ..ReaderOptions::default()
+        },
+    )
+    .map_err(CliError::classified)?;
     let stream_limits = Limits {
         max_frames,
         max_bytes,

@@ -13,7 +13,7 @@ use crate::workflow::{
     Stats as WorkflowStats,
     dns::{
         Outcome as DomainDnsOutcome, QueryType as DnsQueryType, Record as DnsRecord,
-        RecordValue as DnsRecordValue, Result as DnsResult, Transport as DnsTransport,
+        RecordValue as DnsRecordValue, Result as DnsResult,
         ValidatedResponse as ValidatedDnsResponse,
     },
     scan::{
@@ -186,7 +186,6 @@ fn dns_output_preserves_exact_txt_bytes_and_json_escapes_controls() {
         query_name: "txt.example.".to_owned(),
         query_type: DnsQueryType::Txt,
         transaction_id: 7,
-        transport: DnsTransport::Udp,
         outcome: DomainDnsOutcome::Response,
         response: Some(ValidatedDnsResponse {
             transaction_id: 7,
@@ -219,6 +218,7 @@ fn dns_output_preserves_exact_txt_bytes_and_json_escapes_controls() {
         stats: WorkflowStats::default(),
     };
     let (output, _, _) = DnsCommandResult::try_from_dns(result).unwrap();
+    assert_eq!(output.transport, "udp");
     let DnsRecordData::Txt {
         strings,
         strings_hex,

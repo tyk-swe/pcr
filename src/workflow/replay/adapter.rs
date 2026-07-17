@@ -22,9 +22,9 @@ impl SystemAuthorizer {
 }
 
 impl ReplayAuthorizer for SystemAuthorizer {
-    fn authorize(&mut self, frame: &Frame, mode: LinkMode) -> Result<(), ReplayAuthorizationError> {
+    fn authorize(&mut self, frame: &Frame, mode: LinkMode) -> Result<(), BoundaryError> {
         if frame.captured_length() != frame.original_length() {
-            return Err(ReplayAuthorizationError::new(
+            return Err(BoundaryError::new(
                 format!(
                     "captured frame contains {} of {} original wire bytes",
                     frame.captured_length(),
@@ -42,7 +42,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
         }
         if mode == LinkMode::Layer3 {
             replay_network_envelope(frame).map_err(|source| {
-                ReplayAuthorizationError::new(
+                BoundaryError::new(
                     source.to_string(),
                     Classification::new(
                         "packet.replay_network",
@@ -57,7 +57,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
             addresses,
             has_unsupported_routing_header,
         } = replay_wire_destinations(frame).map_err(|source| {
-            ReplayAuthorizationError::new(
+            BoundaryError::new(
                 source.to_string(),
                 Classification::new(
                     "packet.replay_ipv4_options",
@@ -70,16 +70,10 @@ impl ReplayAuthorizer for SystemAuthorizer {
         for destination in addresses {
             self.policy
                 .authorize_destination(destination)
-                .map_err(|source| {
-                    ReplayAuthorizationError::new(
-                        source.to_string(),
-                        source.classification(),
-                        source.causes(),
-                    )
-                })?;
+                .map_err(|source| BoundaryError::classified(&source))?;
         }
         if has_unsupported_routing_header {
-            return Err(ReplayAuthorizationError::new(
+            return Err(BoundaryError::new(
                 "captured IPv6 packet uses an unsupported routing header",
                 Classification::new(
                     "capability.replay_routing_header",
@@ -94,7 +88,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
         let decoded = Decoder::new(Arc::clone(&self.registry))
             .decode(frame.clone(), DecodeOptions::default())
             .map_err(|source| {
-                ReplayAuthorizationError::new(
+                BoundaryError::new(
                     source.to_string(),
                     Classification::new(
                         "packet.decode",
@@ -114,7 +108,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                 },
             )
             .map_err(|source| {
-                ReplayAuthorizationError::new(
+                BoundaryError::new(
                     format!("captured frame cannot be rebuilt exactly: {source}"),
                     Classification::new(
                         "packet.replay_rebuild",
@@ -127,7 +121,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                 )
             })?;
         if rebuilt.bytes != frame.bytes() {
-            return Err(ReplayAuthorizationError::new(
+            return Err(BoundaryError::new(
                 "captured frame did not reproduce the exact source bytes",
                 Classification::new(
                     "internal.replay_rebuild",
@@ -140,7 +134,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
             ));
         }
         if rebuilt.requires_live_opt_in && !self.allow_malformed_live {
-            return Err(ReplayAuthorizationError::new(
+            return Err(BoundaryError::new(
                 "permissive or malformed captured bytes require --allow-malformed-live",
                 Classification::new(
                     "policy.permissive_live_opt_in",
@@ -154,21 +148,11 @@ impl ReplayAuthorizer for SystemAuthorizer {
         }
         if rebuilt.requires_live_opt_in && !self.policy.allow_permissive_packets {
             let source = crate::client::policy::Error::PermissivePacket;
-            return Err(ReplayAuthorizationError::new(
-                source.to_string(),
-                source.classification(),
-                source.causes(),
-            ));
+            return Err(BoundaryError::classified(&source));
         }
         self.policy
             .authorize_packet_destinations(&decoded.packet)
-            .map_err(|source| {
-                ReplayAuthorizationError::new(
-                    source.to_string(),
-                    source.classification(),
-                    source.causes(),
-                )
-            })
+            .map_err(|source| BoundaryError::classified(&source))
     }
 }
 
@@ -389,11 +373,11 @@ use super::wire::{
     replay_wire_destinations,
 };
 use super::{
-    Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, Classified, DecodeOptions,
-    Decoder, DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo,
-    InterfaceProvider, Kind, LinkCapability, LinkMode, LiveIoError, MaterializedRoute,
-    NetworkEnvelope, PacketIo, PlannedRoute, ProtocolRegistry, ReplayAuthorizationError,
-    ReplayAuthorizer, ReplayTransmission, ReplayTransmitter, RouteDecision, RouteProvider,
-    RouteSelectionReason, SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io,
-    SystemRouteProvider, TransmissionFrame,
+    Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, DecodeOptions, Decoder,
+    DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo, InterfaceProvider, Kind,
+    LinkCapability, LinkMode, LiveIoError, MaterializedRoute, NetworkEnvelope, PacketIo,
+    PlannedRoute, ProtocolRegistry, ReplayAuthorizer, ReplayTransmission, ReplayTransmitter,
+    RouteDecision, RouteProvider, RouteSelectionReason, SystemInterfaceProvider, SystemLayer2Io,
+    SystemLayer3Io, SystemRouteProvider, TransmissionFrame,
 };
+use crate::workflow::BoundaryError;

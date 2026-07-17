@@ -30,16 +30,16 @@ pub struct Authorized {
     pub addresses: Vec<IpAddr>,
 }
 
-/// Structured failure from target resolution or operation authorization.
-pub use super::BoundaryError as AuthorizationError;
-
 /// Policy and resolution seam shared by scan, DNS, and traceroute.
 pub trait Authorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, AuthorizationError>;
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+    ) -> Result<Authorized, super::BoundaryError>;
 
     fn authorize_operation(
         &mut self,
         packets: u64,
         maximum_wire_bytes: u64,
-    ) -> Result<(), AuthorizationError>;
+    ) -> Result<(), super::BoundaryError>;
 }

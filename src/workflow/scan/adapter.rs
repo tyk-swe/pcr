@@ -20,7 +20,7 @@ where
     N: NeighborResolver,
     I: ExchangeIo,
 {
-    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, ScanExecutionError> {
+    fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
         let Some(first) = batch.probes.first() else {
             return Err(invalid_client_execution(
                 "scan executor received an empty batch",
@@ -73,7 +73,7 @@ where
         let exchange = self
             .client
             .exchange(&template, options)
-            .map_err(|error| ScanExecutionError::classified(&error))?;
+            .map_err(|error| BoundaryError::classified(&error))?;
         let crate::client::exchange::Result {
             sent,
             sent_evidence,
@@ -103,15 +103,15 @@ where
     }
 }
 
-fn invalid_client_execution(message: impl Into<String>) -> ScanExecutionError {
-    ScanExecutionError::execution_validation(
+fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
+    BoundaryError::execution_validation(
         message,
         "cli.scan_executor",
         "use homogeneous bounded scan batches and retain at least one response per probe",
     )
 }
 use super::{
-    ExchangeIo, FieldValue, NeighborResolver, PacketTemplate, RouteProvider, ScanBatch,
-    ScanBatchExecution, ScanExecutionError, ScanExecutor, ScanMatchedResponse, ScanTransport,
+    BoundaryError, ExchangeIo, FieldValue, NeighborResolver, PacketTemplate, RouteProvider,
+    ScanBatch, ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport,
     TemplateValues,
 };

@@ -1,7 +1,7 @@
 use super::{
     CASE_DOMAIN, Diagnostic, Duration, EvidenceBudget, Frame, FuzzCase, FuzzCaseExecution,
-    FuzzError, FuzzExecutionStats, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION,
-    SPLITMIX_INCREMENT, push_diagnostic_once,
+    FuzzError, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION, SPLITMIX_INCREMENT,
+    push_diagnostic_once,
 };
 
 pub(super) fn worst_case_duration(
@@ -113,7 +113,7 @@ pub(super) fn validate_execution(
 
 pub(super) fn add_execution_stats(
     total: &mut FuzzStats,
-    value: &FuzzExecutionStats,
+    value: &crate::workflow::Stats,
     case_index: u64,
 ) -> Result<(), FuzzError> {
     macro_rules! add {

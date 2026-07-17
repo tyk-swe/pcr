@@ -3,11 +3,18 @@
 use std::io::Cursor;
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::capture::Reader;
+use packetcraftr::capture::{Reader, ReaderOptions};
 
 fuzz_target!(|data: &[u8]| {
-    let Ok(mut reader) = Reader::with_all_resource_limits(Cursor::new(data), 64 * 1024, 16, 32, 64)
-    else {
+    let Ok(mut reader) = Reader::with_options(
+        Cursor::new(data),
+        ReaderOptions {
+            max_size: 64 * 1024,
+            max_interfaces_per_section: 16,
+            max_total_interfaces: 32,
+            max_metadata_blocks_per_frame: 64,
+        },
+    ) else {
         return;
     };
     for _ in 0..64 {

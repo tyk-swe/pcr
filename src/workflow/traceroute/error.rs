@@ -14,7 +14,7 @@ pub enum TracerouteError {
     #[error("traceroute duration {value:?} is invalid; maximum is {maximum:?}")]
     InvalidDuration { value: Duration, maximum: Duration },
     #[error("traceroute authorization failed: {0}")]
-    Authorization(#[from] AuthorizationError),
+    Authorization(#[from] BoundaryError),
     #[error("resolved target has no {family} address selected for traceroute")]
     AddressFamily { family: &'static str },
     #[error("traceroute worst-case duration {actual:?} exceeds the configured limit of {limit:?}")]
@@ -23,7 +23,7 @@ pub enum TracerouteError {
     Execution {
         sequence: u64,
         #[source]
-        source: TracerouteExecutionError,
+        source: BoundaryError,
     },
     #[error("traceroute rate clock failed before probe {sequence}: {message}")]
     Clock { sequence: u64, message: String },
@@ -95,6 +95,4 @@ impl Classified for TracerouteError {
         }
     }
 }
-use super::{
-    AuthorizationError, Classification, Classified, Duration, Error, Kind, TracerouteExecutionError,
-};
+use super::{BoundaryError, Classification, Classified, Duration, Error, Kind};

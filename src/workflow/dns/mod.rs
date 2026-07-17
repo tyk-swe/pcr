@@ -43,8 +43,8 @@ use super::evidence::{
 use super::nonzero_ipv4_identification;
 use super::probe::{self, Transport as ProbeTransport};
 use super::scan::MAX_SCAN_RATE;
-use super::target::{AuthorizationError, Authorizer, Target};
-use super::{AddressFamily, Stats, push_diagnostic_once};
+use super::target::{Authorizer, Target};
+use super::{AddressFamily, BoundaryError, Stats, push_diagnostic_once};
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;
@@ -93,11 +93,10 @@ pub use error::{DnsError as Error, DnsWireError as WireError};
 pub use model::{
     DnsAttemptEvidence as AttemptEvidence, DnsAttemptStatus as AttemptStatus, DnsEdns as Edns,
     DnsEdnsOption as EdnsOption, DnsExchange as Exchange, DnsExchangeExecution as Execution,
-    DnsExecutionError as ExecutionError, DnsExecutor as Executor, DnsLimits as Limits,
-    DnsMatchedResponse as MatchedResponse, DnsName as Name, DnsOutcome as Outcome,
-    DnsProbe as Probe, DnsQueryType as QueryType, DnsRecord as Record,
-    DnsRecordValue as RecordValue, DnsRejectedRecord as RejectedRecord, DnsRequest as Request,
-    DnsResult as Result, DnsSection as Section, DnsTransport as Transport,
+    DnsExecutor as Executor, DnsLimits as Limits, DnsMatchedResponse as MatchedResponse,
+    DnsName as Name, DnsOutcome as Outcome, DnsProbe as Probe, DnsQueryType as QueryType,
+    DnsRecord as Record, DnsRecordValue as RecordValue, DnsRejectedRecord as RejectedRecord,
+    DnsRequest as Request, DnsResult as Result, DnsSection as Section,
     DnsUndecodedEvidence as UndecodedEvidence, ValidatedDnsResponse as ValidatedResponse,
 };
 pub use wire::{
@@ -111,9 +110,9 @@ use engine::dns;
 use error::{DnsError, DnsWireError};
 use model::{
     DnsAttemptEvidence, DnsAttemptStatus, DnsEdns, DnsEdnsOption, DnsExchange,
-    DnsExchangeExecution, DnsExecutionError, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsName,
-    DnsOutcome, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsRequest,
-    DnsResult, DnsSection, DnsTransport, DnsUndecodedEvidence, ValidatedDnsResponse,
+    DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsName, DnsOutcome,
+    DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord, DnsRequest, DnsResult,
+    DnsSection, DnsUndecodedEvidence, ValidatedDnsResponse,
 };
 use wire::{DnsResponseClassification, classify_dns_response, encode_dns_query};
 #[cfg(test)]

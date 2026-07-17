@@ -9,20 +9,20 @@ use packetcraftr::{
     capture::{Frame, LinkType},
     protocol::{builtin::registry, network::Ipv4},
     workflow::{
-        AddressFamily, Stats,
+        AddressFamily, BoundaryError, Stats,
         clock::Clock,
         scan::{
-            Batch, Classification, Execution, ExecutionError, Executor, Limits, ProbeStatus,
-            Request, Transport, run,
+            Batch, Classification, Execution, Executor, Limits, ProbeStatus, Request, Transport,
+            run,
         },
-        target::{AuthorizationError, Authorized, Authorizer, Target},
+        target::{Authorized, Authorizer, Target},
     },
 };
 
 struct LabAuthorizer;
 
 impl Authorizer for LabAuthorizer {
-    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, AuthorizationError> {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
         assert_eq!(target, &Target::Hostname("device.lab".to_owned()));
         Ok(Authorized {
             declared: "device.lab".to_owned(),
@@ -34,7 +34,7 @@ impl Authorizer for LabAuthorizer {
         &mut self,
         packets: u64,
         maximum_wire_bytes: u64,
-    ) -> Result<(), AuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         assert_eq!(packets, 1);
         assert!(maximum_wire_bytes >= 40);
         Ok(())
@@ -44,7 +44,7 @@ impl Authorizer for LabAuthorizer {
 struct TimeoutExecutor;
 
 impl Executor for TimeoutExecutor {
-    fn execute(&mut self, batch: &Batch) -> Result<Execution, ExecutionError> {
+    fn execute(&mut self, batch: &Batch) -> Result<Execution, BoundaryError> {
         assert_eq!(batch.probes.len(), 1);
         let probe = &batch.probes[0];
         let mut packet = probe.packet();

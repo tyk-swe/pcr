@@ -137,12 +137,6 @@ impl ResolvedTarget {
             .copied()
             .find(|address| version.accepts(*address))
     }
-
-    #[deprecated(note = "use address_for_version with IpVersion")]
-    pub fn address_for_family(&self, ipv4: bool) -> Option<IpAddr> {
-        let version = if ipv4 { IpVersion::V4 } else { IpVersion::V6 };
-        self.address_for_version(version)
-    }
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

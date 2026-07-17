@@ -5,6 +5,7 @@ use super::mutation::{bounded_value_size, random_value};
 use super::*;
 use crate::packet::{build::BuildMode, document::PacketDocument, field::WireValue, layer::Raw};
 use crate::protocol::{builtin::registry as default_registry, network::Ipv4, transport::Udp};
+use crate::workflow::{BoundaryError, Stats};
 use std::result::Result;
 
 fn fuzz_protocol_registry() -> Arc<ProtocolRegistry> {
@@ -306,11 +307,11 @@ impl FuzzAuthorizer for RecordingAuthorizer {
         _destination: Option<IpAddr>,
         _maximum_wire_bytes: u64,
         _requires_malformed_live: bool,
-    ) -> Result<(), FuzzAuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         self.calls += 1;
         assert!(!packets.is_empty());
         if self.deny {
-            return Err(FuzzAuthorizationError::new(
+            return Err(BoundaryError::new(
                 "denied",
                 Classification::new("policy.test", Kind::Policy, None),
                 Vec::new(),
@@ -334,7 +335,7 @@ impl FuzzExecutor for RecordingExecutor {
         &mut self,
         case: &FuzzExecutionCase,
         _timeout: Duration,
-    ) -> Result<FuzzCaseExecution, FuzzExecutionError> {
+    ) -> Result<FuzzCaseExecution, BoundaryError> {
         self.calls += 1;
         if let Some(delay) = self.sleep {
             std::thread::sleep(delay);
@@ -349,7 +350,7 @@ impl FuzzExecutor for RecordingExecutor {
                 },
             )
             .map_err(|source| {
-                FuzzExecutionError::new(
+                BoundaryError::new(
                     source.to_string(),
                     Classification::new("packet.test", Kind::Packet, None),
                     Vec::new(),
@@ -376,11 +377,11 @@ impl FuzzExecutor for RecordingExecutor {
             })
             .unwrap_or_default();
         Ok(FuzzCaseExecution {
-            stats: FuzzExecutionStats {
+            stats: Stats {
                 packets_attempted: 1,
                 packets_completed: u64::from(!self.invalid_statistics),
                 bytes: built.bytes.len() as u64,
-                ..FuzzExecutionStats::default()
+                ..Stats::default()
             },
             built,
             sent,

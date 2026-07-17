@@ -17,43 +17,37 @@ impl FuzzAuthorizer for PolicyAuthorizer<'_> {
         destination: Option<IpAddr>,
         maximum_wire_bytes: u64,
         requires_malformed_live: bool,
-    ) -> Result<(), FuzzAuthorizationError> {
+    ) -> Result<(), BoundaryError> {
         use crate::client::policy::Error as PolicyError;
 
         self.policy
             .validate()
-            .map_err(|error| FuzzAuthorizationError::classified(&error))?;
+            .map_err(|error| BoundaryError::classified(&error))?;
         let packet_count = packets.len() as u64;
         if packet_count > self.policy.max_packets_per_operation {
-            return Err(FuzzAuthorizationError::classified(
-                &PolicyError::PacketLimit {
-                    actual: packet_count,
-                    limit: self.policy.max_packets_per_operation,
-                },
-            ));
+            return Err(BoundaryError::classified(&PolicyError::PacketLimit {
+                actual: packet_count,
+                limit: self.policy.max_packets_per_operation,
+            }));
         }
         if maximum_wire_bytes > self.policy.max_bytes_per_operation {
-            return Err(FuzzAuthorizationError::classified(
-                &PolicyError::ByteLimit {
-                    actual: maximum_wire_bytes,
-                    limit: self.policy.max_bytes_per_operation,
-                },
-            ));
+            return Err(BoundaryError::classified(&PolicyError::ByteLimit {
+                actual: maximum_wire_bytes,
+                limit: self.policy.max_bytes_per_operation,
+            }));
         }
         if requires_malformed_live && !self.policy.allow_permissive_packets {
-            return Err(FuzzAuthorizationError::classified(
-                &PolicyError::PermissivePacket,
-            ));
+            return Err(BoundaryError::classified(&PolicyError::PermissivePacket));
         }
         if let Some(destination) = destination {
             self.policy
                 .authorize_destination(destination)
-                .map_err(|error| FuzzAuthorizationError::classified(&error))?;
+                .map_err(|error| BoundaryError::classified(&error))?;
         }
         for packet in packets {
             self.policy
                 .authorize_packet_destinations(packet)
-                .map_err(|error| FuzzAuthorizationError::classified(&error))?;
+                .map_err(|error| BoundaryError::classified(&error))?;
         }
         Ok(())
     }
@@ -85,14 +79,14 @@ where
         &mut self,
         case: &FuzzExecutionCase,
         timeout: Duration,
-    ) -> Result<FuzzCaseExecution, FuzzExecutionError> {
+    ) -> Result<FuzzCaseExecution, BoundaryError> {
         let mut options = self.options.clone();
         options.timeout = timeout;
         options.max_template_packets = 1;
         let exchange = self
             .client
             .exchange(&PacketTemplate::new(case.packet.clone()), options)
-            .map_err(|error| FuzzExecutionError::classified(&error))?;
+            .map_err(|error| BoundaryError::classified(&error))?;
         let crate::client::exchange::Result {
             mut sent,
             mut sent_evidence,
@@ -130,15 +124,15 @@ where
     }
 }
 
-fn invalid_client_execution(message: impl Into<String>) -> FuzzExecutionError {
-    FuzzExecutionError::internal_execution(
+fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
+    BoundaryError::internal_execution(
         message,
         "internal.fuzz_executor",
         "execute exactly one bounded fuzz case per capture-ready exchange",
     )
 }
 use super::{
-    Duration, ExchangeIo, FuzzAuthorizationError, FuzzAuthorizer, FuzzCaseExecution,
-    FuzzExecutionCase, FuzzExecutionError, FuzzExecutor, IpAddr, NeighborResolver, Packet,
-    PacketTemplate, RouteProvider,
+    Duration, ExchangeIo, FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor,
+    IpAddr, NeighborResolver, Packet, PacketTemplate, RouteProvider,
 };
+use crate::workflow::BoundaryError;

@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added tag-driven GitHub Releases with full and pcap-free binary archives for
   Linux x86-64, macOS x86-64 and Arm64, and Windows x86-64, plus SHA-256
   checksums for every release asset.
+- Added `ReaderOptions`, `PcapOptions`, and `PcapNgOptions` for named offline
+  capture resource and format configuration.
 
 ### Changed
 
@@ -27,6 +29,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer copy the retained history for every small in-order segment.
 - Clarified traceroute probe identity, timeout, rate, policy, and output-format
   behavior in CLI help.
+- Simplified offline capture construction to one default and one options path
+  per format, and consolidated PCAPNG interface configuration around the full
+  `Interface` description. Existing capture bytes and validation behavior are
+  preserved.
+- Simplified workflow extension traits to use `workflow::BoundaryError` and
+  `workflow::Stats` directly. DNS remains UDP-only and output-v1 continues to
+  emit the required `"transport": "udp"` field.
+
+### Removed
+
+- **Breaking:** Removed the forwarding `Reader::read_frame` and `Writer::write`
+  methods; use `next_frame` and `write_frame` respectively.
+- **Breaking:** Removed the legacy `workflow::clock::System`, `session::Limits`,
+  `session::fragment::Key`, and Boolean `ResolvedTarget::address_for_family`
+  names; use `SystemClock`, `ReassemblyLimits`, `DatagramKey`, and
+  `address_for_version(IpVersion)`.
+- **Breaking:** Removed positional offline capture constructor permutations.
+  Use `Reader::with_options`, `Writer::pcap_with_options`,
+  `Writer::pcapng_with_options`, and `Writer::add_interface_description`.
+- **Breaking:** Removed `output::network::plan::LinkType`; route output decisions
+  now expose their unchanged serialized numeric link type as `u32`.
+- **Breaking:** Removed the fixed `workflow::dns::Transport` and the transport
+  field from `workflow::dns::Result`; the executable workflow remains UDP-only.
+- **Breaking:** Removed workflow-local authorization/execution error aliases and
+  `workflow::fuzz::ExecutionStats`; use `workflow::BoundaryError` and
+  `workflow::Stats`.
 
 ### Fixed
 

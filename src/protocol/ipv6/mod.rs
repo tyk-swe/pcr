@@ -1,6 +1,6 @@
 //! IPv6 extension-header models.
 
-pub(crate) mod model;
+mod model;
 
 pub use model::{DestinationOptions, HopByHop, Ipv6Fragment as Fragment, SegmentRoutingHeader};
 pub(crate) use model::{

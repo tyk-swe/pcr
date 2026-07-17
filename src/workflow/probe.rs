@@ -9,7 +9,9 @@ use crate::packet::{
     Packet, codec::NetworkEnvelope, decode::DecodedPacket, diagnostic::DiagnosticSeverity,
     field::FieldValue, registry::ProtocolRegistry,
 };
-use crate::protocol::transport::Tcp;
+use crate::protocol::{
+    QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Transport {
@@ -159,44 +161,43 @@ fn classify_icmp_error(
     responder: IpAddr,
 ) -> Option<Observation> {
     let expected_transport = match transport {
-        Transport::Tcp => crate::protocol::matcher::QuotedProbeTransport::Tcp,
-        Transport::Udp => crate::protocol::matcher::QuotedProbeTransport::Udp,
-        Transport::Icmp => crate::protocol::matcher::QuotedProbeTransport::Icmp,
+        Transport::Tcp => QuotedProbeTransport::Tcp,
+        Transport::Udp => QuotedProbeTransport::Udp,
+        Transport::Icmp => QuotedProbeTransport::Icmp,
     };
-    let kind =
-        crate::protocol::matcher::quoted_icmp_error_kind(request, response, expected_transport)?;
+    let kind = quoted_icmp_error_kind(request, response, expected_transport)?;
     let ipv6 = response
         .iter()
         .find(|layer| matches!(layer.protocol_id().as_str(), "icmpv4" | "icmpv6"))
         .is_some_and(|layer| layer.protocol_id().as_str() == "icmpv6");
     let (correlation, reason) = match (kind, ipv6) {
-        (crate::protocol::matcher::QuotedIcmpError::PortUnreachable, false) => {
+        (QuotedIcmpError::PortUnreachable, false) => {
             (Correlation::PortUnreachable, "ICMPv4 port unreachable")
         }
-        (crate::protocol::matcher::QuotedIcmpError::PortUnreachable, true) => {
+        (QuotedIcmpError::PortUnreachable, true) => {
             (Correlation::PortUnreachable, "ICMPv6 port unreachable")
         }
-        (crate::protocol::matcher::QuotedIcmpError::AdministrativelyProhibited, false) => (
+        (QuotedIcmpError::AdministrativelyProhibited, false) => (
             Correlation::AdministrativelyProhibited,
             "ICMPv4 administratively prohibited",
         ),
-        (crate::protocol::matcher::QuotedIcmpError::AdministrativelyProhibited, true) => (
+        (QuotedIcmpError::AdministrativelyProhibited, true) => (
             Correlation::AdministrativelyProhibited,
             "ICMPv6 policy or administrative rejection",
         ),
-        (crate::protocol::matcher::QuotedIcmpError::DestinationUnreachable, false) => (
+        (QuotedIcmpError::DestinationUnreachable, false) => (
             Correlation::DestinationUnreachable,
             "ICMPv4 destination unreachable",
         ),
-        (crate::protocol::matcher::QuotedIcmpError::DestinationUnreachable, true) => (
+        (QuotedIcmpError::DestinationUnreachable, true) => (
             Correlation::DestinationUnreachable,
             "ICMPv6 destination unreachable",
         ),
-        (crate::protocol::matcher::QuotedIcmpError::TimeExceeded, false) => (
+        (QuotedIcmpError::TimeExceeded, false) => (
             Correlation::TimeExceeded,
             "ICMPv4 time exceeded before reaching the endpoint",
         ),
-        (crate::protocol::matcher::QuotedIcmpError::TimeExceeded, true) => (
+        (QuotedIcmpError::TimeExceeded, true) => (
             Correlation::TimeExceeded,
             "ICMPv6 time exceeded before reaching the endpoint",
         ),

@@ -29,17 +29,21 @@ use crate::workflow::{
     },
 };
 
-use super::capture::ReadFrameCommandResult;
+use super::capture::Read as ReadFrameCommandResult;
 use super::contract::{
-    COMMAND_OUTPUT_CONTRACTS, CommandName, OutputFormat, READ_FORMATS, REPLAY_FORMATS,
+    CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName, Format as OutputFormat,
 };
-use super::dns::{DnsAttemptStatus, DnsCommandResult, DnsRecordData};
-use super::envelope::{AggregateOutput, StreamRecord};
-use super::frame::{FrameOutput, OutputTimestamp};
-use super::fuzz::FuzzCaseOutcome;
-use super::network::{InterfacesCommandResult, RoutesCommandResult};
-use super::scan::{ScanClassification, ScanCommandResult};
-use super::traceroute::{TraceCompletionReason, TracerouteCommandResult};
+use super::dns::{
+    AttemptStatus as DnsAttemptStatus, RecordData as DnsRecordData, Result as DnsCommandResult,
+};
+use super::envelope::{Aggregate as AggregateOutput, Stream as StreamRecord};
+use super::frame::{Captured as FrameOutput, Timestamp as OutputTimestamp};
+use super::fuzz::Outcome as FuzzCaseOutcome;
+use super::network::{
+    interfaces::Result as InterfacesCommandResult, routes::Result as RoutesCommandResult,
+};
+use super::scan::{Classification as ScanClassification, Result as ScanCommandResult};
+use super::traceroute::{Completion as TraceCompletionReason, Result as TracerouteCommandResult};
 
 #[test]
 fn command_matrix_is_complete_and_has_no_duplicate_formats() {
@@ -282,8 +286,26 @@ fn unsupported_format_errors_name_all_supported_choices() {
 
 #[test]
 fn capture_and_replay_formats_are_stable() {
-    assert_eq!(CommandName::Read.formats(), READ_FORMATS);
-    assert_eq!(CommandName::Replay.formats(), REPLAY_FORMATS);
+    assert_eq!(
+        CommandName::Read.formats(),
+        &[
+            OutputFormat::Text,
+            OutputFormat::Ndjson,
+            OutputFormat::Hex,
+            OutputFormat::Pcap,
+            OutputFormat::Pcapng,
+        ]
+    );
+    assert_eq!(
+        CommandName::Replay.formats(),
+        &[
+            OutputFormat::Text,
+            OutputFormat::Json,
+            OutputFormat::Ndjson,
+            OutputFormat::Pcap,
+            OutputFormat::Pcapng,
+        ]
+    );
 }
 
 #[test]

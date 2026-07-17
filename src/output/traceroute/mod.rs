@@ -7,5 +7,3 @@ pub use model::{
     TraceUndecodedOutput as Undecoded, TracerouteCommandResult as Result,
     TracerouteStreamCommandResult as Event,
 };
-#[cfg(test)]
-pub(crate) use model::{TraceCompletionReason, TracerouteCommandResult};

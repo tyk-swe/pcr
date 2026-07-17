@@ -5,10 +5,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 
+use super::models::{LinkCapability, LinkMode, MacAddress};
 use super::{
-    DestinationScope, InterfaceId, LinkCapability, LinkMode, MacAddress, NeighborError,
-    NeighborRequest, NeighborResolution, NeighborResolver, NeighborVlanKind, NeighborVlanTag,
-    PlanError, PlanOptions, RouteDecision, RoutePlanner, RouteProvider, RouteSelectionReason,
+    DestinationScope, InterfaceId, NeighborError, NeighborRequest, NeighborResolution,
+    NeighborResolver, NeighborVlanKind, NeighborVlanTag, PlanError, PlanOptions, RouteDecision,
+    RoutePlanner, RouteProvider, RouteSelectionReason,
 };
 #[cfg(not(feature = "native-route"))]
 use super::{NativeRouteError, SystemRouteProvider};

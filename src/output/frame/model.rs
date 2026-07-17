@@ -4,9 +4,11 @@ use bytes::Bytes;
 use serde::Serialize;
 
 use crate::capture::Frame;
+use crate::packet::{decode::DecodedPacket, document::PacketDocument, layout::PacketLayout};
 
 use super::super::common::compact_hex;
 use super::super::contract::OutputContractError;
+use super::super::envelope::DiagnosticOutput;
 
 /// Canonical signed Unix timestamp used by output records, including pre-epoch captures.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -146,5 +148,32 @@ impl FrameOutput {
 
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
+    }
+}
+
+/// A decoded frame retained by exchange-like tools.
+#[derive(Clone, Debug, Serialize)]
+pub struct DecodedFrameOutput {
+    pub frame: FrameOutput,
+    pub packet: PacketDocument,
+    pub layout: PacketLayout,
+    pub diagnostics: Vec<DiagnosticOutput>,
+}
+
+impl DecodedFrameOutput {
+    pub fn try_from_decoded(decoded: DecodedPacket) -> Result<Self, OutputContractError> {
+        let DecodedPacket {
+            packet,
+            original: _,
+            frame,
+            layout,
+            diagnostics,
+        } = decoded;
+        Ok(Self {
+            frame: FrameOutput::try_from_frame(frame)?,
+            packet: PacketDocument::from_packet(&packet),
+            layout,
+            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
+        })
     }
 }

@@ -49,7 +49,7 @@
       "additionalProperties": false
     },
     "fieldValue": {
-      "description": "Canonical JSON representation of packetcraftr::FieldValue.",
+      "description": "Canonical JSON representation of packetcraftr::packet::field::Value.",
       "oneOf": [
         {
           "$ref": "#/$defs/boolValue"

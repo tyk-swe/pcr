@@ -10,17 +10,15 @@ mod provider;
 mod tests;
 
 pub use models::{
-    DestinationScope as Scope, InterfaceId as Id, LinkCapability as Capability, LinkMode as Mode,
-    MacAddress, PlanOptions as Options, PlannedRoute as Plan, RouteDecision as Decision,
-    RouteProvider as Provider, RouteSelectionReason as SelectionReason,
+    DestinationScope as Scope, PlanOptions as Options, PlannedRoute as Plan,
+    RouteDecision as Decision, RouteProvider as Provider, RouteSelectionReason as SelectionReason,
 };
 pub use planner::{MaterializedRoute as Materialized, PlanError as Error, RoutePlanner as Planner};
 pub use provider::{NativeRouteError as SystemError, SystemRouteProvider as SystemProvider};
 
 pub(crate) use models::{
-    DestinationScope, InterfaceId, LinkCapability, LinkMode, NeighborRequest, NeighborResolution,
-    NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute, RouteDecision, RouteProvider,
-    RouteSelectionReason,
+    DestinationScope, InterfaceId, NeighborRequest, NeighborResolution, NeighborVlanKind,
+    NeighborVlanTag, PlanOptions, PlannedRoute, RouteDecision, RouteProvider, RouteSelectionReason,
 };
 pub(crate) use planner::{
     MaterializedRoute, NeighborError, NeighborResolver, PlanError, RoutePlanner,

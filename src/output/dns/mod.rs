@@ -8,5 +8,3 @@ pub use model::{
     DnsRejectedRecordOutput as RejectedRecord, DnsSection as Section,
     DnsStreamCommandResult as Event, DnsUndecodedOutput as Undecoded,
 };
-#[cfg(test)]
-pub(crate) use model::{DnsAttemptStatus, DnsCommandResult, DnsRecordData};

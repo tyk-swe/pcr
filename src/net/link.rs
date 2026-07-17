@@ -1,4 +1,4 @@
 //! Link-layer addressing and transmission capabilities.
 
-pub use super::route::{Capability, MacAddress, Mode};
-pub(crate) use super::route::{LinkCapability, LinkMode};
+pub(crate) use super::route::models::{LinkCapability, LinkMode};
+pub use super::route::models::{LinkCapability as Capability, LinkMode as Mode, MacAddress};

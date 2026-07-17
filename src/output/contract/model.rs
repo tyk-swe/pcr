@@ -167,14 +167,14 @@ const CAPTURE_FORMATS: &[OutputFormat] = &[
     OutputFormat::Pcap,
     OutputFormat::Pcapng,
 ];
-pub(crate) const READ_FORMATS: &[OutputFormat] = &[
+const READ_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Ndjson,
     OutputFormat::Hex,
     OutputFormat::Pcap,
     OutputFormat::Pcapng,
 ];
-pub(crate) const REPLAY_FORMATS: &[OutputFormat] = &[
+const REPLAY_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Json,
     OutputFormat::Ndjson,

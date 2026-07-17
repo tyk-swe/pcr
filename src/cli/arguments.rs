@@ -627,7 +627,7 @@ pub(super) struct TrafficPolicyArgs {
     #[arg(long, default_value_t = net::capture::Limits::default().max_bytes as u64)]
     max_bytes: u64,
     /// Maximum distinct addresses accepted from one hostname resolution.
-    #[arg(long, default_value_t = client::target::DEFAULT_MAX_RESOLVED_ADDRESSES)]
+    #[arg(long, default_value_t = client::policy::DEFAULT_MAX_RESOLVED_ADDRESSES)]
     max_resolved_addresses: usize,
 }
 

@@ -1,6 +1,6 @@
 //! Network-layer protocol models.
 
-pub(crate) mod model;
+mod model;
 
 pub use model::{Ipv4, Ipv6};
 pub(crate) use model::{

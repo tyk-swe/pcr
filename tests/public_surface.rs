@@ -120,9 +120,13 @@ fn canonical_runtime_domain_namespaces_are_downstream_usable() {
     assert_eq!(tcp.aggregate_bytes(), 0);
 
     let target = "192.168.56.10".parse::<client::target::Target>().unwrap();
-    let resolved = client::policy::Policy::default()
-        .resolve_target(&target, &NeverResolve)
-        .unwrap();
+    let policy = client::policy::Policy::default();
+    assert_eq!(
+        policy.max_resolved_addresses,
+        client::policy::DEFAULT_MAX_RESOLVED_ADDRESSES
+    );
+    assert!(policy.max_resolved_addresses <= client::policy::MAX_RESOLVED_ADDRESSES);
+    let resolved = policy.resolve_target(&target, &NeverResolve).unwrap();
     assert_eq!(resolved.selected_address(), Ipv4Addr::new(192, 168, 56, 10));
 
     assert_eq!(workflow::AddressFamily::Ipv4, workflow::AddressFamily::Ipv4);

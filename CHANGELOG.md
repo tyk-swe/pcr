@@ -55,9 +55,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** Removed workflow-local authorization/execution error aliases and
   `workflow::fuzz::ExecutionStats`; use `workflow::BoundaryError` and
   `workflow::Stats`.
+- **Breaking:** Removed `net::route::Id`; use `net::interface::Id`. Removed
+  `net::route::{Capability, Mode, MacAddress}`; use the corresponding
+  `net::link` names.
+- **Breaking:** Removed the resolved-address limit constants from
+  `client::target`; use `client::policy::{DEFAULT_MAX_RESOLVED_ADDRESSES,
+  MAX_RESOLVED_ADDRESSES}`.
 
 ### Fixed
 
+- Corrected the packet schema documentation to reference the canonical
+  `packet::field::Value` Rust path.
 - Preserved per-hop network-layer identity across multi-attempt traceroutes,
   matched quoted ICMP errors with monotonic capture timing, rejected zero
   traceroute ports, and reused live client state across hops.

@@ -1,6 +1,6 @@
 //! Transport protocol models.
 
-pub(crate) mod model;
+mod model;
 
 pub use model::{Tcp, Udp};
 pub(crate) use model::{TcpCodec, UdpCodec};

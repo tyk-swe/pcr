@@ -183,7 +183,7 @@ mod tests {
         Packet,
         build::{BuildContext, BuildMode, BuildOptions, Builder},
         decode::{DecodeOptions, Dissector},
-        expression::{ExpressionOptions, parse_packet_expression},
+        expression::{Options as ExpressionOptions, parse as parse_packet_expression},
         field::WireValue,
     };
 

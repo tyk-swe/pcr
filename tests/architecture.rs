@@ -116,6 +116,34 @@ impl<'ast> Visit<'ast> for LayoutVisitor<'_> {
     }
 }
 
+fn use_tree_contains_glob(tree: &syn::UseTree) -> bool {
+    match tree {
+        syn::UseTree::Path(tree) => use_tree_contains_glob(&tree.tree),
+        syn::UseTree::Group(tree) => tree.items.iter().any(use_tree_contains_glob),
+        syn::UseTree::Glob(_) => true,
+        syn::UseTree::Name(_) | syn::UseTree::Rename(_) => false,
+    }
+}
+
+fn is_visible_glob_reexport(item: &syn::ItemUse) -> bool {
+    !matches!(item.vis, syn::Visibility::Inherited) && use_tree_contains_glob(&item.tree)
+}
+
+struct VisibleGlobVisitor<'a> {
+    file: &'a Path,
+    violations: &'a mut Vec<String>,
+}
+
+impl<'ast> Visit<'ast> for VisibleGlobVisitor<'_> {
+    fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+        if is_visible_glob_reexport(item) {
+            self.violations
+                .push(format!("visible glob reexport in {}", self.file.display()));
+        }
+        syn::visit::visit_item_use(self, item);
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CfgValue {
     True,
@@ -606,6 +634,51 @@ fn source_modules_follow_the_canonical_filesystem_layout() {
     assert!(
         violations.is_empty(),
         "non-canonical source layout:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn visible_reexport_detection_is_structural() {
+    let is_violation = |source: &str| {
+        let item = syn::parse_str::<syn::ItemUse>(source)
+            .unwrap_or_else(|error| panic!("failed to parse {source}: {error}"));
+        is_visible_glob_reexport(&item)
+    };
+
+    assert!(is_violation("pub use crate::output::*;"));
+    assert!(is_violation(
+        "pub(crate) use crate::{net::*, packet::Packet};"
+    ));
+    assert!(is_violation("pub(super) use super::commands::*;"));
+    assert!(!is_violation("use super::*;"));
+    assert!(!is_violation("pub use crate::packet::Packet;"));
+    assert!(!is_violation(
+        "pub use crate::packet::{Packet, Result as PacketResult};"
+    ));
+}
+
+#[test]
+fn visible_reexports_are_explicit() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut violations = Vec::new();
+
+    for file in source_files(root) {
+        let relative = file.strip_prefix(root).unwrap_or(&file);
+        let source = std::fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
+        let syntax = syn::parse_file(&source)
+            .unwrap_or_else(|error| panic!("failed to parse {}: {error}", file.display()));
+        VisibleGlobVisitor {
+            file: relative,
+            violations: &mut violations,
+        }
+        .visit_file(&syntax);
+    }
+
+    assert!(
+        violations.is_empty(),
+        "visible glob reexports obscure module boundaries:\n{}",
         violations.join("\n")
     );
 }

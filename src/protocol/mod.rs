@@ -11,8 +11,10 @@ mod common;
 pub mod icmp;
 pub mod ipv6;
 pub mod link;
-pub(crate) mod matcher;
+mod matcher;
 pub mod network;
 mod raw;
 pub mod support;
 pub mod transport;
+
+pub(crate) use matcher::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};

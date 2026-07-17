@@ -63,7 +63,7 @@ impl Provider for SystemProvider {
     }
 }
 
-pub use super::route::Id;
+pub use super::route::models::InterfaceId as Id;
 
 #[cfg(any(
     feature = "live",

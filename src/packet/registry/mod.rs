@@ -1,6 +1,6 @@
 //! Deterministic protocol registration.
 
-pub(crate) mod core;
+mod core;
 
 pub(crate) use super::codec::{CodecError, LayerDecodeContext, LayerEncodeContext};
 pub use core::{

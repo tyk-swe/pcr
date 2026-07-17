@@ -10,13 +10,11 @@ use crate::net::{
     link::{Capability as LinkCapability, Mode as LinkMode},
     route::{Decision as RouteDecision, Materialized as MaterializedRoute, Plan as PlannedRoute},
 };
-use crate::packet::{
-    decode::DecodedPacket, diagnostic::Diagnostic, document::PacketDocument, layout::PacketLayout,
-};
+use crate::packet::diagnostic::Diagnostic;
 
 use super::super::contract::OutputContractError;
-use super::super::envelope::{CaptureStats, DiagnosticOutput, OperationStats};
-use super::super::frame::{FrameOutput, WireFrameOutput};
+use super::super::envelope::{CaptureStats, OperationStats};
+use super::super::frame::{DecodedFrameOutput, FrameOutput, WireFrameOutput};
 
 /// Stable interface shape used by both the text and JSON renderers.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
@@ -428,33 +426,6 @@ impl SendCommandResult {
             built.diagnostics,
             stats.into(),
         ))
-    }
-}
-
-/// A decoded frame retained by exchange-like tools.
-#[derive(Clone, Debug, Serialize)]
-pub struct DecodedFrameOutput {
-    pub frame: FrameOutput,
-    pub packet: PacketDocument,
-    pub layout: PacketLayout,
-    pub diagnostics: Vec<DiagnosticOutput>,
-}
-
-impl DecodedFrameOutput {
-    pub fn try_from_decoded(decoded: DecodedPacket) -> Result<Self, OutputContractError> {
-        let DecodedPacket {
-            packet,
-            original: _,
-            frame,
-            layout,
-            diagnostics,
-        } = decoded;
-        Ok(Self {
-            frame: FrameOutput::try_from_frame(frame)?,
-            packet: PacketDocument::from_packet(&packet),
-            layout,
-            diagnostics: diagnostics.into_iter().map(Into::into).collect(),
-        })
     }
 }
 

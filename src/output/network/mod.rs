@@ -1,9 +1,6 @@
 //! Structured network-operation output.
 
-pub(crate) mod model;
-
-#[cfg(test)]
-pub(crate) use model::{InterfacesCommandResult, RoutesCommandResult};
+mod model;
 
 pub mod interfaces {
     pub use super::model::{

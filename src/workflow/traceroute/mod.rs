@@ -4,12 +4,13 @@
 //! Bounded, structured traceroute over the shared authorization, exchange,
 //! protocol-correlation, and capture-evidence contracts.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::capture::Frame;
@@ -35,8 +36,9 @@ use crate::protocol::{
 
 use super::clock::Clock;
 use super::evidence::{
-    EvidenceBudget, EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError,
-    MatchedResponseEvidence, preferred_latency, response_within_deadline,
+    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence,
+    ResponseCandidate, format_exchange_evidence_error, push_undecoded_limit_diagnostic,
+    retain_evidence, select_response_candidate,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 use super::nonzero_ipv4_identification;
@@ -86,7 +88,7 @@ pub use model::{
     TracerouteStrategy as Strategy, TracerouteUndecodedEvidence as UndecodedEvidence,
 };
 
-use classification::{TracerouteResponseClassification, classify_traceroute_response};
+use classification::classify_traceroute_response;
 #[cfg(test)]
 use engine::traceroute;
 use error::TracerouteError;

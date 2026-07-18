@@ -320,8 +320,8 @@ pub trait TracerouteExecutor {
 }
 use super::{
     AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DecodedPacket, Diagnostic, Duration, Frame, IpAddr,
-    MAX_SCAN_PROBES, MAX_SCAN_RATE, MAX_TRACEROUTE_DURATION, MAX_TRACEROUTE_PROBES_PER_HOP, Packet,
-    ProbeTransport, Serialize, Stats, SystemTime, Target, TracerouteError, fmt,
+    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DecodedPacket, Deserialize, Diagnostic, Duration,
+    Frame, IpAddr, MAX_SCAN_PROBES, MAX_SCAN_RATE, MAX_TRACEROUTE_DURATION,
+    MAX_TRACEROUTE_PROBES_PER_HOP, Packet, ProbeTransport, Serialize, Stats, SystemTime, Target,
+    TracerouteError, fmt,
 };
-use serde::Deserialize;

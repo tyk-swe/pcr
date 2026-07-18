@@ -4,12 +4,13 @@
 //! Bounded structured scanning over the shared resolver, policy, template,
 //! exchange, matcher, and capture-evidence APIs.
 
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::capture::Frame;
@@ -35,8 +36,9 @@ use crate::protocol::{
 
 use super::clock::Clock;
 use super::evidence::{
-    EvidenceBudget, EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError,
-    MatchedResponseEvidence, preferred_latency, response_within_deadline,
+    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence,
+    ResponseCandidate, format_exchange_evidence_error, push_undecoded_limit_diagnostic,
+    retain_evidence, select_response_candidate,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 use super::nonzero_ipv4_identification;
@@ -83,7 +85,7 @@ pub use model::{
     ScanTransport as Transport,
 };
 
-use classification::{ScanResponseClassification, classify_scan_response};
+use classification::classify_scan_response;
 #[cfg(test)]
 use engine::scan;
 use error::ScanError;

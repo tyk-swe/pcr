@@ -76,6 +76,27 @@ impl Authorizer for FixedAuthorizer {
     }
 }
 
+struct AddressListAuthorizer {
+    addresses: Vec<IpAddr>,
+}
+
+impl Authorizer for AddressListAuthorizer {
+    fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+        Ok(Authorized {
+            declared: target.to_string(),
+            addresses: self.addresses.clone(),
+        })
+    }
+
+    fn authorize_operation(
+        &mut self,
+        _packets: u64,
+        _maximum_wire_bytes: u64,
+    ) -> Result<(), BoundaryError> {
+        Ok(())
+    }
+}
+
 struct MixedHopExecutor;
 
 impl TracerouteExecutor for MixedHopExecutor {
@@ -213,6 +234,132 @@ fn workflow_preserves_mixed_attempts_and_stops_after_destination_evidence() {
     assert_eq!(result.stats.elapsed, Duration::from_millis(1_002));
     assert_eq!(clock.0, vec![Duration::from_secs(1)]);
     assert_eq!(authorizer.operations, vec![(16, 16 * 74)]);
+}
+
+#[test]
+fn duplicate_resolved_addresses_preserve_first_seen_order_after_family_filtering() {
+    let first = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let second = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 10));
+    let excluded = IpAddr::V6(Ipv6Addr::LOCALHOST);
+    let mut operation = udp_traceroute_request(Target::Hostname("ordered.example".to_owned()));
+    operation.address_family = AddressFamily::Ipv4;
+    operation.max_hops = 1;
+    operation.probes_per_hop = 1;
+    let result = traceroute(
+        &operation,
+        &mut AddressListAuthorizer {
+            addresses: vec![excluded, first, first, second, first, excluded],
+        },
+        &default_registry().unwrap(),
+        &mut UndecodedExecutor,
+        &mut NoopClock::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result.resolved_addresses, vec![first, second]);
+    assert_eq!(result.destination, first);
+}
+
+#[test]
+fn unsorted_matched_groups_preserve_probe_and_fully_tied_evidence_order() {
+    struct ReverseTiedResponses;
+
+    impl TracerouteExecutor for ReverseTiedResponses {
+        fn execute(
+            &mut self,
+            batch: &TracerouteBatch,
+        ) -> Result<TracerouteBatchExecution, BoundaryError> {
+            let local = Ipv4Addr::new(10, 0, 0, 1);
+            let router = Ipv4Addr::new(10, 0, 0, 254);
+            let mut sent = Vec::with_capacity(batch.probes.len());
+            let mut sent_evidence = Vec::with_capacity(batch.probes.len());
+            for probe in &batch.probes {
+                let mut packet = probe.packet();
+                packet.get_mut::<Ipv4>().unwrap().source = local;
+                sent.push(packet);
+                sent_evidence.push(frame_at(probe.sequence + 1));
+            }
+            let mut responses = Vec::with_capacity(batch.probes.len() * 2);
+            for request_index in (0..batch.probes.len()).rev() {
+                let probe = &batch.probes[request_index];
+                let mut first = icmpv4_error(
+                    router,
+                    local,
+                    11,
+                    0,
+                    ipv4_udp_quote(&sent[request_index]),
+                    probe.sequence + 1,
+                    Vec::new(),
+                );
+                first.frame.timestamp =
+                    sent_evidence[request_index].timestamp + Duration::from_millis(1);
+                first.frame.interface = Some(1);
+                let mut second = first.clone();
+                second.frame.interface = Some(2);
+                responses.extend([
+                    TracerouteMatchedResponse {
+                        request_index,
+                        response: first,
+                        latency: Duration::from_millis(1),
+                    },
+                    TracerouteMatchedResponse {
+                        request_index,
+                        response: second,
+                        latency: Duration::from_millis(1),
+                    },
+                ]);
+            }
+            Ok(TracerouteBatchExecution {
+                sent,
+                sent_evidence,
+                responses,
+                unsolicited: Vec::new(),
+                undecoded: Vec::new(),
+                diagnostics: Vec::new(),
+                stats: Stats {
+                    packets_attempted: batch.probes.len() as u64,
+                    packets_completed: batch.probes.len() as u64,
+                    bytes: batch.probes.len() as u64,
+                    elapsed: Duration::from_millis(1),
+                    capture: CaptureStatistics::default(),
+                },
+            })
+        }
+    }
+
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut operation = udp_traceroute_request(Target::Address(destination));
+    operation.max_hops = 1;
+    operation.probes_per_hop = 3;
+    let result = traceroute(
+        &operation,
+        &mut FixedAuthorizer {
+            address: destination,
+            operations: Vec::new(),
+        },
+        &default_registry().unwrap(),
+        &mut ReverseTiedResponses,
+        &mut NoopClock::default(),
+    )
+    .unwrap();
+
+    assert_eq!(result.hops.len(), 1);
+    assert_eq!(
+        result.hops[0]
+            .probes
+            .iter()
+            .map(|probe| (probe.sequence, probe.attempt))
+            .collect::<Vec<_>>(),
+        vec![(0, 1), (1, 2), (2, 3)]
+    );
+    assert!(result.hops[0].probes.iter().all(|probe| {
+        probe.status == TracerouteProbeStatus::Response
+            && probe.response_kind == Some(TracerouteResponseKind::Intermediate)
+            && probe
+                .response
+                .as_ref()
+                .is_some_and(|frame| frame.interface == Some(1))
+    }));
 }
 
 #[test]

@@ -16,8 +16,9 @@ where
     request.validate()?;
     let resolved = authorizer.resolve_and_authorize(&request.target)?;
     let mut resolved_addresses = Vec::with_capacity(resolved.addresses.len());
+    let mut seen_addresses = HashSet::with_capacity(resolved.addresses.len());
     for address in resolved.addresses {
-        if request.address_family.accepts(address) && !resolved_addresses.contains(&address) {
+        if request.address_family.accepts(address) && seen_addresses.insert(address) {
             resolved_addresses.push(address);
         }
     }
@@ -349,50 +350,7 @@ fn map_traceroute_evidence_error(
         }
         _ => batch_sequence,
     };
-    let message = match error {
-        ExchangeEvidenceError::SentCardinality {
-            expected,
-            packets,
-            frames,
-        } => format!(
-            "expected {expected} sent packets and frames, received {packets} packets and {frames} frames"
-        ),
-        ExchangeEvidenceError::MatchedResponseOutsideBatch => {
-            "matched response references a request outside the hop batch".to_owned()
-        }
-        ExchangeEvidenceError::CapturedFrameCountOverflow => {
-            "executor capture frame-count accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::CapturedFrameLimitExceeded { actual, limit } => {
-            format!("executor returned {actual} captured frames beyond max_evidence_frames={limit}")
-        }
-        ExchangeEvidenceError::CapturedByteCountOverflow => {
-            "executor capture byte accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::CapturedByteLimitExceeded { actual, limit } => {
-            format!("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")
-        }
-        ExchangeEvidenceError::SentPacketMismatch { .. } => {
-            "sent packet does not preserve the traceroute destination and probe identity".to_owned()
-        }
-        ExchangeEvidenceError::InvalidSentFrame { message, .. }
-        | ExchangeEvidenceError::InvalidMatchedResponse { message }
-        | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
-        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
-        | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
-        ExchangeEvidenceError::SentByteCountOverflow => {
-            "sent frame byte accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
-            "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
-        ),
-        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
-            format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
-        }
-        ExchangeEvidenceError::IncompleteStatistics => {
-            "successful exchange statistics do not account for every traceroute probe".to_owned()
-        }
-    };
+    let message = format_exchange_evidence_error(error, "hop batch", "traceroute");
     TracerouteError::InvalidEvidence { sequence, message }
 }
 
@@ -468,35 +426,6 @@ pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Pack
     }
 }
 
-fn retain_traceroute_evidence(
-    budget: &mut EvidenceBudget,
-    frame: &Frame,
-    limits: TracerouteLimits,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
-    let error = match budget.retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes) {
-        Ok(()) => return true,
-        Err(error) => error,
-    };
-    let message = match error {
-        EvidenceBudgetError::FrameCountOverflow => {
-            "traceroute evidence frame accounting overflowed; later frames were omitted".to_owned()
-        }
-        EvidenceBudgetError::ByteCountOverflow => {
-            "traceroute evidence byte accounting overflowed; later frames were omitted".to_owned()
-        }
-        EvidenceBudgetError::LimitExceeded => format!(
-            "traceroute evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-            limits.max_evidence_frames, limits.max_evidence_bytes
-        ),
-    };
-    push_diagnostic_once(
-        diagnostics,
-        Diagnostic::warning("traceroute.evidence_limit", message),
-    );
-    false
-}
-
 fn process_batch(
     batch: &TracerouteBatch,
     execution: TracerouteBatchExecution,
@@ -509,7 +438,7 @@ fn process_batch(
     let TracerouteBatchExecution {
         sent,
         sent_evidence,
-        responses,
+        mut responses,
         unsolicited,
         undecoded: batch_undecoded,
         diagnostics: batch_diagnostics,
@@ -518,6 +447,9 @@ fn process_batch(
     for diagnostic in batch_diagnostics {
         push_diagnostic_once(diagnostics, diagnostic);
     }
+    // Stable ordering retains executor order among responses for one request.
+    responses.sort_by_key(|response| response.request_index);
+    let mut matched_responses = responses.iter().peekable();
 
     let mut probes = Vec::with_capacity(batch.probes.len());
     for (request_index, ((probe, built), sent_frame)) in batch
@@ -528,14 +460,17 @@ fn process_batch(
         .enumerate()
     {
         let mut best = None;
-        for response in responses
-            .iter()
-            .filter(|response| response.request_index == request_index)
+        while matched_responses
+            .peek()
+            .is_some_and(|response| response.request_index == request_index)
         {
+            let response = matched_responses
+                .next()
+                .expect("peeked matched response must remain available");
             if let Some(observation) =
                 classify_traceroute_response(registry, probe.strategy, built, &response.response)
             {
-                select_candidate(
+                select_response_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -544,6 +479,8 @@ fn process_batch(
                     },
                     sent_frame.timestamp,
                     batch.timeout,
+                    |observation| observation.kind.rank(),
+                    |observation| observation.responder,
                 );
             }
         }
@@ -551,7 +488,7 @@ fn process_batch(
             if let Some(observation) =
                 classify_traceroute_response(registry, probe.strategy, built, response)
             {
-                select_candidate(
+                select_response_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -560,6 +497,8 @@ fn process_batch(
                     },
                     sent_frame.timestamp,
                     batch.timeout,
+                    |observation| observation.kind.rank(),
+                    |observation| observation.responder,
                 );
             }
         }
@@ -569,10 +508,12 @@ fn process_batch(
             let latency = candidate
                 .latency
                 .or_else(|| received_at.duration_since(sent_frame.timestamp).ok());
-            let response = retain_traceroute_evidence(
+            let response = retain_evidence(
                 evidence_budget,
                 &candidate.decoded.frame,
-                limits,
+                "traceroute",
+                limits.max_evidence_frames,
+                limits.max_evidence_bytes,
                 diagnostics,
             )
             .then(|| candidate.decoded.frame.clone());
@@ -617,81 +558,34 @@ fn process_batch(
     let hop_limit = batch.probes[0].hop_limit;
     for frame in batch_undecoded {
         if undecoded.len() >= limits.max_undecoded {
-            push_diagnostic_once(
-                diagnostics,
-                Diagnostic::warning(
-                    "traceroute.undecoded_limit",
-                    format!(
-                        "undecodable traceroute evidence limit {} reached; later frames were omitted",
-                        limits.max_undecoded
-                    ),
-                ),
-            );
+            push_undecoded_limit_diagnostic(diagnostics, "traceroute", limits.max_undecoded);
             break;
         }
-        if retain_traceroute_evidence(evidence_budget, &frame, limits, diagnostics) {
+        if retain_evidence(
+            evidence_budget,
+            &frame,
+            "traceroute",
+            limits.max_evidence_frames,
+            limits.max_evidence_bytes,
+            diagnostics,
+        ) {
             undecoded.push(TracerouteUndecodedEvidence { hop_limit, frame });
         }
     }
     TracerouteHopResult { hop_limit, probes }
 }
 
-struct ResponseCandidate<'a> {
-    observation: TracerouteResponseClassification,
-    decoded: &'a DecodedPacket,
-    latency: Option<Duration>,
-}
-
-fn select_candidate<'a>(
-    best: &mut Option<ResponseCandidate<'a>>,
-    candidate: ResponseCandidate<'a>,
-    sent_at: SystemTime,
-    timeout: Duration,
-) {
-    if !response_within_deadline(
-        candidate.latency,
-        candidate.decoded.frame.timestamp,
-        sent_at,
-        timeout,
-    ) {
-        return;
-    }
-    if best
-        .as_ref()
-        .is_none_or(|current| traceroute_candidate_precedes(&candidate, current))
-    {
-        *best = Some(candidate);
-    }
-}
-
-fn traceroute_candidate_precedes(
-    candidate: &ResponseCandidate<'_>,
-    current: &ResponseCandidate<'_>,
-) -> bool {
-    let candidate_rank = candidate.observation.kind.rank();
-    let current_rank = current.observation.kind.rank();
-    candidate_rank > current_rank
-        || (candidate_rank == current_rank
-            && (candidate.decoded.frame.timestamp < current.decoded.frame.timestamp
-                || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
-                    && (candidate.observation.responder < current.observation.responder
-                        || (candidate.observation.responder == current.observation.responder
-                            && (candidate.decoded.frame.bytes()
-                                < current.decoded.frame.bytes()
-                                || (candidate.decoded.frame.bytes()
-                                    == current.decoded.frame.bytes()
-                                    && preferred_latency(candidate.latency, current.latency))))))))
-}
 use super::classification::add_stats;
 use super::{
     Authorizer, Bytes, Clock, DecodedPacket, Diagnostic, Duration, EvidenceBudget,
-    EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError, Frame, Icmpv4, Icmpv6, IpAddr,
-    Ipv4, Ipv6, MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
-    Stats, SystemTime, TRACEROUTE_SOURCE_PORT, Tcp, TracerouteBatch, TracerouteBatchExecution,
-    TracerouteCompletion, TracerouteError, TracerouteExecutor, TracerouteHopResult,
-    TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe, TracerouteProbeEvidence,
-    TracerouteProbeStatus, TracerouteRequest, TracerouteResponseClassification,
-    TracerouteResponseKind, TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence, Udp,
-    classify_traceroute_response, nonzero_ipv4_identification, preferred_latency,
-    push_diagnostic_once, response_within_deadline, validate_shared_exchange_evidence,
+    ExchangeEvidence, ExchangeEvidenceError, HashSet, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
+    MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
+    ResponseCandidate, Stats, TRACEROUTE_SOURCE_PORT, Tcp, TracerouteBatch,
+    TracerouteBatchExecution, TracerouteCompletion, TracerouteError, TracerouteExecutor,
+    TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe,
+    TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest, TracerouteResponseKind,
+    TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence, Udp,
+    classify_traceroute_response, format_exchange_evidence_error, nonzero_ipv4_identification,
+    push_diagnostic_once, push_undecoded_limit_diagnostic, retain_evidence,
+    select_response_candidate, validate_shared_exchange_evidence,
 };

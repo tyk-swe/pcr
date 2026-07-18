@@ -3,14 +3,14 @@
 
 //! Private response-evidence accounting and ordering shared by workflows.
 
+use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use crate::capture::Frame;
 use crate::net::capture::Statistics as CaptureStatistics;
-use crate::packet::Packet;
-use crate::packet::decode::Result as DecodedPacket;
+use crate::packet::{Packet, decode::Result as DecodedPacket, diagnostic::Diagnostic};
 
-use super::Stats;
+use super::{Stats, push_diagnostic_once};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EvidenceBudgetError {
@@ -47,6 +47,52 @@ impl EvidenceBudget {
         self.retained_byte_count = next_byte_count;
         Ok(())
     }
+}
+
+pub(super) fn retain_evidence(
+    budget: &mut EvidenceBudget,
+    frame: &Frame,
+    workflow: &str,
+    max_frames: usize,
+    max_bytes: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let error = match budget.retain(frame, max_frames, max_bytes) {
+        Ok(()) => return true,
+        Err(error) => error,
+    };
+    let message = match error {
+        EvidenceBudgetError::FrameCountOverflow => {
+            format!("{workflow} evidence frame accounting overflowed; later frames were omitted")
+        }
+        EvidenceBudgetError::ByteCountOverflow => {
+            format!("{workflow} evidence byte accounting overflowed; later frames were omitted")
+        }
+        EvidenceBudgetError::LimitExceeded => format!(
+            "{workflow} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted"
+        ),
+    };
+    push_diagnostic_once(
+        diagnostics,
+        Diagnostic::warning(format!("{workflow}.evidence_limit"), message),
+    );
+    false
+}
+
+pub(super) fn push_undecoded_limit_diagnostic(
+    diagnostics: &mut Vec<Diagnostic>,
+    workflow: &str,
+    limit: usize,
+) {
+    push_diagnostic_once(
+        diagnostics,
+        Diagnostic::warning(
+            format!("{workflow}.undecoded_limit"),
+            format!(
+                "undecodable {workflow} evidence limit {limit} reached; later frames were omitted"
+            ),
+        ),
+    );
 }
 
 pub(super) fn checked_frame_count(counts: &[usize]) -> Option<usize> {
@@ -154,6 +200,57 @@ pub(super) enum ExchangeEvidenceError {
         message: String,
     },
     IncompleteStatistics,
+}
+
+pub(super) fn format_exchange_evidence_error(
+    error: ExchangeEvidenceError,
+    batch_kind: &str,
+    workflow: &str,
+) -> String {
+    match error {
+        ExchangeEvidenceError::SentCardinality {
+            expected,
+            packets,
+            frames,
+        } => format!(
+            "expected {expected} sent packets and frames, received {packets} packets and {frames} frames"
+        ),
+        ExchangeEvidenceError::MatchedResponseOutsideBatch => {
+            format!("matched response references a request outside the {batch_kind}")
+        }
+        ExchangeEvidenceError::CapturedFrameCountOverflow => {
+            "executor capture frame-count accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedFrameLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} captured frames beyond max_evidence_frames={limit}")
+        }
+        ExchangeEvidenceError::CapturedByteCountOverflow => {
+            "executor capture byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedByteLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")
+        }
+        ExchangeEvidenceError::SentPacketMismatch { .. } => {
+            format!("sent packet does not preserve the {workflow} destination and probe identity")
+        }
+        ExchangeEvidenceError::InvalidSentFrame { message, .. }
+        | ExchangeEvidenceError::InvalidMatchedResponse { message }
+        | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
+        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
+        | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
+        ExchangeEvidenceError::SentByteCountOverflow => {
+            "sent frame byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
+            "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
+        ),
+        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
+            format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
+        }
+        ExchangeEvidenceError::IncompleteStatistics => {
+            format!("successful exchange statistics do not account for every {workflow} probe")
+        }
+    }
 }
 
 pub(super) fn validate_exchange_evidence<M, F>(
@@ -286,6 +383,52 @@ pub(super) fn preferred_latency(candidate: Option<Duration>, current: Option<Dur
     }
 }
 
+pub(super) struct ResponseCandidate<'a, O> {
+    pub(super) observation: O,
+    pub(super) decoded: &'a DecodedPacket,
+    pub(super) latency: Option<Duration>,
+}
+
+pub(super) fn select_response_candidate<'a, O>(
+    best: &mut Option<ResponseCandidate<'a, O>>,
+    candidate: ResponseCandidate<'a, O>,
+    sent_at: SystemTime,
+    timeout: Duration,
+    rank: impl Fn(&O) -> u8,
+    responder: impl Fn(&O) -> IpAddr,
+) {
+    if !response_within_deadline(
+        candidate.latency,
+        candidate.decoded.frame.timestamp,
+        sent_at,
+        timeout,
+    ) {
+        return;
+    }
+    let candidate_precedes = best.as_ref().is_none_or(|current| {
+        let candidate_rank = rank(&candidate.observation);
+        let current_rank = rank(&current.observation);
+        candidate_rank > current_rank
+            || (candidate_rank == current_rank
+                && (candidate.decoded.frame.timestamp < current.decoded.frame.timestamp
+                    || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
+                        && (responder(&candidate.observation) < responder(&current.observation)
+                            || (responder(&candidate.observation)
+                                == responder(&current.observation)
+                                && (candidate.decoded.frame.bytes()
+                                    < current.decoded.frame.bytes()
+                                    || (candidate.decoded.frame.bytes()
+                                        == current.decoded.frame.bytes()
+                                        && preferred_latency(
+                                            candidate.latency,
+                                            current.latency,
+                                        ))))))))
+    });
+    if candidate_precedes {
+        *best = Some(candidate);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
@@ -415,6 +558,59 @@ mod tests {
                 reported: 1,
                 actual: 2,
             })
+        );
+    }
+
+    #[test]
+    fn workflow_evidence_diagnostics_and_errors_preserve_exact_text() {
+        let first = frame(&[1]);
+        let second = frame(&[2]);
+        let mut budget = EvidenceBudget::default();
+        let mut diagnostics = Vec::new();
+        assert!(retain_evidence(
+            &mut budget,
+            &first,
+            "scan",
+            1,
+            1,
+            &mut diagnostics,
+        ));
+        assert!(!retain_evidence(
+            &mut budget,
+            &second,
+            "scan",
+            1,
+            1,
+            &mut diagnostics,
+        ));
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "scan.evidence_limit");
+        assert_eq!(
+            diagnostics[0].message,
+            "scan evidence exceeded 1 frame(s) or 1 byte(s); later exact frames were omitted"
+        );
+
+        push_undecoded_limit_diagnostic(&mut diagnostics, "traceroute", 7);
+        assert_eq!(diagnostics[1].code, "traceroute.undecoded_limit");
+        assert_eq!(
+            diagnostics[1].message,
+            "undecodable traceroute evidence limit 7 reached; later frames were omitted"
+        );
+        assert_eq!(
+            format_exchange_evidence_error(
+                ExchangeEvidenceError::MatchedResponseOutsideBatch,
+                "hop batch",
+                "traceroute",
+            ),
+            "matched response references a request outside the hop batch"
+        );
+        assert_eq!(
+            format_exchange_evidence_error(
+                ExchangeEvidenceError::IncompleteStatistics,
+                "batch",
+                "scan",
+            ),
+            "successful exchange statistics do not account for every scan probe"
         );
     }
 }

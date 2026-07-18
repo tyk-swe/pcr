@@ -82,6 +82,30 @@ impl Clock for NoopClock {
     }
 }
 
+struct AddressListAuthorizer {
+    addresses: Vec<IpAddr>,
+}
+
+impl Authorizer for AddressListAuthorizer {
+    fn resolve_and_authorize(
+        &mut self,
+        target: &Target,
+    ) -> Result<crate::workflow::target::Authorized, BoundaryError> {
+        Ok(crate::workflow::target::Authorized {
+            declared: target.to_string(),
+            addresses: self.addresses.clone(),
+        })
+    }
+
+    fn authorize_operation(
+        &mut self,
+        _packets: u64,
+        _maximum_wire_bytes: u64,
+    ) -> Result<(), BoundaryError> {
+        Ok(())
+    }
+}
+
 struct ScriptedResolver {
     calls: Arc<AtomicUsize>,
     answers: Mutex<VecDeque<Vec<IpAddr>>>,
@@ -461,6 +485,138 @@ fn batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     assert_eq!(result.stats.packets_attempted, 8);
     assert_eq!(result.stats.packets_completed, 8);
     assert_eq!(result.stats.elapsed, Duration::from_millis(3_004));
+}
+
+#[test]
+fn duplicate_addresses_and_ports_preserve_first_seen_order_after_family_filtering() {
+    let first = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let second = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3));
+    let excluded = IpAddr::V6(Ipv6Addr::LOCALHOST);
+    let mut operation = tcp_scan_request(Target::Hostname("ordered.example".to_owned()));
+    operation.address_family = AddressFamily::Ipv4;
+    operation.ports = vec![443, 80, 443, 22, 80];
+    operation.limits.batch_size = 3;
+    let result = scan(
+        &operation,
+        &mut AddressListAuthorizer {
+            addresses: vec![excluded, first, first, second, first, excluded],
+        },
+        &default_registry().unwrap(),
+        &mut TimeoutExecutor::new(),
+        &mut NoopClock,
+    )
+    .unwrap();
+
+    assert_eq!(result.resolved_addresses, vec![first, second]);
+    assert_eq!(
+        result
+            .endpoints
+            .iter()
+            .map(|endpoint| (endpoint.address, endpoint.port))
+            .collect::<Vec<_>>(),
+        vec![
+            (first, Some(443)),
+            (first, Some(80)),
+            (first, Some(22)),
+            (second, Some(443)),
+            (second, Some(80)),
+            (second, Some(22)),
+        ]
+    );
+}
+
+#[test]
+fn unsorted_matched_groups_preserve_endpoint_attempt_and_fully_tied_evidence_order() {
+    struct ReverseTiedResponses(TimeoutExecutor);
+
+    impl ScanExecutor for ReverseTiedResponses {
+        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+            let mut execution = self.0.execute(batch)?;
+            for request_index in (0..batch.probes.len()).rev() {
+                let probe = &batch.probes[request_index];
+                let IpAddr::V4(remote) = probe.address else {
+                    unreachable!("regression uses IPv4 probes")
+                };
+                let mut first = decoded(
+                    tcp_packet(
+                        remote,
+                        Ipv4Addr::new(10, 0, 0, 1),
+                        probe.port.expect("TCP probe has a port"),
+                        50_000,
+                        Tcp::SYN | Tcp::ACK,
+                    ),
+                    Vec::new(),
+                );
+                first
+                    .packet
+                    .get_mut::<Tcp>()
+                    .expect("response has TCP")
+                    .acknowledgment = (probe.sequence as u32).wrapping_add(1);
+                first.frame.timestamp =
+                    execution.sent_evidence[request_index].timestamp + Duration::from_millis(1);
+                first.frame.interface = Some(1);
+                let mut second = first.clone();
+                second.frame.interface = Some(2);
+                execution.responses.extend([
+                    ScanMatchedResponse {
+                        request_index,
+                        response: first,
+                        latency: Duration::from_millis(1),
+                    },
+                    ScanMatchedResponse {
+                        request_index,
+                        response: second,
+                        latency: Duration::from_millis(1),
+                    },
+                ]);
+            }
+            Ok(execution)
+        }
+    }
+
+    let first = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let second = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3));
+    let mut operation = tcp_scan_request(Target::Hostname("grouped.example".to_owned()));
+    operation.ports = vec![443, 80, 22];
+    operation.attempts = 2;
+    operation.timeout = Duration::from_millis(10);
+    operation.limits.batch_size = 3;
+    let result = scan(
+        &operation,
+        &mut AddressListAuthorizer {
+            addresses: vec![first, second],
+        },
+        &default_registry().unwrap(),
+        &mut ReverseTiedResponses(TimeoutExecutor::new()),
+        &mut NoopClock,
+    )
+    .unwrap();
+
+    assert_eq!(result.endpoints.len(), 6);
+    for (endpoint_index, endpoint) in result.endpoints.iter().enumerate() {
+        let expected_address = if endpoint_index < 3 { first } else { second };
+        let expected_port = [443, 80, 22][endpoint_index % 3];
+        assert_eq!(
+            (endpoint.address, endpoint.port),
+            (expected_address, Some(expected_port))
+        );
+        assert_eq!(endpoint.classification, ScanClassification::Open);
+        assert_eq!(
+            endpoint
+                .evidence
+                .iter()
+                .map(|evidence| evidence.attempt)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        assert!(endpoint.evidence.iter().all(|evidence| {
+            evidence.status == ScanProbeStatus::Response
+                && evidence
+                    .response
+                    .as_ref()
+                    .is_some_and(|frame| frame.interface == Some(1))
+        }));
+    }
 }
 
 #[test]

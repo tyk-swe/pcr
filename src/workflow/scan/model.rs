@@ -169,8 +169,9 @@ impl ScanRequest {
             _ => {}
         }
         let mut ports = Vec::with_capacity(self.ports.len());
+        let mut seen_ports = HashSet::with_capacity(self.ports.len());
         for port in &self.ports {
-            if !ports.contains(port) {
+            if seen_ports.insert(*port) {
                 ports.push(*port);
             }
         }
@@ -299,8 +300,7 @@ pub trait ScanExecutor {
 use super::{
     AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
     DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_TEMPLATE_PACKETS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES,
-    DEFAULT_SCAN_BATCH_SIZE, DecodedPacket, Diagnostic, Duration, Frame, IpAddr, MAX_SCAN_ATTEMPTS,
-    MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE, Packet, ScanError, Serialize, Stats,
-    SystemTime, Target, fmt,
+    DEFAULT_SCAN_BATCH_SIZE, DecodedPacket, Deserialize, Diagnostic, Duration, Frame, HashSet,
+    IpAddr, MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE, Packet,
+    ScanError, Serialize, Stats, SystemTime, Target, fmt,
 };
-use serde::Deserialize;

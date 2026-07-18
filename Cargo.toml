@@ -80,3 +80,7 @@ harness = false
 [[bench]]
 name = "reassembly"
 harness = false
+
+[[bench]]
+name = "workflow_scan"
+harness = false

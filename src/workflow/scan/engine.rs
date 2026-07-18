@@ -18,8 +18,9 @@ where
     // and authorize every answer before anything below constructs a ScanProbe.
     let resolved = authorizer.resolve_and_authorize(&request.target)?;
     let mut addresses = Vec::with_capacity(resolved.addresses.len());
+    let mut seen_addresses = HashSet::with_capacity(resolved.addresses.len());
     for address in resolved.addresses {
-        if request.address_family.accepts(address) && !addresses.contains(&address) {
+        if request.address_family.accepts(address) && seen_addresses.insert(address) {
             addresses.push(address);
         }
     }
@@ -107,9 +108,15 @@ where
             })
         })
         .collect::<Vec<_>>();
+    let endpoint_indices = endpoints
+        .iter()
+        .enumerate()
+        .map(|(index, endpoint)| ((endpoint.address, endpoint.port), index))
+        .collect::<HashMap<_, _>>();
     let mut output = ScanOutput {
         evidence_budget: EvidenceBudget::default(),
         endpoints,
+        endpoint_indices,
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
     };
@@ -357,50 +364,7 @@ fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> S
         }
         _ => batch_sequence,
     };
-    let message = match error {
-        ExchangeEvidenceError::SentCardinality {
-            expected,
-            packets,
-            frames,
-        } => format!(
-            "expected {expected} sent packets and frames, received {packets} packets and {frames} frames"
-        ),
-        ExchangeEvidenceError::MatchedResponseOutsideBatch => {
-            "matched response references a request outside the batch".to_owned()
-        }
-        ExchangeEvidenceError::CapturedFrameCountOverflow => {
-            "executor capture frame-count accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::CapturedFrameLimitExceeded { actual, limit } => {
-            format!("executor returned {actual} captured frames beyond max_evidence_frames={limit}")
-        }
-        ExchangeEvidenceError::CapturedByteCountOverflow => {
-            "executor capture byte accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::CapturedByteLimitExceeded { actual, limit } => {
-            format!("executor returned {actual} captured bytes beyond max_evidence_bytes={limit}")
-        }
-        ExchangeEvidenceError::SentPacketMismatch { .. } => {
-            "sent packet does not preserve the scan destination and probe identity".to_owned()
-        }
-        ExchangeEvidenceError::InvalidSentFrame { message, .. }
-        | ExchangeEvidenceError::InvalidMatchedResponse { message }
-        | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
-        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
-        | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
-        ExchangeEvidenceError::SentByteCountOverflow => {
-            "sent frame byte accounting overflowed".to_owned()
-        }
-        ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
-            "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
-        ),
-        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
-            format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
-        }
-        ExchangeEvidenceError::IncompleteStatistics => {
-            "successful exchange statistics do not account for every scan probe".to_owned()
-        }
-    };
+    let message = format_exchange_evidence_error(error, "batch", "scan");
     ScanError::InvalidEvidence { sequence, message }
 }
 
@@ -467,38 +431,10 @@ pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool 
     }
 }
 
-fn retain_scan_evidence(
-    budget: &mut EvidenceBudget,
-    frame: &Frame,
-    limits: ScanLimits,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
-    let error = match budget.retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes) {
-        Ok(()) => return true,
-        Err(error) => error,
-    };
-    let message = match error {
-        EvidenceBudgetError::FrameCountOverflow => {
-            "scan evidence frame accounting overflowed; later frames were omitted".to_owned()
-        }
-        EvidenceBudgetError::ByteCountOverflow => {
-            "scan evidence byte accounting overflowed; later frames were omitted".to_owned()
-        }
-        EvidenceBudgetError::LimitExceeded => format!(
-            "scan evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-            limits.max_evidence_frames, limits.max_evidence_bytes
-        ),
-    };
-    push_diagnostic_once(
-        diagnostics,
-        Diagnostic::warning("scan.evidence_limit", message),
-    );
-    false
-}
-
 struct ScanOutput {
     evidence_budget: EvidenceBudget,
     endpoints: Vec<ScanEndpointResult>,
+    endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
     undecoded: Vec<Frame>,
     diagnostics: Vec<Diagnostic>,
 }
@@ -513,7 +449,7 @@ fn process_batch(
     let ScanBatchExecution {
         sent,
         sent_evidence,
-        responses,
+        mut responses,
         unsolicited,
         undecoded: batch_undecoded,
         diagnostics: batch_diagnostics,
@@ -522,6 +458,9 @@ fn process_batch(
     for diagnostic in batch_diagnostics {
         push_diagnostic_once(&mut output.diagnostics, diagnostic);
     }
+    // Stable ordering retains executor order among responses for one request.
+    responses.sort_by_key(|response| response.request_index);
+    let mut matched_responses = responses.iter().peekable();
 
     for (request_index, ((probe, built), sent_frame)) in batch
         .probes
@@ -530,15 +469,18 @@ fn process_batch(
         .zip(sent_evidence.iter())
         .enumerate()
     {
-        let mut best: Option<ResponseCandidate<'_>> = None;
-        for response in responses
-            .iter()
-            .filter(|response| response.request_index == request_index)
+        let mut best = None;
+        while matched_responses
+            .peek()
+            .is_some_and(|response| response.request_index == request_index)
         {
+            let response = matched_responses
+                .next()
+                .expect("peeked matched response must remain available");
             if let Some(observation) =
                 classify_scan_response(registry, probe.transport, built, &response.response)
             {
-                select_candidate(
+                select_response_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -547,6 +489,8 @@ fn process_batch(
                     },
                     sent_frame.timestamp,
                     batch.timeout,
+                    |observation| observation.classification.rank(),
+                    |observation| observation.responder,
                 );
             }
         }
@@ -554,7 +498,7 @@ fn process_batch(
             if let Some(observation) =
                 classify_scan_response(registry, probe.transport, built, response)
             {
-                select_candidate(
+                select_response_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -563,28 +507,29 @@ fn process_batch(
                     },
                     sent_frame.timestamp,
                     batch.timeout,
+                    |observation| observation.classification.rank(),
+                    |observation| observation.responder,
                 );
             }
         }
 
-        let endpoint = output
-            .endpoints
-            .iter_mut()
-            .find(|endpoint| {
-                endpoint.address == probe.address
-                    && endpoint.transport == probe.transport
-                    && endpoint.port == probe.port
-            })
+        let endpoint_index = output
+            .endpoint_indices
+            .get(&(probe.address, probe.port))
+            .copied()
             .expect("validated scan probe must have a result endpoint");
+        let endpoint = &mut output.endpoints[endpoint_index];
         let evidence = if let Some(candidate) = best {
             let received_at = candidate.decoded.frame.timestamp;
             let latency = candidate
                 .latency
                 .or_else(|| received_at.duration_since(sent_frame.timestamp).ok());
-            let response = retain_scan_evidence(
+            let response = retain_evidence(
                 &mut output.evidence_budget,
                 &candidate.decoded.frame,
-                limits,
+                "scan",
+                limits.max_evidence_frames,
+                limits.max_evidence_bytes,
                 &mut output.diagnostics,
             )
             .then(|| candidate.decoded.frame.clone());
@@ -621,71 +566,20 @@ fn process_batch(
 
     for frame in batch_undecoded {
         if output.undecoded.len() >= limits.max_undecoded {
-            push_diagnostic_once(
-                &mut output.diagnostics,
-                Diagnostic::warning(
-                    "scan.undecoded_limit",
-                    format!(
-                        "undecodable scan evidence limit {} reached; later frames were omitted",
-                        limits.max_undecoded
-                    ),
-                ),
-            );
+            push_undecoded_limit_diagnostic(&mut output.diagnostics, "scan", limits.max_undecoded);
             break;
         }
-        if retain_scan_evidence(
+        if retain_evidence(
             &mut output.evidence_budget,
             &frame,
-            limits,
+            "scan",
+            limits.max_evidence_frames,
+            limits.max_evidence_bytes,
             &mut output.diagnostics,
         ) {
             output.undecoded.push(frame);
         }
     }
-}
-
-struct ResponseCandidate<'a> {
-    observation: ScanResponseClassification,
-    decoded: &'a DecodedPacket,
-    latency: Option<Duration>,
-}
-
-fn select_candidate<'a>(
-    best: &mut Option<ResponseCandidate<'a>>,
-    candidate: ResponseCandidate<'a>,
-    sent_at: SystemTime,
-    timeout: Duration,
-) {
-    if !response_within_deadline(
-        candidate.latency,
-        candidate.decoded.frame.timestamp,
-        sent_at,
-        timeout,
-    ) {
-        return;
-    }
-    if best
-        .as_ref()
-        .is_none_or(|current| candidate_precedes(&candidate, current))
-    {
-        *best = Some(candidate);
-    }
-}
-
-fn candidate_precedes(candidate: &ResponseCandidate<'_>, current: &ResponseCandidate<'_>) -> bool {
-    let candidate_rank = candidate.observation.classification.rank();
-    let current_rank = current.observation.classification.rank();
-    candidate_rank > current_rank
-        || (candidate_rank == current_rank
-            && (candidate.decoded.frame.timestamp < current.decoded.frame.timestamp
-                || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
-                    && (candidate.observation.responder < current.observation.responder
-                        || (candidate.observation.responder == current.observation.responder
-                            && (candidate.decoded.frame.bytes()
-                                < current.decoded.frame.bytes()
-                                || (candidate.decoded.frame.bytes()
-                                    == current.decoded.frame.bytes()
-                                    && preferred_latency(candidate.latency, current.latency))))))))
 }
 
 fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), ScanError> {
@@ -695,11 +589,12 @@ fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), Scan
 }
 use super::{
     Authorizer, Bytes, Clock, DecodedPacket, Diagnostic, Duration, EvidenceBudget,
-    EvidenceBudgetError, ExchangeEvidence, ExchangeEvidenceError, Frame, IPV4_PROBE_BYTES,
+    ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, HashSet, IPV4_PROBE_BYTES,
     IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
-    ProtocolRegistry, ScanBatch, ScanBatchExecution, ScanClassification, ScanEndpointResult,
-    ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence,
-    ScanProbeStatus, ScanRequest, ScanResponseClassification, ScanResult, ScanTransport, Stats,
-    SystemTime, Tcp, Udp, classify_scan_response, nonzero_ipv4_identification, preferred_latency,
-    push_diagnostic_once, response_within_deadline, validate_shared_exchange_evidence,
+    ProtocolRegistry, ResponseCandidate, ScanBatch, ScanBatchExecution, ScanClassification,
+    ScanEndpointResult, ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe,
+    ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult, ScanTransport, Stats, Tcp, Udp,
+    classify_scan_response, format_exchange_evidence_error, nonzero_ipv4_identification,
+    push_diagnostic_once, push_undecoded_limit_diagnostic, retain_evidence,
+    select_response_candidate, validate_shared_exchange_evidence,
 };

@@ -341,17 +341,19 @@ pub(super) fn validate_exchange_evidence(
     .map_err(|error| map_scan_evidence_error(batch, error))
 }
 
-impl MatchedResponseEvidence for ScanMatchedResponse {
-    fn request_index(&self) -> usize {
-        self.request_index
-    }
-
+impl ResponseEvidence for ScanMatchedResponse {
     fn response(&self) -> &DecodedPacket {
         &self.response
     }
 
     fn latency(&self) -> Duration {
         self.latency
+    }
+}
+
+impl MatchedResponseEvidence for ScanMatchedResponse {
+    fn request_index(&self) -> usize {
+        self.request_index
     }
 }
 
@@ -527,7 +529,7 @@ fn process_batch(
             let response = retain_evidence(
                 &mut output.evidence_budget,
                 &candidate.decoded.frame,
-                "scan",
+                SCAN_EVIDENCE_DIAGNOSTICS,
                 limits.max_evidence_frames,
                 limits.max_evidence_bytes,
                 &mut output.diagnostics,
@@ -566,13 +568,17 @@ fn process_batch(
 
     for frame in batch_undecoded {
         if output.undecoded.len() >= limits.max_undecoded {
-            push_undecoded_limit_diagnostic(&mut output.diagnostics, "scan", limits.max_undecoded);
+            push_undecoded_limit_diagnostic(
+                &mut output.diagnostics,
+                SCAN_EVIDENCE_DIAGNOSTICS,
+                limits.max_undecoded,
+            );
             break;
         }
         if retain_evidence(
             &mut output.evidence_budget,
             &frame,
-            "scan",
+            SCAN_EVIDENCE_DIAGNOSTICS,
             limits.max_evidence_frames,
             limits.max_evidence_bytes,
             &mut output.diagnostics,
@@ -591,10 +597,11 @@ use super::{
     Authorizer, Bytes, Clock, DecodedPacket, Diagnostic, Duration, EvidenceBudget,
     ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, HashSet, IPV4_PROBE_BYTES,
     IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
-    ProtocolRegistry, ResponseCandidate, ScanBatch, ScanBatchExecution, ScanClassification,
-    ScanEndpointResult, ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe,
-    ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult, ScanTransport, Stats, Tcp, Udp,
-    classify_scan_response, format_exchange_evidence_error, nonzero_ipv4_identification,
-    push_diagnostic_once, push_undecoded_limit_diagnostic, retain_evidence,
-    select_response_candidate, validate_shared_exchange_evidence,
+    ProtocolRegistry, ResponseCandidate, ResponseEvidence, SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch,
+    ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanError, ScanExecutor,
+    ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest,
+    ScanResult, ScanTransport, Stats, Tcp, Udp, classify_scan_response,
+    format_exchange_evidence_error, nonzero_ipv4_identification, push_diagnostic_once,
+    push_undecoded_limit_diagnostic, retain_evidence, select_response_candidate,
+    validate_shared_exchange_evidence,
 };

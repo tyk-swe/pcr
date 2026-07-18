@@ -36,9 +36,9 @@ use crate::protocol::{
 
 use super::clock::Clock;
 use super::evidence::{
-    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence,
-    ResponseCandidate, format_exchange_evidence_error, push_undecoded_limit_diagnostic,
-    retain_evidence, select_response_candidate,
+    EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
+    MatchedResponseEvidence, ResponseCandidate, ResponseEvidence, format_exchange_evidence_error,
+    push_undecoded_limit_diagnostic, retain_evidence, select_response_candidate,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 use super::nonzero_ipv4_identification;
@@ -61,6 +61,8 @@ pub const MAX_TRACEROUTE_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
 // possible before any route, capture, neighbor, or send side effect.
 const MAX_TRACEROUTE_PROBE_BYTES: u64 = 14 + 40 + 20;
 const TRACEROUTE_SOURCE_PORT: u16 = 49_152;
+const TRACEROUTE_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
+    EvidenceDiagnosticDescriptor::new("traceroute", "traceroute");
 
 mod adapter;
 mod classification;

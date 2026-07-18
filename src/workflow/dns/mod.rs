@@ -36,9 +36,11 @@ use crate::protocol::{
 
 use super::clock::Clock;
 use super::evidence::{
-    EvidenceBudget, EvidenceBudgetError, checked_frame_bytes, checked_frame_count,
-    preferred_latency, response_within_deadline, validate_capture_statistics,
-    validate_decoded_frame, validate_frame,
+    EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate,
+    ResponseEvidence, push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,
+    select_response_candidate, validate_aggregate_evidence_limits,
+    validate_capture_statistics_evidence, validate_frame, validate_response_frames_and_deadlines,
+    validate_sent_byte_accounting,
 };
 use super::nonzero_ipv4_identification;
 use super::probe::{self, Transport as ProbeTransport};
@@ -61,6 +63,9 @@ pub const MAX_DNS_MESSAGE_BYTES: usize = u16::MAX as usize;
 pub const MAX_DNS_RECORDS: usize = 4_096;
 pub const MAX_DNS_NAME_POINTERS: usize = 128;
 pub const MAX_DNS_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
+
+const DNS_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
+    EvidenceDiagnosticDescriptor::new("dns", "DNS");
 
 const DNS_FLAG_RESPONSE: u16 = 0x8000;
 const DNS_FLAG_AUTHORITATIVE: u16 = 0x0400;

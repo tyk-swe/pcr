@@ -959,40 +959,46 @@ struct PayloadExecutor {
     payload: Bytes,
 }
 
+fn decoded_dns_payload(
+    exchange: &DnsExchange,
+    payload: Bytes,
+    timestamp: SystemTime,
+) -> DecodedPacket {
+    let mut response_packet = Packet::new();
+    response_packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 53),
+            destination: Ipv4Addr::UNSPECIFIED,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: exchange.probe.server_port,
+            destination_port: exchange.probe.source_port,
+            ..Udp::default()
+        })
+        .push(Raw::new(payload.clone()));
+    DecodedPacket {
+        packet: response_packet,
+        original: payload.clone(),
+        frame: Frame::new(timestamp, LinkType::RAW, payload).unwrap(),
+        layout: crate::packet::layout::PacketLayout::default(),
+        diagnostics: Vec::new(),
+    }
+}
+
 impl DnsExecutor for PayloadExecutor {
     fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
         let sent_at = UNIX_EPOCH + Duration::from_secs(10);
-        let mut response_packet = Packet::new();
-        response_packet
-            .push(Ipv4 {
-                source: Ipv4Addr::new(10, 0, 0, 53),
-                destination: Ipv4Addr::UNSPECIFIED,
-                ..Ipv4::default()
-            })
-            .push(Udp {
-                source_port: exchange.probe.server_port,
-                destination_port: exchange.probe.source_port,
-                ..Udp::default()
-            })
-            .push(Raw::new(self.payload.clone()));
-        let frame = Frame::new(
-            sent_at + Duration::from_millis(2),
-            LinkType::RAW,
-            self.payload.clone(),
-        )
-        .unwrap();
         Ok(DnsExchangeExecution {
             sent: exchange.probe.packet(),
             sent_evidence: Frame::new(sent_at, LinkType::RAW, exchange.probe.query.clone())
                 .unwrap(),
             responses: vec![DnsMatchedResponse {
-                response: DecodedPacket {
-                    packet: response_packet,
-                    original: self.payload.clone(),
-                    frame,
-                    layout: crate::packet::layout::PacketLayout::default(),
-                    diagnostics: Vec::new(),
-                },
+                response: decoded_dns_payload(
+                    exchange,
+                    self.payload.clone(),
+                    sent_at + Duration::from_millis(2),
+                ),
                 latency: Duration::from_millis(2),
             }],
             unsolicited: Vec::new(),
@@ -1190,6 +1196,105 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
     assert!(result.attempts[0].received_at.unwrap() < result.attempts[0].sent_at);
 }
 
+#[test]
+fn canonical_dns_selection_is_independent_of_matched_and_unsolicited_source_order() {
+    struct CompetingExecutor {
+        preferred_is_matched: bool,
+        preferred: Bytes,
+        other: Bytes,
+    }
+
+    impl DnsExecutor for CompetingExecutor {
+        fn execute(
+            &mut self,
+            exchange: &DnsExchange,
+        ) -> Result<DnsExchangeExecution, BoundaryError> {
+            let sent_at = UNIX_EPOCH + Duration::from_secs(10);
+            let preferred = decoded_dns_payload(
+                exchange,
+                self.preferred.clone(),
+                sent_at + Duration::from_millis(2),
+            );
+            let other = decoded_dns_payload(
+                exchange,
+                self.other.clone(),
+                sent_at + Duration::from_millis(3),
+            );
+            let (responses, unsolicited) = if self.preferred_is_matched {
+                (
+                    vec![DnsMatchedResponse {
+                        response: preferred,
+                        latency: Duration::from_millis(2),
+                    }],
+                    vec![other],
+                )
+            } else {
+                (
+                    vec![DnsMatchedResponse {
+                        response: other,
+                        latency: Duration::from_millis(3),
+                    }],
+                    vec![preferred],
+                )
+            };
+            Ok(DnsExchangeExecution {
+                sent: exchange.probe.packet(),
+                sent_evidence: Frame::new(sent_at, LinkType::RAW, exchange.probe.query.clone())
+                    .unwrap(),
+                responses,
+                unsolicited,
+                undecoded: Vec::new(),
+                diagnostics: Vec::new(),
+                stats: Stats {
+                    packets_attempted: 1,
+                    packets_completed: 1,
+                    bytes: exchange.probe.query.len() as u64,
+                    ..Stats::default()
+                },
+            })
+        }
+    }
+
+    let preferred = Bytes::from(fixture_response(
+        77,
+        0,
+        "www.example.test",
+        DnsQueryType::A,
+        &[],
+        &[],
+        &[],
+    ));
+    let other = Bytes::from(fixture_response(
+        77,
+        3,
+        "www.example.test",
+        DnsQueryType::A,
+        &[],
+        &[],
+        &[],
+    ));
+    for preferred_is_matched in [true, false] {
+        let result = dns(
+            &single_attempt_request(),
+            &mut LocalAuthorizer,
+            &default_registry().unwrap(),
+            &mut CompetingExecutor {
+                preferred_is_matched,
+                preferred: preferred.clone(),
+                other: other.clone(),
+            },
+            &mut NoopClock,
+        )
+        .unwrap();
+
+        assert_eq!(result.attempts[0].response_code, Some(0));
+        assert_eq!(
+            result.attempts[0].received_at,
+            Some(UNIX_EPOCH + Duration::from_secs(10) + Duration::from_millis(2))
+        );
+    }
+}
+
 struct NoopClock;
 
 impl Clock for NoopClock {
@@ -1264,8 +1369,7 @@ impl DnsExecutor for TimeoutExecutor {
     }
 }
 
-#[test]
-fn executor_cannot_underreport_exact_dns_wire_bytes() {
+fn dns_validation_fixture() -> (DnsProbe, DnsExchangeExecution) {
     let query = encode_dns_query("www.example.test", DnsQueryType::A, 77, true).unwrap();
     let probe = DnsProbe {
         attempt: 1,
@@ -1277,24 +1381,305 @@ fn executor_cannot_underreport_exact_dns_wire_bytes() {
         query_type: DnsQueryType::A,
         query,
     };
-    let mut execution = TimeoutExecutor::default()
+    let execution = TimeoutExecutor::default()
         .execute(&DnsExchange {
             probe: probe.clone(),
             timeout: Duration::from_millis(10),
             max_responses: 1,
         })
         .unwrap();
+    (probe, execution)
+}
+
+fn invalid_dns_evidence_message(
+    result: Result<(), DnsError>,
+    expected_sequence: Option<u64>,
+) -> String {
+    let error = result.unwrap_err();
+    assert_eq!(error.sequence(), expected_sequence);
+    assert_eq!(error.classification().code, "internal.dns_evidence");
+    match error {
+        DnsError::InvalidEvidence {
+            attempt: 1,
+            message,
+        } => message,
+        other => panic!("expected invalid DNS evidence, received {other:?}"),
+    }
+}
+
+#[test]
+fn executor_cannot_underreport_exact_dns_wire_bytes() {
+    let (probe, mut execution) = dns_validation_fixture();
     execution.stats.bytes = 0;
 
-    assert!(matches!(
-        validate_dns_execution(
-            &probe,
-            &execution,
-            DnsLimits::default(),
-            Duration::from_millis(10),
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(
+                &probe,
+                &execution,
+                DnsLimits::default(),
+                Duration::from_millis(10),
+            ),
+            Some(0),
         ),
-        Err(DnsError::InvalidEvidence { attempt: 1, .. })
-    ));
+        format!(
+            "successful exchange reported 0 sent bytes for {} exact frame bytes",
+            probe.query.len()
+        )
+    );
+}
+
+#[test]
+fn dns_executor_response_frames_and_deadlines_preserve_exact_errors() {
+    let (probe, mut malformed) = dns_validation_fixture();
+    malformed.responses.push(DnsMatchedResponse {
+        response: DecodedPacket {
+            packet: Packet::new(),
+            original: Bytes::from_static(&[2]),
+            frame: Frame::new(UNIX_EPOCH, LinkType::RAW, vec![1]).unwrap(),
+            layout: crate::packet::layout::PacketLayout::default(),
+            diagnostics: Vec::new(),
+        },
+        latency: Duration::from_millis(1),
+    });
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(
+                &probe,
+                &malformed,
+                DnsLimits::default(),
+                Duration::from_millis(10),
+            ),
+            Some(0),
+        ),
+        "matched response original bytes differ from its exact frame"
+    );
+
+    let mut late = malformed;
+    late.responses[0].response.original = Bytes::from_static(&[1]);
+    late.responses[0].latency = Duration::from_millis(11);
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(
+                &probe,
+                &late,
+                DnsLimits::default(),
+                Duration::from_millis(10),
+            ),
+            Some(0),
+        ),
+        "matched response latency 11ms exceeds timeout 10ms"
+    );
+}
+
+#[test]
+fn dns_executor_statistics_and_aggregate_limits_preserve_exact_errors() {
+    let (probe, execution) = dns_validation_fixture();
+
+    let mut packet_statistics = execution.clone();
+    packet_statistics.stats.packets_completed = 0;
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(
+                &probe,
+                &packet_statistics,
+                DnsLimits::default(),
+                Duration::from_millis(10),
+            ),
+            Some(0),
+        ),
+        "successful exchange statistics must account for exactly one DNS query"
+    );
+
+    let mut capture_statistics = execution.clone();
+    capture_statistics.stats.capture.dropped_bytes = 1;
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(
+                &probe,
+                &capture_statistics,
+                DnsLimits::default(),
+                Duration::from_millis(10),
+            ),
+            Some(0),
+        ),
+        "capture statistics are invalid: capture backend returned invalid statistics: dropped bytes were reported without a dropped frame"
+    );
+
+    let mut captured = execution;
+    captured
+        .undecoded
+        .push(Frame::new(UNIX_EPOCH, LinkType::RAW, Bytes::from_static(&[1, 2])).unwrap());
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(
+                &probe,
+                &captured,
+                DnsLimits {
+                    max_evidence_frames: 0,
+                    ..DnsLimits::default()
+                },
+                Duration::from_millis(10),
+            ),
+            Some(0),
+        ),
+        "executor returned 1 frames beyond max_evidence_frames=0"
+    );
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(
+                &probe,
+                &captured,
+                DnsLimits {
+                    max_evidence_bytes: 1,
+                    ..DnsLimits::default()
+                },
+                Duration::from_millis(10),
+            ),
+            Some(0),
+        ),
+        "executor returned 2 frame bytes beyond max_evidence_bytes=1"
+    );
+}
+
+#[test]
+fn dns_evidence_validation_keeps_multi_failure_precedence() {
+    let (probe, mut execution) = dns_validation_fixture();
+    execution.stats.packets_attempted = 0;
+    execution.stats.bytes = 0;
+    execution.stats.capture.dropped_bytes = 1;
+    execution.responses.push(DnsMatchedResponse {
+        response: DecodedPacket {
+            packet: Packet::new(),
+            original: Bytes::from_static(&[2]),
+            frame: Frame::new(UNIX_EPOCH, LinkType::RAW, vec![1]).unwrap(),
+            layout: crate::packet::layout::PacketLayout::default(),
+            diagnostics: Vec::new(),
+        },
+        latency: Duration::from_millis(11),
+    });
+    let limits = DnsLimits {
+        max_evidence_frames: 0,
+        max_evidence_bytes: 0,
+        ..DnsLimits::default()
+    };
+
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(&probe, &execution, limits, Duration::from_millis(10)),
+            Some(0),
+        ),
+        "successful exchange statistics must account for exactly one DNS query"
+    );
+
+    execution.stats.packets_attempted = 1;
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(&probe, &execution, limits, Duration::from_millis(10)),
+            Some(0),
+        ),
+        format!(
+            "successful exchange reported 0 sent bytes for {} exact frame bytes",
+            probe.query.len()
+        )
+    );
+
+    execution.stats.bytes = probe.query.len() as u64;
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(&probe, &execution, limits, Duration::from_millis(10)),
+            Some(0),
+        ),
+        "capture statistics are invalid: capture backend returned invalid statistics: dropped bytes were reported without a dropped frame"
+    );
+
+    execution.stats.capture = crate::net::capture::Statistics::default();
+    assert_eq!(
+        invalid_dns_evidence_message(
+            validate_dns_execution(&probe, &execution, limits, Duration::from_millis(10)),
+            Some(0),
+        ),
+        "matched response original bytes differ from its exact frame"
+    );
+}
+
+#[test]
+fn dns_evidence_diagnostics_preserve_casing_deduplication_and_response_priority() {
+    struct TwoAttemptAuthorizer;
+
+    impl Authorizer for TwoAttemptAuthorizer {
+        fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+            Ok(Authorized {
+                declared: target.to_string(),
+                addresses: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))],
+            })
+        }
+
+        fn authorize_operation(
+            &mut self,
+            packets: u64,
+            _maximum_wire_bytes: u64,
+        ) -> Result<(), BoundaryError> {
+            assert_eq!(packets, 2);
+            Ok(())
+        }
+    }
+
+    struct ResponseAndUndecodedExecutor;
+
+    impl DnsExecutor for ResponseAndUndecodedExecutor {
+        fn execute(
+            &mut self,
+            exchange: &DnsExchange,
+        ) -> Result<DnsExchangeExecution, BoundaryError> {
+            let mut execution = PayloadExecutor {
+                payload: Bytes::from_static(b"malformed"),
+            }
+            .execute(exchange)?;
+            execution.undecoded.push(
+                Frame::new(
+                    execution.sent_evidence.timestamp,
+                    LinkType::RAW,
+                    vec![exchange.probe.attempt as u8],
+                )
+                .unwrap(),
+            );
+            Ok(execution)
+        }
+    }
+
+    let mut request = single_attempt_request();
+    request.attempts = 2;
+    request.limits.max_evidence_frames = 3;
+    request.limits.max_evidence_bytes = 1_024;
+    request.limits.max_undecoded = 3;
+    let result = dns(
+        &request,
+        &mut TwoAttemptAuthorizer,
+        &default_registry().unwrap(),
+        &mut ResponseAndUndecodedExecutor,
+        &mut NoopClock,
+    )
+    .unwrap();
+
+    assert_eq!(result.attempts.len(), 2);
+    assert!(
+        result
+            .attempts
+            .iter()
+            .all(|attempt| attempt.response.is_some())
+    );
+    assert_eq!(result.undecoded.len(), 1);
+    let diagnostics = result
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.code == "dns.evidence_limit")
+        .collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(
+        diagnostics[0].message,
+        "DNS evidence exceeded 3 frame(s) or 1024 byte(s); later exact frames were omitted"
+    );
 }
 
 fn private_policy() -> TrafficPolicy {

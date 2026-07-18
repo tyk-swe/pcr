@@ -324,17 +324,19 @@ pub(super) fn validate_execution(
     .map_err(|error| map_traceroute_evidence_error(batch, error))
 }
 
-impl MatchedResponseEvidence for TracerouteMatchedResponse {
-    fn request_index(&self) -> usize {
-        self.request_index
-    }
-
+impl ResponseEvidence for TracerouteMatchedResponse {
     fn response(&self) -> &DecodedPacket {
         &self.response
     }
 
     fn latency(&self) -> Duration {
         self.latency
+    }
+}
+
+impl MatchedResponseEvidence for TracerouteMatchedResponse {
+    fn request_index(&self) -> usize {
+        self.request_index
     }
 }
 
@@ -511,7 +513,7 @@ fn process_batch(
             let response = retain_evidence(
                 evidence_budget,
                 &candidate.decoded.frame,
-                "traceroute",
+                TRACEROUTE_EVIDENCE_DIAGNOSTICS,
                 limits.max_evidence_frames,
                 limits.max_evidence_bytes,
                 diagnostics,
@@ -558,13 +560,17 @@ fn process_batch(
     let hop_limit = batch.probes[0].hop_limit;
     for frame in batch_undecoded {
         if undecoded.len() >= limits.max_undecoded {
-            push_undecoded_limit_diagnostic(diagnostics, "traceroute", limits.max_undecoded);
+            push_undecoded_limit_diagnostic(
+                diagnostics,
+                TRACEROUTE_EVIDENCE_DIAGNOSTICS,
+                limits.max_undecoded,
+            );
             break;
         }
         if retain_evidence(
             evidence_budget,
             &frame,
-            "traceroute",
+            TRACEROUTE_EVIDENCE_DIAGNOSTICS,
             limits.max_evidence_frames,
             limits.max_evidence_bytes,
             diagnostics,
@@ -580,12 +586,12 @@ use super::{
     Authorizer, Bytes, Clock, DecodedPacket, Diagnostic, Duration, EvidenceBudget,
     ExchangeEvidence, ExchangeEvidenceError, HashSet, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
     MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
-    ResponseCandidate, Stats, TRACEROUTE_SOURCE_PORT, Tcp, TracerouteBatch,
-    TracerouteBatchExecution, TracerouteCompletion, TracerouteError, TracerouteExecutor,
-    TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse, TracerouteProbe,
-    TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest, TracerouteResponseKind,
-    TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence, Udp,
-    classify_traceroute_response, format_exchange_evidence_error, nonzero_ipv4_identification,
-    push_diagnostic_once, push_undecoded_limit_diagnostic, retain_evidence,
-    select_response_candidate, validate_shared_exchange_evidence,
+    ResponseCandidate, ResponseEvidence, Stats, TRACEROUTE_EVIDENCE_DIAGNOSTICS,
+    TRACEROUTE_SOURCE_PORT, Tcp, TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion,
+    TracerouteError, TracerouteExecutor, TracerouteHopResult, TracerouteLimits,
+    TracerouteMatchedResponse, TracerouteProbe, TracerouteProbeEvidence, TracerouteProbeStatus,
+    TracerouteRequest, TracerouteResponseKind, TracerouteResult, TracerouteStrategy,
+    TracerouteUndecodedEvidence, Udp, classify_traceroute_response, format_exchange_evidence_error,
+    nonzero_ipv4_identification, push_diagnostic_once, push_undecoded_limit_diagnostic,
+    retain_evidence, select_response_candidate, validate_shared_exchange_evidence,
 };

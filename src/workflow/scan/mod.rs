@@ -36,9 +36,9 @@ use crate::protocol::{
 
 use super::clock::Clock;
 use super::evidence::{
-    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence,
-    ResponseCandidate, format_exchange_evidence_error, push_undecoded_limit_diagnostic,
-    retain_evidence, select_response_candidate,
+    EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
+    MatchedResponseEvidence, ResponseCandidate, ResponseEvidence, format_exchange_evidence_error,
+    push_undecoded_limit_diagnostic, retain_evidence, select_response_candidate,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 use super::nonzero_ipv4_identification;
@@ -60,6 +60,8 @@ pub const MAX_SCAN_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
 // effect, even though individual batches are delegated to Client::exchange.
 const IPV4_PROBE_BYTES: u64 = 14 + 20 + 20;
 const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
+const SCAN_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
+    EvidenceDiagnosticDescriptor::new("scan", "scan");
 
 mod adapter;
 mod classification;

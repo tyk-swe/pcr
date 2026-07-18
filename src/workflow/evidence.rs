@@ -3,7 +3,6 @@
 
 //! Private response-evidence accounting and ordering shared by workflows.
 
-use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
 use crate::capture::Frame;
@@ -23,6 +22,21 @@ pub(super) enum EvidenceBudgetError {
 pub(super) struct EvidenceBudget {
     retained_frame_count: usize,
     retained_byte_count: usize,
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct EvidenceDiagnosticDescriptor {
+    code_namespace: &'static str,
+    display_name: &'static str,
+}
+
+impl EvidenceDiagnosticDescriptor {
+    pub(super) const fn new(code_namespace: &'static str, display_name: &'static str) -> Self {
+        Self {
+            code_namespace,
+            display_name,
+        }
+    }
 }
 
 impl EvidenceBudget {
@@ -52,7 +66,7 @@ impl EvidenceBudget {
 pub(super) fn retain_evidence(
     budget: &mut EvidenceBudget,
     frame: &Frame,
-    workflow: &str,
+    descriptor: EvidenceDiagnosticDescriptor,
     max_frames: usize,
     max_bytes: usize,
     diagnostics: &mut Vec<Diagnostic>,
@@ -62,34 +76,41 @@ pub(super) fn retain_evidence(
         Err(error) => error,
     };
     let message = match error {
-        EvidenceBudgetError::FrameCountOverflow => {
-            format!("{workflow} evidence frame accounting overflowed; later frames were omitted")
-        }
-        EvidenceBudgetError::ByteCountOverflow => {
-            format!("{workflow} evidence byte accounting overflowed; later frames were omitted")
-        }
+        EvidenceBudgetError::FrameCountOverflow => format!(
+            "{} evidence frame accounting overflowed; later frames were omitted",
+            descriptor.display_name
+        ),
+        EvidenceBudgetError::ByteCountOverflow => format!(
+            "{} evidence byte accounting overflowed; later frames were omitted",
+            descriptor.display_name
+        ),
         EvidenceBudgetError::LimitExceeded => format!(
-            "{workflow} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted"
+            "{} evidence exceeded {max_frames} frame(s) or {max_bytes} byte(s); later exact frames were omitted",
+            descriptor.display_name
         ),
     };
     push_diagnostic_once(
         diagnostics,
-        Diagnostic::warning(format!("{workflow}.evidence_limit"), message),
+        Diagnostic::warning(
+            format!("{}.evidence_limit", descriptor.code_namespace),
+            message,
+        ),
     );
     false
 }
 
 pub(super) fn push_undecoded_limit_diagnostic(
     diagnostics: &mut Vec<Diagnostic>,
-    workflow: &str,
+    descriptor: EvidenceDiagnosticDescriptor,
     limit: usize,
 ) {
     push_diagnostic_once(
         diagnostics,
         Diagnostic::warning(
-            format!("{workflow}.undecoded_limit"),
+            format!("{}.undecoded_limit", descriptor.code_namespace),
             format!(
-                "undecodable {workflow} evidence limit {limit} reached; later frames were omitted"
+                "undecodable {} evidence limit {limit} reached; later frames were omitted",
+                descriptor.display_name
             ),
         ),
     );
@@ -136,10 +157,13 @@ pub(super) fn validate_capture_statistics(statistics: CaptureStatistics) -> Resu
         .map_err(|error| format!("capture statistics are invalid: {error}"))
 }
 
-pub(super) trait MatchedResponseEvidence {
-    fn request_index(&self) -> usize;
+pub(super) trait ResponseEvidence {
     fn response(&self) -> &DecodedPacket;
     fn latency(&self) -> Duration;
+}
+
+pub(super) trait MatchedResponseEvidence: ResponseEvidence {
+    fn request_index(&self) -> usize;
 }
 
 pub(super) struct ExchangeEvidence<'a, M> {
@@ -200,6 +224,94 @@ pub(super) enum ExchangeEvidenceError {
         message: String,
     },
     IncompleteStatistics,
+}
+
+pub(super) fn validate_aggregate_evidence_limits<M: ResponseEvidence>(
+    matched_responses: &[M],
+    unsolicited: &[DecodedPacket],
+    undecoded: &[Frame],
+    max_captured_frames: usize,
+    max_captured_bytes: usize,
+) -> Result<(), ExchangeEvidenceError> {
+    let captured_frames =
+        checked_frame_count(&[matched_responses.len(), unsolicited.len(), undecoded.len()])
+            .ok_or(ExchangeEvidenceError::CapturedFrameCountOverflow)?;
+    if captured_frames > max_captured_frames {
+        return Err(ExchangeEvidenceError::CapturedFrameLimitExceeded {
+            actual: captured_frames,
+            limit: max_captured_frames,
+        });
+    }
+    let captured_bytes = checked_frame_bytes(
+        matched_responses
+            .iter()
+            .map(|response| &response.response().frame)
+            .chain(unsolicited.iter().map(|response| &response.frame))
+            .chain(undecoded),
+    )
+    .ok_or(ExchangeEvidenceError::CapturedByteCountOverflow)?;
+    if captured_bytes > max_captured_bytes {
+        return Err(ExchangeEvidenceError::CapturedByteLimitExceeded {
+            actual: captured_bytes,
+            limit: max_captured_bytes,
+        });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_sent_byte_accounting(
+    sent_frames: &[Frame],
+    reported: u64,
+) -> Result<(), ExchangeEvidenceError> {
+    let actual = checked_sent_frame_bytes(sent_frames)
+        .ok_or(ExchangeEvidenceError::SentByteCountOverflow)?;
+    if reported != actual {
+        return Err(ExchangeEvidenceError::SentByteCountMismatch { reported, actual });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
+    matched_responses: &[M],
+    unsolicited: &[DecodedPacket],
+    undecoded: &[Frame],
+    timeout: Duration,
+) -> Result<(), ExchangeEvidenceError> {
+    for response in matched_responses {
+        validate_exact_matched_response(response.response())?;
+        validate_matched_response_deadline(response.latency(), timeout)?;
+    }
+    for response in unsolicited {
+        validate_decoded_frame(response, "unsolicited response")
+            .map_err(|message| ExchangeEvidenceError::InvalidUnsolicitedResponse { message })?;
+    }
+    for frame in undecoded {
+        validate_frame(frame, "undecoded")
+            .map_err(|message| ExchangeEvidenceError::InvalidUndecodedFrame { message })?;
+    }
+    Ok(())
+}
+
+fn validate_exact_matched_response(response: &DecodedPacket) -> Result<(), ExchangeEvidenceError> {
+    validate_decoded_frame(response, "matched response")
+        .map_err(|message| ExchangeEvidenceError::InvalidMatchedResponse { message })
+}
+
+fn validate_matched_response_deadline(
+    latency: Duration,
+    timeout: Duration,
+) -> Result<(), ExchangeEvidenceError> {
+    if latency > timeout {
+        return Err(ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout });
+    }
+    Ok(())
+}
+
+pub(super) fn validate_capture_statistics_evidence(
+    statistics: CaptureStatistics,
+) -> Result<(), ExchangeEvidenceError> {
+    validate_capture_statistics(statistics)
+        .map_err(|message| ExchangeEvidenceError::InvalidCaptureStatistics { message })
 }
 
 pub(super) fn format_exchange_evidence_error(
@@ -280,33 +392,13 @@ where
         return Err(ExchangeEvidenceError::MatchedResponseOutsideBatch);
     }
 
-    let captured_frames = checked_frame_count(&[
-        evidence.matched_responses.len(),
-        evidence.unsolicited.len(),
-        evidence.undecoded.len(),
-    ])
-    .ok_or(ExchangeEvidenceError::CapturedFrameCountOverflow)?;
-    if captured_frames > max_captured_frames {
-        return Err(ExchangeEvidenceError::CapturedFrameLimitExceeded {
-            actual: captured_frames,
-            limit: max_captured_frames,
-        });
-    }
-    let captured_bytes = checked_frame_bytes(
-        evidence
-            .matched_responses
-            .iter()
-            .map(|response| &response.response().frame)
-            .chain(evidence.unsolicited.iter().map(|response| &response.frame))
-            .chain(evidence.undecoded),
-    )
-    .ok_or(ExchangeEvidenceError::CapturedByteCountOverflow)?;
-    if captured_bytes > max_captured_bytes {
-        return Err(ExchangeEvidenceError::CapturedByteLimitExceeded {
-            actual: captured_bytes,
-            limit: max_captured_bytes,
-        });
-    }
+    validate_aggregate_evidence_limits(
+        evidence.matched_responses,
+        evidence.unsolicited,
+        evidence.undecoded,
+        max_captured_frames,
+        max_captured_bytes,
+    )?;
 
     for (request_index, (sent, frame)) in evidence
         .sent_packets
@@ -325,34 +417,14 @@ where
         })?;
     }
 
-    let sent_bytes = checked_sent_frame_bytes(evidence.sent_frames)
-        .ok_or(ExchangeEvidenceError::SentByteCountOverflow)?;
-    if evidence.stats.bytes != sent_bytes {
-        return Err(ExchangeEvidenceError::SentByteCountMismatch {
-            reported: evidence.stats.bytes,
-            actual: sent_bytes,
-        });
-    }
-    for response in evidence.matched_responses {
-        validate_decoded_frame(response.response(), "matched response")
-            .map_err(|message| ExchangeEvidenceError::InvalidMatchedResponse { message })?;
-        if response.latency() > evidence.timeout {
-            return Err(ExchangeEvidenceError::MatchedResponseAfterTimeout {
-                latency: response.latency(),
-                timeout: evidence.timeout,
-            });
-        }
-    }
-    for response in evidence.unsolicited {
-        validate_decoded_frame(response, "unsolicited response")
-            .map_err(|message| ExchangeEvidenceError::InvalidUnsolicitedResponse { message })?;
-    }
-    for frame in evidence.undecoded {
-        validate_frame(frame, "undecoded")
-            .map_err(|message| ExchangeEvidenceError::InvalidUndecodedFrame { message })?;
-    }
-    validate_capture_statistics(evidence.stats.capture)
-        .map_err(|message| ExchangeEvidenceError::InvalidCaptureStatistics { message })?;
+    validate_sent_byte_accounting(evidence.sent_frames, evidence.stats.bytes)?;
+    validate_response_frames_and_deadlines(
+        evidence.matched_responses,
+        evidence.unsolicited,
+        evidence.undecoded,
+        evidence.timeout,
+    )?;
+    validate_capture_statistics_evidence(evidence.stats.capture)?;
     if evidence.stats.packets_attempted != evidence.request_count as u64
         || evidence.stats.packets_completed != evidence.request_count as u64
     {
@@ -389,13 +461,13 @@ pub(super) struct ResponseCandidate<'a, O> {
     pub(super) latency: Option<Duration>,
 }
 
-pub(super) fn select_response_candidate<'a, O>(
+pub(super) fn select_response_candidate<'a, O, K: Ord>(
     best: &mut Option<ResponseCandidate<'a, O>>,
     candidate: ResponseCandidate<'a, O>,
     sent_at: SystemTime,
     timeout: Duration,
     rank: impl Fn(&O) -> u8,
-    responder: impl Fn(&O) -> IpAddr,
+    tie_break_key: impl Fn(&O) -> K,
 ) {
     if !response_within_deadline(
         candidate.latency,
@@ -408,21 +480,21 @@ pub(super) fn select_response_candidate<'a, O>(
     let candidate_precedes = best.as_ref().is_none_or(|current| {
         let candidate_rank = rank(&candidate.observation);
         let current_rank = rank(&current.observation);
-        candidate_rank > current_rank
-            || (candidate_rank == current_rank
-                && (candidate.decoded.frame.timestamp < current.decoded.frame.timestamp
-                    || (candidate.decoded.frame.timestamp == current.decoded.frame.timestamp
-                        && (responder(&candidate.observation) < responder(&current.observation)
-                            || (responder(&candidate.observation)
-                                == responder(&current.observation)
-                                && (candidate.decoded.frame.bytes()
-                                    < current.decoded.frame.bytes()
-                                    || (candidate.decoded.frame.bytes()
-                                        == current.decoded.frame.bytes()
-                                        && preferred_latency(
-                                            candidate.latency,
-                                            current.latency,
-                                        ))))))))
+        if candidate_rank != current_rank {
+            return candidate_rank > current_rank;
+        }
+        if candidate.decoded.frame.timestamp != current.decoded.frame.timestamp {
+            return candidate.decoded.frame.timestamp < current.decoded.frame.timestamp;
+        }
+        let candidate_key = tie_break_key(&candidate.observation);
+        let current_key = tie_break_key(&current.observation);
+        if candidate_key != current_key {
+            return candidate_key < current_key;
+        }
+        if candidate.decoded.frame.bytes() != current.decoded.frame.bytes() {
+            return candidate.decoded.frame.bytes() < current.decoded.frame.bytes();
+        }
+        preferred_latency(candidate.latency, current.latency)
     });
     if candidate_precedes {
         *best = Some(candidate);
@@ -439,11 +511,7 @@ mod tests {
 
     struct NoMatchedResponses;
 
-    impl MatchedResponseEvidence for NoMatchedResponses {
-        fn request_index(&self) -> usize {
-            unreachable!()
-        }
-
+    impl ResponseEvidence for NoMatchedResponses {
         fn response(&self) -> &DecodedPacket {
             unreachable!()
         }
@@ -453,8 +521,164 @@ mod tests {
         }
     }
 
+    impl MatchedResponseEvidence for NoMatchedResponses {
+        fn request_index(&self) -> usize {
+            unreachable!()
+        }
+    }
+
     fn frame(bytes: &'static [u8]) -> Frame {
         Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).unwrap()
+    }
+
+    fn decoded_at(offset: Duration, bytes: &'static [u8]) -> DecodedPacket {
+        let frame = Frame::new(SystemTime::UNIX_EPOCH + offset, LinkType::RAW, bytes).unwrap();
+        DecodedPacket {
+            packet: Packet::new(),
+            original: frame.bytes().clone(),
+            frame,
+            layout: layout::Packet::default(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct TestObservation {
+        rank: u8,
+        key: (u8, u16),
+        identity: u8,
+    }
+
+    fn test_candidate<'a>(
+        decoded: &'a DecodedPacket,
+        rank: u8,
+        key: (u8, u16),
+        identity: u8,
+        latency: Option<Duration>,
+    ) -> ResponseCandidate<'a, TestObservation> {
+        ResponseCandidate {
+            observation: TestObservation {
+                rank,
+                key,
+                identity,
+            },
+            decoded,
+            latency,
+        }
+    }
+
+    fn select_test_candidate<'a>(
+        best: &mut Option<ResponseCandidate<'a, TestObservation>>,
+        candidate: ResponseCandidate<'a, TestObservation>,
+    ) {
+        select_response_candidate(
+            best,
+            candidate,
+            SystemTime::UNIX_EPOCH,
+            Duration::from_millis(10),
+            |observation| observation.rank,
+            |observation| observation.key,
+        );
+    }
+
+    #[test]
+    fn response_selector_rejects_monotonic_and_wall_clock_deadline_violations() {
+        let within_wall_clock = decoded_at(Duration::from_millis(1), &[1]);
+        let after_wall_clock = decoded_at(Duration::from_millis(11), &[2]);
+        let mut best = None;
+
+        select_test_candidate(
+            &mut best,
+            test_candidate(
+                &within_wall_clock,
+                1,
+                (0, 0),
+                1,
+                Some(Duration::from_millis(11)),
+            ),
+        );
+        select_test_candidate(
+            &mut best,
+            test_candidate(&after_wall_clock, 1, (0, 0), 2, None),
+        );
+
+        assert!(best.is_none());
+    }
+
+    #[test]
+    fn response_selector_prefers_rank_before_all_tie_breakers() {
+        let earlier = decoded_at(Duration::from_millis(1), &[1]);
+        let later = decoded_at(Duration::from_millis(9), &[9]);
+        let mut best = None;
+        select_test_candidate(
+            &mut best,
+            test_candidate(&earlier, 1, (0, 0), 1, Some(Duration::from_millis(1))),
+        );
+        select_test_candidate(
+            &mut best,
+            test_candidate(&later, 2, (9, 9), 2, Some(Duration::from_millis(9))),
+        );
+
+        assert_eq!(best.unwrap().observation.identity, 2);
+    }
+
+    #[test]
+    fn response_selector_prefers_earlier_timestamp_after_rank() {
+        let later = decoded_at(Duration::from_millis(9), &[1]);
+        let earlier = decoded_at(Duration::from_millis(1), &[9]);
+        let mut best = None;
+        select_test_candidate(&mut best, test_candidate(&later, 1, (0, 0), 1, None));
+        select_test_candidate(&mut best, test_candidate(&earlier, 1, (9, 9), 2, None));
+
+        assert_eq!(best.unwrap().observation.identity, 2);
+    }
+
+    #[test]
+    fn response_selector_accepts_a_generic_ordered_tie_break_key() {
+        let first = decoded_at(Duration::from_millis(1), &[1]);
+        let second = decoded_at(Duration::from_millis(1), &[9]);
+        let mut best = None;
+        select_test_candidate(&mut best, test_candidate(&first, 1, (2, 1), 1, None));
+        select_test_candidate(&mut best, test_candidate(&second, 1, (1, 9), 2, None));
+
+        assert_eq!(best.unwrap().observation.identity, 2);
+    }
+
+    #[test]
+    fn response_selector_prefers_lexicographically_smaller_exact_bytes() {
+        let larger = decoded_at(Duration::from_millis(1), &[2]);
+        let smaller = decoded_at(Duration::from_millis(1), &[1]);
+        let mut best = None;
+        select_test_candidate(&mut best, test_candidate(&larger, 1, (0, 0), 1, None));
+        select_test_candidate(&mut best, test_candidate(&smaller, 1, (0, 0), 2, None));
+
+        assert_eq!(best.unwrap().observation.identity, 2);
+    }
+
+    #[test]
+    fn response_selector_prefers_shorter_known_latency_last() {
+        let response = decoded_at(Duration::from_millis(1), &[1]);
+        let mut best = None;
+        select_test_candidate(
+            &mut best,
+            test_candidate(&response, 1, (0, 0), 1, Some(Duration::from_millis(5))),
+        );
+        select_test_candidate(
+            &mut best,
+            test_candidate(&response, 1, (0, 0), 2, Some(Duration::from_millis(2))),
+        );
+
+        assert_eq!(best.unwrap().observation.identity, 2);
+    }
+
+    #[test]
+    fn response_selector_is_stable_when_candidates_are_fully_tied() {
+        let response = decoded_at(Duration::from_millis(1), &[1]);
+        let mut best = None;
+        select_test_candidate(&mut best, test_candidate(&response, 1, (0, 0), 1, None));
+        select_test_candidate(&mut best, test_candidate(&response, 1, (0, 0), 2, None));
+
+        assert_eq!(best.unwrap().observation.identity, 1);
     }
 
     #[test]
@@ -570,7 +794,7 @@ mod tests {
         assert!(retain_evidence(
             &mut budget,
             &first,
-            "scan",
+            EvidenceDiagnosticDescriptor::new("scan", "scan"),
             1,
             1,
             &mut diagnostics,
@@ -578,7 +802,15 @@ mod tests {
         assert!(!retain_evidence(
             &mut budget,
             &second,
-            "scan",
+            EvidenceDiagnosticDescriptor::new("scan", "scan"),
+            1,
+            1,
+            &mut diagnostics,
+        ));
+        assert!(!retain_evidence(
+            &mut budget,
+            &second,
+            EvidenceDiagnosticDescriptor::new("scan", "scan"),
             1,
             1,
             &mut diagnostics,
@@ -590,11 +822,87 @@ mod tests {
             "scan evidence exceeded 1 frame(s) or 1 byte(s); later exact frames were omitted"
         );
 
-        push_undecoded_limit_diagnostic(&mut diagnostics, "traceroute", 7);
+        push_undecoded_limit_diagnostic(
+            &mut diagnostics,
+            EvidenceDiagnosticDescriptor::new("traceroute", "traceroute"),
+            7,
+        );
         assert_eq!(diagnostics[1].code, "traceroute.undecoded_limit");
         assert_eq!(
             diagnostics[1].message,
             "undecodable traceroute evidence limit 7 reached; later frames were omitted"
+        );
+
+        let mut dns_budget = EvidenceBudget::default();
+        assert!(!retain_evidence(
+            &mut dns_budget,
+            &first,
+            EvidenceDiagnosticDescriptor::new("dns", "DNS"),
+            0,
+            0,
+            &mut diagnostics,
+        ));
+        assert!(!retain_evidence(
+            &mut dns_budget,
+            &second,
+            EvidenceDiagnosticDescriptor::new("dns", "DNS"),
+            0,
+            0,
+            &mut diagnostics,
+        ));
+        assert_eq!(diagnostics[2].code, "dns.evidence_limit");
+        assert_eq!(
+            diagnostics[2].message,
+            "DNS evidence exceeded 0 frame(s) or 0 byte(s); later exact frames were omitted"
+        );
+        assert_eq!(diagnostics.len(), 3);
+
+        let mut dns_undecoded_diagnostics = Vec::new();
+        push_undecoded_limit_diagnostic(
+            &mut dns_undecoded_diagnostics,
+            EvidenceDiagnosticDescriptor::new("dns", "DNS"),
+            4,
+        );
+        assert_eq!(dns_undecoded_diagnostics[0].code, "dns.undecoded_limit");
+        assert_eq!(
+            dns_undecoded_diagnostics[0].message,
+            "undecodable DNS evidence limit 4 reached; later frames were omitted"
+        );
+
+        let mut frame_overflow_budget = EvidenceBudget {
+            retained_frame_count: usize::MAX,
+            retained_byte_count: 0,
+        };
+        let mut overflow_diagnostics = Vec::new();
+        assert!(!retain_evidence(
+            &mut frame_overflow_budget,
+            &first,
+            EvidenceDiagnosticDescriptor::new("dns", "DNS"),
+            usize::MAX,
+            usize::MAX,
+            &mut overflow_diagnostics,
+        ));
+        assert_eq!(
+            overflow_diagnostics[0].message,
+            "DNS evidence frame accounting overflowed; later frames were omitted"
+        );
+
+        let mut byte_overflow_budget = EvidenceBudget {
+            retained_frame_count: 0,
+            retained_byte_count: usize::MAX,
+        };
+        let mut overflow_diagnostics = Vec::new();
+        assert!(!retain_evidence(
+            &mut byte_overflow_budget,
+            &first,
+            EvidenceDiagnosticDescriptor::new("scan", "scan"),
+            usize::MAX,
+            usize::MAX,
+            &mut overflow_diagnostics,
+        ));
+        assert_eq!(
+            overflow_diagnostics[0].message,
+            "scan evidence byte accounting overflowed; later frames were omitted"
         );
         assert_eq!(
             format_exchange_evidence_error(

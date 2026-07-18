@@ -139,7 +139,7 @@ where
         }
 
         let sent_at = execution.sent_evidence.timestamp;
-        let mut best: Option<DnsCandidate<'_>> = None;
+        let mut best: Option<ResponseCandidate<'_, DnsResponseClassification>> = None;
         let candidate_context = DnsCandidateContext {
             registry,
             probe: &probe,
@@ -165,14 +165,16 @@ where
             let latency = candidate
                 .latency
                 .or_else(|| received_at.duration_since(sent_at).ok());
-            let response_frame = retain_dns_evidence(
+            let response_frame = retain_evidence(
                 &mut evidence_budget,
                 &candidate.decoded.frame,
-                request.limits,
+                DNS_EVIDENCE_DIAGNOSTICS,
+                request.limits.max_evidence_frames,
+                request.limits.max_evidence_bytes,
                 &mut result.diagnostics,
             )
             .then(|| candidate.decoded.frame.clone());
-            match candidate.classification {
+            match candidate.observation {
                 DnsResponseClassification::Response(response) => {
                     let truncated = response.truncated;
                     let response_code = Some(response.response_code);
@@ -290,22 +292,19 @@ where
         // frames under the one operation-wide retention budget.
         for frame in execution.undecoded {
             if result.undecoded.len() >= request.limits.max_undecoded {
-                push_diagnostic_once(
+                push_undecoded_limit_diagnostic(
                     &mut result.diagnostics,
-                    Diagnostic::warning(
-                        "dns.undecoded_limit",
-                        format!(
-                            "undecodable DNS evidence limit {} reached; later frames were omitted",
-                            request.limits.max_undecoded
-                        ),
-                    ),
+                    DNS_EVIDENCE_DIAGNOSTICS,
+                    request.limits.max_undecoded,
                 );
                 break;
             }
-            if retain_dns_evidence(
+            if retain_evidence(
                 &mut evidence_budget,
                 &frame,
-                request.limits,
+                DNS_EVIDENCE_DIAGNOSTICS,
+                request.limits.max_evidence_frames,
+                request.limits.max_evidence_bytes,
                 &mut result.diagnostics,
             ) {
                 result
@@ -328,12 +327,6 @@ where
     Ok(result)
 }
 
-struct DnsCandidate<'a> {
-    classification: DnsResponseClassification,
-    decoded: &'a DecodedPacket,
-    latency: Option<Duration>,
-}
-
 struct DnsCandidateContext<'a> {
     registry: &'a ProtocolRegistry,
     probe: &'a DnsProbe,
@@ -344,7 +337,7 @@ struct DnsCandidateContext<'a> {
 }
 
 fn consider_dns_candidate<'a>(
-    best: &mut Option<DnsCandidate<'a>>,
+    best: &mut Option<ResponseCandidate<'a, DnsResponseClassification>>,
     context: &DnsCandidateContext<'_>,
     decoded: &'a DecodedPacket,
     latency: Option<Duration>,
@@ -366,20 +359,27 @@ fn consider_dns_candidate<'a>(
     ) else {
         return;
     };
-    if best.as_ref().is_none_or(|current| {
-        classification.rank() > current.classification.rank()
-            || (classification.rank() == current.classification.rank()
-                && (decoded.frame.timestamp < current.decoded.frame.timestamp
-                    || (decoded.frame.timestamp == current.decoded.frame.timestamp
-                        && (decoded.frame.bytes() < current.decoded.frame.bytes()
-                            || (decoded.frame.bytes() == current.decoded.frame.bytes()
-                                && preferred_latency(latency, current.latency))))))
-    }) {
-        *best = Some(DnsCandidate {
-            classification,
+    select_response_candidate(
+        best,
+        ResponseCandidate {
+            observation: classification,
             decoded,
             latency,
-        });
+        },
+        context.sent_at,
+        context.timeout,
+        DnsResponseClassification::rank,
+        |_| (),
+    );
+}
+
+impl ResponseEvidence for DnsMatchedResponse {
+    fn response(&self) -> &DecodedPacket {
+        &self.response
+    }
+
+    fn latency(&self) -> Duration {
+        self.latency
     }
 }
 
@@ -428,79 +428,67 @@ pub(super) fn validate_dns_execution(
                 .to_owned(),
         });
     }
-    let sent_bytes = execution.sent_evidence.bytes().len() as u64;
-    if execution.stats.bytes != sent_bytes {
-        return Err(DnsError::InvalidEvidence {
-            attempt,
-            message: format!(
-                "successful exchange reported {} sent bytes for {sent_bytes} exact frame bytes",
-                execution.stats.bytes
-            ),
-        });
-    }
-    validate_capture_statistics(execution.stats.capture)
-        .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
-    for response in &execution.responses {
-        validate_decoded_frame(&response.response, "matched response")
-            .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
-        if response.latency > timeout {
-            return Err(DnsError::InvalidEvidence {
-                attempt,
-                message: format!(
-                    "matched response latency {:?} exceeds timeout {timeout:?}",
-                    response.latency
-                ),
-            });
-        }
-    }
-    for response in &execution.unsolicited {
-        validate_decoded_frame(response, "unsolicited response")
-            .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
-    }
-    for frame in &execution.undecoded {
-        validate_frame(frame, "undecoded")
-            .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
-    }
-    let frame_count = checked_frame_count(&[
-        execution.responses.len(),
-        execution.unsolicited.len(),
-        execution.undecoded.len(),
-    ])
-    .ok_or_else(|| DnsError::InvalidEvidence {
-        attempt,
-        message: "executor frame-count accounting overflowed".to_owned(),
-    })?;
-    if frame_count > limits.max_evidence_frames {
-        return Err(DnsError::InvalidEvidence {
-            attempt,
-            message: format!(
-                "executor returned {frame_count} frames beyond max_evidence_frames={}",
-                limits.max_evidence_frames
-            ),
-        });
-    }
-    let frame_bytes = checked_frame_bytes(
-        execution
-            .responses
-            .iter()
-            .map(|response| &response.response.frame)
-            .chain(execution.unsolicited.iter().map(|response| &response.frame))
-            .chain(execution.undecoded.iter()),
+    validate_sent_byte_accounting(
+        std::slice::from_ref(&execution.sent_evidence),
+        execution.stats.bytes,
     )
-    .ok_or_else(|| DnsError::InvalidEvidence {
-        attempt,
-        message: "executor frame-byte accounting overflowed".to_owned(),
-    })?;
-    if frame_bytes > limits.max_evidence_bytes {
-        return Err(DnsError::InvalidEvidence {
-            attempt,
-            message: format!(
-                "executor returned {frame_bytes} frame bytes beyond max_evidence_bytes={}",
-                limits.max_evidence_bytes
-            ),
-        });
-    }
+    .map_err(|error| map_dns_evidence_error(attempt, error))?;
+    validate_capture_statistics_evidence(execution.stats.capture)
+        .map_err(|error| map_dns_evidence_error(attempt, error))?;
+    validate_response_frames_and_deadlines(
+        &execution.responses,
+        &execution.unsolicited,
+        &execution.undecoded,
+        timeout,
+    )
+    .map_err(|error| map_dns_evidence_error(attempt, error))?;
+    validate_aggregate_evidence_limits(
+        &execution.responses,
+        &execution.unsolicited,
+        &execution.undecoded,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+    )
+    .map_err(|error| map_dns_evidence_error(attempt, error))?;
     Ok(())
+}
+
+fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsError {
+    let message = match error {
+        ExchangeEvidenceError::CapturedFrameCountOverflow => {
+            "executor frame-count accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedFrameLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} frames beyond max_evidence_frames={limit}")
+        }
+        ExchangeEvidenceError::CapturedByteCountOverflow => {
+            "executor frame-byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::CapturedByteLimitExceeded { actual, limit } => {
+            format!("executor returned {actual} frame bytes beyond max_evidence_bytes={limit}")
+        }
+        ExchangeEvidenceError::SentByteCountOverflow => {
+            "sent frame byte accounting overflowed".to_owned()
+        }
+        ExchangeEvidenceError::SentByteCountMismatch { reported, actual } => format!(
+            "successful exchange reported {reported} sent bytes for {actual} exact frame bytes"
+        ),
+        ExchangeEvidenceError::InvalidMatchedResponse { message }
+        | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
+        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
+        | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
+        ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
+            format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
+        }
+        ExchangeEvidenceError::SentCardinality { .. }
+        | ExchangeEvidenceError::MatchedResponseOutsideBatch
+        | ExchangeEvidenceError::SentPacketMismatch { .. }
+        | ExchangeEvidenceError::InvalidSentFrame { .. }
+        | ExchangeEvidenceError::IncompleteStatistics => {
+            unreachable!("DNS validation does not produce batch-only evidence errors")
+        }
+    };
+    DnsError::InvalidEvidence { attempt, message }
 }
 
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
@@ -581,35 +569,6 @@ fn update_dns_fallback(outcome: &mut DnsOutcome, rank: &mut u8, candidate: DnsOu
     }
 }
 
-fn retain_dns_evidence(
-    budget: &mut EvidenceBudget,
-    frame: &Frame,
-    limits: DnsLimits,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
-    let error = match budget.retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes) {
-        Ok(()) => return true,
-        Err(error) => error,
-    };
-    let message = match error {
-        EvidenceBudgetError::FrameCountOverflow => {
-            "DNS evidence frame accounting overflowed; later frames were omitted".to_owned()
-        }
-        EvidenceBudgetError::ByteCountOverflow => {
-            "DNS evidence byte accounting overflowed; later frames were omitted".to_owned()
-        }
-        EvidenceBudgetError::LimitExceeded => format!(
-            "DNS evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
-            limits.max_evidence_frames, limits.max_evidence_bytes
-        ),
-    };
-    push_diagnostic_once(
-        diagnostics,
-        Diagnostic::warning("dns.evidence_limit", message),
-    );
-    false
-}
-
 fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), DnsError> {
     total
         .checked_add(value)
@@ -618,12 +577,14 @@ fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), D
 use super::Clock;
 use super::wire::raw_payload;
 use super::{
-    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DecodedPacket, Diagnostic, DnsAttemptEvidence,
-    DnsAttemptStatus, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsLimits,
-    DnsOutcome, DnsProbe, DnsRequest, DnsResponseClassification, DnsResult, DnsUndecodedEvidence,
-    Duration, EvidenceBudget, EvidenceBudgetError, FieldValue, Frame, IpAddr,
-    MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet, ProtocolRegistry, Stats, SystemTime,
-    checked_frame_bytes, checked_frame_count, classify_dns_response, encode_dns_query,
-    preferred_latency, push_diagnostic_once, response_within_deadline, validate_capture_statistics,
-    validate_decoded_frame, validate_frame,
+    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, DecodedPacket,
+    DnsAttemptEvidence, DnsAttemptStatus, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor,
+    DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe, DnsRequest, DnsResponseClassification,
+    DnsResult, DnsUndecodedEvidence, Duration, EvidenceBudget, ExchangeEvidenceError, FieldValue,
+    IpAddr, MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet, ProtocolRegistry, ResponseCandidate,
+    ResponseEvidence, Stats, SystemTime, classify_dns_response, encode_dns_query,
+    push_diagnostic_once, push_undecoded_limit_diagnostic, response_within_deadline,
+    retain_evidence, select_response_candidate, validate_aggregate_evidence_limits,
+    validate_capture_statistics_evidence, validate_frame, validate_response_frames_and_deadlines,
+    validate_sent_byte_accounting,
 };

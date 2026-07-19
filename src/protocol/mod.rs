@@ -8,6 +8,7 @@
 pub mod builtin;
 pub mod capture;
 mod common;
+pub mod gre;
 pub mod icmp;
 pub mod ipv6;
 pub mod link;

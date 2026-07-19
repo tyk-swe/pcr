@@ -6,19 +6,22 @@
 //! Portable built-in Internet protocol layers and their deterministic registry module.
 
 use super::super::{
-    capture as capture_link, icmp, ipv6 as ipv6_ext, link, matcher, network as ip, raw, support,
-    transport,
+    capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher, network as ip, raw,
+    support, transport,
 };
 
 #[cfg(test)]
 use crate::packet::layer::{Padding, Raw};
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
 #[cfg(test)]
+use gre::Gre;
+use gre::GreCodec;
+#[cfg(test)]
 use icmp::{Icmpv4, Icmpv6};
 use icmp::{Icmpv4Codec, Icmpv6Codec};
 #[cfg(test)]
-use ip::{Ipv4, Ipv6};
-use ip::{Ipv4Codec, Ipv6Codec, RawIpCodec};
+use ip::{Igmp, Ipv4, Ipv6};
+use ip::{IgmpCodec, Ipv4Codec, Ipv6Codec, RawIpCodec};
 #[cfg(test)]
 use ipv6_ext::{DestinationOptions, HopByHop, SegmentRoutingHeader};
 use ipv6_ext::{
@@ -30,8 +33,8 @@ use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::{BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS};
 #[cfg(test)]
-use transport::{Tcp, Udp};
-use transport::{TcpCodec, UdpCodec};
+use transport::{Sctp, Tcp, Udp};
+use transport::{SctpCodec, TcpCodec, UdpCodec};
 
 use crate::packet::registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError};
 
@@ -58,11 +61,14 @@ impl ProtocolModule for BuiltinProtocols {
         builder.register_builtin_codec(DestinationOptionsCodec)?;
         builder.register_builtin_codec(Ipv6FragmentCodec)?;
         builder.register_builtin_codec(SegmentRoutingHeaderCodec)?;
+        builder.register_builtin_codec(GreCodec)?;
         builder.register_builtin_codec(RawIpCodec)?;
         builder.register_builtin_codec(UdpCodec)?;
         builder.register_builtin_codec(TcpCodec)?;
+        builder.register_builtin_codec(SctpCodec)?;
         builder.register_builtin_codec(Icmpv4Codec)?;
         builder.register_builtin_codec(Icmpv6Codec)?;
+        builder.register_builtin_codec(IgmpCodec)?;
         for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.matcher) {
             match support.protocol {
                 "tcp" | "udp" => builder.register_matcher(
@@ -75,6 +81,10 @@ impl ProtocolModule for BuiltinProtocols {
                 "icmpv6" => {
                     builder.register_matcher(support.protocol, matcher::EchoMatcher::v6())?
                 }
+                "sctp" => builder.register_matcher(
+                    support.protocol,
+                    matcher::ReverseFlowMatcher::new(support.protocol),
+                )?,
                 protocol => panic!("missing built-in matcher implementation for {protocol}"),
             };
         }
@@ -97,11 +107,7 @@ impl ProtocolModule for BuiltinProtocols {
 
         bind_ip_children(builder, "ipv4", 1)?;
         bind_ip_children(builder, "raw_ip", 1)?;
-        builder.bind("ipv6", 6, "tcp", 100)?;
-        builder.bind("ipv6", 17, "udp", 100)?;
-        builder.bind("ipv6", 58, "icmpv6", 100)?;
-        builder.bind("ipv6", 59, "malformed", 100)?;
-        builder.bind("ipv6", 255, "raw", -100)?;
+        bind_ipv6_children(builder, "ipv6")?;
         bind_ipv6_extensions(builder, "ipv6")?;
         for parent in [
             "ipv6_hop_by_hop",
@@ -109,18 +115,19 @@ impl ProtocolModule for BuiltinProtocols {
             "ipv6_fragment",
             "ipv6_srh",
         ] {
-            builder.bind(parent, 6, "tcp", 100)?;
-            builder.bind(parent, 17, "udp", 100)?;
-            builder.bind(parent, 58, "icmpv6", 100)?;
-            builder.bind(parent, 59, "malformed", 100)?;
-            builder.bind(parent, 255, "raw", -100)?;
+            bind_ipv6_children(builder, parent)?;
             bind_ipv6_extensions(builder, parent)?;
         }
         builder.bind("raw_ip", 58, "icmpv6", 100)?;
 
+        builder.bind("gre", 0x0800, "ipv4", 100)?;
+        builder.bind("gre", 0x86dd, "ipv6", 100)?;
+        builder.bind("gre", 0, "raw", -100)?;
+
         // Payload-bearing transports use discriminator zero as their typed raw child.
         builder.bind("udp", 0, "raw", 0)?;
         builder.bind("tcp", 0, "raw", 0)?;
+        builder.bind("sctp", 0, "raw", 0)?;
         // ICMP bodies are terminal: their codec owns all bytes after the
         // checksum, so advertising a Raw child would make round trips merge
         // two layers into one.
@@ -128,6 +135,27 @@ impl ProtocolModule for BuiltinProtocols {
         builder.bind("arp", 0, "padding", 0)?;
         Ok(())
     }
+}
+
+fn bind_common_ip_children(
+    builder: &mut RegistryBuilder,
+    parent: &str,
+) -> Result<(), RegistryError> {
+    builder.bind(parent, 4, "ipv4", 100)?;
+    builder.bind(parent, 6, "tcp", 100)?;
+    builder.bind(parent, 17, "udp", 100)?;
+    builder.bind(parent, 41, "ipv6", 100)?;
+    builder.bind(parent, 47, "gre", 100)?;
+    builder.bind(parent, 132, "sctp", 100)?;
+    builder.bind(parent, 255, "raw", -100)?;
+    Ok(())
+}
+
+fn bind_ipv6_children(builder: &mut RegistryBuilder, parent: &str) -> Result<(), RegistryError> {
+    bind_common_ip_children(builder, parent)?;
+    builder.bind(parent, 58, "icmpv6", 100)?;
+    builder.bind(parent, 59, "malformed", 100)?;
+    Ok(())
 }
 
 fn bind_ipv6_extensions(builder: &mut RegistryBuilder, parent: &str) -> Result<(), RegistryError> {
@@ -157,10 +185,9 @@ fn bind_ip_children(
     parent: &str,
     icmp_number: u64,
 ) -> Result<(), RegistryError> {
+    bind_common_ip_children(builder, parent)?;
     builder.bind(parent, icmp_number, "icmpv4", 100)?;
-    builder.bind(parent, 6, "tcp", 100)?;
-    builder.bind(parent, 17, "udp", 100)?;
-    builder.bind(parent, 255, "raw", -100)?;
+    builder.bind(parent, 2, "igmp", 100)?;
     Ok(())
 }
 
@@ -1220,5 +1247,153 @@ mod tests {
             .build(decoded.packet, BuildContext::default(), options)
             .unwrap();
         assert_eq!(rebuilt.bytes, built.bytes);
+    }
+
+    #[test]
+    fn all_ip_in_ip_family_combinations_round_trip() {
+        let registry = Arc::new(default_registry().unwrap());
+        let builder = Builder::new(Arc::clone(&registry));
+        for (outer_v6, inner_v6) in [(false, false), (false, true), (true, false), (true, true)] {
+            let mut packet = Packet::new();
+            if outer_v6 {
+                packet.push(Ipv6 {
+                    source: "2001:db8::1".parse().unwrap(),
+                    destination: "2001:db8::2".parse().unwrap(),
+                    ..Ipv6::default()
+                });
+            } else {
+                packet.push(Ipv4 {
+                    source: Ipv4Addr::new(192, 0, 2, 1),
+                    destination: Ipv4Addr::new(192, 0, 2, 2),
+                    ..Ipv4::default()
+                });
+            }
+            if inner_v6 {
+                packet.push(Ipv6 {
+                    source: "2001:db8:1::1".parse().unwrap(),
+                    destination: "2001:db8:1::2".parse().unwrap(),
+                    ..Ipv6::default()
+                });
+            } else {
+                packet.push(Ipv4 {
+                    source: Ipv4Addr::new(198, 51, 100, 1),
+                    destination: Ipv4Addr::new(198, 51, 100, 2),
+                    ..Ipv4::default()
+                });
+            }
+            packet.push(Udp::default());
+
+            let built = builder
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .unwrap();
+            let root = if outer_v6 { "ipv6" } else { "ipv4" };
+            let decoded = Dissector::new(Arc::clone(&registry))
+                .decode_with_root(built.bytes.clone(), root.into(), DecodeOptions::default())
+                .unwrap();
+            let protocols = decoded
+                .packet
+                .iter()
+                .map(|layer| layer.protocol_id().as_str().to_owned())
+                .collect::<Vec<_>>();
+            assert_eq!(
+                protocols,
+                vec![
+                    if outer_v6 { "ipv6" } else { "ipv4" },
+                    if inner_v6 { "ipv6" } else { "ipv4" },
+                    "udp",
+                ]
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+            );
+            let rebuilt = builder
+                .build(
+                    decoded.packet,
+                    BuildContext::default(),
+                    BuildOptions::default(),
+                )
+                .unwrap();
+            assert_eq!(rebuilt.bytes, built.bytes);
+        }
+    }
+
+    #[test]
+    fn gre_sctp_and_igmp_round_trip_through_the_default_registry() {
+        let mut gre_packet = Packet::new();
+        gre_packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(192, 0, 2, 2),
+                ..Ipv4::default()
+            })
+            .push(Gre {
+                checksum: Some(WireValue::Auto),
+                key: Some(0x1122_3344),
+                sequence: Some(7),
+                ..Gre::default()
+            })
+            .push(Ipv6 {
+                source: "2001:db8::1".parse().unwrap(),
+                destination: "2001:db8::2".parse().unwrap(),
+                ..Ipv6::default()
+            })
+            .push(Udp::default());
+
+        let mut sctp_packet = Packet::new();
+        sctp_packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(192, 0, 2, 2),
+                ..Ipv4::default()
+            })
+            .push(Sctp::default())
+            .push(Raw::new(vec![
+                1, 0, 0, 20, 0x11, 0x22, 0x33, 0x44, 0, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0,
+            ]));
+
+        let mut igmp_packet = Packet::new();
+        igmp_packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(224, 0, 0, 1),
+                ..Ipv4::default()
+            })
+            .push(Igmp {
+                code: 100,
+                body: Bytes::from_static(&[224, 0, 0, 1]),
+                ..Igmp::default()
+            });
+
+        let registry = Arc::new(default_registry().unwrap());
+        let builder = Builder::new(Arc::clone(&registry));
+        for (packet, expected) in [
+            (gre_packet, vec!["ipv4", "gre", "ipv6", "udp"]),
+            (sctp_packet, vec!["ipv4", "sctp", "raw"]),
+            (igmp_packet, vec!["ipv4", "igmp"]),
+        ] {
+            let built = builder
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .unwrap();
+            let decoded = Dissector::new(Arc::clone(&registry))
+                .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+                .unwrap();
+            assert_eq!(
+                decoded
+                    .packet
+                    .iter()
+                    .map(|layer| layer.protocol_id().as_str().to_owned())
+                    .collect::<Vec<_>>(),
+                expected.into_iter().map(str::to_owned).collect::<Vec<_>>()
+            );
+            assert!(decoded.diagnostics.is_empty());
+            let rebuilt = builder
+                .build(
+                    decoded.packet,
+                    BuildContext::default(),
+                    BuildOptions::default(),
+                )
+                .unwrap();
+            assert_eq!(rebuilt.bytes, built.bytes);
+        }
     }
 }

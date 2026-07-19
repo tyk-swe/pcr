@@ -624,16 +624,14 @@ fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, P
 }
 
 fn packet_ip_field(packet: &Packet, field: &str) -> Option<IpAddr> {
-    packet.iter().find_map(|layer| {
-        if !matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6") {
-            return None;
-        }
-        match layer.field(field) {
-            Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => Some(IpAddr::V4(value)),
-            Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => Some(IpAddr::V6(value)),
-            _ => None,
-        }
-    })
+    let layer = packet
+        .iter()
+        .find(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))?;
+    match layer.field(field) {
+        Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => Some(IpAddr::V4(value)),
+        Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => Some(IpAddr::V6(value)),
+        _ => None,
+    }
 }
 
 fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {

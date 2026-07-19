@@ -829,3 +829,36 @@ fn encapsulated_srh_does_not_redirect_the_outer_route() {
         vec![IpAddr::V6(outer_destination)]
     );
 }
+
+#[test]
+fn unspecified_outer_ip_does_not_route_to_an_explicit_inner_destination() {
+    let requested_destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
+    let inner_destination = Ipv4Addr::new(10, 0, 0, 99);
+    let mut packet = Packet::new();
+    packet.push(Ipv4::default()).push(Ipv4 {
+        source: Ipv4Addr::new(10, 0, 0, 1),
+        destination: inner_destination,
+        ..Ipv4::default()
+    });
+
+    let plan = RoutePlanner
+        .plan(
+            &packet,
+            Some(requested_destination),
+            &PlanOptions {
+                link_mode: LinkMode::Layer3,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(RouteDecision {
+                capability: LinkCapability::Layer3,
+                link_type: LinkType::IPV4,
+                ..route(None)
+            }),
+        )
+        .unwrap();
+
+    assert_eq!(plan.lookup_destination, Some(requested_destination));
+    assert_eq!(plan.final_destination, Some(requested_destination));
+    assert_eq!(plan.visited_destinations, vec![requested_destination]);
+}

@@ -3,3 +3,7 @@
 "protocol"="protocol"
 "raw"="raw(hex=deadbeef)"
 "bytes"="bytes"
+"gre"="gre(checksum=auto,key=287454020,sequence=7)"
+"igmp"="igmp(type=17,code=100)"
+"sctp"="sctp(sport=40000,dport=5000,vtag=0)"
+"sctp_init"="raw(hex=0100001411223344000100000001000100000000)"

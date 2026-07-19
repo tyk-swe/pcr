@@ -3,6 +3,8 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use bytes::Bytes;
+
 use crate::packet::{
     Packet,
     codec::NetworkEnvelope,
@@ -26,10 +28,17 @@ impl ResponseMatcher for ReverseFlowMatcher {
         let transport = match self.protocol {
             "tcp" => QuotedProbeTransport::Tcp,
             "udp" => QuotedProbeTransport::Udp,
+            "sctp" => QuotedProbeTransport::Sctp,
             _ => return MatchResult::no_match(),
         };
         if quoted_icmp_error_kind(request, response, transport).is_some() {
-            return MatchResult::matched(150, "matching quoted ICMP error response");
+            return MatchResult::matched(
+                150,
+                match transport {
+                    QuotedProbeTransport::Sctp => "matching quoted SCTP ICMP error response",
+                    _ => "matching quoted ICMP error response",
+                },
+            );
         }
         let Some((request_layer_index, request_layer)) = request
             .iter()
@@ -57,34 +66,11 @@ impl ResponseMatcher for ReverseFlowMatcher {
         {
             return MatchResult::no_match();
         }
-        let Some(request_source_port) = request_layer
-            .field("source_port")
-            .and_then(|value| value.as_u64())
-        else {
+        if !ports_are_reversed(request_layer, response_layer) {
             return MatchResult::no_match();
-        };
-        let Some(request_destination_port) = request_layer
-            .field("destination_port")
-            .and_then(|value| value.as_u64())
-        else {
-            return MatchResult::no_match();
-        };
-        let Some(response_source_port) = response_layer
-            .field("source_port")
-            .and_then(|value| value.as_u64())
-        else {
-            return MatchResult::no_match();
-        };
-        let Some(response_destination_port) = response_layer
-            .field("destination_port")
-            .and_then(|value| value.as_u64())
-        else {
-            return MatchResult::no_match();
-        };
-        if request_source_port == response_destination_port
-            && request_destination_port == response_source_port
-        {
-            if self.protocol == "tcp" {
+        }
+        match self.protocol {
+            "tcp" => {
                 let Some(request_flags) = request_layer
                     .field("flags")
                     .and_then(|value| value.as_u64())
@@ -146,11 +132,32 @@ impl ResponseMatcher for ReverseFlowMatcher {
                     return MatchResult::no_match();
                 }
                 MatchResult::matched(200, "reverse TCP tuple and sequence state")
-            } else {
-                MatchResult::matched(100, format!("reverse {} tuple", self.protocol))
             }
-        } else {
-            MatchResult::no_match()
+            "sctp" => {
+                if request_layer
+                    .field("verification_tag")
+                    .and_then(|value| value.as_u64())
+                    != Some(0)
+                {
+                    return MatchResult::no_match();
+                }
+                let Some((request_initiate_tag, _)) =
+                    sctp_initiate_tag(request, request_layer_index, 1)
+                else {
+                    return MatchResult::no_match();
+                };
+                if request_initiate_tag == 0
+                    || sctp_initiate_tag(response, response_layer_index, 2).is_none()
+                    || response_layer
+                        .field("verification_tag")
+                        .and_then(|value| value.as_u64())
+                        != Some(u64::from(request_initiate_tag))
+                {
+                    return MatchResult::no_match();
+                }
+                MatchResult::matched(200, "reverse SCTP tuple and INIT verification tag")
+            }
+            _ => MatchResult::matched(100, format!("reverse {} tuple", self.protocol)),
         }
     }
 
@@ -160,6 +167,45 @@ impl ResponseMatcher for ReverseFlowMatcher {
             .position(|layer| layer.protocol_id().as_str() == self.protocol)?;
         network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
     }
+}
+
+fn ports_are_reversed(
+    request: &dyn crate::packet::layer::Layer,
+    response: &dyn crate::packet::layer::Layer,
+) -> bool {
+    request
+        .field("source_port")
+        .and_then(|value| value.as_u64())
+        == response
+            .field("destination_port")
+            .and_then(|value| value.as_u64())
+        && request
+            .field("destination_port")
+            .and_then(|value| value.as_u64())
+            == response
+                .field("source_port")
+                .and_then(|value| value.as_u64())
+}
+
+fn sctp_initiate_tag(
+    packet: &Packet,
+    sctp_index: usize,
+    expected_type: u8,
+) -> Option<(u32, Bytes)> {
+    let FieldValue::Bytes(bytes) = packet.layer(sctp_index + 1)?.field("bytes")? else {
+        return None;
+    };
+    if bytes.len() < 20 || bytes[0] != expected_type {
+        return None;
+    }
+    let chunk_len = usize::from(u16::from_be_bytes([bytes[2], bytes[3]]));
+    if chunk_len < 20 || chunk_len > bytes.len() {
+        return None;
+    }
+    Some((
+        u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]),
+        bytes,
+    ))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -174,6 +220,7 @@ pub(crate) enum QuotedIcmpError {
 pub(crate) enum QuotedProbeTransport {
     Tcp,
     Udp,
+    Sctp,
     Icmp,
 }
 
@@ -190,6 +237,7 @@ pub(crate) fn quoted_icmp_error_kind(
         .find_map(|layer| match layer.protocol_id().as_str() {
             "tcp" => Some(QuotedProbeTransport::Tcp),
             "udp" => Some(QuotedProbeTransport::Udp),
+            "sctp" => Some(QuotedProbeTransport::Sctp),
             "icmpv4" | "icmpv6" => Some(QuotedProbeTransport::Icmp),
             _ => None,
         })?;
@@ -240,18 +288,20 @@ fn quoted_probe_matches(transport: QuotedProbeTransport, request: &Packet, quote
         return false;
     }
     match transport {
-        QuotedProbeTransport::Tcp | QuotedProbeTransport::Udp => {
-            let (protocol_name, protocol_number) = if transport == QuotedProbeTransport::Tcp {
-                ("tcp", 6)
-            } else {
-                ("udp", 17)
+        QuotedProbeTransport::Tcp | QuotedProbeTransport::Udp | QuotedProbeTransport::Sctp => {
+            let (protocol_name, protocol_number) = match transport {
+                QuotedProbeTransport::Tcp => ("tcp", 6),
+                QuotedProbeTransport::Udp => ("udp", 17),
+                QuotedProbeTransport::Sctp => ("sctp", 132),
+                QuotedProbeTransport::Icmp => unreachable!("ICMP uses the other match arm"),
             };
             if quoted.protocol != protocol_number {
                 return false;
             }
-            let Some(layer) = request
+            let Some((layer_index, layer)) = request
                 .iter()
-                .find(|layer| layer.protocol_id().as_str() == protocol_name)
+                .enumerate()
+                .find(|(_, layer)| layer.protocol_id().as_str() == protocol_name)
             else {
                 return false;
             };
@@ -283,17 +333,30 @@ fn quoted_probe_matches(transport: QuotedProbeTransport, request: &Packet, quote
             {
                 return false;
             }
-            if transport == QuotedProbeTransport::Tcp {
-                let Some(sequence) = layer
-                    .field("sequence")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u32::try_from(value).ok())
-                else {
-                    return false;
-                };
-                quoted.payload.get(4..8) == Some(&sequence.to_be_bytes()[..])
-            } else {
-                true
+            match transport {
+                QuotedProbeTransport::Tcp => {
+                    let Some(sequence) = layer
+                        .field("sequence")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok())
+                    else {
+                        return false;
+                    };
+                    quoted.payload.get(4..8) == Some(&sequence.to_be_bytes()[..])
+                }
+                QuotedProbeTransport::Sctp => {
+                    let Some(verification_tag) = layer
+                        .field("verification_tag")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok())
+                    else {
+                        return false;
+                    };
+                    quoted.payload.get(4..8) == Some(&verification_tag.to_be_bytes()[..])
+                        && quoted_sctp_init_matches(layer, request, layer_index, quoted.payload)
+                }
+                QuotedProbeTransport::Udp => true,
+                QuotedProbeTransport::Icmp => unreachable!("ICMP uses the other match arm"),
             }
         }
         QuotedProbeTransport::Icmp => {
@@ -337,6 +400,36 @@ fn quoted_probe_matches(transport: QuotedProbeTransport, request: &Packet, quote
     }
 }
 
+fn quoted_sctp_init_matches(
+    layer: &dyn crate::packet::layer::Layer,
+    request: &Packet,
+    sctp_index: usize,
+    payload: &[u8],
+) -> bool {
+    let Some((_, chunk)) = sctp_initiate_tag(request, sctp_index, 1) else {
+        return false;
+    };
+    let Some(checksum) = layer.field("checksum") else {
+        return false;
+    };
+    let checksum_bytes = match checksum {
+        FieldValue::Unsigned(value) => {
+            let Ok(value) = u32::try_from(value) else {
+                return false;
+            };
+            value.to_le_bytes()
+        }
+        FieldValue::Bytes(value) => {
+            let Ok(value) = <[u8; 4]>::try_from(value.as_ref()) else {
+                return false;
+            };
+            value
+        }
+        _ => return false,
+    };
+    payload.get(8..12) == Some(&checksum_bytes[..]) && payload.get(12..20) == chunk.get(..8)
+}
+
 struct QuotedProbe<'a> {
     source: IpAddr,
     destination: IpAddr,
@@ -366,21 +459,23 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
                 source: IpAddr::V4(Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15])),
                 destination: IpAddr::V4(Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19])),
                 protocol: bytes[9],
-                payload: &bytes[header_len..],
+                payload: &bytes[header_len..total_length.min(bytes.len())],
             })
         }
         6 => {
             if bytes.len() < 48 {
                 return None;
             }
-            if u16::from_be_bytes([bytes[4], bytes[5]]) < 8 {
+            let payload_length = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+            if payload_length < 8 {
                 return None;
             }
+            let end = 40_usize.checked_add(payload_length)?.min(bytes.len());
             Some(QuotedProbe {
                 source: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[8..24]).ok()?)),
                 destination: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[24..40]).ok()?)),
                 protocol: bytes[6],
-                payload: &bytes[40..],
+                payload: &bytes[40..end],
             })
         }
         _ => None,
@@ -591,16 +686,21 @@ fn network_endpoints_before(packet: &Packet, upper_layer_index: usize) -> Option
 #[cfg(test)]
 mod tests {
     use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::sync::Arc;
 
     use bytes::Bytes;
 
     use super::*;
-    use crate::packet::layer::Raw;
+    use crate::packet::{
+        build::{BuildContext, BuildMode, BuildOptions, Builder},
+        field::WireValue,
+        layer::Raw,
+    };
     use crate::protocol::{
         icmp::{Icmpv4, Icmpv6},
         ipv6::SegmentRoutingHeader,
         network::{Ipv4, Ipv6},
-        transport::{Tcp, Udp},
+        transport::{Sctp, Tcp, Udp},
     };
 
     fn echo(source: Ipv4Addr, destination: Ipv4Addr, icmp_type: u8) -> Packet {
@@ -659,6 +759,7 @@ mod tests {
             ..Tcp::default()
         });
         let icmp = echo(source, destination, 8);
+        let sctp = sctp_init(source, destination, 0x1122_3344);
 
         assert!(
             ReverseFlowMatcher::new("udp")
@@ -678,6 +779,90 @@ mod tests {
                 )
                 .matched
         );
+        assert!(
+            ReverseFlowMatcher::new("sctp")
+                .matches(
+                    &sctp,
+                    &quoted_icmpv4_time_exceeded(router, source, 132, &sctp)
+                )
+                .matched
+        );
+    }
+
+    #[test]
+    fn sctp_init_matcher_requires_reversed_tuple_and_initiate_tag() {
+        let source = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 2);
+        let request = sctp_init(source, destination, 0x1122_3344);
+        let response = sctp_init_ack(destination, source, 0x1122_3344, 0x5566_7788);
+        let wrong_tag = sctp_init_ack(destination, source, 0x0102_0304, 0x5566_7788);
+        let wrong_endpoint =
+            sctp_init_ack(Ipv4Addr::new(10, 0, 0, 3), source, 0x1122_3344, 0x5566_7788);
+
+        assert!(
+            ReverseFlowMatcher::new("sctp")
+                .matches(&request, &response)
+                .matched
+        );
+        assert!(
+            !ReverseFlowMatcher::new("sctp")
+                .matches(&request, &wrong_tag)
+                .matched
+        );
+        assert!(
+            !ReverseFlowMatcher::new("sctp")
+                .matches(&request, &wrong_endpoint)
+                .matched
+        );
+        assert_eq!(
+            ReverseFlowMatcher::new("sctp").responder(&request, &response),
+            Some(IpAddr::V4(destination))
+        );
+    }
+
+    fn init_chunk(chunk_type: u8, initiate_tag: u32) -> Vec<u8> {
+        let mut chunk = vec![chunk_type, 0, 0, 20];
+        chunk.extend_from_slice(&initiate_tag.to_be_bytes());
+        chunk.extend_from_slice(&65_535_u32.to_be_bytes());
+        chunk.extend_from_slice(&1_u16.to_be_bytes());
+        chunk.extend_from_slice(&1_u16.to_be_bytes());
+        chunk.extend_from_slice(&0_u32.to_be_bytes());
+        chunk
+    }
+
+    fn sctp_init(source: Ipv4Addr, destination: Ipv4Addr, initiate_tag: u32) -> Packet {
+        let chunk = init_chunk(1, initiate_tag);
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source,
+                destination,
+                ..Ipv4::default()
+            })
+            .push(Sctp {
+                source_port: 40_000,
+                destination_port: 5_000,
+                verification_tag: 0,
+                checksum: WireValue::Exact(initiate_tag.rotate_left(7)),
+            })
+            .push(Raw::new(chunk));
+        packet
+    }
+
+    fn sctp_init_ack(
+        source: Ipv4Addr,
+        destination: Ipv4Addr,
+        verification_tag: u32,
+        initiate_tag: u32,
+    ) -> Packet {
+        let mut packet = sctp_init(source, destination, initiate_tag);
+        let sctp = packet.get_mut::<Sctp>().unwrap();
+        sctp.source_port = 5_000;
+        sctp.destination_port = 40_000;
+        sctp.verification_tag = verification_tag;
+        let raw = packet.get_mut::<Raw>().unwrap();
+        raw.bytes = Bytes::from(init_chunk(2, initiate_tag));
+        packet
     }
 
     #[test]
@@ -737,6 +922,64 @@ mod tests {
         );
     }
 
+    #[test]
+    fn sctp_quoted_icmp_requires_enough_bytes_to_identify_the_init() {
+        let source = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 2);
+        let router = Ipv4Addr::new(10, 0, 0, 254);
+        let request = sctp_init(source, destination, 0x1122_3344);
+        let same_tuple = sctp_init(source, destination, 0x5566_7788);
+        let response = quoted_icmpv4_time_exceeded(router, source, 132, &request);
+
+        assert!(
+            ReverseFlowMatcher::new("sctp")
+                .matches(&request, &response)
+                .matched
+        );
+        assert!(
+            !ReverseFlowMatcher::new("sctp")
+                .matches(&same_tuple, &response)
+                .matched
+        );
+
+        let mut short = response;
+        let body = short.get_mut::<Icmpv4>().unwrap();
+        body.body = body.body.slice(..32);
+        assert!(
+            !ReverseFlowMatcher::new("sctp")
+                .matches(&request, &short)
+                .matched
+        );
+    }
+
+    #[test]
+    fn sctp_quoted_icmp_matches_a_permissively_built_raw_checksum() {
+        let source = Ipv4Addr::new(10, 0, 0, 1);
+        let destination = Ipv4Addr::new(10, 0, 0, 2);
+        let router = Ipv4Addr::new(10, 0, 0, 254);
+        let mut request = sctp_init(source, destination, 0x1122_3344);
+        request.get_mut::<Sctp>().unwrap().checksum =
+            WireValue::Raw(Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]));
+        let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
+        let built = Builder::new(registry)
+            .build(
+                request,
+                BuildContext::default(),
+                BuildOptions {
+                    mode: BuildMode::Permissive,
+                    ..BuildOptions::default()
+                },
+            )
+            .unwrap();
+        let response = quoted_icmpv4_time_exceeded(router, source, 132, &built.packet);
+
+        assert!(
+            ReverseFlowMatcher::new("sctp")
+                .matches(&built.packet, &response)
+                .matched
+        );
+    }
+
     fn quoted_icmpv4_time_exceeded(
         router: Ipv4Addr,
         source: Ipv4Addr,
@@ -744,9 +987,10 @@ mod tests {
         request: &Packet,
     ) -> Packet {
         let request_network = request.get::<Ipv4>().unwrap();
-        let mut quote = vec![0_u8; 28];
+        let quote_length = if protocol == 132 { 40 } else { 28 };
+        let mut quote = vec![0_u8; quote_length];
         quote[0] = 0x45;
-        quote[2..4].copy_from_slice(&28_u16.to_be_bytes());
+        quote[2..4].copy_from_slice(&u16::try_from(quote_length).unwrap().to_be_bytes());
         quote[9] = protocol;
         quote[12..16].copy_from_slice(&request_network.source.octets());
         quote[16..20].copy_from_slice(&request_network.destination.octets());
@@ -761,6 +1005,20 @@ mod tests {
                 let udp = request.get::<Udp>().unwrap();
                 quote[20..22].copy_from_slice(&udp.source_port.to_be_bytes());
                 quote[22..24].copy_from_slice(&udp.destination_port.to_be_bytes());
+            }
+            132 => {
+                let sctp = request.get::<Sctp>().unwrap();
+                quote[20..22].copy_from_slice(&sctp.source_port.to_be_bytes());
+                quote[22..24].copy_from_slice(&sctp.destination_port.to_be_bytes());
+                quote[24..28].copy_from_slice(&sctp.verification_tag.to_be_bytes());
+                let checksum = match &sctp.checksum {
+                    WireValue::Exact(checksum) => checksum.to_le_bytes(),
+                    WireValue::Raw(checksum) => checksum.as_ref().try_into().unwrap(),
+                    WireValue::Auto => panic!("SCTP matcher fixture checksum must be materialized"),
+                };
+                quote[28..32].copy_from_slice(&checksum);
+                let chunk = &request.get::<Raw>().unwrap().bytes;
+                quote[32..40].copy_from_slice(&chunk[..8]);
             }
             1 => {
                 let icmp = request.get::<Icmpv4>().unwrap();

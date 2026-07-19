@@ -356,7 +356,8 @@ impl LayerCodec for Ipv4Codec {
             return Err(invalid("ipv4", "options exceed the 40-byte IPv4 limit"));
         }
 
-        let source = if layer.source.is_unspecified() {
+        let inherit_context = is_outer_network_layer(context.packet, context.index);
+        let source = if layer.source.is_unspecified() && inherit_context {
             match context.build_context.source {
                 Some(IpAddr::V4(source)) => source,
                 _ => layer.source,
@@ -364,7 +365,7 @@ impl LayerCodec for Ipv4Codec {
         } else {
             layer.source
         };
-        let destination = if layer.destination.is_unspecified() {
+        let destination = if layer.destination.is_unspecified() && inherit_context {
             match context.build_context.destination {
                 Some(IpAddr::V4(destination)) => destination,
                 _ => layer.destination,
@@ -802,7 +803,8 @@ impl LayerCodec for Ipv6Codec {
         if layer.flow_label > 0x000f_ffff {
             return Err(invalid("ipv6", "flow label exceeds 20 bits"));
         }
-        let source = if layer.source.is_unspecified() {
+        let inherit_context = is_outer_network_layer(context.packet, context.index);
+        let source = if layer.source.is_unspecified() && inherit_context {
             match context.build_context.source {
                 Some(IpAddr::V6(source)) => source,
                 _ => layer.source,
@@ -848,9 +850,15 @@ impl LayerCodec for Ipv6Codec {
             )?;
         }
         let destination = if layer.destination.is_unspecified() {
-            srh_active.unwrap_or(match context.build_context.destination {
-                Some(IpAddr::V6(destination)) => destination,
-                _ => layer.destination,
+            srh_active.unwrap_or({
+                if inherit_context {
+                    match context.build_context.destination {
+                        Some(IpAddr::V6(destination)) => destination,
+                        _ => layer.destination,
+                    }
+                } else {
+                    layer.destination
+                }
             })
         } else {
             layer.destination
@@ -1008,7 +1016,8 @@ pub(crate) fn encode_network(
             continue;
         };
         if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
-            let source = if ipv4.source.is_unspecified() {
+            let inherit_context = is_outer_network_layer(context.packet, index);
+            let source = if ipv4.source.is_unspecified() && inherit_context {
                 context
                     .build_context
                     .source
@@ -1020,7 +1029,7 @@ pub(crate) fn encode_network(
             } else {
                 ipv4.source
             };
-            let destination = if ipv4.destination.is_unspecified() {
+            let destination = if ipv4.destination.is_unspecified() && inherit_context {
                 context
                     .build_context
                     .destination
@@ -1035,6 +1044,7 @@ pub(crate) fn encode_network(
             return Ok(network_from_addresses(source.into(), destination.into()));
         }
         if let Some(ipv6) = layer.as_any().downcast_ref::<Ipv6>() {
+            let inherit_context = is_outer_network_layer(context.packet, index);
             // Only routing headers inside the nearest IPv6 envelope can
             // replace its pseudo-header destination. An SRH belonging to an
             // outer tunnel must not affect an encapsulated transport.
@@ -1050,7 +1060,7 @@ pub(crate) fn encode_network(
                         .copied()
                 })
                 .last();
-            let source = if ipv6.source.is_unspecified() {
+            let source = if ipv6.source.is_unspecified() && inherit_context {
                 context
                     .build_context
                     .source
@@ -1062,7 +1072,7 @@ pub(crate) fn encode_network(
             } else {
                 ipv6.source
             };
-            let destination = if ipv6.destination.is_unspecified() {
+            let destination = if ipv6.destination.is_unspecified() && inherit_context {
                 context
                     .build_context
                     .destination
@@ -1095,6 +1105,13 @@ pub(crate) fn encode_network(
             "transport checksum requires matching source and destination IP addresses",
         )),
     }
+}
+
+fn is_outer_network_layer(packet: &crate::packet::Packet, index: usize) -> bool {
+    !packet
+        .iter()
+        .take(index)
+        .any(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))
 }
 
 #[cfg(test)]
@@ -1186,6 +1203,42 @@ mod tests {
         Builder::new(tunnel_registry())
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap();
+    }
+
+    #[test]
+    fn build_context_materializes_only_the_outer_network_envelope() {
+        let source = Ipv4Addr::new(192, 0, 2, 1);
+        let destination = Ipv4Addr::new(192, 0, 2, 2);
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4::default())
+            .push(Ipv4::default())
+            .push(Udp::default());
+
+        let built = Builder::new(Arc::new(crate::protocol::builtin::registry().unwrap()))
+            .build(
+                packet,
+                BuildContext {
+                    source: Some(source.into()),
+                    destination: Some(destination.into()),
+                    ..BuildContext::default()
+                },
+                BuildOptions::default(),
+            )
+            .unwrap();
+
+        assert_eq!(&built.bytes[12..16], &source.octets());
+        assert_eq!(&built.bytes[16..20], &destination.octets());
+        assert_eq!(&built.bytes[32..40], &[0; 8]);
+        assert_eq!(
+            super::super::super::common::transport_checksum(
+                network_from_addresses(Ipv4Addr::UNSPECIFIED.into(), Ipv4Addr::UNSPECIFIED.into(),),
+                17,
+                &built.bytes[40..],
+            )
+            .unwrap(),
+            0
+        );
     }
 }
 

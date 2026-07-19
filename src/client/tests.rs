@@ -2240,6 +2240,50 @@ fn send_materializes_route_selected_ip_source() {
 }
 
 #[test]
+fn send_materializes_only_the_outer_ip_envelope() {
+    let io = RecordingIo::default();
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(route(LinkCapability::Layer3)),
+        CountingNeighbors::default(),
+        io,
+        TrafficPolicy::default(),
+    );
+    let mut request = Packet::new();
+    request
+        .push(Ipv4::default())
+        .push(Ipv4::default())
+        .push(Udp::default());
+
+    let report = client
+        .send(
+            request,
+            SendOptions {
+                destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+                plan: PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    interface: None,
+                    preferred_source: None,
+                },
+                ..SendOptions::default()
+            },
+        )
+        .unwrap();
+    let envelopes = report
+        .built
+        .packet
+        .iter()
+        .filter_map(|layer| layer.as_any().downcast_ref::<Ipv4>())
+        .collect::<Vec<_>>();
+
+    assert_eq!(envelopes.len(), 2);
+    assert_eq!(envelopes[0].source, Ipv4Addr::new(10, 0, 0, 1));
+    assert_eq!(envelopes[0].destination, Ipv4Addr::new(10, 0, 0, 2));
+    assert!(envelopes[1].source.is_unspecified());
+    assert!(envelopes[1].destination.is_unspecified());
+}
+
+#[test]
 fn send_materializes_resolved_and_interface_owned_macs() {
     let io = RecordingIo::default();
     let neighbors = CountingNeighbors::default();

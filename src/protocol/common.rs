@@ -98,6 +98,19 @@ pub(crate) fn field_layout(name: &str, start: usize, end: usize) -> FieldLayout 
     }
 }
 
+/// Layout for the shared type/code/checksum/body header shape used by ICMP and
+/// IGMP. The four-byte fixed prefix is followed by a variable-length body.
+pub(crate) fn type_code_checksum_body_layout(
+    body_len: usize,
+) -> Vec<crate::packet::layout::FieldLayout> {
+    vec![
+        field_layout("type", 0, 1),
+        field_layout("code", 1, 2),
+        field_layout("checksum", 2, 4),
+        field_layout("body", 4, 4 + body_len),
+    ]
+}
+
 pub(crate) fn wire_u8(value: &WireValue<u8>) -> FieldValue {
     match value {
         WireValue::Auto => FieldValue::Text("auto".to_string()),
@@ -141,6 +154,31 @@ pub(crate) fn set_wire_u16(
         FieldValue::Text(value) if value.eq_ignore_ascii_case("auto") => WireValue::Auto,
         FieldValue::Unsigned(value) => {
             WireValue::Exact(u16::try_from(value).map_err(|_| out_of_range(schema, field))?)
+        }
+        FieldValue::Bytes(value) => WireValue::Raw(value),
+        _ => return Err(wrong_type(schema, field, "unsigned, bytes, or 'auto'")),
+    };
+    Ok(())
+}
+
+pub(crate) fn wire_u32(value: &WireValue<u32>) -> FieldValue {
+    match value {
+        WireValue::Auto => FieldValue::Text("auto".to_string()),
+        WireValue::Exact(value) => FieldValue::Unsigned(u64::from(*value)),
+        WireValue::Raw(value) => FieldValue::Bytes(value.clone()),
+    }
+}
+
+pub(crate) fn set_wire_u32(
+    target: &mut WireValue<u32>,
+    schema: &'static LayerSchema,
+    field: &str,
+    value: FieldValue,
+) -> Result<(), FieldError> {
+    *target = match value {
+        FieldValue::Text(value) if value.eq_ignore_ascii_case("auto") => WireValue::Auto,
+        FieldValue::Unsigned(value) => {
+            WireValue::Exact(u32::try_from(value).map_err(|_| out_of_range(schema, field))?)
         }
         FieldValue::Bytes(value) => WireValue::Raw(value),
         _ => return Err(wrong_type(schema, field, "unsigned, bytes, or 'auto'")),
@@ -228,7 +266,7 @@ pub(crate) fn resolve_u16(
     }
 }
 
-fn validate_dependent<T>(
+pub(crate) fn validate_dependent<T>(
     name: &str,
     field: &str,
     actual: T,
@@ -662,6 +700,57 @@ macro_rules! impl_layer_boilerplate {
 }
 
 pub(crate) use impl_layer_boilerplate;
+
+/// Implements `Layer` for the shared type/code/checksum/body header shape used
+/// by ICMPv4, ICMPv6, and IGMP. `$type_field` is the protocol's own name for the
+/// leading type octet (`icmp_type` or `igmp_type`); the remaining fields share a
+/// common shape and wire handling.
+macro_rules! impl_type_code_checksum_body_layer {
+    ($ty:ty, $schema:path, $type_field:ident) => {
+        impl Layer for $ty {
+            impl_layer_boilerplate!($ty, $schema);
+
+            fn field(&self, name: &str) -> Option<FieldValue> {
+                match name {
+                    "type" => Some(self.$type_field.into()),
+                    "code" => Some(self.code.into()),
+                    "checksum" => Some(wire_u16(&self.checksum)),
+                    "body" => Some(self.body.clone().into()),
+                    _ => None,
+                }
+            }
+
+            fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+                match (name, value) {
+                    ("type", FieldValue::Unsigned(value)) => {
+                        self.$type_field =
+                            u8::try_from(value).map_err(|_| out_of_range($schema(), name))?
+                    }
+                    ("code", FieldValue::Unsigned(value)) => {
+                        self.code =
+                            u8::try_from(value).map_err(|_| out_of_range($schema(), name))?
+                    }
+                    ("checksum", value) => {
+                        return set_wire_u16(&mut self.checksum, $schema(), name, value);
+                    }
+                    ("body", value) => {
+                        self.body =
+                            bytes(&value).ok_or_else(|| wrong_type($schema(), name, "bytes"))?
+                    }
+                    ("type" | "code", _) => return Err(wrong_type($schema(), name, "unsigned")),
+                    _ => return Err(unknown_field($schema(), name)),
+                }
+                Ok(())
+            }
+
+            fn normalize(&mut self) {
+                self.checksum.normalize();
+            }
+        }
+    };
+}
+
+pub(crate) use impl_type_code_checksum_body_layer;
 
 #[cfg(test)]
 mod tests {

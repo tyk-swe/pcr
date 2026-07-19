@@ -94,14 +94,16 @@ pub(crate) fn aliases(protocol: &str) -> &'static [&'static str] {
         .unwrap_or_else(|| panic!("missing built-in protocol support for {protocol}"))
 }
 
-/// All 22 codecs registered by [`crate::protocol::builtin::Module`].
+/// All 25 codecs registered by [`crate::protocol::builtin::Module`].
 pub const BUILTIN_PROTOCOLS: &[ProtocolSupport] = &[
     protocol!("arp", &[], matcher = false),
     protocol!("bsd_loop", &["loop"], matcher = false),
     protocol!("bsd_null", &["null"], matcher = false),
     protocol!("ethernet", &["eth", "ether", "ethernet2"], matcher = false),
+    protocol!("gre", &[], matcher = false),
     protocol!("icmpv4", &["icmp", "icmp4"], matcher = true),
     protocol!("icmpv6", &["icmp6"], matcher = true),
+    protocol!("igmp", &[], matcher = false),
     protocol!("ipv4", &["ip", "ip4"], matcher = false),
     protocol!("ipv6", &["ip6"], matcher = false),
     protocol!(
@@ -130,6 +132,7 @@ pub const BUILTIN_PROTOCOLS: &[ProtocolSupport] = &[
         matcher: false,
         decode_only: true,
     },
+    protocol!("sctp", &[], matcher = true),
     protocol!("tcp", &[], matcher = true),
     protocol!("udp", &[], matcher = true),
     protocol!("vlan", &["dot1q", "8021q"], matcher = false),
@@ -196,6 +199,7 @@ pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRootSupport] = &[
 
 const NONE: &[&str] = &[];
 const DNS_MATCHERS: &[&str] = &["tcp", "udp"];
+const PROBE_MATCHERS: &[&str] = &["icmpv4", "icmpv6", "tcp", "udp"];
 
 #[derive(Clone, Copy)]
 enum Capability {
@@ -226,17 +230,19 @@ const fn supported_protocols<const N: usize>(capability: Capability) -> [&'stati
     protocols
 }
 
-const ALL_BUILD_VALUES: [&str; 21] = supported_protocols(Capability::Build);
-const ALL_DISSECT_VALUES: [&str; 22] = supported_protocols(Capability::Dissect);
-const MATCHER_VALUES: [&str; 4] = supported_protocols(Capability::Matcher);
+const ALL_BUILD_VALUES: [&str; 24] = supported_protocols(Capability::Build);
+const ALL_DISSECT_VALUES: [&str; 25] = supported_protocols(Capability::Dissect);
+const MATCHER_VALUES: [&str; 5] = supported_protocols(Capability::Matcher);
 const ALL_BUILD: &[&str] = &ALL_BUILD_VALUES;
 const ALL_DISSECT: &[&str] = &ALL_DISSECT_VALUES;
 const MATCHERS: &[&str] = &MATCHER_VALUES;
 const LIVE_BUILD: &[&str] = &[
     "arp",
     "ethernet",
+    "gre",
     "icmpv4",
     "icmpv6",
+    "igmp",
     "ipv4",
     "ipv6",
     "ipv6_destination_options",
@@ -246,11 +252,13 @@ const LIVE_BUILD: &[&str] = &[
     "malformed",
     "padding",
     "raw",
+    "sctp",
     "tcp",
     "udp",
     "vlan",
     "vlan8021ad",
 ];
+const PROBE_BUILD: &[&str] = &["ethernet", "icmpv4", "icmpv6", "ipv4", "ipv6", "tcp", "udp"];
 const DNS_BUILD: &[&str] = &[
     "ethernet",
     "ipv4",
@@ -349,18 +357,18 @@ pub const STABLE_WORKFLOW_PROTOCOLS: &[WorkflowProtocolSupport] = &[
     },
     WorkflowProtocolSupport {
         workflow: "scan",
-        builds: LIVE_BUILD,
+        builds: PROBE_BUILD,
         dissects: ALL_DISSECT,
-        matches: MATCHERS,
+        matches: PROBE_MATCHERS,
         capture_roots: true,
         packet_independent: false,
         notes: "scan probes and classifications use shared builders, dissectors, and matchers",
     },
     WorkflowProtocolSupport {
         workflow: "traceroute",
-        builds: LIVE_BUILD,
+        builds: PROBE_BUILD,
         dissects: ALL_DISSECT,
-        matches: MATCHERS,
+        matches: PROBE_MATCHERS,
         capture_roots: true,
         packet_independent: false,
         notes: "IPv4/IPv6 UDP, TCP, and ICMP probes use the shared registry contract",
@@ -439,7 +447,7 @@ mod tests {
             .map(|protocol| protocol.as_str())
             .collect::<BTreeSet<_>>();
         assert_eq!(declared.keys().copied().collect::<BTreeSet<_>>(), actual);
-        assert_eq!(declared.len(), 22);
+        assert_eq!(declared.len(), 25);
 
         for support in BUILTIN_PROTOCOLS {
             assert!(unique(support.aliases), "{} aliases", support.protocol);
@@ -585,13 +593,25 @@ mod tests {
                 );
             }
         }
+
+        for name in ["scan", "traceroute"] {
+            let workflow = STABLE_WORKFLOW_PROTOCOLS
+                .iter()
+                .find(|workflow| workflow.workflow == name)
+                .unwrap();
+            assert_eq!(workflow.builds, PROBE_BUILD);
+            assert_eq!(workflow.matches, PROBE_MATCHERS);
+            assert!(!workflow.builds.contains(&"gre"));
+            assert!(!workflow.builds.contains(&"igmp"));
+            assert!(!workflow.builds.contains(&"sctp"));
+        }
     }
 
     #[test]
     fn manifest_serialization_is_versioned_and_complete() {
         let value = serde_json::to_value(BUILTIN_PROTOCOL_SUPPORT).unwrap();
         assert_eq!(value["schema"], PROTOCOL_SUPPORT_SCHEMA_V1);
-        assert_eq!(value["protocols"].as_array().unwrap().len(), 22);
+        assert_eq!(value["protocols"].as_array().unwrap().len(), 25);
         assert_eq!(value["capture_roots"].as_array().unwrap().len(), 9);
         assert_eq!(value["workflows"].as_array().unwrap().len(), 14);
     }

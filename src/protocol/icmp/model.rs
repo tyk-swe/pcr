@@ -17,10 +17,11 @@ use crate::packet::{
 };
 
 use super::super::common::{
-    ValueExpectation, bytes, checksum, checksum_parts, ensure_encode_budget, field_layout,
-    impl_layer_boilerplate, invalid, make_layer, out_of_range, payload_without_padding, protocol,
-    resolve_u16, set_wire_u16, transport_checksum, transport_checksum_parts, truncated,
-    unknown_field, wire_u16, wrong_layer, wrong_type,
+    ValueExpectation, bytes, checksum, checksum_parts, ensure_encode_budget,
+    impl_layer_boilerplate, impl_type_code_checksum_body_layer, invalid, make_layer, out_of_range,
+    payload_without_padding, protocol, resolve_u16, set_wire_u16, transport_checksum,
+    transport_checksum_parts, truncated, type_code_checksum_body_layout, unknown_field, wire_u16,
+    wrong_layer, wrong_type,
 };
 use super::super::network::encode_network;
 
@@ -128,53 +129,8 @@ fn icmpv6_schema() -> &'static LayerSchema {
     })
 }
 
-macro_rules! impl_icmp_layer {
-    ($ty:ty, $schema:path) => {
-        impl Layer for $ty {
-            impl_layer_boilerplate!($ty, $schema);
-
-            fn field(&self, name: &str) -> Option<FieldValue> {
-                match name {
-                    "type" => Some(self.icmp_type.into()),
-                    "code" => Some(self.code.into()),
-                    "checksum" => Some(wire_u16(&self.checksum)),
-                    "body" => Some(self.body.clone().into()),
-                    _ => None,
-                }
-            }
-
-            fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-                match (name, value) {
-                    ("type", FieldValue::Unsigned(value)) => {
-                        self.icmp_type =
-                            u8::try_from(value).map_err(|_| out_of_range($schema(), name))?
-                    }
-                    ("code", FieldValue::Unsigned(value)) => {
-                        self.code =
-                            u8::try_from(value).map_err(|_| out_of_range($schema(), name))?
-                    }
-                    ("checksum", value) => {
-                        return set_wire_u16(&mut self.checksum, $schema(), name, value);
-                    }
-                    ("body", value) => {
-                        self.body =
-                            bytes(&value).ok_or_else(|| wrong_type($schema(), name, "bytes"))?
-                    }
-                    ("type" | "code", _) => return Err(wrong_type($schema(), name, "unsigned")),
-                    _ => return Err(unknown_field($schema(), name)),
-                }
-                Ok(())
-            }
-
-            fn normalize(&mut self) {
-                self.checksum.normalize();
-            }
-        }
-    };
-}
-
-impl_icmp_layer!(Icmpv4, icmpv4_schema);
-impl_icmp_layer!(Icmpv6, icmpv6_schema);
+impl_type_code_checksum_body_layer!(Icmpv4, icmpv4_schema, icmp_type);
+impl_type_code_checksum_body_layer!(Icmpv6, icmpv6_schema, icmp_type);
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Icmpv4Codec;
@@ -224,7 +180,7 @@ impl LayerCodec for Icmpv4Codec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: icmp_layout(layer.body.len()),
+            fields: type_code_checksum_body_layout(layer.body.len()),
             diagnostics,
         })
     }
@@ -255,7 +211,7 @@ impl LayerCodec for Icmpv4Codec {
             payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: icmp_layout(input.len() - ICMP_MIN_LEN),
+            fields: type_code_checksum_body_layout(input.len() - ICMP_MIN_LEN),
             diagnostics,
             stop: true,
             network: None,
@@ -319,7 +275,7 @@ impl LayerCodec for Icmpv6Codec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: icmp_layout(layer.body.len()),
+            fields: type_code_checksum_body_layout(layer.body.len()),
             diagnostics,
         })
     }
@@ -353,7 +309,7 @@ impl LayerCodec for Icmpv6Codec {
             payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: icmp_layout(input.len() - ICMP_MIN_LEN),
+            fields: type_code_checksum_body_layout(input.len() - ICMP_MIN_LEN),
             diagnostics,
             stop: true,
             network: None,
@@ -366,13 +322,4 @@ impl LayerCodec for Icmpv6Codec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Icmpv6::default(), fields)
     }
-}
-
-fn icmp_layout(body_len: usize) -> Vec<crate::packet::layout::FieldLayout> {
-    vec![
-        field_layout("type", 0, 1),
-        field_layout("code", 1, 2),
-        field_layout("checksum", 2, 4),
-        field_layout("body", 4, 4 + body_len),
-    ]
 }

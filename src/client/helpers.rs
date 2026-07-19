@@ -246,68 +246,72 @@ pub(super) fn materialize_network_fields(
     packet: &mut Packet,
     plan: &PlannedRoute,
 ) -> Result<(), ClientError> {
-    for index in 0..packet.len() {
-        let Some(layer) = packet.layer_mut(index) else {
-            continue;
-        };
-        let protocol = layer.protocol_id();
-        let ip_version = match protocol.as_str() {
-            "ipv4" => IpVersion::V4,
-            "ipv6" => IpVersion::V6,
-            _ => continue,
-        };
-        let source_unspecified = match layer.field("source") {
-            Some(FieldValue::Ipv4(value)) => value.is_unspecified(),
-            Some(FieldValue::Ipv6(value)) => value.is_unspecified(),
-            _ => false,
-        };
-        if source_unspecified {
-            let value = match (ip_version, plan.packet_source) {
-                (IpVersion::V4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
-                (IpVersion::V6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
-                _ => {
-                    return Err(ClientError::PacketMaterialization {
-                        layer: index,
-                        field: "source",
-                        message: "route source family does not match the packet layer".to_owned(),
-                    });
-                }
-            };
-            layer.set_field("source", value).map_err(|source| {
-                ClientError::PacketMaterialization {
+    let Some(index) = packet
+        .iter()
+        .enumerate()
+        .find(|(_, layer)| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))
+        .map(|(index, _)| index)
+    else {
+        return Ok(());
+    };
+    let Some(layer) = packet.layer_mut(index) else {
+        return Ok(());
+    };
+    let ip_version = match layer.protocol_id().as_str() {
+        "ipv4" => IpVersion::V4,
+        "ipv6" => IpVersion::V6,
+        _ => return Ok(()),
+    };
+    let source_unspecified = match layer.field("source") {
+        Some(FieldValue::Ipv4(value)) => value.is_unspecified(),
+        Some(FieldValue::Ipv6(value)) => value.is_unspecified(),
+        _ => false,
+    };
+    if source_unspecified {
+        let value = match (ip_version, plan.packet_source) {
+            (IpVersion::V4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
+            (IpVersion::V6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
+            _ => {
+                return Err(ClientError::PacketMaterialization {
                     layer: index,
                     field: "source",
-                    message: source.to_string(),
-                }
-            })?;
-        }
-
-        let destination_unspecified = match layer.field("destination") {
-            Some(FieldValue::Ipv4(value)) => value.is_unspecified(),
-            Some(FieldValue::Ipv6(value)) => value.is_unspecified(),
-            _ => false,
+                    message: "route source family does not match the packet layer".to_owned(),
+                });
+            }
         };
-        if destination_unspecified {
-            let value = match (ip_version, plan.lookup_destination) {
-                (IpVersion::V4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
-                (IpVersion::V6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
-                _ => {
-                    return Err(ClientError::PacketMaterialization {
-                        layer: index,
-                        field: "destination",
-                        message: "route destination family does not match the packet layer"
-                            .to_owned(),
-                    });
-                }
-            };
-            layer.set_field("destination", value).map_err(|source| {
-                ClientError::PacketMaterialization {
+        layer
+            .set_field("source", value)
+            .map_err(|source| ClientError::PacketMaterialization {
+                layer: index,
+                field: "source",
+                message: source.to_string(),
+            })?;
+    }
+
+    let destination_unspecified = match layer.field("destination") {
+        Some(FieldValue::Ipv4(value)) => value.is_unspecified(),
+        Some(FieldValue::Ipv6(value)) => value.is_unspecified(),
+        _ => false,
+    };
+    if destination_unspecified {
+        let value = match (ip_version, plan.lookup_destination) {
+            (IpVersion::V4, Some(IpAddr::V4(value))) => FieldValue::Ipv4(value),
+            (IpVersion::V6, Some(IpAddr::V6(value))) => FieldValue::Ipv6(value),
+            _ => {
+                return Err(ClientError::PacketMaterialization {
                     layer: index,
                     field: "destination",
-                    message: source.to_string(),
-                }
-            })?;
-        }
+                    message: "route destination family does not match the packet layer".to_owned(),
+                });
+            }
+        };
+        layer.set_field("destination", value).map_err(|source| {
+            ClientError::PacketMaterialization {
+                layer: index,
+                field: "destination",
+                message: source.to_string(),
+            }
+        })?;
     }
     Ok(())
 }

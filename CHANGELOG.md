@@ -7,8 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added exact packet construction and dissection for GRE, SCTP common headers
+  with validated opaque chunks, and IGMP, plus IPv4/IPv6-in-IP encapsulation.
+- Added SCTP INIT/INIT-ACK and quoted-ICMP response correlation for generic
+  exchanges.
+
 ### Changed
 
+- Route planning and live materialization now use only the outer IP envelope;
+  encapsulated addresses remain independent and drive inner transport checksums.
+- IP protocol numbers 2, 4, 41, 47, and 132 are now typed bindings, so strict
+  builds require IGMP, nested IP, GRE, or SCTP children instead of raw payloads.
 - Improved scan and traceroute workflow scaling for large probe batches while
   preserving endpoint, response-evidence, and diagnostic ordering.
 

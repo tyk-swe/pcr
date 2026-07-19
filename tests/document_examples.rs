@@ -151,7 +151,11 @@ fn every_command_has_published_success_and_error_goldens() {
 
 #[test]
 fn packet_document_examples_build_through_the_public_cli() {
-    for (name, expected_length) in [("packet-ipv4-udp.json", 47), ("packet-raw.yaml", 4)] {
+    for (name, expected_length) in [
+        ("packet-ipv4-udp.json", 47),
+        ("packet-gre-sctp.json", 108),
+        ("packet-raw.yaml", 4),
+    ] {
         let output = binary()
             .args([
                 "--output",

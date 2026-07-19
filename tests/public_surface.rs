@@ -37,6 +37,9 @@ fn canonical_packet_and_protocol_namespaces_are_downstream_usable() {
 
     let registry = protocol::builtin::registry().unwrap();
     assert!(registry.protocol_named("ethernet").is_some());
+    let _ = protocol::gre::Gre::default();
+    let _ = protocol::network::Igmp::default();
+    let _ = protocol::transport::Sctp::default();
 
     // The external-protocol integration test supplies concrete downstream
     // implementations. This signature guards the three intentional extension

@@ -34,12 +34,21 @@ type FrameCase = (
 );
 
 fn read_fixture(relative: &str) -> Vec<u8> {
-    fs::read(
+    let bytes = fs::read(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures")
             .join(relative),
     )
-    .unwrap()
+    .unwrap();
+    if !relative.ends_with(".hex") {
+        return bytes;
+    }
+    let text = std::str::from_utf8(&bytes).unwrap().trim();
+    assert_eq!(text.len() % 2, 0, "{relative} has an incomplete hex byte");
+    text.as_bytes()
+        .chunks_exact(2)
+        .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+        .collect()
 }
 
 fn layer_names(packet: &Packet) -> Vec<String> {
@@ -119,6 +128,13 @@ fn frame_corpus_decodes_and_rebuilds() {
             "frames/raw/linktype-ipv6-udp.bin",
             229,
             &["ipv6", "udp", "raw"],
+            &[],
+            true,
+        ),
+        (
+            "frames/raw/ipv4-gre-ipv6-sctp.hex",
+            228,
+            &["ipv4", "gre", "ipv6", "sctp", "raw"],
             &[],
             true,
         ),

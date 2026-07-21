@@ -17,7 +17,8 @@ use super::super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
 use super::super::errors::CliError;
 use super::super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
 use super::super::rendering::{
-    capture_file_format, emit_json, emit_json_compact, spaced_hex, write_raw, write_stdout_line,
+    capture_file_format, emit_json, emit_json_compact, spaced_hex, write_plain_line, write_raw,
+    write_stdout_line,
 };
 use super::super::runtime::default_registry_arc;
 
@@ -53,7 +54,7 @@ pub(in crate::cli) fn run_build(
             }
             Ok(())
         }
-        output::contract::Format::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
         output::contract::Format::Raw => write_raw(result.bytes()),
         output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
             output::contract::Command::Build,
@@ -110,7 +111,7 @@ pub(in crate::cli) fn run_dissect(
             }
             Ok(())
         }
-        output::contract::Format::Hex => write_stdout_line(format_args!("{}", result.bytes_hex)),
+        output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
         output::contract::Format::Raw => write_raw(result.bytes()),
         output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
             output::contract::Command::Dissect,
@@ -212,7 +213,7 @@ pub(in crate::cli) fn run_read(
                 spaced_hex(result.frame.bytes())
             ))?,
             output::contract::Format::Hex => {
-                write_stdout_line(format_args!("{}", result.frame.bytes_hex))?
+                write_plain_line(format_args!("{}", result.frame.bytes_hex))?
             }
             output::contract::Format::Ndjson => {
                 emit_json_compact(&output::envelope::Stream::success(

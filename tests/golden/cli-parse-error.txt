@@ -1,1 +1,5 @@
-error: unexpected argument '--unknown-option' found\n\nUsage: packetcraftr build [OPTIONS]\n\nFor more information, try '--help'.\n
+error: unexpected argument '--unknown-option' found
+
+Usage: packetcraftr build [OPTIONS]
+
+For more information, try '--help'.

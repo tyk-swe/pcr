@@ -14,7 +14,9 @@ use packetcraftr::{
 
 use super::super::arguments::{RouteArgs, SendArgs};
 use super::super::errors::CliError;
-use super::super::rendering::{emit_json, write_capture_file, write_raw, write_stdout_line};
+use super::super::rendering::{
+    emit_json, write_capture_file, write_plain_line, write_raw, write_stdout_line,
+};
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 use super::capture::cli_build_mode;
 
@@ -186,7 +188,7 @@ pub(in crate::cli) fn run_send(
             .with_stats(stats),
         ),
         output::contract::Format::Hex => {
-            write_stdout_line(format_args!("{}", result.frame.bytes_hex))
+            write_plain_line(format_args!("{}", result.frame.bytes_hex))
         }
         output::contract::Format::Raw => write_raw(result.frame.bytes()),
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {

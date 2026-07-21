@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added terminal-aware coloured human output with explicit `--color <WHEN>`
+  control (`auto`, `always`, or `never`); structured, hexadecimal, raw, and
+  capture-file outputs remain free of terminal styling.
+- Added command-focused help examples and clearer output-format, input, and
+  safety guidance across the CLI.
 - Added exact packet construction and dissection for GRE, SCTP common headers
   with validated opaque chunks, and IGMP, plus IPv4/IPv6-in-IP encapsulation.
 - Added SCTP INIT/INIT-ACK and quoted-ICMP response correlation for generic
@@ -16,12 +21,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- CLI help, version, and parse diagnostics now use one hardened document
+  renderer with terminal-control escaping and semantic styling.
 - Route planning and live materialization now use only the outer IP envelope;
   encapsulated addresses remain independent and drive inner transport checksums.
 - IP protocol numbers 2, 4, 41, 47, and 132 are now typed bindings, so strict
   builds require IGMP, nested IP, GRE, or SCTP children instead of raw payloads.
 - Improved scan and traceroute workflow scaling for large probe batches while
   preserving endpoint, response-evidence, and diagnostic ordering.
+
+### Fixed
+
+- Preserved readable multiline Clap diagnostics instead of displaying escaped
+  newline literals, and now propagate Clap's actual exit codes.
 
 ## [0.4.0-beta.1] - 2026-07-17
 

@@ -21,15 +21,46 @@ Commands:
   help        Print this message or the help of the given subcommand(s)
 
 Options:
-      --output <OUTPUT>
-          [default: text]
-          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-
   -h, --help
           Print help (see a summary with '-h')
 
   -V, --version
           Print version
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Output formats:
+  text    Human-readable summaries and diagnostics.
+  json    One aggregate JSON document.
+  ndjson  One JSON record per streamed event.
+  hex     Exact frame bytes as hexadecimal text.
+  raw     Exact frame bytes without text framing.
+  pcap    Classic PCAP capture bytes.
+  pcapng  PCAPNG capture bytes.
+
+Output availability is command-specific. Machine formats never contain terminal colour codes.
+
+Examples:
+  packetcraftr build --packet 'raw(text=hello)'
+  packetcraftr --output json dissect --hex '45000014000000004001f6e7c0000201c6336402'
+  packetcraftr --output ndjson read capture.pcapng --max-frames 100
+
+Run `packetcraftr <COMMAND> --help` for command-specific options and examples.
 
 ===== packetcraftr build --help =====
 Build exact packet bytes from an expression or document
@@ -37,11 +68,41 @@ Build exact packet bytes from an expression or document
 Usage: packetcraftr build [OPTIONS]
 
 Options:
-      --output <OUTPUT>     [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-      --packet <PACKET>     One-off layer expression
-      --packet-file <PATH>  Versioned JSON/YAML packet document
-      --mode <MODE>         [default: strict] [possible values: strict, permissive]
-  -h, --help                Print help
+      --packet <PACKET>
+          Inline packet layer expression; conflicts with --packet-file
+
+      --packet-file <PATH>
+          Versioned JSON or YAML packet document; conflicts with --packet
+
+      --mode <MODE>
+          Enforce protocol invariants or preserve explicitly permissive values
+
+          [default: strict]
+          [possible values: strict, permissive]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr build --packet 'raw(text=hello)'
+  packetcraftr --output raw build --packet-file packet.json
 
 ===== packetcraftr dissect --help =====
 Decode a frame with bounded, registry-driven dissection
@@ -49,11 +110,42 @@ Decode a frame with bounded, registry-driven dissection
 Usage: packetcraftr dissect [OPTIONS]
 
 Options:
-      --hex <HEX>              Whole-frame hexadecimal bytes
-      --output <OUTPUT>        [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-      --file <PATH>            File containing raw frame bytes
-      --link-type <LINK_TYPE>  Open numeric DLT/link type (defaults to Ethernet/DLT 1) [default: 1]
-  -h, --help                   Print help
+      --hex <HEX>
+          Whole-frame hexadecimal bytes
+
+      --file <PATH>
+          File containing raw frame bytes
+
+      --link-type <LINK_TYPE>
+          Open numeric DLT/link type (defaults to Ethernet/DLT 1)
+
+          [default: 1]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
+
+Examples:
+  packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
+  packetcraftr --output json dissect --file frame.bin --link-type 1
 
 ===== packetcraftr read --help =====
 Stream frames from a classic PCAP or PCAPNG file
@@ -62,20 +154,52 @@ Usage: packetcraftr read [OPTIONS] <PATH>
 
 Arguments:
   <PATH>
+          Classic PCAP or PCAPNG input path
 
 Options:
       --max-frames <MAX_FRAMES>
-          Maximum frames read or copied from the capture stream [default: 10000]
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+          Maximum frames read or copied from the capture stream
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum aggregate captured payload bytes read or copied [default: 268435456]
+          Maximum aggregate captured payload bytes read or copied
+
+          [default: 268435456]
+
       --max-frame-bytes <MAX_FRAME_BYTES>
-          Maximum bytes accepted from any one captured frame or PCAPNG block [default: 16777216]
+          Maximum bytes accepted from any one captured frame or PCAPNG block
+
+          [default: 16777216]
+
       --max-interfaces <MAX_INTERFACES>
-          Maximum PCAPNG interfaces accepted from the input [default: 4096]
+          Maximum PCAPNG interfaces accepted from the input
+
+          [default: 4096]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr read capture.pcapng --max-frames 100
+  packetcraftr --output ndjson read capture.pcap
 
 ===== packetcraftr interfaces --help =====
 Enumerate local interfaces
@@ -83,8 +207,29 @@ Enumerate local interfaces
 Usage: packetcraftr interfaces [OPTIONS]
 
 Options:
-      --output <OUTPUT>  [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-  -h, --help             Print help
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr interfaces
+  packetcraftr --output json interfaces
 
 ===== packetcraftr plan --help =====
 Passively select route, source, MTU, and link mode
@@ -92,34 +237,75 @@ Passively select route, source, MTU, and link mode
 Usage: packetcraftr plan [OPTIONS]
 
 Options:
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
-          One-off layer expression
+          Inline packet layer expression; conflicts with --packet-file
+
       --packet-file <PATH>
-          Versioned JSON/YAML packet document
+          Versioned JSON or YAML packet document; conflicts with --packet
+
       --destination <ADDRESS_OR_HOSTNAME>
           Explicit address or hostname when the packet has no fixed destination
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Route planning is passive: it performs no packet transmission.
+
+Example:
+  packetcraftr plan --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)'
 
 ===== packetcraftr send --help =====
 Transmit a packet under traffic policy
@@ -127,38 +313,84 @@ Transmit a packet under traffic policy
 Usage: packetcraftr send [OPTIONS]
 
 Options:
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
-          One-off layer expression
+          Inline packet layer expression; conflicts with --packet-file
+
       --packet-file <PATH>
-          Versioned JSON/YAML packet document
+          Versioned JSON or YAML packet document; conflicts with --packet
+
       --destination <ADDRESS_OR_HOSTNAME>
           Explicit address or hostname when the packet has no fixed destination
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
       --mode <MODE>
-          Strict or permissive packet construction [default: strict] [possible values: strict, permissive]
+          Strict or permissive packet construction
+
+          [default: strict]
+          [possible values: strict, permissive]
+
       --allow-permissive-live
           Per-operation opt-in required for a permissively built live frame
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Live transmission is policy-gated and may require native features, dependencies, and privileges.
+
+Example:
+  packetcraftr send --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)'
 
 ===== packetcraftr exchange --help =====
 Capture-ready request/response exchange
@@ -166,52 +398,120 @@ Capture-ready request/response exchange
 Usage: packetcraftr exchange [OPTIONS]
 
 Options:
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
-          One-off layer expression
+          Inline packet layer expression; conflicts with --packet-file
+
       --packet-file <PATH>
-          Versioned JSON/YAML packet document
+          Versioned JSON or YAML packet document; conflicts with --packet
+
       --destination <ADDRESS_OR_HOSTNAME>
           Explicit address or hostname when the packet has no fixed destination
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
       --mode <MODE>
-          Strict or permissive packet construction [default: strict] [possible values: strict, permissive]
+          Strict or permissive packet construction
+
+          [default: strict]
+          [possible values: strict, permissive]
+
       --allow-permissive-live
           Per-operation opt-in required for a permissively built live frame
+
       --timeout-ms <TIMEOUT_MS>
-          Overall response window in milliseconds [default: 3000]
+          Overall response window in milliseconds
+
+          [default: 3000]
+
       --max-responses <MAX_RESPONSES>
-          Maximum matched responses retained across the exchange [default: 4096]
+          Maximum matched responses retained across the exchange
+
+          [default: 4096]
+
       --max-unsolicited <MAX_UNSOLICITED>
-          Maximum unsolicited decoded frames retained across the exchange [default: 4096]
+          Maximum unsolicited decoded frames retained across the exchange
+
+          [default: 4096]
+
       --max-queue-frames <MAX_QUEUE_FRAMES>
-          Aggregate backend capture-queue frame bound [default: 4096]
+          Aggregate backend capture-queue frame bound
+
+          [default: 4096]
+
       --max-captured-bytes <MAX_CAPTURED_BYTES>
-          Aggregate retained/queued capture byte bound [default: 268435456]
+          Aggregate retained/queued capture byte bound
+
+          [default: 268435456]
+
       --snap-length <SNAP_LENGTH>
-          Maximum bytes retained from any one captured frame [default: 16777216]
+          Maximum bytes retained from any one captured frame
+
+          [default: 16777216]
+
       --overflow-policy <OVERFLOW_POLICY>
-          Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+          Backend queue behavior when a configured bound is reached
+
+          [default: fail]
+          [possible values: fail, drop-newest, drop-oldest]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Live exchange is policy-gated and may require native features, dependencies, and privileges.
+
+Example:
+  packetcraftr exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000
 
 ===== packetcraftr capture --help =====
 Stream live captured frames
@@ -219,44 +519,101 @@ Stream live captured frames
 Usage: packetcraftr capture [OPTIONS]
 
 Options:
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
-          One-off layer expression
+          Inline packet layer expression; conflicts with --packet-file
+
       --packet-file <PATH>
-          Versioned JSON/YAML packet document
+          Versioned JSON or YAML packet document; conflicts with --packet
+
       --destination <ADDRESS_OR_HOSTNAME>
           Explicit address or hostname when the packet has no fixed destination
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
       --timeout-ms <TIMEOUT_MS>
-          Overall capture window in milliseconds [default: 3000]
+          Overall capture window in milliseconds
+
+          [default: 3000]
+
       --max-queue-frames <MAX_QUEUE_FRAMES>
-          Aggregate backend capture-queue frame bound [default: 4096]
+          Aggregate backend capture-queue frame bound
+
+          [default: 4096]
+
       --max-captured-bytes <MAX_CAPTURED_BYTES>
-          Aggregate retained/queued capture byte bound [default: 268435456]
+          Aggregate retained/queued capture byte bound
+
+          [default: 268435456]
+
       --snap-length <SNAP_LENGTH>
-          Maximum bytes retained from any one captured frame [default: 16777216]
+          Maximum bytes retained from any one captured frame
+
+          [default: 16777216]
+
       --overflow-policy <OVERFLOW_POLICY>
-          Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+          Backend queue behavior when a configured bound is reached
+
+          [default: fail]
+          [possible values: fail, drop-newest, drop-oldest]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Live capture may require native features, dependencies, and privileges.
+
+Example:
+  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
 
 ===== packetcraftr replay --help =====
 Replay a PCAP/PCAPNG stream
@@ -264,39 +621,90 @@ Replay a PCAP/PCAPNG stream
 Usage: packetcraftr replay [OPTIONS] --interface <NAME_OR_INDEX> <PATH>
 
 Arguments:
-  <PATH>  Classic PCAP or PCAPNG input path
+  <PATH>
+          Classic PCAP or PCAPNG input path
 
 Options:
       --interface <NAME_OR_INDEX>
           Exact interface name or numeric index used for every transmission
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 replay intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 replay intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --timing <TIMING>
-          Preserve captured intervals or send immediately [default: original] [possible values: original, immediate]
+          Preserve captured intervals or send immediately
+
+          [default: original]
+          [possible values: original, immediate]
+
       --speed <SPEED>
           Positive multiplier for captured replay speed (2 means twice as fast)
+
       --rate <RATE>
           Positive fixed frame rate, overriding captured intervals
+
       --max-duration-ms <MAX_DURATION_MS>
-          Maximum cumulative intentional replay delay in milliseconds [default: 3600000]
+          Maximum cumulative intentional replay delay in milliseconds
+
+          [default: 3600000]
+
       --max-frame-bytes <MAX_FRAME_BYTES>
-          Maximum bytes accepted from any one captured frame or PCAPNG block [default: 16777216]
+          Maximum bytes accepted from any one captured frame or PCAPNG block
+
+          [default: 16777216]
+
       --max-interfaces <MAX_INTERFACES>
-          Maximum PCAPNG interfaces accepted from the input [default: 4096]
+          Maximum PCAPNG interfaces accepted from the input
+
+          [default: 4096]
+
       --allow-malformed-live
           Per-operation opt-in required when dissection preserves malformed bytes
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-permissive-packets
           Policy-level opt-in for malformed/permissive live bytes
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Replay is policy-gated and may require native features, dependencies, and privileges.
+
+Examples:
+  packetcraftr replay capture.pcapng --interface eth0 --timing immediate
+  packetcraftr replay capture.pcap --interface 2 --rate 100
 
 ===== packetcraftr scan --help =====
 Run a structured network scan
@@ -304,61 +712,143 @@ Run a structured network scan
 Usage: packetcraftr scan [OPTIONS] <ADDRESS_OR_HOSTNAME>
 
 Arguments:
-  <ADDRESS_OR_HOSTNAME>  Explicit IP address or hostname to scan
+  <ADDRESS_OR_HOSTNAME>
+          Explicit IP address or hostname to scan
 
 Options:
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --transport <TRANSPORT>
-          TCP SYN, UDP, or ICMP echo probes [default: tcp] [possible values: tcp, udp, icmp]
+          TCP SYN, UDP, or ICMP echo probes
+
+          [default: tcp]
+          [possible values: tcp, udp, icmp]
+
       --family <FAMILY>
-          Select all authorized addresses or only one IP family [default: any] [possible values: any, ipv4, ipv6]
+          Select all authorized addresses or only one IP family
+
+          [default: any]
+          [possible values: any, ipv4, ipv6]
+
       --ports <PORTS>...
           Comma-separated TCP/UDP destination ports; omitted for ICMP
+
       --attempts <ATTEMPTS>
-          Number of bounded attempts per selected endpoint [default: 1]
+          Number of bounded attempts per selected endpoint
+
+          [default: 1]
+
       --timeout-ms <TIMEOUT_MS>
-          Response window for each capture-ready batch [default: 1000]
+          Response window for each capture-ready batch
+
+          [default: 1000]
+
       --rate <RATE>
           Optional average probe-rate ceiling; batches remain deliberate bursts
+
       --batch-size <BATCH_SIZE>
-          Maximum probes sent by one shared-capture exchange batch [default: 64]
+          Maximum probes sent by one shared-capture exchange batch
+
+          [default: 64]
+
       --max-ports <MAX_PORTS>
-          Maximum distinct destination ports accepted by the request [default: 1024]
+          Maximum distinct destination ports accepted by the request
+
+          [default: 1024]
+
       --max-probes <MAX_PROBES>
-          Maximum generated probes after target resolution and attempts [default: 10000]
+          Maximum generated probes after target resolution and attempts
+
+          [default: 10000]
+
       --max-duration-ms <MAX_DURATION_MS>
-          Maximum worst-case timeout plus intentional rate delay in milliseconds [default: 3600000]
+          Maximum worst-case timeout plus intentional rate delay in milliseconds
+
+          [default: 3600000]
+
       --max-undecoded <MAX_UNDECODED>
-          Maximum undecodable exact frames retained across the scan [default: 64]
+          Maximum undecodable exact frames retained across the scan
+
+          [default: 64]
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --max-queue-frames <MAX_QUEUE_FRAMES>
-          Aggregate backend capture-queue frame bound [default: 4096]
+          Aggregate backend capture-queue frame bound
+
+          [default: 4096]
+
       --max-captured-bytes <MAX_CAPTURED_BYTES>
-          Aggregate retained/queued capture byte bound [default: 268435456]
+          Aggregate retained/queued capture byte bound
+
+          [default: 268435456]
+
       --snap-length <SNAP_LENGTH>
-          Maximum bytes retained from any one captured frame [default: 16777216]
+          Maximum bytes retained from any one captured frame
+
+          [default: 16777216]
+
       --overflow-policy <OVERFLOW_POLICY>
-          Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+          Backend queue behavior when a configured bound is reached
+
+          [default: fail]
+          [possible values: fail, drop-newest, drop-oldest]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
+  packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
 
 ===== packetcraftr traceroute --help =====
 Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.
@@ -370,10 +860,6 @@ Arguments:
           Explicit IP address or hostname to trace
 
 Options:
-      --output <OUTPUT>
-          [default: text]
-          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-
       --strategy <STRATEGY>
           UDP, ICMP echo, or TCP SYN probes
 
@@ -487,80 +973,199 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr traceroute 192.0.2.1 --strategy icmp
+  packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution
+
 ===== packetcraftr dns --help =====
 Run a structured DNS operation
 
 Usage: packetcraftr dns [OPTIONS] <SERVER> <NAME>
 
 Arguments:
-  <SERVER>  Explicit DNS server IP address or hostname
-  <NAME>    Bounded ASCII DNS owner name to query
+  <SERVER>
+          Explicit DNS server IP address or hostname
+
+  <NAME>
+          Bounded ASCII DNS owner name to query
 
 Options:
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --type <QUERY_TYPE>
-          DNS question type [default: a] [possible values: a, aaaa, cname, mx, ns, ptr, soa, srv, txt, any]
+          DNS question type
+
+          [default: a]
+          [possible values: a, aaaa, cname, mx, ns, ptr, soa, srv, txt, any]
+
       --family <FAMILY>
-          Select the first authorized server address or one IP family [default: any] [possible values: any, ipv4, ipv6]
+          Select the first authorized server address or one IP family
+
+          [default: any]
+          [possible values: any, ipv4, ipv6]
+
       --port <PORT>
-          DNS server UDP port [default: 53]
+          DNS server UDP port
+
+          [default: 53]
+
       --transaction-id <TRANSACTION_ID>
           Explicit 16-bit transaction ID; a process-local value is generated when omitted
+
       --source-port <SOURCE_PORT>
           First UDP source port; an ephemeral-range value is generated when omitted
+
       --no-recursion
           Disable the recursion-desired query flag
+
       --attempts <ATTEMPTS>
-          Number of independently re-resolved and re-authorized attempts [default: 1]
+          Number of independently re-resolved and re-authorized attempts
+
+          [default: 1]
+
       --timeout-ms <TIMEOUT_MS>
-          Response window for each capture-ready query [default: 1000]
+          Response window for each capture-ready query
+
+          [default: 1000]
+
       --rate <RATE>
           Optional average query-rate ceiling
+
       --max-duration-ms <MAX_DURATION_MS>
-          Maximum worst-case timeout plus intentional retry delay in milliseconds [default: 3600000]
+          Maximum worst-case timeout plus intentional retry delay in milliseconds
+
+          [default: 3600000]
+
       --max-message-bytes <MAX_MESSAGE_BYTES>
-          Maximum complete DNS message bytes decoded [default: 65535]
+          Maximum complete DNS message bytes decoded
+
+          [default: 65535]
+
       --max-records <MAX_RECORDS>
-          Maximum total answer, authority, and additional records decoded [default: 512]
+          Maximum total answer, authority, and additional records decoded
+
+          [default: 512]
+
       --max-name-pointers <MAX_NAME_POINTERS>
-          Maximum compression-pointer traversals for any decoded DNS name [default: 32]
+          Maximum compression-pointer traversals for any decoded DNS name
+
+          [default: 32]
+
       --max-txt-strings <MAX_TXT_STRINGS>
-          Maximum TXT character strings in one record [default: 256]
+          Maximum TXT character strings in one record
+
+          [default: 256]
+
       --max-txt-bytes <MAX_TXT_BYTES>
-          Maximum aggregate TXT data bytes in one record [default: 16384]
+          Maximum aggregate TXT data bytes in one record
+
+          [default: 16384]
+
       --max-rejected-records <MAX_REJECTED_RECORDS>
-          Maximum rejected-record metadata entries retained [default: 128]
+          Maximum rejected-record metadata entries retained
+
+          [default: 128]
+
       --max-undecoded <MAX_UNDECODED>
-          Maximum undecodable exact frames retained across attempts [default: 32]
+          Maximum undecodable exact frames retained across attempts
+
+          [default: 32]
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --max-queue-frames <MAX_QUEUE_FRAMES>
-          Aggregate backend capture-queue frame bound [default: 4096]
+          Aggregate backend capture-queue frame bound
+
+          [default: 4096]
+
       --max-captured-bytes <MAX_CAPTURED_BYTES>
-          Aggregate retained/queued capture byte bound [default: 268435456]
+          Aggregate retained/queued capture byte bound
+
+          [default: 268435456]
+
       --snap-length <SNAP_LENGTH>
-          Maximum bytes retained from any one captured frame [default: 16777216]
+          Maximum bytes retained from any one captured frame
+
+          [default: 16777216]
+
       --overflow-policy <OVERFLOW_POLICY>
-          Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+          Backend queue behavior when a configured bound is reached
+
+          [default: fail]
+          [possible values: fail, drop-newest, drop-oldest]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr dns 192.0.2.53 example.test --type a
+  packetcraftr --output json dns 192.0.2.53 _service._tcp.example.test --type srv
 
 ===== packetcraftr fuzz --help =====
 Run bounded field-aware packet fuzzing
@@ -568,74 +1173,169 @@ Run bounded field-aware packet fuzzing
 Usage: packetcraftr fuzz [OPTIONS]
 
 Options:
-      --output <OUTPUT>
-          [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
       --packet <PACKET>
-          One-off layer expression
+          Inline packet layer expression; conflicts with --packet-file
+
       --packet-file <PATH>
-          Versioned JSON/YAML packet document
+          Versioned JSON or YAML packet document; conflicts with --packet
+
       --seed <SEED>
-          Stable operation seed used to derive each case independently [default: 0]
+          Stable operation seed used to derive each case independently
+
+          [default: 0]
+
       --first-case <FIRST_CASE>
-          Absolute first case index; combine with --cases 1 to reproduce a case [default: 0]
+          Absolute first case index; combine with --cases 1 to reproduce a case
+
+          [default: 0]
+
       --cases <CASES>
-          Number of ordered cases to generate [default: 64]
+          Number of ordered cases to generate
+
+          [default: 64]
+
       --strategy <STRATEGIES>
-          Comma-separated field-aware mutation strategies [default: boundary,random,bit-flip,malformed] [possible values: boundary, random, bit-flip, malformed]
+          Comma-separated field-aware mutation strategies
+
+          [default: boundary,random,bit-flip,malformed]
+          [possible values: boundary, random, bit-flip, malformed]
+
       --field <FIELDS>
           Restrict mutation to repeated LAYER.FIELD targets; defaults to all fields
+
       --mode <MODE>
-          Strict or permissive packet construction for generated cases [default: strict] [possible values: strict, permissive]
+          Strict or permissive packet construction for generated cases
+
+          [default: strict]
+          [possible values: strict, permissive]
+
       --live
           Explicitly enable route, capture, and transmission; offline is the default
+
       --allow-malformed-live
           Independent per-operation opt-in for permissive/malformed live cases
+
       --destination <DESTINATION>
           Optional route destination when the packet has no fixed destination
+
       --timeout-ms <TIMEOUT_MS>
-          Response window for each capture-ready live case [default: 1000]
+          Response window for each capture-ready live case
+
+          [default: 1000]
+
       --rate <RATE>
           Optional average live-case rate ceiling
+
       --max-cases <MAX_CASES>
-          Maximum cases accepted by this operation [default: 10000]
+          Maximum cases accepted by this operation
+
+          [default: 10000]
+
       --max-total-bytes <MAX_TOTAL_BYTES>
-          Maximum aggregate retained case data and live wire bytes [default: 268435456]
+          Maximum aggregate retained case data and live wire bytes
+
+          [default: 268435456]
+
       --max-field-bytes <MAX_FIELD_BYTES>
-          Maximum bytes allocated for one generated field value [default: 4096]
+          Maximum bytes allocated for one generated field value
+
+          [default: 4096]
+
       --max-list-items <MAX_LIST_ITEMS>
-          Maximum list elements generated by one mutation [default: 256]
+          Maximum list elements generated by one mutation
+
+          [default: 256]
+
       --max-shrink-steps <MAX_SHRINK_STEPS>
-          Maximum deterministic shrink candidates returned per case [default: 8]
+          Maximum deterministic shrink candidates returned per case
+
+          [default: 8]
+
       --max-duration-ms <MAX_DURATION_MS>
-          Maximum worst-case timeout plus intentional rate delay in milliseconds [default: 3600000]
+          Maximum worst-case timeout plus intentional rate delay in milliseconds
+
+          [default: 3600000]
+
       --interface <NAME_OR_INDEX>
           Interface name or numeric index used as an exact live route constraint
+
       --source <SOURCE>
           Interface-owned source preference used only for live route selection
+
       --link-mode <LINK_MODE>
-          Automatic, Layer 2, or raw Layer 3 live transmission intent [default: auto] [possible values: auto, layer2, layer3]
+          Automatic, Layer 2, or raw Layer 3 live transmission intent
+
+          [default: auto]
+          [possible values: auto, layer2, layer3]
+
       --max-queue-frames <MAX_QUEUE_FRAMES>
-          Aggregate backend capture-queue frame bound [default: 4096]
+          Aggregate backend capture-queue frame bound
+
+          [default: 4096]
+
       --max-captured-bytes <MAX_CAPTURED_BYTES>
-          Aggregate retained/queued capture byte bound [default: 268435456]
+          Aggregate retained/queued capture byte bound
+
+          [default: 268435456]
+
       --snap-length <SNAP_LENGTH>
-          Maximum bytes retained from any one captured frame [default: 16777216]
+          Maximum bytes retained from any one captured frame
+
+          [default: 16777216]
+
       --overflow-policy <OVERFLOW_POLICY>
-          Backend queue behavior when a configured bound is reached [default: fail] [possible values: fail, drop-newest, drop-oldest]
+          Backend queue behavior when a configured bound is reached
+
+          [default: fail]
+          [possible values: fail, drop-newest, drop-oldest]
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
+
       --allow-hostname-resolution
           Deliberately authorize hostname resolution before route lookup
+
       --allow-permissive-packets
           Policy-level opt-in for permissively built live packets
+
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation [default: 10000]
+          Maximum packets authorized for one operation
+
+          [default: 10000]
+
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation [default: 268435456]
+          Maximum wire bytes authorized for one operation
+
+          [default: 268435456]
+
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution
+
+          [default: 64]
+
   -h, --help
-          Print help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr fuzz --packet 'ipv4(dst=192.0.2.1)/udp(dport=9)/raw(text=hi)' --cases 16
+  packetcraftr fuzz --packet-file packet.json --seed 7 --first-case 42 --cases 1
 
 ===== packetcraftr routes --help =====
 Enumerate passive interface-bound route decisions
@@ -643,5 +1343,26 @@ Enumerate passive interface-bound route decisions
 Usage: packetcraftr routes [OPTIONS]
 
 Options:
-      --output <OUTPUT>  [default: text] [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
-  -h, --help             Print help
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr routes
+  packetcraftr --output json routes

@@ -22,9 +22,12 @@ use super::commands::{
     run_build, run_capture, run_dissect, run_dns, run_exchange, run_fuzz, run_interfaces, run_plan,
     run_read, run_replay, run_routes, run_scan, run_send, run_traceroute,
 };
-use super::errors::{CliError, command_from_env, machine_format_from_env};
+use super::errors::{CliError, color_choice_from_env, command_from_env, machine_format_from_env};
 use super::input::read_recipe;
-use super::rendering::{emit_json, emit_json_compact, emit_stderr_error, emit_stderr_message};
+use super::rendering::{
+    emit_json, emit_json_compact, emit_stderr_document, emit_stderr_error, emit_stdout_document,
+    terminal_document,
+};
 
 pub(super) struct PreparedRouteRequest {
     pub(super) packet: Packet,
@@ -62,14 +65,16 @@ impl DeferredInterface {
 }
 
 pub(crate) fn run_entrypoint() -> ExitCode {
+    color_choice_from_env().write_global();
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(error) => {
-            let code = if error.use_stderr() { 2 } else { 0 };
-            if code != 0
+            let code = u8::try_from(error.exit_code()).unwrap_or(70);
+            let raw_message = error.to_string();
+            let message = terminal_document(&raw_message);
+            if error.use_stderr()
                 && let Some(output) = machine_format_from_env()
             {
-                let message = error.to_string();
                 let error = CliError::new(code, message);
                 let emitted = match output {
                     output::contract::Format::Json => {
@@ -95,20 +100,18 @@ pub(crate) fn run_entrypoint() -> ExitCode {
                     }
                 };
             }
-            return if code == 0 {
-                if error.print().is_ok() {
-                    ExitCode::SUCCESS
-                } else {
-                    ExitCode::from(5)
-                }
+            let emitted = if error.use_stderr() {
+                emit_stderr_document(&raw_message)
             } else {
-                match emit_stderr_message(&error.to_string()) {
-                    Ok(()) => ExitCode::from(code),
-                    Err(_) => ExitCode::from(5),
-                }
+                emit_stdout_document(&raw_message)
+            };
+            return match emitted {
+                Ok(()) => ExitCode::from(code),
+                Err(_) => ExitCode::from(5),
             };
         }
     };
+    cli.color.write_global();
     let output = output::contract::Format::from(cli.output);
     let command = cli.command.name();
     match run(cli) {

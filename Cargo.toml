@@ -33,6 +33,8 @@ native-layer2 = ["live", "dep:libloading", "dep:pcap"]
 native-layer3 = ["live", "dep:socket2"]
 
 [dependencies]
+anstream = "1"
+anstyle = "1"
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 noyalib = { version = "0.0.15", default-features = false, features = ["std", "fast-int", "fast-float"] }

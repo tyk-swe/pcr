@@ -8,6 +8,8 @@ use packetcraftr::{
     net, output,
 };
 
+use super::arguments::CliColorChoice;
+
 #[derive(Debug)]
 pub(super) struct CliError {
     pub(super) exit_code: u8,
@@ -122,28 +124,45 @@ const fn exit_code_for_kind(kind: Kind) -> u8 {
 
 pub(super) fn machine_format_from_env() -> Option<output::contract::Format> {
     let arguments = std::env::args_os().collect::<Vec<_>>();
-    machine_format(&arguments)
+    match option_value_before_end_of_options(&arguments, "--output")? {
+        "json" => Some(output::contract::Format::Json),
+        "ndjson" => Some(output::contract::Format::Ndjson),
+        _ => None,
+    }
 }
 
-fn machine_format(arguments: &[std::ffi::OsString]) -> Option<output::contract::Format> {
-    arguments
+pub(super) fn color_choice_from_env() -> CliColorChoice {
+    let arguments = std::env::args_os().collect::<Vec<_>>();
+    match option_value_before_end_of_options(&arguments, "--color") {
+        Some("always") => CliColorChoice::Always,
+        Some("never") => CliColorChoice::Never,
+        _ => CliColorChoice::Auto,
+    }
+}
+
+fn option_value_before_end_of_options<'a>(
+    arguments: &'a [std::ffi::OsString],
+    option: &str,
+) -> Option<&'a str> {
+    let end = arguments
         .iter()
-        .take_while(|argument| argument.as_os_str() != "--")
-        .enumerate()
-        .find_map(|(index, argument)| {
-            let value = if argument.as_os_str() == "--output" {
-                arguments.get(index + 1).and_then(|value| value.to_str())
-            } else {
-                argument
-                    .to_str()
-                    .and_then(|argument| argument.strip_prefix("--output="))
-            }?;
-            match value {
-                "json" => Some(output::contract::Format::Json),
-                "ndjson" => Some(output::contract::Format::Ndjson),
-                _ => None,
-            }
-        })
+        .position(|argument| argument.as_os_str() == "--")
+        .unwrap_or(arguments.len());
+    let inline_prefix = format!("{option}=");
+    for (index, argument) in arguments[..end].iter().enumerate() {
+        if argument.as_os_str() == option {
+            return arguments[..end]
+                .get(index + 1)
+                .and_then(|value| value.to_str());
+        }
+        if let Some(value) = argument
+            .to_str()
+            .and_then(|argument| argument.strip_prefix(&inline_prefix))
+        {
+            return Some(value);
+        }
+    }
+    None
 }
 
 pub(super) fn command_from_env() -> Option<output::contract::Command> {

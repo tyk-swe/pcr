@@ -17,7 +17,7 @@ use super::super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs}
 use super::super::errors::CliError;
 use super::super::rendering::{
     capture_file_format, capture_file_frame, emit_json, emit_json_compact, emit_stderr_message,
-    emit_stream_record, spaced_hex, write_capture_file, write_stdout_line,
+    emit_stream_record, spaced_hex, write_capture_file, write_plain_line, write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
@@ -101,7 +101,7 @@ pub(in crate::cli) fn run_capture(
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, _| {
                 let frame =
                     output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-                write_stdout_line(format_args!("{}", frame.bytes_hex))
+                write_plain_line(format_args!("{}", frame.bytes_hex))
             })?;
             render_diagnostics_stderr(&outcome.diagnostics)
         }

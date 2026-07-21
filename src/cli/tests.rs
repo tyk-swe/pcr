@@ -13,8 +13,8 @@ use packetcraftr::{
 };
 
 use super::arguments::{
-    Cli, CliAddressFamily, CliDnsQueryType, CliLinkMode, CliScanTransport, CliTracerouteStrategy,
-    Command,
+    Cli, CliAddressFamily, CliColorChoice, CliDnsQueryType, CliLinkMode, CliScanTransport,
+    CliTracerouteStrategy, Command,
 };
 use super::commands::{
     CaptureBudget, dns_cli_error, drive_capture, fuzz_cli_error, replay_cli_error, scan_cli_error,
@@ -22,7 +22,10 @@ use super::commands::{
 };
 use super::errors::CliError;
 use super::input::read_bounded_allow_empty;
-use super::rendering::{encode_capture_file, output_timestamp_text, terminal_safe};
+use super::rendering::{
+    encode_capture_file, output_timestamp_text, terminal_document, terminal_safe,
+    terminal_safe_document,
+};
 use super::runtime::{
     parse_workflow_target, run, validate_interface_selector, workflow_exchange_options,
 };
@@ -70,6 +73,31 @@ fn packet_sources_are_mutually_exclusive() {
         "packet.json",
     ]);
     assert!(result.is_err());
+}
+
+#[test]
+fn global_colour_choice_parses_before_or_after_the_subcommand() {
+    for arguments in [
+        [
+            "packetcraftr",
+            "--color",
+            "always",
+            "build",
+            "--packet",
+            "raw()",
+        ],
+        [
+            "packetcraftr",
+            "build",
+            "--packet",
+            "raw()",
+            "--color",
+            "always",
+        ],
+    ] {
+        let cli = Cli::try_parse_from(arguments).unwrap();
+        assert!(matches!(cli.color, CliColorChoice::Always));
+    }
 }
 
 #[test]
@@ -282,6 +310,18 @@ fn terminal_text_escapes_controls_and_directional_overrides() {
     );
     assert!(!safe.chars().any(char::is_control));
     assert!(!safe.contains(['\u{2028}', '\u{2029}']));
+}
+
+#[test]
+fn terminal_documents_preserve_layout_but_escape_terminal_controls() {
+    let safe = terminal_safe_document("first\r\nsecond\n\t\u{1b}[31m\u{202e}tail");
+    assert_eq!(safe, "first\nsecond\n\\t\\u{1b}[31m\\u{202e}tail");
+    assert_eq!(safe.lines().count(), 3);
+    assert!(!safe.contains('\u{1b}'));
+    assert!(!safe.contains('\u{202e}'));
+
+    let cleaned = terminal_document("\u{1b}[31merror:\u{1b}[0m bad\nnext");
+    assert_eq!(cleaned, "error: bad\nnext");
 }
 
 #[test]

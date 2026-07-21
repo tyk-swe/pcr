@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds require IGMP, nested IP, GRE, or SCTP children instead of raw payloads.
 - Improved scan and traceroute workflow scaling for large probe batches while
   preserving endpoint, response-evidence, and diagnostic ordering.
+- Reduced deep packet-builder allocations and repeated binding work by
+  collecting materialized layers, layouts, and encoded payload lengths directly
+  while codecs retain an immutable view of the source packet.
 
 ### Fixed
 

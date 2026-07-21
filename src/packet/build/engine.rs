@@ -305,18 +305,20 @@ impl Builder {
                     source,
                 })?;
         }
-        self.validate_bindings(&packet, options.mode, &mut diagnostics)?;
+        let protocols: Vec<_> = packet.iter().map(|layer| layer.protocol_id()).collect();
+        self.validate_bindings(&packet, &protocols, options.mode, &mut diagnostics)?;
 
-        let mut materialized = packet.clone();
+        // The reverse walk keeps the source packet intact for every codec and
+        // accumulates each materialized result once before restoring source order.
         let mut bytes = PacketBuffer::default();
-        let mut layouts: Vec<Option<LayerLayout>> = vec![None; packet.len()];
-        let mut encoded_payload_lengths = vec![None; packet.len()];
+        let mut layouts = Vec::with_capacity(packet.len());
+        let mut materialized_layers = Vec::with_capacity(packet.len());
+        let mut encoded_payload_lengths = Vec::with_capacity(packet.len());
 
-        for index in (0..packet.len()).rev() {
+        for (index, protocol) in protocols.into_iter().enumerate().rev() {
             let layer = packet
                 .layer(index)
                 .expect("validated layer index must remain present");
-            let protocol = layer.protocol_id();
             let codec = self
                 .registry
                 .codec(&protocol)
@@ -325,7 +327,7 @@ impl Builder {
                     protocol: protocol.clone(),
                 })?;
             let child = packet.layer(index + 1);
-            encoded_payload_lengths[index] = Some(bytes.len());
+            encoded_payload_lengths.push(Some(bytes.len()));
             let remaining_packet_bytes = options.max_packet_size.checked_sub(bytes.len()).ok_or(
                 BuildError::PacketSizeLimit {
                     actual: bytes.len(),
@@ -371,17 +373,15 @@ impl Builder {
                 return Err(BuildError::InvalidCodecLayout { protocol });
             }
             let fields = encoded.fields;
-            layouts[index] = Some(LayerLayout {
+            layouts.push(LayerLayout {
                 index,
-                protocol: layer.protocol_id(),
+                protocol,
                 range: ByteRange::new(0, encoded.prefix.len()),
                 fields,
             });
 
             bytes.wrap(&encoded.prefix, &encoded.suffix, options.max_packet_size)?;
-            materialized
-                .replace_boxed(index, encoded.materialized)
-                .expect("materialized packet keeps source packet shape");
+            materialized_layers.push(encoded.materialized);
             diagnostics.extend(encoded.diagnostics.into_iter().map(|mut diagnostic| {
                 if diagnostic.layer.is_none() {
                     diagnostic.layer = Some(index);
@@ -390,8 +390,9 @@ impl Builder {
             }));
         }
 
+        layouts.reverse();
         let mut layout_offset = 0usize;
-        for layout in layouts.iter_mut().flatten() {
+        for layout in &mut layouts {
             if !layout.checked_shift(layout_offset) {
                 return Err(BuildError::LengthOverflow);
             }
@@ -399,10 +400,11 @@ impl Builder {
                 .checked_add(layout.range.len())
                 .ok_or(BuildError::LengthOverflow)?;
         }
-        let layout = PacketLayout {
-            layers: layouts.into_iter().flatten().collect(),
-        };
-        materialized.set_encoded_payload_lengths(encoded_payload_lengths);
+        let layout = PacketLayout { layers: layouts };
+        materialized_layers.reverse();
+        encoded_payload_lengths.reverse();
+        let materialized =
+            Packet::from_encoded_layers(materialized_layers, encoded_payload_lengths);
         let contains_malformed = materialized
             .iter()
             .any(|layer| layer.as_any().is::<MalformedLayer>());
@@ -430,9 +432,11 @@ impl Builder {
     fn validate_bindings(
         &self,
         packet: &Packet,
+        protocols: &[ProtocolId],
         mode: BuildMode,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Result<(), BuildError> {
+        debug_assert_eq!(protocols.len(), packet.len());
         for (index, layer) in packet.iter().enumerate() {
             let Some(padding) = layer.as_any().downcast_ref::<Padding>() else {
                 continue;
@@ -453,7 +457,7 @@ impl Builder {
                         outside_layer,
                     });
                 }
-                let outside_protocol = outside.protocol_id();
+                let outside_protocol = &protocols[outside_layer];
                 let has_declared_boundary =
                     matches!(outside_protocol.as_str(), "ipv4" | "ipv6" | "udp" | "arp");
                 if !has_declared_boundary {
@@ -484,9 +488,9 @@ impl Builder {
                 }
                 continue;
             }
-            let enclosed_by_link = packet.iter().take(index).any(|layer| {
+            let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
                 matches!(
-                    layer.protocol_id().as_str(),
+                    protocol.as_str(),
                     "ethernet" | "bsd_null" | "bsd_loop" | "linux_sll" | "linux_sll2"
                 )
             });
@@ -505,20 +509,33 @@ impl Builder {
             );
         }
 
+        let mut previous_binding = None;
         for index in 0..packet.len().saturating_sub(1) {
-            let parent = packet.layer(index).expect("index in packet").protocol_id();
-            let child = packet
-                .layer(index + 1)
-                .expect("child index in packet")
-                .protocol_id();
-            if self.registry.discriminator_for(&parent, &child).is_some()
+            let parent = &protocols[index];
+            let child = &protocols[index + 1];
+            let discriminator = match previous_binding {
+                Some((previous_parent, previous_child, discriminator))
+                    if previous_parent == parent && previous_child == child =>
+                {
+                    discriminator
+                }
+                _ => {
+                    let discriminator = self.registry.discriminator_for(parent, child);
+                    previous_binding = Some((parent, child, discriminator));
+                    discriminator
+                }
+            };
+            if discriminator.is_some()
                 || parent.as_str() == "raw"
                 || matches!(child.as_str(), "padding" | "malformed")
             {
                 continue;
             }
             if mode == BuildMode::Strict {
-                return Err(BuildError::UnboundLayers { parent, child });
+                return Err(BuildError::UnboundLayers {
+                    parent: parent.clone(),
+                    child: child.clone(),
+                });
             }
             diagnostics.push(
                 Diagnostic::warning(
@@ -560,6 +577,7 @@ mod tests {
     use std::any::Any;
     use std::collections::BTreeMap;
     use std::sync::OnceLock;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
     use crate::packet::layer::Raw;
@@ -667,6 +685,105 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct CloneCountingLayer {
+        id: u8,
+        clone_count: Arc<AtomicUsize>,
+    }
+
+    impl Clone for CloneCountingLayer {
+        fn clone(&self) -> Self {
+            self.clone_count.fetch_add(1, Ordering::Relaxed);
+            Self {
+                id: self.id,
+                clone_count: Arc::clone(&self.clone_count),
+            }
+        }
+    }
+
+    impl Layer for CloneCountingLayer {
+        fn schema(&self) -> &'static LayerSchema {
+            static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
+            SCHEMA.get_or_init(|| LayerSchema {
+                protocol: ProtocolId::new("clone.counting"),
+                name: "Clone counting",
+                fields: &[],
+            })
+        }
+
+        fn clone_box(&self) -> Box<dyn Layer> {
+            Box::new(self.clone())
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn field(&self, _name: &str) -> Option<FieldValue> {
+            None
+        }
+
+        fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
+            Err(FieldError::UnknownField {
+                protocol: self.protocol_id(),
+                field: name.to_owned(),
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct CloneCountingCodec;
+
+    impl LayerCodec for CloneCountingCodec {
+        fn protocol_id(&self) -> ProtocolId {
+            ProtocolId::new("clone.counting")
+        }
+
+        fn encode(
+            &self,
+            layer: &dyn Layer,
+            _payload: &[u8],
+            _context: &LayerEncodeContext<'_>,
+        ) -> Result<EncodedLayer, CodecError> {
+            let layer = layer
+                .as_any()
+                .downcast_ref::<CloneCountingLayer>()
+                .ok_or_else(|| CodecError::WrongLayer {
+                    expected: self.protocol_id(),
+                    actual: layer.protocol_id(),
+                })?;
+            Ok(EncodedLayer::header(vec![layer.id], layer.clone_box()))
+        }
+
+        fn decode(
+            &self,
+            input: &[u8],
+            _context: &LayerDecodeContext<'_>,
+        ) -> Result<DecodedLayerValue, CodecError> {
+            Ok(DecodedLayerValue::terminal(
+                Box::new(CloneCountingLayer {
+                    id: input.first().copied().unwrap_or_default(),
+                    clone_count: Arc::new(AtomicUsize::new(0)),
+                }),
+                input.len(),
+            ))
+        }
+
+        fn make_layer(
+            &self,
+            _fields: &BTreeMap<String, FieldValue>,
+        ) -> Result<Box<dyn Layer>, CodecError> {
+            Ok(Box::new(CloneCountingLayer {
+                id: 0,
+                clone_count: Arc::new(AtomicUsize::new(0)),
+            }))
+        }
+    }
+
     fn empty_registry() -> Arc<ProtocolRegistry> {
         Arc::new(ProtocolRegistry::builder().build().unwrap())
     }
@@ -736,6 +853,49 @@ mod tests {
         assert_eq!(built.layout.layers[1].range, ByteRange::new(1, 2));
         assert_eq!(built.packet.encoded_payload_length(0), Some(2));
         assert_eq!(built.packet.encoded_payload_length(1), Some(0));
+    }
+
+    #[test]
+    fn builder_only_clones_layers_when_the_codec_materializes_them() {
+        let clone_count = Arc::new(AtomicUsize::new(0));
+        let mut packet = Packet::new();
+        for id in [1, 2, 3] {
+            packet.push(CloneCountingLayer {
+                id,
+                clone_count: Arc::clone(&clone_count),
+            });
+        }
+        let mut registry = RegistryBuilder::new();
+        registry.register_codec(CloneCountingCodec).unwrap();
+
+        let built = Builder::new(Arc::new(registry.build().unwrap()))
+            .build(
+                packet,
+                BuildContext::default(),
+                BuildOptions {
+                    mode: BuildMode::Permissive,
+                    ..BuildOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(clone_count.load(Ordering::Relaxed), 3);
+        let materialized_ids: Vec<_> = built
+            .packet
+            .iter()
+            .map(|layer| {
+                layer
+                    .as_any()
+                    .downcast_ref::<CloneCountingLayer>()
+                    .expect("the codec preserves its concrete layer type")
+                    .id
+            })
+            .collect();
+        assert_eq!(materialized_ids, [1, 2, 3]);
+        let payload_lengths: Vec<_> = (0..built.packet.len())
+            .map(|index| built.packet.encoded_payload_length(index))
+            .collect();
+        assert_eq!(payload_lengths, [Some(2), Some(1), Some(0)]);
     }
 
     #[test]

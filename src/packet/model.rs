@@ -50,6 +50,17 @@ impl Packet {
         }
     }
 
+    pub(crate) fn from_encoded_layers(
+        layers: Vec<Box<dyn Layer>>,
+        encoded_payload_lengths: Vec<Option<usize>>,
+    ) -> Self {
+        debug_assert_eq!(encoded_payload_lengths.len(), layers.len());
+        Self {
+            layers,
+            encoded_payload_lengths,
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.layers.len()
     }
@@ -277,11 +288,6 @@ impl Packet {
 
     pub(crate) fn encoded_payload_length(&self, index: usize) -> Option<usize> {
         self.encoded_payload_lengths.get(index).copied().flatten()
-    }
-
-    pub(crate) fn set_encoded_payload_lengths(&mut self, lengths: Vec<Option<usize>>) {
-        debug_assert_eq!(lengths.len(), self.layers.len());
-        self.encoded_payload_lengths = lengths;
     }
 
     fn invalidate_encoded_payload_lengths(&mut self) {

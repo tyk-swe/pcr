@@ -19,7 +19,11 @@ use packetcraftr::{
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 fn binary() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_packetcraftr"));
+    for variable in ["NO_COLOR", "CLICOLOR", "CLICOLOR_FORCE", "FORCE_COLOR"] {
+        command.env_remove(variable);
+    }
+    command
 }
 
 fn normalize_cli_text(bytes: &[u8]) -> String {
@@ -168,6 +172,161 @@ fn cli_help_parse_error_and_version_match_the_committed_goldens() {
         normalize_cli_text(&version.stdout),
         normalize_cli_text(include_str!("golden/cli-version.txt").as_bytes())
     );
+}
+
+#[test]
+fn bare_invocation_prints_readable_help_to_stderr() {
+    let output = binary().output().unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.contains(&0x1b));
+
+    let stderr = std::str::from_utf8(&output.stderr).unwrap();
+    assert!(stderr.contains("Reflective packet construction"));
+    assert!(stderr.contains("\n\nUsage: packetcraftr [OPTIONS] <COMMAND>\n\n"));
+    assert!(stderr.contains("\nCommands:\n"));
+    assert!(!stderr.contains("\\n"));
+}
+
+#[test]
+fn colour_is_terminal_aware_forceable_and_excluded_from_machine_output() {
+    let automatic = binary().arg("--help").output().unwrap();
+    assert!(automatic.status.success());
+    assert!(!automatic.stdout.contains(&0x1b));
+
+    let coloured_help = binary()
+        .args(["--color", "always", "--help"])
+        .output()
+        .unwrap();
+    assert!(coloured_help.status.success());
+    assert!(coloured_help.stderr.is_empty());
+    assert!(coloured_help.stdout.contains(&0x1b));
+
+    let plain_help = binary()
+        .args(["--color", "never", "--help"])
+        .output()
+        .unwrap();
+    assert!(plain_help.status.success());
+    assert!(!plain_help.stdout.contains(&0x1b));
+
+    let explicit_always_overrides_no_color = binary()
+        .env("NO_COLOR", "1")
+        .args(["--color", "always", "--help"])
+        .output()
+        .unwrap();
+    assert!(explicit_always_overrides_no_color.status.success());
+    assert!(explicit_always_overrides_no_color.stdout.contains(&0x1b));
+
+    let explicit_never_overrides_force = binary()
+        .env("CLICOLOR_FORCE", "1")
+        .args(["--color", "never", "--help"])
+        .output()
+        .unwrap();
+    assert!(explicit_never_overrides_force.status.success());
+    assert!(!explicit_never_overrides_force.stdout.contains(&0x1b));
+
+    let coloured_text = binary()
+        .args(["--color", "always", "build", "--packet", "raw(text=hello)"])
+        .output()
+        .unwrap();
+    assert!(coloured_text.status.success());
+    assert!(coloured_text.stdout.contains(&0x1b));
+
+    let coloured_error = binary()
+        .args(["--color", "always", "build", "--unknown-option"])
+        .output()
+        .unwrap();
+    assert_eq!(coloured_error.status.code(), Some(2));
+    assert!(coloured_error.stdout.is_empty());
+    assert!(coloured_error.stderr.contains(&0x1b));
+    let plain_error =
+        anstream::adapter::strip_str(std::str::from_utf8(&coloured_error.stderr).unwrap())
+            .to_string();
+    assert!(plain_error.contains("\n\nUsage:"));
+
+    let json = binary()
+        .args([
+            "--color",
+            "always",
+            "--output",
+            "json",
+            "build",
+            "--packet",
+            "raw(text=hello)",
+        ])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    assert!(!json.stdout.contains(&0x1b));
+    serde_json::from_slice::<serde_json::Value>(&json.stdout).unwrap();
+
+    let json_error = binary()
+        .args([
+            "--color",
+            "always",
+            "--output",
+            "json",
+            "build",
+            "--unknown-option",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(json_error.status.code(), Some(2));
+    assert!(json_error.stderr.is_empty());
+    assert!(!json_error.stdout.contains(&0x1b));
+    serde_json::from_slice::<serde_json::Value>(&json_error.stdout).unwrap();
+
+    let ndjson_error = binary()
+        .args([
+            "--color",
+            "always",
+            "--output",
+            "ndjson",
+            "build",
+            "--unknown-option",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(ndjson_error.status.code(), Some(2));
+    assert!(ndjson_error.stderr.is_empty());
+    assert!(!ndjson_error.stdout.contains(&0x1b));
+    for line in ndjson_error.stdout.split(|byte| *byte == b'\n') {
+        if !line.is_empty() {
+            serde_json::from_slice::<serde_json::Value>(line).unwrap();
+        }
+    }
+
+    let hex = binary()
+        .args([
+            "--color",
+            "always",
+            "--output",
+            "hex",
+            "build",
+            "--packet",
+            "raw(text=hello)",
+        ])
+        .output()
+        .unwrap();
+    assert!(hex.status.success());
+    assert!(!hex.stdout.contains(&0x1b));
+    assert_eq!(hex.stdout, b"68656c6c6f\n");
+
+    let raw = binary()
+        .args([
+            "--color",
+            "always",
+            "--output",
+            "raw",
+            "build",
+            "--packet",
+            "raw(hex=001bff)",
+        ])
+        .output()
+        .unwrap();
+    assert!(raw.status.success());
+    assert!(raw.stderr.is_empty());
+    assert_eq!(raw.stdout, [0x00, 0x1b, 0xff]);
 }
 
 #[test]

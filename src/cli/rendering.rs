@@ -5,6 +5,7 @@
 
 use std::io::{self, Write};
 
+use anstyle::{AnsiColor, Style};
 use packetcraftr::{
     capture::{Format, Frame, LinkType, Writer},
     output,
@@ -159,37 +160,234 @@ pub(super) fn emit_stream_record<T: Serialize>(
 }
 
 pub(super) fn write_stdout_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
-    let rendered = terminal_safe(&arguments.to_string());
-    write_machine_line(&rendered)
+    let rendered = style_human_line(&terminal_safe(&arguments.to_string()));
+    write_human_stdout(&rendered, true)
+}
+
+pub(super) fn write_plain_line(arguments: std::fmt::Arguments<'_>) -> Result<(), CliError> {
+    write_machine_line(&terminal_safe(&arguments.to_string()))
 }
 
 fn write_machine_line(rendered: &str) -> Result<(), CliError> {
     let mut stdout = io::stdout().lock();
-    stdout
-        .write_all(rendered.as_bytes())
-        .and_then(|()| stdout.write_all(b"\n"))
-        .and_then(|()| stdout.flush())
+    write_terminated(&mut stdout, rendered, true)
         .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
 }
 
+pub(super) fn terminal_document(value: &str) -> String {
+    terminal_safe_document(&anstream::adapter::strip_str(value).to_string())
+}
+
+pub(super) fn emit_stdout_document(message: &str) -> Result<(), CliError> {
+    let rendered = style_document(&terminal_document(message));
+    write_human_stdout(&rendered, false)
+}
+
+pub(super) fn emit_stderr_document(message: &str) -> Result<(), CliError> {
+    let rendered = style_document(&terminal_document(message));
+    write_human_stderr(&rendered, false)
+}
+
 pub(super) fn emit_stderr_error(message: &str) -> Result<(), CliError> {
-    let mut stderr = io::stderr().lock();
-    writeln!(stderr, "error: {}", terminal_safe(message))
-        .and_then(|()| stderr.flush())
-        .map_err(|source| CliError::new(5, format!("write stderr failed: {source}")))
+    let style = error_style();
+    let rendered = format!("{style}error:{style:#} {}", terminal_safe(message));
+    write_human_stderr(&rendered, true)
 }
 
 pub(super) fn emit_stderr_message(message: &str) -> Result<(), CliError> {
-    let mut stderr = io::stderr().lock();
-    writeln!(stderr, "{}", terminal_safe(message))
-        .and_then(|()| stderr.flush())
+    let rendered = style_human_line(&terminal_safe(message));
+    write_human_stderr(&rendered, true)
+}
+
+fn write_human_stdout(rendered: &str, append_newline: bool) -> Result<(), CliError> {
+    let stdout = anstream::stdout();
+    let mut stdout = stdout.lock();
+    write_terminated(&mut stdout, rendered, append_newline)
+        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+}
+
+fn write_human_stderr(rendered: &str, append_newline: bool) -> Result<(), CliError> {
+    let stderr = anstream::stderr();
+    let mut stderr = stderr.lock();
+    write_terminated(&mut stderr, rendered, append_newline)
         .map_err(|source| CliError::new(5, format!("write stderr failed: {source}")))
 }
 
+fn write_terminated(
+    writer: &mut impl Write,
+    rendered: &str,
+    append_newline: bool,
+) -> io::Result<()> {
+    writer.write_all(rendered.as_bytes())?;
+    if append_newline || !rendered.ends_with('\n') {
+        writer.write_all(b"\n")?;
+    }
+    writer.flush()
+}
+
+fn style_human_line(value: &str) -> String {
+    const SUCCESSES: &[&str] = &[
+        "built",
+        "captured",
+        "completed",
+        "decoded",
+        "generated",
+        "planned",
+        "read",
+        "replayed",
+        "scanned",
+        "sent",
+    ];
+
+    if let Some((prefix, rest)) = split_leading_token(value) {
+        let style = match prefix {
+            "Error" | "ERROR" => Some(error_style()),
+            "Warning" | "WARNING" => Some(warning_style()),
+            "Info" | "INFO" | "Note" | "NOTE" => Some(info_style()),
+            _ if SUCCESSES.contains(&prefix) => Some(success_style()),
+            _ => None,
+        };
+        if let Some(style) = style {
+            return format!("{style}{prefix}{style:#}{}", style_key_value_labels(rest));
+        }
+    }
+
+    if let Some(rest) = value.strip_prefix("error:") {
+        let style = error_style();
+        return format!("{style}error:{style:#}{}", style_key_value_labels(rest));
+    }
+    if let Some(rest) = value.strip_prefix("warning:") {
+        let style = warning_style();
+        return format!("{style}warning:{style:#}{}", style_key_value_labels(rest));
+    }
+    style_key_value_labels(value)
+}
+
+fn split_leading_token(value: &str) -> Option<(&str, &str)> {
+    let split = value.find(|character: char| character.is_whitespace())?;
+    Some((&value[..split], &value[split..]))
+}
+
+fn style_key_value_labels(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut rendered = String::with_capacity(value.len());
+    let mut copied = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        let starts_key = bytes[index].is_ascii_alphabetic() || bytes[index] == b'_';
+        let boundary =
+            index == 0 || matches!(bytes[index - 1], b' ' | b',' | b'(' | b'[' | b'{' | b':');
+        if starts_key && boundary {
+            let mut end = index + 1;
+            while end < bytes.len()
+                && (bytes[end].is_ascii_alphanumeric() || matches!(bytes[end], b'_' | b'-' | b'.'))
+            {
+                end += 1;
+            }
+            if bytes.get(end) == Some(&b'=') {
+                rendered.push_str(&value[copied..index]);
+                let style = key_style();
+                rendered.push_str(&format!("{style}{}{style:#}", &value[index..end]));
+                rendered.push('=');
+                copied = end + 1;
+                index = copied;
+                continue;
+            }
+        }
+        let character = value[index..]
+            .chars()
+            .next()
+            .expect("index remains on a UTF-8 boundary");
+        index += character.len_utf8();
+    }
+    rendered.push_str(&value[copied..]);
+    rendered
+}
+
+fn style_document(value: &str) -> String {
+    let mut rendered = String::with_capacity(value.len());
+    for segment in value.split_inclusive('\n') {
+        let (line, newline) = match segment.strip_suffix('\n') {
+            Some(line) => (line, "\n"),
+            None => (segment, ""),
+        };
+        rendered.push_str(&style_document_line(line));
+        rendered.push_str(newline);
+    }
+    rendered
+}
+
+fn style_document_line(line: &str) -> String {
+    for (prefix, style) in [
+        ("error:", error_style()),
+        ("warning:", warning_style()),
+        ("Usage:", heading_style()),
+        ("Commands:", heading_style()),
+        ("Arguments:", heading_style()),
+        ("Options:", heading_style()),
+        ("Global options:", heading_style()),
+        ("Output formats:", heading_style()),
+        ("Examples:", heading_style()),
+        ("Example:", heading_style()),
+        ("Notes:", heading_style()),
+    ] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            return format!("{style}{prefix}{style:#}{rest}");
+        }
+    }
+    if line.starts_with("For more information") || line.starts_with("Run `packetcraftr") {
+        let style = muted_style();
+        return format!("{style}{line}{style:#}");
+    }
+    line.to_owned()
+}
+
+fn error_style() -> Style {
+    Style::new().fg_color(Some(AnsiColor::Red.into())).bold()
+}
+
+fn warning_style() -> Style {
+    Style::new().fg_color(Some(AnsiColor::Yellow.into())).bold()
+}
+
+fn success_style() -> Style {
+    Style::new().fg_color(Some(AnsiColor::Green.into())).bold()
+}
+
+fn info_style() -> Style {
+    Style::new().fg_color(Some(AnsiColor::Blue.into())).bold()
+}
+
+fn heading_style() -> Style {
+    Style::new().fg_color(Some(AnsiColor::Cyan.into())).bold()
+}
+
+fn key_style() -> Style {
+    Style::new().fg_color(Some(AnsiColor::Cyan.into()))
+}
+
+fn muted_style() -> Style {
+    Style::new().dimmed()
+}
+
 pub(super) fn terminal_safe(value: &str) -> String {
+    terminal_safe_with_layout(value, false)
+}
+
+pub(super) fn terminal_safe_document(value: &str) -> String {
+    terminal_safe_with_layout(value, true)
+}
+
+fn terminal_safe_with_layout(value: &str, preserve_newlines: bool) -> String {
     let mut safe = String::with_capacity(value.len());
-    for character in value.chars() {
+    let mut characters = value.chars().peekable();
+    while let Some(character) = characters.next() {
         match character {
+            '\n' if preserve_newlines => safe.push('\n'),
+            '\r' if preserve_newlines && characters.peek() == Some(&'\n') => {
+                characters.next();
+                safe.push('\n');
+            }
             '\n' => safe.push_str("\\n"),
             '\r' => safe.push_str("\\r"),
             '\t' => safe.push_str("\\t"),

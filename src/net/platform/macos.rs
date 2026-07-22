@@ -277,6 +277,8 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     // SAFETY: a live sockaddr always contains its leading length byte, and
     // getifaddrs owns the declared record for this call.
     let length = usize::from(unsafe { *address.cast::<u8>() });
+    // SAFETY: getifaddrs owns the live record for this call, and its leading
+    // length byte bounds the complete sockaddr allocation.
     let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
     let ip = sockaddr_ip(bytes)?;
     match (interface_address, ip) {

@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed `packetcraftr.output/v1` schema validation for embedded packet fields so
+  malformed field values are rejected consistently with standalone packet
+  documents.
 - Preserved readable multiline Clap diagnostics instead of displaying escaped
   newline literals, and now propagate Clap's actual exit codes.
 

@@ -1,3 +1,5 @@
 /target/
 /fuzz/target/
 /fuzz/artifacts/
+/unsafe_extern_type
+/unsafe_type

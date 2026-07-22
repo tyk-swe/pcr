@@ -909,11 +909,21 @@ fn tcp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
             &registry,
             TracerouteStrategy::Tcp,
             &tcp_request,
-            &decoded_at(tcp_reply, 2, Vec::new()),
+            &decoded_at(tcp_reply.clone(), 2, Vec::new()),
         )
         .unwrap()
         .kind,
         TracerouteResponseKind::DestinationReached
+    );
+    tcp_reply.get_mut::<Tcp>().unwrap().acknowledgment = 19;
+    assert!(
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Tcp,
+            &tcp_request,
+            &decoded_at(tcp_reply, 2, Vec::new()),
+        )
+        .is_none()
     );
 }
 

@@ -1803,7 +1803,13 @@
                 "minLength": 1
               },
               "fields": {
-                "type": "object"
+                "type": "object",
+                "propertyNames": {
+                  "minLength": 1
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/fieldValue"
+                }
               }
             },
             "additionalProperties": false

@@ -4,7 +4,7 @@
 //! Compile and behavior coverage for providers implemented outside the crate.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use bytes::Bytes;
 use packetcraftr::{
@@ -16,8 +16,8 @@ use packetcraftr::{
     net::{
         Error,
         capture::{
-            Limits as CaptureLimits, Provider as CaptureProvider, Session as CaptureSession,
-            Statistics as CaptureStatistics,
+            Captured as CapturedCaptureFrame, Limits as CaptureLimits, Provider as CaptureProvider,
+            Session as CaptureSession, Statistics as CaptureStatistics,
         },
         exchange::Io as ExchangeIo,
         interface::{Address, Flags, Id, Info, Provider as InterfaceProvider},
@@ -84,7 +84,13 @@ impl Layer3Sender for ExternalLayer3 {
     }
 }
 
-struct ExternalCapture;
+struct ExternalCapture {
+    limits: CaptureLimits,
+    ready: bool,
+    frame: Option<CapturedFrame>,
+    shutdowns: usize,
+    statistics: CaptureStatistics,
+}
 
 struct ExternalHostnameResolver;
 
@@ -100,19 +106,25 @@ impl Resolver for ExternalHostnameResolver {
 
 impl CaptureSession for ExternalCapture {
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
+        self.ready = true;
         Ok(())
     }
 
     fn next_frame(&mut self, _timeout: Duration) -> Result<Option<CapturedFrame>, Error> {
-        Ok(None)
+        assert!(
+            self.ready,
+            "capture must be explicitly readied before polling"
+        );
+        Ok(self.frame.take())
     }
 
     fn shutdown(&mut self) -> Result<(), Error> {
+        self.shutdowns += 1;
         Ok(())
     }
 
     fn statistics(&self) -> CaptureStatistics {
-        CaptureStatistics::default()
+        self.statistics
     }
 }
 
@@ -131,7 +143,24 @@ impl CaptureProvider for ExternalExchange {
 
     fn arm_capture(&self, _route: &Plan, limits: CaptureLimits) -> Result<Self::Capture, Error> {
         limits.validate()?;
-        Ok(ExternalCapture)
+        Ok(ExternalCapture {
+            limits,
+            ready: false,
+            frame: Some(
+                CapturedFrame::new(
+                    SystemTime::UNIX_EPOCH,
+                    LinkType::ETHERNET,
+                    Bytes::from_static(&[0xca, 0xfe]),
+                )
+                .unwrap(),
+            ),
+            shutdowns: 0,
+            statistics: CaptureStatistics {
+                received_frames: 1,
+                received_bytes: 2,
+                ..CaptureStatistics::default()
+            },
+        })
     }
 }
 
@@ -219,5 +248,68 @@ fn external_provider_uses_only_platform_neutral_contracts() {
     assert!(matches!(
         TransmissionFrame::try_new(&bytes, &unresolved_route),
         Err(Error::UnresolvedLinkMode)
+    ));
+}
+
+#[test]
+fn external_capture_provider_lifecycle_is_platform_neutral() {
+    let provider = ExternalExchange {
+        packets: Dispatch::new(ExternalLayer2, ExternalLayer3),
+    };
+    let route = route(Mode::Layer2);
+    let limits = CaptureLimits {
+        max_frames: 8,
+        max_bytes: 256,
+        snap_length: 128,
+        ..CaptureLimits::default()
+    };
+
+    let mut capture = provider.arm_capture(&route.plan, limits).unwrap();
+    assert_eq!(capture.limits, limits);
+    assert!(!capture.ready);
+    assert_eq!(capture.shutdowns, 0);
+
+    capture.wait_ready(Duration::from_millis(1)).unwrap();
+    assert!(capture.ready);
+    let captured = capture
+        .next_captured_frame(Duration::ZERO)
+        .unwrap()
+        .unwrap();
+    let CapturedCaptureFrame { frame, received_at } = captured;
+    assert!(received_at.is_none());
+    assert_eq!(frame.bytes().as_ref(), &[0xca, 0xfe]);
+    assert!(
+        capture
+            .next_captured_frame(Duration::ZERO)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(capture.statistics().validate().unwrap().received_frames, 1);
+
+    capture.shutdown().unwrap();
+    assert_eq!(capture.shutdowns, 1);
+
+    let invalid = provider.arm_capture(
+        &route.plan,
+        CaptureLimits {
+            max_frames: 0,
+            ..limits
+        },
+    );
+    assert!(matches!(
+        invalid,
+        Err(Error::InvalidCaptureQueueLimit { .. })
+    ));
+}
+
+#[test]
+fn external_capture_statistics_contract_reports_invalid_loss_counters() {
+    let invalid = CaptureStatistics {
+        dropped_bytes: 1,
+        ..CaptureStatistics::default()
+    };
+    assert!(matches!(
+        invalid.validate(),
+        Err(Error::InvalidCaptureStatistics { .. })
     ));
 }

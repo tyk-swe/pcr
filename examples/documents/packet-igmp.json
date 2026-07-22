@@ -1,0 +1,21 @@
+{
+  "schema": "packetcraftr.packet/v1",
+  "layers": [
+    {
+      "protocol": "ipv4",
+      "fields": {
+        "source": { "type": "ipv4", "value": "192.0.2.1" },
+        "destination": { "type": "ipv4", "value": "224.0.0.1" },
+        "ttl": { "type": "unsigned", "value": 1 }
+      }
+    },
+    {
+      "protocol": "igmp",
+      "fields": {
+        "type": { "type": "unsigned", "value": 17 },
+        "code": { "type": "unsigned", "value": 0 },
+        "body": { "type": "bytes", "value": [224, 0, 0, 1] }
+      }
+    }
+  ]
+}

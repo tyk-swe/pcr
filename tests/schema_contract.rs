@@ -123,8 +123,34 @@ fn schemas_reject_representative_contract_violations() {
         );
     }
 
-    let mut traceroute =
+    let build_success = json_file(root().join("examples/documents/output-build-success.json"));
+
+    let mut malformed_embedded_packet = build_success.clone();
+    malformed_embedded_packet["result"]["packet"]["layers"][0]["fields"]["bytes"]["value"] =
+        json!([256]);
+    assert!(
+        !packet.is_valid(&malformed_embedded_packet["result"]["packet"]),
+        "accepted standalone packet with malformed field value"
+    );
+    assert!(
+        !output.is_valid(&malformed_embedded_packet),
+        "accepted output with malformed embedded packet field value"
+    );
+
+    let mut empty_embedded_field_name = build_success.clone();
+    empty_embedded_field_name["result"]["packet"]["layers"][0]["fields"]
+        .as_object_mut()
+        .unwrap()
+        .insert("".to_owned(), json!({"type": "unsigned", "value": 1}));
+    assert!(
+        !output.is_valid(&empty_embedded_field_name),
+        "accepted output with an empty embedded packet field name"
+    );
+
+    let traceroute_success =
         json_file(root().join("examples/documents/output-traceroute-success.json"));
+
+    let mut traceroute = traceroute_success.clone();
     traceroute["result"]["destination_port"] = json!(0);
     assert!(
         !output.is_valid(&traceroute),
@@ -137,16 +163,17 @@ fn schemas_reject_representative_contract_violations() {
         "accepted traceroute probe with port zero"
     );
 
-    let mut traceroute_complete =
+    let traceroute_complete =
         json_file(root().join("examples/documents/output-traceroute-complete.json"));
-    traceroute_complete["result"]["destination_port"] = json!(0);
+
+    let mut traceroute_completion = traceroute_complete.clone();
+    traceroute_completion["result"]["destination_port"] = json!(0);
     assert!(
-        !output.is_valid(&traceroute_complete),
+        !output.is_valid(&traceroute_completion),
         "accepted traceroute completion with port zero"
     );
 
-    let mut missing_result_port =
-        json_file(root().join("examples/documents/output-traceroute-success.json"));
+    let mut missing_result_port = traceroute_success.clone();
     missing_result_port["result"]
         .as_object_mut()
         .unwrap()
@@ -156,16 +183,14 @@ fn schemas_reject_representative_contract_violations() {
         "accepted UDP traceroute result without a destination port"
     );
 
-    let mut icmp_result_port =
-        json_file(root().join("examples/documents/output-traceroute-success.json"));
+    let mut icmp_result_port = traceroute_success.clone();
     icmp_result_port["result"]["strategy"] = json!("icmp");
     assert!(
         !output.is_valid(&icmp_result_port),
         "accepted ICMP traceroute result with a destination port"
     );
 
-    let mut missing_probe_port =
-        json_file(root().join("examples/documents/output-traceroute-success.json"));
+    let mut missing_probe_port = traceroute_success.clone();
     missing_probe_port["result"]["hops"][0]["probes"][0]
         .as_object_mut()
         .unwrap()
@@ -175,8 +200,7 @@ fn schemas_reject_representative_contract_violations() {
         "accepted UDP traceroute probe without a destination port"
     );
 
-    let mut icmp_complete_port =
-        json_file(root().join("examples/documents/output-traceroute-complete.json"));
+    let mut icmp_complete_port = traceroute_complete.clone();
     icmp_complete_port["result"]["strategy"] = json!("icmp");
     assert!(
         !output.is_valid(&icmp_complete_port),

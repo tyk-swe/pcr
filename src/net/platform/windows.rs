@@ -400,6 +400,8 @@ fn parse_adapters(
         // SAFETY: these are the active documented fields of the generated C
         // unions in IP_ADAPTER_ADDRESSES_LH.
         let ipv4_index = unsafe { adapter.Anonymous1.Anonymous.IfIndex };
+        // SAFETY: Flags is the active documented field of the second generated
+        // C union in IP_ADAPTER_ADDRESSES_LH.
         let flags = unsafe { adapter.Anonymous2.Flags };
         let index = if ipv4_index != 0 {
             ipv4_index
@@ -677,10 +679,12 @@ mod tests {
             BufferBounds::new(storage.as_ptr().cast(), std::mem::size_of_val(&storage)).unwrap();
         assert!(bounds.contains(storage.as_ptr()));
 
-        // The arithmetic creates inert test pointers only; neither is
+        // SAFETY: the arithmetic creates inert test pointers only; neither is
         // dereferenced.
         let misaligned = unsafe { storage.as_ptr().cast::<u8>().add(1) }.cast::<u64>();
         assert!(!bounds.contains(misaligned));
+        // SAFETY: this constructs the one-past-the-end sentinel pointer for a
+        // bounds check only; it is not dereferenced.
         let end = unsafe {
             storage
                 .as_ptr()

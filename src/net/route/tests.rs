@@ -831,6 +831,75 @@ fn encapsulated_srh_does_not_redirect_the_outer_route() {
 }
 
 #[test]
+fn mixed_family_encapsulation_materializes_against_the_outer_envelope() {
+    let outer_source = Ipv4Addr::new(192, 0, 2, 10);
+    let outer_destination = Ipv4Addr::new(198, 51, 100, 50);
+    let gateway = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
+    let inner_source: Ipv6Addr = "2001:db8:1::1".parse().unwrap();
+    let inner_destination: Ipv6Addr = "2001:db8:1::2".parse().unwrap();
+    let resolved_mac = MacAddress([0x02, 0, 0, 0, 0, 2]);
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: outer_source,
+            destination: outer_destination,
+            ..Ipv4::default()
+        })
+        .push(Ipv6 {
+            source: inner_source,
+            destination: inner_destination,
+            ..Ipv6::default()
+        });
+
+    let resolution = NeighborResolution {
+        mac_address: resolved_mac,
+        attempts: 1,
+        cache_hit: true,
+        captured: Vec::new(),
+        evidence_truncated: false,
+        capture_statistics: CaptureStatistics::default(),
+    };
+    let resolver = RecordingResolver {
+        request: Mutex::new(None),
+        resolution: resolution.clone(),
+    };
+    let plan = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer2,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(route(Some(gateway))),
+        )
+        .unwrap();
+
+    assert_eq!(plan.lookup_destination, Some(IpAddr::V4(outer_destination)));
+    assert_eq!(plan.final_destination, Some(IpAddr::V4(outer_destination)));
+    assert_eq!(
+        plan.visited_destinations,
+        vec![IpAddr::V4(outer_destination)]
+    );
+    assert_eq!(plan.packet_source, Some(IpAddr::V4(outer_source)));
+    assert_eq!(plan.neighbor_source, Some(IpAddr::V4(outer_source)));
+    assert_eq!(plan.neighbor_target, Some(gateway));
+
+    let materialized = RoutePlanner.materialize(plan, &resolver).unwrap();
+    assert_eq!(materialized.plan.destination_mac, Some(resolved_mac));
+    assert_eq!(materialized.neighbor_resolution, Some(resolution));
+    assert_eq!(
+        resolver.request.lock().unwrap().as_ref().map(|request| (
+            request.interface_source,
+            request.target,
+            request.link_type
+        )),
+        Some((IpAddr::V4(outer_source), gateway, LinkType::ETHERNET))
+    );
+}
+
+#[test]
 fn unspecified_outer_ip_does_not_route_to_an_explicit_inner_destination() {
     let requested_destination = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2));
     let inner_destination = Ipv4Addr::new(10, 0, 0, 99);

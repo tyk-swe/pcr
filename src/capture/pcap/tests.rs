@@ -107,6 +107,43 @@ fn classic_pcap_reads_little_endian_microsecond_fixture() {
 }
 
 #[test]
+fn classic_pcap_reads_big_endian_nanosecond_records_and_rejects_bad_lengths() {
+    let pcap_bytes = [
+        // Classic PCAP global header, version 2.4, snaplen 64, Ethernet.
+        0xa1, 0xb2, 0x3c, 0x4d, 0x00, 0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x40, 0x00, 0x00, 0x00, 0x01,
+        // One packet at 1 second + 123,456,789 nanoseconds, caplen 2, wirelen 5.
+        0x00, 0x00, 0x00, 0x01, 0x07, 0x5b, 0xcd, 0x15, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x05, 0xaa, 0xbb,
+    ];
+    let decoded = Reader::new(Cursor::new(pcap_bytes))
+        .unwrap()
+        .next_frame()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        decoded.timestamp,
+        UNIX_EPOCH + Duration::new(1, 123_456_789)
+    );
+    assert_eq!(decoded.captured_length(), 2);
+    assert_eq!(decoded.original_length(), 5);
+    assert_eq!(decoded.link_type, LinkType::ETHERNET);
+    assert_eq!(decoded.bytes().as_ref(), &[0xaa, 0xbb]);
+
+    let mut invalid = pcap_bytes.to_vec();
+    invalid[32..36].copy_from_slice(&5_u32.to_be_bytes());
+    invalid[36..40].copy_from_slice(&3_u32.to_be_bytes());
+    let mut reader = Reader::new(Cursor::new(invalid)).unwrap();
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::OriginalLengthTooSmall {
+            captured: 5,
+            original: 3
+        })
+    ));
+}
+
+#[test]
 fn pcapng_round_trip_preserves_multiple_interfaces_and_direction() {
     let mut writer = Writer::pcapng_with_options(
         Vec::new(),

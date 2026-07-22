@@ -132,6 +132,65 @@ fn exact_frame() -> CapturedFrame {
     .unwrap()
 }
 
+fn packet_protocols(value: &serde_json::Value) -> Vec<&str> {
+    value["result"]["packet"]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|layer| layer["protocol"].as_str().unwrap())
+        .collect()
+}
+
+fn assert_gre_sctp_example(value: &serde_json::Value) {
+    assert_eq!(
+        packet_protocols(value),
+        ["ipv4", "gre", "ipv6", "sctp", "raw"]
+    );
+    assert_eq!(
+        value["result"]["packet"]["layers"][0]["fields"]["protocol"]["value"],
+        47
+    );
+    assert_eq!(
+        value["result"]["packet"]["layers"][1]["fields"]["protocol_type"]["value"],
+        0x86dd
+    );
+    assert_eq!(
+        value["result"]["packet"]["layers"][2]["fields"]["next_header"]["value"],
+        132
+    );
+    assert_eq!(
+        value["result"]["packet"]["layers"][3]["fields"]["checksum"]["type"],
+        "unsigned"
+    );
+    assert_eq!(
+        value["result"]["layout"]["layers"]
+            .as_array()
+            .unwrap()
+            .len(),
+        5
+    );
+}
+
+fn assert_igmp_example(value: &serde_json::Value) {
+    assert_eq!(packet_protocols(value), ["ipv4", "igmp"]);
+    assert_eq!(
+        value["result"]["packet"]["layers"][0]["fields"]["ttl"]["type"],
+        "unsigned"
+    );
+    assert_eq!(
+        value["result"]["packet"]["layers"][0]["fields"]["ttl"]["value"],
+        1
+    );
+    assert_eq!(
+        value["result"]["packet"]["layers"][0]["fields"]["protocol"]["value"],
+        2
+    );
+    assert_eq!(
+        value["result"]["packet"]["layers"][1]["fields"]["checksum"]["type"],
+        "unsigned"
+    );
+}
+
 #[test]
 fn every_command_has_published_success_and_error_goldens() {
     for contract in COMMAND_OUTPUT_CONTRACTS {
@@ -151,10 +210,20 @@ fn every_command_has_published_success_and_error_goldens() {
 
 #[test]
 fn packet_document_examples_build_through_the_public_cli() {
-    for (name, expected_length) in [
-        ("packet-ipv4-udp.json", 47),
-        ("packet-gre-sctp.json", 108),
-        ("packet-raw.yaml", 4),
+    type ResultAssertion = fn(&serde_json::Value);
+    for (name, expected_length, assert_result) in [
+        ("packet-ipv4-udp.json", 47, None),
+        (
+            "packet-gre-sctp.json",
+            108,
+            Some(assert_gre_sctp_example as ResultAssertion),
+        ),
+        (
+            "packet-igmp.json",
+            28,
+            Some(assert_igmp_example as ResultAssertion),
+        ),
+        ("packet-raw.yaml", 4, None),
     ] {
         let output = binary()
             .args([
@@ -176,6 +245,9 @@ fn packet_document_examples_build_through_the_public_cli() {
         assert_eq!(value["schema"], "packetcraftr.output/v1", "{name}");
         assert_eq!(value["status"], "success", "{name}");
         assert_eq!(value["result"]["length"], expected_length, "{name}");
+        if let Some(assert_result) = assert_result {
+            assert_result(&value);
+        }
     }
 }
 

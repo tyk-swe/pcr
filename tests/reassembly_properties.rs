@@ -37,6 +37,17 @@ fn tcp_key(port: u16) -> tcp::FlowKey {
     }
 }
 
+fn tcp_segment(flow: tcp::FlowKey, sequence: u32, payload: &'static [u8]) -> tcp::Segment {
+    tcp::Segment {
+        flow,
+        sequence,
+        payload: Bytes::from_static(payload),
+        syn: false,
+        fin: false,
+        rst: false,
+    }
+}
+
 #[test]
 fn deterministic_fragment_command_stream_is_atomic_and_bounded() {
     let limits = limits();
@@ -124,4 +135,96 @@ fn deterministic_tcp_command_stream_rolls_back_rejections_and_flushes() {
     assert_eq!(state.aggregate_bytes(), 0);
     assert_eq!(state.aggregate_memory_charge(), 0);
     assert!(state.flush().is_empty());
+}
+
+#[test]
+fn fragment_reassembly_expiry_uses_per_datagram_last_update() {
+    let start = Instant::now();
+    let mut state =
+        fragment::Reassembler::new(limits(), fragment::OverlapPolicy::RejectConflicting);
+    let older = fragment_key(1);
+    let refreshed = fragment_key(2);
+
+    for key in [older.clone(), refreshed.clone()] {
+        state
+            .push(
+                fragment::Fragment {
+                    key,
+                    offset: 0,
+                    more_fragments: true,
+                    bytes: Bytes::from_static(b"ab"),
+                },
+                start,
+            )
+            .unwrap();
+    }
+    state
+        .push(
+            fragment::Fragment {
+                key: refreshed.clone(),
+                offset: 2,
+                more_fragments: true,
+                bytes: Bytes::from_static(b"cd"),
+            },
+            start + Duration::from_millis(5),
+        )
+        .unwrap();
+
+    let expired = state.expire(start + Duration::from_millis(11));
+    assert_eq!(expired.len(), 1);
+    assert!(matches!(
+        &expired[0],
+        fragment::Event::Expired { key, received_bytes: 2, fragment_count: 1 } if *key == older
+    ));
+    assert_eq!(state.flow_count(), 1);
+
+    let expired = state.expire(start + Duration::from_millis(16));
+    assert!(matches!(
+        expired.as_slice(),
+        [fragment::Event::Expired { key, received_bytes: 4, fragment_count: 2 }] if *key == refreshed
+    ));
+    assert_eq!(state.aggregate_bytes(), 0);
+}
+
+#[test]
+fn tcp_reassembly_interleaves_independent_flows_without_cross_talk() {
+    let start = Instant::now();
+    let first = tcp_key(40_000);
+    let second = tcp_key(40_001);
+    let mut state = tcp::Reassembler::new(limits());
+    state.open_flow(first.clone(), 100, start).unwrap();
+    state.open_flow(second.clone(), 500, start).unwrap();
+
+    assert!(
+        state
+            .push(tcp_segment(first.clone(), 103, b"def"), start)
+            .unwrap()
+            .is_empty()
+    );
+    let second_events = state
+        .push(tcp_segment(second.clone(), 500, b"xy"), start)
+        .unwrap();
+    assert!(second_events.iter().any(|event| matches!(
+        event,
+        tcp::Event::Data { flow, sequence: 500, bytes } if *flow == second && bytes.as_ref() == b"xy"
+    )));
+    let first_events = state
+        .push(tcp_segment(first.clone(), 100, b"abc"), start)
+        .unwrap();
+    assert!(first_events.iter().any(|event| matches!(
+        event,
+        tcp::Event::Data { flow, sequence: 100, bytes } if *flow == first && bytes.as_ref() == b"abcdef"
+    )));
+
+    let expired = state.expire(start + Duration::from_secs(1));
+    assert_eq!(expired.len(), 2);
+    assert!(expired.iter().any(|event| matches!(
+        event,
+        tcp::Event::Evicted { flow, pending_bytes: 0 } if *flow == first
+    )));
+    assert!(expired.iter().any(|event| matches!(
+        event,
+        tcp::Event::Evicted { flow, pending_bytes: 0 } if *flow == second
+    )));
+    assert_eq!(state.aggregate_bytes(), 0);
 }

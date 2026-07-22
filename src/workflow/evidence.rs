@@ -606,6 +606,28 @@ mod tests {
     }
 
     #[test]
+    fn response_deadline_accepts_exact_boundary_and_rejects_pre_send_wall_time() {
+        assert!(response_within_deadline(
+            Some(Duration::from_millis(10)),
+            SystemTime::UNIX_EPOCH + Duration::from_millis(99),
+            SystemTime::UNIX_EPOCH,
+            Duration::from_millis(10),
+        ));
+        assert!(response_within_deadline(
+            None,
+            SystemTime::UNIX_EPOCH + Duration::from_millis(10),
+            SystemTime::UNIX_EPOCH,
+            Duration::from_millis(10),
+        ));
+        assert!(!response_within_deadline(
+            None,
+            SystemTime::UNIX_EPOCH,
+            SystemTime::UNIX_EPOCH + Duration::from_millis(1),
+            Duration::from_millis(10),
+        ));
+    }
+
+    #[test]
     fn response_selector_prefers_rank_before_all_tie_breakers() {
         let earlier = decoded_at(Duration::from_millis(1), &[1]);
         let later = decoded_at(Duration::from_millis(9), &[9]);

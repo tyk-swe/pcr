@@ -992,6 +992,18 @@ fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
     assert!(
         classify_scan_response(&registry, ScanTransport::Tcp, &tcp_request, &corrupt).is_none()
     );
+    assert!(
+        classify_scan_response(
+            &registry,
+            ScanTransport::Tcp,
+            &tcp_request,
+            &decoded(
+                tcp_packet(remote, local, 443, 50_001, Tcp::SYN | Tcp::ACK),
+                Vec::new(),
+            ),
+        )
+        .is_none()
+    );
 }
 
 #[test]
@@ -1006,6 +1018,15 @@ fn udp_direct_matcher_classifies_reply_as_open() {
             .unwrap()
             .classification,
         ScanClassification::Open
+    );
+    assert!(
+        classify_scan_response(
+            &registry,
+            ScanTransport::Udp,
+            &udp_request,
+            &decoded(udp_packet(remote, local, 53, 53_001), Vec::new()),
+        )
+        .is_none()
     );
 }
 
@@ -1042,11 +1063,21 @@ fn icmp_direct_matcher_classifies_matching_echo_reply_as_open() {
             &registry,
             ScanTransport::Icmp,
             &echo_request,
-            &decoded(echo_reply, Vec::new()),
+            &decoded(echo_reply.clone(), Vec::new()),
         )
         .unwrap()
         .classification,
         ScanClassification::Open
+    );
+    echo_reply.get_mut::<Icmpv4>().unwrap().body = Bytes::from_static(&[0x50, 0x43, 0, 8]);
+    assert!(
+        classify_scan_response(
+            &registry,
+            ScanTransport::Icmp,
+            &echo_request,
+            &decoded(echo_reply, Vec::new()),
+        )
+        .is_none()
     );
 }
 

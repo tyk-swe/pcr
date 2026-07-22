@@ -552,6 +552,148 @@ fn validate_library_root(source: &str) -> Result<(), String> {
     }
 }
 
+#[derive(Default)]
+struct UnsafeSyntaxVisitor {
+    found: bool,
+}
+
+impl<'ast> Visit<'ast> for UnsafeSyntaxVisitor {
+    // Stop recursing as soon as any unsafe construct is found. This keeps the
+    // architecture scan cheap on the large platform modules that legitimately
+    // contain unsafe blocks and FFI declarations.
+    fn visit_attribute(&mut self, attribute: &'ast syn::Attribute) {
+        if self.found {
+            return;
+        }
+        if attribute.path().is_ident("unsafe") {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_attribute(self, attribute);
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if self.found {
+            return;
+        }
+        if item.sig.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_item_fn(self, item);
+    }
+
+    fn visit_item_trait(&mut self, item: &'ast syn::ItemTrait) {
+        if self.found {
+            return;
+        }
+        if item.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_item_trait(self, item);
+    }
+
+    fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
+        if self.found {
+            return;
+        }
+        if item.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_item_impl(self, item);
+    }
+
+    fn visit_item_foreign_mod(&mut self, item: &'ast syn::ItemForeignMod) {
+        if self.found {
+            return;
+        }
+        if item.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_item_foreign_mod(self, item);
+    }
+
+    fn visit_impl_item_fn(&mut self, item: &'ast syn::ImplItemFn) {
+        if self.found {
+            return;
+        }
+        if item.sig.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_impl_item_fn(self, item);
+    }
+
+    fn visit_trait_item_fn(&mut self, item: &'ast syn::TraitItemFn) {
+        if self.found {
+            return;
+        }
+        if item.sig.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_trait_item_fn(self, item);
+    }
+
+    fn visit_foreign_item_fn(&mut self, item: &'ast syn::ForeignItemFn) {
+        if self.found {
+            return;
+        }
+        if item.sig.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_foreign_item_fn(self, item);
+    }
+
+    fn visit_type_bare_fn(&mut self, item: &'ast syn::TypeBareFn) {
+        if self.found {
+            return;
+        }
+        if item.unsafety.is_some() {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_type_bare_fn(self, item);
+    }
+
+    fn visit_expr_unsafe(&mut self, _expression: &'ast syn::ExprUnsafe) {
+        self.found = true;
+    }
+
+    fn visit_macro(&mut self, macro_: &'ast syn::Macro) {
+        if self.found {
+            return;
+        }
+        if macro_tokens_use_unsafe(macro_.tokens.clone()) {
+            self.found = true;
+            return;
+        }
+        syn::visit::visit_macro(self, macro_);
+    }
+}
+
+fn macro_tokens_use_unsafe(tokens: proc_macro2::TokenStream) -> bool {
+    tokens.into_iter().any(|token| match token {
+        proc_macro2::TokenTree::Group(group) => macro_tokens_use_unsafe(group.stream()),
+        proc_macro2::TokenTree::Ident(identifier) => identifier == "unsafe",
+        proc_macro2::TokenTree::Punct(_) | proc_macro2::TokenTree::Literal(_) => false,
+    })
+}
+
+fn source_uses_unsafe_syntax(source: &str) -> syn::Result<bool> {
+    if !source.contains("unsafe") {
+        return Ok(false);
+    }
+    let syntax = syn::parse_file(source)?;
+    let mut visitor = UnsafeSyntaxVisitor::default();
+    visitor.visit_file(&syntax);
+    Ok(visitor.found)
+}
+
 #[test]
 fn production_domains_follow_the_dependency_direction() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
@@ -679,6 +821,56 @@ fn visible_reexports_are_explicit() {
     assert!(
         violations.is_empty(),
         "visible glob reexports obscure module boundaries:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
+fn unsafe_syntax_detection_is_structural() {
+    assert!(!source_uses_unsafe_syntax("fn safe() {}").unwrap());
+    assert!(source_uses_unsafe_syntax("unsafe fn foreign_contract() {}").unwrap());
+    assert!(
+        source_uses_unsafe_syntax("fn raw() { unsafe { core::ptr::read(0 as *const u8); } }")
+            .unwrap()
+    );
+    assert!(source_uses_unsafe_syntax("unsafe trait Marker {}").unwrap());
+    assert!(
+        source_uses_unsafe_syntax("#[unsafe(no_mangle)] extern \"C\" fn exported() {}").unwrap()
+    );
+    assert!(source_uses_unsafe_syntax("type Callback = unsafe extern \"C\" fn();").unwrap());
+    assert!(
+        source_uses_unsafe_syntax(
+            "macro_rules! raw { () => {{ unsafe { core::ptr::read(0 as *const u8); } }} }"
+        )
+        .unwrap()
+    );
+    assert!(!source_uses_unsafe_syntax("macro_rules! safe { () => { \"unsafe\" } }").unwrap());
+    assert!(!source_uses_unsafe_syntax("// unsafe in a comment").unwrap());
+}
+
+#[test]
+fn unsafe_code_stays_inside_platform_boundary() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut violations = Vec::new();
+
+    for file in source_files(root) {
+        let relative = file.strip_prefix(root).unwrap_or(&file);
+        let source = std::fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
+        if source_uses_unsafe_syntax(&source)
+            .unwrap_or_else(|error| panic!("failed to parse {}: {error}", relative.display()))
+            && !relative.starts_with("src/net/platform")
+        {
+            violations.push(format!(
+                "unsafe syntax outside src/net/platform in {}",
+                relative.display()
+            ));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "unsafe boundary violations:\n{}",
         violations.join("\n")
     );
 }

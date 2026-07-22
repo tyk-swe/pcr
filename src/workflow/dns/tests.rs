@@ -722,6 +722,30 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
         ),
         Some(DnsResponseClassification::Response(_))
     ));
+    let mut renamed_probe = probe.clone();
+    renamed_probe.query_name = "api.example.".to_owned();
+    assert!(matches!(
+        classify_dns_response(
+            &registry,
+            &renamed_probe,
+            &sent,
+            &decoded(server, 42, Vec::new()),
+            DnsLimits::default(),
+        ),
+        Some(DnsResponseClassification::Unrelated { .. })
+    ));
+    let mut retyped_probe = probe.clone();
+    retyped_probe.query_type = DnsQueryType::Aaaa;
+    assert!(matches!(
+        classify_dns_response(
+            &registry,
+            &retyped_probe,
+            &sent,
+            &decoded(server, 42, Vec::new()),
+            DnsLimits::default(),
+        ),
+        Some(DnsResponseClassification::Unrelated { .. })
+    ));
     assert!(matches!(
         classify_dns_response(
             &registry,

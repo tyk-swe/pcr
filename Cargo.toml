@@ -13,6 +13,9 @@ publish = false
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
 [profile.release]
 # Packet offsets, lengths, and accounting must fail closed in optimized builds
 # just as they do in development and CI profiles.

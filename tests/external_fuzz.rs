@@ -48,16 +48,16 @@ impl FuzzAuthorizer for Authorizer {
 
 struct Executor {
     registry: Arc<Registry>,
-    calls: usize,
+    executed: Vec<(u64, Duration)>,
 }
 
 impl FuzzExecutor for Executor {
     fn execute(
         &mut self,
         case: &ExecutionCase,
-        _timeout: Duration,
+        timeout: Duration,
     ) -> Result<Execution, BoundaryError> {
-        self.calls += 1;
+        self.executed.push((case.index, timeout));
         let built = Builder::new(Arc::clone(&self.registry))
             .build(case.packet.clone(), Context::default(), Options::default())
             .map_err(|source| {
@@ -129,7 +129,7 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
     let mut authorizer = Authorizer { calls: 0 };
     let mut executor = Executor {
         registry: Arc::clone(&registry),
-        calls: 0,
+        executed: Vec::new(),
     };
     let mut clock = Clock::default();
     let live = run_live(
@@ -148,7 +148,10 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
     )
     .unwrap();
     assert_eq!(authorizer.calls, 1);
-    assert_eq!(executor.calls, 2);
+    assert_eq!(
+        executor.executed,
+        vec![(0, Duration::from_millis(1)), (1, Duration::from_millis(1))]
+    );
     assert_eq!(clock.sleeps, 1);
     assert!(
         live.cases

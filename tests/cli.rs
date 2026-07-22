@@ -1402,6 +1402,46 @@ fn read_ndjson_terminal_errors_use_the_next_unused_sequence() {
 }
 
 #[test]
+fn malformed_read_preserves_completed_binary_output_before_terminal_error() {
+    let path = write_capture(&[b"ok"], true);
+
+    let hex = binary()
+        .args(["--output", "hex", "read"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    let binary_outputs = ["pcap", "pcapng"].map(|format| {
+        let output = binary()
+            .args(["--output", format, "read"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        (format, output)
+    });
+    std::fs::remove_file(path).unwrap();
+
+    assert_eq!(hex.status.code(), Some(3));
+    assert_eq!(hex.stdout, b"6f6b\n");
+    assert!(String::from_utf8_lossy(&hex.stderr).contains("truncated"));
+
+    for (format, output) in binary_outputs {
+        assert_eq!(output.status.code(), Some(3), "{format}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("truncated"),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut reader = Reader::new(std::io::Cursor::new(output.stdout)).unwrap();
+        assert_eq!(
+            reader.next_frame().unwrap().unwrap().bytes().as_ref(),
+            b"ok",
+            "{format}"
+        );
+        assert!(reader.next_frame().unwrap().is_none(), "{format}");
+    }
+}
+
+#[test]
 fn unsupported_json_for_read_is_typed_before_opening_the_input() {
     let output = binary()
         .args(["--output", "json", "read", "definitely-missing.pcap"])

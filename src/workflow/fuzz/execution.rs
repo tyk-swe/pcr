@@ -1,7 +1,7 @@
 use super::{
-    CASE_DOMAIN, Diagnostic, Duration, EvidenceBudget, Frame, FuzzCase, FuzzCaseExecution,
-    FuzzError, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION, SPLITMIX_INCREMENT,
-    push_diagnostic_once,
+    CASE_DOMAIN, Deadline, Diagnostic, Duration, EvidenceBudget, Frame, FuzzCase,
+    FuzzCaseExecution, FuzzError, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION,
+    SPLITMIX_INCREMENT, duration_limit, push_diagnostic_once,
 };
 
 pub(super) fn worst_case_duration(
@@ -40,6 +40,7 @@ pub(super) fn validate_execution(
     execution: &FuzzCaseExecution,
     limits: FuzzLimits,
     timeout: Duration,
+    deadline: &Deadline,
 ) -> Result<(), FuzzError> {
     if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
         return Err(FuzzError::InvalidEvidence {
@@ -86,6 +87,7 @@ pub(super) fn validate_execution(
         ("undecoded", &execution.undecoded),
     ] {
         for frame in frames {
+            deadline.check().map_err(duration_limit)?;
             frame
                 .validate()
                 .map_err(|source| FuzzError::InvalidEvidence {
@@ -95,6 +97,7 @@ pub(super) fn validate_execution(
         }
     }
     for response in &execution.responses {
+        deadline.check().map_err(duration_limit)?;
         let within_deadline = response
             .timestamp
             .duration_since(execution.sent.timestamp)
@@ -108,6 +111,7 @@ pub(super) fn validate_execution(
             });
         }
     }
+    deadline.check().map_err(duration_limit)?;
     Ok(())
 }
 
@@ -155,31 +159,39 @@ fn retain_fuzz_evidence(budget: &mut EvidenceBudget, frame: &Frame, limits: Fuzz
         .is_ok()
 }
 
+pub(super) struct ExecutionEvidence {
+    pub(super) responses: Vec<Frame>,
+    pub(super) unmatched: Vec<Frame>,
+    pub(super) undecoded: Vec<Frame>,
+}
+
 pub(super) fn retain_evidence(
     case: &mut FuzzCase,
-    responses: Vec<Frame>,
-    unmatched: Vec<Frame>,
-    undecoded: Vec<Frame>,
+    evidence: ExecutionEvidence,
     limits: FuzzLimits,
     budget: &mut EvidenceBudget,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+    deadline: &Deadline,
+) -> Result<(), FuzzError> {
     let mut omitted = false;
-    for frame in responses {
+    for frame in evidence.responses {
+        deadline.check().map_err(duration_limit)?;
         if retain_fuzz_evidence(budget, &frame, limits) {
             case.responses.push(frame);
         } else {
             omitted = true;
         }
     }
-    for frame in unmatched {
+    for frame in evidence.unmatched {
+        deadline.check().map_err(duration_limit)?;
         if retain_fuzz_evidence(budget, &frame, limits) {
             case.unmatched.push(frame);
         } else {
             omitted = true;
         }
     }
-    for frame in undecoded {
+    for frame in evidence.undecoded {
+        deadline.check().map_err(duration_limit)?;
         if retain_fuzz_evidence(budget, &frame, limits) {
             case.undecoded.push(frame);
         } else {
@@ -198,6 +210,8 @@ pub(super) fn retain_evidence(
             ),
         );
     }
+    deadline.check().map_err(duration_limit)?;
+    Ok(())
 }
 
 pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {

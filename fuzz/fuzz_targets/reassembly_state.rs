@@ -24,59 +24,81 @@ fuzz_target!(|data: &[u8]| {
         let mut bytes = [0_u8; 8];
         bytes[..command.len()].copy_from_slice(command);
         let word = u64::from_le_bytes(bytes);
-        if word & 1 == 0 {
-            let before = (
-                fragments.flow_count(),
-                fragments.aggregate_bytes(),
-                fragments.aggregate_memory_charge(),
-            );
-            let result = fragments.push(
-                fragment::Fragment {
-                    key: fragment::DatagramKey {
-                        source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-                        destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-                        identification: (word >> 8) as u32 % 24,
-                        next_header: 17,
-                    },
-                    offset: ((word >> 24) as u32 % 512) & !7,
-                    more_fragments: word & 2 != 0,
-                    bytes: vec![(word >> 56) as u8; ((word >> 40) as usize % 32) + 1].into(),
-                },
-                now + Duration::from_micros(step as u64),
-            );
-            if result.is_err() {
-                assert_eq!(
-                    before,
-                    (
-                        fragments.flow_count(),
-                        fragments.aggregate_bytes(),
-                        fragments.aggregate_memory_charge()
-                    )
-                );
-            }
+        let timestamp = if word & (1 << 7) == 0 {
+            now + Duration::from_micros(step as u64)
         } else {
-            let before = (tcp.aggregate_bytes(), tcp.aggregate_memory_charge());
-            let result = tcp.push(
-                tcp::Segment {
-                    flow: tcp::FlowKey {
-                        source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-                        source_port: 40_000 + ((word >> 8) as u16 % 24),
-                        destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-                        destination_port: 443,
-                    },
-                    sequence: (word >> 16) as u32,
-                    payload: vec![(word >> 56) as u8; ((word >> 48) as usize % 32) + 1].into(),
-                    syn: word & 2 != 0,
-                    fin: word & 4 != 0,
-                    rst: word & 8 != 0,
-                },
-                now + Duration::from_micros(step as u64),
-            );
-            if result.is_err() {
-                assert_eq!(
-                    before,
-                    (tcp.aggregate_bytes(), tcp.aggregate_memory_charge())
+            now + Duration::from_micros((step / 2) as u64)
+        };
+        match word & 3 {
+            0 => {
+                let before = (
+                    fragments.flow_count(),
+                    fragments.aggregate_bytes(),
+                    fragments.aggregate_memory_charge(),
                 );
+                let result = fragments.push(
+                    fragment::Fragment {
+                        key: fragment::DatagramKey {
+                            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+                            identification: (word >> 8) as u32 % 24,
+                            next_header: 17,
+                        },
+                        offset: ((word >> 24) as u32 % 512) & !7,
+                        more_fragments: word & (1 << 8) != 0,
+                        bytes: vec![(word >> 56) as u8; ((word >> 40) as usize % 32) + 1]
+                            .into(),
+                    },
+                    timestamp,
+                );
+                if result.is_err() {
+                    assert_eq!(
+                        before,
+                        (
+                            fragments.flow_count(),
+                            fragments.aggregate_bytes(),
+                            fragments.aggregate_memory_charge()
+                        )
+                    );
+                }
+            }
+            1 => {
+                let before = (tcp.aggregate_bytes(), tcp.aggregate_memory_charge());
+                let result = tcp.push(
+                    tcp::Segment {
+                        flow: tcp::FlowKey {
+                            source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                            source_port: 40_000 + ((word >> 8) as u16 % 24),
+                            destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
+                            destination_port: 443,
+                        },
+                        sequence: (word >> 16) as u32,
+                        payload: vec![(word >> 56) as u8; ((word >> 48) as usize % 32) + 1]
+                            .into(),
+                        syn: word & (1 << 8) != 0,
+                        fin: word & (1 << 9) != 0,
+                        rst: word & (1 << 10) != 0,
+                    },
+                    timestamp,
+                );
+                if result.is_err() {
+                    assert_eq!(
+                        before,
+                        (tcp.aggregate_bytes(), tcp.aggregate_memory_charge())
+                    );
+                }
+            }
+            2 => {
+                fragments.expire(timestamp + limits.fragment_expiry);
+                tcp.expire(timestamp + limits.tcp_idle_expiry);
+            }
+            _ => {
+                fragments.flush();
+                tcp.flush();
+                assert_eq!(fragments.aggregate_bytes(), 0);
+                assert_eq!(fragments.aggregate_memory_charge(), 0);
+                assert_eq!(tcp.aggregate_bytes(), 0);
+                assert_eq!(tcp.aggregate_memory_charge(), 0);
             }
         }
         assert!(fragments.aggregate_memory_charge() <= limits.max_aggregate_bytes);

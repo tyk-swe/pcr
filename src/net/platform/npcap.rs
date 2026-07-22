@@ -3,6 +3,8 @@
 
 //! Runtime-loaded Npcap adapter for Windows.
 
+#![allow(unsafe_code)]
+
 use super::live_capture::NativeCaptureParts;
 use crate::net::{
     Error as LiveIoError,
@@ -18,6 +20,7 @@ mod supported {
     use std::path::PathBuf;
     use std::ptr::NonNull;
     use std::sync::{Arc, OnceLock};
+    use std::time::{Instant, SystemTime};
 
     use bytes::Bytes;
     use libloading::os::windows::{
@@ -33,7 +36,7 @@ mod supported {
 
     use super::super::live_capture::{
         CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-        NativeCaptureStatistics, NativeCapturedPacket, system_time,
+        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
     };
     use crate::capture::LinkType;
     use crate::net::{
@@ -353,6 +356,9 @@ mod supported {
             let result = unsafe {
                 (self.handle.api.pcap_next_ex)(self.handle.raw.as_ptr(), &mut header, &mut data)
             };
+            // Monotonic first makes the paired-clock sampling skew conservative.
+            let observed_at = Instant::now();
+            let observed_wall = SystemTime::now();
             match result {
                 1 => {
                     let header = NonNull::new(header).ok_or_else(|| LiveIoError::Capture {
@@ -362,6 +368,11 @@ mod supported {
                     // header remains valid until the next handle operation; we
                     // copy the fixed-size value immediately.
                     let header = unsafe { *header.as_ptr() };
+                    let timestamp = system_time(
+                        header.timestamp.tv_sec as i64,
+                        header.timestamp.tv_usec as i64,
+                    )?;
+                    let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
                     let captured_length = header.captured_length as usize;
                     if captured_length > self.snap_length {
                         return Err(LiveIoError::Capture {
@@ -395,10 +406,8 @@ mod supported {
                         })
                     };
                     Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
-                        timestamp: system_time(
-                            header.timestamp.tv_sec as i64,
-                            header.timestamp.tv_usec as i64,
-                        )?,
+                        timestamp,
+                        received_at,
                         captured_length: header.captured_length,
                         original_length: header.original_length,
                         bytes,

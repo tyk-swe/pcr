@@ -262,6 +262,39 @@ pub(super) fn read_exact_counted<R: Read>(
     }
 }
 
+pub(super) fn read_exact_vec<R: Read>(
+    reader: &mut R,
+    buffer: &mut Vec<u8>,
+    length: usize,
+    context: &'static str,
+) -> Result<(), Error> {
+    buffer.clear();
+    buffer
+        .try_reserve_exact(length)
+        .map_err(|_| Error::Io(io::ErrorKind::OutOfMemory.into()))?;
+    let actual = reader
+        .take(length as u64)
+        .read_to_end(buffer)
+        .map_err(Error::Io)?;
+    if actual == length {
+        Ok(())
+    } else {
+        Err(Error::Truncated {
+            context,
+            expected: length,
+            actual,
+        })
+    }
+}
+
+pub(super) fn copy_bytes_fallibly(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+    let mut copy = Vec::new();
+    copy.try_reserve_exact(bytes.len())
+        .map_err(|_| Error::Io(io::ErrorKind::OutOfMemory.into()))?;
+    copy.extend_from_slice(bytes);
+    Ok(copy)
+}
+
 pub(super) fn usize_to_u32_limit(value: usize) -> Result<u32, Error> {
     u32::try_from(value).map_err(|_| Error::SizeLimitExceeded {
         kind: "capture size",

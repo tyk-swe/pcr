@@ -19,10 +19,8 @@ impl SystemAuthorizer {
             allow_malformed_live,
         }
     }
-}
 
-impl ReplayAuthorizer for SystemAuthorizer {
-    fn authorize(&mut self, frame: &Frame, mode: LinkMode) -> Result<(), BoundaryError> {
+    fn authorize_frame(&self, frame: &Frame, mode: LinkMode) -> Result<(), BoundaryError> {
         if frame.captured_length() != frame.original_length() {
             return Err(BoundaryError::new(
                 format!(
@@ -42,7 +40,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
         }
         if mode == LinkMode::Layer3 {
             replay_network_envelope(frame).map_err(|source| {
-                BoundaryError::new(
+                BoundaryError::with_source(
                     source.to_string(),
                     Classification::new(
                         "packet.replay_network",
@@ -50,6 +48,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                         Some("repair the raw IP header or capture link type before live replay"),
                     ),
                     Vec::new(),
+                    source,
                 )
             })?;
         }
@@ -57,20 +56,21 @@ impl ReplayAuthorizer for SystemAuthorizer {
             addresses,
             has_unsupported_routing_header,
         } = replay_wire_destinations(frame).map_err(|source| {
-            BoundaryError::new(
+            BoundaryError::with_source(
                 source.to_string(),
                 Classification::new(
-                    "packet.replay_ipv4_options",
+                    "packet.replay_packet_semantics",
                     Kind::Packet,
-                    Some("repair malformed IPv4 source-route options before live replay"),
+                    Some("repair malformed route-bearing packet fields before live replay"),
                 ),
                 Vec::new(),
+                source,
             )
         })?;
         for destination in addresses {
             self.policy
                 .authorize_destination(destination)
-                .map_err(|source| BoundaryError::classified(&source))?;
+                .map_err(BoundaryError::from_error)?;
         }
         if has_unsupported_routing_header {
             return Err(BoundaryError::new(
@@ -88,7 +88,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
         let decoded = Decoder::new(Arc::clone(&self.registry))
             .decode(frame.clone(), DecodeOptions::default())
             .map_err(|source| {
-                BoundaryError::new(
+                BoundaryError::with_source(
                     source.to_string(),
                     Classification::new(
                         "packet.decode",
@@ -96,6 +96,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                         Some("repair the frame or link type before authorizing live replay"),
                     ),
                     Vec::new(),
+                    source,
                 )
             })?;
         let rebuilt = Builder::new(Arc::clone(&self.registry))
@@ -108,7 +109,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                 },
             )
             .map_err(|source| {
-                BoundaryError::new(
+                BoundaryError::with_source(
                     format!("captured frame cannot be rebuilt exactly: {source}"),
                     Classification::new(
                         "packet.replay_rebuild",
@@ -118,6 +119,7 @@ impl ReplayAuthorizer for SystemAuthorizer {
                         ),
                     ),
                     Vec::new(),
+                    source,
                 )
             })?;
         if rebuilt.bytes != frame.bytes() {
@@ -147,12 +149,34 @@ impl ReplayAuthorizer for SystemAuthorizer {
             ));
         }
         if rebuilt.requires_live_opt_in && !self.policy.allow_permissive_packets {
-            let source = crate::client::policy::Error::PermissivePacket;
-            return Err(BoundaryError::classified(&source));
+            return Err(BoundaryError::from_error(
+                crate::client::policy::Error::PermissivePacket,
+            ));
         }
         self.policy
             .authorize_packet_destinations(&decoded.packet)
-            .map_err(|source| BoundaryError::classified(&source))
+            .map_err(BoundaryError::from_error)
+    }
+}
+
+impl ReplayAuthorizer for SystemAuthorizer {
+    fn authorize_operation(
+        &mut self,
+        context: ReplayAuthorizationContext,
+        frame: &Frame,
+        mode: LinkMode,
+    ) -> Result<(), BoundaryError> {
+        self.policy
+            .authorize_operation(context.packets, context.wire_bytes)
+            .map_err(BoundaryError::from_error)?;
+        self.authorize_frame(frame, mode)
+    }
+
+    fn authorize(&mut self, frame: &Frame, mode: LinkMode) -> Result<(), BoundaryError> {
+        self.policy
+            .authorize_operation(1, u64::from(frame.captured_length()))
+            .map_err(BoundaryError::from_error)?;
+        self.authorize_frame(frame, mode)
     }
 }
 
@@ -183,17 +207,18 @@ impl SystemTransmitter {
             LinkMode::Layer3 => Some((frame.clone(), replay_network_envelope(frame)?)),
             LinkMode::Layer2 | LinkMode::Auto => None,
         };
+        if self
+            .validated_interface
+            .as_ref()
+            .is_some_and(|selected| !requested_interface_matches(&selected.id, requested))
+        {
+            self.validated_interface = None;
+        }
         if self.validated_interface.is_none() {
             let interfaces = SystemInterfaceProvider.interfaces()?;
             let selected = interfaces
                 .into_iter()
-                .find(|interface| {
-                    if requested.index != 0 {
-                        interface.id.index == requested.index
-                    } else {
-                        interface.id.name == requested.name
-                    }
-                })
+                .find(|interface| requested_interface_matches(&interface.id, requested))
                 .ok_or_else(|| LiveIoError::Device {
                     interface: requested.name.clone(),
                     message: "no interface matches the requested name or index".to_owned(),
@@ -327,6 +352,12 @@ impl SystemTransmitter {
     }
 }
 
+fn requested_interface_matches(actual: &InterfaceId, requested: &InterfaceId) -> bool {
+    !(requested.index == 0 && requested.name.is_empty())
+        && (requested.index == 0 || actual.index == requested.index)
+        && (requested.name.is_empty() || actual.name == requested.name)
+}
+
 impl Default for SystemTransmitter {
     fn default() -> Self {
         Self::new()
@@ -376,8 +407,44 @@ use super::{
     Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, DecodeOptions, Decoder,
     DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo, InterfaceProvider, Kind,
     LinkCapability, LinkMode, LiveIoError, MaterializedRoute, NetworkEnvelope, PacketIo,
-    PlannedRoute, ProtocolRegistry, ReplayAuthorizer, ReplayTransmission, ReplayTransmitter,
-    RouteDecision, RouteProvider, RouteSelectionReason, SystemInterfaceProvider, SystemLayer2Io,
-    SystemLayer3Io, SystemRouteProvider, TransmissionFrame,
+    PlannedRoute, ProtocolRegistry, ReplayAuthorizationContext, ReplayAuthorizer,
+    ReplayTransmission, ReplayTransmitter, RouteDecision, RouteProvider, RouteSelectionReason,
+    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemRouteProvider,
+    TransmissionFrame,
 };
 use crate::workflow::BoundaryError;
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn requested_interface_requires_every_supplied_identity_component() {
+        let actual = InterfaceId {
+            name: "current0".to_owned(),
+            index: 7,
+        };
+        assert!(requested_interface_matches(&actual, &actual));
+        assert!(!requested_interface_matches(
+            &actual,
+            &InterfaceId {
+                name: "stale0".to_owned(),
+                index: 7,
+            }
+        ));
+        assert!(!requested_interface_matches(
+            &actual,
+            &InterfaceId {
+                name: "current0".to_owned(),
+                index: 8,
+            }
+        ));
+        assert!(!requested_interface_matches(
+            &actual,
+            &InterfaceId {
+                name: String::new(),
+                index: 0,
+            }
+        ));
+    }
+}

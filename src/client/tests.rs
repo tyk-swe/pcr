@@ -10,8 +10,9 @@ use bytes::Bytes;
 
 use super::client::Client;
 use super::exchange::{
-    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext, ExchangeResult,
-    MAX_EXCHANGE_TIMEOUT, PreparedExchangePacket,
+    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
+    ExchangeProcessOutcome, ExchangeResult, MAX_EXCHANGE_TIMEOUT, PreparedExchangePacket,
+    WorkflowPromotionContext,
 };
 use super::helpers::{patch_builtin_ethernet, reserve_capture_evidence};
 use super::policy::{TrafficPolicy, TrafficPolicyError};
@@ -44,8 +45,9 @@ use crate::packet::{
         LayerEncodeContext,
     },
     decode::Dissector,
-    field::{FieldValue, WireValue},
+    field::{FieldKind, FieldValue, WireValue},
     layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId, Raw},
+    matcher::{MatchResult, ResponseMatcher},
     registry::RegistryBuilder,
     template::{PacketTemplate, TemplateValues},
 };
@@ -53,7 +55,7 @@ use crate::protocol::{
     builtin::{Module as BuiltinProtocols, registry as default_registry},
     icmp::Icmpv4,
     ipv6::SegmentRoutingHeader,
-    link::{Ethernet, Vlan, Vlan8021ad},
+    link::{Arp, Ethernet, Vlan, Vlan8021ad},
     network::{Ipv4, Ipv6},
     transport::Udp,
 };
@@ -191,6 +193,50 @@ impl Layer for MacSensitiveLayer {
     }
 }
 
+#[derive(Clone, Debug)]
+struct CustomRouteLayer;
+
+impl Layer for CustomRouteLayer {
+    fn schema(&self) -> &'static LayerSchema {
+        static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
+        static FIELDS: &[FieldSchema] = &[FieldSchema {
+            name: "destination",
+            kind: FieldKind::Ipv4,
+            derived: false,
+            required: true,
+            description: "custom route-bearing destination",
+        }];
+        SCHEMA.get_or_init(|| LayerSchema {
+            protocol: ProtocolId::new("test.custom_route"),
+            name: "Custom route-bearing test layer",
+            fields: FIELDS,
+        })
+    }
+
+    fn clone_box(&self) -> Box<dyn Layer> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn field(&self, _name: &str) -> Option<FieldValue> {
+        None
+    }
+
+    fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
+        Err(FieldError::UnknownField {
+            protocol: self.protocol_id(),
+            field: name.to_owned(),
+        })
+    }
+}
+
 #[derive(Debug)]
 struct MacSensitiveCodec;
 
@@ -233,6 +279,16 @@ impl LayerCodec for MacSensitiveCodec {
         _fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, CodecError> {
         Ok(Box::new(MacSensitiveLayer))
+    }
+}
+
+#[derive(Debug)]
+struct SlowMatcher(Duration);
+
+impl ResponseMatcher for SlowMatcher {
+    fn matches(&self, _request: &Packet, _response: &Packet) -> MatchResult {
+        std::thread::sleep(self.0);
+        MatchResult::matched(200, "slow test matcher")
     }
 }
 
@@ -387,6 +443,10 @@ struct ScriptedExchangeCapture {
 }
 
 impl CaptureSession for ScriptedExchangeCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.events.lock().unwrap().push("ready");
         Ok(())
@@ -452,6 +512,150 @@ impl CaptureProvider for ScriptedExchangeIo {
 }
 
 #[derive(Clone)]
+struct DeadlineConsumingExchangeIo {
+    events: Arc<Mutex<Vec<&'static str>>>,
+    response: Arc<Mutex<Option<Frame>>>,
+}
+
+impl PacketIo for DeadlineConsumingExchangeIo {
+    fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+        self.events.lock().unwrap().push("send");
+        Ok(IoSendReport {
+            bytes_sent: frame.bytes().len(),
+            wire_bytes: Some(frame.bytes().clone()),
+        })
+    }
+}
+
+struct DeadlineConsumingCapture {
+    events: Arc<Mutex<Vec<&'static str>>>,
+    response: Arc<Mutex<Option<Frame>>>,
+    statistics: CaptureStatistics,
+}
+
+impl CaptureSession for DeadlineConsumingCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
+    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+        self.events.lock().unwrap().push("ready");
+        Ok(())
+    }
+
+    fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+        if self.events.lock().unwrap().contains(&"send") {
+            let response = self.response.lock().unwrap().take();
+            if let Some(frame) = &response {
+                self.statistics.received_frames += 1;
+                self.statistics.received_bytes += frame.bytes().len() as u64;
+                return Ok(response);
+            }
+        }
+        if !timeout.is_zero() {
+            self.events.lock().unwrap().push("capture_wait");
+            std::thread::sleep(timeout);
+        }
+        Ok(None)
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        self.next_frame(timeout)
+            .map(|frame| frame.map(|frame| CapturedFrame::new(frame, Instant::now())))
+    }
+
+    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        self.events.lock().unwrap().push("shutdown");
+        Ok(())
+    }
+
+    fn statistics(&self) -> CaptureStatistics {
+        self.statistics
+    }
+}
+
+impl CaptureProvider for DeadlineConsumingExchangeIo {
+    type Capture = DeadlineConsumingCapture;
+
+    fn arm_capture(
+        &self,
+        _route: &PlannedRoute,
+        _limits: CaptureQueueLimits,
+    ) -> Result<Self::Capture, LiveIoError> {
+        self.events.lock().unwrap().push("arm");
+        Ok(DeadlineConsumingCapture {
+            events: Arc::clone(&self.events),
+            response: Arc::clone(&self.response),
+            statistics: CaptureStatistics::default(),
+        })
+    }
+}
+
+#[derive(Clone)]
+struct UnmarkedExchangeIo(ScriptedExchangeIo);
+
+impl PacketIo for UnmarkedExchangeIo {
+    fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+        self.0.send(frame)
+    }
+}
+
+struct UnmarkedExchangeCapture(ScriptedExchangeCapture);
+
+impl CaptureSession for UnmarkedExchangeCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
+    fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
+        self.0.wait_ready(timeout)
+    }
+
+    fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+        self.0.next_frame(timeout)
+    }
+
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        self.0
+            .next_frame(timeout)
+            .map(|frame| frame.map(CapturedFrame::without_ingress_time))
+    }
+
+    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        self.0.shutdown()
+    }
+
+    fn statistics(&self) -> CaptureStatistics {
+        self.0.statistics()
+    }
+}
+
+impl CaptureProvider for UnmarkedExchangeIo {
+    type Capture = UnmarkedExchangeCapture;
+
+    fn arm_capture(
+        &self,
+        _route: &PlannedRoute,
+        limits: CaptureQueueLimits,
+    ) -> Result<Self::Capture, LiveIoError> {
+        self.0.events.lock().unwrap().push("arm");
+        self.0.limits.lock().unwrap().push(limits);
+        Ok(UnmarkedExchangeCapture(ScriptedExchangeCapture {
+            events: Arc::clone(&self.0.events),
+            response: Arc::clone(&self.0.response),
+            deliver_before_send: self.0.deliver_before_send,
+            statistics: self.0.capture_statistics,
+        }))
+    }
+}
+
+#[derive(Clone)]
 struct EndlessCaptureIo {
     frame: Frame,
     sends: Arc<AtomicUsize>,
@@ -470,6 +674,10 @@ impl PacketIo for EndlessCaptureIo {
 struct EndlessCapture(Frame);
 
 impl CaptureSession for EndlessCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         Ok(())
     }
@@ -520,6 +728,10 @@ impl PacketIo for SlowSendIo {
 struct EmptyCapture;
 
 impl CaptureSession for EmptyCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         Ok(())
     }
@@ -562,6 +774,10 @@ impl PacketIo for ReadinessAndShutdownFailIo {
 struct ReadinessAndShutdownFailCapture(Arc<Mutex<Vec<&'static str>>>);
 
 impl CaptureSession for ReadinessAndShutdownFailCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().unwrap().push("ready");
         Err(LiveIoError::CaptureReadiness {
@@ -601,6 +817,10 @@ impl CaptureProvider for ReadinessAndShutdownFailIo {
 struct DropObservedCapture(Arc<AtomicUsize>);
 
 impl CaptureSession for DropObservedCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         Ok(())
     }
@@ -616,6 +836,76 @@ impl CaptureSession for DropObservedCapture {
 
     fn statistics(&self) -> CaptureStatistics {
         CaptureStatistics::default()
+    }
+}
+
+struct PanicShutdownCapture(Arc<AtomicUsize>);
+
+impl CaptureSession for PanicShutdownCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
+    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+        Ok(())
+    }
+
+    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+        Ok(None)
+    }
+
+    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        panic!("scripted shutdown panic")
+    }
+
+    fn statistics(&self) -> CaptureStatistics {
+        CaptureStatistics::default()
+    }
+}
+
+#[derive(Clone)]
+struct MissingMonotonicIo(Arc<Mutex<Vec<&'static str>>>);
+
+impl PacketIo for MissingMonotonicIo {
+    fn send(&self, _frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
+        self.0.lock().unwrap().push("send");
+        unreachable!("missing monotonic ingress capability must prevent transmission")
+    }
+}
+
+struct MissingMonotonicCapture(Arc<Mutex<Vec<&'static str>>>);
+
+impl CaptureSession for MissingMonotonicCapture {
+    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
+        self.0.lock().unwrap().push("ready");
+        Ok(())
+    }
+
+    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+        Ok(None)
+    }
+
+    fn shutdown(&mut self) -> Result<(), LiveIoError> {
+        self.0.lock().unwrap().push("shutdown");
+        Ok(())
+    }
+
+    fn statistics(&self) -> CaptureStatistics {
+        CaptureStatistics::default()
+    }
+}
+
+impl CaptureProvider for MissingMonotonicIo {
+    type Capture = MissingMonotonicCapture;
+
+    fn arm_capture(
+        &self,
+        _route: &PlannedRoute,
+        _limits: CaptureQueueLimits,
+    ) -> Result<Self::Capture, LiveIoError> {
+        self.0.lock().unwrap().push("arm");
+        Ok(MissingMonotonicCapture(Arc::clone(&self.0)))
     }
 }
 
@@ -1823,9 +2113,7 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
     let prepared = vec![prepared_exchange_packet(request, source, destination)];
     let sent_at = vec![Instant::now()];
     let received_at = sent_at[0].checked_add(Duration::from_millis(1)).unwrap();
-    let deadline = sent_at[0].checked_add(Duration::from_millis(10)).unwrap();
-    std::thread::sleep(Duration::from_millis(20));
-    assert!(Instant::now() > deadline);
+    let deadline = sent_at[0].checked_add(Duration::from_secs(1)).unwrap();
 
     let dissector = Dissector::new(Arc::clone(&registry));
     let options = ExchangeOptions::default();
@@ -1875,6 +2163,394 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
     assert_eq!(fallback.unsolicited.len(), 1);
     assert!(
         fallback
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "capture.ingress_time_unavailable")
+    );
+
+    let expired_sent_at = vec![
+        Instant::now()
+            .checked_sub(Duration::from_millis(20))
+            .unwrap(),
+    ];
+    let expired_received_at = expired_sent_at[0]
+        .checked_add(Duration::from_millis(1))
+        .unwrap();
+    let expired_deadline = expired_sent_at[0]
+        .checked_add(Duration::from_millis(10))
+        .unwrap();
+    let mut expired = ExchangeAccumulator::new(1);
+    let outcome = expired.process(
+        CapturedFrame::new(
+            Frame::new(
+                std::time::UNIX_EPOCH,
+                LinkType::IPV4,
+                prepared[0].built.bytes.clone(),
+            )
+            .unwrap(),
+            expired_received_at,
+        ),
+        ExchangeProcessContext {
+            registry: &registry,
+            dissector: &dissector,
+            prepared: &prepared,
+            sent_at: &expired_sent_at,
+            deadline: expired_deadline,
+            options: &options,
+        },
+    );
+    assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
+    assert!(expired.responses.is_empty());
+    assert_eq!(expired.unsolicited.len(), 1);
+    assert!(expired.undecoded.is_empty());
+    assert!(
+        expired
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.correlation_deadline")
+    );
+}
+
+#[test]
+fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
+    let mut registry_builder = RegistryBuilder::new();
+    registry_builder.module(&BuiltinProtocols).unwrap();
+    registry_builder.register_codec(MacSensitiveCodec).unwrap();
+    registry_builder
+        .bind("ethernet", 0x88b5, "test.mac_sensitive", 200)
+        .unwrap();
+    registry_builder
+        .register_matcher("test.mac_sensitive", SlowMatcher(Duration::from_millis(75)))
+        .unwrap();
+    let registry = Arc::new(registry_builder.build().unwrap());
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet {
+            ether_type: WireValue::Exact(0x88b5),
+            ..Ethernet::default()
+        })
+        .push(MacSensitiveLayer);
+    let built = Builder::new(Arc::clone(&registry))
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    let prepared = vec![PreparedExchangePacket {
+        built: built.clone(),
+        route: MaterializedRoute {
+            plan: PlannedRoute {
+                route: route(LinkCapability::Layer2),
+                mode: LinkMode::Layer2,
+                lookup_destination: None,
+                final_destination: None,
+                visited_destinations: Vec::new(),
+                packet_source: None,
+                neighbor_source: None,
+                neighbor_target: None,
+                destination_mac: None,
+                source_mac: None,
+                neighbor_vlan_tags: Vec::new(),
+                synthesized_ethernet: false,
+            },
+            neighbor_resolution: None,
+        },
+    }];
+    let sent_at = vec![Instant::now()];
+    let deadline = sent_at[0].checked_add(Duration::from_millis(50)).unwrap();
+    let dissector = Dissector::new(Arc::clone(&registry));
+    let options = ExchangeOptions::default();
+    let mut accumulator = ExchangeAccumulator::new(1);
+
+    let outcome = accumulator.process(
+        CapturedFrame::new(
+            Frame::new(std::time::UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap(),
+            sent_at[0],
+        ),
+        ExchangeProcessContext {
+            registry: &registry,
+            dissector: &dissector,
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            options: &options,
+        },
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
+    assert!(accumulator.responses.is_empty());
+    assert_eq!(accumulator.unsolicited.len(), 1);
+    assert!(
+        accumulator
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.correlation_deadline")
+    );
+}
+
+fn workflow_accumulator_with_unsolicited(
+    promotion_deadline: impl FnOnce() -> Instant,
+) -> (
+    ExchangeAccumulator,
+    Vec<PreparedExchangePacket>,
+    Vec<Instant>,
+    Instant,
+) {
+    let registry = Arc::new(default_registry().unwrap());
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let destination = Ipv4Addr::new(10, 0, 0, 2);
+    let built = Builder::new(Arc::clone(&registry))
+        .build(
+            packet(source, destination, 12_345, 9),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    let prepared = vec![PreparedExchangePacket {
+        built: built.clone(),
+        route: MaterializedRoute {
+            plan: PlannedRoute {
+                route: route(LinkCapability::Layer3),
+                mode: LinkMode::Layer3,
+                lookup_destination: Some(IpAddr::V4(destination)),
+                final_destination: Some(IpAddr::V4(destination)),
+                visited_destinations: vec![IpAddr::V4(destination)],
+                packet_source: Some(IpAddr::V4(source)),
+                neighbor_source: Some(IpAddr::V4(source)),
+                neighbor_target: Some(IpAddr::V4(destination)),
+                destination_mac: None,
+                source_mac: None,
+                neighbor_vlan_tags: Vec::new(),
+                synthesized_ethernet: false,
+            },
+            neighbor_resolution: None,
+        },
+    }];
+    let sent_at = vec![Instant::now()];
+    let process_deadline = sent_at[0].checked_add(Duration::from_secs(1)).unwrap();
+    let dissector = Dissector::new(Arc::clone(&registry));
+    let options = ExchangeOptions::default();
+    let mut accumulator = ExchangeAccumulator::new(1);
+
+    let outcome = accumulator.process(
+        CapturedFrame::new(
+            Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, built.bytes.clone()).unwrap(),
+            sent_at[0],
+        ),
+        ExchangeProcessContext {
+            registry: &registry,
+            dissector: &dissector,
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline: process_deadline,
+            options: &options,
+        },
+    );
+    assert_eq!(outcome, ExchangeProcessOutcome::Continue);
+    assert!(accumulator.responses.is_empty());
+    assert_eq!(accumulator.unsolicited.len(), 1);
+
+    (accumulator, prepared, sent_at, promotion_deadline())
+}
+
+#[test]
+fn expired_workflow_promotion_does_not_invoke_matcher() {
+    let (mut accumulator, prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(|| {
+            Instant::now()
+                .checked_sub(Duration::from_millis(1))
+                .unwrap()
+        });
+    let mut matcher_calls = 0;
+
+    let outcome = accumulator.promote_workflow_unsolicited(
+        WorkflowPromotionContext {
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            max_responses: 1,
+        },
+        &mut |_, _, _| {
+            matcher_calls += 1;
+            true
+        },
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
+    assert_eq!(matcher_calls, 0);
+    assert!(accumulator.responses.is_empty());
+    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(
+        accumulator
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "exchange.correlation_deadline")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn workflow_promotion_crossing_deadline_is_not_committed() {
+    let (mut accumulator, prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(|| {
+            Instant::now()
+                .checked_add(Duration::from_millis(100))
+                .unwrap()
+        });
+    let mut matcher_calls = 0;
+
+    let outcome = accumulator.promote_workflow_unsolicited(
+        WorkflowPromotionContext {
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            max_responses: 1,
+        },
+        &mut |_, _, _| {
+            matcher_calls += 1;
+            std::thread::sleep(Duration::from_millis(150));
+            true
+        },
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
+    assert_eq!(matcher_calls, 1);
+    assert!(accumulator.responses.is_empty());
+    assert!(accumulator.unsolicited.is_empty());
+    assert!(
+        accumulator
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "exchange.correlation_deadline")
+    );
+}
+
+#[test]
+fn workflow_promotion_runs_before_native_capture_wait_consumes_deadline() {
+    let registry = Arc::new(default_registry().unwrap());
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let destination = Ipv4Addr::new(10, 0, 0, 2);
+    let request = packet(source, destination, 12_345, 9);
+    let response = Builder::new(Arc::clone(&registry))
+        .build(
+            request.clone(),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        registry,
+        FixedRoutes(route(LinkCapability::Layer3)),
+        CountingNeighbors::default(),
+        DeadlineConsumingExchangeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(Some(
+                Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
+            ))),
+        },
+        TrafficPolicy::default(),
+    );
+
+    let result = client
+        .exchange_for_workflow(
+            &PacketTemplate::new(request),
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                timeout: Duration::from_millis(50),
+                max_responses: 1,
+                ..ExchangeOptions::default()
+            },
+            |_, _, _| {
+                events.lock().unwrap().push("promote");
+                true
+            },
+        )
+        .unwrap();
+
+    let events = events.lock().unwrap();
+    let promotion = events.iter().position(|event| *event == "promote").unwrap();
+    let native_wait = events
+        .iter()
+        .position(|event| *event == "capture_wait")
+        .unwrap();
+    assert!(promotion < native_wait, "events: {events:?}");
+    assert_eq!(result.responses.len(), 1);
+    assert!(result.unanswered.is_empty());
+    assert!(result.unsolicited.is_empty());
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.code != "exchange.correlation_deadline")
+    );
+}
+
+#[test]
+fn built_in_workflow_path_cannot_promote_a_frame_without_ingress_time() {
+    let registry = Arc::new(default_registry().unwrap());
+    let response = Builder::new(Arc::clone(&registry))
+        .build(
+            packet(
+                Ipv4Addr::new(10, 0, 0, 2),
+                Ipv4Addr::new(10, 0, 0, 1),
+                9,
+                12_345,
+            ),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    let io = UnmarkedExchangeIo(ScriptedExchangeIo {
+        events: Arc::new(Mutex::new(Vec::new())),
+        response: Arc::new(Mutex::new(Some(
+            Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
+        ))),
+        deliver_before_send: false,
+        limits: Arc::new(Mutex::new(Vec::new())),
+        capture_statistics: CaptureStatistics::default(),
+    });
+    let client = Client::new(
+        registry,
+        FixedRoutes(route(LinkCapability::Layer3)),
+        CountingNeighbors::default(),
+        io,
+        TrafficPolicy::default(),
+    );
+    let mut matcher_calls = 0;
+    let result = client
+        .exchange_for_workflow(
+            &PacketTemplate::new(packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12_345,
+                9,
+            )),
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                ..ExchangeOptions::default()
+            },
+            |_, _, _| {
+                matcher_calls += 1;
+                true
+            },
+        )
+        .unwrap();
+    assert_eq!(matcher_calls, 0);
+    assert!(result.responses.is_empty());
+    assert!(result.unsolicited.is_empty());
+    assert!(
+        result
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "capture.ingress_time_unavailable")
@@ -2254,6 +2930,66 @@ fn capture_guard_attempts_shutdown_during_unwind() {
         panic!("simulate external codec panic");
     });
     assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn capture_guard_replays_shutdown_failure_without_second_provider_call() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let mut capture = CaptureGuard::new(ReadinessAndShutdownFailCapture(Arc::clone(&events)));
+    let first = capture.shutdown().unwrap_err();
+    let second = capture.shutdown().unwrap_err();
+    assert_eq!(first, second);
+    drop(capture);
+    assert_eq!(*events.lock().unwrap(), ["shutdown"]);
+}
+
+#[test]
+fn capture_guard_contains_shutdown_panic_and_never_retries() {
+    let shutdowns = Arc::new(AtomicUsize::new(0));
+    let mut capture = CaptureGuard::new(PanicShutdownCapture(Arc::clone(&shutdowns)));
+    let first = capture.shutdown().unwrap_err();
+    let second = capture.shutdown().unwrap_err();
+    assert_eq!(first, second);
+    assert!(matches!(first, LiveIoError::Capture { .. }));
+    drop(capture);
+    assert_eq!(shutdowns.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn active_exchange_requires_monotonic_capture_before_readiness_or_send() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(route(LinkCapability::Layer3)),
+        CountingNeighbors::default(),
+        MissingMonotonicIo(Arc::clone(&events)),
+        TrafficPolicy::default(),
+    );
+    let error = client
+        .exchange(
+            &PacketTemplate::new(packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12_345,
+                9,
+            )),
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                ..ExchangeOptions::default()
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::Io(LiveIoError::MissingMonotonicCaptureTimestamp)
+    ));
+    assert_eq!(*events.lock().unwrap(), ["arm", "shutdown"]);
 }
 
 #[test]
@@ -2676,6 +3412,60 @@ fn mtu_uses_actual_network_span_even_for_permissive_lengths() {
 }
 
 #[test]
+fn arp_target_is_authorized_before_route_lookup() {
+    let target = Ipv4Addr::new(8, 8, 8, 8);
+    let mut request = Packet::new();
+    request.push(Arp {
+        sender_protocol: Ipv4Addr::new(10, 0, 0, 1),
+        target_protocol: target,
+        ..Arp::default()
+    });
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        CountingRoutes {
+            decision: route(LinkCapability::Layer2),
+            calls: Arc::clone(&route_calls),
+        },
+        CountingNeighbors::default(),
+        RejectingPacketIo,
+        TrafficPolicy::default(),
+    );
+
+    assert!(matches!(
+        client.plan(&request, None, &PlanOptions::default()),
+        Err(ClientError::Policy(
+            TrafficPolicyError::PublicDestination { destination }
+        )) if destination == IpAddr::V4(target)
+    ));
+    assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn unknown_route_bearing_custom_layer_fails_closed_before_route_lookup() {
+    let mut request = Packet::new();
+    request.push(CustomRouteLayer);
+    let route_calls = Arc::new(AtomicUsize::new(0));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        CountingRoutes {
+            decision: route(LinkCapability::Layer3),
+            calls: Arc::clone(&route_calls),
+        },
+        CountingNeighbors::default(),
+        RejectingPacketIo,
+        TrafficPolicy::default(),
+    );
+
+    assert!(matches!(
+        client.plan(&request, None, &PlanOptions::default()),
+        Err(ClientError::Policy(TrafficPolicyError::InvalidPacketSemantics { reason }))
+            if reason.contains("test.custom_route") && reason.contains("destination")
+    ));
+    assert_eq!(route_calls.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn srh_policy_checks_final_segment_not_only_first_hop() {
     let source: std::net::Ipv6Addr = "fd00::1".parse().unwrap();
     let first: std::net::Ipv6Addr = "fd00::10".parse().unwrap();
@@ -2788,7 +3578,7 @@ fn ipv4_source_routes_and_multicast_are_authorized_before_route_lookup() {
         assert!(matches!(
             client.plan(&request, None, &PlanOptions::default()),
             Err(ClientError::Policy(
-                TrafficPolicyError::InvalidIpv4Options { .. }
+                TrafficPolicyError::InvalidPacketSemantics { .. }
             ))
         ));
         assert_eq!(route_calls.load(Ordering::SeqCst), 0);

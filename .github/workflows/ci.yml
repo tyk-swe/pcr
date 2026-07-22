@@ -78,6 +78,10 @@ jobs:
         run: cargo test --locked
       - name: Test complete profile
         run: cargo test --locked --all-features
+      - name: Check release pcap-free profile
+        run: >-
+          cargo check --locked --release --no-default-features
+          --features live,native-route,native-layer3
       - name: Clippy complete profile
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
@@ -105,6 +109,8 @@ jobs:
       - run: cargo install cargo-hack --locked --version 0.6.45
       - name: Minimum supported Rust 1.96 portable profile
         run: cargo +1.96.0 check --locked --all-targets --no-default-features
+      - name: Minimum supported Rust 1.96 complete profile
+        run: cargo +1.96.0 check --locked --all-targets --all-features
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Warning-free documentation
@@ -115,6 +121,33 @@ jobs:
         run: cargo hack check --locked --feature-powerset --depth 2 --all-targets
       - name: Complete feature profile
         run: cargo check --locked --all-targets --all-features
+
+  portable-targets:
+    name: portable target (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-freebsd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-portable-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+      - run: rustup target add ${{ matrix.target }}
+      - name: Check portable interface-enumeration profile
+        run: >-
+          cargo check --locked --target ${{ matrix.target }}
+          --no-default-features --features live
+      - name: Check complete portable profile
+        run: cargo check --locked --target ${{ matrix.target }} --all-features --all-targets
 
   coverage:
     name: Linux line coverage

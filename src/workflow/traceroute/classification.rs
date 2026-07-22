@@ -39,37 +39,19 @@ pub fn classify_traceroute_response(
 
 fn packet_destination(packet: &Packet, strategy: TracerouteStrategy) -> Option<IpAddr> {
     let transport = match strategy {
-        TracerouteStrategy::Tcp => "tcp",
-        TracerouteStrategy::Udp => "udp",
-        TracerouteStrategy::Icmp
-            if packet
-                .iter()
-                .any(|layer| layer.protocol_id().as_str() == "icmpv4") =>
-        {
-            "icmpv4"
-        }
-        TracerouteStrategy::Icmp
-            if packet
-                .iter()
-                .any(|layer| layer.protocol_id().as_str() == "icmpv6") =>
-        {
-            "icmpv6"
-        }
-        TracerouteStrategy::Icmp => return None,
+        TracerouteStrategy::Tcp => Some(BuiltinProtocol::Tcp),
+        TracerouteStrategy::Udp => Some(BuiltinProtocol::Udp),
+        TracerouteStrategy::Icmp => None,
     };
-    let transport_index = packet
-        .iter()
-        .position(|layer| layer.protocol_id().as_str() == transport)?;
-    packet.iter().take(transport_index).rev().find_map(|layer| {
-        if !matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6") {
-            return None;
-        }
-        match layer.field("destination")? {
-            FieldValue::Ipv4(value) => Some(IpAddr::V4(value)),
-            FieldValue::Ipv6(value) => Some(IpAddr::V6(value)),
-            _ => None,
-        }
-    })
+    let transport_index = packet.iter().position(|layer| match transport {
+        Some(transport) => BuiltinProtocol::of(layer) == Some(transport),
+        None => matches!(
+            BuiltinProtocol::of(layer),
+            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6)
+        ),
+    })?;
+    let path = semantics::enclosing_ip_path(packet, transport_index).ok()??;
+    Some(path.final_destination)
 }
 
 pub(super) fn add_stats(
@@ -82,6 +64,7 @@ pub(super) fn add_stats(
         .ok_or(TracerouteError::StatisticsOverflow { sequence })
 }
 use super::{
-    Correlation, DecodedPacket, FieldValue, IpAddr, Packet, ProtocolRegistry, Stats,
-    TracerouteError, TracerouteResponseKind, TracerouteStrategy, probe,
+    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, Stats, TracerouteError,
+    TracerouteResponseKind, TracerouteStrategy, probe,
 };
+use crate::packet::semantics::{self, BuiltinProtocol};

@@ -389,6 +389,47 @@ impl ScanExecutor for TimeoutExecutor {
     }
 }
 
+#[test]
+fn slow_executor_expires_before_the_next_scan_batch() {
+    struct SlowExecutor {
+        calls: usize,
+        inner: TimeoutExecutor,
+    }
+
+    impl ScanExecutor for SlowExecutor {
+        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+            self.calls += 1;
+            std::thread::sleep(Duration::from_millis(20));
+            self.inner.execute(batch)
+        }
+    }
+
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.ports = vec![80, 81];
+    request.timeout = Duration::from_millis(1);
+    request.limits.batch_size = 1;
+    request.limits.max_duration = Duration::from_millis(5);
+    let mut executor = SlowExecutor {
+        calls: 0,
+        inner: TimeoutExecutor::new(),
+    };
+
+    let error = scan(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &default_registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, ScanError::DurationLimit { .. }));
+    assert_eq!(executor.calls, 1);
+}
+
 struct UndecodedExecutor(TimeoutExecutor);
 
 impl ScanExecutor for UndecodedExecutor {
@@ -429,6 +470,49 @@ impl ScanExecutor for OpenTcpExecutor {
         });
         Ok(result)
     }
+}
+
+#[test]
+fn candidate_heavy_batch_expires_before_the_next_scan_execution() {
+    struct CandidateHeavyExecutor {
+        calls: usize,
+    }
+
+    impl ScanExecutor for CandidateHeavyExecutor {
+        fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+            self.calls += 1;
+            let mut execution = OpenTcpExecutor(TimeoutExecutor::new()).execute(batch)?;
+            let sent_at = execution.sent_evidence[0].timestamp;
+            let mut candidate = execution.responses.pop().unwrap();
+            candidate.latency = Duration::ZERO;
+            candidate.response.frame.timestamp = sent_at;
+            execution.responses = vec![candidate; DEFAULT_CAPTURE_QUEUE_FRAMES];
+            execution.stats.elapsed = Duration::ZERO;
+            Ok(execution)
+        }
+    }
+
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.ports = vec![80, 81];
+    request.timeout = Duration::from_nanos(1);
+    request.limits.batch_size = 1;
+    request.limits.max_duration = Duration::from_millis(5);
+    let mut executor = CandidateHeavyExecutor { calls: 0 };
+
+    let error = scan(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &default_registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, ScanError::DurationLimit { .. }));
+    assert_eq!(executor.calls, 1);
 }
 
 #[derive(Default)]
@@ -1377,6 +1461,10 @@ impl PacketIo for LifecycleIo {
 struct LifecycleCapture(Arc<Mutex<Vec<&'static str>>>);
 
 impl CaptureSession for LifecycleCapture {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().unwrap().push("ready");
         Ok(())

@@ -13,8 +13,8 @@ use super::pcapng::{
 };
 use super::wire::{
     PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_PACKET_BLOCK,
-    PCAPNG_SECTION_HEADER, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32, read_exact_counted,
-    read_exact_or_eof,
+    PCAPNG_SECTION_HEADER, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32, read_exact_or_eof,
+    read_exact_vec,
 };
 
 pub(super) enum ReaderState {
@@ -45,6 +45,7 @@ pub struct Reader<R> {
     max_interfaces: usize,
     pub(super) max_total_interfaces: usize,
     max_metadata_blocks_per_frame: usize,
+    scratch: Vec<u8>,
     finished: bool,
 }
 
@@ -62,6 +63,7 @@ impl<R: Read> Reader<R> {
             max_total_interfaces,
             max_metadata_blocks_per_frame,
         } = options;
+        let mut scratch = Vec::new();
         let mut magic = [0_u8; 4];
         if !read_exact_or_eof(&mut inner, &mut magic, "capture magic")? {
             return Err(Error::EmptyInput);
@@ -87,7 +89,7 @@ impl<R: Read> Reader<R> {
                 read_pcap_header(&mut inner, Endianness::Big, TimestampPrecision::Nanoseconds)?
             }
             PCAPNG_SECTION_HEADER => {
-                let header = read_section_header_after_type(&mut inner, max_size)?;
+                let header = read_section_header_after_type(&mut inner, max_size, &mut scratch)?;
                 ReaderState::PcapNg {
                     endianness: header.endianness,
                     interfaces: Vec::new(),
@@ -133,6 +135,7 @@ impl<R: Read> Reader<R> {
             max_interfaces,
             max_total_interfaces,
             max_metadata_blocks_per_frame,
+            scratch,
             finished: false,
         })
     }
@@ -246,6 +249,7 @@ impl<R: Read> Reader<R> {
                     &mut self.inner,
                     raw_header[4..8].try_into().expect("four-byte slice"),
                     self.max_size,
+                    &mut self.scratch,
                 )?;
                 match &mut self.state {
                     ReaderState::PcapNg {
@@ -287,18 +291,22 @@ impl<R: Read> Reader<R> {
                 usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
                     length: block_length,
                 })? - 8;
-            let mut block = vec![0_u8; remaining];
-            read_exact_counted(&mut self.inner, &mut block, "pcapng block")?;
+            read_exact_vec(
+                &mut self.inner,
+                &mut self.scratch,
+                remaining,
+                "pcapng block",
+            )?;
 
-            let body_length = block.len() - 4;
-            let trailing_length = decode_u32(section_endianness, &block[body_length..]);
+            let body_length = self.scratch.len() - 4;
+            let trailing_length = decode_u32(section_endianness, &self.scratch[body_length..]);
             if trailing_length != block_length {
                 return Err(Error::BlockLengthMismatch {
                     leading: block_length,
                     trailing: trailing_length,
                 });
             }
-            let body = &block[..body_length];
+            let body = &self.scratch[..body_length];
 
             if let ReaderState::PcapNg {
                 remaining_in_section: Some(remaining),

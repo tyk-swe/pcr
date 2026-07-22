@@ -160,6 +160,10 @@ impl Reassembler {
         {
             return Ok(());
         }
+        let last_update = self
+            .flows
+            .get(&flow)
+            .map_or(now, |state| state.last_update.max(now));
         if let Some(stale) = self.flows.remove(&flow) {
             self.aggregate_bytes = self
                 .aggregate_bytes
@@ -174,7 +178,7 @@ impl Reassembler {
             });
         }
         self.flows
-            .insert(flow, TcpFlowState::new(first_payload_sequence, now));
+            .insert(flow, TcpFlowState::new(first_payload_sequence, last_update));
         Ok(())
     }
 
@@ -347,11 +351,6 @@ impl Reassembler {
                 limit: self.limits.max_bytes_per_flow,
             });
         }
-        if merge.segment_count > self.limits.max_tcp_segments_per_flow {
-            return Err(Error::SegmentLimit {
-                limit: self.limits.max_tcp_segments_per_flow,
-            });
-        }
         if let Some(fin_offset) = incoming_fin_offset
             && (state
                 .pending
@@ -372,6 +371,11 @@ impl Reassembler {
         let final_pending_segments = merge
             .segment_count
             .saturating_sub(usize::from(merge.emitted_segment_bytes != 0));
+        if final_pending_segments > self.limits.max_tcp_segments_per_flow {
+            return Err(Error::SegmentLimit {
+                limit: self.limits.max_tcp_segments_per_flow,
+            });
+        }
         let final_history_capacity = self
             .limits
             .max_bytes_per_flow
@@ -486,6 +490,10 @@ impl Reassembler {
         let aggregate_bytes = plan.aggregate_bytes;
         let aggregate_memory_charge = plan.aggregate_memory_charge;
         let max_bytes_per_flow = self.limits.max_bytes_per_flow;
+        let last_update = self
+            .flows
+            .get(&segment.flow)
+            .map_or(now, |state| state.last_update.max(now));
         let Segment {
             flow, rst, payload, ..
         } = segment;
@@ -495,7 +503,7 @@ impl Reassembler {
             .map(|range| payload.slice(range.clone()));
 
         let (replacement, mut events) = if changes_generation {
-            let mut state = TcpFlowState::new(first_payload_sequence, now);
+            let mut state = TcpFlowState::new(first_payload_sequence, last_update);
             let events = commit_flow_push(
                 &mut state,
                 &flow,
@@ -885,7 +893,7 @@ fn commit_flow_push(
     retransmitted += merge.overlapping_bytes;
     conflicting |= merge.has_conflicting_overlap;
 
-    state.last_update = now;
+    state.last_update = state.last_update.max(now);
     trim_emitted_history(state, initial_history_capacity);
     resize_emitted_history(state, history_allocation);
     apply_pending_merge(state, merge);
@@ -998,6 +1006,7 @@ fn apply_pending_merge(state: &mut TcpFlowState, merge: PendingMergePlan) {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+    use std::time::Duration;
 
     use super::*;
 
@@ -1427,19 +1436,79 @@ mod tests {
             ..ReassemblyLimits::default()
         });
         reassembler.open_flow(flow(), 100, now).unwrap();
-        reassembler.push(segment(102, b"cd"), now).unwrap();
+        reassembler
+            .push(segment(102, b"cd"), now + Duration::from_millis(1))
+            .unwrap();
+        let before = {
+            let state = &reassembler.flows[&flow()];
+            (
+                state.base_sequence,
+                state.next_offset,
+                state.history_start_offset,
+                state.emitted_history.clone(),
+                state.pending.clone(),
+                state.pending_bytes,
+                state.fin_offset,
+                state.last_update,
+                reassembler.aggregate_bytes(),
+                reassembler.aggregate_memory_charge(),
+            )
+        };
 
         let mut replacement = segment(199, b"abcde");
         replacement.syn = true;
         assert_eq!(
-            reassembler.push(replacement, now).unwrap_err(),
+            reassembler
+                .push(replacement, now + Duration::from_millis(2))
+                .unwrap_err(),
             Error::FlowByteLimit { limit: 4 }
         );
+        let after = {
+            let state = &reassembler.flows[&flow()];
+            (
+                state.base_sequence,
+                state.next_offset,
+                state.history_start_offset,
+                state.emitted_history.clone(),
+                state.pending.clone(),
+                state.pending_bytes,
+                state.fin_offset,
+                state.last_update,
+                reassembler.aggregate_bytes(),
+                reassembler.aggregate_memory_charge(),
+            )
+        };
+        assert_eq!(after, before);
 
         let events = reassembler.push(segment(100, b"ab"), now).unwrap();
         assert!(events.iter().any(
             |event| matches!(event, Event::Data { sequence: 100, bytes, .. } if bytes.as_ref() == b"abcd")
         ));
+    }
+
+    #[test]
+    fn older_accepted_timestamp_does_not_regress_expiry_state() {
+        let start = Instant::now();
+        let expiry = Duration::from_millis(10);
+        let mut reassembler = Reassembler::new(ReassemblyLimits {
+            tcp_idle_expiry: expiry,
+            ..ReassemblyLimits::default()
+        });
+        reassembler.open_flow(flow(), 100, start).unwrap();
+        let latest = start + Duration::from_millis(8);
+        reassembler.push(segment(102, b"b"), latest).unwrap();
+
+        reassembler
+            .push(segment(104, b"d"), start + Duration::from_millis(2))
+            .unwrap();
+
+        assert_eq!(reassembler.flows[&flow()].last_update, latest);
+        assert!(
+            reassembler
+                .expire(start + Duration::from_millis(12))
+                .is_empty()
+        );
+        assert!(!reassembler.expire(latest + expiry).is_empty());
     }
 
     #[test]
@@ -1473,6 +1542,31 @@ mod tests {
                 }
             ]
         ));
+    }
+
+    #[test]
+    fn in_order_data_at_pending_segment_limit_uses_final_retained_count() {
+        let now = Instant::now();
+        let limits = ReassemblyLimits {
+            max_tcp_segments_per_flow: 2,
+            ..ReassemblyLimits::default()
+        };
+        let mut reassembler = Reassembler::new(limits);
+        reassembler.open_flow(flow(), 100, now).unwrap();
+        reassembler.push(segment(102, b"b"), now).unwrap();
+        reassembler.push(segment(104, b"d"), now).unwrap();
+
+        let events = reassembler.push(segment(100, b"a"), now).unwrap();
+
+        assert!(events.iter().any(
+            |event| matches!(event, Event::Data { sequence: 100, bytes, .. } if bytes.as_ref() == b"a")
+        ));
+        assert_eq!(reassembler.flows[&flow()].pending.len(), 2);
+        assert_eq!(
+            reassembler.push(segment(106, b"f"), now).unwrap_err(),
+            Error::SegmentLimit { limit: 2 }
+        );
+        assert_eq!(reassembler.flows[&flow()].pending.len(), 2);
     }
 
     #[test]

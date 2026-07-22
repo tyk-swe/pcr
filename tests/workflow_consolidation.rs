@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use packetcraftr::{error, workflow};
+use serde_json::json;
 
 #[test]
 fn boundary_error_preserves_its_public_error_contract() {
@@ -15,6 +16,16 @@ fn boundary_error_preserves_its_public_error_contract() {
     assert_eq!(boundary.to_string(), "boundary failed");
     assert_eq!(error::Classified::classification(&boundary), classification);
     assert_eq!(error::Classified::causes(&boundary), ["underlying failure"]);
+    assert!(std::error::Error::source(&boundary).is_none());
+    assert_eq!(
+        serde_json::to_value(packetcraftr::output::envelope::Error::classified(&boundary)).unwrap(),
+        json!({
+            "code": "test.boundary",
+            "kind": "io",
+            "message": "boundary failed",
+            "causes": ["underlying failure"]
+        })
+    );
     let _: &dyn std::error::Error = &boundary;
 }
 

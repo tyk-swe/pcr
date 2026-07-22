@@ -31,6 +31,22 @@ const LIBRARY_ROOT_MODULES: &[&str] = &[
     "capture", "client", "error", "net", "output", "packet", "protocol", "session", "workflow",
 ];
 
+const SAFETY_SENSITIVE_PROTOCOL_CONSUMERS: &[&str] = &[
+    "src/client/client.rs",
+    "src/client/helpers.rs",
+    "src/net/route/planner.rs",
+    "src/packet/build/engine.rs",
+    "src/packet/decode/engine.rs",
+    "src/protocol/matcher.rs",
+    "src/workflow/dns/engine.rs",
+    "src/workflow/dns/wire.rs",
+    "src/workflow/fuzz/mutation.rs",
+    "src/workflow/probe.rs",
+    "src/workflow/scan/engine.rs",
+    "src/workflow/traceroute/classification.rs",
+    "src/workflow/traceroute/engine.rs",
+];
+
 fn rust_files(path: &Path, files: &mut Vec<PathBuf>) {
     if path.is_file() {
         if path.extension().is_some_and(|extension| extension == "rs")
@@ -300,6 +316,142 @@ fn expression_attributes(expression: &syn::Expr) -> &[syn::Attribute] {
         syn::Expr::Yield(expression) => &expression.attrs,
         _ => &[],
     }
+}
+
+#[derive(Default)]
+struct BuiltinProtocolLiteralVisitor {
+    literals: Vec<String>,
+}
+
+fn is_builtin_protocol_literal(value: &str) -> bool {
+    packetcraftr::protocol::support::BUILTIN_PROTOCOLS
+        .iter()
+        .any(|support| support.protocol == value)
+}
+
+impl BuiltinProtocolLiteralVisitor {
+    fn record(&mut self, literal: &syn::LitStr) {
+        let value = literal.value();
+        if is_builtin_protocol_literal(&value) {
+            self.literals.push(value);
+        }
+    }
+
+    fn visit_macro_tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        use proc_macro2::TokenTree;
+
+        for token in tokens {
+            match token {
+                TokenTree::Group(group) => self.visit_macro_tokens(group.stream()),
+                TokenTree::Literal(literal) => {
+                    if let Ok(syn::Lit::Str(literal)) = syn::parse_str(&literal.to_string()) {
+                        self.record(&literal);
+                    }
+                }
+                TokenTree::Ident(_) | TokenTree::Punct(_) => {}
+            }
+        }
+    }
+}
+
+impl<'ast> Visit<'ast> for BuiltinProtocolLiteralVisitor {
+    fn visit_item(&mut self, item: &'ast syn::Item) {
+        if !test_only(item_attributes(item)) {
+            syn::visit::visit_item(self, item);
+        }
+    }
+
+    fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+        if !test_only(impl_item_attributes(item)) {
+            syn::visit::visit_impl_item(self, item);
+        }
+    }
+
+    fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+        if !test_only(trait_item_attributes(item)) {
+            syn::visit::visit_trait_item(self, item);
+        }
+    }
+
+    fn visit_foreign_item(&mut self, item: &'ast syn::ForeignItem) {
+        if !test_only(foreign_item_attributes(item)) {
+            syn::visit::visit_foreign_item(self, item);
+        }
+    }
+
+    fn visit_field(&mut self, field: &'ast syn::Field) {
+        if !test_only(&field.attrs) {
+            syn::visit::visit_field(self, field);
+        }
+    }
+
+    fn visit_variant(&mut self, variant: &'ast syn::Variant) {
+        if !test_only(&variant.attrs) {
+            syn::visit::visit_variant(self, variant);
+        }
+    }
+
+    fn visit_local(&mut self, local: &'ast syn::Local) {
+        if !test_only(&local.attrs) {
+            syn::visit::visit_local(self, local);
+        }
+    }
+
+    fn visit_arm(&mut self, arm: &'ast syn::Arm) {
+        if !test_only(&arm.attrs) {
+            syn::visit::visit_arm(self, arm);
+        }
+    }
+
+    fn visit_fn_arg(&mut self, argument: &'ast syn::FnArg) {
+        let attributes = match argument {
+            syn::FnArg::Receiver(argument) => &argument.attrs,
+            syn::FnArg::Typed(argument) => &argument.attrs,
+        };
+        if !test_only(attributes) {
+            syn::visit::visit_fn_arg(self, argument);
+        }
+    }
+
+    fn visit_field_value(&mut self, field: &'ast syn::FieldValue) {
+        if !test_only(&field.attrs) {
+            syn::visit::visit_field_value(self, field);
+        }
+    }
+
+    fn visit_stmt_macro(&mut self, statement: &'ast syn::StmtMacro) {
+        if !test_only(&statement.attrs) {
+            syn::visit::visit_stmt_macro(self, statement);
+        }
+    }
+
+    fn visit_expr(&mut self, expression: &'ast syn::Expr) {
+        if !test_only(expression_attributes(expression)) {
+            syn::visit::visit_expr(self, expression);
+        }
+    }
+
+    fn visit_expr_lit(&mut self, expression: &'ast syn::ExprLit) {
+        if let syn::Lit::Str(literal) = &expression.lit {
+            self.record(literal);
+        }
+    }
+
+    fn visit_macro(&mut self, value: &'ast syn::Macro) {
+        self.visit_macro_tokens(value.tokens.clone());
+    }
+
+    fn visit_attribute(&mut self, _attribute: &'ast syn::Attribute) {
+        // Attributes include doc comments and serialized contract spellings,
+        // neither of which performs runtime protocol classification.
+    }
+}
+
+fn builtin_protocol_literals(source: &str) -> syn::Result<Vec<String>> {
+    let syntax = syn::parse_file(source)?;
+    let mut visitor = BuiltinProtocolLiteralVisitor::default();
+    visitor.visit_file(&syntax);
+    Ok(visitor.literals)
 }
 
 #[derive(Default)]
@@ -876,6 +1028,30 @@ fn unsafe_code_stays_inside_platform_boundary() {
 }
 
 #[test]
+fn safety_sensitive_consumers_use_centralized_builtin_protocol_semantics() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut violations = Vec::new();
+
+    for relative in SAFETY_SENSITIVE_PROTOCOL_CONSUMERS {
+        let file = root.join(relative);
+        let source = std::fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
+        let literals = builtin_protocol_literals(&source)
+            .unwrap_or_else(|error| panic!("failed to parse {}: {error}", file.display()));
+        for literal in literals {
+            violations.push(format!("{relative}: built-in protocol literal `{literal}`"));
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "safety-sensitive consumers must classify protocols through \
+         crate::packet::semantics::BuiltinProtocol:\n{}",
+        violations.join("\n")
+    );
+}
+
+#[test]
 fn imports_report_only_their_top_level_domains() {
     let domains = referenced_domains(
         r#"
@@ -946,6 +1122,29 @@ fn comments_strings_and_test_only_items_are_ignored() {
         domains.into_iter().collect::<Vec<_>>(),
         ["capture", "packet"]
     );
+}
+
+#[test]
+fn builtin_protocol_literal_detection_is_structural_and_ignores_tests() {
+    let literals = builtin_protocol_literals(
+        r#"
+        // The words "tcp" and "udp" in this comment are not syntax.
+        const RUNTIME_ALIAS: &str = "ip";
+        #[doc = "raw"]
+        fn production() {
+            let _ = "ipv4";
+            inspect!("ethernet");
+            #[cfg(test)] let _ = "icmpv6";
+        }
+        #[cfg(test)] mod tests { const PROTOCOL: &str = "tcp"; }
+        #[cfg(all(unix, test))] fn helper() { let _ = "raw_ip"; }
+        "#,
+    )
+    .unwrap();
+
+    assert_eq!(literals, ["ipv4", "ethernet"]);
+    assert!(is_builtin_protocol_literal("raw_ip"));
+    assert!(!is_builtin_protocol_literal("ip"));
 }
 
 #[test]

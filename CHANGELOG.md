@@ -38,6 +38,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed `packetcraftr.output/v1` schema validation for embedded packet fields so
   malformed field values are rejected consistently with standalone packet
   documents.
+- Active exchanges now require monotonic capture ingress timing, reject stale or
+  unmarked frames during correlation, bound correlation CPU work, and shut down
+  capture providers exactly once even when cleanup fails or panics.
+- Live routing, destination authorization, checksums, replay, and response
+  matching now share strict packet semantics, including ARP targets, IPv4 source
+  routes, IPv6 segment routing, transport ports, and unknown route-bearing layers.
+- Workflow and replay duration, packet, and byte budgets now cover actual
+  provider and callback time, cumulative replay traffic, and fail-atomic
+  accounting before later side effects begin.
+- Capture-file writers now stop after partial I/O failures, capture readers use
+  fallible bounded allocation, and native capture queue statistics update
+  transactionally.
+- TCP reassembly now applies segment limits to final retained state and prevents
+  older accepted segment timestamps from moving flow expiry backwards.
+- Native I/O now revalidates interface name/index identity immediately before
+  dispatch (subject to OS changes between validation and the send syscall),
+  bounds complete macOS route queries, propagates capture-worker panics, and
+  reuses namespace-aware Linux netlink workers without nesting runtimes.
 - Preserved readable multiline Clap diagnostics instead of displaying escaped
   newline literals, and now propagate Clap's actual exit codes.
 

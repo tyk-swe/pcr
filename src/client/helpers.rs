@@ -15,6 +15,7 @@ use crate::packet::{
     field::FieldValue,
     layer::Padding,
     registry::ProtocolRegistry,
+    semantics::BuiltinProtocol,
 };
 use crate::protocol::link::Ethernet;
 
@@ -97,7 +98,9 @@ pub(super) fn validate_send_report(
 
 pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
     let network_layer = built.packet.iter().enumerate().find_map(|(index, layer)| {
-        matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6").then_some(index)
+        BuiltinProtocol::of(layer)
+            .is_some_and(BuiltinProtocol::is_ip)
+            .then_some(index)
     });
     let network_length = network_layer.and_then(|index| {
         let start = built.layout.layer(index)?.range.start;
@@ -228,7 +231,7 @@ pub(super) fn materialize_link_structure(
     if !plan.synthesized_ethernet
         || packet
             .iter()
-            .any(|layer| layer.protocol_id().as_str() == "ethernet")
+            .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet))
     {
         return Ok(());
     }
@@ -236,7 +239,7 @@ pub(super) fn materialize_link_structure(
         .insert(0, Ethernet::default())
         .map_err(|source| ClientError::PacketMaterialization {
             layer: 0,
-            field: "ethernet",
+            field: BuiltinProtocol::Ethernet.as_str(),
             message: source.to_string(),
         })?;
     Ok(())
@@ -246,20 +249,18 @@ pub(super) fn materialize_network_fields(
     packet: &mut Packet,
     plan: &PlannedRoute,
 ) -> Result<(), ClientError> {
-    let Some(index) = packet
-        .iter()
-        .enumerate()
-        .find(|(_, layer)| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))
-        .map(|(index, _)| index)
-    else {
+    let Some((index, protocol)) = packet.iter().enumerate().find_map(|(index, layer)| {
+        let protocol = BuiltinProtocol::of(layer)?;
+        protocol.is_ip().then_some((index, protocol))
+    }) else {
         return Ok(());
     };
     let Some(layer) = packet.layer_mut(index) else {
         return Ok(());
     };
-    let ip_version = match layer.protocol_id().as_str() {
-        "ipv4" => IpVersion::V4,
-        "ipv6" => IpVersion::V6,
+    let ip_version = match protocol {
+        BuiltinProtocol::Ipv4 => IpVersion::V4,
+        BuiltinProtocol::Ipv6 => IpVersion::V6,
         _ => return Ok(()),
     };
     let source_unspecified = match layer.field("source") {
@@ -325,7 +326,7 @@ pub(super) fn materialize_link_fields(
     }
     let Some(index) = packet
         .iter()
-        .position(|layer| layer.protocol_id().as_str() == "ethernet")
+        .position(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet))
     else {
         return Ok(false);
     };
@@ -412,7 +413,10 @@ pub(super) fn patch_builtin_ethernet(
     let Some(layout) = preliminary.layout.layer(0) else {
         return false;
     };
-    if layout.protocol.as_str() != "ethernet" || layout.range.start != 0 || layout.range.end != 14 {
+    if BuiltinProtocol::from_id(&layout.protocol) != Some(BuiltinProtocol::Ethernet)
+        || layout.range.start != 0
+        || layout.range.end != 14
+    {
         return false;
     }
     let field_range = |name: &str| {
@@ -482,7 +486,7 @@ pub(super) fn require_fixed_width_link_materialization(
         // error rather than authorizing or accounting for a different shape.
         return Err(ClientError::PacketMaterialization {
             layer: 0,
-            field: "ethernet",
+            field: BuiltinProtocol::Ethernet.as_str(),
             message: format!(
                 "link materialization changed frame length from {preliminary_len} to {materialized_len} bytes"
             ),

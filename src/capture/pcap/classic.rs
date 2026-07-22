@@ -9,7 +9,7 @@ use super::models::{Endianness, Error, Format, TimestampPrecision};
 use super::reader::ReaderState;
 use super::wire::{
     PCAP_GLOBAL_HEADER_LEN, PCAP_RECORD_HEADER_LEN, decode_u16, decode_u32, read_exact_counted,
-    read_exact_or_eof, validate_declared_lengths,
+    read_exact_or_eof, read_exact_vec, validate_declared_lengths,
 };
 
 pub(super) fn read_pcap_header<R: Read>(
@@ -83,8 +83,13 @@ pub(super) fn read_next_pcap_frame<R: Read>(
         });
     }
 
-    let mut bytes = vec![0_u8; captured_length as usize];
-    read_exact_counted(reader, &mut bytes, "pcap packet data")?;
+    let mut bytes = Vec::new();
+    read_exact_vec(
+        reader,
+        &mut bytes,
+        captured_length as usize,
+        "pcap packet data",
+    )?;
     let nanoseconds = match precision {
         TimestampPrecision::Microseconds => fraction * 1_000,
         TimestampPrecision::Nanoseconds => fraction,

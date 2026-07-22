@@ -13,13 +13,18 @@ where
     E: ScanExecutor,
     C: Clock,
 {
+    let mut deadline = Deadline::new(request.limits.max_duration);
     let ports = request.validate()?;
     // Implementations must perform declared-target authorization before DNS
     // and authorize every answer before anything below constructs a ScanProbe.
-    let resolved = authorizer.resolve_and_authorize(&request.target)?;
+    enforce_deadline(&deadline)?;
+    let resolved = authorizer.resolve_and_authorize(&request.target);
+    enforce_deadline(&deadline)?;
+    let resolved = resolved?;
     let mut addresses = Vec::with_capacity(resolved.addresses.len());
     let mut seen_addresses = HashSet::with_capacity(resolved.addresses.len());
     for address in resolved.addresses {
+        enforce_deadline(&deadline)?;
         if request.address_family.accepts(address) && seen_addresses.insert(address) {
             addresses.push(address);
         }
@@ -87,7 +92,10 @@ where
             limit: request.limits.max_duration,
         });
     }
-    authorizer.authorize_operation(total_probes as u64, maximum_bytes)?;
+    enforce_deadline(&deadline)?;
+    let authorization = authorizer.authorize_operation(total_probes as u64, maximum_bytes);
+    enforce_deadline(&deadline)?;
+    authorization?;
 
     let endpoint_ports = if request.transport == ScanTransport::Icmp {
         vec![None]
@@ -95,6 +103,7 @@ where
         ports.iter().copied().map(Some).collect()
     };
     let batches = build_batches(request, &addresses, &endpoint_ports)?;
+    enforce_deadline(&deadline)?;
 
     let endpoints = addresses
         .iter()
@@ -124,16 +133,20 @@ where
     let mut scheduled_delay = Duration::ZERO;
 
     for (batch_index, batch) in batches.iter().enumerate() {
+        enforce_deadline(&deadline)?;
         let sequence = batch.probes[0].sequence;
         if batch_index != 0 {
             let delay = rate_delay(
                 batches[batch_index - 1].probes.len(),
                 request.probes_per_second,
             )?;
+            enforce_deadline(&deadline)?;
+            deadline.start_accounting(delay).map_err(duration_limit)?;
             clock.sleep(delay).map_err(|source| ScanError::Clock {
                 sequence,
                 message: source.to_string(),
             })?;
+            deadline.account(delay).map_err(duration_limit)?;
             scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
@@ -142,13 +155,29 @@ where
                         limit: request.limits.max_duration,
                     })?;
         }
-        let exchange = executor
-            .execute(batch)
-            .map_err(|source| ScanError::Execution { sequence, source })?;
+        enforce_deadline(&deadline)?;
+        deadline
+            .start_accounting(Duration::ZERO)
+            .map_err(duration_limit)?;
+        let exchange = executor.execute(batch);
+        enforce_deadline(&deadline)?;
+        let exchange = exchange.map_err(|source| ScanError::Execution { sequence, source })?;
+        deadline
+            .account(exchange.stats.elapsed)
+            .map_err(duration_limit)?;
         validate_exchange_evidence(batch, &exchange, request.limits)?;
+        enforce_deadline(&deadline)?;
         add_stats(&mut stats, &exchange.stats, sequence)?;
-        process_batch(batch, exchange, registry, request.limits, &mut output);
+        process_batch(
+            batch,
+            exchange,
+            registry,
+            request.limits,
+            &mut output,
+            &deadline,
+        )?;
     }
+    enforce_deadline(&deadline)?;
     stats.elapsed =
         stats
             .elapsed
@@ -372,15 +401,15 @@ fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> S
 
 pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
-        "ipv4"
+        BuiltinProtocol::Ipv4
     } else {
-        "ipv6"
+        BuiltinProtocol::Ipv6
     };
     let transport_protocol = match probe.transport {
-        ScanTransport::Tcp => "tcp",
-        ScanTransport::Udp => "udp",
-        ScanTransport::Icmp if probe.address.is_ipv4() => "icmpv4",
-        ScanTransport::Icmp => "icmpv6",
+        ScanTransport::Tcp => BuiltinProtocol::Tcp,
+        ScanTransport::Udp => BuiltinProtocol::Udp,
+        ScanTransport::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
+        ScanTransport::Icmp => BuiltinProtocol::Icmpv6,
     };
     if !crate::workflow::probe::packet_shape_matches(sent, &[network_protocol, transport_protocol])
     {
@@ -389,7 +418,7 @@ pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool 
     let network_matches = match probe.address {
         IpAddr::V4(destination) => {
             sent.iter()
-                .filter(|layer| layer.protocol_id().as_str() == "ipv4")
+                .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ipv4))
                 .count()
                 == 1
                 && sent.get::<Ipv4>().is_some_and(|ipv4| {
@@ -399,7 +428,7 @@ pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool 
         }
         IpAddr::V6(destination) => {
             sent.iter()
-                .filter(|layer| layer.protocol_id().as_str() == "ipv6")
+                .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ipv6))
                 .count()
                 == 1
                 && sent.get::<Ipv6>().is_some_and(|ipv6| {
@@ -447,7 +476,9 @@ fn process_batch(
     registry: &ProtocolRegistry,
     limits: ScanLimits,
     output: &mut ScanOutput,
-) {
+    deadline: &Deadline,
+) -> Result<(), ScanError> {
+    enforce_deadline(deadline)?;
     let ScanBatchExecution {
         sent,
         sent_evidence,
@@ -462,6 +493,7 @@ fn process_batch(
     }
     // Stable ordering retains executor order among responses for one request.
     responses.sort_by_key(|response| response.request_index);
+    enforce_deadline(deadline)?;
     let mut matched_responses = responses.iter().peekable();
 
     for (request_index, ((probe, built), sent_frame)) in batch
@@ -471,11 +503,13 @@ fn process_batch(
         .zip(sent_evidence.iter())
         .enumerate()
     {
+        enforce_deadline(deadline)?;
         let mut best = None;
         while matched_responses
             .peek()
             .is_some_and(|response| response.request_index == request_index)
         {
+            enforce_deadline(deadline)?;
             let response = matched_responses
                 .next()
                 .expect("peeked matched response must remain available");
@@ -495,8 +529,10 @@ fn process_batch(
                     |observation| observation.responder,
                 );
             }
+            enforce_deadline(deadline)?;
         }
         for response in &unsolicited {
+            enforce_deadline(deadline)?;
             if let Some(observation) =
                 classify_scan_response(registry, probe.transport, built, response)
             {
@@ -513,6 +549,7 @@ fn process_batch(
                     |observation| observation.responder,
                 );
             }
+            enforce_deadline(deadline)?;
         }
 
         let endpoint_index = output
@@ -564,9 +601,11 @@ fn process_batch(
             }
         };
         endpoint.evidence.push(evidence);
+        enforce_deadline(deadline)?;
     }
 
     for frame in batch_undecoded {
+        enforce_deadline(deadline)?;
         if output.undecoded.len() >= limits.max_undecoded {
             push_undecoded_limit_diagnostic(
                 &mut output.diagnostics,
@@ -585,7 +624,9 @@ fn process_batch(
         ) {
             output.undecoded.push(frame);
         }
+        enforce_deadline(deadline)?;
     }
+    Ok(())
 }
 
 fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), ScanError> {
@@ -593,15 +634,26 @@ fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), Scan
         .checked_add(batch)
         .ok_or(ScanError::StatisticsOverflow { sequence })
 }
+fn enforce_deadline(deadline: &Deadline) -> Result<(), ScanError> {
+    deadline.check().map_err(duration_limit)
+}
+
+fn duration_limit(error: DeadlineExceeded) -> ScanError {
+    ScanError::DurationLimit {
+        actual: error.actual,
+        limit: error.limit,
+    }
+}
 use super::{
-    Authorizer, Bytes, Clock, DecodedPacket, Diagnostic, Duration, EvidenceBudget,
-    ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, HashSet, IPV4_PROBE_BYTES,
-    IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
-    ProtocolRegistry, ResponseCandidate, ResponseEvidence, SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch,
-    ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanError, ScanExecutor,
-    ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest,
-    ScanResult, ScanTransport, Stats, Tcp, Udp, classify_scan_response,
-    format_exchange_evidence_error, nonzero_ipv4_identification, push_diagnostic_once,
-    push_undecoded_limit_diagnostic, retain_evidence, select_response_candidate,
-    validate_shared_exchange_evidence,
+    Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
+    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, HashSet,
+    IPV4_PROBE_BYTES, IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
+    MatchedResponseEvidence, Packet, ProtocolRegistry, ResponseCandidate, ResponseEvidence,
+    SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch, ScanBatchExecution, ScanClassification,
+    ScanEndpointResult, ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe,
+    ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult, ScanTransport, Stats, Tcp, Udp,
+    classify_scan_response, format_exchange_evidence_error, nonzero_ipv4_identification,
+    push_diagnostic_once, push_undecoded_limit_diagnostic, retain_evidence,
+    select_response_candidate, validate_shared_exchange_evidence,
 };
+use crate::packet::semantics::BuiltinProtocol;

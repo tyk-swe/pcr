@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{self, Write};
 use std::time::UNIX_EPOCH;
 
 use crate::capture::{Direction, Frame, LinkType};
@@ -35,6 +35,31 @@ struct InterfacePlan {
     requires_description_block: bool,
 }
 
+#[derive(Debug)]
+struct OutputFailure {
+    kind: io::ErrorKind,
+    raw_os_error: Option<i32>,
+    message: String,
+}
+
+impl OutputFailure {
+    fn from_error(error: &io::Error) -> Self {
+        Self {
+            kind: error.kind(),
+            raw_os_error: error.raw_os_error(),
+            message: error.to_string(),
+        }
+    }
+
+    fn to_error(&self) -> Error {
+        let error = match self.raw_os_error {
+            Some(code) => io::Error::from_raw_os_error(code),
+            None => io::Error::new(self.kind, self.message.clone()),
+        };
+        Error::Io(error)
+    }
+}
+
 /// A streaming capture writer over any [`Write`] implementation.
 pub struct Writer<W> {
     inner: W,
@@ -44,6 +69,7 @@ pub struct Writer<W> {
     stream_limits: Limits,
     frames_written: u64,
     captured_bytes_written: u64,
+    output_failure: Option<OutputFailure>,
 }
 
 impl<W: Write> Writer<W> {
@@ -123,6 +149,7 @@ impl<W: Write> Writer<W> {
             stream_limits: Limits::default(),
             frames_written: 0,
             captured_bytes_written: 0,
+            output_failure: None,
         })
     }
 
@@ -157,6 +184,7 @@ impl<W: Write> Writer<W> {
             stream_limits: Limits::default(),
             frames_written: 0,
             captured_bytes_written: 0,
+            output_failure: None,
         })
     }
 
@@ -220,6 +248,7 @@ impl<W: Write> Writer<W> {
     /// Adds a PCAPNG interface using the writer's configured size limit as
     /// its snap length and returns its numeric interface ID.
     pub fn add_interface(&mut self, link_type: LinkType) -> Result<u32, Error> {
+        self.ensure_output_available()?;
         let snap_len = usize_to_u32_limit(self.max_size)?;
         self.add_interface_description(Interface {
             link_type,
@@ -231,16 +260,19 @@ impl<W: Write> Writer<W> {
 
     /// Adds one PCAPNG interface while retaining its timestamp metadata.
     pub fn add_interface_description(&mut self, description: Interface) -> Result<u32, Error> {
+        self.ensure_output_available()?;
         let (endianness, interface_id) = self.validate_new_interface(description)?;
 
-        write_interface_description(
-            &mut self.inner,
-            endianness,
-            description.link_type,
-            description.snap_len,
-            description.timestamp_resolution,
-            description.timestamp_offset,
-        )?;
+        self.write_output(|inner| {
+            write_interface_description(
+                inner,
+                endianness,
+                description.link_type,
+                description.snap_len,
+                description.timestamp_resolution,
+                description.timestamp_offset,
+            )
+        })?;
         match &mut self.state {
             WriterState::PcapNg { interfaces, .. } => {
                 interfaces.push(description);
@@ -307,6 +339,7 @@ impl<W: Write> Writer<W> {
     /// Writes one frame, validating all representability and length invariants
     /// before emitting any bytes for it.
     pub fn write_frame(&mut self, frame: &Frame) -> Result<(), Error> {
+        self.ensure_output_available()?;
         validate_frame_lengths(frame, self.max_size)?;
 
         let next_frames = self
@@ -419,12 +452,14 @@ impl<W: Write> Writer<W> {
             TimestampPrecision::Nanoseconds => elapsed.subsec_nanos(),
         };
 
-        write_u32(&mut self.inner, endianness, seconds)?;
-        write_u32(&mut self.inner, endianness, fraction)?;
-        write_u32(&mut self.inner, endianness, frame.captured_length())?;
-        write_u32(&mut self.inner, endianness, frame.original_length())?;
-        self.inner.write_all(frame.bytes())?;
-        Ok(())
+        self.write_output(|inner| {
+            write_u32(inner, endianness, seconds)?;
+            write_u32(inner, endianness, fraction)?;
+            write_u32(inner, endianness, frame.captured_length())?;
+            write_u32(inner, endianness, frame.original_length())?;
+            inner.write_all(frame.bytes())?;
+            Ok(())
+        })
     }
 
     fn write_pcapng_frame(&mut self, frame: &Frame) -> Result<(), Error> {
@@ -465,30 +500,32 @@ impl<W: Write> Writer<W> {
             debug_assert_eq!(committed, interface_id);
         }
 
-        write_u32(&mut self.inner, endianness, PCAPNG_ENHANCED_PACKET_BLOCK)?;
-        write_u32(&mut self.inner, endianness, block_length)?;
-        write_u32(&mut self.inner, endianness, interface_id)?;
-        write_u32(&mut self.inner, endianness, (timestamp >> 32) as u32)?;
-        write_u32(&mut self.inner, endianness, timestamp as u32)?;
-        write_u32(&mut self.inner, endianness, frame.captured_length())?;
-        write_u32(&mut self.inner, endianness, frame.original_length())?;
-        self.inner.write_all(frame.bytes())?;
-        write_padding(&mut self.inner, frame.captured_length())?;
+        self.write_output(|inner| {
+            write_u32(inner, endianness, PCAPNG_ENHANCED_PACKET_BLOCK)?;
+            write_u32(inner, endianness, block_length)?;
+            write_u32(inner, endianness, interface_id)?;
+            write_u32(inner, endianness, (timestamp >> 32) as u32)?;
+            write_u32(inner, endianness, timestamp as u32)?;
+            write_u32(inner, endianness, frame.captured_length())?;
+            write_u32(inner, endianness, frame.original_length())?;
+            inner.write_all(frame.bytes())?;
+            write_padding(inner, frame.captured_length())?;
 
-        if let Some(direction) = frame.direction {
-            write_u16(&mut self.inner, endianness, PCAPNG_OPTION_EPB_FLAGS)?;
-            write_u16(&mut self.inner, endianness, 4)?;
-            let flags = match direction {
-                Direction::Unknown => 0,
-                Direction::Inbound => 1,
-                Direction::Outbound => 2,
-            };
-            write_u32(&mut self.inner, endianness, flags)?;
-            write_u16(&mut self.inner, endianness, PCAPNG_OPTION_END)?;
-            write_u16(&mut self.inner, endianness, 0)?;
-        }
-        write_u32(&mut self.inner, endianness, block_length)?;
-        Ok(())
+            if let Some(direction) = frame.direction {
+                write_u16(inner, endianness, PCAPNG_OPTION_EPB_FLAGS)?;
+                write_u16(inner, endianness, 4)?;
+                let flags = match direction {
+                    Direction::Unknown => 0,
+                    Direction::Inbound => 1,
+                    Direction::Outbound => 2,
+                };
+                write_u32(inner, endianness, flags)?;
+                write_u16(inner, endianness, PCAPNG_OPTION_END)?;
+                write_u16(inner, endianness, 0)?;
+            }
+            write_u32(inner, endianness, block_length)?;
+            Ok(())
+        })
     }
 
     fn select_interface(&self, frame: &Frame) -> Result<InterfacePlan, Error> {
@@ -561,7 +598,28 @@ impl<W: Write> Writer<W> {
     }
 
     pub fn flush(&mut self) -> Result<(), Error> {
-        self.inner.flush().map_err(Error::from)
+        self.write_output(|inner| inner.flush().map_err(Error::from))
+    }
+
+    fn ensure_output_available(&self) -> Result<(), Error> {
+        match &self.output_failure {
+            Some(failure) => Err(failure.to_error()),
+            None => Ok(()),
+        }
+    }
+
+    fn write_output<T>(
+        &mut self,
+        operation: impl FnOnce(&mut W) -> Result<T, Error>,
+    ) -> Result<T, Error> {
+        self.ensure_output_available()?;
+        match operation(&mut self.inner) {
+            Err(Error::Io(error)) => {
+                self.output_failure = Some(OutputFailure::from_error(&error));
+                Err(Error::Io(error))
+            }
+            result => result,
+        }
     }
 
     pub fn get_ref(&self) -> &W {

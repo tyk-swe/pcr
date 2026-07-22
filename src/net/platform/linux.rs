@@ -3,10 +3,22 @@
 
 //! Linux route and interface adapter backed by route netlink.
 
+#![forbid(unsafe_code)]
+
 #[cfg(feature = "native-route")]
-use std::collections::BTreeMap;
-#[cfg(feature = "native-route")]
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::{
+    any::Any,
+    cell::RefCell,
+    collections::BTreeMap,
+    fs,
+    future::Future,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    os::unix::fs::MetadataExt,
+    panic::{AssertUnwindSafe, catch_unwind},
+    pin::Pin,
+    sync::mpsc::{self, Receiver, Sender, SyncSender},
+    thread::{self, JoinHandle},
+};
 
 #[cfg(feature = "native-route")]
 use futures_util::TryStreamExt;
@@ -146,10 +158,95 @@ where
     Fut: std::future::Future<Output = Result<T, NativeRouteError>> + Send + 'static,
     T: Send + 'static,
 {
-    // The public route API is synchronous. Run its private async netlink
-    // machinery on a dedicated thread so callers already inside any Tokio
-    // runtime never nest Runtime::block_on on that runtime's worker.
-    std::thread::Builder::new()
+    with_netlink_for_namespace(current_network_namespace(), operation)
+}
+
+#[cfg(feature = "native-route")]
+fn with_netlink_for_namespace<F, Fut, T>(
+    namespace: Option<NetworkNamespaceId>,
+    operation: F,
+) -> Result<T, NativeRouteError>
+where
+    F: FnOnce(Handle) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    T: Send + 'static,
+{
+    match namespace {
+        Some(namespace) => with_netlink_in_namespace(namespace, operation),
+        None => {
+            // Namespace metadata is only needed to cache workers safely. A
+            // fresh thread inherits the caller's current network namespace,
+            // so netlink remains usable when procfs is not mounted.
+            NETLINK_WORKER.with(|worker| worker.borrow_mut().take());
+            with_uncached_netlink(operation)
+        }
+    }
+}
+
+#[cfg(feature = "native-route")]
+fn with_netlink_in_namespace<F, Fut, T>(
+    namespace: NetworkNamespaceId,
+    operation: F,
+) -> Result<T, NativeRouteError>
+where
+    F: FnOnce(Handle) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    T: Send + 'static,
+{
+    NETLINK_WORKER.with(|worker| {
+        let mut worker = worker.borrow_mut();
+        if worker
+            .as_ref()
+            .is_none_or(|worker| worker.namespace != namespace)
+        {
+            // Linux network namespaces are selected per calling thread. Drop
+            // and join a worker inherited from an earlier namespace before
+            // opening a netlink socket in the caller's current namespace.
+            worker.take();
+            *worker = Some(NetlinkWorker::start(namespace)?);
+        }
+        let result = worker
+            .as_ref()
+            .expect("the netlink worker was initialized above")
+            .execute(operation);
+        match result {
+            Ok(value) => Ok(value),
+            Err(NetlinkExecutionError::Operation(error)) => Err(error),
+            Err(NetlinkExecutionError::Worker(error)) => {
+                // A broken command or response channel means this worker can
+                // no longer make progress. Joining it here lets the next call
+                // initialize a fresh worker instead of retaining a dead one.
+                worker.take();
+                Err(error)
+            }
+        }
+    })
+}
+
+#[cfg(feature = "native-route")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct NetworkNamespaceId {
+    device: u64,
+    inode: u64,
+}
+
+#[cfg(feature = "native-route")]
+fn current_network_namespace() -> Option<NetworkNamespaceId> {
+    let metadata = fs::metadata("/proc/thread-self/ns/net").ok()?;
+    Some(NetworkNamespaceId {
+        device: metadata.dev(),
+        inode: metadata.ino(),
+    })
+}
+
+#[cfg(feature = "native-route")]
+fn with_uncached_netlink<F, Fut, T>(operation: F) -> Result<T, NativeRouteError>
+where
+    F: FnOnce(Handle) -> Fut + Send + 'static,
+    Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+    T: Send + 'static,
+{
+    thread::Builder::new()
         .name("packetcraftr-netlink".to_owned())
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
@@ -167,9 +264,186 @@ where
         })
         .map_err(|error| os_error("spawn netlink worker", error))?
         .join()
-        .map_err(|_| NativeRouteError::InvalidResponse {
-            message: "Linux netlink worker panicked".to_owned(),
-        })?
+        .map_err(|_| netlink_worker_panicked())?
+}
+
+#[cfg(feature = "native-route")]
+thread_local! {
+    static NETLINK_WORKER: RefCell<Option<NetlinkWorker>> = const { RefCell::new(None) };
+}
+
+#[cfg(feature = "native-route")]
+type ErasedNetlinkResult = Result<Box<dyn Any + Send>, NativeRouteError>;
+
+#[cfg(feature = "native-route")]
+type NetlinkFuture = Pin<Box<dyn Future<Output = ErasedNetlinkResult> + Send>>;
+
+#[cfg(feature = "native-route")]
+type NetlinkOperation = Box<dyn FnOnce(Handle) -> NetlinkFuture + Send>;
+
+#[cfg(feature = "native-route")]
+enum NetlinkCommand {
+    Execute {
+        operation: NetlinkOperation,
+        response: SyncSender<ErasedNetlinkResult>,
+    },
+    Shutdown,
+}
+
+#[cfg(feature = "native-route")]
+struct NetlinkWorker {
+    namespace: NetworkNamespaceId,
+    commands: Sender<NetlinkCommand>,
+    thread: Option<JoinHandle<()>>,
+}
+
+#[cfg(feature = "native-route")]
+impl NetlinkWorker {
+    fn start(namespace: NetworkNamespaceId) -> Result<Self, NativeRouteError> {
+        let (commands, command_receiver) = mpsc::channel();
+        let (setup_sender, setup_receiver) = mpsc::sync_channel(1);
+        let thread = thread::Builder::new()
+            .name("packetcraftr-netlink".to_owned())
+            .spawn(move || netlink_worker(command_receiver, setup_sender))
+            .map_err(|error| os_error("spawn netlink worker", error))?;
+
+        match setup_receiver.recv() {
+            Ok(Ok(())) => Ok(Self {
+                namespace,
+                commands,
+                thread: Some(thread),
+            }),
+            Ok(Err(error)) => {
+                let _ = thread.join();
+                Err(error)
+            }
+            Err(_) => {
+                if thread.join().is_err() {
+                    Err(netlink_worker_panicked())
+                } else {
+                    Err(netlink_channel_error("setup response channel closed"))
+                }
+            }
+        }
+    }
+
+    fn execute<F, Fut, T>(&self, operation: F) -> Result<T, NetlinkExecutionError>
+    where
+        F: FnOnce(Handle) -> Fut + Send + 'static,
+        Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
+        T: Send + 'static,
+    {
+        let operation = Box::new(move |handle| {
+            Box::pin(async move {
+                operation(handle)
+                    .await
+                    .map(|value| Box::new(value) as Box<dyn Any + Send>)
+            }) as NetlinkFuture
+        });
+        let (response, receiver) = mpsc::sync_channel(1);
+        self.commands
+            .send(NetlinkCommand::Execute {
+                operation,
+                response,
+            })
+            .map_err(|_| {
+                NetlinkExecutionError::Worker(netlink_channel_error("command channel closed"))
+            })?;
+        let response = receiver.recv().map_err(|_| {
+            NetlinkExecutionError::Worker(netlink_channel_error("response channel closed"))
+        })?;
+        let value = response.map_err(NetlinkExecutionError::Operation)?;
+        value.downcast::<T>().map(|value| *value).map_err(|_| {
+            NetlinkExecutionError::Worker(netlink_channel_error(
+                "returned an unexpected response type",
+            ))
+        })
+    }
+
+    fn shutdown(&mut self) -> Result<(), NativeRouteError> {
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        let send_result = self.commands.send(NetlinkCommand::Shutdown);
+        if thread.join().is_err() {
+            return Err(netlink_worker_panicked());
+        }
+        send_result.map_err(|_| netlink_channel_error("shutdown command channel closed"))
+    }
+}
+
+#[cfg(feature = "native-route")]
+impl Drop for NetlinkWorker {
+    fn drop(&mut self) {
+        let _ = self.shutdown();
+    }
+}
+
+#[cfg(feature = "native-route")]
+#[derive(Debug)]
+enum NetlinkExecutionError {
+    Operation(NativeRouteError),
+    Worker(NativeRouteError),
+}
+
+#[cfg(feature = "native-route")]
+fn netlink_worker(
+    commands: Receiver<NetlinkCommand>,
+    setup: SyncSender<Result<(), NativeRouteError>>,
+) {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = setup.send(Err(os_error("create Tokio netlink runtime", error)));
+            return;
+        }
+    };
+    let (connection, handle, _) = match runtime.block_on(async { new_connection() }) {
+        Ok(parts) => parts,
+        Err(error) => {
+            let _ = setup.send(Err(os_error("open route netlink socket", error)));
+            return;
+        }
+    };
+    let connection = runtime.spawn(connection);
+    if setup.send(Ok(())).is_err() {
+        connection.abort();
+        return;
+    }
+
+    while let Ok(command) = commands.recv() {
+        match command {
+            NetlinkCommand::Execute {
+                operation,
+                response,
+            } => {
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    runtime.block_on(operation(handle.clone()))
+                }))
+                .unwrap_or_else(|_| Err(netlink_worker_panicked()));
+                let _ = response.send(result);
+            }
+            NetlinkCommand::Shutdown => break,
+        }
+    }
+    connection.abort();
+}
+
+#[cfg(feature = "native-route")]
+fn netlink_worker_panicked() -> NativeRouteError {
+    NativeRouteError::InvalidResponse {
+        message: "Linux netlink worker panicked".to_owned(),
+    }
+}
+
+#[cfg(feature = "native-route")]
+fn netlink_channel_error(message: &'static str) -> NativeRouteError {
+    NativeRouteError::InvalidResponse {
+        message: format!("Linux netlink worker {message}"),
+    }
 }
 
 #[cfg(feature = "native-route")]
@@ -327,6 +601,11 @@ fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRou
 mod tests {
     use super::*;
     use crate::net::route::Provider as RouteProvider;
+    use std::collections::HashSet;
+
+    fn worker_thread_id() -> thread::ThreadId {
+        with_netlink(|_| async { Ok(thread::current().id()) }).unwrap()
+    }
 
     #[test]
     fn native_linux_provider_finds_loopback_routes_and_interfaces() {
@@ -348,34 +627,163 @@ mod tests {
     }
 
     #[test]
-    fn synchronous_lookup_is_safe_inside_tokio_and_across_concurrent_callers() {
+    fn repeated_lookups_reuse_the_calling_threads_netlink_worker() {
+        let first_worker = worker_thread_id();
+        crate::net::route::SystemProvider
+            .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+            .unwrap();
+        let second_worker = worker_thread_id();
+
+        assert_eq!(first_worker, second_worker);
+        assert_ne!(first_worker, thread::current().id());
+    }
+
+    #[test]
+    fn network_namespace_change_restarts_the_calling_threads_netlink_worker() {
+        let first_namespace = NetworkNamespaceId {
+            device: 1,
+            inode: 1,
+        };
+        let second_namespace = NetworkNamespaceId {
+            device: 1,
+            inode: 2,
+        };
+        let first_worker =
+            with_netlink_in_namespace(first_namespace, |_| async { Ok(thread::current().id()) })
+                .unwrap();
+        let old_commands = NETLINK_WORKER.with(|worker| {
+            worker
+                .borrow()
+                .as_ref()
+                .expect("the first worker was initialized above")
+                .commands
+                .clone()
+        });
+
+        let reused_worker =
+            with_netlink_in_namespace(first_namespace, |_| async { Ok(thread::current().id()) })
+                .unwrap();
+        assert_eq!(first_worker, reused_worker);
+
+        with_netlink_in_namespace(second_namespace, |_| async {
+            Ok::<_, NativeRouteError>(())
+        })
+        .unwrap();
+        assert!(old_commands.send(NetlinkCommand::Shutdown).is_err());
+        NETLINK_WORKER.with(|worker| {
+            assert_eq!(
+                worker
+                    .borrow()
+                    .as_ref()
+                    .expect("the replacement worker was initialized above")
+                    .namespace,
+                second_namespace
+            );
+        });
+    }
+
+    #[test]
+    fn unavailable_namespace_metadata_uses_uncached_netlink_workers() {
+        let namespace = NetworkNamespaceId {
+            device: 1,
+            inode: 1,
+        };
+        let cached_worker =
+            with_netlink_in_namespace(namespace, |_| async { Ok(thread::current().id()) }).unwrap();
+
+        let first_uncached_worker =
+            with_netlink_for_namespace(None, |_| async { Ok(thread::current().id()) }).unwrap();
+        let second_uncached_worker =
+            with_netlink_for_namespace(None, |_| async { Ok(thread::current().id()) }).unwrap();
+
+        assert_ne!(cached_worker, first_uncached_worker);
+        assert_ne!(first_uncached_worker, second_uncached_worker);
+        NETLINK_WORKER.with(|worker| assert!(worker.borrow().is_none()));
+    }
+
+    #[test]
+    fn synchronous_lookup_is_safe_inside_tokio() {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_io()
             .build()
             .unwrap();
         runtime.block_on(async {
-            tokio::spawn(async {
+            let caller = thread::current().id();
+            let worker = tokio::spawn(async {
+                let worker = worker_thread_id();
                 crate::net::route::SystemProvider
                     .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
-                    .unwrap()
+                    .unwrap();
+                worker
             })
             .await
             .unwrap();
+            assert_ne!(worker, caller);
         });
+    }
 
+    #[test]
+    fn concurrent_caller_threads_get_independent_netlink_workers() {
+        let mut worker_threads = HashSet::new();
         std::thread::scope(|scope| {
             let workers = (0..4)
                 .map(|_| {
                     scope.spawn(|| {
+                        let caller = thread::current().id();
+                        let worker = worker_thread_id();
                         crate::net::route::SystemProvider
                             .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
-                            .unwrap()
+                            .unwrap();
+                        (caller, worker)
                     })
                 })
                 .collect::<Vec<_>>();
             for worker in workers {
-                worker.join().unwrap();
+                let (caller, worker) = worker.join().unwrap();
+                assert_ne!(caller, worker);
+                assert!(worker_threads.insert(worker));
             }
         });
+        assert_eq!(worker_threads.len(), 4);
+    }
+
+    #[test]
+    fn explicit_worker_shutdown_sends_shutdown_and_joins() {
+        let mut worker = NetlinkWorker::start(current_network_namespace().unwrap()).unwrap();
+        let worker_thread = worker
+            .execute(|_| async { Ok::<_, NativeRouteError>(thread::current().id()) })
+            .unwrap();
+        assert_ne!(worker_thread, thread::current().id());
+
+        worker.shutdown().unwrap();
+        assert!(worker.thread.is_none());
+        assert!(matches!(
+            worker.execute(|_| async { Ok::<_, NativeRouteError>(()) }),
+            Err(NetlinkExecutionError::Worker(
+                NativeRouteError::InvalidResponse { .. }
+            ))
+        ));
+    }
+
+    async fn panic_operation() -> Result<(), NativeRouteError> {
+        panic!("scripted netlink operation panic")
+    }
+
+    #[test]
+    fn panicked_operation_is_typed_and_does_not_kill_the_worker() {
+        let mut worker = NetlinkWorker::start(current_network_namespace().unwrap()).unwrap();
+        assert_eq!(
+            match worker.execute(|_| panic_operation()) {
+                Err(NetlinkExecutionError::Operation(error)) => error,
+                result => panic!("expected a typed operation panic, got {result:?}"),
+            },
+            NativeRouteError::InvalidResponse {
+                message: "Linux netlink worker panicked".to_owned(),
+            }
+        );
+        worker
+            .execute(|_| async { Ok::<_, NativeRouteError>(()) })
+            .unwrap();
+        worker.shutdown().unwrap();
     }
 }

@@ -4,7 +4,9 @@ pub fn fuzz(
     packet: Packet,
     registry: Arc<ProtocolRegistry>,
 ) -> Result<FuzzResult, FuzzError> {
-    let prepared = prepare(request, packet, registry)?;
+    request.validate()?;
+    let mut deadline = Deadline::new(request.limits.max_duration);
+    let prepared = prepare(request, packet, registry, &mut deadline)?;
     Ok(FuzzResult {
         mode: FuzzMode::Offline,
         seed: request.seed,
@@ -40,9 +42,10 @@ where
     C: Clock,
 {
     let live = live.validate()?;
-    let operation_started = Instant::now();
+    let mut deadline = Deadline::new(request.limits.max_duration);
     let live_dissector = Dissector::new(Arc::clone(&registry));
-    let mut prepared = prepare(request, packet, registry)?;
+    request.validate()?;
+    let mut prepared = prepare(request, packet, registry, &mut deadline)?;
     let built_indices = prepared
         .cases
         .iter()
@@ -51,20 +54,9 @@ where
         .collect::<Vec<_>>();
 
     let worst_case = worst_case_duration(live, built_indices.len())?;
-    let complete_worst_case =
-        prepared
-            .preparation_elapsed
-            .checked_add(worst_case)
-            .ok_or(FuzzError::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
-            })?;
-    if complete_worst_case > request.limits.max_duration {
-        return Err(FuzzError::DurationLimit {
-            actual: complete_worst_case,
-            limit: request.limits.max_duration,
-        });
-    }
+    deadline
+        .check_additional(worst_case)
+        .map_err(duration_limit)?;
 
     let maximum_wire_bytes = prepared.cases.iter().try_fold(0_u64, |total, case| {
         let Some(built) = &case.built else {
@@ -116,11 +108,7 @@ where
             requires_malformed_live,
         )?;
     }
-    enforce_operation_deadline(
-        operation_started,
-        prepared.preparation_elapsed,
-        request.limits.max_duration,
-    )?;
+    deadline.check().map_err(duration_limit)?;
 
     let mut stats = FuzzStats {
         cases_generated: request.cases as u64,
@@ -135,43 +123,41 @@ where
         let case = &mut prepared.cases[case_index];
         if ordinal != 0 {
             let delay = rate_delay(live.cases_per_second)?;
-            clock.sleep(delay).map_err(|source| FuzzError::Clock {
-                case_index: case.index,
-                message: source.to_string(),
-            })?;
-            scheduled_delay =
+            let prospective_scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
                     .ok_or(FuzzError::DurationLimit {
                         actual: Duration::MAX,
                         limit: request.limits.max_duration,
                     })?;
-        }
-        let accounted_elapsed = prepared
-            .preparation_elapsed
-            .checked_add(stats.elapsed)
-            .and_then(|value| value.checked_add(scheduled_delay))
-            .ok_or(FuzzError::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
+            deadline.start_accounting(delay).map_err(duration_limit)?;
+            clock.sleep(delay).map_err(|source| FuzzError::Clock {
+                case_index: case.index,
+                message: source.to_string(),
             })?;
-        enforce_operation_deadline(
-            operation_started,
-            accounted_elapsed,
-            request.limits.max_duration,
-        )?;
+            deadline.account(delay).map_err(duration_limit)?;
+            scheduled_delay = prospective_scheduled_delay;
+        }
+        deadline.check().map_err(duration_limit)?;
         let execution_case = FuzzExecutionCase {
             index: case.index,
             seed: case.seed,
             packet: case.recipe.clone(),
         };
+        deadline
+            .start_accounting(Duration::ZERO)
+            .map_err(duration_limit)?;
         let execution = executor
             .execute(&execution_case, live.timeout)
             .map_err(|source| FuzzError::Execution {
                 case_index: case.index,
                 source,
             })?;
-        validate_execution(case, &execution, request.limits, live.timeout)?;
+        deadline.check().map_err(duration_limit)?;
+        deadline
+            .account(execution.stats.elapsed)
+            .map_err(duration_limit)?;
+        validate_execution(case, &execution, request.limits, live.timeout, &deadline)?;
         add_execution_stats(&mut stats, &execution.stats, case.index)?;
         if stats.bytes > request.limits.max_total_bytes as u64 {
             return Err(FuzzError::ByteLimit {
@@ -179,19 +165,6 @@ where
                 limit: request.limits.max_total_bytes as u64,
             });
         }
-        let accounted_elapsed = prepared
-            .preparation_elapsed
-            .checked_add(stats.elapsed)
-            .and_then(|value| value.checked_add(scheduled_delay))
-            .ok_or(FuzzError::DurationLimit {
-                actual: Duration::MAX,
-                limit: request.limits.max_duration,
-            })?;
-        enforce_operation_deadline(
-            operation_started,
-            accounted_elapsed,
-            request.limits.max_duration,
-        )?;
         let had_response = !execution.responses.is_empty();
         case.diagnostics = execution.built.diagnostics.clone();
         case.decoded = dissect_built(
@@ -200,23 +173,28 @@ where
             request.limits,
             &mut case.diagnostics,
         );
+        deadline.check().map_err(duration_limit)?;
         case.built = Some(execution.built);
         case.sent = Some(execution.sent);
         case.diagnostics.extend(execution.diagnostics);
         retain_evidence(
             case,
-            execution.responses,
-            execution.unmatched,
-            execution.undecoded,
+            ExecutionEvidence {
+                responses: execution.responses,
+                unmatched: execution.unmatched,
+                undecoded: execution.undecoded,
+            },
             request.limits,
             &mut evidence,
             &mut operation_diagnostics,
-        );
+            &deadline,
+        )?;
         case.outcome = if had_response {
             FuzzCaseOutcome::Response
         } else {
             FuzzCaseOutcome::Timeout
         };
+        deadline.check().map_err(duration_limit)?;
     }
     stats.elapsed =
         stats
@@ -227,6 +205,7 @@ where
                     .first_case
                     .saturating_add(request.cases.saturating_sub(1) as u64),
             })?;
+    deadline.check().map_err(duration_limit)?;
 
     Ok(FuzzResult {
         mode: FuzzMode::Live,
@@ -242,7 +221,6 @@ pub(super) struct PreparedFuzz {
     pub(super) cases: Vec<FuzzCase>,
     pub(super) built_case_count: u64,
     pub(super) built_byte_count: u64,
-    pub(super) preparation_elapsed: Duration,
 }
 
 #[derive(Clone)]
@@ -253,12 +231,13 @@ pub(super) struct ResolvedField {
     pub(super) is_derived: bool,
 }
 use super::execution::{
-    add_execution_stats, rate_delay, retain_evidence, validate_execution, worst_case_duration,
+    ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
+    worst_case_duration,
 };
-use super::mutation::{dissect_built, enforce_operation_deadline, has_link_root, prepare};
+use super::mutation::{dissect_built, has_link_root, prepare};
 use super::{
-    Arc, Clock, Dissector, Duration, EvidenceBudget, FieldKind, FuzzAuthorizer, FuzzCase,
+    Arc, Clock, Deadline, Dissector, Duration, EvidenceBudget, FieldKind, FuzzAuthorizer, FuzzCase,
     FuzzCaseOutcome, FuzzError, FuzzExecutionCase, FuzzExecutor, FuzzLiveOptions, FuzzMode,
-    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Instant, Packet, ProtocolRegistry,
-    SYNTHESIZED_ETHERNET_BYTES,
+    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Packet, ProtocolRegistry,
+    SYNTHESIZED_ETHERNET_BYTES, duration_limit,
 };

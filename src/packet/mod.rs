@@ -17,6 +17,7 @@ pub mod layout;
 pub mod matcher;
 mod model;
 pub mod registry;
+pub(crate) mod semantics;
 pub mod template;
 
 pub use model::{Packet, PacketError as Error};

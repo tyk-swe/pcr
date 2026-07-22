@@ -3,6 +3,8 @@
 
 //! Legacy Unix interface-enumeration adapter used by the default feature.
 
+#![forbid(unsafe_code)]
+
 use super::super::{
     interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{LinkCapability, MacAddress},

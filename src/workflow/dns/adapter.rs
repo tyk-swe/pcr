@@ -40,8 +40,15 @@ where
         options.send.destination = Some(exchange.probe.server_address);
         let result = self
             .client
-            .exchange(&PacketTemplate::new(exchange.probe.packet()), options)
-            .map_err(|error| BoundaryError::classified(&error))?;
+            .exchange_for_workflow(
+                &PacketTemplate::new(exchange.probe.packet()),
+                options,
+                |_request_index, sent, response| {
+                    probe::observe(self.client.registry(), ProbeTransport::Udp, sent, response)
+                        .is_some()
+                },
+            )
+            .map_err(BoundaryError::from_error)?;
         let crate::client::exchange::Result {
             mut sent,
             mut sent_evidence,
@@ -99,5 +106,5 @@ fn invalid_client_result(message: impl Into<String>) -> BoundaryError {
 }
 use super::{
     BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse, ExchangeIo,
-    NeighborResolver, PacketTemplate, RouteProvider,
+    NeighborResolver, PacketTemplate, ProbeTransport, RouteProvider, probe,
 };

@@ -1864,3 +1864,118 @@ fn aggregate_duration_is_rejected_before_operation_authorization() {
     assert!(matches!(error, DnsError::DurationLimit { .. }));
     assert_eq!(authorizer.operation_calls, 0);
 }
+
+#[test]
+fn slow_resolver_expires_before_executor_side_effects() {
+    struct SlowResolver {
+        calls: AtomicUsize,
+    }
+
+    impl HostnameResolver for SlowResolver {
+        fn resolve(
+            &self,
+            _hostname: &Hostname,
+            _limit: usize,
+        ) -> Result<Vec<IpAddr>, TargetResolutionError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_millis(20));
+            Ok(vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))])
+        }
+    }
+
+    let resolver = SlowResolver {
+        calls: AtomicUsize::new(0),
+    };
+    let mut policy = private_policy();
+    policy.allow_hostname_resolution = true;
+    let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
+    let mut executor = TimeoutExecutor::default();
+    let mut request = single_attempt_request();
+    request.server = Target::Hostname("slow-resolver.example".to_owned());
+    request.timeout = Duration::from_millis(1);
+    request.limits.max_duration = Duration::from_millis(5);
+
+    let error = dns(
+        &request,
+        &mut authorizer,
+        &default_registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, DnsError::DurationLimit { .. }));
+    assert_eq!(resolver.calls.load(Ordering::SeqCst), 1);
+    assert_eq!(executor.calls, 0);
+}
+
+#[test]
+fn candidate_heavy_result_expires_before_a_second_dns_attempt() {
+    struct CountingAuthorizer {
+        resolutions: usize,
+    }
+
+    impl Authorizer for CountingAuthorizer {
+        fn resolve_and_authorize(&mut self, target: &Target) -> Result<Authorized, BoundaryError> {
+            self.resolutions += 1;
+            Ok(Authorized {
+                declared: target.to_string(),
+                addresses: vec![IpAddr::V4(Ipv4Addr::new(10, 0, 0, 53))],
+            })
+        }
+
+        fn authorize_operation(
+            &mut self,
+            packets: u64,
+            _maximum_wire_bytes: u64,
+        ) -> Result<(), BoundaryError> {
+            assert_eq!(packets, 2);
+            Ok(())
+        }
+    }
+
+    struct CandidateHeavyExecutor {
+        calls: usize,
+    }
+
+    impl DnsExecutor for CandidateHeavyExecutor {
+        fn execute(
+            &mut self,
+            exchange: &DnsExchange,
+        ) -> Result<DnsExchangeExecution, BoundaryError> {
+            self.calls += 1;
+            let mut execution = PayloadExecutor {
+                payload: Bytes::from_static(b"malformed"),
+            }
+            .execute(exchange)?;
+            let sent_at = execution.sent_evidence.timestamp;
+            let mut candidate = execution.responses.pop().unwrap();
+            candidate.latency = Duration::ZERO;
+            candidate.response.frame.timestamp = sent_at;
+            execution.responses = vec![candidate; exchange.max_responses];
+            execution.stats.elapsed = Duration::ZERO;
+            Ok(execution)
+        }
+    }
+
+    let mut request = single_attempt_request();
+    request.attempts = 2;
+    request.timeout = Duration::from_nanos(1);
+    request.limits.max_duration = Duration::from_millis(5);
+    request.limits.max_evidence_frames = DEFAULT_CAPTURE_QUEUE_FRAMES;
+    let mut authorizer = CountingAuthorizer { resolutions: 0 };
+    let mut executor = CandidateHeavyExecutor { calls: 0 };
+
+    let error = dns(
+        &request,
+        &mut authorizer,
+        &default_registry().unwrap(),
+        &mut executor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, DnsError::DurationLimit { .. }));
+    assert_eq!(authorizer.resolutions, 1);
+    assert_eq!(executor.calls, 1);
+}

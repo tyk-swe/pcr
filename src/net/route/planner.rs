@@ -5,7 +5,12 @@ use thiserror::Error;
 use crate::capture::Frame;
 use crate::error::{Category, Classification, Classified, Kind};
 use crate::net::{Error as LiveIoError, capture::CaptureStatistics};
-use crate::packet::{Packet, field::FieldValue, layer::ProtocolId};
+use crate::packet::{
+    Packet,
+    field::FieldValue,
+    layer::ProtocolId,
+    semantics::{self, BuiltinProtocol},
+};
 
 #[cfg(all(
     feature = "native-route",
@@ -77,6 +82,8 @@ pub enum PlanError {
     MissingPacketSource,
     #[error("invalid Segment Routing Header route state: {message}")]
     InvalidSegmentRouting { message: String },
+    #[error("invalid IPv4 source-route state: {message}")]
+    InvalidSourceRouting { message: String },
     #[error("packet carries an invalid neighbor-discovery VLAN stack: {message}")]
     InvalidNeighborVlan { message: String },
 }
@@ -110,6 +117,7 @@ impl Classified for PlanError {
             | Self::SourceFamilyMismatch { .. }
             | Self::PreferredSourceFamilyMismatch { .. }
             | Self::InvalidSegmentRouting { .. }
+            | Self::InvalidSourceRouting { .. }
             | Self::InvalidNeighborVlan { .. } => Classification::new(
                 "packet.plan",
                 Kind::Packet,
@@ -137,8 +145,8 @@ pub struct RoutePlanner;
 fn packet_has_link_layer_intent(packet: &Packet) -> bool {
     packet.iter().any(|layer| {
         matches!(
-            layer.protocol_id().as_str(),
-            "ethernet" | "vlan" | "vlan8021ad"
+            BuiltinProtocol::of(layer),
+            Some(BuiltinProtocol::Ethernet | BuiltinProtocol::Vlan | BuiltinProtocol::Vlan8021ad)
         )
     })
 }
@@ -155,8 +163,13 @@ impl RoutePlanner {
     ) -> Result<PlannedRoute, PlanError> {
         if let Some(protocol) = packet.iter().find_map(|layer| {
             matches!(
-                layer.protocol_id().as_str(),
-                "bsd_null" | "bsd_loop" | "linux_sll" | "linux_sll2"
+                BuiltinProtocol::of(layer),
+                Some(
+                    BuiltinProtocol::BsdNull
+                        | BuiltinProtocol::BsdLoop
+                        | BuiltinProtocol::LinuxSll
+                        | BuiltinProtocol::LinuxSll2
+                )
             )
             .then(|| layer.protocol_id())
         }) {
@@ -166,24 +179,45 @@ impl RoutePlanner {
         if options.link_mode == LinkMode::Layer3 && has_link_layer_intent {
             return Err(PlanError::EthernetInLayer3);
         }
-        let has_ip = packet
-            .iter()
-            .any(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"));
+        let outer_ip_protocol = packet.iter().find_map(|layer| {
+            let protocol = BuiltinProtocol::of(layer)?;
+            protocol.is_ip().then_some(protocol)
+        });
+        let ip_path = semantics::outer_ip_path(packet).map_err(|source| {
+            let message = source.to_string();
+            match outer_ip_protocol {
+                Some(BuiltinProtocol::Ipv4) => PlanError::InvalidSourceRouting { message },
+                _ => PlanError::InvalidSegmentRouting { message },
+            }
+        })?;
+        if ip_path.as_ref().is_some_and(|path| {
+            matches!(path.header_destination, IpAddr::V4(destination) if destination.is_unspecified())
+                && !path.declared_route_destinations.is_empty()
+        }) {
+            return Err(PlanError::InvalidSourceRouting {
+                message: "the IPv4 header destination must name the active LSRR/SSRR hop"
+                    .to_owned(),
+            });
+        }
+        let has_ip = ip_path.is_some();
         let ip_root = packet
             .layer(0)
-            .is_some_and(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"));
+            .and_then(BuiltinProtocol::of)
+            .is_some_and(BuiltinProtocol::is_ip);
 
-        let packet_destination = packet_ip_field(packet, "destination");
-        let srh = srh_route(packet)?;
-        let final_destination = srh
+        let packet_destination = ip_path
             .as_ref()
-            .and_then(|route| route.segments.last())
-            .copied()
-            .or(packet_destination)
+            .map(|path| path.header_destination)
+            .filter(|destination| !destination.is_unspecified());
+        let final_destination = ip_path
+            .as_ref()
+            .map(|path| path.final_destination)
+            .filter(|destination| !destination.is_unspecified())
             .or(destination);
-        let lookup_destination = srh
+        let lookup_destination = ip_path
             .as_ref()
-            .map(|route| route.segments[route.active_index])
+            .map(|path| path.active_destination)
+            .filter(|destination| !destination.is_unspecified())
             .or(packet_destination)
             .or(final_destination);
 
@@ -264,7 +298,10 @@ impl RoutePlanner {
             return Err(PlanError::Layer3Unsupported);
         }
 
-        let explicit_source = packet_ip_field(packet, "source");
+        let explicit_source = ip_path
+            .as_ref()
+            .map(|path| path.source)
+            .filter(|source| !source.is_unspecified());
         let packet_source = has_ip
             .then(|| {
                 explicit_source
@@ -294,16 +331,16 @@ impl RoutePlanner {
         });
         let explicit_destination_mac = packet
             .iter()
-            .find(|layer| layer.protocol_id().as_str() == "ethernet")
-            .and_then(|layer| layer.field("destination"))
+            .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
+            .and_then(|layer| layer.field(semantics::DESTINATION))
             .and_then(|value| match value {
                 FieldValue::Mac(value) if value != [0; 6] => Some(MacAddress(value)),
                 _ => None,
             });
         let explicit_source_mac = packet
             .iter()
-            .find(|layer| layer.protocol_id().as_str() == "ethernet")
-            .and_then(|layer| layer.field("source"))
+            .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
+            .and_then(|layer| layer.field(semantics::SOURCE))
             .and_then(|value| match value {
                 FieldValue::Mac(value) if value != [0; 6] => Some(MacAddress(value)),
                 _ => None,
@@ -322,10 +359,19 @@ impl RoutePlanner {
         }
         let source_mac = explicit_source_mac.or(arp_source_mac).or(route.source_mac);
         let neighbor_vlan_tags = extract_neighbor_vlan_tags(packet)?;
-        let visited_destinations = srh.map_or_else(
-            || final_destination.into_iter().collect(),
-            |route| route.segments[route.active_index..].to_vec(),
-        );
+        let mut visited_destinations = ip_path
+            .map(|path| {
+                path.visited_destinations
+                    .into_iter()
+                    .filter(|destination| !destination.is_unspecified())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if visited_destinations.is_empty()
+            && let Some(final_destination) = final_destination
+        {
+            visited_destinations.push(final_destination);
+        }
 
         Ok(PlannedRoute {
             neighbor_target: (mode == LinkMode::Layer2)
@@ -339,7 +385,7 @@ impl RoutePlanner {
             synthesized_ethernet: mode == LinkMode::Layer2
                 && !packet
                     .iter()
-                    .any(|layer| layer.protocol_id().as_str() == "ethernet"),
+                    .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet)),
             route,
             mode,
             lookup_destination,
@@ -563,81 +609,33 @@ pub struct MaterializedRoute {
 }
 
 fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, PlanError> {
-    let mut tags = Vec::new();
-    for layer in packet
-        .iter()
-        .filter(|layer| matches!(layer.protocol_id().as_str(), "vlan" | "vlan8021ad"))
-    {
-        if tags.len() >= MAX_NEIGHBOR_VLAN_TAGS {
-            return Err(PlanError::InvalidNeighborVlan {
-                message: format!(
-                    "more than {MAX_NEIGHBOR_VLAN_TAGS} VLAN headers are not supported"
-                ),
-            });
-        }
-        let priority = match layer.field("priority") {
-            Some(FieldValue::Unsigned(value)) => u8::try_from(value)
-                .ok()
-                .filter(|value| *value <= 7)
-                .ok_or_else(|| PlanError::InvalidNeighborVlan {
-                    message: format!("priority {value} is outside 0..=7"),
-                })?,
-            _ => {
-                return Err(PlanError::InvalidNeighborVlan {
-                    message: "priority is missing or is not unsigned".to_owned(),
-                });
-            }
-        };
-        let drop_eligible = match layer.field("drop_eligible") {
-            Some(FieldValue::Bool(value)) => value,
-            _ => {
-                return Err(PlanError::InvalidNeighborVlan {
-                    message: "drop_eligible is missing or is not boolean".to_owned(),
-                });
-            }
-        };
-        let vlan_id = match layer.field("vlan_id") {
-            Some(FieldValue::Unsigned(value)) => u16::try_from(value)
-                .ok()
-                .filter(|value| *value <= 4095)
-                .ok_or_else(|| PlanError::InvalidNeighborVlan {
-                    message: format!("VLAN identifier {value} is outside 0..=4095"),
-                })?,
-            _ => {
-                return Err(PlanError::InvalidNeighborVlan {
-                    message: "vlan_id is missing or is not unsigned".to_owned(),
-                });
-            }
-        };
-        tags.push(NeighborVlanTag {
-            kind: if layer.protocol_id().as_str() == "vlan8021ad" {
-                NeighborVlanKind::Ieee8021Ad
-            } else {
-                NeighborVlanKind::Ieee8021Q
-            },
-            priority,
-            drop_eligible,
-            vlan_id,
+    let metadata =
+        semantics::vlan_metadata(packet).map_err(|source| PlanError::InvalidNeighborVlan {
+            message: source.to_string(),
+        })?;
+    if metadata.len() > MAX_NEIGHBOR_VLAN_TAGS {
+        return Err(PlanError::InvalidNeighborVlan {
+            message: format!("more than {MAX_NEIGHBOR_VLAN_TAGS} VLAN headers are not supported"),
         });
     }
-    Ok(tags)
-}
-
-fn packet_ip_field(packet: &Packet, field: &str) -> Option<IpAddr> {
-    let layer = packet
-        .iter()
-        .find(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))?;
-    match layer.field(field) {
-        Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => Some(IpAddr::V4(value)),
-        Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => Some(IpAddr::V6(value)),
-        _ => None,
-    }
+    Ok(metadata
+        .into_iter()
+        .map(|tag| NeighborVlanTag {
+            kind: match tag.kind {
+                semantics::VlanKind::Ieee8021Q => NeighborVlanKind::Ieee8021Q,
+                semantics::VlanKind::Ieee8021Ad => NeighborVlanKind::Ieee8021Ad,
+            },
+            priority: tag.priority,
+            drop_eligible: tag.drop_eligible,
+            vlan_id: tag.vlan_id,
+        })
+        .collect())
 }
 
 fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
     let Some(layer) = packet
         .iter()
-        .find(|layer| layer.protocol_id().as_str() == "arp")
+        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Arp))
     else {
         return (None, None);
     };
@@ -655,77 +653,6 @@ fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
         _ => None,
     };
     (source, target)
-}
-
-struct SrhRoute {
-    segments: Vec<IpAddr>,
-    active_index: usize,
-}
-
-fn srh_route(packet: &Packet) -> Result<Option<SrhRoute>, PlanError> {
-    // Only an SRH in the outer IPv6 extension chain affects the native route.
-    // An SRH following a second IP header belongs to an encapsulated packet
-    // and must not redirect the outer transmission.
-    let mut outer_ipv6 = false;
-    let mut layer = None;
-    for candidate in packet.iter() {
-        match candidate.protocol_id().as_str() {
-            "ipv4" if !outer_ipv6 => return Ok(None),
-            "ipv6" if !outer_ipv6 => outer_ipv6 = true,
-            "ipv4" | "ipv6" if outer_ipv6 => break,
-            "ipv6_srh" | "srh" if outer_ipv6 => {
-                layer = Some(candidate);
-                break;
-            }
-            _ => {}
-        }
-    }
-    let Some(layer) = layer else {
-        return Ok(None);
-    };
-    let Some(FieldValue::List(values)) = layer.field("segments") else {
-        return Err(PlanError::InvalidSegmentRouting {
-            message: "segments are missing or not an IPv6 list".to_owned(),
-        });
-    };
-    let segments = values
-        .into_iter()
-        .map(|segment| match segment {
-            FieldValue::Ipv6(value) => Ok(IpAddr::V6(value)),
-            _ => Err(PlanError::InvalidSegmentRouting {
-                message: "segment list contains a non-IPv6 value".to_owned(),
-            }),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let last = segments
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| PlanError::InvalidSegmentRouting {
-            message: "segment list is empty".to_owned(),
-        })?;
-    let segments_left = match layer.field("segments_left") {
-        Some(FieldValue::Unsigned(value)) => {
-            usize::try_from(value).map_err(|_| PlanError::InvalidSegmentRouting {
-                message: "segments_left cannot be represented".to_owned(),
-            })?
-        }
-        Some(FieldValue::Bytes(value)) if value.len() == 1 => usize::from(value[0]),
-        Some(FieldValue::Text(value)) if value.eq_ignore_ascii_case("auto") => last,
-        _ => {
-            return Err(PlanError::InvalidSegmentRouting {
-                message: "segments_left must be Auto, Exact, or one raw byte".to_owned(),
-            });
-        }
-    };
-    if segments_left > last {
-        return Err(PlanError::InvalidSegmentRouting {
-            message: format!("segments_left {segments_left} exceeds last entry {last}"),
-        });
-    }
-    Ok(Some(SrhRoute {
-        segments,
-        active_index: last - segments_left,
-    }))
 }
 
 fn multicast_mac(destination: IpAddr) -> Option<MacAddress> {

@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use crate::packet::{Packet, field::FieldValue};
+use crate::packet::{Packet, semantics};
 
 use super::super::helpers::is_public;
 use super::super::target::{
@@ -29,6 +29,28 @@ impl TrafficPolicy {
         Ok(())
     }
 
+    /// Applies the operation-wide packet and exact wire-byte budgets together.
+    /// Callers provide prospective totals before starting live side effects.
+    pub(crate) fn authorize_operation(
+        &self,
+        packets: u64,
+        wire_bytes: u64,
+    ) -> Result<(), TrafficPolicyError> {
+        if packets > self.max_packets_per_operation {
+            return Err(TrafficPolicyError::PacketLimit {
+                actual: packets,
+                limit: self.max_packets_per_operation,
+            });
+        }
+        if wire_bytes > self.max_bytes_per_operation {
+            return Err(TrafficPolicyError::ByteLimit {
+                actual: wire_bytes,
+                limit: self.max_bytes_per_operation,
+            });
+        }
+        Ok(())
+    }
+
     fn authorize_hostname(&self, hostname: &Hostname) -> Result<(), TrafficPolicyError> {
         if !self.allow_hostname_resolution {
             return Err(TrafficPolicyError::HostnameResolution {
@@ -38,40 +60,16 @@ impl TrafficPolicy {
         Ok(())
     }
 
-    /// Authorizes every explicit IP destination and IPv6 segment declared by
-    /// a packet before route, capture, neighbor, or transmission providers are
-    /// allowed to observe it.
+    /// Authorizes every route-bearing address declared by a packet before
+    /// route, capture, neighbor, or transmission providers can observe it.
     pub fn authorize_packet_destinations(&self, packet: &Packet) -> Result<(), TrafficPolicyError> {
-        for layer in packet.iter() {
-            if layer.protocol_id().as_str() == "ipv4"
-                && let Some(FieldValue::Bytes(options)) = layer.field("options")
-            {
-                let destinations = crate::protocol::network::ipv4_source_route_destinations(
-                    &options,
-                )
-                .map_err(|source| TrafficPolicyError::InvalidIpv4Options {
-                    reason: source.to_string(),
-                })?;
-                for destination in destinations {
-                    self.authorize_destination(IpAddr::V4(destination))?;
-                }
+        let destinations = semantics::live_destinations(packet).map_err(|source| {
+            TrafficPolicyError::InvalidPacketSemantics {
+                reason: source.to_string(),
             }
-            match layer.field("destination") {
-                Some(FieldValue::Ipv4(value)) if !value.is_unspecified() => {
-                    self.authorize_destination(IpAddr::V4(value))?;
-                }
-                Some(FieldValue::Ipv6(value)) if !value.is_unspecified() => {
-                    self.authorize_destination(IpAddr::V6(value))?;
-                }
-                _ => {}
-            }
-            if let Some(FieldValue::List(segments)) = layer.field("segments") {
-                for segment in segments {
-                    if let FieldValue::Ipv6(value) = segment {
-                        self.authorize_destination(IpAddr::V6(value))?;
-                    }
-                }
-            }
+        })?;
+        for destination in destinations {
+            self.authorize_destination(destination)?;
         }
         Ok(())
     }

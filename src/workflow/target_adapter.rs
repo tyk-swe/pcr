@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::client::policy::Error as PolicyError;
 use crate::client::target::{Hostname, Target as ClientTarget};
 
 use super::BoundaryError;
@@ -27,13 +26,13 @@ impl<R: crate::client::target::Resolver> Authorizer for PolicyAuthorizer<'_, R> 
             Target::Hostname(hostname) => ClientTarget::Hostname(
                 hostname
                     .parse::<Hostname>()
-                    .map_err(|error| BoundaryError::classified(&error))?,
+                    .map_err(BoundaryError::from_error)?,
             ),
         };
         let resolved = self
             .policy
             .resolve_target(&target, self.resolver)
-            .map_err(|error| BoundaryError::classified(&error))?;
+            .map_err(BoundaryError::from_error)?;
         let declared = match resolved.declared() {
             ClientTarget::Address(address) => address.to_string(),
             ClientTarget::Hostname(hostname) => hostname.to_string(),
@@ -49,18 +48,8 @@ impl<R: crate::client::target::Resolver> Authorizer for PolicyAuthorizer<'_, R> 
         packets: u64,
         maximum_wire_bytes: u64,
     ) -> Result<(), BoundaryError> {
-        if packets > self.policy.max_packets_per_operation {
-            return Err(BoundaryError::classified(&PolicyError::PacketLimit {
-                actual: packets,
-                limit: self.policy.max_packets_per_operation,
-            }));
-        }
-        if maximum_wire_bytes > self.policy.max_bytes_per_operation {
-            return Err(BoundaryError::classified(&PolicyError::ByteLimit {
-                actual: maximum_wire_bytes,
-                limit: self.policy.max_bytes_per_operation,
-            }));
-        }
-        Ok(())
+        self.policy
+            .authorize_operation(packets, maximum_wire_bytes)
+            .map_err(BoundaryError::from_error)
     }
 }

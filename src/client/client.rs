@@ -19,12 +19,14 @@ use crate::packet::{
     build::{Builder, BuiltPacket},
     decode::Dissector,
     registry::ProtocolRegistry,
+    semantics::BuiltinProtocol,
     template::PacketTemplate,
 };
 
 use super::exchange::{
-    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext, ExchangeResult,
-    PlannedExchangePacket, PreparedExchangePacket, drain_available,
+    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
+    ExchangeProcessOutcome, ExchangeResult, PlannedExchangePacket, PreparedExchangePacket,
+    WorkflowPromotionContext, WorkflowResponseMatcher, drain_available,
 };
 use super::helpers::{
     build_context, error_after_shutdown, materialize_link_fields, materialize_link_structure,
@@ -197,14 +199,13 @@ where
         options: &PlanOptions,
     ) -> Result<(ResolvedTarget, PlannedRoute), ClientError> {
         let resolved = self.policy.resolve_target(target, resolver)?;
-        let packet_ip_version =
-            packet
-                .iter()
-                .find_map(|layer| match layer.protocol_id().as_str() {
-                    "ipv4" => Some(IpVersion::V4),
-                    "ipv6" => Some(IpVersion::V6),
-                    _ => None,
-                });
+        let packet_ip_version = packet
+            .iter()
+            .find_map(|layer| match BuiltinProtocol::of(layer) {
+                Some(BuiltinProtocol::Ipv4) => Some(IpVersion::V4),
+                Some(BuiltinProtocol::Ipv6) => Some(IpVersion::V6),
+                _ => None,
+            });
         let selected = match packet_ip_version {
             Some(version) => resolved.address_for_version(version).ok_or(
                 TargetResolutionError::AddressFamilyUnavailable {
@@ -254,13 +255,7 @@ where
 
     pub fn send(&self, packet: Packet, options: SendOptions) -> Result<SendReport, ClientError> {
         let started = Instant::now();
-        if self.policy.max_packets_per_operation < 1 {
-            return Err(TrafficPolicyError::PacketLimit {
-                actual: 1,
-                limit: self.policy.max_packets_per_operation,
-            }
-            .into());
-        }
+        self.policy.authorize_operation(1, 0)?;
         let plan = self.plan(&packet, options.destination, &options.plan)?;
         let mut packet_to_send = packet;
         materialize_network_fields(&mut packet_to_send, &plan)?;
@@ -275,7 +270,8 @@ where
         )?;
         validate_mtu(&preliminary, plan.route.mtu)?;
         self.authorize_built(&preliminary, options.allow_permissive_live)?;
-        self.authorize_byte_count(preliminary.bytes.len() as u64)?;
+        self.policy
+            .authorize_operation(1, preliminary.bytes.len() as u64)?;
         let preliminary_len = preliminary.bytes.len();
         let route = self.planner.materialize(plan, &self.neighbors)?;
         let link_changed = materialize_link_fields(&mut packet_to_send, &route)?;
@@ -288,7 +284,8 @@ where
             };
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             self.authorize_built(&built, options.allow_permissive_live)?;
-            self.authorize_byte_count(built.bytes.len() as u64)?;
+            self.policy
+                .authorize_operation(1, built.bytes.len() as u64)?;
             built
         } else {
             preliminary
@@ -332,17 +329,6 @@ where
         }
         Ok(())
     }
-
-    fn authorize_byte_count(&self, bytes: u64) -> Result<(), ClientError> {
-        if bytes > self.policy.max_bytes_per_operation {
-            return Err(TrafficPolicyError::ByteLimit {
-                actual: bytes,
-                limit: self.policy.max_bytes_per_operation,
-            }
-            .into());
-        }
-        Ok(())
-    }
 }
 
 fn ensure_preparation_deadline(deadline: Instant) -> Result<(), ClientError> {
@@ -353,6 +339,17 @@ fn ensure_preparation_deadline(deadline: Instant) -> Result<(), ClientError> {
         .into());
     }
     Ok(())
+}
+
+fn promote_workflow_unsolicited(
+    captured: &mut ExchangeAccumulator,
+    workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
+    context: WorkflowPromotionContext<'_>,
+) -> ExchangeProcessOutcome {
+    let Some(matches_request) = workflow_matcher.as_deref_mut() else {
+        return ExchangeProcessOutcome::Continue;
+    };
+    captured.promote_workflow_unsolicited(context, matches_request)
 }
 
 impl<R, N, I> Client<R, N, I>
@@ -366,6 +363,24 @@ where
         template: &PacketTemplate,
         options: ExchangeOptions,
     ) -> Result<ExchangeResult, ClientError> {
+        self.exchange_internal(template, options, None)
+    }
+
+    pub(crate) fn exchange_for_workflow(
+        &self,
+        template: &PacketTemplate,
+        options: ExchangeOptions,
+        mut matches_request: impl FnMut(usize, &Packet, &crate::packet::decode::DecodedPacket) -> bool,
+    ) -> Result<ExchangeResult, ClientError> {
+        self.exchange_internal(template, options, Some(&mut matches_request))
+    }
+
+    fn exchange_internal(
+        &self,
+        template: &PacketTemplate,
+        options: ExchangeOptions,
+        mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
+    ) -> Result<ExchangeResult, ClientError> {
         let started = Instant::now();
         let capture_limits = options.validate()?;
         let deadline = started
@@ -376,15 +391,7 @@ where
             .map_err(|source| ClientError::Template {
                 message: source.to_string(),
             })?;
-        let policy_packet_limit =
-            usize::try_from(self.policy.max_packets_per_operation).unwrap_or(usize::MAX);
-        if expansion_len > policy_packet_limit {
-            return Err(TrafficPolicyError::PacketLimit {
-                actual: expansion_len as u64,
-                limit: self.policy.max_packets_per_operation,
-            }
-            .into());
-        }
+        self.policy.authorize_operation(expansion_len as u64, 0)?;
         if expansion_len == 0 {
             return Err(ClientError::Template {
                 message: "template expanded to no packets".to_owned(),
@@ -437,13 +444,7 @@ where
                     actual: u64::MAX,
                     limit: self.policy.max_bytes_per_operation,
                 })?;
-            if total_bytes > self.policy.max_bytes_per_operation {
-                return Err(TrafficPolicyError::ByteLimit {
-                    actual: total_bytes,
-                    limit: self.policy.max_bytes_per_operation,
-                }
-                .into());
-            }
+            self.policy.authorize_operation(packet_count, total_bytes)?;
             if let Some(first_packet) = planned_packets.first()
                 && (first_packet.plan.route.interface != plan.route.interface
                     || first_packet.plan.mode != plan.mode)
@@ -496,6 +497,12 @@ where
             .plan;
         ensure_preparation_deadline(deadline)?;
         let mut capture = CaptureGuard::new(self.io.arm_capture(first_route, capture_limits)?);
+        if !capture.supports_monotonic_ingress_time() {
+            return Err(error_after_shutdown(
+                &mut capture,
+                LiveIoError::MissingMonotonicCaptureTimestamp,
+            ));
+        }
         let readiness_timeout = match deadline.checked_duration_since(Instant::now()) {
             Some(remaining) => remaining,
             None => {
@@ -516,6 +523,7 @@ where
         let mut completed_sends = 0u64;
         let dissector = Dissector::new(Arc::clone(&self.registry));
         let mut captured = ExchangeAccumulator::new(prepared_packets.len());
+        let mut correlation_stopped = false;
         for (send_index, prepared_packet) in prepared_packets.iter().enumerate() {
             let built = &prepared_packet.built;
             let route = &prepared_packet.route;
@@ -534,6 +542,24 @@ where
                 },
             ) {
                 return Err(error_after_shutdown(&mut capture, error));
+            }
+            if promote_workflow_unsolicited(
+                &mut captured,
+                &mut workflow_matcher,
+                WorkflowPromotionContext {
+                    prepared: &prepared_packets,
+                    sent_at: &sent_at,
+                    deadline,
+                    max_responses: options.max_responses,
+                },
+            ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
+            {
+                return Err(error_after_shutdown(
+                    &mut capture,
+                    LiveIoError::DeadlineExceeded {
+                        operation: "correlating workflow responses before all requests were sent",
+                    },
+                ));
             }
             if deadline.checked_duration_since(Instant::now()).is_none() {
                 return Err(error_after_shutdown(
@@ -604,31 +630,70 @@ where
             ) {
                 return Err(error_after_shutdown(&mut capture, error));
             }
-        }
-
-        loop {
-            let now = Instant::now();
-            let Some(remaining) = deadline.checked_duration_since(now) else {
-                break;
-            };
-            let frame = match capture.next_captured_frame(remaining) {
-                Ok(Some(frame)) => frame,
-                Ok(None) => break,
-                Err(error) => {
-                    return Err(error_after_shutdown(&mut capture, error));
-                }
-            };
-            captured.process(
-                frame,
-                ExchangeProcessContext {
-                    registry: &self.registry,
-                    dissector: &dissector,
+            if promote_workflow_unsolicited(
+                &mut captured,
+                &mut workflow_matcher,
+                WorkflowPromotionContext {
                     prepared: &prepared_packets,
                     sent_at: &sent_at,
                     deadline,
-                    options: &options,
+                    max_responses: options.max_responses,
                 },
-            );
+            ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
+            {
+                if send_index + 1 < prepared_packets.len() {
+                    return Err(error_after_shutdown(
+                        &mut capture,
+                        LiveIoError::DeadlineExceeded {
+                            operation: "correlating workflow responses before all requests were sent",
+                        },
+                    ));
+                }
+                correlation_stopped = true;
+            }
+        }
+
+        if !correlation_stopped {
+            loop {
+                let now = Instant::now();
+                let Some(remaining) = deadline.checked_duration_since(now) else {
+                    break;
+                };
+                let frame = match capture.next_captured_frame(remaining) {
+                    Ok(Some(frame)) => frame,
+                    Ok(None) => break,
+                    Err(error) => {
+                        return Err(error_after_shutdown(&mut capture, error));
+                    }
+                };
+                if captured.process(
+                    frame,
+                    ExchangeProcessContext {
+                        registry: &self.registry,
+                        dissector: &dissector,
+                        prepared: &prepared_packets,
+                        sent_at: &sent_at,
+                        deadline,
+                        options: &options,
+                    },
+                ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
+                {
+                    break;
+                }
+                if promote_workflow_unsolicited(
+                    &mut captured,
+                    &mut workflow_matcher,
+                    WorkflowPromotionContext {
+                        prepared: &prepared_packets,
+                        sent_at: &sent_at,
+                        deadline,
+                        max_responses: options.max_responses,
+                    },
+                ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
+                {
+                    break;
+                }
+            }
         }
         if let Err(error) = drain_available(
             &mut capture,
@@ -646,6 +711,16 @@ where
         ) {
             return Err(error_after_shutdown(&mut capture, error));
         }
+        let _ = promote_workflow_unsolicited(
+            &mut captured,
+            &mut workflow_matcher,
+            WorkflowPromotionContext {
+                prepared: &prepared_packets,
+                sent_at: &sent_at,
+                deadline,
+                max_responses: options.max_responses,
+            },
+        );
         capture.shutdown()?;
         let capture_statistics = capture.statistics().validate()?;
         if capture_statistics.has_loss() {
@@ -681,21 +756,17 @@ where
             .into_iter()
             .map(|prepared_packet| prepared_packet.built)
             .collect();
-        Ok(ExchangeResult {
+        Ok(captured.finish(
             sent,
             sent_evidence,
-            responses: captured.responses,
             unanswered,
-            unsolicited: captured.unsolicited,
-            undecoded: captured.undecoded,
-            diagnostics: captured.diagnostics,
-            stats: OperationStats {
+            OperationStats {
                 packets_attempted: packet_count,
                 packets_completed: completed_sends,
                 bytes: total_bytes,
                 elapsed: started.elapsed(),
                 capture: capture_statistics,
             },
-        })
+        ))
     }
 }

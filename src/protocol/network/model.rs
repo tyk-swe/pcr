@@ -6,7 +6,6 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::OnceLock;
 
 use bytes::Bytes;
-use thiserror::Error;
 
 use crate::packet::{
     codec::{
@@ -36,74 +35,6 @@ fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
         layer.protocol_id().as_str(),
         "ipv6_hop_by_hop" | "ipv6_destination_options" | "ipv6_fragment" | "ipv6_srh"
     )
-}
-
-#[derive(Clone, Debug, Error, PartialEq, Eq)]
-#[error("invalid IPv4 options: {reason}")]
-pub(crate) struct Ipv4OptionsError {
-    reason: String,
-}
-
-fn invalid_ipv4_options(reason: impl Into<String>) -> Ipv4OptionsError {
-    Ipv4OptionsError {
-        reason: reason.into(),
-    }
-}
-
-/// Returns every address carried by Loose or Strict Source Route. All live
-/// paths use this parser so malformed route-affecting options fail closed.
-pub(crate) fn ipv4_source_route_destinations(
-    options: &[u8],
-) -> Result<Vec<Ipv4Addr>, Ipv4OptionsError> {
-    if options.len() > 40 {
-        return Err(invalid_ipv4_options(
-            "option bytes exceed the 40-byte header limit",
-        ));
-    }
-    let mut destinations = Vec::new();
-    let mut cursor = 0usize;
-    while cursor < options.len() {
-        match options[cursor] {
-            0 => break,
-            1 => cursor += 1,
-            option => {
-                let length = options
-                    .get(cursor + 1)
-                    .copied()
-                    .map(usize::from)
-                    .ok_or_else(|| invalid_ipv4_options("option is missing its length byte"))?;
-                if length < 2 {
-                    return Err(invalid_ipv4_options(format!(
-                        "option {option} has invalid length {length}"
-                    )));
-                }
-                let end = cursor
-                    .checked_add(length)
-                    .filter(|end| *end <= options.len())
-                    .ok_or_else(|| invalid_ipv4_options(format!("option {option} is truncated")))?;
-                if matches!(option, 131 | 137) {
-                    if length < 3 || !(length - 3).is_multiple_of(4) {
-                        return Err(invalid_ipv4_options(format!(
-                            "source-route option {option} has invalid length {length}"
-                        )));
-                    }
-                    let pointer = usize::from(options[cursor + 2]);
-                    if pointer < 4 || pointer > length + 1 || !(pointer - 4).is_multiple_of(4) {
-                        return Err(invalid_ipv4_options(format!(
-                            "source-route option {option} has invalid pointer {pointer}"
-                        )));
-                    }
-                    for address in options[cursor + 3..end].chunks_exact(4) {
-                        destinations.push(Ipv4Addr::new(
-                            address[0], address[1], address[2], address[3],
-                        ));
-                    }
-                }
-                cursor = end;
-            }
-        }
-    }
-    Ok(destinations)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

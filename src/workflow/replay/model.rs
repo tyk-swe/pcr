@@ -162,8 +162,29 @@ pub struct ReplaySummary {
     pub scheduled_duration: Duration,
 }
 
+/// Prospective operation totals checked before authorizing the current frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplayAuthorizationContext {
+    pub packets: u64,
+    pub wire_bytes: u64,
+}
+
 /// Explicit policy seam invoked before delay or transmission.
 pub trait ReplayAuthorizer {
+    /// Starts a new replay operation. Stateful authorizers can reset
+    /// operation-scoped accounting here.
+    fn begin_operation(&mut self) {}
+
+    fn authorize_operation(
+        &mut self,
+        context: ReplayAuthorizationContext,
+        frame: &Frame,
+        mode: LinkMode,
+    ) -> Result<(), crate::workflow::BoundaryError> {
+        let _ = context;
+        self.authorize(frame, mode)
+    }
+
     fn authorize(
         &mut self,
         frame: &Frame,

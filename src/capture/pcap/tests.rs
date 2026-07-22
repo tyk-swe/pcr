@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::io::{self, Cursor, Write};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
@@ -15,6 +15,69 @@ use super::wire::{
     PCAP_GLOBAL_HEADER_LEN, system_time_from_signed_unix, timestamp_from_ticks, timestamp_to_ticks,
 };
 use super::writer::Writer;
+
+#[derive(Debug)]
+struct PartialFailSink {
+    bytes: Vec<u8>,
+    fail_after: usize,
+    write_calls: usize,
+    flush_calls: usize,
+    fail_flush: bool,
+}
+
+impl PartialFailSink {
+    fn new(fail_after: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            fail_after,
+            write_calls: 0,
+            flush_calls: 0,
+            fail_flush: false,
+        }
+    }
+}
+
+impl Write for PartialFailSink {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.write_calls += 1;
+        if self.bytes.len() >= self.fail_after {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "deterministic sink failure",
+            ));
+        }
+        let written = buffer.len().min(self.fail_after - self.bytes.len());
+        self.bytes.extend_from_slice(&buffer[..written]);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.flush_calls += 1;
+        if self.fail_flush {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "deterministic flush failure",
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn expect_io_error<T>(result: Result<T, Error>) -> io::Error {
+    match result {
+        Err(Error::Io(error)) => error,
+        Err(error) => panic!("expected I/O error, got {error:?}"),
+        Ok(_) => panic!("expected I/O error, got success"),
+    }
+}
+
+fn pcapng_interface_count<W>(writer: &Writer<W>) -> usize {
+    match &writer.state {
+        super::writer::WriterState::PcapNg { interfaces, .. } => interfaces.len(),
+        super::writer::WriterState::Pcap { .. } => panic!("expected pcapng writer"),
+    }
+}
 
 fn frame(timestamp: SystemTime, link_type: LinkType, bytes: &[u8]) -> Frame {
     Frame::new(timestamp, link_type, Bytes::copy_from_slice(bytes)).unwrap()
@@ -53,6 +116,70 @@ fn classic_pcap_round_trip_preserves_full_record() {
     assert_eq!(reader.endianness(), Endianness::Big);
     assert_eq!(reader.next_frame().unwrap(), Some(original));
     assert_eq!(reader.next_frame().unwrap(), None);
+}
+
+#[test]
+fn partial_container_headers_return_io_errors() {
+    let mut pcap_sink = PartialFailSink::new(10);
+    let error = expect_io_error(Writer::pcap(&mut pcap_sink, LinkType::ETHERNET));
+    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(pcap_sink.bytes.len(), 10);
+
+    let mut pcapng_sink = PartialFailSink::new(13);
+    let error = expect_io_error(Writer::pcapng(&mut pcapng_sink));
+    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(pcapng_sink.bytes.len(), 13);
+}
+
+#[test]
+fn partial_classic_record_poisons_writer_without_committing_counters() {
+    let mut writer = Writer::pcap(PartialFailSink::new(usize::MAX), LinkType::ETHERNET).unwrap();
+    writer.get_mut().fail_after = PCAP_GLOBAL_HEADER_LEN + 10;
+
+    let original = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]);
+    let first = expect_io_error(writer.write_frame(&original));
+    assert_eq!(first.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(writer.frames_written(), 0);
+    assert_eq!(writer.captured_bytes_written(), 0);
+
+    let bytes_after_failure = writer.get_ref().bytes.len();
+    let writes_after_failure = writer.get_ref().write_calls;
+    let mut invalid = original;
+    invalid.interface = Some(0);
+    let retained = expect_io_error(writer.write_frame(&invalid));
+    assert_eq!(retained.kind(), first.kind());
+    assert_eq!(retained.to_string(), first.to_string());
+    assert_eq!(writer.get_ref().bytes.len(), bytes_after_failure);
+    assert_eq!(writer.get_ref().write_calls, writes_after_failure);
+
+    expect_io_error(writer.flush());
+    assert_eq!(writer.get_ref().flush_calls, 0);
+}
+
+#[test]
+fn prewrite_validation_error_does_not_poison_writer() {
+    let mut writer = Writer::pcap(PartialFailSink::new(usize::MAX), LinkType::ETHERNET).unwrap();
+    writer.get_mut().fail_after = PCAP_GLOBAL_HEADER_LEN;
+    let writes_before_validation = writer.get_ref().write_calls;
+
+    let mut invalid = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]);
+    invalid.interface = Some(0);
+    assert!(matches!(
+        writer.write_frame(&invalid),
+        Err(Error::MetadataNotRepresentable {
+            format: Format::Pcap,
+            field: "interface",
+        })
+    ));
+    assert_eq!(writer.get_ref().write_calls, writes_before_validation);
+    assert_eq!(writer.frames_written(), 0);
+
+    writer.get_mut().fail_after = usize::MAX;
+    writer
+        .write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]))
+        .unwrap();
+    assert_eq!(writer.frames_written(), 1);
+    assert_eq!(writer.captured_bytes_written(), 1);
 }
 
 #[test]
@@ -595,6 +722,71 @@ fn pcapng_writer_bounds_interfaces_atomically() {
         Err(Error::InterfaceLimit { limit: 0 })
     ));
     assert_eq!(zero_limit.get_ref().len(), section_length);
+}
+
+#[test]
+fn partial_pcapng_interface_poisons_without_advancing_numbering() {
+    let mut writer = Writer::pcapng(PartialFailSink::new(usize::MAX)).unwrap();
+    let section_length = writer.get_ref().bytes.len();
+    writer.get_mut().fail_after = section_length + 9;
+
+    let first = expect_io_error(writer.add_interface(LinkType::ETHERNET));
+    assert_eq!(first.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(pcapng_interface_count(&writer), 0);
+
+    let bytes_after_failure = writer.get_ref().bytes.len();
+    let writes_after_failure = writer.get_ref().write_calls;
+    let retained = expect_io_error(writer.add_interface(LinkType(u32::from(u16::MAX) + 1)));
+    assert_eq!(retained.kind(), first.kind());
+    assert_eq!(retained.to_string(), first.to_string());
+    assert_eq!(pcapng_interface_count(&writer), 0);
+    assert_eq!(writer.get_ref().bytes.len(), bytes_after_failure);
+    assert_eq!(writer.get_ref().write_calls, writes_after_failure);
+}
+
+#[test]
+fn partial_pcapng_packet_poisons_without_committing_counters() {
+    let mut writer = Writer::pcapng(PartialFailSink::new(usize::MAX)).unwrap();
+    let interface = writer.add_interface(LinkType::ETHERNET).unwrap();
+    let headers_length = writer.get_ref().bytes.len();
+    writer.get_mut().fail_after = headers_length + 10;
+
+    let mut original = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1, 2, 3]);
+    original.interface = Some(interface);
+    let first = expect_io_error(writer.write_frame(&original));
+    assert_eq!(first.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(writer.frames_written(), 0);
+    assert_eq!(writer.captured_bytes_written(), 0);
+    assert_eq!(pcapng_interface_count(&writer), 1);
+
+    let bytes_after_failure = writer.get_ref().bytes.len();
+    let writes_after_failure = writer.get_ref().write_calls;
+    let mut invalid = original;
+    invalid.interface = Some(99);
+    let retained = expect_io_error(writer.write_frame(&invalid));
+    assert_eq!(retained.kind(), first.kind());
+    assert_eq!(retained.to_string(), first.to_string());
+    assert_eq!(writer.get_ref().bytes.len(), bytes_after_failure);
+    assert_eq!(writer.get_ref().write_calls, writes_after_failure);
+}
+
+#[test]
+fn flush_failure_poisons_writer() {
+    let mut writer = Writer::pcap(PartialFailSink::new(usize::MAX), LinkType::ETHERNET).unwrap();
+    writer.get_mut().fail_flush = true;
+
+    let first = expect_io_error(writer.flush());
+    assert_eq!(first.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(writer.get_ref().flush_calls, 1);
+    let writes_after_failure = writer.get_ref().write_calls;
+
+    writer.get_mut().fail_flush = false;
+    let retained =
+        expect_io_error(writer.write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[1])));
+    assert_eq!(retained.kind(), first.kind());
+    assert_eq!(retained.to_string(), first.to_string());
+    assert_eq!(writer.get_ref().write_calls, writes_after_failure);
+    assert_eq!(writer.frames_written(), 0);
 }
 
 #[test]

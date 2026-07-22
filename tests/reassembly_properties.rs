@@ -228,3 +228,71 @@ fn tcp_reassembly_interleaves_independent_flows_without_cross_talk() {
     )));
     assert_eq!(state.aggregate_bytes(), 0);
 }
+
+#[test]
+fn tcp_segment_limit_uses_the_final_retained_pending_count() {
+    let mut limits = limits();
+    limits.max_tcp_segments_per_flow = 2;
+    let start = Instant::now();
+    let flow = tcp_key(40_000);
+    let mut state = tcp::Reassembler::new(limits);
+    state.open_flow(flow.clone(), 100, start).unwrap();
+    let segment = |sequence, payload: &'static [u8]| tcp::Segment {
+        flow: flow.clone(),
+        sequence,
+        payload: Bytes::from_static(payload),
+        syn: false,
+        fin: false,
+        rst: false,
+    };
+    state.push(segment(102, b"b"), start).unwrap();
+    state.push(segment(104, b"d"), start).unwrap();
+
+    let events = state.push(segment(100, b"a"), start).unwrap();
+
+    assert!(events.iter().any(
+        |event| matches!(event, tcp::Event::Data { sequence: 100, bytes, .. } if bytes.as_ref() == b"a")
+    ));
+    let before_rejection = (state.aggregate_bytes(), state.aggregate_memory_charge());
+    assert_eq!(
+        state.push(segment(106, b"f"), start),
+        Err(tcp::Error::SegmentLimit { limit: 2 })
+    );
+    assert_eq!(
+        (state.aggregate_bytes(), state.aggregate_memory_charge()),
+        before_rejection
+    );
+    assert!(state.flush().iter().any(|event| matches!(
+        event,
+        tcp::Event::Evicted {
+            pending_bytes: 2,
+            ..
+        }
+    )));
+}
+
+#[test]
+fn tcp_older_accepted_timestamp_does_not_change_expiry() {
+    let limits = limits();
+    let start = Instant::now();
+    let latest = start + Duration::from_millis(8);
+    let flow = tcp_key(40_000);
+    let mut state = tcp::Reassembler::new(limits);
+    state.open_flow(flow.clone(), 100, start).unwrap();
+    let segment = |sequence| tcp::Segment {
+        flow: flow.clone(),
+        sequence,
+        payload: Bytes::from_static(b"x"),
+        syn: false,
+        fin: false,
+        rst: false,
+    };
+    state.push(segment(102), latest).unwrap();
+
+    state
+        .push(segment(104), start + Duration::from_millis(2))
+        .unwrap();
+
+    assert!(state.expire(start + Duration::from_millis(12)).is_empty());
+    assert!(!state.expire(start + Duration::from_millis(18)).is_empty());
+}

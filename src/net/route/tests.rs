@@ -778,6 +778,160 @@ fn srh_route_lookup_uses_the_current_active_segment() {
 }
 
 #[test]
+fn srh_route_distinguishes_active_and_final_destinations() {
+    let source: Ipv6Addr = "2001:db8::1".parse().unwrap();
+    let active: Ipv6Addr = "2001:db8::10".parse().unwrap();
+    let final_destination: Ipv6Addr = "2001:db8::20".parse().unwrap();
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv6 {
+            source,
+            destination: active,
+            ..Ipv6::default()
+        })
+        .push(SegmentRoutingHeader {
+            segments: vec![active, final_destination],
+            ..SegmentRoutingHeader::default()
+        });
+    let decision = RouteDecision {
+        selected_address: Some(IpAddr::V6(source)),
+        preferred_source: Some(IpAddr::V6(source)),
+        capability: LinkCapability::Layer3,
+        link_type: LinkType::IPV6,
+        ..route(None)
+    };
+
+    let plan = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer3,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(decision),
+        )
+        .unwrap();
+
+    assert_eq!(plan.lookup_destination, Some(IpAddr::V6(active)));
+    assert_eq!(plan.final_destination, Some(IpAddr::V6(final_destination)));
+    assert_eq!(
+        plan.visited_destinations,
+        vec![IpAddr::V6(active), IpAddr::V6(final_destination)]
+    );
+}
+
+#[test]
+fn ipv4_source_route_uses_only_unvisited_option_destinations() {
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let active = Ipv4Addr::new(10, 0, 0, 2);
+    let visited = Ipv4Addr::new(10, 0, 0, 3);
+    let final_destination = Ipv4Addr::new(10, 0, 0, 4);
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source,
+        destination: active,
+        options: Bytes::from(
+            [131, 11, 8]
+                .into_iter()
+                .chain(visited.octets())
+                .chain(final_destination.octets())
+                .collect::<Vec<_>>(),
+        ),
+        ..Ipv4::default()
+    });
+    let decision = RouteDecision {
+        selected_address: Some(IpAddr::V4(source)),
+        preferred_source: Some(IpAddr::V4(source)),
+        capability: LinkCapability::Layer3,
+        link_type: LinkType::IPV4,
+        ..route(None)
+    };
+
+    let plan = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer3,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(decision),
+        )
+        .unwrap();
+
+    assert_eq!(plan.lookup_destination, Some(IpAddr::V4(active)));
+    assert_eq!(plan.final_destination, Some(IpAddr::V4(final_destination)));
+    assert_eq!(
+        plan.visited_destinations,
+        vec![IpAddr::V4(active), IpAddr::V4(final_destination)]
+    );
+}
+
+#[test]
+fn ipv4_source_route_requires_an_explicit_active_header_destination() {
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let active = Ipv4Addr::new(10, 0, 0, 2);
+    let final_destination = Ipv4Addr::new(10, 0, 0, 3);
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source,
+        destination: Ipv4Addr::UNSPECIFIED,
+        options: Bytes::from(
+            [131, 11, 4]
+                .into_iter()
+                .chain(active.octets())
+                .chain(final_destination.octets())
+                .collect::<Vec<_>>(),
+        ),
+        ..Ipv4::default()
+    });
+
+    let error = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer3,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(route(None)),
+        )
+        .unwrap_err();
+
+    assert!(matches!(error, PlanError::InvalidSourceRouting { .. }));
+}
+
+#[test]
+fn malformed_ipv4_options_are_invalid_source_routing() {
+    let mut packet = Packet::new();
+    packet.push(Ipv4 {
+        source: Ipv4Addr::new(10, 0, 0, 1),
+        destination: Ipv4Addr::new(10, 0, 0, 2),
+        options: Bytes::from_static(&[131, 2]),
+        ..Ipv4::default()
+    });
+
+    let error = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer3,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(route(None)),
+        )
+        .unwrap_err();
+
+    assert!(matches!(error, PlanError::InvalidSourceRouting { .. }));
+}
+
+#[test]
 fn encapsulated_srh_does_not_redirect_the_outer_route() {
     let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
     let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();

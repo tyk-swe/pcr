@@ -3,7 +3,10 @@
 
 //! Owned native capture worker and bounded queue shared by libpcap and Npcap.
 
+#![forbid(unsafe_code)]
+
 use std::collections::VecDeque;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
@@ -25,6 +28,8 @@ const STATISTICS_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(super) struct NativeCapturedPacket {
     pub timestamp: SystemTime,
+    /// Conservative monotonic time derived from the kernel packet timestamp.
+    pub received_at: Option<Instant>,
     pub captured_length: u32,
     pub original_length: u32,
     pub bytes: Bytes,
@@ -83,13 +88,22 @@ impl NativeCaptureSession {
         let worker = thread::Builder::new()
             .name(format!("packetcraftr-capture-{}", parts.interface.name))
             .spawn(move || {
-                capture_worker(
-                    source.as_mut(),
-                    worker_shared,
-                    worker_stop,
-                    interface_index,
-                    link_type,
-                );
+                let panic_shared = Arc::clone(&worker_shared);
+                if catch_unwind(AssertUnwindSafe(|| {
+                    capture_worker(
+                        source.as_mut(),
+                        worker_shared,
+                        worker_stop,
+                        interface_index,
+                        link_type,
+                    );
+                }))
+                .is_err()
+                {
+                    panic_shared.set_error(LiveIoError::Capture {
+                        message: "native capture worker panicked".to_owned(),
+                    });
+                }
             })
             .map_err(|error| LiveIoError::Capture {
                 message: format!("could not start the owned capture worker: {error}"),
@@ -105,6 +119,10 @@ impl NativeCaptureSession {
 }
 
 impl CaptureSession for NativeCaptureSession {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         validate_timeout(timeout)?;
         let deadline = Instant::now()
@@ -305,74 +323,125 @@ impl SharedCapture {
             .checked_add(frame_bytes)
             .is_none_or(|bytes| bytes > self.limits.max_bytes);
         if would_exceed_frames || would_exceed_bytes {
-            increment(&mut state.statistics.overflow_events, 1, "overflow events")?;
             match self.limits.overflow_policy {
                 CaptureOverflowPolicy::Fail => {
-                    increment(&mut state.statistics.dropped_frames, 1, "dropped frames")?;
+                    let mut statistics = state.statistics;
+                    increment(&mut statistics.overflow_events, 1, "overflow events")?;
+                    increment(&mut statistics.dropped_frames, 1, "dropped frames")?;
                     increment(
-                        &mut state.statistics.dropped_bytes,
+                        &mut statistics.dropped_bytes,
                         frame_bytes as u64,
                         "dropped bytes",
                     )?;
+                    state.statistics = statistics;
                     return Err(LiveIoError::CaptureQueueOverflow {
-                        dropped_frames: state.statistics.dropped_frames,
-                        dropped_bytes: state.statistics.dropped_bytes,
-                        overflow_events: state.statistics.overflow_events,
+                        dropped_frames: statistics.dropped_frames,
+                        dropped_bytes: statistics.dropped_bytes,
+                        overflow_events: statistics.overflow_events,
                     });
                 }
                 CaptureOverflowPolicy::DropNewest => {
-                    increment(&mut state.statistics.dropped_frames, 1, "dropped frames")?;
+                    let mut statistics = state.statistics;
+                    increment(&mut statistics.overflow_events, 1, "overflow events")?;
+                    increment(&mut statistics.dropped_frames, 1, "dropped frames")?;
                     increment(
-                        &mut state.statistics.dropped_bytes,
+                        &mut statistics.dropped_bytes,
                         frame_bytes as u64,
                         "dropped bytes",
                     )?;
+                    state.statistics = statistics;
                     return Ok(true);
                 }
                 CaptureOverflowPolicy::DropOldest => {
-                    while state.queue.len() >= self.limits.max_frames
-                        || state
-                            .queued_bytes
+                    let mut retained_frames = state.queue.len();
+                    let mut retained_bytes = state.queued_bytes;
+                    let mut drop_count = 0usize;
+                    let mut drop_bytes = 0usize;
+                    for dropped in &state.queue {
+                        if retained_frames < self.limits.max_frames
+                            && retained_bytes
+                                .checked_add(frame_bytes)
+                                .is_some_and(|bytes| bytes <= self.limits.max_bytes)
+                        {
+                            break;
+                        }
+                        let bytes = dropped.frame.bytes().len();
+                        retained_frames -= 1;
+                        retained_bytes = retained_bytes.checked_sub(bytes).ok_or_else(|| {
+                            LiveIoError::InvalidCaptureStatistics {
+                                message: "native capture queue byte accounting underflowed"
+                                    .to_owned(),
+                            }
+                        })?;
+                        drop_count += 1;
+                        drop_bytes = drop_bytes.checked_add(bytes).ok_or_else(|| {
+                            LiveIoError::InvalidCaptureStatistics {
+                                message: "native capture dropped-byte accounting overflowed"
+                                    .to_owned(),
+                            }
+                        })?;
+                    }
+                    if retained_frames >= self.limits.max_frames
+                        || retained_bytes
                             .checked_add(frame_bytes)
                             .is_none_or(|bytes| bytes > self.limits.max_bytes)
                     {
-                        let Some(dropped) = state.queue.pop_front() else {
-                            increment(&mut state.statistics.dropped_frames, 1, "dropped frames")?;
-                            increment(
-                                &mut state.statistics.dropped_bytes,
-                                frame_bytes as u64,
-                                "dropped bytes",
-                            )?;
-                            return Ok(true);
-                        };
-                        state.queued_bytes = state
-                            .queued_bytes
-                            .checked_sub(dropped.frame.bytes().len())
-                            .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
-                                message: "native capture queue byte accounting underflowed"
-                                    .to_owned(),
-                            })?;
-                        increment(&mut state.statistics.dropped_frames, 1, "dropped frames")?;
+                        let mut statistics = state.statistics;
+                        increment(&mut statistics.overflow_events, 1, "overflow events")?;
+                        increment(&mut statistics.dropped_frames, 1, "dropped frames")?;
                         increment(
-                            &mut state.statistics.dropped_bytes,
-                            dropped.frame.bytes().len() as u64,
+                            &mut statistics.dropped_bytes,
+                            frame_bytes as u64,
                             "dropped bytes",
                         )?;
+                        state.statistics = statistics;
+                        return Ok(true);
                     }
+
+                    let mut statistics = state.statistics;
+                    increment(&mut statistics.overflow_events, 1, "overflow events")?;
+                    increment(
+                        &mut statistics.dropped_frames,
+                        drop_count as u64,
+                        "dropped frames",
+                    )?;
+                    increment(
+                        &mut statistics.dropped_bytes,
+                        drop_bytes as u64,
+                        "dropped bytes",
+                    )?;
+                    increment(&mut statistics.received_frames, 1, "received frames")?;
+                    increment(
+                        &mut statistics.received_bytes,
+                        frame_bytes as u64,
+                        "received bytes",
+                    )?;
+                    for _ in 0..drop_count {
+                        state.queue.pop_front();
+                    }
+                    state.queued_bytes = retained_bytes + frame_bytes;
+                    state.statistics = statistics;
+                    state.queue.push_back(captured);
+                    drop(state);
+                    self.changed.notify_one();
+                    return Ok(false);
                 }
             }
         }
-        state.queued_bytes = state.queued_bytes.checked_add(frame_bytes).ok_or_else(|| {
+        let queued_bytes = state.queued_bytes.checked_add(frame_bytes).ok_or_else(|| {
             LiveIoError::InvalidCaptureStatistics {
                 message: "native capture queue byte accounting overflowed".to_owned(),
             }
         })?;
-        increment(&mut state.statistics.received_frames, 1, "received frames")?;
+        let mut statistics = state.statistics;
+        increment(&mut statistics.received_frames, 1, "received frames")?;
         increment(
-            &mut state.statistics.received_bytes,
+            &mut statistics.received_bytes,
             frame_bytes as u64,
             "received bytes",
         )?;
+        state.queued_bytes = queued_bytes;
+        state.statistics = statistics;
         state.queue.push_back(captured);
         drop(state);
         self.changed.notify_one();
@@ -404,16 +473,18 @@ impl SharedCapture {
             return Ok(());
         }
         let mut state = self.lock()?;
+        let mut statistics = state.statistics;
         increment(
-            &mut state.statistics.dropped_frames,
+            &mut statistics.dropped_frames,
             total_drop_delta,
             "dropped frames",
         )?;
         increment(
-            &mut state.statistics.receiver_dropped_frames,
+            &mut statistics.receiver_dropped_frames,
             total_drop_delta,
             "receiver-dropped frames",
         )?;
+        state.statistics = statistics;
         Ok(())
     }
 }
@@ -449,7 +520,6 @@ fn capture_worker(
     while !stop.load(Ordering::Acquire) {
         match source.next_event() {
             Ok(NativeCaptureEvent::Packet(packet)) => {
-                let received_at = Instant::now();
                 let mut frame = match Frame::try_with_lengths(
                     packet.timestamp,
                     link_type,
@@ -466,7 +536,9 @@ fn capture_worker(
                     }
                 };
                 frame.interface = Some(interface_index);
-                if let Err(error) = shared.enqueue(CapturedFrame::new(frame, received_at)) {
+                if let Err(error) =
+                    shared.enqueue(CapturedFrame::with_ingress_time(frame, packet.received_at))
+                {
                     shared.set_error(error);
                     return;
                 }
@@ -547,6 +619,22 @@ pub(super) fn system_time(seconds: i64, microseconds: i64) -> Result<SystemTime,
     })
 }
 
+/// Projects a kernel wall-clock packet timestamp onto the monotonic clock.
+/// Future timestamps and packet ages older than the monotonic clock can
+/// represent are deliberately left unmarked.
+pub(super) fn monotonic_packet_time(
+    packet_timestamp: SystemTime,
+    observed_wall: SystemTime,
+    observed_at: Instant,
+) -> Option<Instant> {
+    let age = observed_wall.duration_since(packet_timestamp).ok()?;
+    monotonic_time_for_age(age, observed_at)
+}
+
+fn monotonic_time_for_age(age: Duration, observed_at: Instant) -> Option<Instant> {
+    observed_at.checked_sub(age)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,13 +670,76 @@ mod tests {
         }
     }
 
+    struct PanicBeforeReadySource;
+
+    impl NativeCaptureSource for PanicBeforeReadySource {
+        fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+            unreachable!("statistics panic must happen before receive")
+        }
+
+        fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+            panic!("scripted statistics panic")
+        }
+    }
+
+    struct PanicAfterReadySource {
+        proceed: Arc<AtomicBool>,
+    }
+
+    impl NativeCaptureSource for PanicAfterReadySource {
+        fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+            while !self.proceed.load(Ordering::Acquire) {
+                thread::yield_now();
+            }
+            panic!("scripted receive panic")
+        }
+
+        fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+            Ok(NativeCaptureStatistics::default())
+        }
+    }
+
+    fn panic_session(source: Box<dyn NativeCaptureSource>) -> NativeCaptureSession {
+        NativeCaptureSession::spawn(
+            NativeCaptureParts {
+                source,
+                interrupt: Arc::new(MockInterrupt(Arc::new(AtomicUsize::new(0)))),
+                interface: InterfaceId {
+                    name: "mock0".to_owned(),
+                    index: 7,
+                },
+                link_type: LinkType::ETHERNET,
+            },
+            CaptureQueueLimits {
+                max_frames: 1,
+                max_bytes: 4,
+                snap_length: 4,
+                overflow_policy: CaptureOverflowPolicy::Fail,
+            },
+        )
+        .unwrap()
+    }
+
     fn packet(byte: u8, length: usize) -> NativeCaptureEvent {
         NativeCaptureEvent::Packet(NativeCapturedPacket {
             timestamp: UNIX_EPOCH,
+            received_at: Some(Instant::now()),
             captured_length: length as u32,
             original_length: length as u32,
             bytes: Bytes::from(vec![byte; length]),
         })
+    }
+
+    fn captured(byte: u8, length: usize) -> CapturedFrame {
+        CapturedFrame::new(
+            Frame::new(
+                UNIX_EPOCH,
+                LinkType::ETHERNET,
+                Bytes::from(vec![byte; length]),
+            )
+            .unwrap(),
+            Instant::now(),
+        )
     }
 
     fn session(
@@ -790,6 +941,27 @@ mod tests {
     }
 
     #[test]
+    fn worker_panic_before_readiness_wakes_waiter_and_shutdown_joins() {
+        let mut session = panic_session(Box::new(PanicBeforeReadySource));
+        let error = session.wait_ready(Duration::from_secs(1)).unwrap_err();
+        assert!(matches!(error, LiveIoError::Capture { .. }));
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn worker_panic_after_readiness_wakes_receiver_and_shutdown_joins() {
+        let proceed = Arc::new(AtomicBool::new(false));
+        let mut session = panic_session(Box::new(PanicAfterReadySource {
+            proceed: Arc::clone(&proceed),
+        }));
+        session.wait_ready(Duration::from_secs(1)).unwrap();
+        proceed.store(true, Ordering::Release);
+        let error = session.next_frame(Duration::from_secs(1)).unwrap_err();
+        assert!(matches!(error, LiveIoError::Capture { .. }));
+        session.shutdown().unwrap();
+    }
+
+    #[test]
     fn native_drop_counters_do_not_masquerade_as_queue_overflows() {
         let shared = SharedCapture::new(CaptureQueueLimits {
             max_frames: 1,
@@ -863,11 +1035,98 @@ mod tests {
     }
 
     #[test]
+    fn queue_statistic_overflow_leaves_queue_and_counters_unchanged() {
+        let shared = SharedCapture::new(CaptureQueueLimits {
+            max_frames: 1,
+            max_bytes: 4,
+            snap_length: 4,
+            overflow_policy: CaptureOverflowPolicy::DropNewest,
+        });
+        shared.enqueue(captured(1, 1)).unwrap();
+        {
+            let mut state = shared.lock().unwrap();
+            state.statistics.dropped_frames = u64::MAX;
+        }
+        let before = {
+            let state = shared.lock().unwrap();
+            (state.statistics, state.queue.len(), state.queued_bytes)
+        };
+
+        assert!(matches!(
+            shared.enqueue(captured(2, 1)),
+            Err(LiveIoError::InvalidCaptureStatistics { .. })
+        ));
+        let after = shared.lock().unwrap();
+        assert_eq!(after.statistics, before.0);
+        assert_eq!(after.queue.len(), before.1);
+        assert_eq!(after.queued_bytes, before.2);
+    }
+
+    #[test]
+    fn receiver_statistic_overflow_is_fail_atomic() {
+        let shared = SharedCapture::new(CaptureQueueLimits {
+            max_frames: 1,
+            max_bytes: 4,
+            snap_length: 4,
+            overflow_policy: CaptureOverflowPolicy::Fail,
+        });
+        {
+            let mut state = shared.lock().unwrap();
+            state.statistics.dropped_frames = 17;
+            state.statistics.receiver_dropped_frames = u64::MAX;
+        }
+        let before = shared.lock().unwrap().statistics;
+
+        assert!(matches!(
+            shared.add_native_drop_deltas(
+                NativeCaptureStatistics::default(),
+                NativeCaptureStatistics {
+                    capture_dropped_frames: 1,
+                    ..NativeCaptureStatistics::default()
+                },
+            ),
+            Err(LiveIoError::InvalidCaptureStatistics { .. })
+        ));
+        assert_eq!(shared.lock().unwrap().statistics, before);
+    }
+
+    #[test]
     fn timestamp_conversion_validates_fractional_range() {
         assert_eq!(
             system_time(1, 2).unwrap(),
             UNIX_EPOCH + Duration::from_micros(1_000_002)
         );
         assert!(system_time(0, 1_000_000).is_err());
+    }
+
+    #[test]
+    fn old_kernel_timestamp_maps_before_dequeue_observation() {
+        let observed_wall = SystemTime::now();
+        let observed_at = Instant::now();
+        let packet_timestamp = observed_wall
+            .checked_sub(Duration::from_millis(250))
+            .unwrap();
+
+        let received_at =
+            monotonic_packet_time(packet_timestamp, observed_wall, observed_at).unwrap();
+
+        assert_eq!(
+            received_at,
+            observed_at.checked_sub(Duration::from_millis(250)).unwrap()
+        );
+        assert!(received_at < observed_at);
+    }
+
+    #[test]
+    fn future_or_unrepresentable_kernel_timestamp_has_no_monotonic_marker() {
+        let observed_wall = SystemTime::now();
+        let observed_at = Instant::now();
+        let future = observed_wall.checked_add(Duration::from_secs(1)).unwrap();
+
+        assert_eq!(
+            monotonic_packet_time(future, observed_wall, observed_at),
+            None
+        );
+        assert_eq!(monotonic_time_for_age(Duration::MAX, observed_at), None);
     }
 }

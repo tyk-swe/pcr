@@ -8,9 +8,9 @@ use crate::capture::{Direction, Frame, LinkType};
 use super::models::{Endianness, Error, Format, Interface, TimestampResolution};
 use super::wire::{
     DEFAULT_TIMESTAMP_RESOLUTION, PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS,
-    PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, align_to_usize, decode_i64, decode_u16,
-    decode_u32, read_exact_counted, read_exact_or_eof, timestamp_from_ticks,
-    validate_declared_lengths,
+    PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, align_to_usize, copy_bytes_fallibly,
+    decode_i64, decode_u16, decode_u32, read_exact_counted, read_exact_or_eof, read_exact_vec,
+    timestamp_from_ticks, validate_declared_lengths,
 };
 
 #[derive(Clone, Copy)]
@@ -31,16 +31,18 @@ pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option
 pub(super) fn read_section_header_after_type<R: Read>(
     reader: &mut R,
     max_size: usize,
+    scratch: &mut Vec<u8>,
 ) -> Result<SectionHeader, Error> {
     let mut length = [0_u8; 4];
     read_exact_counted(reader, &mut length, "pcapng section header length")?;
-    read_section_header_with_length(reader, length, max_size)
+    read_section_header_with_length(reader, length, max_size, scratch)
 }
 
 pub(super) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
+    scratch: &mut Vec<u8>,
 ) -> Result<SectionHeader, Error> {
     let mut raw_bom = [0_u8; 4];
     read_exact_counted(reader, &mut raw_bom, "pcapng byte-order magic")?;
@@ -63,10 +65,9 @@ pub(super) fn read_section_header_with_length<R: Read>(
     }
 
     let remaining_length = block_length as usize - 12;
-    let mut remaining = vec![0_u8; remaining_length];
-    read_exact_counted(reader, &mut remaining, "pcapng section header")?;
-    let footer_offset = remaining.len() - 4;
-    let trailing_length = decode_u32(endianness, &remaining[footer_offset..]);
+    read_exact_vec(reader, scratch, remaining_length, "pcapng section header")?;
+    let footer_offset = scratch.len() - 4;
+    let trailing_length = decode_u32(endianness, &scratch[footer_offset..]);
     if trailing_length != block_length {
         return Err(Error::BlockLengthMismatch {
             leading: block_length,
@@ -74,8 +75,8 @@ pub(super) fn read_section_header_with_length<R: Read>(
         });
     }
 
-    let major = decode_u16(endianness, &remaining[0..2]);
-    let minor = decode_u16(endianness, &remaining[2..4]);
+    let major = decode_u16(endianness, &scratch[0..2]);
+    let minor = decode_u16(endianness, &scratch[2..4]);
     // Some established writers emitted 1.2 without an incompatible format
     // change. The pcapng specification requires readers to treat it as 1.0.
     if major != 1 || (minor != 0 && minor != 2) {
@@ -85,7 +86,7 @@ pub(super) fn read_section_header_with_length<R: Read>(
             minor,
         });
     }
-    let section_length = decode_i64(endianness, &remaining[4..12]);
+    let section_length = decode_i64(endianness, &scratch[4..12]);
     if section_length < -1 {
         return Err(Error::InvalidData {
             format: Format::PcapNg,
@@ -99,7 +100,7 @@ pub(super) fn read_section_header_with_length<R: Read>(
         });
     }
     visit_options(
-        &remaining[12..footer_offset],
+        &scratch[12..footer_offset],
         endianness,
         "pcapng section options",
         |_, _| Ok(()),
@@ -331,7 +332,7 @@ fn parse_pcapng_packet_body(
         interface.link_type,
         captured_length,
         original_length,
-        Bytes::copy_from_slice(&body[data_offset..actual_data_end]),
+        Bytes::from(copy_bytes_fallibly(&body[data_offset..actual_data_end])?),
     )?;
     frame.interface = Some(global_interface);
     frame.direction = direction;
@@ -397,7 +398,7 @@ pub(super) fn parse_simple_packet(
         interface.link_type,
         captured_length,
         original_length,
-        Bytes::copy_from_slice(&body[4..4 + captured_length as usize]),
+        Bytes::from(copy_bytes_fallibly(&body[4..4 + captured_length as usize])?),
     )?;
     frame.interface = Some(interface_base);
     Ok(frame)

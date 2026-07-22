@@ -1,19 +1,24 @@
+use std::time::{Duration, Instant};
+
 use super::engine::{PreparedFuzz, ResolvedField};
 use super::execution::{SplitMix64, case_seed};
 use super::{
-    Arc, BuildContext, Builder, BuiltPacket, Bytes, Classification, DecodeOptions, DecodedPacket,
-    Diagnostic, Dissector, Duration, FieldKind, FieldValue, Frame, FuzzCase, FuzzCaseFailure,
-    FuzzCaseOutcome, FuzzError, FuzzLimits, FuzzMutation, FuzzReproduction, FuzzRequest,
-    FuzzStrategy, FuzzTarget, Instant, Ipv4Addr, Ipv6Addr, Kind, LinkType, MAX_FUZZ_TARGET_FIELDS,
-    Packet, ProtocolRegistry,
+    Arc, BuildContext, Builder, BuiltPacket, BuiltinProtocol, Bytes, Classification, Deadline,
+    DecodeOptions, DecodedPacket, Diagnostic, Dissector, FieldKind, FieldValue, Frame, FuzzCase,
+    FuzzCaseFailure, FuzzCaseOutcome, FuzzError, FuzzLimits, FuzzMutation, FuzzReproduction,
+    FuzzRequest, FuzzStrategy, FuzzTarget, Ipv4Addr, Ipv6Addr, Kind, LinkType,
+    MAX_FUZZ_TARGET_FIELDS, Packet, ProtocolRegistry, duration_limit,
 };
 
 pub(super) fn prepare(
     request: &FuzzRequest,
     packet: Packet,
     registry: Arc<ProtocolRegistry>,
+    deadline: &mut Deadline,
 ) -> Result<PreparedFuzz, FuzzError> {
-    request.validate()?;
+    deadline
+        .start_accounting(Duration::ZERO)
+        .map_err(duration_limit)?;
     let started = Instant::now();
     validate_base_shape(&packet, request.build.max_layers)?;
     packet_reflected_value_bytes(&packet, request.limits)?;
@@ -41,7 +46,7 @@ pub(super) fn prepare(
     let mut built_byte_count = 0_u64;
     let mut retained_bytes = 0_u64;
     for offset in 0..request.cases {
-        enforce_preparation_deadline(started, request.limits.max_duration)?;
+        deadline.check().map_err(duration_limit)?;
         let index = request
             .first_case
             .checked_add(offset as u64)
@@ -173,36 +178,14 @@ pub(super) fn prepare(
         }
         cases.push(case);
     }
-    enforce_preparation_deadline(started, request.limits.max_duration)?;
+    deadline
+        .account(started.elapsed())
+        .map_err(duration_limit)?;
     Ok(PreparedFuzz {
         cases,
         built_case_count,
         built_byte_count,
-        preparation_elapsed: started.elapsed(),
     })
-}
-
-fn enforce_preparation_deadline(started: Instant, limit: Duration) -> Result<(), FuzzError> {
-    let elapsed = started.elapsed();
-    if elapsed > limit {
-        return Err(FuzzError::DurationLimit {
-            actual: elapsed,
-            limit,
-        });
-    }
-    Ok(())
-}
-
-pub(super) fn enforce_operation_deadline(
-    started: Instant,
-    accounted_elapsed: Duration,
-    limit: Duration,
-) -> Result<(), FuzzError> {
-    let actual = started.elapsed().max(accounted_elapsed);
-    if actual > limit {
-        return Err(FuzzError::DurationLimit { actual, limit });
-    }
-    Ok(())
 }
 
 fn validate_base_shape(packet: &Packet, max_layers: usize) -> Result<(), FuzzError> {
@@ -762,16 +745,15 @@ pub(super) fn dissect_built(
 }
 
 fn packet_link_type(packet: &Packet) -> Option<LinkType> {
-    let protocol = packet.layer(0)?.protocol_id();
-    Some(match protocol.as_str() {
-        "ethernet" => LinkType::ETHERNET,
-        "bsd_null" => LinkType::NULL,
-        "bsd_loop" => LinkType::LOOP,
-        "linux_sll" => LinkType::LINUX_SLL,
-        "linux_sll2" => LinkType::LINUX_SLL2,
-        "ipv4" => LinkType::IPV4,
-        "ipv6" => LinkType::IPV6,
-        "raw_ip" => LinkType::RAW,
+    Some(match BuiltinProtocol::of(packet.layer(0)?)? {
+        BuiltinProtocol::Ethernet => LinkType::ETHERNET,
+        BuiltinProtocol::BsdNull => LinkType::NULL,
+        BuiltinProtocol::BsdLoop => LinkType::LOOP,
+        BuiltinProtocol::LinuxSll => LinkType::LINUX_SLL,
+        BuiltinProtocol::LinuxSll2 => LinkType::LINUX_SLL2,
+        BuiltinProtocol::Ipv4 => LinkType::IPV4,
+        BuiltinProtocol::Ipv6 => LinkType::IPV6,
+        BuiltinProtocol::RawIp => LinkType::RAW,
         _ => return None,
     })
 }
@@ -779,8 +761,14 @@ fn packet_link_type(packet: &Packet) -> Option<LinkType> {
 pub(super) fn has_link_root(packet: &Packet) -> bool {
     packet.layer(0).is_some_and(|layer| {
         matches!(
-            layer.protocol_id().as_str(),
-            "ethernet" | "bsd_null" | "bsd_loop" | "linux_sll" | "linux_sll2"
+            BuiltinProtocol::of(layer),
+            Some(
+                BuiltinProtocol::Ethernet
+                    | BuiltinProtocol::BsdNull
+                    | BuiltinProtocol::BsdLoop
+                    | BuiltinProtocol::LinuxSll
+                    | BuiltinProtocol::LinuxSll2
+            )
         )
     })
 }

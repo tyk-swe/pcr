@@ -15,8 +15,11 @@ where
     C: WorkflowClock,
     F: FnMut(ReplayFrameEvidence) -> Result<(), ReplayError>,
 {
+    let mut deadline = Deadline::new(options.limits.max_duration);
     let limits = options.limits.validate()?;
     let timing = options.timing.validate()?;
+    authorizer.begin_operation();
+    enforce_deadline(&deadline, 0)?;
     let source_format = reader.format();
     let mut previous_timestamp = None;
     let mut frames_attempted = 0_u64;
@@ -26,10 +29,10 @@ where
 
     loop {
         let sequence = frames_attempted;
-        let Some(frame) = reader
-            .next_frame()
-            .map_err(|source| ReplayError::Capture { sequence, source })?
-        else {
+        enforce_deadline(&deadline, sequence)?;
+        let frame = reader.next_frame();
+        enforce_deadline(&deadline, sequence)?;
+        let Some(frame) = frame.map_err(|source| ReplayError::Capture { sequence, source })? else {
             break;
         };
         let capture_interface = frame
@@ -113,20 +116,43 @@ where
                 limit: limits.max_duration,
             });
         }
-        authorizer
-            .authorize(&frame, mode)
-            .map_err(|source| ReplayError::Authorization { sequence, source })?;
-        let concrete_interface = transmitter
-            .validate_interface(&options.interface, mode, &frame)
-            .map_err(|source| ReplayError::Transmission { sequence, source })?;
+        deadline
+            .check_additional(delay)
+            .map_err(|error| duration_limit(sequence, error))?;
+        enforce_deadline(&deadline, sequence)?;
+        let authorization = authorizer.authorize_operation(
+            ReplayAuthorizationContext {
+                packets: next_frames,
+                wire_bytes: next_bytes,
+            },
+            &frame,
+            mode,
+        );
+        enforce_deadline(&deadline, sequence)?;
+        authorization.map_err(|source| ReplayError::Authorization { sequence, source })?;
+
+        enforce_deadline(&deadline, sequence)?;
+        let concrete_interface = transmitter.validate_interface(&options.interface, mode, &frame);
+        enforce_deadline(&deadline, sequence)?;
+        let concrete_interface =
+            concrete_interface.map_err(|source| ReplayError::Transmission { sequence, source })?;
+
+        deadline
+            .start_accounting(delay)
+            .map_err(|error| duration_limit(sequence, error))?;
         clock.sleep(delay).map_err(|source| ReplayError::Clock {
             sequence,
             message: source.to_string(),
         })?;
+        deadline
+            .account(delay)
+            .map_err(|error| duration_limit(sequence, error))?;
 
-        let transmission = transmitter
-            .transmit(&concrete_interface, mode, &frame)
-            .map_err(|source| ReplayError::Transmission { sequence, source })?;
+        enforce_deadline(&deadline, sequence)?;
+        let transmission = transmitter.transmit(&concrete_interface, mode, &frame);
+        enforce_deadline(&deadline, sequence)?;
+        let transmission =
+            transmission.map_err(|source| ReplayError::Transmission { sequence, source })?;
         if transmission.interface != concrete_interface {
             return Err(ReplayError::InvalidEvidence {
                 sequence,
@@ -147,7 +173,8 @@ where
         bytes_completed = next_bytes;
         scheduled_duration = next_duration;
         previous_timestamp = Some(frame.timestamp);
-        emit(ReplayFrameEvidence {
+        enforce_deadline(&deadline, sequence)?;
+        let emitted = emit(ReplayFrameEvidence {
             source_sequence: sequence,
             source_interface_id: frame.interface,
             capture_interface,
@@ -156,9 +183,12 @@ where
             scheduled_delay: delay,
             bytes_sent: transmission.report.bytes_sent as u64,
             frame,
-        })?;
+        });
+        enforce_deadline(&deadline, sequence)?;
+        emitted?;
     }
 
+    enforce_deadline(&deadline, frames_attempted)?;
     Ok(ReplaySummary {
         source_format,
         timing,
@@ -168,8 +198,23 @@ where
         scheduled_duration,
     })
 }
+
+fn enforce_deadline(deadline: &Deadline, sequence: u64) -> Result<(), ReplayError> {
+    deadline
+        .check()
+        .map_err(|error| duration_limit(sequence, error))
+}
+
+fn duration_limit(sequence: u64, error: DeadlineExceeded) -> ReplayError {
+    ReplayError::DurationLimit {
+        sequence,
+        actual: error.actual,
+        limit: error.limit,
+    }
+}
 use super::wire::{replay_link_mode, validate_transmission_evidence};
 use super::{
-    Duration, Format, Read, Reader, ReplayAuthorizer, ReplayError, ReplayFrameEvidence,
-    ReplayOptions, ReplaySummary, ReplayTransmitter, WorkflowClock,
+    Deadline, DeadlineExceeded, Duration, Format, Read, Reader, ReplayAuthorizationContext,
+    ReplayAuthorizer, ReplayError, ReplayFrameEvidence, ReplayOptions, ReplaySummary,
+    ReplayTransmitter, WorkflowClock,
 };

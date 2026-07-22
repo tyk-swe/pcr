@@ -35,6 +35,7 @@ use crate::protocol::{
 };
 
 use super::clock::Clock;
+use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate,
     ResponseEvidence, push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,

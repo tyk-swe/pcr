@@ -3,6 +3,9 @@
 
 //! Target-native raw IPv4/IPv6 transmission.
 
+#![cfg_attr(windows, allow(unsafe_code))]
+#![cfg_attr(not(windows), forbid(unsafe_code))]
+
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV6};
 #[cfg(target_os = "macos")]

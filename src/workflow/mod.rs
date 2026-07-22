@@ -8,6 +8,7 @@
 mod address_family;
 mod boundary_error;
 pub mod clock;
+mod deadline;
 pub mod dns;
 mod evidence;
 pub mod fuzz;

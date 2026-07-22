@@ -121,6 +121,10 @@ impl CaptureProvider for CoordinatedCaptureProvider {
 struct CoordinatedCaptureSession(Arc<CoordinatedResolutionIo>);
 
 impl CaptureSession for CoordinatedCaptureSession {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        true
+    }
+
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().ready = true;
         self.0.changed.notify_all();

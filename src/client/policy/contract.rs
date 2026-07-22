@@ -37,7 +37,9 @@ impl Default for TrafficPolicy {
 pub enum TrafficPolicyError {
     #[error("traffic policy denies public destination {destination}")]
     PublicDestination { destination: IpAddr },
-    #[error("traffic policy cannot authorize {reason}")]
+    #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
+    InvalidPacketSemantics { reason: String },
+    #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
     InvalidIpv4Options { reason: String },
     #[error("traffic policy denies hostname resolution for {hostname}")]
     HostnameResolution { hostname: String },
@@ -56,9 +58,13 @@ impl Classified for TrafficPolicyError {
                 "policy.public_destination",
                 "explicitly authorize public destinations only for networks you are permitted to test",
             ),
+            Self::InvalidPacketSemantics { .. } => (
+                "policy.invalid_packet_semantics",
+                "repair malformed or unsupported route-bearing packet fields before live transmission",
+            ),
             Self::InvalidIpv4Options { .. } => (
                 "policy.invalid_ipv4_options",
-                "repair malformed IPv4 source-route options before live transmission",
+                "repair malformed or unsupported route-bearing packet fields before live transmission",
             ),
             Self::HostnameResolution { .. } => (
                 "policy.hostname_resolution",

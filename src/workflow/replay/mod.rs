@@ -12,6 +12,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use super::clock::Clock as WorkflowClock;
+use super::deadline::{Deadline, DeadlineExceeded};
 use crate::capture::{
     DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Format,
     Frame, Interface, LinkType, Reader,
@@ -47,17 +48,18 @@ pub use adapter::{SystemAuthorizer, SystemTransmitter};
 pub use engine::replay_capture as run;
 pub use error::ReplayError as Error;
 pub use model::{
-    MAX_REPLAY_DURATION, ReplayAuthorizer as Authorizer, ReplayFrameEvidence as FrameEvidence,
-    ReplayLimits as Limits, ReplayOptions as Options, ReplaySummary as Summary,
-    ReplayTiming as Timing, ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
+    MAX_REPLAY_DURATION, ReplayAuthorizationContext as AuthorizationContext,
+    ReplayAuthorizer as Authorizer, ReplayFrameEvidence as FrameEvidence, ReplayLimits as Limits,
+    ReplayOptions as Options, ReplaySummary as Summary, ReplayTiming as Timing,
+    ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
 };
 
 #[cfg(test)]
 use engine::replay_capture;
 use error::ReplayError;
 use model::{
-    ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions, ReplaySummary, ReplayTransmission,
-    ReplayTransmitter,
+    ReplayAuthorizationContext, ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions,
+    ReplaySummary, ReplayTransmission, ReplayTransmitter,
 };
 #[cfg(test)]
 use model::{ReplayLimits, ReplayTiming};

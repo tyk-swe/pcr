@@ -6,8 +6,11 @@
 use std::net::IpAddr;
 
 use crate::packet::{
-    Packet, codec::NetworkEnvelope, decode::DecodedPacket, diagnostic::DiagnosticSeverity,
-    field::FieldValue, registry::ProtocolRegistry,
+    Packet,
+    decode::DecodedPacket,
+    diagnostic::DiagnosticSeverity,
+    registry::ProtocolRegistry,
+    semantics::{self, BuiltinProtocol},
 };
 use crate::protocol::{
     QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind, transport::Tcp,
@@ -63,18 +66,18 @@ impl Observation {
     }
 }
 
-pub(super) fn packet_shape_matches(packet: &Packet, expected: &[&str]) -> bool {
+pub(super) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]) -> bool {
     let mut layers = packet.iter().peekable();
     if layers
         .peek()
-        .is_some_and(|layer| layer.protocol_id().as_str() == "ethernet")
+        .is_some_and(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
     {
         layers.next();
     }
     expected.iter().all(|expected| {
         layers
             .next()
-            .is_some_and(|layer| layer.protocol_id().as_str() == *expected)
+            .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(*expected))
     }) && layers.next().is_none()
 }
 
@@ -91,7 +94,7 @@ pub(super) fn observe(
     }) {
         return None;
     }
-    let responder = network_envelope(&response.packet)?.source;
+    let responder = semantics::outer_ip_path(&response.packet).ok()??.source;
     if let Some(observation) = classify_icmp_error(transport, request, &response.packet, responder)
     {
         return Some(observation);
@@ -113,14 +116,14 @@ pub(super) fn observe(
                 let tcp = response
                     .packet
                     .iter()
-                    .find(|layer| layer.protocol_id().as_str() == "tcp")?;
+                    .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Tcp))?;
                 let flags = u16::try_from(tcp.field("flags")?.as_u64()?).ok()?;
                 if flags & Tcp::RST != 0 {
                     Observation::new(responder, Correlation::TcpReset, "correlated TCP reset")
                 } else if flags & (Tcp::SYN | Tcp::ACK) == (Tcp::SYN | Tcp::ACK) {
                     let request_tcp = request
                         .iter()
-                        .find(|layer| layer.protocol_id().as_str() == "tcp")?;
+                        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Tcp))?;
                     let request_sequence =
                         u32::try_from(request_tcp.field("sequence")?.as_u64()?).ok()?;
                     let acknowledgment =
@@ -166,10 +169,13 @@ fn classify_icmp_error(
         Transport::Icmp => QuotedProbeTransport::Icmp,
     };
     let kind = quoted_icmp_error_kind(request, response, expected_transport)?;
-    let ipv6 = response
+    let icmp_protocol = response
         .iter()
-        .find(|layer| matches!(layer.protocol_id().as_str(), "icmpv4" | "icmpv6"))
-        .is_some_and(|layer| layer.protocol_id().as_str() == "icmpv6");
+        .find_map(|layer| match BuiltinProtocol::of(layer) {
+            Some(protocol @ (BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6)) => Some(protocol),
+            _ => None,
+        })?;
+    let ipv6 = icmp_protocol == BuiltinProtocol::Icmpv6;
     let (correlation, reason) = match (kind, ipv6) {
         (QuotedIcmpError::PortUnreachable, false) => {
             (Correlation::PortUnreachable, "ICMPv4 port unreachable")
@@ -203,26 +209,4 @@ fn classify_icmp_error(
         ),
     };
     Some(Observation::new(responder, correlation, reason))
-}
-
-fn network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
-    packet.iter().find_map(|layer| {
-        if !matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6") {
-            return None;
-        }
-        let source = match layer.field("source")? {
-            FieldValue::Ipv4(value) => IpAddr::V4(value),
-            FieldValue::Ipv6(value) => IpAddr::V6(value),
-            _ => return None,
-        };
-        let destination = match layer.field("destination")? {
-            FieldValue::Ipv4(value) => IpAddr::V4(value),
-            FieldValue::Ipv6(value) => IpAddr::V6(value),
-            _ => return None,
-        };
-        Some(NetworkEnvelope {
-            source,
-            destination,
-        })
-    })
 }

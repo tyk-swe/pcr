@@ -888,13 +888,13 @@ pub fn classify_dns_response(
 fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Packet) -> bool {
     if !response
         .iter()
-        .any(|layer| layer.protocol_id().as_str() == "udp")
+        .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
     {
         return false;
     }
     let Some(udp) = request
         .iter()
-        .find(|layer| layer.protocol_id().as_str() == "udp")
+        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Udp))
     else {
         return false;
     };
@@ -906,7 +906,7 @@ fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Pa
 pub(super) fn raw_payload(packet: &Packet) -> Option<Bytes> {
     match packet
         .iter()
-        .find(|layer| layer.protocol_id().as_str() == "raw")?
+        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Raw))?
         .field("bytes")?
     {
         FieldValue::Bytes(bytes) => Some(bytes),
@@ -922,3 +922,4 @@ use super::{
     DnsSection, DnsWireError, FieldValue, Ipv4Addr, Ipv6Addr, Packet, ProbeTransport,
     ProtocolRegistry, ValidatedDnsResponse, probe,
 };
+use crate::packet::semantics::BuiltinProtocol;

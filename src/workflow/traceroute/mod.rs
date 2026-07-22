@@ -24,7 +24,6 @@ use crate::packet::{
     Packet,
     decode::DecodedPacket,
     diagnostic::Diagnostic,
-    field::FieldValue,
     registry::ProtocolRegistry,
     template::{PacketTemplate, TemplateValues},
 };
@@ -35,6 +34,7 @@ use crate::protocol::{
 };
 
 use super::clock::Clock;
+use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
     MatchedResponseEvidence, ResponseCandidate, ResponseEvidence, format_exchange_evidence_error,

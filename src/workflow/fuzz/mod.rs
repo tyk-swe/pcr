@@ -10,13 +10,14 @@
 use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use bytes::Bytes;
 use serde::Serialize;
 use thiserror::Error;
 
 use super::clock::Clock;
+use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::EvidenceBudget;
 use super::push_diagnostic_once;
 use crate::capture::{Frame, LinkType};
@@ -33,6 +34,7 @@ use crate::packet::{
     diagnostic::Diagnostic,
     field::{FieldKind, FieldValue},
     registry::ProtocolRegistry,
+    semantics::BuiltinProtocol,
     template::{DEFAULT_MAX_TEMPLATE_PACKETS, PacketTemplate},
 };
 
@@ -84,3 +86,10 @@ use model::{
     FuzzExecutionCase, FuzzExecutor, FuzzLimits, FuzzLiveOptions, FuzzMode, FuzzMutation,
     FuzzReproduction, FuzzRequest, FuzzResult, FuzzStats, FuzzStrategy, FuzzTarget,
 };
+
+fn duration_limit(error: DeadlineExceeded) -> FuzzError {
+    FuzzError::DurationLimit {
+        actual: error.actual,
+        limit: error.limit,
+    }
+}

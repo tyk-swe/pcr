@@ -113,6 +113,12 @@ impl Statistics {
 }
 
 pub trait Session: Send {
+    /// Returns whether this session guarantees monotonic ingress timestamps
+    /// for captured frames. Active exchanges require this capability before
+    /// they transmit; passive consumers may continue using frame-only sessions.
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        false
+    }
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
     fn next_frame(&mut self, timeout: Duration) -> Result<Option<CaptureFrame>, Error>;
@@ -147,19 +153,18 @@ pub struct Captured {
 
 impl Captured {
     pub fn new(frame: CaptureFrame, received_at: Instant) -> Self {
-        Self {
-            frame,
-            received_at: Some(received_at),
-        }
+        Self::with_ingress_time(frame, Some(received_at))
+    }
+
+    /// Retains an optional provider-supplied monotonic ingress marker.
+    pub fn with_ingress_time(frame: CaptureFrame, received_at: Option<Instant>) -> Self {
+        Self { frame, received_at }
     }
 
     /// Retains a frame from a provider that cannot report capture ingress time.
     /// Such a frame is evidence, but cannot satisfy freshness correlation.
     pub fn without_ingress_time(frame: CaptureFrame) -> Self {
-        Self {
-            frame,
-            received_at: None,
-        }
+        Self::with_ingress_time(frame, None)
     }
 }
 
@@ -277,6 +282,10 @@ impl SystemSession {
 }
 
 impl Session for SystemSession {
+    fn supports_monotonic_ingress_time(&self) -> bool {
+        self.inner.supports_monotonic_ingress_time()
+    }
+
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
         validate_timeout(timeout)?;
         self.inner.wait_ready(timeout)

@@ -95,8 +95,18 @@ where
         options.send.destination = Some(first.address);
         let exchange = self
             .client
-            .exchange(&template, options)
-            .map_err(|error| BoundaryError::classified(&error))?;
+            .exchange_for_workflow(&template, options, |request_index, sent, response| {
+                batch.probes.get(request_index).is_some_and(|probe| {
+                    classify_traceroute_response(
+                        self.client.registry(),
+                        probe.strategy,
+                        sent,
+                        response,
+                    )
+                    .is_some()
+                })
+            })
+            .map_err(BoundaryError::from_error)?;
         let crate::client::exchange::Result {
             sent,
             sent_evidence,
@@ -136,5 +146,5 @@ fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
 use super::{
     BoundaryError, ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
     TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
-    TracerouteStrategy,
+    TracerouteStrategy, classify_traceroute_response,
 };

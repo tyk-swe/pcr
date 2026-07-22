@@ -18,36 +18,25 @@ impl FuzzAuthorizer for PolicyAuthorizer<'_> {
         maximum_wire_bytes: u64,
         requires_malformed_live: bool,
     ) -> Result<(), BoundaryError> {
-        use crate::client::policy::Error as PolicyError;
-
-        self.policy
-            .validate()
-            .map_err(|error| BoundaryError::classified(&error))?;
+        self.policy.validate().map_err(BoundaryError::from_error)?;
         let packet_count = packets.len() as u64;
-        if packet_count > self.policy.max_packets_per_operation {
-            return Err(BoundaryError::classified(&PolicyError::PacketLimit {
-                actual: packet_count,
-                limit: self.policy.max_packets_per_operation,
-            }));
-        }
-        if maximum_wire_bytes > self.policy.max_bytes_per_operation {
-            return Err(BoundaryError::classified(&PolicyError::ByteLimit {
-                actual: maximum_wire_bytes,
-                limit: self.policy.max_bytes_per_operation,
-            }));
-        }
+        self.policy
+            .authorize_operation(packet_count, maximum_wire_bytes)
+            .map_err(BoundaryError::from_error)?;
         if requires_malformed_live && !self.policy.allow_permissive_packets {
-            return Err(BoundaryError::classified(&PolicyError::PermissivePacket));
+            return Err(BoundaryError::from_error(
+                crate::client::policy::Error::PermissivePacket,
+            ));
         }
         if let Some(destination) = destination {
             self.policy
                 .authorize_destination(destination)
-                .map_err(|error| BoundaryError::classified(&error))?;
+                .map_err(BoundaryError::from_error)?;
         }
         for packet in packets {
             self.policy
                 .authorize_packet_destinations(packet)
-                .map_err(|error| BoundaryError::classified(&error))?;
+                .map_err(BoundaryError::from_error)?;
         }
         Ok(())
     }
@@ -86,7 +75,7 @@ where
         let exchange = self
             .client
             .exchange(&PacketTemplate::new(case.packet.clone()), options)
-            .map_err(|error| BoundaryError::classified(&error))?;
+            .map_err(BoundaryError::from_error)?;
         let crate::client::exchange::Result {
             mut sent,
             mut sent_evidence,

@@ -7,6 +7,8 @@ use bytes::Bytes;
 use super::wire::{replay_network_envelope, replay_wire_destinations};
 use super::*;
 use crate::capture::Writer;
+use crate::packet::{Packet, layer::Raw};
+use crate::protocol::{network::Ipv4, transport::Udp};
 use crate::workflow::BoundaryError;
 use std::result::Result;
 
@@ -101,6 +103,145 @@ fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
     assert_eq!(error.classification().code, "policy.public_destination");
 }
 
+fn authorized_raw_frame() -> Frame {
+    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 40_000,
+            destination_port: 9,
+            ..Udp::default()
+        })
+        .push(Raw::new(Bytes::from_static(b"replay")));
+    let built = Builder::new(registry)
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    Frame::new(UNIX_EPOCH, LinkType::RAW, built.bytes).unwrap()
+}
+
+#[test]
+fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
+    let frame = authorized_raw_frame();
+    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
+    let mut packet_policy = crate::client::policy::Policy {
+        max_packets_per_operation: 1,
+        allow_permissive_packets: true,
+        ..crate::client::policy::Policy::default()
+    };
+    packet_policy.max_bytes_per_operation = u64::MAX;
+    let mut authorizer = SystemAuthorizer::new(packet_policy, Arc::clone(&registry), true);
+    let error = authorizer
+        .authorize_operation(
+            ReplayAuthorizationContext {
+                packets: 2,
+                wire_bytes: u64::from(frame.captured_length()),
+            },
+            &frame,
+            LinkMode::Layer3,
+        )
+        .unwrap_err();
+    assert_eq!(error.classification().code, "policy.packet_limit");
+
+    let mut byte_policy = crate::client::policy::Policy {
+        max_packets_per_operation: 10,
+        max_bytes_per_operation: u64::from(frame.captured_length()),
+        allow_permissive_packets: true,
+        ..crate::client::policy::Policy::default()
+    };
+    byte_policy.allow_public_destinations = false;
+    let mut authorizer = SystemAuthorizer::new(byte_policy, registry, true);
+    let error = authorizer
+        .authorize_operation(
+            ReplayAuthorizationContext {
+                packets: 1,
+                wire_bytes: u64::from(frame.captured_length()) + 1,
+            },
+            &frame,
+            LinkMode::Layer3,
+        )
+        .unwrap_err();
+    assert_eq!(error.classification().code, "policy.byte_limit");
+}
+
+#[test]
+fn system_authorizer_uses_engine_budget_for_each_replay_operation() {
+    let frame = authorized_raw_frame();
+    let bytes = frame.bytes().clone();
+    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
+    let policy = crate::client::policy::Policy {
+        max_packets_per_operation: 1,
+        max_bytes_per_operation: u64::MAX,
+        allow_permissive_packets: true,
+        ..crate::client::policy::Policy::default()
+    };
+    let mut authorizer = SystemAuthorizer::new(policy, registry, true);
+    let mut options = replay_options(ReplayTiming::Immediate);
+    options.link_mode = LinkMode::Layer3;
+    let mut first_reader = capture_reader(
+        LinkType::RAW,
+        &[
+            (Duration::ZERO, bytes.as_ref()),
+            (Duration::ZERO, bytes.as_ref()),
+        ],
+    );
+    let mut transmitter = ConfigurableRecordingTransmitter::default();
+
+    let error = replay_capture(
+        &mut first_reader,
+        &options,
+        &mut authorizer,
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |_| Ok(()),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        &error,
+        ReplayError::Authorization { sequence: 1, .. }
+    ));
+    assert_eq!(error.classification().code, "policy.packet_limit");
+    assert_eq!(transmitter.transmission_calls, 1);
+
+    let mut second_reader = capture_reader(LinkType::RAW, &[(Duration::ZERO, bytes.as_ref())]);
+    let summary = replay_capture(
+        &mut second_reader,
+        &options,
+        &mut authorizer,
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |_| Ok(()),
+    )
+    .unwrap();
+
+    assert_eq!(summary.frames_completed, 1);
+    assert_eq!(transmitter.transmission_calls, 2);
+}
+
+#[test]
+fn failed_frame_authorization_does_not_commit_campaign_budget() {
+    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
+    let mut public_ipv4 = vec![0_u8; 20];
+    public_ipv4[0] = 0x45;
+    public_ipv4[16..20].copy_from_slice(&[8, 8, 8, 8]);
+    let denied = Frame::new(UNIX_EPOCH, LinkType::RAW, public_ipv4).unwrap();
+    let allowed = authorized_raw_frame();
+    let policy = crate::client::policy::Policy {
+        max_packets_per_operation: 1,
+        max_bytes_per_operation: u64::MAX,
+        allow_permissive_packets: true,
+        ..crate::client::policy::Policy::default()
+    };
+    let mut authorizer = SystemAuthorizer::new(policy, registry, true);
+    assert!(authorizer.authorize(&denied, LinkMode::Layer3).is_err());
+    authorizer.authorize(&allowed, LinkMode::Layer3).unwrap();
+}
+
 #[test]
 fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
     let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
@@ -132,6 +273,41 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
 }
 
 #[test]
+fn replay_srh_validation_requires_the_header_to_name_the_active_segment() {
+    let active: Ipv6Addr = "fd00::10".parse().unwrap();
+    let final_destination: Ipv6Addr = "fd00::20".parse().unwrap();
+    let mut bytes = vec![0_u8; 80];
+    bytes[0] = 0x60;
+    bytes[4..6].copy_from_slice(&40_u16.to_be_bytes());
+    bytes[6] = 43;
+    bytes[24..40].copy_from_slice(&active.octets());
+    bytes[40] = 59;
+    bytes[41] = 4;
+    bytes[42] = 4;
+    bytes[43] = 1;
+    bytes[44] = 1;
+    bytes[48..64].copy_from_slice(&final_destination.octets());
+    bytes[64..80].copy_from_slice(&active.octets());
+    let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes.clone()).unwrap();
+
+    let destinations = replay_wire_destinations(&frame).unwrap();
+    assert!(!destinations.has_unsupported_routing_header);
+    assert!(
+        destinations
+            .addresses
+            .contains(&IpAddr::V6(final_destination))
+    );
+
+    bytes[24..40].copy_from_slice(&Ipv6Addr::LOCALHOST.octets());
+    let malformed = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
+    assert!(
+        replay_wire_destinations(&malformed)
+            .unwrap()
+            .has_unsupported_routing_header
+    );
+}
+
+#[test]
 fn raw_ip_link_types_must_match_the_packet_version() {
     let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
     for (link_type, bytes, declared) in [
@@ -155,11 +331,16 @@ fn raw_ip_link_types_must_match_the_packet_version() {
 
 #[derive(Default)]
 struct ConfigurableRecordingAuthorizer {
+    operation_calls: usize,
     authorization_calls: usize,
     deny_authorization: bool,
 }
 
 impl ReplayAuthorizer for ConfigurableRecordingAuthorizer {
+    fn begin_operation(&mut self) {
+        self.operation_calls += 1;
+    }
+
     fn authorize(&mut self, _frame: &Frame, _mode: LinkMode) -> Result<(), BoundaryError> {
         self.authorization_calls += 1;
         if self.deny_authorization {
@@ -176,7 +357,10 @@ impl ReplayAuthorizer for ConfigurableRecordingAuthorizer {
 
 #[derive(Default)]
 struct ConfigurableRecordingTransmitter {
+    validation_calls: usize,
     transmission_calls: usize,
+    validation_delay: Duration,
+    transmission_delay: Duration,
     return_partial_send: bool,
     omit_wire_bytes: bool,
     report_different_interface: bool,
@@ -189,6 +373,10 @@ impl ReplayTransmitter for ConfigurableRecordingTransmitter {
         _mode: LinkMode,
         _frame: &Frame,
     ) -> Result<InterfaceId, LiveIoError> {
+        self.validation_calls += 1;
+        if !self.validation_delay.is_zero() {
+            std::thread::sleep(self.validation_delay);
+        }
         Ok(interface.clone())
     }
 
@@ -199,6 +387,9 @@ impl ReplayTransmitter for ConfigurableRecordingTransmitter {
         frame: &Frame,
     ) -> Result<ReplayTransmission, LiveIoError> {
         self.transmission_calls += 1;
+        if !self.transmission_delay.is_zero() {
+            std::thread::sleep(self.transmission_delay);
+        }
         Ok(ReplayTransmission {
             interface: if self.report_different_interface {
                 InterfaceId {
@@ -287,6 +478,7 @@ fn replay_capture_with_scaled_timing_streams_exact_frames_and_reports_summary() 
     .unwrap();
 
     assert_eq!(clock.delays, [Duration::ZERO, Duration::from_millis(500)]);
+    assert_eq!(authorizer.operation_calls, 1);
     assert_eq!(authorizer.authorization_calls, 2);
     assert_eq!(transmitter.transmission_calls, 2);
     assert_eq!(summary.frames_attempted, 2);
@@ -520,6 +712,126 @@ fn replay_capture_when_duration_limit_is_exceeded_stops_before_authorizing_next_
     assert_eq!(authorizer.authorization_calls, 1);
     assert_eq!(transmitter.transmission_calls, 1);
     assert_eq!(clock.delays, [Duration::ZERO]);
+}
+
+#[test]
+fn infeasible_replay_delay_is_rejected_before_frame_side_effects() {
+    let mut reader = capture_reader(
+        LinkType::ETHERNET,
+        &[(Duration::ZERO, &[1]), (Duration::from_millis(160), &[2])],
+    );
+    let mut options = replay_options(ReplayTiming::Original);
+    options.limits.max_duration = Duration::from_millis(200);
+    let mut authorizer = ConfigurableRecordingAuthorizer::default();
+    let mut transmitter = ConfigurableRecordingTransmitter {
+        transmission_delay: Duration::from_millis(60),
+        ..ConfigurableRecordingTransmitter::default()
+    };
+
+    let error = replay_capture(
+        &mut reader,
+        &options,
+        &mut authorizer,
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |_| Ok(()),
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ReplayError::DurationLimit { sequence: 1, .. }
+    ));
+    assert_eq!(authorizer.authorization_calls, 1);
+    assert_eq!(transmitter.validation_calls, 1);
+    assert_eq!(transmitter.transmission_calls, 1);
+}
+
+#[test]
+fn slow_transmitter_boundaries_expire_before_emit_or_a_later_frame() {
+    for slow_validation in [true, false] {
+        let mut reader = capture_reader(
+            LinkType::ETHERNET,
+            &[(Duration::ZERO, &[1]), (Duration::ZERO, &[2])],
+        );
+        let mut options = replay_options(ReplayTiming::Immediate);
+        options.limits.max_duration = Duration::from_millis(5);
+        let mut authorizer = ConfigurableRecordingAuthorizer::default();
+        let mut transmitter = ConfigurableRecordingTransmitter {
+            validation_delay: if slow_validation {
+                Duration::from_millis(20)
+            } else {
+                Duration::default()
+            },
+            transmission_delay: if slow_validation {
+                Duration::default()
+            } else {
+                Duration::from_millis(20)
+            },
+            ..ConfigurableRecordingTransmitter::default()
+        };
+        let mut emitted = 0;
+
+        let error = replay_capture(
+            &mut reader,
+            &options,
+            &mut authorizer,
+            &mut transmitter,
+            &mut RecordingClock::default(),
+            |_| {
+                emitted += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ReplayError::DurationLimit { sequence: 0, .. }
+        ));
+        assert_eq!(authorizer.authorization_calls, 1);
+        assert_eq!(transmitter.validation_calls, 1);
+        assert_eq!(
+            transmitter.transmission_calls,
+            usize::from(!slow_validation)
+        );
+        assert_eq!(emitted, 0);
+    }
+}
+
+#[test]
+fn slow_emit_expires_before_authorizing_or_transmitting_another_frame() {
+    let mut reader = capture_reader(
+        LinkType::ETHERNET,
+        &[(Duration::ZERO, &[1]), (Duration::ZERO, &[2])],
+    );
+    let mut options = replay_options(ReplayTiming::Immediate);
+    options.limits.max_duration = Duration::from_millis(5);
+    let mut authorizer = ConfigurableRecordingAuthorizer::default();
+    let mut transmitter = ConfigurableRecordingTransmitter::default();
+    let mut emitted = 0;
+
+    let error = replay_capture(
+        &mut reader,
+        &options,
+        &mut authorizer,
+        &mut transmitter,
+        &mut RecordingClock::default(),
+        |_| {
+            emitted += 1;
+            std::thread::sleep(Duration::from_millis(20));
+            Ok(())
+        },
+    )
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ReplayError::DurationLimit { sequence: 0, .. }
+    ));
+    assert_eq!(emitted, 1);
+    assert_eq!(authorizer.authorization_calls, 1);
+    assert_eq!(transmitter.transmission_calls, 1);
 }
 
 #[test]

@@ -14,6 +14,7 @@ use super::super::diagnostic::Diagnostic;
 use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
 use super::super::layout::{ByteRange, LayerLayout, PacketLayout};
 use super::super::registry::{CodecError, LayerEncodeContext, ProtocolRegistry};
+use super::super::semantics::BuiltinProtocol;
 
 pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_LAYERS: usize = 64;
@@ -415,7 +416,10 @@ impl Builder {
                 .and_then(|padding| padding.outside_layer)
                 .and_then(|outside_layer| materialized.layer(outside_layer))
                 .is_some_and(|outside| {
-                    matches!(outside.protocol_id().as_str(), "ipv4" | "ipv6" | "udp")
+                    matches!(
+                        BuiltinProtocol::of(outside),
+                        Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6 | BuiltinProtocol::Udp)
+                    )
                 })
         });
         Ok(BuiltPacket {
@@ -458,8 +462,16 @@ impl Builder {
                     });
                 }
                 let outside_protocol = &protocols[outside_layer];
-                let has_declared_boundary =
-                    matches!(outside_protocol.as_str(), "ipv4" | "ipv6" | "udp" | "arp");
+                let outside_builtin = BuiltinProtocol::from_id(outside_protocol);
+                let has_declared_boundary = matches!(
+                    outside_builtin,
+                    Some(
+                        BuiltinProtocol::Ipv4
+                            | BuiltinProtocol::Ipv6
+                            | BuiltinProtocol::Udp
+                            | BuiltinProtocol::Arp
+                    )
+                );
                 if !has_declared_boundary {
                     if mode == BuildMode::Strict {
                         return Err(BuildError::InvalidPaddingBoundary {
@@ -477,7 +489,10 @@ impl Builder {
                         .at_layer(index),
                     );
                 }
-                if matches!(outside_protocol.as_str(), "ipv4" | "ipv6" | "udp") {
+                if matches!(
+                    outside_builtin,
+                    Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6 | BuiltinProtocol::Udp)
+                ) {
                     diagnostics.push(
                         Diagnostic::warning(
                             "build.padding_outside_network_length",
@@ -490,8 +505,14 @@ impl Builder {
             }
             let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
                 matches!(
-                    protocol.as_str(),
-                    "ethernet" | "bsd_null" | "bsd_loop" | "linux_sll" | "linux_sll2"
+                    BuiltinProtocol::from_id(protocol),
+                    Some(
+                        BuiltinProtocol::Ethernet
+                            | BuiltinProtocol::BsdNull
+                            | BuiltinProtocol::BsdLoop
+                            | BuiltinProtocol::LinuxSll
+                            | BuiltinProtocol::LinuxSll2
+                    )
                 )
             });
             if enclosed_by_link {
@@ -526,8 +547,11 @@ impl Builder {
                 }
             };
             if discriminator.is_some()
-                || parent.as_str() == "raw"
-                || matches!(child.as_str(), "padding" | "malformed")
+                || BuiltinProtocol::from_id(parent) == Some(BuiltinProtocol::Raw)
+                || matches!(
+                    BuiltinProtocol::from_id(child),
+                    Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
+                )
             {
                 continue;
             }

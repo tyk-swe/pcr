@@ -14,6 +14,7 @@ use super::super::diagnostic::Diagnostic;
 use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
 use super::super::layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout};
 use super::super::registry::{LayerDecodeContext, ProtocolRegistry};
+use super::super::semantics::BuiltinProtocol;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodeOptions {
@@ -144,8 +145,14 @@ impl Dissector {
         original: Bytes,
     ) -> Result<DecodedPacket, DecodeError> {
         let allow_trailing_padding = matches!(
-            root.as_str(),
-            "ethernet" | "bsd_null" | "bsd_loop" | "linux_sll" | "linux_sll2"
+            BuiltinProtocol::from_id(&root),
+            Some(
+                BuiltinProtocol::Ethernet
+                    | BuiltinProtocol::BsdNull
+                    | BuiltinProtocol::BsdLoop
+                    | BuiltinProtocol::LinuxSll
+                    | BuiltinProtocol::LinuxSll2
+            )
         );
         let mut packet = Packet::new();
         let mut layouts = Vec::new();
@@ -206,7 +213,7 @@ impl Dissector {
                     )));
                     layouts.push(LayerLayout {
                         index,
-                        protocol: ProtocolId::new("malformed"),
+                        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
                         range: ByteRange::new(
                             absolute_offset,
                             absolute_offset.saturating_add(current.len()),
@@ -315,7 +322,14 @@ impl Dissector {
                 .cloned();
             if decoded.payload_len == 0 {
                 if let Some(required) = next_protocol.filter(|protocol| {
-                    !matches!(protocol.as_str(), "raw" | "malformed" | "padding")
+                    !matches!(
+                        BuiltinProtocol::from_id(protocol),
+                        Some(
+                            BuiltinProtocol::Raw
+                                | BuiltinProtocol::Malformed
+                                | BuiltinProtocol::Padding
+                        )
+                    )
                 }) {
                     if packet.len() >= options.max_layers {
                         return Err(DecodeError::LayerLimit {
@@ -420,7 +434,12 @@ fn append_padding(
     outside_layer: usize,
 ) {
     let index = packet.len();
-    let layout = bytes_layer_layout(index, "padding", absolute_offset, bytes.len());
+    let layout = bytes_layer_layout(
+        index,
+        BuiltinProtocol::Padding,
+        absolute_offset,
+        bytes.len(),
+    );
     packet.push(Padding::after_layer(bytes, outside_layer));
     layouts.push(layout);
 }
@@ -432,21 +451,21 @@ fn append_raw(
     absolute_offset: usize,
 ) {
     let index = packet.len();
-    let layout = bytes_layer_layout(index, "raw", absolute_offset, bytes.len());
+    let layout = bytes_layer_layout(index, BuiltinProtocol::Raw, absolute_offset, bytes.len());
     packet.push(Raw::new(bytes));
     layouts.push(layout);
 }
 
 fn bytes_layer_layout(
     index: usize,
-    protocol: &str,
+    protocol: BuiltinProtocol,
     absolute_offset: usize,
     byte_length: usize,
 ) -> LayerLayout {
     let end = absolute_offset.saturating_add(byte_length);
     LayerLayout {
         index,
-        protocol: ProtocolId::new(protocol),
+        protocol: ProtocolId::new(protocol.as_str()),
         range: ByteRange::new(absolute_offset, end),
         fields: vec![FieldLayout {
             name: "bytes".to_owned(),
@@ -476,7 +495,7 @@ fn append_missing_required_layer(
     ));
     layouts.push(LayerLayout {
         index,
-        protocol: ProtocolId::new("malformed"),
+        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
         range: ByteRange::new(absolute_offset, absolute_offset),
         fields: Vec::new(),
     });
@@ -493,7 +512,7 @@ fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
         layout: PacketLayout {
             layers: vec![LayerLayout {
                 index: 0,
-                protocol: ProtocolId::new("raw"),
+                protocol: ProtocolId::new(BuiltinProtocol::Raw.as_str()),
                 range: ByteRange::new(0, original.len()),
                 fields: vec![FieldLayout {
                     name: "bytes".to_owned(),

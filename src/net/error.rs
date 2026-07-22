@@ -57,6 +57,10 @@ pub enum Error {
     Capture { message: String },
     #[error("capture did not become ready: {message}")]
     CaptureReadiness { message: String },
+    #[error(
+        "active exchange capture cannot provide monotonic ingress timestamps required for freshness correlation"
+    )]
+    MissingMonotonicCaptureTimestamp,
     #[error("live operation deadline expired while {operation}")]
     DeadlineExceeded { operation: &'static str },
     #[error("capture timeout {timeout:?} is invalid; maximum is {maximum:?}")]
@@ -152,6 +156,13 @@ impl Classified for Error {
                 Kind::Io,
                 Some(
                     "fix capture startup before transmitting; capture-before-send readiness cannot be bypassed",
+                ),
+            ),
+            Self::MissingMonotonicCaptureTimestamp => Classification::new(
+                "capability.capture_monotonic_ingress_time",
+                Kind::Capability,
+                Some(
+                    "use a capture session that records monotonic ingress timestamps before sending active probes",
                 ),
             ),
             Self::DeadlineExceeded { .. } => Classification::new(

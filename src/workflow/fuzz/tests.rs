@@ -529,6 +529,41 @@ fn actual_executor_wall_time_cannot_evade_the_duration_limit() {
 }
 
 #[test]
+fn expired_executor_evidence_is_not_validated() {
+    let mut authorizer = RecordingAuthorizer::default();
+    let mut executor = RecordingExecutor {
+        invalid_statistics: true,
+        sleep: Some(Duration::from_millis(25)),
+        ..RecordingExecutor::default()
+    };
+    let result = fuzz_live(
+        &FuzzRequest {
+            cases: 1,
+            strategies: vec![FuzzStrategy::BitFlip],
+            targets: vec!["2.bytes".parse().unwrap()],
+            limits: FuzzLimits {
+                max_duration: Duration::from_millis(10),
+                ..FuzzLimits::default()
+            },
+            ..FuzzRequest::default()
+        },
+        FuzzLiveOptions {
+            timeout: Duration::from_millis(1),
+            ..FuzzLiveOptions::default()
+        },
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
+        &mut authorizer,
+        &mut executor,
+        &mut RecordingClock::default(),
+    );
+
+    assert!(matches!(result, Err(FuzzError::DurationLimit { .. })));
+    assert_eq!(authorizer.calls, 1);
+    assert_eq!(executor.calls, 1);
+}
+
+#[test]
 fn live_rate_and_timeout_are_bounded_before_execution() {
     let mut authorizer = RecordingAuthorizer::default();
     let mut executor = RecordingExecutor::default();

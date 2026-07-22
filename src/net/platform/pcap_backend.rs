@@ -3,14 +3,17 @@
 
 //! libpcap-backed Layer 2 capture and injection for Linux and macOS.
 
+#![forbid(unsafe_code)]
+
 use std::sync::Arc;
+use std::time::{Instant, SystemTime};
 
 use bytes::Bytes;
 use pcap::{Active, Capture, Error as PcapError};
 
 use super::live_capture::{
     CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
-    NativeCaptureStatistics, NativeCapturedPacket, system_time,
+    NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
 };
 use crate::capture::LinkType;
 use crate::net::{
@@ -64,6 +67,12 @@ pub(super) fn open_capture(
 
 pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     let interface = &frame.route().plan.route.interface;
+    i32::try_from(frame.bytes().len()).map_err(|_| LiveIoError::InvalidTransmissionFrame {
+        message: format!(
+            "Layer 2 frame length {} exceeds the libpcap signed-length limit",
+            frame.bytes().len()
+        ),
+    })?;
     let mut capture = Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?
         .promisc(false)
@@ -89,6 +98,15 @@ impl NativeCaptureSource for PcapCaptureSource {
     fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
         match self.capture.next_packet() {
             Ok(packet) => {
+                // Monotonic first makes the paired-clock sampling skew conservative.
+                let observed_at = Instant::now();
+                let observed_wall = SystemTime::now();
+                #[cfg(target_os = "linux")]
+                let timestamp = system_time(packet.header.ts.tv_sec, packet.header.ts.tv_usec)?;
+                #[cfg(target_os = "macos")]
+                let timestamp =
+                    system_time(packet.header.ts.tv_sec, i64::from(packet.header.ts.tv_usec))?;
+                let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
                 if packet.data.len() > self.snap_length {
                     return Err(LiveIoError::Capture {
                         message: format!(
@@ -107,13 +125,9 @@ impl NativeCaptureSource for PcapCaptureSource {
                         ),
                     });
                 }
-                #[cfg(target_os = "linux")]
-                let timestamp = system_time(packet.header.ts.tv_sec, packet.header.ts.tv_usec)?;
-                #[cfg(target_os = "macos")]
-                let timestamp =
-                    system_time(packet.header.ts.tv_sec, i64::from(packet.header.ts.tv_usec))?;
                 Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
                     timestamp,
+                    received_at,
                     captured_length: packet.header.caplen,
                     original_length: packet.header.len,
                     bytes: Bytes::copy_from_slice(packet.data),

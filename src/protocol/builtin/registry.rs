@@ -36,7 +36,10 @@ use support::{BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS};
 use transport::{Sctp, Tcp, Udp};
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 
-use crate::packet::registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError};
+use crate::packet::{
+    registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
+    semantics::BuiltinProtocol,
+};
 
 /// Complete, deterministic built-in protocol registration for the portable kernel.
 #[derive(Clone, Copy, Debug, Default)]
@@ -71,9 +74,13 @@ impl ProtocolModule for BuiltinProtocols {
         builder.register_builtin_codec(IgmpCodec)?;
         for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.matcher) {
             match support.protocol {
-                "tcp" | "udp" => builder.register_matcher(
+                "tcp" => builder.register_matcher(
                     support.protocol,
-                    matcher::ReverseFlowMatcher::new(support.protocol),
+                    matcher::ReverseFlowMatcher::new(BuiltinProtocol::Tcp),
+                )?,
+                "udp" => builder.register_matcher(
+                    support.protocol,
+                    matcher::ReverseFlowMatcher::new(BuiltinProtocol::Udp),
                 )?,
                 "icmpv4" => {
                     builder.register_matcher(support.protocol, matcher::EchoMatcher::v4())?
@@ -83,7 +90,7 @@ impl ProtocolModule for BuiltinProtocols {
                 }
                 "sctp" => builder.register_matcher(
                     support.protocol,
-                    matcher::ReverseFlowMatcher::new(support.protocol),
+                    matcher::ReverseFlowMatcher::new(BuiltinProtocol::Sctp),
                 )?,
                 protocol => panic!("missing built-in matcher implementation for {protocol}"),
             };

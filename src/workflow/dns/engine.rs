@@ -14,6 +14,7 @@ where
     E: DnsExecutor,
     C: Clock,
 {
+    let mut deadline = Deadline::new(request.limits.max_duration);
     let query_name = request.validate()?;
     let query = encode_dns_query(
         &query_name,
@@ -56,7 +57,10 @@ where
     // This complete-operation gate deliberately precedes resolution and probe
     // construction. The authorizer's resolver path independently enforces the
     // declared hostname before every resolver side effect.
-    authorizer.authorize_operation(packet_count, maximum_wire_bytes)?;
+    enforce_deadline(&deadline)?;
+    let authorization = authorizer.authorize_operation(packet_count, maximum_wire_bytes);
+    enforce_deadline(&deadline)?;
+    authorization?;
 
     let mut result = DnsResult {
         server: request.server.to_string(),
@@ -77,11 +81,15 @@ where
     let mut scheduled_delay = Duration::ZERO;
 
     for attempt in 1..=request.attempts {
+        enforce_deadline(&deadline)?;
         if attempt != 1 {
+            enforce_deadline(&deadline)?;
+            deadline.start_accounting(delay).map_err(duration_limit)?;
             clock.sleep(delay).map_err(|source| DnsError::Clock {
                 attempt,
                 message: source.to_string(),
             })?;
+            deadline.account(delay).map_err(duration_limit)?;
             scheduled_delay =
                 scheduled_delay
                     .checked_add(delay)
@@ -90,7 +98,10 @@ where
                         limit: request.limits.max_duration,
                     })?;
         }
-        let resolved = authorizer.resolve_and_authorize(&request.server)?;
+        enforce_deadline(&deadline)?;
+        let resolved = authorizer.resolve_and_authorize(&request.server);
+        enforce_deadline(&deadline)?;
+        let resolved = resolved?;
         result.server = resolved.declared;
         let addresses = resolved
             .addresses
@@ -125,14 +136,21 @@ where
             query_type: request.query_type,
             query: query.clone(),
         };
-        let execution = executor
-            .execute(&DnsExchange {
-                probe: probe.clone(),
-                timeout: request.timeout,
-                max_responses: request.limits.max_evidence_frames,
-            })
-            .map_err(|source| DnsError::Execution { attempt, source })?;
+        deadline
+            .start_accounting(Duration::ZERO)
+            .map_err(duration_limit)?;
+        let execution = executor.execute(&DnsExchange {
+            probe: probe.clone(),
+            timeout: request.timeout,
+            max_responses: request.limits.max_evidence_frames,
+        });
+        enforce_deadline(&deadline)?;
+        let execution = execution.map_err(|source| DnsError::Execution { attempt, source })?;
+        deadline
+            .account(execution.stats.elapsed)
+            .map_err(duration_limit)?;
         validate_dns_execution(&probe, &execution, request.limits, request.timeout)?;
+        enforce_deadline(&deadline)?;
         add_dns_stats(&mut result.stats, &execution.stats, attempt)?;
         for diagnostic in execution.diagnostics {
             push_diagnostic_once(&mut result.diagnostics, diagnostic);
@@ -154,10 +172,11 @@ where
                 &candidate_context,
                 &matched.response,
                 Some(matched.latency),
-            );
+                &deadline,
+            )?;
         }
         for decoded in &execution.unsolicited {
-            consider_dns_candidate(&mut best, &candidate_context, decoded, None);
+            consider_dns_candidate(&mut best, &candidate_context, decoded, None, &deadline)?;
         }
 
         let evidence = if let Some(candidate) = best {
@@ -291,6 +310,7 @@ where
         // Correlated response evidence has priority over ambient undecodable
         // frames under the one operation-wide retention budget.
         for frame in execution.undecoded {
+            enforce_deadline(&deadline)?;
             if result.undecoded.len() >= request.limits.max_undecoded {
                 push_undecoded_limit_diagnostic(
                     &mut result.diagnostics,
@@ -311,11 +331,13 @@ where
                     .undecoded
                     .push(DnsUndecodedEvidence { attempt, frame });
             }
+            enforce_deadline(&deadline)?;
         }
         if terminal {
             break;
         }
     }
+    enforce_deadline(&deadline)?;
     result.stats.elapsed =
         result
             .stats
@@ -341,36 +363,35 @@ fn consider_dns_candidate<'a>(
     context: &DnsCandidateContext<'_>,
     decoded: &'a DecodedPacket,
     latency: Option<Duration>,
-) {
-    if !response_within_deadline(
+    deadline: &Deadline,
+) -> Result<(), DnsError> {
+    enforce_deadline(deadline)?;
+    if response_within_deadline(
         latency,
         decoded.frame.timestamp,
         context.sent_at,
         context.timeout,
-    ) {
-        return;
-    }
-    let Some(classification) = classify_dns_response(
+    ) && let Some(classification) = classify_dns_response(
         context.registry,
         context.probe,
         context.sent,
         decoded,
         context.limits,
-    ) else {
-        return;
-    };
-    select_response_candidate(
-        best,
-        ResponseCandidate {
-            observation: classification,
-            decoded,
-            latency,
-        },
-        context.sent_at,
-        context.timeout,
-        DnsResponseClassification::rank,
-        |_| (),
-    );
+    ) {
+        select_response_candidate(
+            best,
+            ResponseCandidate {
+                observation: classification,
+                decoded,
+                latency,
+            },
+            context.sent_at,
+            context.timeout,
+            DnsResponseClassification::rank,
+            |_| (),
+        );
+    }
+    enforce_deadline(deadline)
 }
 
 impl ResponseEvidence for DnsMatchedResponse {
@@ -405,12 +426,14 @@ pub(super) fn validate_dns_execution(
         });
     };
     let network_protocol = if probe.server_address.is_ipv4() {
-        "ipv4"
+        BuiltinProtocol::Ipv4
     } else {
-        "ipv6"
+        BuiltinProtocol::Ipv6
     };
-    if !super::probe::packet_shape_matches(&execution.sent, &[network_protocol, "udp", "raw"])
-        || network.destination != probe.server_address
+    if !super::probe::packet_shape_matches(
+        &execution.sent,
+        &[network_protocol, BuiltinProtocol::Udp, BuiltinProtocol::Raw],
+    ) || network.destination != probe.server_address
         || ports.source != probe.source_port
         || ports.destination != probe.server_port
         || raw_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
@@ -492,32 +515,11 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsErro
 }
 
 fn dns_network_envelope(packet: &Packet) -> Option<NetworkEnvelope> {
-    let layer = packet
-        .iter()
-        .find(|layer| matches!(layer.protocol_id().as_str(), "ipv4" | "ipv6"))?;
-    match layer.protocol_id().as_str() {
-        "ipv4" => Some(NetworkEnvelope {
-            source: IpAddr::V4(match layer.field("source")? {
-                FieldValue::Ipv4(value) => value,
-                _ => return None,
-            }),
-            destination: IpAddr::V4(match layer.field("destination")? {
-                FieldValue::Ipv4(value) => value,
-                _ => return None,
-            }),
-        }),
-        "ipv6" => Some(NetworkEnvelope {
-            source: IpAddr::V6(match layer.field("source")? {
-                FieldValue::Ipv6(value) => value,
-                _ => return None,
-            }),
-            destination: IpAddr::V6(match layer.field("destination")? {
-                FieldValue::Ipv6(value) => value,
-                _ => return None,
-            }),
-        }),
-        _ => None,
-    }
+    let path = crate::packet::semantics::outer_ip_path(packet).ok()??;
+    Some(NetworkEnvelope {
+        source: path.source,
+        destination: path.header_destination,
+    })
 }
 
 struct UdpPorts {
@@ -528,10 +530,11 @@ struct UdpPorts {
 fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
     let udp = packet
         .iter()
-        .find(|layer| layer.protocol_id().as_str() == "udp")?;
+        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Udp))?;
+    let udp = crate::packet::semantics::transport_key(udp)?;
     Some(UdpPorts {
-        source: u16::try_from(udp.field("source_port")?.as_u64()?).ok()?,
-        destination: u16::try_from(udp.field("destination_port")?.as_u64()?).ok()?,
+        source: udp.source_port,
+        destination: udp.destination_port,
     })
 }
 
@@ -574,17 +577,28 @@ fn add_dns_stats(total: &mut Stats, value: &Stats, attempt: u32) -> Result<(), D
         .checked_add(value)
         .ok_or(DnsError::StatisticsOverflow { attempt })
 }
+fn enforce_deadline(deadline: &Deadline) -> Result<(), DnsError> {
+    deadline.check().map_err(duration_limit)
+}
+
+fn duration_limit(error: DeadlineExceeded) -> DnsError {
+    DnsError::DurationLimit {
+        actual: error.actual,
+        limit: error.limit,
+    }
+}
 use super::Clock;
 use super::wire::raw_payload;
 use super::{
-    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, DecodedPacket,
-    DnsAttemptEvidence, DnsAttemptStatus, DnsError, DnsExchange, DnsExchangeExecution, DnsExecutor,
-    DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe, DnsRequest, DnsResponseClassification,
-    DnsResult, DnsUndecodedEvidence, Duration, EvidenceBudget, ExchangeEvidenceError, FieldValue,
-    IpAddr, MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet, ProtocolRegistry, ResponseCandidate,
-    ResponseEvidence, Stats, SystemTime, classify_dns_response, encode_dns_query,
-    push_diagnostic_once, push_undecoded_limit_diagnostic, response_within_deadline,
-    retain_evidence, select_response_candidate, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_frame, validate_response_frames_and_deadlines,
-    validate_sent_byte_accounting,
+    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, Deadline,
+    DeadlineExceeded, DecodedPacket, DnsAttemptEvidence, DnsAttemptStatus, DnsError, DnsExchange,
+    DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe,
+    DnsRequest, DnsResponseClassification, DnsResult, DnsUndecodedEvidence, Duration,
+    EvidenceBudget, ExchangeEvidenceError, MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet,
+    ProtocolRegistry, ResponseCandidate, ResponseEvidence, Stats, SystemTime,
+    classify_dns_response, encode_dns_query, push_diagnostic_once, push_undecoded_limit_diagnostic,
+    response_within_deadline, retain_evidence, select_response_candidate,
+    validate_aggregate_evidence_limits, validate_capture_statistics_evidence, validate_frame,
+    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
+use crate::packet::semantics::BuiltinProtocol;

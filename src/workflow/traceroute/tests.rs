@@ -14,6 +14,7 @@ use crate::client::target::{Error as TargetResolutionError, Resolver as Hostname
 use crate::net::capture::CaptureStatistics;
 use crate::packet::layout::PacketLayout;
 use crate::protocol::builtin::registry as default_registry;
+use crate::protocol::ipv6::SegmentRoutingHeader;
 use crate::workflow::target::Authorized;
 use crate::workflow::target_adapter::PolicyAuthorizer;
 use std::result::Result;
@@ -152,6 +153,89 @@ impl TracerouteExecutor for MixedHopExecutor {
             },
         })
     }
+}
+
+#[test]
+fn slow_executor_expires_before_the_next_traceroute_hop() {
+    struct SlowExecutor {
+        calls: usize,
+    }
+
+    impl TracerouteExecutor for SlowExecutor {
+        fn execute(
+            &mut self,
+            batch: &TracerouteBatch,
+        ) -> Result<TracerouteBatchExecution, BoundaryError> {
+            self.calls += 1;
+            std::thread::sleep(Duration::from_millis(20));
+            MixedHopExecutor.execute(batch)
+        }
+    }
+
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(destination));
+    request.probes_per_hop = 1;
+    request.timeout = Duration::from_millis(1);
+    request.limits.max_duration = Duration::from_millis(5);
+    let mut executor = SlowExecutor { calls: 0 };
+
+    let error = traceroute(
+        &request,
+        &mut FixedAuthorizer {
+            address: destination,
+            operations: Vec::new(),
+        },
+        &default_registry().unwrap(),
+        &mut executor,
+        &mut NoopClock::default(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, TracerouteError::DurationLimit { .. }));
+    assert_eq!(executor.calls, 1);
+}
+
+#[test]
+fn candidate_heavy_hop_expires_before_the_next_traceroute_execution() {
+    struct CandidateHeavyExecutor {
+        calls: usize,
+    }
+
+    impl TracerouteExecutor for CandidateHeavyExecutor {
+        fn execute(
+            &mut self,
+            batch: &TracerouteBatch,
+        ) -> Result<TracerouteBatchExecution, BoundaryError> {
+            self.calls += 1;
+            let mut execution = MixedHopExecutor.execute(batch)?;
+            let candidate = execution.unsolicited.pop().unwrap();
+            execution.unsolicited = vec![candidate; DEFAULT_CAPTURE_QUEUE_FRAMES];
+            execution.stats.elapsed = Duration::ZERO;
+            Ok(execution)
+        }
+    }
+
+    let destination = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
+    let mut request = udp_traceroute_request(Target::Address(destination));
+    request.probes_per_hop = 1;
+    request.timeout = Duration::from_nanos(1);
+    request.limits.max_duration = Duration::from_millis(5);
+    let mut executor = CandidateHeavyExecutor { calls: 0 };
+
+    let error = traceroute(
+        &request,
+        &mut FixedAuthorizer {
+            address: destination,
+            operations: Vec::new(),
+        },
+        &default_registry().unwrap(),
+        &mut executor,
+        &mut NoopClock::default(),
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, TracerouteError::DurationLimit { .. }));
+    assert_eq!(executor.calls, 1);
 }
 
 struct UndecodedExecutor;
@@ -872,6 +956,56 @@ fn tunneled_direct_reply_reaches_the_inner_destination() {
         TracerouteResponseKind::DestinationReached
     );
     assert_eq!(classification.responder, IpAddr::V6(inner_destination));
+}
+
+#[test]
+fn srh_direct_reply_reaches_the_final_destination() {
+    let registry = default_registry().unwrap();
+    let source: Ipv6Addr = "2001:db8::1".parse().unwrap();
+    let active: Ipv6Addr = "2001:db8::10".parse().unwrap();
+    let final_destination: Ipv6Addr = "2001:db8::20".parse().unwrap();
+    let mut request = Packet::new();
+    request
+        .push(Ipv6 {
+            source,
+            destination: active,
+            ..Ipv6::default()
+        })
+        .push(SegmentRoutingHeader {
+            segments: vec![active, final_destination],
+            ..SegmentRoutingHeader::default()
+        })
+        .push(Udp {
+            source_port: TRACEROUTE_SOURCE_PORT,
+            destination_port: DEFAULT_TRACEROUTE_UDP_PORT,
+            ..Udp::default()
+        });
+    let mut reply = Packet::new();
+    reply
+        .push(Ipv6 {
+            source: final_destination,
+            destination: source,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: DEFAULT_TRACEROUTE_UDP_PORT,
+            destination_port: TRACEROUTE_SOURCE_PORT,
+            ..Udp::default()
+        });
+
+    let classification = classify_traceroute_response(
+        &registry,
+        TracerouteStrategy::Udp,
+        &request,
+        &decoded_at(reply, 2, Vec::new()),
+    )
+    .unwrap();
+
+    assert_eq!(
+        classification.kind,
+        TracerouteResponseKind::DestinationReached
+    );
+    assert_eq!(classification.responder, IpAddr::V6(final_destination));
 }
 
 #[test]

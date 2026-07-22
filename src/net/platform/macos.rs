@@ -5,6 +5,8 @@
 //! socket. Route lookup is passive: it does not perform neighbor discovery,
 //! capture, or transmission.
 
+#![allow(unsafe_code)]
+
 #[cfg(feature = "native-route")]
 use std::collections::BTreeMap;
 #[cfg(feature = "native-route")]
@@ -18,7 +20,7 @@ use std::ptr;
 #[cfg(feature = "native-route")]
 use std::sync::atomic::{AtomicI32, Ordering};
 #[cfg(feature = "native-route")]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(feature = "native-route")]
 use socket2::{Domain, Socket, Type};
@@ -337,6 +339,9 @@ fn query_route(
     destination: IpAddr,
     interface_index: Option<u32>,
 ) -> Result<RouteResponse, NativeRouteError> {
+    let deadline = Instant::now()
+        .checked_add(Duration::from_secs(2))
+        .expect("the bounded routing-socket timeout must fit Instant");
     let sequence = ROUTE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     // SAFETY: `getpid` has no preconditions.
     let pid = unsafe { libc::getpid() };
@@ -377,8 +382,14 @@ fn query_route(
 
     let socket = Socket::new(Domain::from(libc::AF_ROUTE), Type::RAW, None)
         .map_err(|error| os_error("open routing socket", error))?;
+    let remaining = deadline
+        .checked_duration_since(Instant::now())
+        .ok_or_else(|| NativeRouteError::OperatingSystem {
+            operation: "write RTM_GET",
+            message: "macOS routing-socket request deadline expired".to_owned(),
+        })?;
     socket
-        .set_read_timeout(Some(Duration::from_secs(2)))
+        .set_write_timeout(Some(remaining))
         .map_err(|error| os_error("set routing-socket timeout", error))?;
     let sent = socket
         .send(&request)
@@ -393,6 +404,15 @@ fn query_route(
     }
 
     for _ in 0..64 {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| NativeRouteError::OperatingSystem {
+                operation: "read RTM_GET",
+                message: "macOS routing-socket response deadline expired".to_owned(),
+            })?;
+        socket
+            .set_read_timeout(Some(remaining))
+            .map_err(|error| os_error("set routing-socket timeout", error))?;
         let mut response = [MaybeUninit::<u8>::uninit(); 4096];
         let length = socket
             .recv(&mut response)

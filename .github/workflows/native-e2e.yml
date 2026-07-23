@@ -1,0 +1,59 @@
+name: Linux native E2E
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+concurrency:
+  group: native-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  native-e2e:
+    name: namespace topology (requires privileged sudo)
+    # The harness probes this known GitHub-hosted runner for the actual
+    # namespace, veth, forwarding, and mount privileges before it builds.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-native-e2e-linux-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-native-e2e-linux-${{ hashFiles('rust-toolchain.toml') }}-
+      - name: Install native-E2E prerequisites
+        run: >-
+          sudo apt-get update &&
+          sudo apt-get install --yes iproute2 libpcap-dev shellcheck
+      - name: Lint native-E2E helpers
+        env:
+          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/native-e2e-pycache
+        run: |
+          shellcheck scripts/test-native-e2e scripts/public-api-diff
+          python3 -m compileall -q tests/native_e2e
+      - name: Run strict namespace E2E baseline
+        shell: bash
+        env:
+          PCR_NATIVE_E2E_ARTIFACT_DIR: ${{ runner.temp }}/native-e2e-artifacts
+          PCR_NATIVE_E2E_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -o pipefail
+          mkdir -p "$PCR_NATIVE_E2E_ARTIFACT_DIR"
+          scripts/test-native-e2e 2>&1 |
+            tee "$PCR_NATIVE_E2E_ARTIFACT_DIR/workflow.log"
+      - name: Upload native-E2E failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linux-native-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/native-e2e-artifacts
+          if-no-files-found: error
+          retention-days: 7

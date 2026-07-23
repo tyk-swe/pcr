@@ -32,6 +32,9 @@ jobs:
           key: cargo-tools-deny-v3-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-0.20.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
+      - name: Enforce the RUSTSEC-2024-0436 internal remediation target
+        shell: bash
+        run: test "$(date -u +%F)" '<' '2026-09-16'
       - name: Enforce the RUSTSEC-2024-0436 exception expiry
         shell: bash
         run: test "$(date -u +%F)" '<' '2026-10-12'

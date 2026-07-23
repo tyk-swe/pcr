@@ -62,6 +62,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserved readable multiline Clap diagnostics instead of displaying escaped
   newline literals, and now propagate Clap's actual exit codes.
 
+### Security
+
+- Documented the verified `RUSTSEC-2024-0436` transitive dependency path and
+  rejected upgrade candidates, retained the existing exception expiry, added
+  an enforced 2026-09-15 remediation target, and enabled weekly Cargo
+  dependency update pull requests.
+
 ## [0.4.0-beta.1] - 2026-07-17
 
 ### Added

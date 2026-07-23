@@ -1,0 +1,18 @@
+# Safety-sensitive review routing. Approval roles and escalation rules live in
+# docs/governance/review-ownership.md.
+
+/src/net/platform/** @tyk-swe
+/src/client/exchange/** @tyk-swe
+/src/protocol/matcher.rs @tyk-swe
+/src/protocol/matcher/** @tyk-swe
+
+/src/output/** @tyk-swe @rkdxodud-tyk
+/schemas/** @tyk-swe @rkdxodud-tyk
+/examples/documents/** @tyk-swe @rkdxodud-tyk
+/src/packet/document/model.rs @tyk-swe @rkdxodud-tyk
+/src/packet/field/value.rs @tyk-swe @rkdxodud-tyk
+/src/packet/layout/model.rs @tyk-swe @rkdxodud-tyk
+
+/src/packet/protocol_catalog.rs @tyk-swe
+/src/protocol/support/manifest.rs @tyk-swe
+/.github/workflows/release.yml @tyk-swe

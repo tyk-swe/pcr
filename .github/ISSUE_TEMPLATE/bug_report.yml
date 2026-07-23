@@ -1,0 +1,90 @@
+name: Bug report
+description: Report a reproducible PacketcraftR defect or regression
+title: "[bug] "
+labels:
+  - type/bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping stabilize PacketcraftR. Remove secrets, credentials,
+        public targets, and sensitive packet contents before submitting. Use
+        the security policy instead when exploitation or policy bypass may be
+        involved.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I searched open and closed issues for this failure.
+          required: true
+        - label: This report does not contain a security vulnerability or sensitive traffic.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: PacketcraftR version
+      description: Paste `packetcraftr --version` and say whether this is a release binary or source build.
+      placeholder: packetcraftr 0.4.0-beta.1, release all-features archive
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Include operating system, version, architecture, and relevant feature profile.
+      placeholder: Ubuntu 24.04 x86_64, Rust 1.97, --all-features
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command and output format
+      description: Redact addresses or filenames as needed.
+      placeholder: packetcraftr --output json dissect ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide the smallest deterministic steps, input shape, or sanitized fixture.
+      placeholder: |
+        1. Run ...
+        2. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include exit code and sanitized stdout/stderr. Preserve structured output exactly when relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: regression
+    attributes:
+      label: Regression information
+      description: State the last known working version or commit, or say unknown.
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add logs, backtraces, or a minimal sanitized capture. Do not upload production traffic.

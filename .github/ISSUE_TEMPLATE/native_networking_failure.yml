@@ -1,0 +1,151 @@
+name: Native networking failure
+description: Report send, capture, route, replay, or live workflow failures
+title: "[native networking] "
+labels:
+  - type/bug
+  - area/platform
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for failures involving native interfaces, routes, capture,
+        Layer 2 injection, raw Layer 3 sockets, libpcap, or Npcap. Sanitize
+        interface data and packet contents. Follow SECURITY.md instead for
+        privilege bypasses, memory-safety issues, or exploitable malformed input.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: I reproduced this with the smallest safe command and target available.
+          required: true
+        - label: I removed credentials, public targets, and sensitive captured traffic.
+          required: true
+        - label: This report is not a security vulnerability.
+          required: true
+
+  - type: dropdown
+    id: command
+    attributes:
+      label: Native-capable command
+      options:
+        - interfaces
+        - plan
+        - routes
+        - send
+        - capture
+        - exchange
+        - replay
+        - scan
+        - traceroute
+        - dns
+        - fuzz --live
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: path
+    attributes:
+      label: Native path involved
+      description: Select every path known to be involved.
+      options:
+        - label: Interface enumeration or identity validation
+        - label: Native route lookup or source selection
+        - label: Layer 2 capture
+        - label: Layer 2 injection
+        - label: Raw Layer 3 transmission
+        - label: Neighbor resolution
+        - label: Timeout, cancellation, or shutdown
+        - label: Queue overflow, dropped frames, or accounting
+        - label: Unknown
+
+  - type: input
+    id: version
+    attributes:
+      label: PacketcraftR version
+      description: Paste `packetcraftr --version` and include the commit for source builds.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build profile
+      options:
+        - Release archive, all-features
+        - Release archive, pcap-free
+        - Source build, default features
+        - Source build, all features
+        - Source build, custom features
+    validations:
+      required: true
+
+  - type: input
+    id: features
+    attributes:
+      label: Exact Cargo features
+      description: Required for source builds; write N/A for release archives.
+      placeholder: --no-default-features --features live,native-route,native-layer3
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      description: Include the exact OS release and architecture.
+      placeholder: macOS 15.5 arm64
+    validations:
+      required: true
+
+  - type: textarea
+    id: backend
+    attributes:
+      label: Interface and backend details
+      description: Include sanitized interface name/index, link mode, link type, and libpcap/Npcap version where relevant.
+      placeholder: |
+        interface: lab0 / index 7
+        requested link mode: layer2
+        backend: libpcap 1.x
+    validations:
+      required: true
+
+  - type: textarea
+    id: privileges
+    attributes:
+      label: Privileges and network environment
+      description: Include administrator/root status or capabilities and relevant firewall, VPN, container, or network-namespace details.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include the sanitized command, safe target type, and whether the failure is deterministic.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and failure evidence
+      description: Include exit code, exact sanitized error, structured diagnostics, and whether resources shut down cleanly.
+    validations:
+      required: true
+
+  - type: textarea
+    id: comparison
+    attributes:
+      label: Cross-profile or cross-platform comparison
+      description: State whether another feature profile, link mode, interface, or platform succeeds. Write "not tested" when unavailable.
+    validations:
+      required: true

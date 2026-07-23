@@ -6,6 +6,7 @@ set -euo pipefail
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 harness="$repository_root/tests/native_e2e/harness.py"
+artifact_resolver="$repository_root/tests/native_e2e/support/cargo_artifact.py"
 export PYTHONDONTWRITEBYTECODE=1
 
 fail() {
@@ -48,13 +49,17 @@ cargo_command=(
     --all-features
     --bin packetcraftr
     --target-dir "$target_dir"
+    --message-format=json-render-diagnostics
 )
 printf '+'
 printf ' %q' "${cargo_command[@]}"
+printf ' |'
+printf ' %q' python3 "$artifact_resolver" packetcraftr
 printf '\n'
-"${cargo_command[@]}"
 
-binary="$target_dir/debug/packetcraftr"
+if ! binary="$("${cargo_command[@]}" | python3 "$artifact_resolver" packetcraftr)"; then
+    fail "Cargo did not report one runnable 'packetcraftr' binary"
+fi
 [[ -x "$binary" ]] || fail "Cargo reported success but '$binary' is not executable"
 
 binary_directory="$(cd -- "$(dirname -- "$binary")" && pwd -P)"

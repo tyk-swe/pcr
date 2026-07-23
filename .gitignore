@@ -1,5 +1,7 @@
 /target/
 /fuzz/target/
 /fuzz/artifacts/
+__pycache__/
+*.py[cod]
 /unsafe_extern_type
 /unsafe_type

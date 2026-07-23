@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 tyk-swe
+# SPDX-License-Identifier: AGPL-3.0-only
+
+set -euo pipefail
+
+repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+harness="$repository_root/tests/native_e2e/harness.py"
+artifact_resolver="$repository_root/tests/native_e2e/support/cargo_artifact.py"
+export PYTHONDONTWRITEBYTECODE=1
+
+fail() {
+    printf 'native-e2e prerequisite error: %s\n' "$*" >&2
+    exit 2
+}
+
+[[ "$(uname -s)" == "Linux" ]] || fail "Linux is required"
+
+for command in cargo ip python3 sysctl; do
+    command -v "$command" >/dev/null 2>&1 || fail "required command '$command' was not found in PATH"
+done
+
+if ((EUID == 0)); then
+    export PCR_NATIVE_E2E_PRIVILEGE_MODE=direct
+elif command -v sudo >/dev/null 2>&1 && sudo --non-interactive true >/dev/null 2>&1; then
+    export PCR_NATIVE_E2E_PRIVILEGE_MODE=sudo
+else
+    export PCR_NATIVE_E2E_PRIVILEGE_MODE=direct
+fi
+
+cd -- "$repository_root"
+
+case "${1:-}" in
+    -h | --help | --check-prerequisites)
+        exec python3 "$harness" "$@"
+        ;;
+esac
+
+python3 "$harness" --check-prerequisites
+
+target_dir="${CARGO_TARGET_DIR:-$repository_root/target}"
+if [[ "$target_dir" != /* ]]; then
+    target_dir="$repository_root/$target_dir"
+fi
+
+cargo_command=(
+    cargo build
+    --locked
+    --all-features
+    --bin packetcraftr
+    --target-dir "$target_dir"
+    --message-format=json-render-diagnostics
+)
+printf '+'
+printf ' %q' "${cargo_command[@]}"
+printf ' |'
+printf ' %q' python3 "$artifact_resolver" packetcraftr
+printf '\n'
+
+if ! binary="$("${cargo_command[@]}" | python3 "$artifact_resolver" packetcraftr)"; then
+    fail "Cargo did not report one runnable 'packetcraftr' binary"
+fi
+[[ -x "$binary" ]] || fail "Cargo reported success but '$binary' is not executable"
+
+binary_directory="$(cd -- "$(dirname -- "$binary")" && pwd -P)"
+PACKETCRAFTR_BIN="$binary_directory/$(basename -- "$binary")"
+export PACKETCRAFTR_BIN
+printf 'native-e2e PacketcraftR binary: %s\n' "$PACKETCRAFTR_BIN"
+
+exec python3 "$harness" --skip-prerequisite-check "$@"

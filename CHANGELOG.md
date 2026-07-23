@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with validated opaque chunks, and IGMP, plus IPv4/IPv6-in-IP encapsulation.
 - Added SCTP INIT/INIT-ACK and quoted-ICMP response correlation for generic
   exchanges.
+- Added a strict Linux-native E2E harness with isolated client, router, and
+  server namespaces, independent IPv4/IPv6 UDP and TCP fixtures, deterministic
+  teardown, and failure-time network diagnostics.
 
 ### Changed
 

@@ -8,16 +8,22 @@ review requests; this document defines which role must approve.
 
 | Paths | Required senior role | Primary owner | Named deputy |
 | --- | --- | --- | --- |
-| `src/net/platform/**` | Native Networking Senior Owner | `@tyk-swe` | Unassigned |
-| `src/client/exchange/**` | Exchange Lifecycle Senior Owner | `@tyk-swe` | Unassigned |
-| `src/protocol/matcher.rs` and reserved future path `src/protocol/matcher/**` | Protocol Matching Senior Owner | `@tyk-swe` | Unassigned |
-| `src/output/**`, `schemas/**`, `examples/documents/**`, `src/packet/document/model.rs`, `src/packet/field/value.rs`, `src/packet/layout/model.rs` | Contract Senior Owner | `@tyk-swe` | `@rkdxodud-tyk` |
-| `src/packet/protocol_catalog.rs`, `src/protocol/support/manifest.rs` | Protocol Catalog Senior Owner | `@tyk-swe` | Unassigned |
+| `src/net/platform/**`, `src/net/transmit.rs`, `src/net/capture.rs`, `src/net/route/**`, `src/net/interface.rs` | Native Networking Senior Owner | `@tyk-swe` | Unassigned |
+| `src/client/exchange/**`, `src/client/client.rs`, `src/client/helpers.rs` | Exchange Lifecycle Senior Owner | `@tyk-swe` | Unassigned |
+| `src/protocol/matcher.rs`, reserved future path `src/protocol/matcher/**`, and `src/workflow/probe.rs` | Protocol Matching Senior Owner | `@tyk-swe` | Unassigned |
+| `src/output/**`, `schemas/**`, `examples/documents/**`, `src/packet/document/model.rs`, `src/packet/field/value.rs`, `src/packet/layout/model.rs`, protocol layer model files under `src/protocol/**/model.rs`, `src/protocol/network/igmp.rs`, `src/protocol/transport/sctp.rs`, and `src/protocol/support/manifest.rs` | Contract Senior Owner | `@tyk-swe` | `@rkdxodud-tyk` |
+| `src/packet/protocol_catalog.rs`, `src/protocol/builtin/registry.rs`, `src/protocol/support/manifest.rs` | Protocol Catalog Senior Owner | `@tyk-swe` | Unassigned |
 | `.github/workflows/release.yml` | Release Engineering Senior Owner | `@tyk-swe` | Unassigned |
 
 The matcher currently lives in the single file `src/protocol/matcher.rs`.
 Ownership also reserves the requested directory boundary so a later,
 separately reviewed split cannot bypass protocol-matching review.
+
+The protocol-support manifest belongs to both the contract and protocol-catalog
+boundaries. GitHub applies only the last matching `CODEOWNERS` pattern, so its
+entry names the Contract Senior Owner and deputy together rather than relying
+on separate patterns to accumulate reviewers. The approval rules below still
+require review for every affected role.
 
 ## Approval rules
 

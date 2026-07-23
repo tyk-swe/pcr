@@ -2,9 +2,18 @@
 # docs/governance/review-ownership.md.
 
 /src/net/platform/** @tyk-swe
+/src/net/transmit.rs @tyk-swe
+/src/net/capture.rs @tyk-swe
+/src/net/route/** @tyk-swe
+/src/net/interface.rs @tyk-swe
+
 /src/client/exchange/** @tyk-swe
+/src/client/client.rs @tyk-swe
+/src/client/helpers.rs @tyk-swe
+
 /src/protocol/matcher.rs @tyk-swe
 /src/protocol/matcher/** @tyk-swe
+/src/workflow/probe.rs @tyk-swe
 
 /src/output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
@@ -12,7 +21,15 @@
 /src/packet/document/model.rs @tyk-swe @rkdxodud-tyk
 /src/packet/field/value.rs @tyk-swe @rkdxodud-tyk
 /src/packet/layout/model.rs @tyk-swe @rkdxodud-tyk
+/src/protocol/**/model.rs @tyk-swe @rkdxodud-tyk
+/src/protocol/network/igmp.rs @tyk-swe @rkdxodud-tyk
+/src/protocol/transport/sctp.rs @tyk-swe @rkdxodud-tyk
 
 /src/packet/protocol_catalog.rs @tyk-swe
-/src/protocol/support/manifest.rs @tyk-swe
+/src/protocol/builtin/registry.rs @tyk-swe
+
+# GitHub uses only the last matching CODEOWNERS pattern. Keep every owner for
+# this contract-and-catalog overlap on the same line.
+/src/protocol/support/manifest.rs @tyk-swe @rkdxodud-tyk
+
 /.github/workflows/release.yml @tyk-swe

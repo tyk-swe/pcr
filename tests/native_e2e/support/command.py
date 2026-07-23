@@ -9,6 +9,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from typing import IO, Mapping, Sequence
 
@@ -83,31 +84,50 @@ class CommandRunner:
         if self._verbose:
             print(f"+ {shlex.join(command)}", file=sys.stderr, flush=True)
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
-                check=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=timeout,
                 env=env,
+                start_new_session=True,
             )
-        except subprocess.TimeoutExpired as error:
-            stdout = self._decode_timeout_output(error.stdout)
-            stderr = self._decode_timeout_output(error.stderr)
-            self.records.append(CommandRecord(command, f"timeout after {timeout:.1f}s"))
-            raise CommandFailure(
-                command,
-                f"timeout after {timeout:.1f}s",
-                stdout,
-                stderr,
-            ) from error
         except OSError as error:
             self.records.append(CommandRecord(command, f"exec error: {error}"))
             raise CommandFailure(command, "could not execute", stderr=str(error)) from error
 
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as error:
+            cleanup_errors = self._terminate_process_group(process, privileged)
+            stdout, stderr = self._collect_after_abort(process, error, cleanup_errors)
+            outcome = f"timeout after {timeout:.1f}s"
+            if cleanup_errors:
+                outcome += "; " + "; ".join(cleanup_errors)
+            self.records.append(CommandRecord(command, outcome))
+            raise CommandFailure(
+                command,
+                outcome,
+                stdout,
+                stderr,
+            ) from error
+        except BaseException as error:
+            cleanup_errors = self._terminate_process_group(process, privileged)
+            self._close_capture_pipes(process)
+            outcome = f"interrupted by {type(error).__name__}"
+            if cleanup_errors:
+                outcome += "; " + "; ".join(cleanup_errors)
+            self.records.append(CommandRecord(command, outcome))
+            raise
+
+        completed = subprocess.CompletedProcess(
+            command,
+            process.returncode,
+            stdout,
+            stderr,
+        )
         self.records.append(CommandRecord(command, f"exit {completed.returncode}"))
         if check and completed.returncode != 0:
             raise CommandFailure(
@@ -161,6 +181,114 @@ class CommandRunner:
             record.render(sequence)
             for sequence, record in enumerate(self.records, start=1)
         )
+
+    def _terminate_process_group(
+        self,
+        process: subprocess.Popen[str],
+        privileged: bool,
+    ) -> list[str]:
+        """Terminate every descendant sharing the command's isolated process group."""
+        errors: list[str] = []
+        process_group = process.pid
+        self._signal_process_group(process_group, "TERM", privileged, errors)
+        try:
+            process.wait(timeout=0.25)
+        except subprocess.TimeoutExpired:
+            pass
+        self._signal_process_group(process_group, "KILL", privileged, errors)
+        try:
+            process.wait(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            errors.append(
+                f"process-group leader {process.pid} survived SIGKILL"
+            )
+        deadline = time.monotonic() + 2.0
+        while (
+            self._process_group_exists(process_group)
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.02)
+        if self._process_group_exists(process_group):
+            errors.append(f"process group {process_group} survived SIGKILL")
+        return errors
+
+    def _signal_process_group(
+        self,
+        process_group: int,
+        signal_name: str,
+        privileged: bool,
+        errors: list[str],
+    ) -> None:
+        command = self.command(
+            ("kill", f"-{signal_name}", "--", f"-{process_group}"),
+            privileged=privileged,
+        )
+        try:
+            completed = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=2.0,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            errors.append(
+                f"could not send SIG{signal_name} to process group "
+                f"{process_group}: {error}"
+            )
+            return
+        self.records.append(
+            CommandRecord(command, f"exit {completed.returncode}")
+        )
+        if completed.returncode != 0 and self._process_group_exists(process_group):
+            errors.append(
+                f"could not send SIG{signal_name} to process group "
+                f"{process_group}: "
+                f"{completed.stderr.strip() or completed.stdout.strip()}"
+            )
+
+    @staticmethod
+    def _process_group_exists(process_group: int) -> bool:
+        try:
+            os.killpg(process_group, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return True
+        return True
+
+    def _collect_after_abort(
+        self,
+        process: subprocess.Popen[str],
+        timeout_error: subprocess.TimeoutExpired,
+        errors: list[str],
+    ) -> tuple[str, str]:
+        stdout = self._decode_timeout_output(timeout_error.stdout)
+        stderr = self._decode_timeout_output(timeout_error.stderr)
+        try:
+            final_stdout, final_stderr = process.communicate(timeout=2.0)
+        except subprocess.TimeoutExpired as error:
+            stdout = self._decode_timeout_output(error.stdout) or stdout
+            stderr = self._decode_timeout_output(error.stderr) or stderr
+            errors.append(
+                "capture pipes remained open after process-group termination"
+            )
+            self._close_capture_pipes(process)
+        else:
+            stdout = final_stdout
+            stderr = final_stderr
+        return stdout, stderr
+
+    @staticmethod
+    def _close_capture_pipes(process: subprocess.Popen[str]) -> None:
+        for stream in (process.stdout, process.stderr):
+            if stream is not None and not stream.closed:
+                stream.close()
 
     @staticmethod
     def _decode_timeout_output(value: bytes | str | None) -> str:

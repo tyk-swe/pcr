@@ -106,14 +106,18 @@ jobs:
       - name: Install native-E2E prerequisites
         run: >-
           sudo apt-get update &&
-          sudo apt-get install --yes iproute2 libpcap-dev shellcheck
+          sudo apt-get install --yes ethtool iproute2 libpcap-dev python3-jsonschema shellcheck
       - name: Lint native-E2E helpers
         env:
           PYTHONPYCACHEPREFIX: ${{ runner.temp }}/native-e2e-pycache
         run: |
           shellcheck scripts/test-native-e2e
           python3 -m compileall -q tests/native_e2e
-      - name: Run strict namespace E2E baseline
+          PCR_NATIVE_E2E_PRIVILEGE_MODE=sudo \
+            PCR_NATIVE_E2E_TEST_PRIVILEGED=1 \
+            PYTHONPATH=tests \
+            python3 -m unittest native_e2e.support.test_command
+      - name: Run strict namespace E2E smoke tests
         run: scripts/test-native-e2e
 
   linux-quality:

@@ -16,7 +16,7 @@ fail() {
 
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required"
 
-for command in cargo ip python3 sysctl; do
+for command in cargo ethtool ip kill python3 sysctl; do
     command -v "$command" >/dev/null 2>&1 || fail "required command '$command' was not found in PATH"
 done
 

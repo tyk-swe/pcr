@@ -36,10 +36,11 @@ when prerequisites or privileges are unavailable:
 sudo -v && scripts/test-native-e2e
 ```
 
-The harness builds the all-feature PacketcraftR binary once, then verifies its
-isolated IPv4/IPv6 UDP and TCP fixture paths without using PacketcraftR as the
-verifier. See [Linux native E2E testing](docs/native-e2e.md) for topology,
-prerequisites, diagnostics, and CI details.
+The harness builds the all-feature PacketcraftR binary once, then exercises
+isolated IPv4/IPv6 route planning, native Layer 3 send, and UDP exchange paths
+with independent socket fixtures. See
+[Linux native E2E testing](docs/native-e2e.md) for topology, prerequisites,
+diagnostics, and CI details.
 
 The separate `fuzz/` package has its own lockfile, targets, corpora, and
 dictionaries. CI smoke-tests every committed fuzz target.

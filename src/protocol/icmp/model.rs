@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
 use bytes::Bytes;
 
@@ -12,16 +11,14 @@ use crate::packet::{
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, bytes, checksum, checksum_parts, ensure_encode_budget,
-    impl_layer_boilerplate, impl_type_code_checksum_body_layer, invalid, make_layer, out_of_range,
-    payload_without_padding, protocol, resolve_u16, set_wire_u16, transport_checksum,
-    transport_checksum_parts, truncated, type_code_checksum_body_layout, unknown_field, wire_u16,
-    wrong_layer, wrong_type,
+    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
+    payload_without_padding, protocol, resolve_u16, transport_checksum, transport_checksum_parts,
+    truncated, wrong_layer,
 };
 use super::super::network::encode_network;
 
@@ -77,60 +74,48 @@ impl Default for Icmpv6 {
     }
 }
 
-fn icmp_fields() -> &'static [FieldSchema] {
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "type",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "ICMP message type",
-        },
-        FieldSchema {
-            name: "code",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "ICMP message code",
-        },
-        FieldSchema {
-            name: "checksum",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "ICMP checksum",
-        },
-        FieldSchema {
-            name: "body",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
-            description: "Type-specific ICMP body",
-        },
-    ];
-    FIELDS
+macro_rules! icmp_reflection {
+    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, $layout:ident) => {
+        reflective_layer! {
+            fn $schema() => { protocol: protocol($protocol), name: $name }
+            impl $ty {
+                "type" => {
+                    kind: Unsigned, derived: false, required: true,
+                    description: "ICMP message type",
+                    get |layer| Some(reflect_get(&layer.icmp_type)),
+                    set |layer, value, name| reflect_set(&mut layer.icmp_type, $schema(), name, value),
+                    layout: (0, 1)
+                },
+                "code" => {
+                    kind: Unsigned, derived: false, required: true,
+                    description: "ICMP message code",
+                    get |layer| Some(reflect_get(&layer.code)),
+                    set |layer, value, name| reflect_set(&mut layer.code, $schema(), name, value),
+                    layout: (1, 2)
+                },
+                "checksum" => {
+                    kind: Unsigned, derived: true, required: false,
+                    description: "ICMP checksum",
+                    get |layer| Some(reflect_get(&layer.checksum)),
+                    set |layer, value, name| reflect_set(&mut layer.checksum, $schema(), name, value),
+                    layout: (2, 4)
+                },
+                "body" => {
+                    kind: Bytes, derived: false, required: false,
+                    description: "Type-specific ICMP body",
+                    get |layer| Some(reflect_get(&layer.body)),
+                    set |layer, value, name| reflect_set(&mut layer.body, $schema(), name, value),
+                    layout: (4, 4 + body_len)
+                },
+                normalize |layer| { layer.checksum.normalize(); }
+            }
+            layout fn $layout(body_len: usize);
+        }
+    };
 }
 
-fn icmpv4_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("icmpv4"),
-        name: "ICMPv4",
-        fields: icmp_fields(),
-    })
-}
-
-fn icmpv6_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("icmpv6"),
-        name: "ICMPv6",
-        fields: icmp_fields(),
-    })
-}
-
-impl_type_code_checksum_body_layer!(Icmpv4, icmpv4_schema, icmp_type);
-impl_type_code_checksum_body_layer!(Icmpv6, icmpv6_schema, icmp_type);
+icmp_reflection!(Icmpv4, icmpv4_schema, "icmpv4", "ICMPv4", icmpv4_layout);
+icmp_reflection!(Icmpv6, icmpv6_schema, "icmpv6", "ICMPv6", icmpv6_layout);
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Icmpv4Codec;
@@ -180,7 +165,7 @@ impl LayerCodec for Icmpv4Codec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: type_code_checksum_body_layout(layer.body.len()),
+            fields: icmpv4_layout(layer.body.len()),
             diagnostics,
         })
     }
@@ -211,7 +196,7 @@ impl LayerCodec for Icmpv4Codec {
             payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: type_code_checksum_body_layout(input.len() - ICMP_MIN_LEN),
+            fields: icmpv4_layout(input.len() - ICMP_MIN_LEN),
             diagnostics,
             stop: true,
             network: None,
@@ -275,7 +260,7 @@ impl LayerCodec for Icmpv6Codec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: type_code_checksum_body_layout(layer.body.len()),
+            fields: icmpv6_layout(layer.body.len()),
             diagnostics,
         })
     }
@@ -309,7 +294,7 @@ impl LayerCodec for Icmpv6Codec {
             payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: type_code_checksum_body_layout(input.len() - ICMP_MIN_LEN),
+            fields: icmpv6_layout(input.len() - ICMP_MIN_LEN),
             diagnostics,
             stop: true,
             network: None,

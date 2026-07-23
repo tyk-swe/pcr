@@ -54,17 +54,8 @@ fn packet_destination(packet: &Packet, strategy: TracerouteStrategy) -> Option<I
     Some(path.final_destination)
 }
 
-pub(super) fn add_stats(
-    total: &mut Stats,
-    batch: &Stats,
-    sequence: u64,
-) -> Result<(), TracerouteError> {
-    total
-        .checked_add(batch)
-        .ok_or(TracerouteError::StatisticsOverflow { sequence })
-}
 use super::{
-    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, Stats, TracerouteError,
-    TracerouteResponseKind, TracerouteStrategy, probe,
+    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, TracerouteResponseKind,
+    TracerouteStrategy, probe,
 };
 use crate::packet::semantics::{self, BuiltinProtocol};

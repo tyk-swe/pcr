@@ -10,6 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use super::Packet;
 use super::field::FieldValue;
 use super::layer::{Layer, ProtocolId};
+pub(crate) use super::protocol_catalog::{BuiltinProtocol, builtin_protocol_catalog};
 
 pub(crate) const SOURCE: &str = "source";
 pub(crate) const DESTINATION: &str = "destination";
@@ -22,117 +23,6 @@ pub(crate) const TARGET_PROTOCOL: &str = "target_protocol";
 pub(crate) const IPV4_OPTIONS: &str = "options";
 
 const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
-
-/// Exact runtime identities for every codec in the built-in registry.
-///
-/// Registry aliases are deliberately absent: packet layers always expose the
-/// canonical codec identifier after parsing or decoding.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BuiltinProtocol {
-    Arp,
-    BsdLoop,
-    BsdNull,
-    Ethernet,
-    Gre,
-    Icmpv4,
-    Icmpv6,
-    Igmp,
-    Ipv4,
-    Ipv6,
-    Ipv6DestinationOptions,
-    Ipv6Fragment,
-    Ipv6HopByHop,
-    Ipv6Srh,
-    LinuxSll,
-    LinuxSll2,
-    Malformed,
-    Padding,
-    Raw,
-    RawIp,
-    Sctp,
-    Tcp,
-    Udp,
-    Vlan,
-    Vlan8021ad,
-}
-
-impl BuiltinProtocol {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Arp => "arp",
-            Self::BsdLoop => "bsd_loop",
-            Self::BsdNull => "bsd_null",
-            Self::Ethernet => "ethernet",
-            Self::Gre => "gre",
-            Self::Icmpv4 => "icmpv4",
-            Self::Icmpv6 => "icmpv6",
-            Self::Igmp => "igmp",
-            Self::Ipv4 => "ipv4",
-            Self::Ipv6 => "ipv6",
-            Self::Ipv6DestinationOptions => "ipv6_destination_options",
-            Self::Ipv6Fragment => "ipv6_fragment",
-            Self::Ipv6HopByHop => "ipv6_hop_by_hop",
-            Self::Ipv6Srh => "ipv6_srh",
-            Self::LinuxSll => "linux_sll",
-            Self::LinuxSll2 => "linux_sll2",
-            Self::Malformed => "malformed",
-            Self::Padding => "padding",
-            Self::Raw => "raw",
-            Self::RawIp => "raw_ip",
-            Self::Sctp => "sctp",
-            Self::Tcp => "tcp",
-            Self::Udp => "udp",
-            Self::Vlan => "vlan",
-            Self::Vlan8021ad => "vlan8021ad",
-        }
-    }
-
-    pub(crate) fn from_id(protocol: &ProtocolId) -> Option<Self> {
-        Some(match protocol.as_str() {
-            "arp" => Self::Arp,
-            "bsd_loop" => Self::BsdLoop,
-            "bsd_null" => Self::BsdNull,
-            "ethernet" => Self::Ethernet,
-            "gre" => Self::Gre,
-            "icmpv4" => Self::Icmpv4,
-            "icmpv6" => Self::Icmpv6,
-            "igmp" => Self::Igmp,
-            "ipv4" => Self::Ipv4,
-            "ipv6" => Self::Ipv6,
-            "ipv6_destination_options" => Self::Ipv6DestinationOptions,
-            "ipv6_fragment" => Self::Ipv6Fragment,
-            "ipv6_hop_by_hop" => Self::Ipv6HopByHop,
-            "ipv6_srh" => Self::Ipv6Srh,
-            "linux_sll" => Self::LinuxSll,
-            "linux_sll2" => Self::LinuxSll2,
-            "malformed" => Self::Malformed,
-            "padding" => Self::Padding,
-            "raw" => Self::Raw,
-            "raw_ip" => Self::RawIp,
-            "sctp" => Self::Sctp,
-            "tcp" => Self::Tcp,
-            "udp" => Self::Udp,
-            "vlan" => Self::Vlan,
-            "vlan8021ad" => Self::Vlan8021ad,
-            _ => return None,
-        })
-    }
-
-    pub(crate) fn of(layer: &dyn Layer) -> Option<Self> {
-        Self::from_id(&layer.schema().protocol)
-    }
-
-    pub(crate) const fn is_ip(self) -> bool {
-        matches!(self, Self::Ipv4 | Self::Ipv6)
-    }
-
-    pub(crate) const fn is_ipv6_extension(self) -> bool {
-        matches!(
-            self,
-            Self::Ipv6DestinationOptions | Self::Ipv6Fragment | Self::Ipv6HopByHop | Self::Ipv6Srh
-        )
-    }
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SemanticError {
@@ -730,6 +620,7 @@ pub(crate) fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, Semant
 #[cfg(test)]
 mod tests {
     use std::any::Any;
+    use std::collections::BTreeMap;
     use std::sync::OnceLock;
 
     use super::*;
@@ -781,11 +672,32 @@ mod tests {
 
     #[test]
     fn built_in_identity_is_canonical_and_does_not_accept_runtime_aliases() {
-        for support in crate::protocol::support::BUILTIN_PROTOCOLS {
-            let protocol = BuiltinProtocol::from_id(&ProtocolId::new(support.protocol))
-                .unwrap_or_else(|| panic!("missing semantic identity for {}", support.protocol));
-            assert_eq!(protocol.as_str(), support.protocol);
+        let mut spellings = BTreeMap::new();
+        for protocol in BuiltinProtocol::ALL {
+            let canonical = protocol.as_str();
+            assert_eq!(BuiltinProtocol::from_name(canonical), Some(*protocol));
+            assert_eq!(
+                BuiltinProtocol::from_id(&ProtocolId::new(canonical)),
+                Some(*protocol)
+            );
+            assert_eq!(
+                BuiltinProtocol::from_name_or_alias(canonical),
+                Some(*protocol)
+            );
+            assert_eq!(spellings.insert(canonical, *protocol), None);
+
+            for alias in protocol.aliases() {
+                assert_eq!(BuiltinProtocol::from_name(alias), None);
+                assert_eq!(BuiltinProtocol::from_id(&ProtocolId::new(*alias)), None);
+                assert_eq!(BuiltinProtocol::from_name_or_alias(alias), Some(*protocol));
+                assert_eq!(
+                    spellings.insert(alias, *protocol),
+                    None,
+                    "duplicate built-in protocol spelling {alias}"
+                );
+            }
         }
+        assert_eq!(BuiltinProtocol::ALL.len(), 25);
         assert_eq!(
             BuiltinProtocol::from_id(&ProtocolId::new("raw_ip")),
             Some(BuiltinProtocol::RawIp)

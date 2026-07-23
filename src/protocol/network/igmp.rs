@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
 use bytes::Bytes;
 
@@ -12,15 +11,13 @@ use crate::packet::{
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, bytes, checksum, checksum_parts, ensure_encode_budget,
-    impl_layer_boilerplate, impl_type_code_checksum_body_layer, invalid, make_layer, out_of_range,
-    payload_without_padding, protocol, resolve_u16, set_wire_u16, truncated,
-    type_code_checksum_body_layout, unknown_field, wire_u16, wrong_layer, wrong_type,
+    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, invalid, make_layer,
+    payload_without_padding, protocol, resolve_u16, truncated, wrong_layer,
 };
 
 const IGMP_HEADER_LEN: usize = 4;
@@ -45,46 +42,41 @@ impl Default for Igmp {
     }
 }
 
-fn igmp_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "type",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
+reflective_layer! {
+    fn igmp_schema() => { protocol: protocol("igmp"), name: "IGMP" }
+    impl Igmp {
+        "type" => {
+            kind: Unsigned, derived: false, required: true,
             description: "IGMP message type",
+            get |layer| Some(reflect_get(&layer.igmp_type)),
+            set |layer, value, name| reflect_set(&mut layer.igmp_type, igmp_schema(), name, value),
+            layout: (0, 1)
         },
-        FieldSchema {
-            name: "code",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
+        "code" => {
+            kind: Unsigned, derived: false, required: true,
             description: "Type-specific IGMP code or reserved octet",
+            get |layer| Some(reflect_get(&layer.code)),
+            set |layer, value, name| reflect_set(&mut layer.code, igmp_schema(), name, value),
+            layout: (1, 2)
         },
-        FieldSchema {
-            name: "checksum",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
+        "checksum" => {
+            kind: Unsigned, derived: true, required: false,
             description: "IGMP checksum",
+            get |layer| Some(reflect_get(&layer.checksum)),
+            set |layer, value, name| reflect_set(&mut layer.checksum, igmp_schema(), name, value),
+            layout: (2, 4)
         },
-        FieldSchema {
-            name: "body",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
+        "body" => {
+            kind: Bytes, derived: false, required: false,
             description: "Version- and type-specific IGMP body",
+            get |layer| Some(reflect_get(&layer.body)),
+            set |layer, value, name| reflect_set(&mut layer.body, igmp_schema(), name, value),
+            layout: (4, 4 + body_len)
         },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("igmp"),
-        name: "IGMP",
-        fields: FIELDS,
-    })
+        normalize |layer| { layer.checksum.normalize(); }
+    }
+    layout fn igmp_layout(body_len: usize);
 }
-
-impl_type_code_checksum_body_layer!(Igmp, igmp_schema, igmp_type);
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct IgmpCodec;
@@ -141,7 +133,7 @@ impl LayerCodec for IgmpCodec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: type_code_checksum_body_layout(layer.body.len()),
+            fields: igmp_layout(layer.body.len()),
             diagnostics,
         })
     }
@@ -172,7 +164,7 @@ impl LayerCodec for IgmpCodec {
             payload_offset: input.len(),
             payload_len: 0,
             next: Vec::new(),
-            fields: type_code_checksum_body_layout(input.len() - IGMP_HEADER_LEN),
+            fields: igmp_layout(input.len() - IGMP_HEADER_LEN),
             diagnostics,
             stop: true,
             network: None,

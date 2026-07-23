@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
 use crate::packet::{
     codec::{
@@ -10,17 +9,16 @@ use crate::packet::{
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
     ValueExpectation, checksum, checksum_parts, ensure_encode_budget, expected_discriminator,
-    field_layout, impl_layer_boilerplate, invalid, make_layer, out_of_range,
-    payload_without_padding, protocol, resolve_u16, set_wire_u16, strict_or_diagnostic, truncated,
-    unknown_field, validate_auto_raw_discriminator, validate_raw_child_discriminator, wire_u16,
-    wrong_layer, wrong_type,
+    invalid, make_layer, out_of_range, payload_without_padding, protocol, resolve_u16,
+    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
 const GRE_BASE_LEN: usize = 4;
@@ -61,105 +59,17 @@ impl Default for Gre {
     }
 }
 
-fn gre_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "protocol_type",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Encapsulated EtherType discriminator",
-        },
-        FieldSchema {
-            name: "checksum",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Optional checksum over the GRE header and payload",
-        },
-        FieldSchema {
-            name: "key",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Optional GRE key",
-        },
-        FieldSchema {
-            name: "sequence",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Optional GRE sequence number",
-        },
-        FieldSchema {
-            name: "reserved_bits",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Receiver-ignored GRE bits 6 through 12",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("gre"),
-        name: "GRE",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Gre {
-    impl_layer_boilerplate!(Gre, gre_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "protocol_type" => Some(wire_u16(&self.protocol_type)),
-            "checksum" => self.checksum.as_ref().map(wire_u16),
-            "key" => self.key.map(FieldValue::from),
-            "sequence" => self.sequence.map(FieldValue::from),
-            "reserved_bits" => Some(self.reserved_bits.into()),
-            _ => None,
-        }
+reflective_layer! {
+    fn gre_schema() => { protocol: protocol("gre"), name: "GRE" }
+    impl Gre {
+        "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", get |layer| Some(reflect_get(&layer.protocol_type)), set |layer, value, name| reflect_set(&mut layer.protocol_type, gre_schema(), name, value), layout: (2, 4) },
+        "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
+        "key" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.key = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
+        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.sequence = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
+        "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| reflect_set(&mut layer.reserved_bits, gre_schema(), name, value), layout: (0, 2) },
+        normalize |layer| { layer.protocol_type.normalize(); if let Some(checksum) = &mut layer.checksum { checksum.normalize(); } }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("protocol_type", value) => {
-                set_wire_u16(&mut self.protocol_type, gre_schema(), name, value)
-            }
-            ("checksum", value) => {
-                let mut checksum = self.checksum.clone().unwrap_or_default();
-                set_wire_u16(&mut checksum, gre_schema(), name, value)?;
-                self.checksum = Some(checksum);
-                Ok(())
-            }
-            ("key", FieldValue::Unsigned(value)) => {
-                self.key =
-                    Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?);
-                Ok(())
-            }
-            ("sequence", FieldValue::Unsigned(value)) => {
-                self.sequence =
-                    Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?);
-                Ok(())
-            }
-            ("reserved_bits", FieldValue::Unsigned(value)) => {
-                self.reserved_bits =
-                    u8::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?;
-                Ok(())
-            }
-            ("key" | "sequence" | "reserved_bits", _) => {
-                Err(wrong_type(gre_schema(), name, "unsigned"))
-            }
-            _ => Err(unknown_field(gre_schema(), name)),
-        }
-    }
-
-    fn normalize(&mut self) {
-        self.protocol_type.normalize();
-        if let Some(checksum) = &mut self.checksum {
-            checksum.normalize();
-        }
-    }
+    layout fn gre_static_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -402,23 +312,33 @@ impl LayerCodec for GreCodec {
 }
 
 fn gre_layout(layer: &Gre) -> Vec<crate::packet::layout::FieldLayout> {
-    let mut fields = vec![
-        field_layout("reserved_bits", 0, 2),
-        field_layout("protocol_type", 2, 4),
-    ];
+    // Optional GRE fields move according to the preceding presence bits, so
+    // only the fixed prefix is generated from the field declaration.
+    let mut fields = gre_static_layout();
     let mut cursor = GRE_BASE_LEN;
     if layer.checksum.is_some() {
-        fields.push(field_layout("checksum", cursor, cursor + 2));
+        fields.push(gre_dynamic_field("checksum", cursor, cursor + 2));
         cursor += GRE_OPTION_LEN;
     }
     if layer.key.is_some() {
-        fields.push(field_layout("key", cursor, cursor + GRE_OPTION_LEN));
+        fields.push(gre_dynamic_field("key", cursor, cursor + GRE_OPTION_LEN));
         cursor += GRE_OPTION_LEN;
     }
     if layer.sequence.is_some() {
-        fields.push(field_layout("sequence", cursor, cursor + GRE_OPTION_LEN));
+        fields.push(gre_dynamic_field(
+            "sequence",
+            cursor,
+            cursor + GRE_OPTION_LEN,
+        ));
     }
     fields
+}
+
+fn gre_dynamic_field(name: &str, start: usize, end: usize) -> crate::packet::layout::FieldLayout {
+    crate::packet::layout::FieldLayout {
+        name: name.to_owned(),
+        range: crate::packet::layout::ByteRange::new(start, end),
+    }
 }
 
 #[cfg(test)]

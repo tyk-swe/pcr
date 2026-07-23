@@ -4,7 +4,6 @@
 //! Bounded, structured traceroute over the shared authorization, exchange,
 //! protocol-correlation, and capture-evidence contracts.
 
-use std::collections::HashSet;
 use std::fmt;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
@@ -37,8 +36,7 @@ use super::clock::Clock;
 use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
-    MatchedResponseEvidence, ResponseCandidate, ResponseEvidence, format_exchange_evidence_error,
-    push_undecoded_limit_diagnostic, retain_evidence, select_response_candidate,
+    MatchedResponseEvidence, ResponseEvidence, format_exchange_evidence_error, retain_evidence,
     validate_exchange_evidence as validate_shared_exchange_evidence,
 };
 use super::nonzero_ipv4_identification;

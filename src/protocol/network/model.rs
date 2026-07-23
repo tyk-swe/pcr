@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::sync::OnceLock;
 
 use bytes::Bytes;
 
@@ -13,18 +12,16 @@ use crate::packet::{
         LayerEncodeContext, NetworkEnvelope,
     },
     diagnostic::Diagnostic,
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, bytes, checksum, expected_discriminator, field_layout,
-    impl_layer_boilerplate, invalid, ipv4, ipv6, make_layer, network_from_addresses, out_of_range,
-    payload_without_padding, protocol, resolve_u8, resolve_u16, set_wire_u8, set_wire_u16,
-    strict_or_diagnostic, truncated, unknown_field, validate_auto_raw_discriminator,
-    validate_ipv6_routing_child, validate_raw_child_discriminator, wire_u8, wire_u16, wrong_layer,
-    wrong_type,
+    ValueExpectation, aliased_fields, checksum, expected_discriminator, invalid, make_layer,
+    network_from_addresses, out_of_range, payload_without_padding, protocol, resolve_u8,
+    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    validate_ipv6_routing_child, validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
 const IPV4_MIN_LEN: usize = 20;
@@ -74,188 +71,25 @@ impl Default for Ipv4 {
     }
 }
 
-fn ipv4_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "dscp_ecn",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "DSCP and ECN octet",
-        },
-        FieldSchema {
-            name: "total_length",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "IPv4 total length",
-        },
-        FieldSchema {
-            name: "identification",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Fragment identification",
-        },
-        FieldSchema {
-            name: "reserved_flag",
-            kind: FieldKind::Bool,
-            derived: false,
-            required: false,
-            description: "Reserved IPv4 flag bit",
-        },
-        FieldSchema {
-            name: "dont_fragment",
-            kind: FieldKind::Bool,
-            derived: false,
-            required: false,
-            description: "Don't-fragment flag",
-        },
-        FieldSchema {
-            name: "more_fragments",
-            kind: FieldKind::Bool,
-            derived: false,
-            required: false,
-            description: "More-fragments flag",
-        },
-        FieldSchema {
-            name: "fragment_offset",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Fragment offset in eight-byte units",
-        },
-        FieldSchema {
-            name: "ttl",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Time to live",
-        },
-        FieldSchema {
-            name: "protocol",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Next protocol discriminator",
-        },
-        FieldSchema {
-            name: "checksum",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "IPv4 header checksum",
-        },
-        FieldSchema {
-            name: "source",
-            kind: FieldKind::Ipv4,
-            derived: false,
-            required: true,
-            description: "Source IPv4 address",
-        },
-        FieldSchema {
-            name: "destination",
-            kind: FieldKind::Ipv4,
-            derived: false,
-            required: true,
-            description: "Destination IPv4 address",
-        },
-        FieldSchema {
-            name: "options",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
-            description: "Verbatim IPv4 option bytes",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("ipv4"),
-        name: "IPv4",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Ipv4 {
-    impl_layer_boilerplate!(Ipv4, ipv4_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "dscp_ecn" => Some(self.dscp_ecn.into()),
-            "total_length" => Some(wire_u16(&self.total_length)),
-            "identification" => Some(self.identification.into()),
-            "reserved_flag" => Some(self.reserved_flag.into()),
-            "dont_fragment" => Some(self.dont_fragment.into()),
-            "more_fragments" => Some(self.more_fragments.into()),
-            "fragment_offset" => Some(self.fragment_offset.into()),
-            "ttl" => Some(self.ttl.into()),
-            "protocol" => Some(wire_u8(&self.protocol)),
-            "checksum" => Some(wire_u16(&self.checksum)),
-            "source" => Some(self.source.into()),
-            "destination" => Some(self.destination.into()),
-            "options" => Some(self.options.clone().into()),
-            _ => None,
-        }
+reflective_layer! {
+    fn ipv4_schema() => { protocol: protocol("ipv4"), name: "IPv4" }
+    impl Ipv4 {
+        "dscp_ecn" => { kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", get |layer| Some(reflect_get(&layer.dscp_ecn)), set |layer, value, name| reflect_set(&mut layer.dscp_ecn, ipv4_schema(), name, value), layout: (1, 2) },
+        "total_length" => { kind: Unsigned, derived: true, required: false, description: "IPv4 total length", get |layer| Some(reflect_get(&layer.total_length)), set |layer, value, name| reflect_set(&mut layer.total_length, ipv4_schema(), name, value), layout: (2, 4) },
+        "identification" => { kind: Unsigned, derived: false, required: false, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, ipv4_schema(), name, value), layout: (4, 6) },
+        "reserved_flag" => { kind: Bool, derived: false, required: false, description: "Reserved IPv4 flag bit", get |layer| Some(reflect_get(&layer.reserved_flag)), set |layer, value, name| reflect_set(&mut layer.reserved_flag, ipv4_schema(), name, value), layout: (6, 8) },
+        "dont_fragment" => { kind: Bool, derived: false, required: false, description: "Don't-fragment flag", get |layer| Some(reflect_get(&layer.dont_fragment)), set |layer, value, name| reflect_set(&mut layer.dont_fragment, ipv4_schema(), name, value), layout: (6, 8) },
+        "more_fragments" => { kind: Bool, derived: false, required: false, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, ipv4_schema(), name, value), layout: (6, 8) },
+        "fragment_offset" => { kind: Unsigned, derived: false, required: false, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(ipv4_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv4_schema(), name, "unsigned")) }, layout: (6, 8) },
+        "ttl" => { kind: Unsigned, derived: false, required: true, description: "Time to live", get |layer| Some(reflect_get(&layer.ttl)), set |layer, value, name| reflect_set(&mut layer.ttl, ipv4_schema(), name, value), layout: (8, 9) },
+        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, ipv4_schema(), name, value), layout: (9, 10) },
+        "checksum" => { kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", get |layer| Some(reflect_get(&layer.checksum)), set |layer, value, name| reflect_set(&mut layer.checksum, ipv4_schema(), name, value), layout: (10, 12) },
+        "source" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv4_schema(), name, value), layout: (12, 16) },
+        "destination" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv4_schema(), name, value), layout: (16, 20) },
+        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, ipv4_schema(), name, value), layout: (20, header_len) },
+        normalize |layer| { layer.total_length.normalize(); layer.protocol.normalize(); layer.checksum.normalize(); }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("dscp_ecn", FieldValue::Unsigned(value)) => {
-                self.dscp_ecn =
-                    u8::try_from(value).map_err(|_| out_of_range(ipv4_schema(), name))?
-            }
-            ("total_length", value) => {
-                return set_wire_u16(&mut self.total_length, ipv4_schema(), name, value);
-            }
-            ("identification", FieldValue::Unsigned(value)) => {
-                self.identification =
-                    u16::try_from(value).map_err(|_| out_of_range(ipv4_schema(), name))?
-            }
-            ("reserved_flag", FieldValue::Bool(value)) => self.reserved_flag = value,
-            ("dont_fragment", FieldValue::Bool(value)) => self.dont_fragment = value,
-            ("more_fragments", FieldValue::Bool(value)) => self.more_fragments = value,
-            ("fragment_offset", FieldValue::Unsigned(value)) => {
-                self.fragment_offset = u16::try_from(value)
-                    .ok()
-                    .filter(|value| *value <= 0x1fff)
-                    .ok_or_else(|| out_of_range(ipv4_schema(), name))?
-            }
-            ("ttl", FieldValue::Unsigned(value)) => {
-                self.ttl = u8::try_from(value).map_err(|_| out_of_range(ipv4_schema(), name))?
-            }
-            ("protocol", value) => {
-                return set_wire_u8(&mut self.protocol, ipv4_schema(), name, value);
-            }
-            ("checksum", value) => {
-                return set_wire_u16(&mut self.checksum, ipv4_schema(), name, value);
-            }
-            ("source", value) => {
-                self.source = ipv4(&value).ok_or_else(|| wrong_type(ipv4_schema(), name, "ipv4"))?
-            }
-            ("destination", value) => {
-                self.destination =
-                    ipv4(&value).ok_or_else(|| wrong_type(ipv4_schema(), name, "ipv4"))?
-            }
-            ("options", value) => {
-                self.options =
-                    bytes(&value).ok_or_else(|| wrong_type(ipv4_schema(), name, "bytes"))?
-            }
-            ("reserved_flag" | "dont_fragment" | "more_fragments", _) => {
-                return Err(wrong_type(ipv4_schema(), name, "bool"));
-            }
-            ("dscp_ecn" | "identification" | "fragment_offset" | "ttl", _) => {
-                return Err(wrong_type(ipv4_schema(), name, "unsigned"));
-            }
-            _ => return Err(unknown_field(ipv4_schema(), name)),
-        }
-        Ok(())
-    }
-
-    fn normalize(&mut self) {
-        self.total_length.normalize();
-        self.protocol.normalize();
-        self.checksum.normalize();
-    }
+    layout fn ipv4_layout(header_len: usize);
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -548,24 +382,6 @@ impl LayerCodec for Ipv4Codec {
     }
 }
 
-fn ipv4_layout(header_len: usize) -> Vec<crate::packet::layout::FieldLayout> {
-    vec![
-        field_layout("dscp_ecn", 1, 2),
-        field_layout("total_length", 2, 4),
-        field_layout("identification", 4, 6),
-        field_layout("reserved_flag", 6, 8),
-        field_layout("dont_fragment", 6, 8),
-        field_layout("more_fragments", 6, 8),
-        field_layout("fragment_offset", 6, 8),
-        field_layout("ttl", 8, 9),
-        field_layout("protocol", 9, 10),
-        field_layout("checksum", 10, 12),
-        field_layout("source", 12, 16),
-        field_layout("destination", 16, 20),
-        field_layout("options", 20, header_len),
-    ]
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ipv6 {
     pub traffic_class: u8,
@@ -591,123 +407,19 @@ impl Default for Ipv6 {
     }
 }
 
-fn ipv6_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "traffic_class",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "IPv6 traffic class",
-        },
-        FieldSchema {
-            name: "flow_label",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "IPv6 flow label",
-        },
-        FieldSchema {
-            name: "payload_length",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "IPv6 payload length",
-        },
-        FieldSchema {
-            name: "next_header",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Next-header discriminator",
-        },
-        FieldSchema {
-            name: "hop_limit",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Hop limit",
-        },
-        FieldSchema {
-            name: "source",
-            kind: FieldKind::Ipv6,
-            derived: false,
-            required: true,
-            description: "Source IPv6 address",
-        },
-        FieldSchema {
-            name: "destination",
-            kind: FieldKind::Ipv6,
-            derived: false,
-            required: true,
-            description: "Destination IPv6 address",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("ipv6"),
-        name: "IPv6",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Ipv6 {
-    impl_layer_boilerplate!(Ipv6, ipv6_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "traffic_class" => Some(self.traffic_class.into()),
-            "flow_label" => Some(self.flow_label.into()),
-            "payload_length" => Some(wire_u16(&self.payload_length)),
-            "next_header" => Some(wire_u8(&self.next_header)),
-            "hop_limit" => Some(self.hop_limit.into()),
-            "source" => Some(self.source.into()),
-            "destination" => Some(self.destination.into()),
-            _ => None,
-        }
+reflective_layer! {
+    fn ipv6_schema() => { protocol: protocol("ipv6"), name: "IPv6" }
+    impl Ipv6 {
+        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", get |layer| Some(reflect_get(&layer.traffic_class)), set |layer, value, name| reflect_set(&mut layer.traffic_class, ipv6_schema(), name, value), layout: (0, 4) },
+        "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", get |layer| Some(reflect_get(&layer.flow_label)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.flow_label = u32::try_from(value).ok().filter(|value| *value <= 0x000f_ffff).ok_or_else(|| out_of_range(ipv6_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv6_schema(), name, "unsigned")) }, layout: (0, 4) },
+        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", get |layer| Some(reflect_get(&layer.payload_length)), set |layer, value, name| reflect_set(&mut layer.payload_length, ipv6_schema(), name, value), layout: (4, 6) },
+        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, ipv6_schema(), name, value), layout: (6, 7) },
+        "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", get |layer| Some(reflect_get(&layer.hop_limit)), set |layer, value, name| reflect_set(&mut layer.hop_limit, ipv6_schema(), name, value), layout: (7, 8) },
+        "source" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv6_schema(), name, value), layout: (8, 24) },
+        "destination" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv6_schema(), name, value), layout: (24, 40) },
+        normalize |layer| { layer.payload_length.normalize(); layer.next_header.normalize(); }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("traffic_class", FieldValue::Unsigned(value)) => {
-                self.traffic_class =
-                    u8::try_from(value).map_err(|_| out_of_range(ipv6_schema(), name))?
-            }
-            ("flow_label", FieldValue::Unsigned(value)) => {
-                self.flow_label = u32::try_from(value)
-                    .ok()
-                    .filter(|value| *value <= 0x000f_ffff)
-                    .ok_or_else(|| out_of_range(ipv6_schema(), name))?
-            }
-            ("payload_length", value) => {
-                return set_wire_u16(&mut self.payload_length, ipv6_schema(), name, value);
-            }
-            ("next_header", value) => {
-                return set_wire_u8(&mut self.next_header, ipv6_schema(), name, value);
-            }
-            ("hop_limit", FieldValue::Unsigned(value)) => {
-                self.hop_limit =
-                    u8::try_from(value).map_err(|_| out_of_range(ipv6_schema(), name))?
-            }
-            ("source", value) => {
-                self.source = ipv6(&value).ok_or_else(|| wrong_type(ipv6_schema(), name, "ipv6"))?
-            }
-            ("destination", value) => {
-                self.destination =
-                    ipv6(&value).ok_or_else(|| wrong_type(ipv6_schema(), name, "ipv6"))?
-            }
-            ("traffic_class" | "flow_label" | "hop_limit", _) => {
-                return Err(wrong_type(ipv6_schema(), name, "unsigned"));
-            }
-            _ => return Err(unknown_field(ipv6_schema(), name)),
-        }
-        Ok(())
-    }
-
-    fn normalize(&mut self) {
-        self.payload_length.normalize();
-        self.next_header.normalize();
-    }
+    layout fn ipv6_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -845,15 +557,7 @@ impl LayerCodec for Ipv6Codec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: vec![
-                field_layout("traffic_class", 0, 4),
-                field_layout("flow_label", 0, 4),
-                field_layout("payload_length", 4, 6),
-                field_layout("next_header", 6, 7),
-                field_layout("hop_limit", 7, 8),
-                field_layout("source", 8, 24),
-                field_layout("destination", 24, 40),
-            ],
+            fields: ipv6_layout(),
             diagnostics,
         })
     }
@@ -913,15 +617,7 @@ impl LayerCodec for Ipv6Codec {
             payload_offset: IPV6_LEN,
             payload_len: payload_length,
             next: vec![Discriminator(u64::from(next))],
-            fields: vec![
-                field_layout("traffic_class", 0, 4),
-                field_layout("flow_label", 0, 4),
-                field_layout("payload_length", 4, 6),
-                field_layout("next_header", 6, 7),
-                field_layout("hop_limit", 7, 8),
-                field_layout("source", 8, 24),
-                field_layout("destination", 24, 40),
-            ],
+            fields: ipv6_layout(),
             diagnostics: Vec::new(),
             stop: payload_length == 0,
             network: Some(network_from_addresses(source.into(), destination.into())),

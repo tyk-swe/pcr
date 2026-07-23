@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 use std::net::IpAddr;
-use std::sync::OnceLock;
 
 use bytes::Bytes;
 
@@ -13,15 +12,14 @@ use crate::packet::{
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, bytes, field_layout, impl_layer_boilerplate, invalid,
-    make_layer, out_of_range, payload_without_padding, protocol, resolve_u16, set_wire_u16,
-    transport_checksum, transport_checksum_parts, truncated, unknown_field, wire_u16, wrong_layer,
+    ValueExpectation, aliased_fields, invalid, make_layer, out_of_range, payload_without_padding,
+    protocol, resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
     wrong_type,
 };
 use super::super::network::encode_network;
@@ -48,84 +46,57 @@ impl Default for Udp {
     }
 }
 
-fn udp_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "source_port",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
+reflective_layer! {
+    fn udp_schema() => { protocol: protocol("udp"), name: "UDP" }
+    impl Udp {
+        "source_port" => {
+            kind: Unsigned, derived: false, required: true,
             description: "UDP source port",
+            get |layer| Some(layer.source_port.into()),
+            set |layer, value, name| match value {
+                FieldValue::Unsigned(value) => {
+                    layer.source_port = u16::try_from(value)
+                        .map_err(|_| out_of_range(udp_schema(), name))?;
+                    Ok(())
+                }
+                _ => Err(wrong_type(udp_schema(), name, "unsigned")),
+            },
+            layout: (0, 2)
         },
-        FieldSchema {
-            name: "destination_port",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
+        "destination_port" => {
+            kind: Unsigned, derived: false, required: true,
             description: "UDP destination port",
+            get |layer| Some(layer.destination_port.into()),
+            set |layer, value, name| match value {
+                FieldValue::Unsigned(value) => {
+                    layer.destination_port = u16::try_from(value)
+                        .map_err(|_| out_of_range(udp_schema(), name))?;
+                    Ok(())
+                }
+                _ => Err(wrong_type(udp_schema(), name, "unsigned")),
+            },
+            layout: (2, 4)
         },
-        FieldSchema {
-            name: "length",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
+        "length" => {
+            kind: Unsigned, derived: true, required: false,
             description: "UDP datagram length",
+            get |layer| Some(reflect_get(&layer.length)),
+            set |layer, value, name| reflect_set(&mut layer.length, udp_schema(), name, value),
+            layout: (4, 6)
         },
-        FieldSchema {
-            name: "checksum",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
+        "checksum" => {
+            kind: Unsigned, derived: true, required: false,
             description: "UDP checksum",
+            get |layer| Some(reflect_get(&layer.checksum)),
+            set |layer, value, name| reflect_set(&mut layer.checksum, udp_schema(), name, value),
+            layout: (6, 8)
         },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("udp"),
-        name: "UDP",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Udp {
-    impl_layer_boilerplate!(Udp, udp_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "source_port" => Some(self.source_port.into()),
-            "destination_port" => Some(self.destination_port.into()),
-            "length" => Some(wire_u16(&self.length)),
-            "checksum" => Some(wire_u16(&self.checksum)),
-            _ => None,
+        normalize |layer| {
+            layer.length.normalize();
+            layer.checksum.normalize();
         }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("source_port", FieldValue::Unsigned(value)) => {
-                self.source_port =
-                    u16::try_from(value).map_err(|_| out_of_range(udp_schema(), name))?
-            }
-            ("destination_port", FieldValue::Unsigned(value)) => {
-                self.destination_port =
-                    u16::try_from(value).map_err(|_| out_of_range(udp_schema(), name))?
-            }
-            ("length", value) => return set_wire_u16(&mut self.length, udp_schema(), name, value),
-            ("checksum", value) => {
-                return set_wire_u16(&mut self.checksum, udp_schema(), name, value);
-            }
-            ("source_port" | "destination_port", _) => {
-                return Err(wrong_type(udp_schema(), name, "unsigned"));
-            }
-            _ => return Err(unknown_field(udp_schema(), name)),
-        }
-        Ok(())
-    }
-
-    fn normalize(&mut self) {
-        self.length.normalize();
-        self.checksum.normalize();
-    }
+    layout fn udp_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -196,12 +167,7 @@ impl LayerCodec for UdpCodec {
             prefix: header.to_vec(),
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: vec![
-                field_layout("source_port", 0, 2),
-                field_layout("destination_port", 2, 4),
-                field_layout("length", 4, 6),
-                field_layout("checksum", 6, 8),
-            ],
+            fields: udp_layout(),
             diagnostics,
         })
     }
@@ -262,12 +228,7 @@ impl LayerCodec for UdpCodec {
             } else {
                 vec![Discriminator(0)]
             },
-            fields: vec![
-                field_layout("source_port", 0, 2),
-                field_layout("destination_port", 2, 4),
-                field_layout("length", 4, 6),
-                field_layout("checksum", 6, 8),
-            ],
+            fields: udp_layout(),
             diagnostics,
             stop: payload_len == 0,
             network: None,
@@ -332,163 +293,38 @@ impl Default for Tcp {
     }
 }
 
-fn tcp_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "source_port",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "TCP source port",
-        },
-        FieldSchema {
-            name: "destination_port",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "TCP destination port",
-        },
-        FieldSchema {
-            name: "sequence",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Sequence number",
-        },
-        FieldSchema {
-            name: "acknowledgment",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Acknowledgment number",
-        },
-        FieldSchema {
-            name: "reserved_bits",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Three reserved TCP header bits",
-        },
-        FieldSchema {
-            name: "flags",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Nine TCP control flags",
-        },
-        FieldSchema {
-            name: "window",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Receive window",
-        },
-        FieldSchema {
-            name: "checksum",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "TCP checksum",
-        },
-        FieldSchema {
-            name: "urgent_pointer",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Urgent pointer",
-        },
-        FieldSchema {
-            name: "options",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
-            description: "Verbatim standard or unknown TCP options",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("tcp"),
-        name: "TCP",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Tcp {
-    impl_layer_boilerplate!(Tcp, tcp_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "source_port" => Some(self.source_port.into()),
-            "destination_port" => Some(self.destination_port.into()),
-            "sequence" => Some(self.sequence.into()),
-            "acknowledgment" => Some(self.acknowledgment.into()),
-            "reserved_bits" => Some(self.reserved_bits.into()),
-            "flags" => Some(self.flags.into()),
-            "window" => Some(self.window.into()),
-            "checksum" => Some(wire_u16(&self.checksum)),
-            "urgent_pointer" => Some(self.urgent_pointer.into()),
-            "options" => Some(self.options.clone().into()),
-            _ => None,
-        }
+reflective_layer! {
+    fn tcp_schema() => { protocol: protocol("tcp"), name: "TCP" }
+    impl Tcp {
+        "source_port" => { kind: Unsigned, derived: false, required: true, description: "TCP source port",
+            get |layer| Some(reflect_get(&layer.source_port)), set |layer, value, name| reflect_set(&mut layer.source_port, tcp_schema(), name, value), layout: (0, 2) },
+        "destination_port" => { kind: Unsigned, derived: false, required: true, description: "TCP destination port",
+            get |layer| Some(reflect_get(&layer.destination_port)), set |layer, value, name| reflect_set(&mut layer.destination_port, tcp_schema(), name, value), layout: (2, 4) },
+        "sequence" => { kind: Unsigned, derived: false, required: true, description: "Sequence number",
+            get |layer| Some(reflect_get(&layer.sequence)), set |layer, value, name| reflect_set(&mut layer.sequence, tcp_schema(), name, value), layout: (4, 8) },
+        "acknowledgment" => { kind: Unsigned, derived: false, required: false, description: "Acknowledgment number",
+            get |layer| Some(reflect_get(&layer.acknowledgment)), set |layer, value, name| reflect_set(&mut layer.acknowledgment, tcp_schema(), name, value), layout: (8, 12) },
+        "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Three reserved TCP header bits",
+            get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| match value {
+                FieldValue::Unsigned(value) => { layer.reserved_bits = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range(tcp_schema(), name))?; Ok(()) },
+                _ => Err(wrong_type(tcp_schema(), name, "unsigned")),
+            }, layout: (12, 13) },
+        "flags" => { kind: Unsigned, derived: false, required: true, description: "Nine TCP control flags",
+            get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| match value {
+                FieldValue::Unsigned(value) => { layer.flags = u16::try_from(value).ok().filter(|value| *value <= 0x01ff).ok_or_else(|| out_of_range(tcp_schema(), name))?; Ok(()) },
+                _ => Err(wrong_type(tcp_schema(), name, "unsigned")),
+            }, layout: (12, 14) },
+        "window" => { kind: Unsigned, derived: false, required: true, description: "Receive window",
+            get |layer| Some(reflect_get(&layer.window)), set |layer, value, name| reflect_set(&mut layer.window, tcp_schema(), name, value), layout: (14, 16) },
+        "checksum" => { kind: Unsigned, derived: true, required: false, description: "TCP checksum",
+            get |layer| Some(reflect_get(&layer.checksum)), set |layer, value, name| reflect_set(&mut layer.checksum, tcp_schema(), name, value), layout: (16, 18) },
+        "urgent_pointer" => { kind: Unsigned, derived: false, required: false, description: "Urgent pointer",
+            get |layer| Some(reflect_get(&layer.urgent_pointer)), set |layer, value, name| reflect_set(&mut layer.urgent_pointer, tcp_schema(), name, value), layout: (18, 20) },
+        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim standard or unknown TCP options",
+            get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, tcp_schema(), name, value), layout: (20, header_len) },
+        normalize |layer| { layer.checksum.normalize(); }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("source_port", FieldValue::Unsigned(value)) => {
-                self.source_port =
-                    u16::try_from(value).map_err(|_| out_of_range(tcp_schema(), name))?
-            }
-            ("destination_port", FieldValue::Unsigned(value)) => {
-                self.destination_port =
-                    u16::try_from(value).map_err(|_| out_of_range(tcp_schema(), name))?
-            }
-            ("sequence", FieldValue::Unsigned(value)) => {
-                self.sequence =
-                    u32::try_from(value).map_err(|_| out_of_range(tcp_schema(), name))?
-            }
-            ("acknowledgment", FieldValue::Unsigned(value)) => {
-                self.acknowledgment =
-                    u32::try_from(value).map_err(|_| out_of_range(tcp_schema(), name))?
-            }
-            ("reserved_bits", FieldValue::Unsigned(value)) => {
-                self.reserved_bits = u8::try_from(value)
-                    .ok()
-                    .filter(|value| *value <= 7)
-                    .ok_or_else(|| out_of_range(tcp_schema(), name))?
-            }
-            ("flags", FieldValue::Unsigned(value)) => {
-                self.flags = u16::try_from(value)
-                    .ok()
-                    .filter(|value| *value <= 0x01ff)
-                    .ok_or_else(|| out_of_range(tcp_schema(), name))?
-            }
-            ("window", FieldValue::Unsigned(value)) => {
-                self.window = u16::try_from(value).map_err(|_| out_of_range(tcp_schema(), name))?
-            }
-            ("checksum", value) => {
-                return set_wire_u16(&mut self.checksum, tcp_schema(), name, value);
-            }
-            ("urgent_pointer", FieldValue::Unsigned(value)) => {
-                self.urgent_pointer =
-                    u16::try_from(value).map_err(|_| out_of_range(tcp_schema(), name))?
-            }
-            ("options", value) => {
-                self.options =
-                    bytes(&value).ok_or_else(|| wrong_type(tcp_schema(), name, "bytes"))?
-            }
-            (
-                "source_port" | "destination_port" | "sequence" | "acknowledgment"
-                | "reserved_bits" | "flags" | "window" | "urgent_pointer",
-                _,
-            ) => return Err(wrong_type(tcp_schema(), name, "unsigned")),
-            _ => return Err(unknown_field(tcp_schema(), name)),
-        }
-        Ok(())
-    }
-
-    fn normalize(&mut self) {
-        self.checksum.normalize();
-    }
+    layout fn tcp_layout(header_len: usize);
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -666,19 +502,4 @@ impl LayerCodec for TcpCodec {
             )?,
         )
     }
-}
-
-fn tcp_layout(header_len: usize) -> Vec<crate::packet::layout::FieldLayout> {
-    vec![
-        field_layout("source_port", 0, 2),
-        field_layout("destination_port", 2, 4),
-        field_layout("sequence", 4, 8),
-        field_layout("acknowledgment", 8, 12),
-        field_layout("reserved_bits", 12, 13),
-        field_layout("flags", 12, 14),
-        field_layout("window", 14, 16),
-        field_layout("checksum", 16, 18),
-        field_layout("urgent_pointer", 18, 20),
-        field_layout("options", 20, header_len),
-    ]
 }

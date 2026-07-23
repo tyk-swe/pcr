@@ -31,14 +31,14 @@ use ipv6_ext::{
 use link::{Arp, Ethernet, Vlan, Vlan8021ad};
 use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
-use support::{BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS};
+use support::BUILTIN_CAPTURE_ROOTS;
 #[cfg(test)]
 use transport::{Sctp, Tcp, Udp};
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 
 use crate::packet::{
     registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
-    semantics::BuiltinProtocol,
+    semantics::{BuiltinProtocol, builtin_protocol_catalog},
 };
 
 /// Complete, deterministic built-in protocol registration for the portable kernel.
@@ -47,155 +47,209 @@ pub struct BuiltinProtocols;
 
 impl ProtocolModule for BuiltinProtocols {
     fn register(&self, builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
-        builder.register_builtin_codec(RawCodec)?;
-        builder.register_builtin_codec(PaddingCodec)?;
-        builder.register_builtin_codec(MalformedCodec)?;
-        builder.register_builtin_codec(BsdNullCodec)?;
-        builder.register_builtin_codec(BsdLoopCodec)?;
-        builder.register_builtin_codec(LinuxSllCodec)?;
-        builder.register_builtin_codec(LinuxSll2Codec)?;
-        builder.register_builtin_codec(EthernetCodec)?;
-        builder.register_builtin_codec(VlanCodec)?;
-        builder.register_builtin_codec(Vlan8021adCodec)?;
-        builder.register_builtin_codec(ArpCodec)?;
-        builder.register_builtin_codec(Ipv4Codec)?;
-        builder.register_builtin_codec(Ipv6Codec)?;
-        builder.register_builtin_codec(HopByHopCodec)?;
-        builder.register_builtin_codec(DestinationOptionsCodec)?;
-        builder.register_builtin_codec(Ipv6FragmentCodec)?;
-        builder.register_builtin_codec(SegmentRoutingHeaderCodec)?;
-        builder.register_builtin_codec(GreCodec)?;
-        builder.register_builtin_codec(RawIpCodec)?;
-        builder.register_builtin_codec(UdpCodec)?;
-        builder.register_builtin_codec(TcpCodec)?;
-        builder.register_builtin_codec(SctpCodec)?;
-        builder.register_builtin_codec(Icmpv4Codec)?;
-        builder.register_builtin_codec(Icmpv6Codec)?;
-        builder.register_builtin_codec(IgmpCodec)?;
-        for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.matcher) {
-            match support.protocol {
-                "tcp" => builder.register_matcher(
-                    support.protocol,
-                    matcher::ReverseFlowMatcher::new(BuiltinProtocol::Tcp),
-                )?,
-                "udp" => builder.register_matcher(
-                    support.protocol,
-                    matcher::ReverseFlowMatcher::new(BuiltinProtocol::Udp),
-                )?,
-                "icmpv4" => {
-                    builder.register_matcher(support.protocol, matcher::EchoMatcher::v4())?
-                }
-                "icmpv6" => {
-                    builder.register_matcher(support.protocol, matcher::EchoMatcher::v6())?
-                }
-                "sctp" => builder.register_matcher(
-                    support.protocol,
-                    matcher::ReverseFlowMatcher::new(BuiltinProtocol::Sctp),
-                )?,
-                protocol => panic!("missing built-in matcher implementation for {protocol}"),
-            };
-        }
+        register_catalog(builder)?;
 
         for root in BUILTIN_CAPTURE_ROOTS {
             builder.bind_link_type(root.link_type, root.protocol)?;
         }
 
-        bind_link_children(builder, "ethernet")?;
-        bind_link_children(builder, "vlan")?;
-        bind_link_children(builder, "vlan8021ad")?;
-        for parent in ["linux_sll", "linux_sll2"] {
+        bind_link_children(builder, BuiltinProtocol::Ethernet)?;
+        bind_link_children(builder, BuiltinProtocol::Vlan)?;
+        bind_link_children(builder, BuiltinProtocol::Vlan8021ad)?;
+        for parent in [BuiltinProtocol::LinuxSll, BuiltinProtocol::LinuxSll2] {
             bind_link_children(builder, parent)?;
         }
-        for parent in ["bsd_null", "bsd_loop"] {
-            builder.bind(parent, 4, "ipv4", 100)?;
-            builder.bind(parent, 6, "ipv6", 100)?;
-            builder.bind(parent, 0, "raw", -100)?;
+        for parent in [BuiltinProtocol::BsdNull, BuiltinProtocol::BsdLoop] {
+            bind(builder, parent, 4, BuiltinProtocol::Ipv4, 100)?;
+            bind(builder, parent, 6, BuiltinProtocol::Ipv6, 100)?;
+            bind(builder, parent, 0, BuiltinProtocol::Raw, -100)?;
         }
 
-        bind_ip_children(builder, "ipv4", 1)?;
-        bind_ip_children(builder, "raw_ip", 1)?;
-        bind_ipv6_children(builder, "ipv6")?;
-        bind_ipv6_extensions(builder, "ipv6")?;
+        bind_ip_children(builder, BuiltinProtocol::Ipv4, 1)?;
+        bind_ip_children(builder, BuiltinProtocol::RawIp, 1)?;
+        bind_ipv6_children(builder, BuiltinProtocol::Ipv6)?;
+        bind_ipv6_extensions(builder, BuiltinProtocol::Ipv6)?;
         for parent in [
-            "ipv6_hop_by_hop",
-            "ipv6_destination_options",
-            "ipv6_fragment",
-            "ipv6_srh",
+            BuiltinProtocol::Ipv6HopByHop,
+            BuiltinProtocol::Ipv6DestinationOptions,
+            BuiltinProtocol::Ipv6Fragment,
+            BuiltinProtocol::Ipv6Srh,
         ] {
             bind_ipv6_children(builder, parent)?;
             bind_ipv6_extensions(builder, parent)?;
         }
-        builder.bind("raw_ip", 58, "icmpv6", 100)?;
+        bind(
+            builder,
+            BuiltinProtocol::RawIp,
+            58,
+            BuiltinProtocol::Icmpv6,
+            100,
+        )?;
 
-        builder.bind("gre", 0x0800, "ipv4", 100)?;
-        builder.bind("gre", 0x86dd, "ipv6", 100)?;
-        builder.bind("gre", 0, "raw", -100)?;
+        bind(
+            builder,
+            BuiltinProtocol::Gre,
+            0x0800,
+            BuiltinProtocol::Ipv4,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Gre,
+            0x86dd,
+            BuiltinProtocol::Ipv6,
+            100,
+        )?;
+        bind(builder, BuiltinProtocol::Gre, 0, BuiltinProtocol::Raw, -100)?;
 
         // Payload-bearing transports use discriminator zero as their typed raw child.
-        builder.bind("udp", 0, "raw", 0)?;
-        builder.bind("tcp", 0, "raw", 0)?;
-        builder.bind("sctp", 0, "raw", 0)?;
+        for parent in [
+            BuiltinProtocol::Udp,
+            BuiltinProtocol::Tcp,
+            BuiltinProtocol::Sctp,
+        ] {
+            bind(builder, parent, 0, BuiltinProtocol::Raw, 0)?;
+        }
         // ICMP bodies are terminal: their codec owns all bytes after the
         // checksum, so advertising a Raw child would make round trips merge
         // two layers into one.
         // ARP has no next-protocol field; any remaining bytes are link padding.
-        builder.bind("arp", 0, "padding", 0)?;
+        bind(
+            builder,
+            BuiltinProtocol::Arp,
+            0,
+            BuiltinProtocol::Padding,
+            0,
+        )?;
         Ok(())
     }
 }
 
+fn register_catalog(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
+    macro_rules! register_matcher {
+        ($variant:ident, none) => {};
+        ($variant:ident, reverse_flow) => {
+            builder.register_matcher(
+                BuiltinProtocol::$variant.as_str(),
+                matcher::ReverseFlowMatcher::new(BuiltinProtocol::$variant),
+            )?;
+        };
+        ($variant:ident, echo_v4) => {
+            builder.register_matcher(
+                BuiltinProtocol::$variant.as_str(),
+                matcher::EchoMatcher::v4(),
+            )?;
+        };
+        ($variant:ident, echo_v6) => {
+            builder.register_matcher(
+                BuiltinProtocol::$variant.as_str(),
+                matcher::EchoMatcher::v6(),
+            )?;
+        };
+    }
+
+    macro_rules! register_protocols {
+        ($(
+            $variant:ident {
+                canonical: $canonical:literal,
+                aliases: [$($alias:literal),* $(,)?],
+                constructible: $constructible:literal,
+                dissect: $dissect:literal,
+                exact_round_trip: $exact_round_trip:literal,
+                matcher: $matcher:ident,
+                codec: $codec:ident
+            }
+        )*) => {{
+            $(
+                builder.register_builtin_codec($codec)?;
+                register_matcher!($variant, $matcher);
+            )*
+            Ok(())
+        }};
+    }
+
+    builtin_protocol_catalog!(register_protocols)
+}
+
 fn bind_common_ip_children(
     builder: &mut RegistryBuilder,
-    parent: &str,
+    parent: BuiltinProtocol,
 ) -> Result<(), RegistryError> {
-    builder.bind(parent, 4, "ipv4", 100)?;
-    builder.bind(parent, 6, "tcp", 100)?;
-    builder.bind(parent, 17, "udp", 100)?;
-    builder.bind(parent, 41, "ipv6", 100)?;
-    builder.bind(parent, 47, "gre", 100)?;
-    builder.bind(parent, 132, "sctp", 100)?;
-    builder.bind(parent, 255, "raw", -100)?;
+    bind(builder, parent, 4, BuiltinProtocol::Ipv4, 100)?;
+    bind(builder, parent, 6, BuiltinProtocol::Tcp, 100)?;
+    bind(builder, parent, 17, BuiltinProtocol::Udp, 100)?;
+    bind(builder, parent, 41, BuiltinProtocol::Ipv6, 100)?;
+    bind(builder, parent, 47, BuiltinProtocol::Gre, 100)?;
+    bind(builder, parent, 132, BuiltinProtocol::Sctp, 100)?;
+    bind(builder, parent, 255, BuiltinProtocol::Raw, -100)?;
     Ok(())
 }
 
-fn bind_ipv6_children(builder: &mut RegistryBuilder, parent: &str) -> Result<(), RegistryError> {
+fn bind_ipv6_children(
+    builder: &mut RegistryBuilder,
+    parent: BuiltinProtocol,
+) -> Result<(), RegistryError> {
     bind_common_ip_children(builder, parent)?;
-    builder.bind(parent, 58, "icmpv6", 100)?;
-    builder.bind(parent, 59, "malformed", 100)?;
+    bind(builder, parent, 58, BuiltinProtocol::Icmpv6, 100)?;
+    bind(builder, parent, 59, BuiltinProtocol::Malformed, 100)?;
     Ok(())
 }
 
-fn bind_ipv6_extensions(builder: &mut RegistryBuilder, parent: &str) -> Result<(), RegistryError> {
+fn bind_ipv6_extensions(
+    builder: &mut RegistryBuilder,
+    parent: BuiltinProtocol,
+) -> Result<(), RegistryError> {
     // Hop-by-Hop is valid only immediately after the outer IPv6 header.
-    if parent == "ipv6" {
-        builder.bind(parent, 0, "ipv6_hop_by_hop", 100)?;
+    if parent == BuiltinProtocol::Ipv6 {
+        bind(builder, parent, 0, BuiltinProtocol::Ipv6HopByHop, 100)?;
     }
-    builder.bind(parent, 43, "ipv6_srh", 100)?;
-    builder.bind(parent, 44, "ipv6_fragment", 100)?;
-    builder.bind(parent, 60, "ipv6_destination_options", 100)?;
+    bind(builder, parent, 43, BuiltinProtocol::Ipv6Srh, 100)?;
+    bind(builder, parent, 44, BuiltinProtocol::Ipv6Fragment, 100)?;
+    bind(
+        builder,
+        parent,
+        60,
+        BuiltinProtocol::Ipv6DestinationOptions,
+        100,
+    )?;
     Ok(())
 }
 
-fn bind_link_children(builder: &mut RegistryBuilder, parent: &str) -> Result<(), RegistryError> {
-    builder.bind(parent, 0x0800, "ipv4", 100)?;
-    builder.bind(parent, 0x0806, "arp", 100)?;
-    builder.bind(parent, 0x8100, "vlan", 100)?;
-    builder.bind(parent, 0x88a8, "vlan8021ad", 100)?;
-    builder.bind(parent, 0x86dd, "ipv6", 100)?;
+fn bind_link_children(
+    builder: &mut RegistryBuilder,
+    parent: BuiltinProtocol,
+) -> Result<(), RegistryError> {
+    bind(builder, parent, 0x0800, BuiltinProtocol::Ipv4, 100)?;
+    bind(builder, parent, 0x0806, BuiltinProtocol::Arp, 100)?;
+    bind(builder, parent, 0x8100, BuiltinProtocol::Vlan, 100)?;
+    bind(builder, parent, 0x88a8, BuiltinProtocol::Vlan8021ad, 100)?;
+    bind(builder, parent, 0x86dd, BuiltinProtocol::Ipv6, 100)?;
     // A fallback reverse binding lets an exactly decoded unknown EtherType rebuild with Raw.
-    builder.bind(parent, 0, "raw", -100)?;
+    bind(builder, parent, 0, BuiltinProtocol::Raw, -100)?;
     Ok(())
 }
 
 fn bind_ip_children(
     builder: &mut RegistryBuilder,
-    parent: &str,
+    parent: BuiltinProtocol,
     icmp_number: u64,
 ) -> Result<(), RegistryError> {
     bind_common_ip_children(builder, parent)?;
-    builder.bind(parent, icmp_number, "icmpv4", 100)?;
-    builder.bind(parent, 2, "igmp", 100)?;
+    bind(builder, parent, icmp_number, BuiltinProtocol::Icmpv4, 100)?;
+    bind(builder, parent, 2, BuiltinProtocol::Igmp, 100)?;
     Ok(())
+}
+
+fn bind(
+    builder: &mut RegistryBuilder,
+    parent: BuiltinProtocol,
+    discriminator: u64,
+    child: BuiltinProtocol,
+    priority: i32,
+) -> Result<(), RegistryError> {
+    builder
+        .bind(parent.as_str(), discriminator, child.as_str(), priority)
+        .map(|_| ())
 }
 
 /// Build the default immutable registry without global mutable registration.

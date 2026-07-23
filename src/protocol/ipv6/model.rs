@@ -3,7 +3,6 @@
 
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
-use std::sync::OnceLock;
 
 use bytes::Bytes;
 
@@ -12,17 +11,16 @@ use crate::packet::{
         CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
         LayerEncodeContext, NetworkEnvelope,
     },
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, bytes, expected_discriminator, field_layout,
-    impl_layer_boilerplate, invalid, make_layer, out_of_range, payload_without_padding, protocol,
-    resolve_u8, set_wire_u8, strict_or_diagnostic, truncated, unknown_field,
+    ValueExpectation, aliased_fields, expected_discriminator, invalid, make_layer, out_of_range,
+    payload_without_padding, protocol, resolve_u8, strict_or_diagnostic, truncated,
     validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
-    wire_u8, wrong_layer, wrong_type,
+    wrong_layer, wrong_type,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,80 +53,34 @@ impl Default for DestinationOptions {
     }
 }
 
-fn options_fields() -> &'static [FieldSchema] {
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "next_header",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "IPv6 next-header discriminator",
-        },
-        FieldSchema {
-            name: "options",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
-            description: "Option bytes, padded to an eight-byte header boundary",
-        },
-    ];
-    FIELDS
-}
-
-fn hop_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("ipv6_hop_by_hop"),
-        name: "IPv6 Hop-by-Hop Options",
-        fields: options_fields(),
-    })
-}
-
-fn destination_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("ipv6_destination_options"),
-        name: "IPv6 Destination Options",
-        fields: options_fields(),
-    })
-}
-
-macro_rules! impl_options_layer {
-    ($ty:ty, $schema:path) => {
-        impl Layer for $ty {
-            impl_layer_boilerplate!($ty, $schema);
-
-            fn field(&self, name: &str) -> Option<FieldValue> {
-                match name {
-                    "next_header" => Some(wire_u8(&self.next_header)),
-                    "options" => Some(FieldValue::Bytes(self.options.clone())),
-                    _ => None,
-                }
+macro_rules! declare_options_layer {
+    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, $layout:ident) => {
+        reflective_layer! {
+            fn $schema() => { protocol: protocol($protocol), name: $name }
+            impl $ty {
+                "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, $schema(), name, value), layout: (0, 1) },
+                "options" => { kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, $schema(), name, value), layout: (2, header_len) },
+                normalize |layer| { layer.next_header.normalize(); }
             }
-
-            fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-                match (name, value) {
-                    ("next_header", value) => {
-                        set_wire_u8(&mut self.next_header, $schema(), name, value)
-                    }
-                    ("options", value) => {
-                        self.options =
-                            bytes(&value).ok_or_else(|| wrong_type($schema(), name, "bytes"))?;
-                        Ok(())
-                    }
-                    _ => Err(unknown_field($schema(), name)),
-                }
-            }
-
-            fn normalize(&mut self) {
-                self.next_header.normalize();
-            }
+            layout fn $layout(header_len: usize);
         }
     };
 }
 
-impl_options_layer!(HopByHop, hop_schema);
-impl_options_layer!(DestinationOptions, destination_schema);
+declare_options_layer!(
+    HopByHop,
+    hop_schema,
+    "ipv6_hop_by_hop",
+    "IPv6 Hop-by-Hop Options",
+    hop_layout
+);
+declare_options_layer!(
+    DestinationOptions,
+    destination_schema,
+    "ipv6_destination_options",
+    "IPv6 Destination Options",
+    destination_layout
+);
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct HopByHopCodec;
@@ -141,6 +93,7 @@ fn encode_options<L>(
     layer: &L,
     next_header: &WireValue<u8>,
     options: &Bytes,
+    layout: fn(usize) -> Vec<crate::packet::layout::FieldLayout>,
     context: &LayerEncodeContext<'_>,
 ) -> Result<EncodedLayer, CodecError>
 where
@@ -188,10 +141,7 @@ where
         prefix,
         suffix: Vec::new(),
         materialized,
-        fields: vec![
-            field_layout("next_header", 0, 1),
-            field_layout("options", 2, header_len),
-        ],
+        fields: layout(header_len),
         diagnostics,
     })
 }
@@ -200,6 +150,7 @@ fn decode_options<L>(
     name: &str,
     input: &[u8],
     make: impl FnOnce(u8, Bytes) -> L,
+    layout: fn(usize) -> Vec<crate::packet::layout::FieldLayout>,
 ) -> Result<DecodedLayerValue, CodecError>
 where
     L: Layer + 'static,
@@ -222,10 +173,7 @@ where
         payload_offset: header_len,
         payload_len: input.len() - header_len,
         next: vec![Discriminator(u64::from(input[0]))],
-        fields: vec![
-            field_layout("next_header", 0, 1),
-            field_layout("options", 2, header_len),
-        ],
+        fields: layout(header_len),
         diagnostics: Vec::new(),
         stop: input.len() == header_len,
         network: None,
@@ -256,6 +204,7 @@ impl LayerCodec for HopByHopCodec {
             layer,
             &layer.next_header,
             &layer.options,
+            hop_layout,
             context,
         )
     }
@@ -265,10 +214,15 @@ impl LayerCodec for HopByHopCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
-        decode_options("ipv6_hop_by_hop", input, |next, options| HopByHop {
-            next_header: WireValue::Exact(next),
-            options,
-        })
+        decode_options(
+            "ipv6_hop_by_hop",
+            input,
+            |next, options| HopByHop {
+                next_header: WireValue::Exact(next),
+                options,
+            },
+            hop_layout,
+        )
     }
 
     fn make_layer(
@@ -303,6 +257,7 @@ impl LayerCodec for DestinationOptionsCodec {
             layer,
             &layer.next_header,
             &layer.options,
+            destination_layout,
             context,
         )
     }
@@ -312,12 +267,15 @@ impl LayerCodec for DestinationOptionsCodec {
         input: &[u8],
         _context: &LayerDecodeContext<'_>,
     ) -> Result<DecodedLayerValue, CodecError> {
-        decode_options("ipv6_destination_options", input, |next, options| {
-            DestinationOptions {
+        decode_options(
+            "ipv6_destination_options",
+            input,
+            |next, options| DestinationOptions {
                 next_header: WireValue::Exact(next),
                 options,
-            }
-        })
+            },
+            destination_layout,
+        )
     }
 
     fn make_layer(
@@ -348,90 +306,16 @@ impl Default for Ipv6Fragment {
     }
 }
 
-fn fragment_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "next_header",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "IPv6 next-header discriminator",
-        },
-        FieldSchema {
-            name: "fragment_offset",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Fragment offset in eight-byte units",
-        },
-        FieldSchema {
-            name: "more_fragments",
-            kind: FieldKind::Bool,
-            derived: false,
-            required: true,
-            description: "More-fragments flag",
-        },
-        FieldSchema {
-            name: "identification",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Fragment identification",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("ipv6_fragment"),
-        name: "IPv6 Fragment",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Ipv6Fragment {
-    impl_layer_boilerplate!(Ipv6Fragment, fragment_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "next_header" => Some(wire_u8(&self.next_header)),
-            "fragment_offset" => Some(self.fragment_offset.into()),
-            "more_fragments" => Some(self.more_fragments.into()),
-            "identification" => Some(self.identification.into()),
-            _ => None,
-        }
+reflective_layer! {
+    fn fragment_schema() => { protocol: protocol("ipv6_fragment"), name: "IPv6 Fragment" }
+    impl Ipv6Fragment {
+        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, fragment_schema(), name, value), layout: (0, 1) },
+        "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(fragment_schema(), name))?; Ok(()) }, _ => Err(wrong_type(fragment_schema(), name, "unsigned")) }, layout: (2, 4) },
+        "more_fragments" => { kind: Bool, derived: false, required: true, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, fragment_schema(), name, value), layout: (2, 4) },
+        "identification" => { kind: Unsigned, derived: false, required: true, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, fragment_schema(), name, value), layout: (4, 8) },
+        normalize |layer| { layer.next_header.normalize(); }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("next_header", value) => {
-                set_wire_u8(&mut self.next_header, fragment_schema(), name, value)
-            }
-            ("fragment_offset", FieldValue::Unsigned(value)) => {
-                self.fragment_offset = u16::try_from(value)
-                    .ok()
-                    .filter(|value| *value <= 0x1fff)
-                    .ok_or_else(|| out_of_range(fragment_schema(), name))?;
-                Ok(())
-            }
-            ("more_fragments", FieldValue::Bool(value)) => {
-                self.more_fragments = value;
-                Ok(())
-            }
-            ("identification", FieldValue::Unsigned(value)) => {
-                self.identification =
-                    u32::try_from(value).map_err(|_| out_of_range(fragment_schema(), name))?;
-                Ok(())
-            }
-            ("fragment_offset" | "identification", _) => {
-                Err(wrong_type(fragment_schema(), name, "unsigned"))
-            }
-            ("more_fragments", _) => Err(wrong_type(fragment_schema(), name, "bool")),
-            _ => Err(unknown_field(fragment_schema(), name)),
-        }
-    }
-
-    fn normalize(&mut self) {
-        self.next_header.normalize();
-    }
+    layout fn fragment_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -527,12 +411,7 @@ impl LayerCodec for Ipv6FragmentCodec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: vec![
-                field_layout("next_header", 0, 1),
-                field_layout("fragment_offset", 2, 4),
-                field_layout("more_fragments", 2, 4),
-                field_layout("identification", 4, 8),
-            ],
+            fields: fragment_layout(),
             diagnostics,
         })
     }
@@ -567,12 +446,7 @@ impl LayerCodec for Ipv6FragmentCodec {
                 // header; preserve its bytes explicitly as Raw.
                 vec![Discriminator(255)]
             },
-            fields: vec![
-                field_layout("next_header", 0, 1),
-                field_layout("fragment_offset", 2, 4),
-                field_layout("more_fragments", 2, 4),
-                field_layout("identification", 4, 8),
-            ],
+            fields: fragment_layout(),
             diagnostics: Vec::new(),
             stop: input.len() == 8,
             network: None,
@@ -611,119 +485,18 @@ impl Default for SegmentRoutingHeader {
     }
 }
 
-fn srh_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "next_header",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "IPv6 next-header discriminator",
-        },
-        FieldSchema {
-            name: "segments_left",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Remaining segments",
-        },
-        FieldSchema {
-            name: "last_entry",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Highest segment-list index",
-        },
-        FieldSchema {
-            name: "flags",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "SRH flags",
-        },
-        FieldSchema {
-            name: "tag",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "SRH tag",
-        },
-        FieldSchema {
-            name: "segments",
-            kind: FieldKind::List,
-            derived: false,
-            required: true,
-            description: "Segments in visit order",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("ipv6_srh"),
-        name: "IPv6 Segment Routing Header",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for SegmentRoutingHeader {
-    impl_layer_boilerplate!(SegmentRoutingHeader, srh_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "next_header" => Some(wire_u8(&self.next_header)),
-            "segments_left" => Some(wire_u8(&self.segments_left)),
-            "last_entry" => Some(wire_u8(&self.last_entry)),
-            "flags" => Some(self.flags.into()),
-            "tag" => Some(self.tag.into()),
-            "segments" => Some(FieldValue::List(
-                self.segments
-                    .iter()
-                    .copied()
-                    .map(FieldValue::Ipv6)
-                    .collect(),
-            )),
-            _ => None,
-        }
+reflective_layer! {
+    fn srh_schema() => { protocol: protocol("ipv6_srh"), name: "IPv6 Segment Routing Header" }
+    impl SegmentRoutingHeader {
+        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, srh_schema(), name, value), layout: (0, 1) },
+        "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", get |layer| Some(reflect_get(&layer.segments_left)), set |layer, value, name| reflect_set(&mut layer.segments_left, srh_schema(), name, value), layout: (3, 4) },
+        "last_entry" => { kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", get |layer| Some(reflect_get(&layer.last_entry)), set |layer, value, name| reflect_set(&mut layer.last_entry, srh_schema(), name, value), layout: (4, 5) },
+        "flags" => { kind: Unsigned, derived: false, required: false, description: "SRH flags", get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| reflect_set(&mut layer.flags, srh_schema(), name, value), layout: (5, 6) },
+        "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", get |layer| Some(reflect_get(&layer.tag)), set |layer, value, name| reflect_set(&mut layer.tag, srh_schema(), name, value), layout: (6, 8) },
+        "segments" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, header_len) },
+        normalize |layer| { layer.next_header.normalize(); layer.segments_left.normalize(); layer.last_entry.normalize(); }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("next_header", value) => set_wire_u8(&mut self.next_header, srh_schema(), name, value),
-            ("segments_left", value) => {
-                set_wire_u8(&mut self.segments_left, srh_schema(), name, value)
-            }
-            ("last_entry", value) => set_wire_u8(&mut self.last_entry, srh_schema(), name, value),
-            ("flags", FieldValue::Unsigned(value)) => {
-                self.flags = u8::try_from(value).map_err(|_| out_of_range(srh_schema(), name))?;
-                Ok(())
-            }
-            ("tag", FieldValue::Unsigned(value)) => {
-                self.tag = u16::try_from(value).map_err(|_| out_of_range(srh_schema(), name))?;
-                Ok(())
-            }
-            ("segments", FieldValue::List(values)) => {
-                self.segments = values
-                    .into_iter()
-                    .map(|value| match value {
-                        FieldValue::Ipv6(value) => Ok(value),
-                        FieldValue::Text(value) => value
-                            .parse()
-                            .map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")),
-                        _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")),
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(())
-            }
-            ("flags" | "tag", _) => Err(wrong_type(srh_schema(), name, "unsigned")),
-            ("segments", _) => Err(wrong_type(srh_schema(), name, "list")),
-            _ => Err(unknown_field(srh_schema(), name)),
-        }
-    }
-
-    fn normalize(&mut self) {
-        self.next_header.normalize();
-        self.segments_left.normalize();
-        self.last_entry.normalize();
-    }
+    layout fn srh_layout(header_len: usize);
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -818,14 +591,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             prefix,
             suffix: Vec::new(),
             materialized: Box::new(materialized),
-            fields: vec![
-                field_layout("next_header", 0, 1),
-                field_layout("segments_left", 3, 4),
-                field_layout("last_entry", 4, 5),
-                field_layout("flags", 5, 6),
-                field_layout("tag", 6, 8),
-                field_layout("segments", 8, header_len),
-            ],
+            fields: srh_layout(header_len),
             diagnostics,
         })
     }
@@ -893,14 +659,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
             payload_offset: header_len,
             payload_len: input.len() - header_len,
             next: vec![Discriminator(u64::from(input[0]))],
-            fields: vec![
-                field_layout("next_header", 0, 1),
-                field_layout("segments_left", 3, 4),
-                field_layout("last_entry", 4, 5),
-                field_layout("flags", 5, 6),
-                field_layout("tag", 6, 8),
-                field_layout("segments", 8, header_len),
-            ],
+            fields: srh_layout(header_len),
             diagnostics: Vec::new(),
             stop: input.len() == header_len,
             network,

@@ -5,6 +5,8 @@
 
 use serde::Serialize;
 
+use crate::packet::semantics::{BuiltinProtocol, builtin_protocol_catalog};
+
 /// Schema identifier for the stable built-in protocol support manifest.
 pub const PROTOCOL_SUPPORT_SCHEMA_V1: &str = "packetcraftr.protocol-support/v1";
 
@@ -72,134 +74,132 @@ pub struct ProtocolSupportManifest {
     pub fallback: ProtocolFallbackSupport,
 }
 
-macro_rules! protocol {
-    ($name:literal, $aliases:expr_2021, matcher = $matcher:literal) => {
-        ProtocolSupport {
-            protocol: $name,
-            aliases: $aliases,
-            build: true,
-            dissect: true,
-            exact_round_trip: true,
-            matcher: $matcher,
-            decode_only: false,
-        }
-    };
-}
-
 pub(crate) fn aliases(protocol: &str) -> &'static [&'static str] {
-    BUILTIN_PROTOCOLS
-        .iter()
-        .find(|support| support.protocol == protocol)
-        .map(|support| support.aliases)
+    BuiltinProtocol::from_name(protocol)
+        .map(BuiltinProtocol::aliases)
         .unwrap_or_else(|| panic!("missing built-in protocol support for {protocol}"))
 }
 
-/// All 25 codecs registered by [`crate::protocol::builtin::Module`].
-pub const BUILTIN_PROTOCOLS: &[ProtocolSupport] = &[
-    protocol!("arp", &[], matcher = false),
-    protocol!("bsd_loop", &["loop"], matcher = false),
-    protocol!("bsd_null", &["null"], matcher = false),
-    protocol!("ethernet", &["eth", "ether", "ethernet2"], matcher = false),
-    protocol!("gre", &[], matcher = false),
-    protocol!("icmpv4", &["icmp", "icmp4"], matcher = true),
-    protocol!("icmpv6", &["icmp6"], matcher = true),
-    protocol!("igmp", &[], matcher = false),
-    protocol!("ipv4", &["ip", "ip4"], matcher = false),
-    protocol!("ipv6", &["ip6"], matcher = false),
-    protocol!(
-        "ipv6_destination_options",
-        &["destopts", "destination_options"],
-        matcher = false
-    ),
-    protocol!("ipv6_fragment", &["fragment6", "frag6"], matcher = false),
-    protocol!(
-        "ipv6_hop_by_hop",
-        &["hop", "hopopts", "hbh"],
-        matcher = false
-    ),
-    protocol!("ipv6_srh", &["srh", "segment_routing"], matcher = false),
-    protocol!("linux_sll", &["sll"], matcher = false),
-    protocol!("linux_sll2", &["sll2"], matcher = false),
-    protocol!("malformed", &[], matcher = false),
-    protocol!("padding", &["pad"], matcher = false),
-    protocol!("raw", &["payload", "bytes"], matcher = false),
-    ProtocolSupport {
-        protocol: "raw_ip",
-        aliases: &["rawip"],
-        build: false,
-        dissect: true,
+macro_rules! define_protocol_support {
+    ($(
+        $variant:ident {
+            canonical: $canonical:literal,
+            aliases: [$($alias:literal),* $(,)?],
+            constructible: $constructible:literal,
+            dissect: $dissect:literal,
+            exact_round_trip: $exact_round_trip:literal,
+            matcher: $matcher:ident,
+            codec: $codec:ident
+        }
+    )*) => {
+        /// Every codec registered by [`crate::protocol::builtin::Module`], in
+        /// stable manifest order.
+        pub const BUILTIN_PROTOCOLS: &[ProtocolSupport] = &[$(
+            ProtocolSupport {
+                protocol: $canonical,
+                aliases: &[$($alias),*],
+                build: $constructible,
+                dissect: $dissect,
+                exact_round_trip: $exact_round_trip,
+                matcher: define_protocol_support!(@matcher $matcher),
+                decode_only: !$constructible,
+            }
+        ),*];
+    };
+    (@matcher none) => { false };
+    (@matcher reverse_flow) => { true };
+    (@matcher echo_v4) => { true };
+    (@matcher echo_v6) => { true };
+}
+
+builtin_protocol_catalog!(define_protocol_support);
+
+const fn capture_root(
+    link_type: u32,
+    protocol: BuiltinProtocol,
+    byte_order: CaptureRootByteOrder,
+) -> CaptureRootSupport {
+    CaptureRootSupport {
+        link_type,
+        protocol: protocol.as_str(),
+        byte_order,
         exact_round_trip: true,
-        matcher: false,
-        decode_only: true,
-    },
-    protocol!("sctp", &[], matcher = true),
-    protocol!("tcp", &[], matcher = true),
-    protocol!("udp", &[], matcher = true),
-    protocol!("vlan", &["dot1q", "8021q"], matcher = false),
-    protocol!("vlan8021ad", &["dot1ad", "8021ad", "qinq"], matcher = false),
-];
+    }
+}
 
 /// Every numeric capture root registered by the default built-in module.
+///
+/// Capture topology remains separate from identity metadata, but every edge is
+/// typed so a protocol rename cannot silently leave a string binding behind.
 pub const BUILTIN_CAPTURE_ROOTS: &[CaptureRootSupport] = &[
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::NULL.0,
-        protocol: "bsd_null",
-        byte_order: CaptureRootByteOrder::CapturedHost,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::ETHERNET.0,
-        protocol: "ethernet",
-        byte_order: CaptureRootByteOrder::ProtocolDefined,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::BSD_RAW.0,
-        protocol: "raw_ip",
-        byte_order: CaptureRootByteOrder::ProtocolDefined,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::RAW.0,
-        protocol: "raw_ip",
-        byte_order: CaptureRootByteOrder::ProtocolDefined,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::LOOP.0,
-        protocol: "bsd_loop",
-        byte_order: CaptureRootByteOrder::Network,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::LINUX_SLL.0,
-        protocol: "linux_sll",
-        byte_order: CaptureRootByteOrder::Network,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::IPV4.0,
-        protocol: "ipv4",
-        byte_order: CaptureRootByteOrder::ProtocolDefined,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::IPV6.0,
-        protocol: "ipv6",
-        byte_order: CaptureRootByteOrder::ProtocolDefined,
-        exact_round_trip: true,
-    },
-    CaptureRootSupport {
-        link_type: crate::capture::LinkType::LINUX_SLL2.0,
-        protocol: "linux_sll2",
-        byte_order: CaptureRootByteOrder::Network,
-        exact_round_trip: true,
-    },
+    capture_root(
+        crate::capture::LinkType::NULL.0,
+        BuiltinProtocol::BsdNull,
+        CaptureRootByteOrder::CapturedHost,
+    ),
+    capture_root(
+        crate::capture::LinkType::ETHERNET.0,
+        BuiltinProtocol::Ethernet,
+        CaptureRootByteOrder::ProtocolDefined,
+    ),
+    capture_root(
+        crate::capture::LinkType::BSD_RAW.0,
+        BuiltinProtocol::RawIp,
+        CaptureRootByteOrder::ProtocolDefined,
+    ),
+    capture_root(
+        crate::capture::LinkType::RAW.0,
+        BuiltinProtocol::RawIp,
+        CaptureRootByteOrder::ProtocolDefined,
+    ),
+    capture_root(
+        crate::capture::LinkType::LOOP.0,
+        BuiltinProtocol::BsdLoop,
+        CaptureRootByteOrder::Network,
+    ),
+    capture_root(
+        crate::capture::LinkType::LINUX_SLL.0,
+        BuiltinProtocol::LinuxSll,
+        CaptureRootByteOrder::Network,
+    ),
+    capture_root(
+        crate::capture::LinkType::IPV4.0,
+        BuiltinProtocol::Ipv4,
+        CaptureRootByteOrder::ProtocolDefined,
+    ),
+    capture_root(
+        crate::capture::LinkType::IPV6.0,
+        BuiltinProtocol::Ipv6,
+        CaptureRootByteOrder::ProtocolDefined,
+    ),
+    capture_root(
+        crate::capture::LinkType::LINUX_SLL2.0,
+        BuiltinProtocol::LinuxSll2,
+        CaptureRootByteOrder::Network,
+    ),
 ];
 
 const NONE: &[&str] = &[];
-const DNS_MATCHERS: &[&str] = &["tcp", "udp"];
-const PROBE_MATCHERS: &[&str] = &["icmpv4", "icmpv6", "tcp", "udp"];
+
+const fn protocol_names<const N: usize>(protocols: [BuiltinProtocol; N]) -> [&'static str; N] {
+    let mut names = [""; N];
+    let mut index = 0;
+    while index < N {
+        names[index] = protocols[index].as_str();
+        index += 1;
+    }
+    names
+}
+
+const DNS_MATCHER_VALUES: [&str; 2] = protocol_names([BuiltinProtocol::Tcp, BuiltinProtocol::Udp]);
+const PROBE_MATCHER_VALUES: [&str; 4] = protocol_names([
+    BuiltinProtocol::Icmpv4,
+    BuiltinProtocol::Icmpv6,
+    BuiltinProtocol::Tcp,
+    BuiltinProtocol::Udp,
+]);
+const DNS_MATCHERS: &[&str] = &DNS_MATCHER_VALUES;
+const PROBE_MATCHERS: &[&str] = &PROBE_MATCHER_VALUES;
 
 #[derive(Clone, Copy)]
 enum Capability {
@@ -212,16 +212,16 @@ const fn supported_protocols<const N: usize>(capability: Capability) -> [&'stati
     let mut protocols = [""; N];
     let mut source = 0;
     let mut target = 0;
-    while source < BUILTIN_PROTOCOLS.len() {
-        let support = &BUILTIN_PROTOCOLS[source];
+    while source < BuiltinProtocol::ALL.len() {
+        let protocol = BuiltinProtocol::ALL[source];
         let supported = match capability {
-            Capability::Build => support.build,
-            Capability::Dissect => support.dissect,
-            Capability::Matcher => support.matcher,
+            Capability::Build => protocol.is_constructible(),
+            Capability::Dissect => protocol.is_dissectible(),
+            Capability::Matcher => protocol.has_matcher(),
         };
         if supported {
             assert!(target < N, "too many protocols for capability list");
-            protocols[target] = support.protocol;
+            protocols[target] = protocol.as_str();
             target += 1;
         }
         source += 1;
@@ -236,50 +236,62 @@ const MATCHER_VALUES: [&str; 5] = supported_protocols(Capability::Matcher);
 const ALL_BUILD: &[&str] = &ALL_BUILD_VALUES;
 const ALL_DISSECT: &[&str] = &ALL_DISSECT_VALUES;
 const MATCHERS: &[&str] = &MATCHER_VALUES;
-const LIVE_BUILD: &[&str] = &[
-    "arp",
-    "ethernet",
-    "gre",
-    "icmpv4",
-    "icmpv6",
-    "igmp",
-    "ipv4",
-    "ipv6",
-    "ipv6_destination_options",
-    "ipv6_fragment",
-    "ipv6_hop_by_hop",
-    "ipv6_srh",
-    "malformed",
-    "padding",
-    "raw",
-    "sctp",
-    "tcp",
-    "udp",
-    "vlan",
-    "vlan8021ad",
-];
-const PROBE_BUILD: &[&str] = &["ethernet", "icmpv4", "icmpv6", "ipv4", "ipv6", "tcp", "udp"];
-const DNS_BUILD: &[&str] = &[
-    "ethernet",
-    "ipv4",
-    "ipv6",
-    "raw",
-    "tcp",
-    "udp",
-    "vlan",
-    "vlan8021ad",
-];
-const DNS_DISSECT: &[&str] = &[
-    "ethernet",
-    "ipv4",
-    "ipv6",
-    "malformed",
-    "raw",
-    "tcp",
-    "udp",
-    "vlan",
-    "vlan8021ad",
-];
+const LIVE_BUILD_VALUES: [&str; 20] = protocol_names([
+    BuiltinProtocol::Arp,
+    BuiltinProtocol::Ethernet,
+    BuiltinProtocol::Gre,
+    BuiltinProtocol::Icmpv4,
+    BuiltinProtocol::Icmpv6,
+    BuiltinProtocol::Igmp,
+    BuiltinProtocol::Ipv4,
+    BuiltinProtocol::Ipv6,
+    BuiltinProtocol::Ipv6DestinationOptions,
+    BuiltinProtocol::Ipv6Fragment,
+    BuiltinProtocol::Ipv6HopByHop,
+    BuiltinProtocol::Ipv6Srh,
+    BuiltinProtocol::Malformed,
+    BuiltinProtocol::Padding,
+    BuiltinProtocol::Raw,
+    BuiltinProtocol::Sctp,
+    BuiltinProtocol::Tcp,
+    BuiltinProtocol::Udp,
+    BuiltinProtocol::Vlan,
+    BuiltinProtocol::Vlan8021ad,
+]);
+const PROBE_BUILD_VALUES: [&str; 7] = protocol_names([
+    BuiltinProtocol::Ethernet,
+    BuiltinProtocol::Icmpv4,
+    BuiltinProtocol::Icmpv6,
+    BuiltinProtocol::Ipv4,
+    BuiltinProtocol::Ipv6,
+    BuiltinProtocol::Tcp,
+    BuiltinProtocol::Udp,
+]);
+const DNS_BUILD_VALUES: [&str; 8] = protocol_names([
+    BuiltinProtocol::Ethernet,
+    BuiltinProtocol::Ipv4,
+    BuiltinProtocol::Ipv6,
+    BuiltinProtocol::Raw,
+    BuiltinProtocol::Tcp,
+    BuiltinProtocol::Udp,
+    BuiltinProtocol::Vlan,
+    BuiltinProtocol::Vlan8021ad,
+]);
+const DNS_DISSECT_VALUES: [&str; 9] = protocol_names([
+    BuiltinProtocol::Ethernet,
+    BuiltinProtocol::Ipv4,
+    BuiltinProtocol::Ipv6,
+    BuiltinProtocol::Malformed,
+    BuiltinProtocol::Raw,
+    BuiltinProtocol::Tcp,
+    BuiltinProtocol::Udp,
+    BuiltinProtocol::Vlan,
+    BuiltinProtocol::Vlan8021ad,
+]);
+const LIVE_BUILD: &[&str] = &LIVE_BUILD_VALUES;
+const PROBE_BUILD: &[&str] = &PROBE_BUILD_VALUES;
+const DNS_BUILD: &[&str] = &DNS_BUILD_VALUES;
+const DNS_DISSECT: &[&str] = &DNS_DISSECT_VALUES;
 
 /// Packet-layer obligations for every command in the CLI surface.
 pub const STABLE_WORKFLOW_PROTOCOLS: &[WorkflowProtocolSupport] = &[
@@ -428,11 +440,158 @@ pub const BUILTIN_PROTOCOL_SUPPORT: ProtocolSupportManifest = ProtocolSupportMan
 #[cfg(test)]
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
+    use bytes::Bytes;
 
     use super::*;
+    use crate::packet::{
+        field::{FieldKind, FieldValue},
+        layer::FieldError,
+    };
 
     fn unique(values: &[&str]) -> bool {
         values.iter().copied().collect::<BTreeSet<_>>().len() == values.len()
+    }
+
+    fn representative_value(kind: FieldKind, name: &str) -> FieldValue {
+        match kind {
+            FieldKind::Bool => FieldValue::Bool(true),
+            FieldKind::Unsigned => FieldValue::Unsigned(0),
+            FieldKind::Signed => FieldValue::Signed(0),
+            FieldKind::Text if name == "byte_order" => FieldValue::Text("little".to_owned()),
+            FieldKind::Text => FieldValue::Text("value".to_owned()),
+            FieldKind::Bytes if name == "address" => FieldValue::Bytes(Bytes::from(vec![0; 8])),
+            FieldKind::Bytes => FieldValue::Bytes(Bytes::from_static(&[1, 2])),
+            FieldKind::Ipv4 => FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 1)),
+            FieldKind::Ipv6 => FieldValue::Ipv6(Ipv6Addr::LOCALHOST),
+            FieldKind::Mac => FieldValue::Mac([0, 1, 2, 3, 4, 5]),
+            FieldKind::List => FieldValue::List(Vec::new()),
+        }
+    }
+
+    fn definitely_wrong_value(kind: FieldKind) -> FieldValue {
+        if kind == FieldKind::Bool {
+            FieldValue::Text("wrong".to_owned())
+        } else {
+            FieldValue::Bool(false)
+        }
+    }
+
+    #[test]
+    fn every_constructible_builtin_obeys_the_reflective_field_contract() {
+        let registry = crate::protocol::builtin::registry().unwrap();
+        for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.build) {
+            let codec = registry.codec_named(support.protocol).unwrap();
+            let layer = codec.make_layer(&BTreeMap::new()).unwrap();
+            let schema = layer.schema();
+            let names = schema
+                .fields
+                .iter()
+                .map(|field| field.name)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(
+                names.len(),
+                schema.fields.len(),
+                "{} schema",
+                support.protocol
+            );
+
+            for layout_name in layer.declared_layout_fields() {
+                assert!(
+                    names.contains(layout_name),
+                    "{} layout field {layout_name} is absent from its schema",
+                    support.protocol
+                );
+            }
+
+            for field in schema.fields {
+                let value = representative_value(field.kind, field.name);
+                let mut writable = layer.clone_box();
+                writable
+                    .set_field(field.name, value.clone())
+                    .unwrap_or_else(|error| {
+                        panic!(
+                            "{}.{} rejected its schema type: {error}",
+                            support.protocol, field.name
+                        )
+                    });
+                assert_eq!(
+                    writable.field(field.name),
+                    Some(value),
+                    "{}.{} setter/getter round trip",
+                    support.protocol,
+                    field.name
+                );
+
+                let mut wrong = layer.clone_box();
+                assert!(
+                    matches!(
+                        wrong.set_field(field.name, definitely_wrong_value(field.kind)),
+                        Err(FieldError::WrongType { .. })
+                    ),
+                    "{}.{} accepted an incompatible type",
+                    support.protocol,
+                    field.name
+                );
+            }
+
+            assert!(matches!(
+                layer
+                    .clone_box()
+                    .set_field("__unknown", FieldValue::Bool(false)),
+                Err(FieldError::UnknownField { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn address_fields_preserve_direct_text_setter_conversions() {
+        let registry = crate::protocol::builtin::registry().unwrap();
+
+        let mut ipv4 = registry
+            .codec_named("ipv4")
+            .unwrap()
+            .make_layer(&BTreeMap::new())
+            .unwrap();
+        ipv4.set_field("source", FieldValue::Text("192.0.2.9".to_owned()))
+            .unwrap();
+        assert_eq!(
+            ipv4.field("source"),
+            Some(FieldValue::Ipv4(Ipv4Addr::new(192, 0, 2, 9)))
+        );
+        assert!(matches!(
+            ipv4.set_field("source", FieldValue::Text("not-an-address".to_owned())),
+            Err(FieldError::WrongType {
+                expected: "ipv4",
+                ..
+            })
+        ));
+
+        let mut ipv6 = registry
+            .codec_named("ipv6")
+            .unwrap()
+            .make_layer(&BTreeMap::new())
+            .unwrap();
+        ipv6.set_field("source", FieldValue::Text("2001:db8::9".to_owned()))
+            .unwrap();
+        assert_eq!(
+            ipv6.field("source"),
+            Some(FieldValue::Ipv6("2001:db8::9".parse().unwrap()))
+        );
+
+        let mut ethernet = registry
+            .codec_named("ethernet")
+            .unwrap()
+            .make_layer(&BTreeMap::new())
+            .unwrap();
+        ethernet
+            .set_field("source", FieldValue::Text("00-11-22-33-44-55".to_owned()))
+            .unwrap();
+        assert_eq!(
+            ethernet.field("source"),
+            Some(FieldValue::Mac([0x00, 0x11, 0x22, 0x33, 0x44, 0x55]))
+        );
     }
 
     #[test]
@@ -450,6 +609,13 @@ mod tests {
         assert_eq!(declared.len(), 25);
 
         for support in BUILTIN_PROTOCOLS {
+            let identity = BuiltinProtocol::from_name(support.protocol)
+                .expect("manifest protocol must have a catalog identity");
+            assert_eq!(identity.aliases(), support.aliases);
+            assert_eq!(identity.is_constructible(), support.build);
+            assert_eq!(identity.is_dissectible(), support.dissect);
+            assert_eq!(identity.has_exact_round_trip(), support.exact_round_trip);
+            assert_eq!(identity.has_matcher(), support.matcher);
             assert!(unique(support.aliases), "{} aliases", support.protocol);
             let codec = registry
                 .codec(&support.protocol.into())
@@ -614,5 +780,14 @@ mod tests {
         assert_eq!(value["protocols"].as_array().unwrap().len(), 25);
         assert_eq!(value["capture_roots"].as_array().unwrap().len(), 9);
         assert_eq!(value["workflows"].as_array().unwrap().len(), 14);
+    }
+
+    #[test]
+    fn catalog_membership_is_independent_of_live_backend_features() {
+        // Backends are feature-gated, but the portable built-in codec catalog
+        // is not. This assertion runs in every CI feature profile.
+        assert_eq!(BuiltinProtocol::ALL.len(), 25);
+        assert_eq!(BUILTIN_PROTOCOLS.len(), BuiltinProtocol::ALL.len());
+        assert!(BuiltinProtocol::ALL.contains(&BuiltinProtocol::RawIp));
     }
 }

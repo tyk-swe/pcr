@@ -16,9 +16,7 @@ use crate::packet::{
     layer::{Layer, MalformedLayer, Padding, ProtocolId, Raw},
 };
 
-use super::common::{
-    ensure_encode_budget, field_layout, invalid, make_layer, protocol, wrong_layer,
-};
+use super::common::{ensure_encode_budget, invalid, make_layer, protocol, wrong_layer};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct RawCodec;
@@ -44,7 +42,7 @@ impl LayerCodec for RawCodec {
             .ok_or_else(|| wrong_layer("raw", layer))?;
         ensure_encode_budget("raw", layer.bytes.len(), context)?;
         let mut encoded = EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()));
-        encoded.fields = vec![field_layout("bytes", 0, layer.bytes.len())];
+        encoded.fields = crate::packet::layer::model::raw_layout(layer.bytes.len());
         Ok(encoded)
     }
 
@@ -57,7 +55,7 @@ impl LayerCodec for RawCodec {
             Box::new(Raw::new(Bytes::copy_from_slice(input))),
             input.len(),
         );
-        decoded.fields = vec![field_layout("bytes", 0, input.len())];
+        decoded.fields = crate::packet::layer::model::raw_layout(input.len());
         Ok(decoded)
     }
 
@@ -96,7 +94,7 @@ impl LayerCodec for MalformedCodec {
             .ok_or_else(|| wrong_layer("malformed", layer))?;
         ensure_encode_budget("malformed", layer.bytes.len(), context)?;
         let mut encoded = EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()));
-        encoded.fields = vec![field_layout("bytes", 0, layer.bytes.len())];
+        encoded.fields = crate::packet::layer::model::malformed_layout(layer.bytes.len());
         encoded.diagnostics.push(Diagnostic::warning(
             "build.malformed_layer",
             format!("preserving explicitly malformed bytes: {}", layer.reason),
@@ -117,7 +115,7 @@ impl LayerCodec for MalformedCodec {
             )),
             input.len(),
         );
-        decoded.fields = vec![field_layout("bytes", 0, input.len())];
+        decoded.fields = crate::packet::layer::model::malformed_layout(input.len());
         Ok(decoded)
     }
 
@@ -154,7 +152,7 @@ impl LayerCodec for PaddingCodec {
             .ok_or_else(|| wrong_layer("padding", layer))?;
         ensure_encode_budget("padding", layer.bytes.len(), context)?;
         let mut encoded = EncodedLayer::header(layer.bytes.to_vec(), Box::new(layer.clone()));
-        encoded.fields = vec![field_layout("bytes", 0, layer.bytes.len())];
+        encoded.fields = crate::packet::layer::model::padding_layout(layer.bytes.len());
         Ok(encoded)
     }
 
@@ -167,7 +165,7 @@ impl LayerCodec for PaddingCodec {
             Box::new(Padding::new(Bytes::copy_from_slice(input))),
             input.len(),
         );
-        decoded.fields = vec![field_layout("bytes", 0, input.len())];
+        decoded.fields = crate::packet::layer::model::padding_layout(input.len());
         Ok(decoded)
     }
 

@@ -15,18 +15,14 @@ where
 {
     let mut deadline = Deadline::new(request.limits.max_duration);
     request.validate()?;
-    enforce_deadline(&deadline)?;
-    let resolved = authorizer.resolve_and_authorize(&request.target);
-    enforce_deadline(&deadline)?;
-    let resolved = resolved?;
-    let mut resolved_addresses = Vec::with_capacity(resolved.addresses.len());
-    let mut seen_addresses = HashSet::with_capacity(resolved.addresses.len());
-    for address in resolved.addresses {
-        enforce_deadline(&deadline)?;
-        if request.address_family.accepts(address) && seen_addresses.insert(address) {
-            resolved_addresses.push(address);
-        }
-    }
+    let resolved = resolve_selected(
+        authorizer,
+        &request.target,
+        request.address_family,
+        &deadline,
+        traceroute_duration_error,
+    )?;
+    let resolved_addresses = resolved.addresses;
     let Some(&destination) = resolved_addresses.first() else {
         return Err(TracerouteError::AddressFamily {
             family: request.address_family.label(),
@@ -70,108 +66,76 @@ where
             value: u64::MAX,
             reason: "wire-byte accounting overflowed".to_owned(),
         })?;
-    enforce_deadline(&deadline)?;
-    let authorization = authorizer.authorize_operation(total_probes as u64, maximum_wire_bytes);
-    enforce_deadline(&deadline)?;
-    authorization?;
+    approve_operation(
+        authorizer,
+        total_probes as u64,
+        maximum_wire_bytes,
+        &deadline,
+        traceroute_duration_error,
+    )?;
 
     let batches = build_batches(request, destination)?;
     enforce_deadline(&deadline)?;
-    let mut hops = Vec::with_capacity(batches.len());
     let mut undecoded = Vec::new();
     let mut diagnostics = Vec::new();
-    let mut stats = Stats::default();
     let mut evidence_budget = EvidenceBudget::default();
-    let mut scheduled_delay = Duration::ZERO;
-    let mut completion = TracerouteCompletion::MaximumHops;
-    let mut any_response = false;
-
-    for (batch_index, batch) in batches.iter().enumerate() {
-        enforce_deadline(&deadline)?;
-        let sequence = batch.probes[0].sequence;
-        if batch_index != 0 {
-            let delay = rate_delay(
-                batches[batch_index - 1].probes.len(),
-                request.probes_per_second,
-            )?;
-            enforce_deadline(&deadline)?;
-            deadline.start_accounting(delay).map_err(duration_limit)?;
-            clock
-                .sleep(delay)
-                .map_err(|source| TracerouteError::Clock {
-                    sequence,
-                    message: source.to_string(),
-                })?;
-            deadline.account(delay).map_err(duration_limit)?;
-            scheduled_delay =
-                scheduled_delay
-                    .checked_add(delay)
-                    .ok_or(TracerouteError::DurationLimit {
-                        actual: Duration::MAX,
-                        limit: request.limits.max_duration,
-                    })?;
-        }
-
-        enforce_deadline(&deadline)?;
-        deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(duration_limit)?;
-        let execution = executor.execute(batch);
-        enforce_deadline(&deadline)?;
-        let execution =
-            execution.map_err(|source| TracerouteError::Execution { sequence, source })?;
-        deadline
-            .account(execution.stats.elapsed)
-            .map_err(duration_limit)?;
-        validate_execution(batch, &execution, request.limits)?;
-        enforce_deadline(&deadline)?;
-        add_stats(&mut stats, &execution.stats, sequence)?;
-        let mut evidence = TracerouteEvidenceState {
-            budget: &mut evidence_budget,
-            undecoded: &mut undecoded,
-            diagnostics: &mut diagnostics,
-        };
-        let hop = process_batch(
-            batch,
-            execution,
-            registry,
-            request.limits,
-            &mut evidence,
-            &deadline,
-        )?;
-        any_response |= hop
-            .probes
+    let run = run_batches(
+        &batches,
+        request.probes_per_second,
+        request.limits.max_duration,
+        total_probes.saturating_sub(1) as u64,
+        &mut deadline,
+        clock,
+        |batch| executor.execute(batch),
+        |batch, execution| validate_execution(batch, execution, request.limits),
+        |batch, execution, deadline| {
+            let mut evidence = TracerouteEvidenceState {
+                budget: &mut evidence_budget,
+                undecoded: &mut undecoded,
+                diagnostics: &mut diagnostics,
+            };
+            process_batch(
+                batch,
+                execution,
+                registry,
+                request.limits,
+                &mut evidence,
+                deadline,
+            )
+        },
+        terminal_hop,
+        traceroute_duration_error,
+        |rate| TracerouteError::InvalidLimit {
+            field: "probes_per_second",
+            value: u64::from(rate.unwrap_or_default()),
+            reason: "rate-delay arithmetic overflowed".to_owned(),
+        },
+        |sequence, message| TracerouteError::Clock { sequence, message },
+        |sequence, source| TracerouteError::Execution { sequence, source },
+        |sequence| TracerouteError::StatisticsOverflow { sequence },
+    )?;
+    let any_response = run.outputs.iter().any(|hop| {
+        hop.probes
             .iter()
-            .any(|probe| probe.status == TracerouteProbeStatus::Response);
-        let reached = hop
-            .probes
+            .any(|probe| probe.status == TracerouteProbeStatus::Response)
+    });
+    let completion = if run.outputs.iter().any(|hop| {
+        hop.probes
             .iter()
-            .any(|probe| probe.response_kind == Some(TracerouteResponseKind::DestinationReached));
-        let unreachable = hop
-            .probes
+            .any(|probe| probe.response_kind == Some(TracerouteResponseKind::DestinationReached))
+    }) {
+        TracerouteCompletion::DestinationReached
+    } else if run.outputs.iter().any(|hop| {
+        hop.probes
             .iter()
-            .any(|probe| probe.response_kind == Some(TracerouteResponseKind::Unreachable));
-        hops.push(hop);
-        if reached {
-            completion = TracerouteCompletion::DestinationReached;
-            break;
-        }
-        if unreachable {
-            completion = TracerouteCompletion::Unreachable;
-            break;
-        }
-    }
-    enforce_deadline(&deadline)?;
-    if completion == TracerouteCompletion::MaximumHops && !any_response {
-        completion = TracerouteCompletion::Timeout;
-    }
-    stats.elapsed =
-        stats
-            .elapsed
-            .checked_add(scheduled_delay)
-            .ok_or(TracerouteError::StatisticsOverflow {
-                sequence: total_probes.saturating_sub(1) as u64,
-            })?;
+            .any(|probe| probe.response_kind == Some(TracerouteResponseKind::Unreachable))
+    }) {
+        TracerouteCompletion::Unreachable
+    } else if any_response {
+        TracerouteCompletion::MaximumHops
+    } else {
+        TracerouteCompletion::Timeout
+    };
 
     Ok(TracerouteResult {
         target: resolved.declared,
@@ -179,11 +143,11 @@ where
         destination,
         strategy: request.strategy,
         destination_port: request.destination_port,
-        hops,
+        hops: run.outputs,
         undecoded,
         completion,
         diagnostics,
-        stats,
+        stats: run.stats,
     })
 }
 
@@ -482,10 +446,8 @@ fn process_batch(
     for diagnostic in batch_diagnostics {
         push_diagnostic_once(evidence.diagnostics, diagnostic);
     }
-    // Stable ordering retains executor order among responses for one request.
-    responses.sort_by_key(|response| response.request_index);
     enforce_deadline(deadline)?;
-    let mut matched_responses = responses.iter().peekable();
+    let mut response_selector = ResponseSelector::new(&mut responses, &unsolicited);
 
     let mut probes = Vec::with_capacity(batch.probes.len());
     for (request_index, ((probe, built), sent_frame)) in batch
@@ -496,53 +458,15 @@ fn process_batch(
         .enumerate()
     {
         enforce_deadline(deadline)?;
-        let mut best = None;
-        while matched_responses
-            .peek()
-            .is_some_and(|response| response.request_index == request_index)
-        {
-            enforce_deadline(deadline)?;
-            let response = matched_responses
-                .next()
-                .expect("peeked matched response must remain available");
-            if let Some(observation) =
-                classify_traceroute_response(registry, probe.strategy, built, &response.response)
-            {
-                select_response_candidate(
-                    &mut best,
-                    ResponseCandidate {
-                        observation,
-                        decoded: &response.response,
-                        latency: Some(response.latency),
-                    },
-                    sent_frame.timestamp,
-                    batch.timeout,
-                    |observation| observation.kind.rank(),
-                    |observation| observation.responder,
-                );
-            }
-            enforce_deadline(deadline)?;
-        }
-        for response in &unsolicited {
-            enforce_deadline(deadline)?;
-            if let Some(observation) =
-                classify_traceroute_response(registry, probe.strategy, built, response)
-            {
-                select_response_candidate(
-                    &mut best,
-                    ResponseCandidate {
-                        observation,
-                        decoded: response,
-                        latency: None,
-                    },
-                    sent_frame.timestamp,
-                    batch.timeout,
-                    |observation| observation.kind.rank(),
-                    |observation| observation.responder,
-                );
-            }
-            enforce_deadline(deadline)?;
-        }
+        let best = response_selector.select(
+            request_index,
+            sent_frame.timestamp,
+            batch.timeout,
+            |response| classify_traceroute_response(registry, probe.strategy, built, response),
+            |observation| observation.kind.rank(),
+            |observation| observation.responder,
+            || enforce_deadline(deadline),
+        )?;
 
         let evidence = if let Some(candidate) = best {
             let received_at = candidate.decoded.frame.timestamp;
@@ -598,30 +522,18 @@ fn process_batch(
     }
 
     let hop_limit = batch.probes[0].hop_limit;
-    for frame in batch_undecoded {
-        enforce_deadline(deadline)?;
-        if evidence.undecoded.len() >= limits.max_undecoded {
-            push_undecoded_limit_diagnostic(
-                evidence.diagnostics,
-                TRACEROUTE_EVIDENCE_DIAGNOSTICS,
-                limits.max_undecoded,
-            );
-            break;
-        }
-        if retain_evidence(
-            evidence.budget,
-            &frame,
-            TRACEROUTE_EVIDENCE_DIAGNOSTICS,
-            limits.max_evidence_frames,
-            limits.max_evidence_bytes,
-            evidence.diagnostics,
-        ) {
-            evidence
-                .undecoded
-                .push(TracerouteUndecodedEvidence { hop_limit, frame });
-        }
-        enforce_deadline(deadline)?;
-    }
+    retain_undecoded_frames(
+        batch_undecoded,
+        evidence.undecoded,
+        limits.max_undecoded,
+        evidence.budget,
+        TRACEROUTE_EVIDENCE_DIAGNOSTICS,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+        evidence.diagnostics,
+        |frame| TracerouteUndecodedEvidence { hop_limit, frame },
+        || enforce_deadline(deadline),
+    )?;
     Ok(TracerouteHopResult { hop_limit, probes })
 }
 
@@ -636,18 +548,49 @@ fn duration_limit(error: DeadlineExceeded) -> TracerouteError {
     }
 }
 
-use super::classification::add_stats;
+fn traceroute_duration_error(actual: Duration, limit: Duration) -> TracerouteError {
+    TracerouteError::DurationLimit { actual, limit }
+}
+
+fn terminal_hop(hop: &TracerouteHopResult) -> bool {
+    hop.probes.iter().any(|probe| {
+        matches!(
+            probe.response_kind,
+            Some(TracerouteResponseKind::DestinationReached | TracerouteResponseKind::Unreachable)
+        )
+    })
+}
+
+impl ProbeBatch for TracerouteBatch {
+    fn sequence(&self) -> u64 {
+        self.probes[0].sequence
+    }
+
+    fn probe_count(&self) -> usize {
+        self.probes.len()
+    }
+}
+
+impl ProbeExecution for TracerouteBatchExecution {
+    fn stats(&self) -> &Stats {
+        &self.stats
+    }
+}
+
+use super::super::bounded_probe::{
+    ProbeBatch, ProbeExecution, ResponseSelector, approve_operation, resolve_selected,
+    retain_undecoded_frames, run_batches,
+};
 use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
-    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, HashSet, Icmpv4, Icmpv6, IpAddr, Ipv4,
-    Ipv6, MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
-    ResponseCandidate, ResponseEvidence, Stats, TRACEROUTE_EVIDENCE_DIAGNOSTICS,
-    TRACEROUTE_SOURCE_PORT, Tcp, TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion,
-    TracerouteError, TracerouteExecutor, TracerouteHopResult, TracerouteLimits,
-    TracerouteMatchedResponse, TracerouteProbe, TracerouteProbeEvidence, TracerouteProbeStatus,
-    TracerouteRequest, TracerouteResponseKind, TracerouteResult, TracerouteStrategy,
-    TracerouteUndecodedEvidence, Udp, classify_traceroute_response, format_exchange_evidence_error,
-    nonzero_ipv4_identification, push_diagnostic_once, push_undecoded_limit_diagnostic,
-    retain_evidence, select_response_candidate, validate_shared_exchange_evidence,
+    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
+    MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
+    ResponseEvidence, Stats, TRACEROUTE_EVIDENCE_DIAGNOSTICS, TRACEROUTE_SOURCE_PORT, Tcp,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteError,
+    TracerouteExecutor, TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse,
+    TracerouteProbe, TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest,
+    TracerouteResponseKind, TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence, Udp,
+    classify_traceroute_response, format_exchange_evidence_error, nonzero_ipv4_identification,
+    push_diagnostic_once, retain_evidence, validate_shared_exchange_evidence,
 };
 use crate::packet::semantics::BuiltinProtocol;

@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
 use crate::packet::{
     codec::{
@@ -10,16 +9,15 @@ use crate::packet::{
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    binding_protocol, expected_discriminator, field_layout, impl_layer_boilerplate, invalid,
-    make_layer, out_of_range, protocol, resolve_u16, set_wire_u16, truncated, unknown_field,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator, wire_u16, wrong_layer,
-    wrong_type,
+    binding_protocol, expected_discriminator, invalid, make_layer, out_of_range, protocol,
+    resolve_u16, truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator,
+    wrong_layer, wrong_type,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -55,119 +53,21 @@ impl Default for BsdLoop {
     }
 }
 
-fn family_fields() -> &'static [FieldSchema] {
-    static FIELDS: &[FieldSchema] = &[FieldSchema {
-        name: "family",
-        kind: FieldKind::Unsigned,
-        derived: false,
-        required: true,
-        description: "Address-family discriminator",
-    }];
-    FIELDS
-}
-
-fn null_fields() -> &'static [FieldSchema] {
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "family",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Address-family discriminator",
-        },
-        FieldSchema {
-            name: "byte_order",
-            kind: FieldKind::Text,
-            derived: false,
-            required: true,
-            description: "Host byte order used by the captured NULL header",
-        },
-    ];
-    FIELDS
-}
-
-fn null_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("bsd_null"),
-        name: "BSD NULL",
-        fields: null_fields(),
-    })
-}
-
-fn loop_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("bsd_loop"),
-        name: "BSD LOOP",
-        fields: family_fields(),
-    })
-}
-
-macro_rules! impl_family_layer {
-    ($ty:ty, $schema:path) => {
-        impl Layer for $ty {
-            impl_layer_boilerplate!($ty, $schema);
-
-            fn field(&self, name: &str) -> Option<FieldValue> {
-                (name == "family").then_some(self.family.into())
-            }
-
-            fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-                match (name, value) {
-                    ("family", FieldValue::Unsigned(value)) => {
-                        self.family =
-                            u32::try_from(value).map_err(|_| out_of_range($schema(), name))?;
-                        Ok(())
-                    }
-                    ("family", _) => Err(wrong_type($schema(), name, "unsigned")),
-                    _ => Err(unknown_field($schema(), name)),
-                }
-            }
-        }
-    };
-}
-
-impl_family_layer!(BsdLoop, loop_schema);
-
-impl Layer for BsdNull {
-    impl_layer_boilerplate!(BsdNull, null_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "family" => Some(self.family.into()),
-            "byte_order" => Some(FieldValue::Text(
-                match self.byte_order {
-                    CaptureByteOrder::Little => "little",
-                    CaptureByteOrder::Big => "big",
-                }
-                .to_owned(),
-            )),
-            _ => None,
-        }
+reflective_layer! {
+    fn loop_schema() => { protocol: protocol("bsd_loop"), name: "BSD LOOP" }
+    impl BsdLoop {
+        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, loop_schema(), name, value), layout: (0, 4) }
     }
+    layout fn loop_layout();
+}
 
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("family", FieldValue::Unsigned(value)) => {
-                self.family =
-                    u32::try_from(value).map_err(|_| out_of_range(null_schema(), name))?;
-                Ok(())
-            }
-            ("family", _) => Err(wrong_type(null_schema(), name, "unsigned")),
-            ("byte_order", FieldValue::Text(value)) if value.eq_ignore_ascii_case("little") => {
-                self.byte_order = CaptureByteOrder::Little;
-                Ok(())
-            }
-            ("byte_order", FieldValue::Text(value)) if value.eq_ignore_ascii_case("big") => {
-                self.byte_order = CaptureByteOrder::Big;
-                Ok(())
-            }
-            ("byte_order", FieldValue::Text(_)) => Err(out_of_range(null_schema(), name)),
-            ("byte_order", _) => Err(wrong_type(null_schema(), name, "text")),
-            _ => Err(unknown_field(null_schema(), name)),
-        }
+reflective_layer! {
+    fn null_schema() => { protocol: protocol("bsd_null"), name: "BSD NULL" }
+    impl BsdNull {
+        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, null_schema(), name, value), layout: (0, 4) },
+        "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(FieldValue::Text(match layer.byte_order { CaptureByteOrder::Little => "little", CaptureByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { FieldValue::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = CaptureByteOrder::Little; Ok(()) }, FieldValue::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = CaptureByteOrder::Big; Ok(()) }, FieldValue::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
     }
+    layout fn null_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -255,10 +155,7 @@ impl LayerCodec for BsdNullCodec {
             CaptureByteOrder::Big => layer.family.to_be_bytes(),
         };
         let mut encoded = EncodedLayer::header(prefix.to_vec(), Box::new(layer.clone()));
-        encoded.fields = vec![
-            field_layout("family", 0, 4),
-            field_layout("byte_order", 0, 4),
-        ];
+        encoded.fields = null_layout();
         encoded.diagnostics = validate_family_binding("bsd_null", layer.family, context)?;
         Ok(encoded)
     }
@@ -300,7 +197,7 @@ impl LayerCodec for BsdLoopCodec {
             .ok_or_else(|| wrong_layer("bsd_loop", layer))?;
         let mut encoded =
             EncodedLayer::header(layer.family.to_be_bytes().to_vec(), Box::new(layer.clone()));
-        encoded.fields = vec![field_layout("family", 0, 4)];
+        encoded.fields = loop_layout();
         encoded.diagnostics = validate_family_binding("bsd_loop", layer.family, context)?;
         Ok(encoded)
     }
@@ -350,11 +247,8 @@ fn decode_family(input: &[u8], header: FamilyHeader) -> Result<DecodedLayerValue
         payload_len: input.len() - 4,
         next: vec![Discriminator(family_discriminator(family))],
         fields: match header {
-            FamilyHeader::Loop => vec![field_layout("family", 0, 4)],
-            FamilyHeader::Null => vec![
-                field_layout("family", 0, 4),
-                field_layout("byte_order", 0, 4),
-            ],
+            FamilyHeader::Loop => loop_layout(),
+            FamilyHeader::Null => null_layout(),
         },
         diagnostics: Vec::new(),
         stop: input.len() == 4,
@@ -406,237 +300,31 @@ impl Default for LinuxSll2 {
     }
 }
 
-fn sll_schema(name: &'static str, id: &'static str) -> &'static LayerSchema {
-    static SLL: OnceLock<LayerSchema> = OnceLock::new();
-    static SLL2: OnceLock<LayerSchema> = OnceLock::new();
-    static SLL_FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "protocol",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Protocol discriminator",
-        },
-        FieldSchema {
-            name: "packet_type",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Packet direction/type",
-        },
-        FieldSchema {
-            name: "arp_hardware_type",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "ARP hardware type",
-        },
-        FieldSchema {
-            name: "address_length",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Link address length",
-        },
-        FieldSchema {
-            name: "address",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
-            description: "Eight-byte link address slot",
-        },
-    ];
-    static SLL2_FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "protocol",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "Protocol discriminator",
-        },
-        FieldSchema {
-            name: "packet_type",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Packet direction/type",
-        },
-        FieldSchema {
-            name: "arp_hardware_type",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "ARP hardware type",
-        },
-        FieldSchema {
-            name: "interface_index",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
-            description: "Interface index",
-        },
-        FieldSchema {
-            name: "address_length",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "Link address length",
-        },
-        FieldSchema {
-            name: "address",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
-            description: "Eight-byte link address slot",
-        },
-    ];
-    let cell = if id == "linux_sll" { &SLL } else { &SLL2 };
-    cell.get_or_init(|| LayerSchema {
-        protocol: protocol(id),
-        name,
-        fields: if id == "linux_sll" {
-            SLL_FIELDS
-        } else {
-            SLL2_FIELDS
-        },
-    })
+reflective_layer! {
+    fn linux_sll_schema() => { protocol: protocol("linux_sll"), name: "Linux cooked capture v1" }
+    impl LinuxSll {
+        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll_schema(), name, value), layout: (14, 16) },
+        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll_schema(), name, value), layout: (0, 2) },
+        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll_schema(), name, value), layout: (2, 4) },
+        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u16::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll_schema(), name, "unsigned")) }, layout: (4, 6) },
+        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll_schema(), name, value), layout: (6, 14) },
+        normalize |layer| { layer.protocol.normalize(); }
+    }
+    layout fn linux_sll_layout();
 }
 
-impl Layer for LinuxSll {
-    impl_layer_boilerplate!(LinuxSll, linux_sll_schema);
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        if name == "interface_index" {
-            return None;
-        }
-        sll_field(
-            name,
-            &self.protocol,
-            self.packet_type.into(),
-            self.arp_hardware_type,
-            0,
-            self.address_length.into(),
-            &self.address,
-        )
+reflective_layer! {
+    fn linux_sll2_schema() => { protocol: protocol("linux_sll2"), name: "Linux cooked capture v2" }
+    impl LinuxSll2 {
+        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll2_schema(), name, value), layout: (0, 2) },
+        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll2_schema(), name, value), layout: (10, 11) },
+        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll2_schema(), name, value), layout: (8, 10) },
+        "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", get |layer| Some(reflect_get(&layer.interface_index)), set |layer, value, name| reflect_set(&mut layer.interface_index, linux_sll2_schema(), name, value), layout: (4, 8) },
+        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u8::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll2_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll2_schema(), name, "unsigned")) }, layout: (11, 12) },
+        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll2_schema(), name, value), layout: (12, 20) },
+        normalize |layer| { layer.protocol.normalize(); }
     }
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("protocol", value) => {
-                set_wire_u16(&mut self.protocol, linux_sll_schema(), name, value)
-            }
-            ("packet_type", FieldValue::Unsigned(value)) => {
-                self.packet_type =
-                    u16::try_from(value).map_err(|_| out_of_range(linux_sll_schema(), name))?;
-                Ok(())
-            }
-            ("arp_hardware_type", FieldValue::Unsigned(value)) => {
-                self.arp_hardware_type =
-                    u16::try_from(value).map_err(|_| out_of_range(linux_sll_schema(), name))?;
-                Ok(())
-            }
-            ("address_length", FieldValue::Unsigned(value)) => {
-                self.address_length = u16::try_from(value)
-                    .ok()
-                    .filter(|value| *value <= 8)
-                    .ok_or_else(|| out_of_range(linux_sll_schema(), name))?;
-                Ok(())
-            }
-            ("address", FieldValue::Bytes(value)) if value.len() == 8 => {
-                self.address.copy_from_slice(&value);
-                Ok(())
-            }
-            ("packet_type" | "arp_hardware_type" | "address_length", _) => {
-                Err(wrong_type(linux_sll_schema(), name, "unsigned"))
-            }
-            ("address", _) => Err(wrong_type(linux_sll_schema(), name, "eight bytes")),
-            _ => Err(unknown_field(linux_sll_schema(), name)),
-        }
-    }
-    fn normalize(&mut self) {
-        self.protocol.normalize();
-    }
-}
-
-fn linux_sll_schema() -> &'static LayerSchema {
-    sll_schema("Linux cooked capture v1", "linux_sll")
-}
-fn linux_sll2_schema() -> &'static LayerSchema {
-    sll_schema("Linux cooked capture v2", "linux_sll2")
-}
-
-impl Layer for LinuxSll2 {
-    impl_layer_boilerplate!(LinuxSll2, linux_sll2_schema);
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        sll_field(
-            name,
-            &self.protocol,
-            self.packet_type.into(),
-            self.arp_hardware_type,
-            self.interface_index,
-            self.address_length.into(),
-            &self.address,
-        )
-    }
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("protocol", value) => {
-                set_wire_u16(&mut self.protocol, linux_sll2_schema(), name, value)
-            }
-            ("packet_type", FieldValue::Unsigned(value)) => {
-                self.packet_type =
-                    u8::try_from(value).map_err(|_| out_of_range(linux_sll2_schema(), name))?;
-                Ok(())
-            }
-            ("arp_hardware_type", FieldValue::Unsigned(value)) => {
-                self.arp_hardware_type =
-                    u16::try_from(value).map_err(|_| out_of_range(linux_sll2_schema(), name))?;
-                Ok(())
-            }
-            ("interface_index", FieldValue::Unsigned(value)) => {
-                self.interface_index =
-                    u32::try_from(value).map_err(|_| out_of_range(linux_sll2_schema(), name))?;
-                Ok(())
-            }
-            ("address_length", FieldValue::Unsigned(value)) => {
-                self.address_length = u8::try_from(value)
-                    .ok()
-                    .filter(|value| *value <= 8)
-                    .ok_or_else(|| out_of_range(linux_sll2_schema(), name))?;
-                Ok(())
-            }
-            ("address", FieldValue::Bytes(value)) if value.len() == 8 => {
-                self.address.copy_from_slice(&value);
-                Ok(())
-            }
-            ("packet_type" | "arp_hardware_type" | "interface_index" | "address_length", _) => {
-                Err(wrong_type(linux_sll2_schema(), name, "unsigned"))
-            }
-            ("address", _) => Err(wrong_type(linux_sll2_schema(), name, "eight bytes")),
-            _ => Err(unknown_field(linux_sll2_schema(), name)),
-        }
-    }
-    fn normalize(&mut self) {
-        self.protocol.normalize();
-    }
-}
-
-fn sll_field(
-    name: &str,
-    protocol_value: &WireValue<u16>,
-    packet_type: u64,
-    hardware: u16,
-    interface: u32,
-    address_length: u64,
-    address: &[u8; 8],
-) -> Option<FieldValue> {
-    match name {
-        "protocol" => Some(wire_u16(protocol_value)),
-        "packet_type" => Some(packet_type.into()),
-        "arp_hardware_type" => Some(hardware.into()),
-        "interface_index" => Some(interface.into()),
-        "address_length" => Some(FieldValue::Unsigned(address_length)),
-        "address" => Some(address.to_vec().into()),
-        _ => None,
-    }
+    layout fn linux_sll2_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -847,27 +535,6 @@ impl LayerCodec for LinuxSll2Codec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(LinuxSll2::default(), fields)
     }
-}
-
-fn linux_sll_layout() -> Vec<crate::packet::layout::FieldLayout> {
-    vec![
-        field_layout("packet_type", 0, 2),
-        field_layout("arp_hardware_type", 2, 4),
-        field_layout("address_length", 4, 6),
-        field_layout("address", 6, 14),
-        field_layout("protocol", 14, 16),
-    ]
-}
-
-fn linux_sll2_layout() -> Vec<crate::packet::layout::FieldLayout> {
-    vec![
-        field_layout("protocol", 0, 2),
-        field_layout("interface_index", 4, 8),
-        field_layout("arp_hardware_type", 8, 10),
-        field_layout("packet_type", 10, 11),
-        field_layout("address_length", 11, 12),
-        field_layout("address", 12, 20),
-    ]
 }
 
 #[cfg(test)]

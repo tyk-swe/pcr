@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
-use crate::capture::{Frame, LinkType};
 use crate::net::{
     Error as LiveIoError,
-    capture::{CaptureOverflowPolicy, CaptureStatistics},
+    capture::CaptureStatistics,
     exchange::ExchangeIo,
     route::{
         InterfaceId, NeighborResolver, PlanOptions, PlannedRoute, RouteDecision, RoutePlanner,
@@ -17,21 +16,19 @@ use crate::net::{
 use crate::packet::{
     Packet,
     build::{Builder, BuiltPacket},
-    decode::Dissector,
     registry::ProtocolRegistry,
     semantics::BuiltinProtocol,
     template::PacketTemplate,
 };
 
 use super::exchange::{
-    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
-    ExchangeProcessOutcome, ExchangeResult, PlannedExchangePacket, PreparedExchangePacket,
-    WorkflowPromotionContext, WorkflowResponseMatcher, drain_available,
+    ExchangeOptions, ExchangeResult, ExchangeTransaction, PlannedExchangePacket, PreparedExchange,
+    PreparedExchangePacket, WorkflowResponseMatcher,
 };
 use super::helpers::{
-    build_context, error_after_shutdown, materialize_link_fields, materialize_link_structure,
-    materialize_network_fields, patch_builtin_ethernet, push_diagnostic_once,
-    require_fixed_width_link_materialization, validate_mtu, validate_send_report,
+    build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
+    patch_builtin_ethernet, require_fixed_width_link_materialization, validate_mtu,
+    validate_send_report,
 };
 use super::policy::{TrafficPolicy, TrafficPolicyError};
 use super::send::{ClientError, SendOptions, SendReport};
@@ -341,17 +338,6 @@ fn ensure_preparation_deadline(deadline: Instant) -> Result<(), ClientError> {
     Ok(())
 }
 
-fn promote_workflow_unsolicited(
-    captured: &mut ExchangeAccumulator,
-    workflow_matcher: &mut Option<&mut WorkflowResponseMatcher<'_>>,
-    context: WorkflowPromotionContext<'_>,
-) -> ExchangeProcessOutcome {
-    let Some(matches_request) = workflow_matcher.as_deref_mut() else {
-        return ExchangeProcessOutcome::Continue;
-    };
-    captured.promote_workflow_unsolicited(context, matches_request)
-}
-
 impl<R, N, I> Client<R, N, I>
 where
     R: RouteProvider,
@@ -379,8 +365,18 @@ where
         &self,
         template: &PacketTemplate,
         options: ExchangeOptions,
-        mut workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
+        workflow_matcher: Option<&mut WorkflowResponseMatcher<'_>>,
     ) -> Result<ExchangeResult, ClientError> {
+        let prepared = self.prepare_exchange(template, options)?;
+        let transaction = self.arm_capture(prepared)?;
+        transaction.execute(&self.io, workflow_matcher)
+    }
+
+    fn prepare_exchange(
+        &self,
+        template: &PacketTemplate,
+        options: ExchangeOptions,
+    ) -> Result<PreparedExchange, ClientError> {
         let started = Instant::now();
         let capture_limits = options.validate()?;
         let deadline = started
@@ -490,283 +486,36 @@ where
             prepared_packets.push(PreparedExchangePacket { built, route });
         }
 
-        let first_route = &prepared_packets
+        Ok(PreparedExchange {
+            started,
+            deadline,
+            capture_limits,
+            options,
+            packets: prepared_packets,
+            packet_count,
+            total_bytes,
+        })
+    }
+
+    fn arm_capture(
+        &self,
+        prepared: PreparedExchange,
+    ) -> Result<
+        ExchangeTransaction<<I as crate::net::capture::CaptureProvider>::Capture>,
+        ClientError,
+    > {
+        let first_route = &prepared
+            .packets
             .first()
             .expect("non-empty prepared exchange")
             .route
             .plan;
-        ensure_preparation_deadline(deadline)?;
-        let mut capture = CaptureGuard::new(self.io.arm_capture(first_route, capture_limits)?);
-        if !capture.supports_monotonic_ingress_time() {
-            return Err(error_after_shutdown(
-                &mut capture,
-                LiveIoError::MissingMonotonicCaptureTimestamp,
-            ));
-        }
-        let readiness_timeout = match deadline.checked_duration_since(Instant::now()) {
-            Some(remaining) => remaining,
-            None => {
-                return Err(error_after_shutdown(
-                    &mut capture,
-                    LiveIoError::DeadlineExceeded {
-                        operation: "waiting for capture readiness",
-                    },
-                ));
-            }
-        };
-        if let Err(error) = capture.wait_ready(readiness_timeout) {
-            return Err(error_after_shutdown(&mut capture, error));
-        }
-
-        let mut sent_at = Vec::with_capacity(prepared_packets.len());
-        let mut sent_evidence = Vec::with_capacity(prepared_packets.len());
-        let mut completed_sends = 0u64;
-        let dissector = Dissector::new(Arc::clone(&self.registry));
-        let mut captured = ExchangeAccumulator::new(prepared_packets.len());
-        let mut correlation_stopped = false;
-        for (send_index, prepared_packet) in prepared_packets.iter().enumerate() {
-            let built = &prepared_packet.built;
-            let route = &prepared_packet.route;
-            if let Err(error) = drain_available(
-                &mut capture,
-                Some(deadline),
-                capture_limits.max_frames,
-                &mut captured,
-                ExchangeProcessContext {
-                    registry: &self.registry,
-                    dissector: &dissector,
-                    prepared: &prepared_packets,
-                    sent_at: &sent_at,
-                    deadline,
-                    options: &options,
-                },
-            ) {
-                return Err(error_after_shutdown(&mut capture, error));
-            }
-            if promote_workflow_unsolicited(
-                &mut captured,
-                &mut workflow_matcher,
-                WorkflowPromotionContext {
-                    prepared: &prepared_packets,
-                    sent_at: &sent_at,
-                    deadline,
-                    max_responses: options.max_responses,
-                },
-            ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
-            {
-                return Err(error_after_shutdown(
-                    &mut capture,
-                    LiveIoError::DeadlineExceeded {
-                        operation: "correlating workflow responses before all requests were sent",
-                    },
-                ));
-            }
-            if deadline.checked_duration_since(Instant::now()).is_none() {
-                return Err(error_after_shutdown(
-                    &mut capture,
-                    LiveIoError::DeadlineExceeded {
-                        operation: "sending exchange requests",
-                    },
-                ));
-            }
-            let send_started = Instant::now();
-            let send_wall_time = SystemTime::now();
-            let frame = match TransmissionFrame::try_new(&built.bytes, route) {
-                Ok(frame) => frame,
-                Err(error) => return Err(error_after_shutdown(&mut capture, error)),
-            };
-            let sent = match self.io.send(frame) {
-                Ok(report) => report,
-                Err(error) => return Err(error_after_shutdown(&mut capture, error)),
-            };
-            if let Err(error) = validate_send_report(&built.bytes, &sent) {
-                return Err(error_after_shutdown(&mut capture, error));
-            }
-            let link_type = match route.plan.mode {
-                crate::net::link::LinkMode::Layer2 => route.plan.route.link_type,
-                crate::net::link::LinkMode::Layer3 => LinkType::RAW,
-                crate::net::link::LinkMode::Auto => {
-                    return Err(error_after_shutdown(
-                        &mut capture,
-                        LiveIoError::UnresolvedLinkMode,
-                    ));
-                }
-            };
-            let evidence = match Frame::new(send_wall_time, link_type, built.bytes.clone()) {
-                Ok(evidence) => evidence,
-                Err(source) => {
-                    return Err(error_after_shutdown(
-                        &mut capture,
-                        LiveIoError::InvalidSendEvidence {
-                            message: source.to_string(),
-                        },
-                    ));
-                }
-            };
-            sent_at.push(send_started);
-            sent_evidence.push(evidence);
-            completed_sends += 1;
-            if deadline.checked_duration_since(Instant::now()).is_none() {
-                return Err(error_after_shutdown(
-                    &mut capture,
-                    LiveIoError::DeadlineExceeded {
-                        operation: "sending exchange requests",
-                    },
-                ));
-            }
-            if let Err(error) = drain_available(
-                &mut capture,
-                (send_index + 1 < prepared_packets.len()).then_some(deadline),
-                capture_limits.max_frames,
-                &mut captured,
-                ExchangeProcessContext {
-                    registry: &self.registry,
-                    dissector: &dissector,
-                    prepared: &prepared_packets,
-                    sent_at: &sent_at,
-                    deadline,
-                    options: &options,
-                },
-            ) {
-                return Err(error_after_shutdown(&mut capture, error));
-            }
-            if promote_workflow_unsolicited(
-                &mut captured,
-                &mut workflow_matcher,
-                WorkflowPromotionContext {
-                    prepared: &prepared_packets,
-                    sent_at: &sent_at,
-                    deadline,
-                    max_responses: options.max_responses,
-                },
-            ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
-            {
-                if send_index + 1 < prepared_packets.len() {
-                    return Err(error_after_shutdown(
-                        &mut capture,
-                        LiveIoError::DeadlineExceeded {
-                            operation: "correlating workflow responses before all requests were sent",
-                        },
-                    ));
-                }
-                correlation_stopped = true;
-            }
-        }
-
-        if !correlation_stopped {
-            loop {
-                let now = Instant::now();
-                let Some(remaining) = deadline.checked_duration_since(now) else {
-                    break;
-                };
-                let frame = match capture.next_captured_frame(remaining) {
-                    Ok(Some(frame)) => frame,
-                    Ok(None) => break,
-                    Err(error) => {
-                        return Err(error_after_shutdown(&mut capture, error));
-                    }
-                };
-                if captured.process(
-                    frame,
-                    ExchangeProcessContext {
-                        registry: &self.registry,
-                        dissector: &dissector,
-                        prepared: &prepared_packets,
-                        sent_at: &sent_at,
-                        deadline,
-                        options: &options,
-                    },
-                ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
-                {
-                    break;
-                }
-                if promote_workflow_unsolicited(
-                    &mut captured,
-                    &mut workflow_matcher,
-                    WorkflowPromotionContext {
-                        prepared: &prepared_packets,
-                        sent_at: &sent_at,
-                        deadline,
-                        max_responses: options.max_responses,
-                    },
-                ) == ExchangeProcessOutcome::CorrelationDeadlineExpired
-                {
-                    break;
-                }
-            }
-        }
-        if let Err(error) = drain_available(
-            &mut capture,
-            None,
-            capture_limits.max_frames,
-            &mut captured,
-            ExchangeProcessContext {
-                registry: &self.registry,
-                dissector: &dissector,
-                prepared: &prepared_packets,
-                sent_at: &sent_at,
-                deadline,
-                options: &options,
-            },
-        ) {
-            return Err(error_after_shutdown(&mut capture, error));
-        }
-        let _ = promote_workflow_unsolicited(
-            &mut captured,
-            &mut workflow_matcher,
-            WorkflowPromotionContext {
-                prepared: &prepared_packets,
-                sent_at: &sent_at,
-                deadline,
-                max_responses: options.max_responses,
-            },
-        );
-        capture.shutdown()?;
-        let capture_statistics = capture.statistics().validate()?;
-        if capture_statistics.has_loss() {
-            if capture_limits.overflow_policy == CaptureOverflowPolicy::Fail {
-                return Err(capture_statistics
-                    .evidence_loss_error()
-                    .expect("lossy capture statistics must produce a typed error")
-                    .into());
-            }
-            push_diagnostic_once(
-                &mut captured.diagnostics,
-                crate::packet::diagnostic::Diagnostic::warning(
-                    "capture.evidence_incomplete",
-                    format!(
-                        "capture backend reported {} overflow event(s), {} receiver drop(s), {} total dropped frame(s), and {} dropped byte(s) under {:?}",
-                        capture_statistics.overflow_events,
-                        capture_statistics.receiver_dropped_frames,
-                        capture_statistics.dropped_frames,
-                        capture_statistics.dropped_bytes,
-                        capture_limits.overflow_policy,
-                    ),
-                ),
-            );
-        }
-
-        let unanswered = captured
-            .response_counts
-            .iter()
-            .enumerate()
-            .filter_map(|(index, response_count)| (*response_count == 0).then_some(index))
-            .collect();
-        let sent = prepared_packets
-            .into_iter()
-            .map(|prepared_packet| prepared_packet.built)
-            .collect();
-        Ok(captured.finish(
-            sent,
-            sent_evidence,
-            unanswered,
-            OperationStats {
-                packets_attempted: packet_count,
-                packets_completed: completed_sends,
-                bytes: total_bytes,
-                elapsed: started.elapsed(),
-                capture: capture_statistics,
-            },
+        ensure_preparation_deadline(prepared.deadline)?;
+        let capture = self.io.arm_capture(first_route, prepared.capture_limits)?;
+        Ok(ExchangeTransaction::new(
+            Arc::clone(&self.registry),
+            capture,
+            prepared,
         ))
     }
 }

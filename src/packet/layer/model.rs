@@ -3,13 +3,13 @@
 
 use std::any::Any;
 use std::fmt;
-use std::sync::OnceLock;
 
 use bytes::Bytes;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::super::field::{FieldKind, FieldValue};
+use super::reflection::{reflect_get, reflect_set, reflective_layer};
 
 /// An open, stable identifier for a protocol layer or codec.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -123,6 +123,11 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
 
     /// Reset dependent values to automatic derivation.
     fn normalize(&mut self) {}
+
+    #[cfg(test)]
+    fn declared_layout_fields(&self) -> Vec<&'static str> {
+        Vec::new()
+    }
 }
 
 impl Clone for Box<dyn Layer> {
@@ -144,53 +149,18 @@ impl Raw {
     }
 }
 
-fn raw_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[FieldSchema {
-        name: "bytes",
-        kind: FieldKind::Bytes,
-        derived: false,
-        required: false,
-        description: "Verbatim bytes",
-    }];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: ProtocolId::new("raw"),
-        name: "Raw",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Raw {
-    fn schema(&self) -> &'static LayerSchema {
-        raw_schema()
-    }
-
-    fn clone_box(&self) -> Box<dyn Layer> {
-        Box::new(self.clone())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        (name == "bytes").then(|| FieldValue::Bytes(self.bytes.clone()))
-    }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        if name != "bytes" {
-            return Err(unknown_field(self, name));
+reflective_layer! {
+    fn raw_schema() => { protocol: ProtocolId::new("raw"), name: "Raw" }
+    impl Raw {
+        "bytes" => {
+            kind: Bytes, derived: false, required: false,
+            description: "Verbatim bytes",
+            get |layer| Some(reflect_get(&layer.bytes)),
+            set |layer, value, name| reflect_set(&mut layer.bytes, raw_schema(), name, value),
+            layout: (0, length)
         }
-        let FieldValue::Bytes(bytes) = value else {
-            return Err(wrong_type(self, name, "bytes"));
-        };
-        self.bytes = bytes;
-        Ok(())
     }
+    layout fn raw_layout(length: usize);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -217,73 +187,34 @@ impl Padding {
     }
 }
 
-fn padding_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "bytes",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
+reflective_layer! {
+    fn padding_schema() => { protocol: ProtocolId::new("padding"), name: "Padding" }
+    impl Padding {
+        "bytes" => {
+            kind: Bytes, derived: false, required: false,
             description: "Trailing padding bytes",
+            get |layer| Some(reflect_get(&layer.bytes)),
+            set |layer, value, name| reflect_set(&mut layer.bytes, padding_schema(), name, value),
+            layout: (0, length)
         },
-        FieldSchema {
-            name: "outside_layer",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: false,
+        "outside_layer" => {
+            kind: Unsigned, derived: false, required: false,
             description: "First layer index whose declared length excludes the padding",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: ProtocolId::new("padding"),
-        name: "Padding",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Padding {
-    fn schema(&self) -> &'static LayerSchema {
-        padding_schema()
-    }
-
-    fn clone_box(&self) -> Box<dyn Layer> {
-        Box::new(self.clone())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "bytes" => Some(FieldValue::Bytes(self.bytes.clone())),
-            "outside_layer" => self
-                .outside_layer
-                .map(|value| FieldValue::Unsigned(value as u64)),
-            _ => None,
-        }
-    }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("bytes", FieldValue::Bytes(bytes)) => self.bytes = bytes,
-            ("outside_layer", FieldValue::Unsigned(value)) => {
-                self.outside_layer = Some(
-                    usize::try_from(value)
-                        .map_err(|_| out_of_range_layer(self, "outside_layer"))?,
-                );
+            get |layer| layer.outside_layer.map(FieldValue::from),
+            set |layer, value, name| match value {
+                FieldValue::Unsigned(value) => {
+                    layer.outside_layer = Some(usize::try_from(value).map_err(|_| FieldError::OutOfRange {
+                        protocol: padding_schema().protocol.clone(), field: name.to_owned(),
+                    })?);
+                    Ok(())
+                }
+                _ => Err(FieldError::WrongType {
+                    protocol: padding_schema().protocol.clone(), field: name.to_owned(), expected: "unsigned",
+                }),
             }
-            ("bytes", _) => return Err(wrong_type(self, name, "bytes")),
-            ("outside_layer", _) => return Err(wrong_type(self, name, "unsigned")),
-            _ => return Err(unknown_field(self, name)),
         }
-        Ok(())
     }
+    layout fn padding_layout(length: usize);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -307,106 +238,92 @@ impl MalformedLayer {
     }
 }
 
-fn malformed_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "protocol",
-            kind: FieldKind::Text,
-            derived: false,
-            required: false,
+reflective_layer! {
+    fn malformed_schema() => { protocol: ProtocolId::new("malformed"), name: "Malformed" }
+    impl MalformedLayer {
+        "protocol" => {
+            kind: Text, derived: false, required: false,
             description: "Intended protocol identifier",
+            get |layer| layer.intended_protocol.as_ref().map(|value| FieldValue::Text(value.to_string())),
+            set |layer, value, name| match value {
+                FieldValue::Text(value) => { layer.intended_protocol = Some(ProtocolId::new(value)); Ok(()) }
+                _ => Err(FieldError::WrongType { protocol: malformed_schema().protocol.clone(), field: name.to_owned(), expected: "text" }),
+            }
         },
-        FieldSchema {
-            name: "bytes",
-            kind: FieldKind::Bytes,
-            derived: false,
-            required: false,
+        "bytes" => {
+            kind: Bytes, derived: false, required: false,
             description: "Preserved malformed bytes",
+            get |layer| Some(reflect_get(&layer.bytes)),
+            set |layer, value, name| reflect_set(&mut layer.bytes, malformed_schema(), name, value),
+            layout: (0, length)
         },
-        FieldSchema {
-            name: "reason",
-            kind: FieldKind::Text,
-            derived: false,
-            required: true,
+        "reason" => {
+            kind: Text, derived: false, required: true,
             description: "Decode or construction finding",
-        },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: ProtocolId::new("malformed"),
-        name: "Malformed",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for MalformedLayer {
-    fn schema(&self) -> &'static LayerSchema {
-        malformed_schema()
-    }
-
-    fn clone_box(&self) -> Box<dyn Layer> {
-        Box::new(self.clone())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "protocol" => self
-                .intended_protocol
-                .as_ref()
-                .map(|value| FieldValue::Text(value.to_string())),
-            "bytes" => Some(FieldValue::Bytes(self.bytes.clone())),
-            "reason" => Some(FieldValue::Text(self.reason.clone())),
-            _ => None,
+            get |layer| Some(reflect_get(&layer.reason)),
+            set |layer, value, name| reflect_set(&mut layer.reason, malformed_schema(), name, value)
         }
     }
+    layout fn malformed_layout(length: usize);
+}
 
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("protocol", FieldValue::Text(value)) => {
-                self.intended_protocol = Some(ProtocolId::new(value));
-                Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Debug, Default)]
+    struct ReflectionHooks {
+        value: u8,
+    }
+
+    reflective_layer! {
+        fn hooks_schema() => { protocol: ProtocolId::new("reflection_hooks"), name: "Reflection hooks" }
+        impl ReflectionHooks {
+            "value" | "v" => {
+                kind: Unsigned, derived: false, required: true,
+                description: "Aliased writable value",
+                get |layer| Some(reflect_get(&layer.value)),
+                set |layer, value, name| reflect_set(&mut layer.value, hooks_schema(), name, value),
+                layout: (0, 1)
+            },
+            "computed" => {
+                kind: Unsigned, derived: true, required: false,
+                description: "Computed read-only value",
+                get |layer| Some(FieldValue::Unsigned(u64::from(layer.value) * 2)),
+                set |_layer, _value, name| Err(FieldError::ReadOnly {
+                    protocol: hooks_schema().protocol.clone(),
+                    field: name.to_owned(),
+                })
             }
-            ("bytes", FieldValue::Bytes(value)) => {
-                self.bytes = value;
-                Ok(())
-            }
-            ("reason", FieldValue::Text(value)) => {
-                self.reason = value;
-                Ok(())
-            }
-            ("protocol" | "reason", _) => Err(wrong_type(self, name, "text")),
-            ("bytes", _) => Err(wrong_type(self, name, "bytes")),
-            _ => Err(unknown_field(self, name)),
         }
+        layout fn hooks_layout();
     }
-}
 
-pub(crate) fn unknown_field(layer: &dyn Layer, field: &str) -> FieldError {
-    FieldError::UnknownField {
-        protocol: layer.protocol_id(),
-        field: field.to_owned(),
-    }
-}
-
-pub(crate) fn wrong_type(layer: &dyn Layer, field: &str, expected: &'static str) -> FieldError {
-    FieldError::WrongType {
-        protocol: layer.protocol_id(),
-        field: field.to_owned(),
-        expected,
-    }
-}
-
-fn out_of_range_layer(layer: &dyn Layer, field: &str) -> FieldError {
-    FieldError::OutOfRange {
-        protocol: layer.protocol_id(),
-        field: field.to_owned(),
+    #[test]
+    fn declaration_supports_aliases_read_only_fields_and_static_layouts() {
+        let mut layer = ReflectionHooks::default();
+        layer.set_field("v", FieldValue::Unsigned(7)).unwrap();
+        assert_eq!(layer.field("value"), Some(FieldValue::Unsigned(7)));
+        assert_eq!(layer.field("v"), Some(FieldValue::Unsigned(7)));
+        assert_eq!(layer.field("computed"), Some(FieldValue::Unsigned(14)));
+        assert!(matches!(
+            layer.set_field("computed", FieldValue::Unsigned(1)),
+            Err(FieldError::ReadOnly { .. })
+        ));
+        assert_eq!(
+            hooks_schema()
+                .fields
+                .iter()
+                .map(|field| field.name)
+                .collect::<Vec<_>>(),
+            vec!["value", "computed"]
+        );
+        assert_eq!(
+            hooks_layout()
+                .iter()
+                .map(|field| field.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["value"]
+        );
     }
 }

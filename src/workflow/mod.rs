@@ -7,6 +7,7 @@
 
 mod address_family;
 mod boundary_error;
+mod bounded_probe;
 pub mod clock;
 mod deadline;
 pub mod dns;

@@ -5,7 +5,7 @@ use bytes::Bytes;
 
 use crate::net::{
     Error as LiveIoError,
-    capture::{CaptureQueueLimits, CaptureSession},
+    capture::CaptureQueueLimits,
     route::{MaterializedRoute, PlannedRoute},
     transmit::IoSendReport,
 };
@@ -19,7 +19,7 @@ use crate::packet::{
 };
 use crate::protocol::link::Ethernet;
 
-use super::exchange::{CaptureGuard, ExchangeOptions, MAX_EXCHANGE_TIMEOUT};
+use super::exchange::{ExchangeOptions, MAX_EXCHANGE_TIMEOUT};
 use super::send::ClientError;
 use super::target::IpVersion;
 
@@ -130,19 +130,6 @@ pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientEr
         return Err(ClientError::PacketExceedsMtu { actual, mtu });
     }
     Ok(())
-}
-
-pub(super) fn error_after_shutdown<C: CaptureSession>(
-    capture: &mut CaptureGuard<C>,
-    operation: LiveIoError,
-) -> ClientError {
-    match capture.shutdown() {
-        Ok(()) => ClientError::Io(operation),
-        Err(shutdown) => ClientError::OperationAndCaptureShutdown {
-            operation,
-            shutdown,
-        },
-    }
 }
 
 pub(super) fn push_diagnostic_once(

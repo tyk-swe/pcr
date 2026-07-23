@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
 
 use crate::packet::{
     build::BuildMode,
@@ -11,15 +10,14 @@ use crate::packet::{
         LayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId},
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, field_layout, impl_layer_boilerplate, invalid, make_layer,
-    out_of_range, payload_without_padding, protocol, set_wire_u32, truncated, unknown_field,
-    validate_dependent, wire_u32, wrong_layer, wrong_type,
+    ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
+    truncated, validate_dependent, wrong_layer,
 };
 
 const SCTP_HEADER_LEN: usize = 12;
@@ -46,86 +44,36 @@ impl Default for Sctp {
     }
 }
 
-fn sctp_schema() -> &'static LayerSchema {
-    static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[
-        FieldSchema {
-            name: "source_port",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "SCTP source port",
+reflective_layer! {
+    fn sctp_schema() => { protocol: protocol("sctp"), name: "SCTP" }
+    impl Sctp {
+        "source_port" => {
+            kind: Unsigned, derived: false, required: true, description: "SCTP source port",
+            get |layer| Some(reflect_get(&layer.source_port)),
+            set |layer, value, name| reflect_set(&mut layer.source_port, sctp_schema(), name, value),
+            layout: (0, 2)
         },
-        FieldSchema {
-            name: "destination_port",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "SCTP destination port",
+        "destination_port" => {
+            kind: Unsigned, derived: false, required: true, description: "SCTP destination port",
+            get |layer| Some(reflect_get(&layer.destination_port)),
+            set |layer, value, name| reflect_set(&mut layer.destination_port, sctp_schema(), name, value),
+            layout: (2, 4)
         },
-        FieldSchema {
-            name: "verification_tag",
-            kind: FieldKind::Unsigned,
-            derived: false,
-            required: true,
-            description: "SCTP verification tag",
+        "verification_tag" => {
+            kind: Unsigned, derived: false, required: true, description: "SCTP verification tag",
+            get |layer| Some(reflect_get(&layer.verification_tag)),
+            set |layer, value, name| reflect_set(&mut layer.verification_tag, sctp_schema(), name, value),
+            layout: (4, 8)
         },
-        FieldSchema {
-            name: "checksum",
-            kind: FieldKind::Unsigned,
-            derived: true,
-            required: false,
-            description: "SCTP CRC32c checksum",
+        "checksum" => {
+            kind: Unsigned, derived: true, required: false, description: "SCTP CRC32c checksum",
+            get |layer| Some(reflect_get(&layer.checksum)),
+            set |layer, value, name| reflect_set(&mut layer.checksum, sctp_schema(), name, value),
+            layout: (8, 12)
         },
-    ];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: protocol("sctp"),
-        name: "SCTP",
-        fields: FIELDS,
-    })
-}
-
-impl Layer for Sctp {
-    impl_layer_boilerplate!(Sctp, sctp_schema);
-
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
-            "source_port" => Some(self.source_port.into()),
-            "destination_port" => Some(self.destination_port.into()),
-            "verification_tag" => Some(self.verification_tag.into()),
-            "checksum" => Some(wire_u32(&self.checksum)),
-            _ => None,
-        }
+        normalize |layer| { layer.checksum.normalize(); }
     }
-
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-        match (name, value) {
-            ("source_port", FieldValue::Unsigned(value)) => {
-                self.source_port =
-                    u16::try_from(value).map_err(|_| out_of_range(sctp_schema(), name))?
-            }
-            ("destination_port", FieldValue::Unsigned(value)) => {
-                self.destination_port =
-                    u16::try_from(value).map_err(|_| out_of_range(sctp_schema(), name))?
-            }
-            ("verification_tag", FieldValue::Unsigned(value)) => {
-                self.verification_tag =
-                    u32::try_from(value).map_err(|_| out_of_range(sctp_schema(), name))?
-            }
-            ("checksum", value) => {
-                return set_wire_u32(&mut self.checksum, sctp_schema(), name, value);
-            }
-            ("source_port" | "destination_port" | "verification_tag", _) => {
-                return Err(wrong_type(sctp_schema(), name, "unsigned"));
-            }
-            _ => return Err(unknown_field(sctp_schema(), name)),
-        }
-        Ok(())
-    }
-
-    fn normalize(&mut self) {
-        self.checksum.normalize();
-    }
+    layout fn sctp_layout();
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -362,15 +310,6 @@ fn validate_chunks(payload: &[u8], require_zero_padding: bool) -> Result<(), Str
         ));
     }
     Ok(())
-}
-
-fn sctp_layout() -> Vec<crate::packet::layout::FieldLayout> {
-    vec![
-        field_layout("source_port", 0, 2),
-        field_layout("destination_port", 2, 4),
-        field_layout("verification_tag", 4, 8),
-        field_layout("checksum", 8, 12),
-    ]
 }
 
 fn resolve_u32(

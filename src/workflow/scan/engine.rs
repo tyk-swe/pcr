@@ -17,18 +17,14 @@ where
     let ports = request.validate()?;
     // Implementations must perform declared-target authorization before DNS
     // and authorize every answer before anything below constructs a ScanProbe.
-    enforce_deadline(&deadline)?;
-    let resolved = authorizer.resolve_and_authorize(&request.target);
-    enforce_deadline(&deadline)?;
-    let resolved = resolved?;
-    let mut addresses = Vec::with_capacity(resolved.addresses.len());
-    let mut seen_addresses = HashSet::with_capacity(resolved.addresses.len());
-    for address in resolved.addresses {
-        enforce_deadline(&deadline)?;
-        if request.address_family.accepts(address) && seen_addresses.insert(address) {
-            addresses.push(address);
-        }
-    }
+    let resolved = resolve_selected(
+        authorizer,
+        &request.target,
+        request.address_family,
+        &deadline,
+        scan_duration_error,
+    )?;
+    let addresses = resolved.addresses;
     if addresses.is_empty() {
         return Err(ScanError::AddressFamily {
             family: request.address_family.label(),
@@ -92,10 +88,13 @@ where
             limit: request.limits.max_duration,
         });
     }
-    enforce_deadline(&deadline)?;
-    let authorization = authorizer.authorize_operation(total_probes as u64, maximum_bytes);
-    enforce_deadline(&deadline)?;
-    authorization?;
+    approve_operation(
+        authorizer,
+        total_probes as u64,
+        maximum_bytes,
+        &deadline,
+        scan_duration_error,
+    )?;
 
     let endpoint_ports = if request.transport == ScanTransport::Icmp {
         vec![None]
@@ -129,62 +128,36 @@ where
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
     };
-    let mut stats = Stats::default();
-    let mut scheduled_delay = Duration::ZERO;
-
-    for (batch_index, batch) in batches.iter().enumerate() {
-        enforce_deadline(&deadline)?;
-        let sequence = batch.probes[0].sequence;
-        if batch_index != 0 {
-            let delay = rate_delay(
-                batches[batch_index - 1].probes.len(),
-                request.probes_per_second,
-            )?;
-            enforce_deadline(&deadline)?;
-            deadline.start_accounting(delay).map_err(duration_limit)?;
-            clock.sleep(delay).map_err(|source| ScanError::Clock {
-                sequence,
-                message: source.to_string(),
-            })?;
-            deadline.account(delay).map_err(duration_limit)?;
-            scheduled_delay =
-                scheduled_delay
-                    .checked_add(delay)
-                    .ok_or(ScanError::DurationLimit {
-                        actual: Duration::MAX,
-                        limit: request.limits.max_duration,
-                    })?;
-        }
-        enforce_deadline(&deadline)?;
-        deadline
-            .start_accounting(Duration::ZERO)
-            .map_err(duration_limit)?;
-        let exchange = executor.execute(batch);
-        enforce_deadline(&deadline)?;
-        let exchange = exchange.map_err(|source| ScanError::Execution { sequence, source })?;
-        deadline
-            .account(exchange.stats.elapsed)
-            .map_err(duration_limit)?;
-        validate_exchange_evidence(batch, &exchange, request.limits)?;
-        enforce_deadline(&deadline)?;
-        add_stats(&mut stats, &exchange.stats, sequence)?;
-        process_batch(
-            batch,
-            exchange,
-            registry,
-            request.limits,
-            &mut output,
-            &deadline,
-        )?;
-    }
-    enforce_deadline(&deadline)?;
-    stats.elapsed =
-        stats
-            .elapsed
-            .checked_add(scheduled_delay)
-            .ok_or(ScanError::StatisticsOverflow {
-                sequence: total_probes.saturating_sub(1) as u64,
-            })?;
+    let run = run_batches(
+        &batches,
+        request.probes_per_second,
+        request.limits.max_duration,
+        total_probes.saturating_sub(1) as u64,
+        &mut deadline,
+        clock,
+        |batch| executor.execute(batch),
+        |batch, exchange| validate_exchange_evidence(batch, exchange, request.limits),
+        |batch, exchange, deadline| {
+            process_batch(
+                batch,
+                exchange,
+                registry,
+                request.limits,
+                &mut output,
+                deadline,
+            )
+        },
+        |()| false,
+        scan_duration_error,
+        |rate| ScanError::InvalidLimit {
+            field: "probes_per_second",
+            value: u64::from(rate.unwrap_or_default()),
+            reason: "rate-delay arithmetic overflowed".to_owned(),
+        },
+        |sequence, message| ScanError::Clock { sequence, message },
+        |sequence, source| ScanError::Execution { sequence, source },
+        |sequence| ScanError::StatisticsOverflow { sequence },
+    )?;
 
     Ok(ScanResult {
         target: resolved.declared,
@@ -192,7 +165,7 @@ where
         endpoints: output.endpoints,
         undecoded: output.undecoded,
         diagnostics: output.diagnostics,
-        stats,
+        stats: run.stats,
     })
 }
 
@@ -491,10 +464,8 @@ fn process_batch(
     for diagnostic in batch_diagnostics {
         push_diagnostic_once(&mut output.diagnostics, diagnostic);
     }
-    // Stable ordering retains executor order among responses for one request.
-    responses.sort_by_key(|response| response.request_index);
     enforce_deadline(deadline)?;
-    let mut matched_responses = responses.iter().peekable();
+    let mut response_selector = ResponseSelector::new(&mut responses, &unsolicited);
 
     for (request_index, ((probe, built), sent_frame)) in batch
         .probes
@@ -504,53 +475,15 @@ fn process_batch(
         .enumerate()
     {
         enforce_deadline(deadline)?;
-        let mut best = None;
-        while matched_responses
-            .peek()
-            .is_some_and(|response| response.request_index == request_index)
-        {
-            enforce_deadline(deadline)?;
-            let response = matched_responses
-                .next()
-                .expect("peeked matched response must remain available");
-            if let Some(observation) =
-                classify_scan_response(registry, probe.transport, built, &response.response)
-            {
-                select_response_candidate(
-                    &mut best,
-                    ResponseCandidate {
-                        observation,
-                        decoded: &response.response,
-                        latency: Some(response.latency),
-                    },
-                    sent_frame.timestamp,
-                    batch.timeout,
-                    |observation| observation.classification.rank(),
-                    |observation| observation.responder,
-                );
-            }
-            enforce_deadline(deadline)?;
-        }
-        for response in &unsolicited {
-            enforce_deadline(deadline)?;
-            if let Some(observation) =
-                classify_scan_response(registry, probe.transport, built, response)
-            {
-                select_response_candidate(
-                    &mut best,
-                    ResponseCandidate {
-                        observation,
-                        decoded: response,
-                        latency: None,
-                    },
-                    sent_frame.timestamp,
-                    batch.timeout,
-                    |observation| observation.classification.rank(),
-                    |observation| observation.responder,
-                );
-            }
-            enforce_deadline(deadline)?;
-        }
+        let best = response_selector.select(
+            request_index,
+            sent_frame.timestamp,
+            batch.timeout,
+            |response| classify_scan_response(registry, probe.transport, built, response),
+            |observation| observation.classification.rank(),
+            |observation| observation.responder,
+            || enforce_deadline(deadline),
+        )?;
 
         let endpoint_index = output
             .endpoint_indices
@@ -604,36 +537,21 @@ fn process_batch(
         enforce_deadline(deadline)?;
     }
 
-    for frame in batch_undecoded {
-        enforce_deadline(deadline)?;
-        if output.undecoded.len() >= limits.max_undecoded {
-            push_undecoded_limit_diagnostic(
-                &mut output.diagnostics,
-                SCAN_EVIDENCE_DIAGNOSTICS,
-                limits.max_undecoded,
-            );
-            break;
-        }
-        if retain_evidence(
-            &mut output.evidence_budget,
-            &frame,
-            SCAN_EVIDENCE_DIAGNOSTICS,
-            limits.max_evidence_frames,
-            limits.max_evidence_bytes,
-            &mut output.diagnostics,
-        ) {
-            output.undecoded.push(frame);
-        }
-        enforce_deadline(deadline)?;
-    }
+    retain_undecoded_frames(
+        batch_undecoded,
+        &mut output.undecoded,
+        limits.max_undecoded,
+        &mut output.evidence_budget,
+        SCAN_EVIDENCE_DIAGNOSTICS,
+        limits.max_evidence_frames,
+        limits.max_evidence_bytes,
+        &mut output.diagnostics,
+        |frame| frame,
+        || enforce_deadline(deadline),
+    )?;
     Ok(())
 }
 
-fn add_stats(total: &mut Stats, batch: &Stats, sequence: u64) -> Result<(), ScanError> {
-    total
-        .checked_add(batch)
-        .ok_or(ScanError::StatisticsOverflow { sequence })
-}
 fn enforce_deadline(deadline: &Deadline) -> Result<(), ScanError> {
     deadline.check().map_err(duration_limit)
 }
@@ -644,16 +562,39 @@ fn duration_limit(error: DeadlineExceeded) -> ScanError {
         limit: error.limit,
     }
 }
+
+fn scan_duration_error(actual: Duration, limit: Duration) -> ScanError {
+    ScanError::DurationLimit { actual, limit }
+}
+
+impl ProbeBatch for ScanBatch {
+    fn sequence(&self) -> u64 {
+        self.probes[0].sequence
+    }
+
+    fn probe_count(&self) -> usize {
+        self.probes.len()
+    }
+}
+
+impl ProbeExecution for ScanBatchExecution {
+    fn stats(&self) -> &Stats {
+        &self.stats
+    }
+}
+use super::super::bounded_probe::{
+    ProbeBatch, ProbeExecution, ResponseSelector, approve_operation, resolve_selected,
+    retain_undecoded_frames, run_batches,
+};
 use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
-    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, HashSet,
-    IPV4_PROBE_BYTES, IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
-    MatchedResponseEvidence, Packet, ProtocolRegistry, ResponseCandidate, ResponseEvidence,
-    SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch, ScanBatchExecution, ScanClassification,
-    ScanEndpointResult, ScanError, ScanExecutor, ScanLimits, ScanMatchedResponse, ScanProbe,
-    ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult, ScanTransport, Stats, Tcp, Udp,
-    classify_scan_response, format_exchange_evidence_error, nonzero_ipv4_identification,
-    push_diagnostic_once, push_undecoded_limit_diagnostic, retain_evidence,
-    select_response_candidate, validate_shared_exchange_evidence,
+    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, IPV4_PROBE_BYTES,
+    IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
+    ProtocolRegistry, ResponseEvidence, SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch, ScanBatchExecution,
+    ScanClassification, ScanEndpointResult, ScanError, ScanExecutor, ScanLimits,
+    ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult,
+    ScanTransport, Stats, Tcp, Udp, classify_scan_response, format_exchange_evidence_error,
+    nonzero_ipv4_identification, push_diagnostic_once, retain_evidence,
+    validate_shared_exchange_evidence,
 };
 use crate::packet::semantics::BuiltinProtocol;

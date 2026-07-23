@@ -16,6 +16,7 @@ pub mod layer;
 pub mod layout;
 pub mod matcher;
 mod model;
+mod protocol_catalog;
 pub mod registry;
 pub(crate) mod semantics;
 pub mod template;

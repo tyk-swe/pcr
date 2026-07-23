@@ -81,6 +81,40 @@ generic `internal`, `_impl`, or `#[path = ...]` modules. Unsafe code is confined
 to `src/net/platform/`, and every unsafe block needs a specific `SAFETY`
 explanation.
 
+## Rust source size guard
+
+Rust source files under `src/`, `tests/`, `benches/`, and `fuzz/` have a
+20 KiB (20,480 byte) limit. CI runs `cargo test --locked --test source_size`.
+The test measures bytes after normalizing CRLF line endings to LF so that the
+result is stable on Linux, macOS, and Windows. It ignores Cargo build output,
+generated and vendored directories, symlinks, Git internals, and external
+submodule worktrees.
+
+Existing files above the limit are recorded in
+`tests/source_size_baseline.txt`. Each non-comment line is a sorted,
+tab-separated repository-relative path and maximum normalized byte count:
+
+```text
+path/to/file.rs<TAB>maximum-bytes
+```
+
+An allowlisted file may stay at its recorded size or shrink, but it may not
+grow. A missing allowlisted file also fails the test so obsolete entries are
+removed deliberately. The test never rewrites or regenerates the baseline.
+Once an allowlisted file is reduced to 20 KiB or less, the test requires its
+baseline entry to be removed in the same change.
+
+Split large files along an existing domain boundary. Move a cohesive type,
+operation, platform adapter, or test group into a canonically named child
+module and keep its public surface explicit; do not introduce `internal`,
+`_impl`, or `#[path = ...]` modules to evade the limit.
+
+New exceptions are a last resort and require repository lead approval because
+they increase structural debt and weaken the CI ceiling. After approval, add a
+sorted baseline line manually using the exact normalized size reported by the
+failing test. The same approval is required before raising an existing
+baseline. Never update the baseline only to make CI pass.
+
 ## Temporary contract freeze
 
 The stabilization freeze covers:

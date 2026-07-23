@@ -33,4 +33,5 @@ PRs should explain intent and impact, link issues, list validation, and identify
 
 ## Other instructions
 
-Good code is maintainable code. Files above 20kb (~600 lines) are too large and should be split/refactored
+Good code is maintainable code. Rust source files above 20 KiB (20,480 bytes,
+roughly 600 lines) are too large and should be split or refactored.

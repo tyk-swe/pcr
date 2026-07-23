@@ -1,0 +1,40 @@
+# Existing Rust source-size exceptions.
+# Format: <normalized repository-relative path><TAB><maximum normalized bytes>
+# Keep entries sorted. Add or increase an exception only with repository lead approval.
+src/capture/pcap/tests.rs	45787
+src/capture/pcap/writer.rs	25748
+src/cli/tests.rs	21557
+src/client/exchange/contract.rs	25280
+src/net/neighbor/provider.rs	22988
+src/net/neighbor/tests.rs	25244
+src/net/platform/linux.rs	28102
+src/net/platform/live_capture.rs	40512
+src/net/platform/macos.rs	27582
+src/net/platform/mod.rs	23924
+src/net/platform/npcap.rs	31671
+src/net/platform/raw_ip.rs	26888
+src/net/platform/windows.rs	30636
+src/net/route/planner.rs	26361
+src/net/route/tests.rs	33244
+src/packet/build/engine.rs	34765
+src/packet/decode/engine.rs	27935
+src/packet/document/model.rs	25765
+src/packet/semantics.rs	26119
+src/protocol/capture/model.rs	27399
+src/protocol/gre/model.rs	20804
+src/protocol/ipv6/model.rs	30323
+src/protocol/link/model.rs	23906
+src/protocol/network/model.rs	38400
+src/protocol/support/manifest.rs	27678
+src/protocol/transport/sctp.rs	21746
+src/session/fragment.rs	34082
+src/workflow/dns/engine.rs	22829
+src/workflow/dns/wire.rs	32508
+src/workflow/evidence.rs	30920
+src/workflow/fuzz/mutation.rs	28003
+src/workflow/fuzz/tests.rs	21789
+src/workflow/replay/tests.rs	31123
+src/workflow/scan/engine.rs	21441
+src/workflow/traceroute/engine.rs	21794
+tests/architecture.rs	38874
+tests/document_examples.rs	37331

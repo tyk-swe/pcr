@@ -5,7 +5,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use bytes::Bytes;
 
-use crate::packet::{Packet, layer::Raw, matcher::ResponseMatcher, semantics::BuiltinProtocol};
+use crate::packet::{
+    Packet, field::FieldValue, layer::Raw, matcher::ResponseMatcher, semantics::BuiltinProtocol,
+};
 use crate::protocol::{
     ipv6::SegmentRoutingHeader,
     network::Ipv6,
@@ -13,7 +15,7 @@ use crate::protocol::{
 };
 
 use super::super::ReverseFlowMatcher;
-use super::support::{address, sctp_init, sctp_init_ack, tcp_packet};
+use super::super::tests::{address, reflective_udp_packet, sctp_init, sctp_init_ack, tcp_packet};
 
 #[test]
 fn sctp_init_matcher_requires_reversed_tuple_and_initiate_tag() {
@@ -196,5 +198,31 @@ fn reordered_same_tuple_tcp_replies_match_only_their_own_probe() {
             })
             .collect::<Vec<_>>();
         assert_eq!(matches, vec![expected_sequence / 100 - 1]);
+    }
+}
+
+#[test]
+fn reverse_matcher_rejects_missing_wrong_and_out_of_range_ports() {
+    let client = Ipv4Addr::new(10, 0, 0, 1);
+    let server = Ipv4Addr::new(10, 0, 0, 2);
+    let matcher = ReverseFlowMatcher::new(BuiltinProtocol::Udp);
+    for (request_source, request_destination, response_source, response_destination) in [
+        (None, None, None, None),
+        (
+            Some(FieldValue::Text("12345".to_owned())),
+            Some(FieldValue::Unsigned(9)),
+            Some(FieldValue::Unsigned(9)),
+            Some(FieldValue::Text("12345".to_owned())),
+        ),
+        (
+            Some(FieldValue::Unsigned(u64::from(u16::MAX) + 1)),
+            Some(FieldValue::Unsigned(9)),
+            Some(FieldValue::Unsigned(9)),
+            Some(FieldValue::Unsigned(u64::from(u16::MAX) + 1)),
+        ),
+    ] {
+        let request = reflective_udp_packet(client, server, request_source, request_destination);
+        let response = reflective_udp_packet(server, client, response_source, response_destination);
+        assert!(!matcher.matches(&request, &response).matched);
     }
 }

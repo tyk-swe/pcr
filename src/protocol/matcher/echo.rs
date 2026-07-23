@@ -88,3 +88,6 @@ impl ResponseMatcher for EchoMatcher {
         network_endpoints_before(response, response_layer_index).map(|endpoints| endpoints.source)
     }
 }
+
+#[cfg(test)]
+mod tests;

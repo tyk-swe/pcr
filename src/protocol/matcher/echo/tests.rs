@@ -6,7 +6,7 @@ use std::net::Ipv4Addr;
 use crate::packet::matcher::ResponseMatcher;
 
 use super::super::EchoMatcher;
-use super::support::echo;
+use super::super::tests::echo;
 
 #[test]
 fn echo_matcher_requires_reversed_network_endpoints() {

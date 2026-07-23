@@ -19,8 +19,12 @@ use crate::protocol::{
     transport::{Sctp, Tcp, Udp},
 };
 
-use super::super::{EchoMatcher, QuotedProbeTransport, ReverseFlowMatcher, quoted_icmp_error_kind};
-use super::support::{echo, quoted_icmpv4_time_exceeded, quoted_icmpv6_time_exceeded, sctp_init};
+use super::super::{
+    EchoMatcher, QuotedProbeTransport, ReverseFlowMatcher, quoted_icmp_error_kind,
+    tests::{
+        MalformedIpv4, echo, quoted_icmpv4_time_exceeded, quoted_icmpv6_time_exceeded, sctp_init,
+    },
+};
 
 #[test]
 fn matchers_accept_quoted_icmp_errors_for_each_probe_transport() {
@@ -189,6 +193,34 @@ fn sctp_quoted_icmp_matches_a_permissively_built_raw_checksum() {
     assert!(
         ReverseFlowMatcher::new(BuiltinProtocol::Sctp)
             .matches(&built.packet, &response)
+            .matched
+    );
+}
+
+#[test]
+fn malformed_first_ip_does_not_fall_through_to_an_inner_ip_for_quoted_matching() {
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let destination = Ipv4Addr::new(10, 0, 0, 2);
+    let router = Ipv4Addr::new(10, 0, 0, 254);
+    let mut request = Packet::new();
+    request
+        .push(MalformedIpv4)
+        .push(Ipv4 {
+            source,
+            destination,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 9,
+            ..Udp::default()
+        });
+    let response = quoted_icmpv4_time_exceeded(router, source, 17, &request);
+
+    assert!(quoted_icmp_error_kind(&request, &response, QuotedProbeTransport::Udp).is_none());
+    assert!(
+        !ReverseFlowMatcher::new(BuiltinProtocol::Udp)
+            .matches(&request, &response)
             .matched
     );
 }

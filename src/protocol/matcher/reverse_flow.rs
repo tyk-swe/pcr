@@ -199,3 +199,6 @@ fn tcp_payload_length(packet: &Packet, tcp_layer_index: usize) -> Option<u32> {
     }
     Some(payload_length)
 }
+
+#[cfg(test)]
+mod tests;

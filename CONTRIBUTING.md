@@ -28,6 +28,9 @@ RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo deny check
 ```
 
+The complete enforced matrix, tool versions, thresholds, release checks, and
+artifacts are recorded in the [CI baseline](docs/ci-baseline.md).
+
 Linux native networking also has a strict, opt-in namespace harness. It is not
 part of ordinary unprivileged `cargo test`; its dedicated entry point fails
 when prerequisites or privileges are unavailable:
@@ -116,6 +119,21 @@ they increase structural debt and weaken the CI ceiling. After approval, add a
 sorted baseline line manually using the exact normalized size reported by the
 failing test. The same approval is required before raising an existing
 baseline. Never update the baseline only to make CI pass.
+
+## Public API compatibility report
+
+CI compares the all-feature public Rust API with the newest reachable release
+tag by using the pinned cargo-semver-checks version. Breaking changes are
+visible but report-only during beta stabilization; failures to perform the
+comparison still fail CI. Reproduce the report with:
+
+```console
+cargo install cargo-semver-checks --locked --version 0.49.0
+scripts/public-api-diff
+```
+
+See the [CI baseline](docs/ci-baseline.md#public-rust-api-compatibility) for
+baseline selection, exit-code handling, and artifact contents.
 
 ## Temporary contract freeze
 

@@ -24,7 +24,7 @@ if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
 from native_e2e.cases import exchange, route, send  # noqa: E402
-from native_e2e.support import diagnostics  # noqa: E402
+from native_e2e.support import artifacts, diagnostics  # noqa: E402
 from native_e2e.support.command import CommandRunner  # noqa: E402
 from native_e2e.support.context import (  # noqa: E402
     CaseContext,
@@ -128,19 +128,52 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def prerequisite_entry(runner: CommandRunner) -> int:
+def write_failure_artifacts(
+    directory: Path | None,
+    files: dict[str, str],
+) -> None:
+    try:
+        artifacts.write_failure_files(directory, files)
+    except BaseException as error:
+        print(
+            f"native-e2e failure artifact error: {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+    else:
+        if directory is not None:
+            print(f"native-e2e failure artifacts: {directory}", file=sys.stderr)
+
+
+def prerequisite_entry(
+    runner: CommandRunner,
+    artifact_directory: Path | None,
+) -> int:
     signal_guard = SignalGuard()
     signal_guard.install()
     try:
         check_prerequisites(runner)
     except HarnessSignal as error:
         print(f"native-e2e prerequisite probe interrupted: {error}", file=sys.stderr)
+        write_failure_artifacts(
+            artifact_directory,
+            {
+                "prerequisite-error.txt": f"{type(error).__name__}: {error}",
+                "commands.log": runner.format_log(),
+            },
+        )
         if runner.records:
             print("\nExact commands executed:", file=sys.stderr)
             print(runner.format_log(), file=sys.stderr)
         return 128 + error.signum
     except (PrerequisiteError, ValueError) as error:
         print(f"native-e2e prerequisite error: {error}", file=sys.stderr)
+        write_failure_artifacts(
+            artifact_directory,
+            {
+                "prerequisite-error.txt": f"{type(error).__name__}: {error}",
+                "commands.log": runner.format_log(),
+            },
+        )
         if runner.records:
             print("\nExact commands executed:", file=sys.stderr)
             print(runner.format_log(), file=sys.stderr)
@@ -169,6 +202,7 @@ def run_case(
     binary: Path,
     case: NativeCase,
     force_failure: bool,
+    artifact_directory: Path | None,
 ) -> dict[str, object]:
     names = TopologyNames.unique()
     topology = Topology(runner, names, AddressPlan.isolated(case.address_slot))
@@ -272,6 +306,22 @@ def run_case(
         failure_trace = f"{type(failure).__name__}: {failure}\n"
 
     if failure is not None:
+        cleanup_report = "\n".join(f"- {error}" for error in cleanup_errors)
+        write_failure_artifacts(
+            artifact_directory,
+            {
+                "case.txt": case.name,
+                "topology.txt": topology.describe(),
+                "failure.txt": failure_trace.rstrip(),
+                "cleanup-errors.txt": cleanup_report or "<none>",
+                "topology-before-cleanup.txt": before_cleanup or "<not collected>",
+                "topology-after-cleanup.txt": after_cleanup or "<not collected>",
+                "responder-stdout.log": responder_stdout,
+                "responder-stderr.log": responder_stderr,
+                "packetcraftr-invocations.log": context.format_invocations(),
+                "commands.log": runner.format_log(),
+            },
+        )
         sections = [
             f"NATIVE E2E CASE FAILURE: {case.name}",
             topology.describe(),
@@ -309,6 +359,7 @@ def run_harness(
     runner: CommandRunner,
     binary: Path,
     forced_failure: str | None,
+    artifact_directory: Path | None,
 ) -> int:
     print(f"packetcraftr_binary={binary}", flush=True)
     results: list[dict[str, object]] = []
@@ -320,6 +371,7 @@ def run_harness(
                     binary,
                     case,
                     force_failure=forced_failure == case.name,
+                    artifact_directory=artifact_directory,
                 )
             )
     except CaseExecutionError as error:
@@ -342,22 +394,35 @@ def main() -> int:
     arguments = parse_arguments()
     try:
         runner = CommandRunner.from_environment()
+        artifact_directory = artifacts.directory_from_environment()
     except ValueError as error:
         print(f"native-e2e prerequisite error: {error}", file=sys.stderr)
         return 2
 
     if arguments.check_prerequisites:
-        return prerequisite_entry(runner)
+        return prerequisite_entry(runner, artifact_directory)
     if not arguments.skip_prerequisite_check:
-        status = prerequisite_entry(runner)
+        status = prerequisite_entry(runner, artifact_directory)
         if status != 0:
             return status
     try:
         binary = binary_from_environment()
     except RuntimeError as error:
         print(f"native-e2e setup error: {error}", file=sys.stderr)
+        write_failure_artifacts(
+            artifact_directory,
+            {
+                "setup-error.txt": f"{type(error).__name__}: {error}",
+                "commands.log": runner.format_log(),
+            },
+        )
         return 2
-    return run_harness(runner, binary, arguments.force_failure)
+    return run_harness(
+        runner,
+        binary,
+        arguments.force_failure,
+        artifact_directory,
+    )
 
 
 if __name__ == "__main__":

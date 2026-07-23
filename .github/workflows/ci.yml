@@ -79,6 +79,9 @@ jobs:
         run: cargo test --locked --no-default-features
       - name: Test default profile
         run: cargo test --locked
+      - if: runner.os == 'Linux'
+        name: Enforce the Rust source-size architecture guard
+        run: cargo test --locked --test source_size
       - name: Test complete profile
         run: cargo test --locked --all-features
       - name: Check release pcap-free profile
@@ -90,35 +93,9 @@ jobs:
 
   native-e2e:
     name: Linux native namespace E2E
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-native-e2e-linux-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-native-e2e-linux-${{ hashFiles('rust-toolchain.toml') }}-
-      - name: Install native-E2E prerequisites
-        run: >-
-          sudo apt-get update &&
-          sudo apt-get install --yes ethtool iproute2 libpcap-dev python3-jsonschema shellcheck
-      - name: Lint native-E2E helpers
-        env:
-          PYTHONPYCACHEPREFIX: ${{ runner.temp }}/native-e2e-pycache
-        run: |
-          shellcheck scripts/test-native-e2e
-          python3 -m compileall -q tests/native_e2e
-          PCR_NATIVE_E2E_PRIVILEGE_MODE=sudo \
-            PCR_NATIVE_E2E_TEST_PRIVILEGED=1 \
-            PYTHONPATH=tests \
-            python3 -m unittest native_e2e.support.test_command
-      - name: Run strict namespace E2E smoke tests
-        run: scripts/test-native-e2e
+    permissions:
+      contents: read
+    uses: ./.github/workflows/native-e2e.yml
 
   linux-quality:
     name: Linux quality and feature powerset
@@ -156,6 +133,79 @@ jobs:
         run: cargo hack check --locked --feature-powerset --depth 2 --all-targets
       - name: Complete feature profile
         run: cargo check --locked --all-targets --all-features
+
+  public-api:
+    name: public Rust API compatibility (report only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-public-api-linux-v1-${{ hashFiles('rust-toolchain.toml') }}-semver-checks-0.49.0-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-public-api-linux-v1-${{ hashFiles('rust-toolchain.toml') }}-semver-checks-0.49.0-
+      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install pinned cargo-semver-checks
+        run: cargo install cargo-semver-checks --locked --version 0.49.0
+      - name: Generate report against the latest reachable release
+        id: semver
+        shell: bash
+        env:
+          REPORT_DIRECTORY: ${{ runner.temp }}/public-api-compatibility
+        run: |
+          set +e
+          scripts/public-api-diff "$REPORT_DIRECTORY"
+          status=$?
+          set -e
+
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          if [[ "$status" -eq 100 ]]; then
+            echo "::warning::Breaking public Rust API changes were reported; review the public-api-compatibility artifact."
+          fi
+          {
+            echo "### Public Rust API compatibility"
+            echo
+            if [[ -f "$REPORT_DIRECTORY/baseline.txt" ]]; then
+              cat "$REPORT_DIRECTORY/baseline.txt"
+            else
+              echo "Baseline metadata was not generated."
+            fi
+            echo
+            case "$status" in
+              0)
+                echo "No breaking public API changes were reported."
+                ;;
+              100)
+                echo "Breaking changes were reported. This beta-stabilization check is review-only."
+                ;;
+              *)
+                echo "The comparison did not complete (exit $status); this is an infrastructure or tool failure."
+                ;;
+            esac
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "$status" -eq 0 || "$status" -eq 100 ]]; then
+            exit 0
+          fi
+          exit "$status"
+      - name: Upload public API compatibility report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-api-compatibility
+          path: ${{ runner.temp }}/public-api-compatibility
+          if-no-files-found: warn
+          retention-days: 7
 
   portable-targets:
     name: portable target (${{ matrix.target }})

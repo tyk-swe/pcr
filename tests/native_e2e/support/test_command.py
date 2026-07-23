@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -43,6 +44,16 @@ child = subprocess.Popen(
 with open(sys.argv[1], "w", encoding="utf-8") as stream:
     json.dump({"leader": os.getpid(), "child": child.pid}, stream)
 child.wait()
+"""
+
+ZOMBIE_DESCENDANT_SCRIPT = """
+import subprocess
+import sys
+import time
+
+child = subprocess.Popen([sys.executable, "-c", "pass"])
+print(child.pid, flush=True)
+time.sleep(30)
 """
 
 
@@ -202,6 +213,28 @@ class CommandRunnerProcessTests(unittest.TestCase):
                         timeout=2.0,
                     )
 
+    def test_wait_for_exit_treats_zombie_as_exited(self) -> None:
+        parent = subprocess.Popen(
+            (sys.executable, "-c", ZOMBIE_DESCENDANT_SCRIPT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+        try:
+            if parent.stdout is None:
+                self.fail("zombie fixture did not expose its child pid")
+            child_pid = int(parent.stdout.readline())
+            self._wait_for_exit((child_pid,))
+            self.assertEqual(self._process_state(child_pid), "Z")
+        finally:
+            parent.terminate()
+            try:
+                parent.communicate(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                parent.kill()
+                parent.communicate(timeout=2.0)
+
     def _assert_timeout_kills_tree(
         self,
         runner: CommandRunner,
@@ -236,11 +269,29 @@ class CommandRunnerProcessTests(unittest.TestCase):
     def _wait_for_exit(self, pids: tuple[int, ...]) -> None:
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
-            if not any(os.path.exists(f"/proc/{pid}") for pid in pids):
+            if not any(self._process_is_running(pid) for pid in pids):
                 return
             time.sleep(0.02)
-        survivors = [pid for pid in pids if os.path.exists(f"/proc/{pid}")]
+        survivors = [pid for pid in pids if self._process_is_running(pid)]
         self.fail(f"timed-out command descendants survived: {survivors}")
+
+    @classmethod
+    def _process_is_running(cls, pid: int) -> bool:
+        return cls._process_state(pid) not in (None, "X", "Z")
+
+    @staticmethod
+    def _process_state(pid: int) -> str | None:
+        try:
+            status = Path(f"/proc/{pid}/status").read_text(encoding="utf-8")
+        except (FileNotFoundError, ProcessLookupError):
+            return None
+        for line in status.splitlines():
+            if line.startswith("State:"):
+                fields = line.split()
+                if len(fields) >= 2:
+                    return fields[1]
+                break
+        raise AssertionError(f"/proc/{pid}/status did not contain a process state")
 
     def _wait_for_namespace_process(
         self,

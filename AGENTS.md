@@ -30,3 +30,7 @@ Use Conventional Commits: `<type>(<scope>): <description>`, for example `fix(ses
 Maintain root `CHANGELOG.md` in Keep a Changelog format. Record user-visible work under `## [Unreleased]` with relevant `Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`, or `Security` headings. On release, move entries into `## [x.y.z] - YYYY-MM-DD`; do not use it as a commit dump.
 
 PRs should explain intent and impact, link issues, list validation, and identify feature or platform effects. For output changes, include updated goldens or representative CLI output. Keep all CI profiles green.
+
+## Other instructions
+
+Good code is maintainable code. Files above 20kb (~600 lines) are too large and should be split/refactored

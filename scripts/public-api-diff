@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 tyk-swe
+# SPDX-License-Identifier: AGPL-3.0-only
+
+set -euo pipefail
+
+fail() {
+    printf 'public API diff error: %s\n' "$*" >&2
+    exit 2
+}
+
+if (($# > 1)); then
+    fail "usage: scripts/public-api-diff [REPORT_DIRECTORY]"
+fi
+
+for command in cargo git sed; do
+    command -v "$command" >/dev/null 2>&1 ||
+        fail "required command '$command' was not found in PATH"
+done
+cargo_semver_checks_version="$(cargo semver-checks --version 2>/dev/null)" ||
+    fail "cargo-semver-checks is required; install the version documented in docs/ci-baseline.md"
+[[ "$cargo_semver_checks_version" == "cargo-semver-checks 0.49.0" ]] ||
+    fail "cargo-semver-checks 0.49.0 is required; found '$cargo_semver_checks_version'"
+
+repository_root="$(git rev-parse --show-toplevel 2>/dev/null)" ||
+    fail "the repository root could not be resolved"
+cd -- "$repository_root"
+
+report_directory="${1:-target/public-api-compatibility}"
+if [[ "$report_directory" != /* ]]; then
+    report_directory="$repository_root/$report_directory"
+fi
+mkdir -p -- "$report_directory"
+report_directory="$(cd -- "$report_directory" && pwd -P)"
+
+baseline_ref="${PCR_API_BASELINE_REF:-}"
+if [[ -z "$baseline_ref" ]]; then
+    # In ascending order, rank `-...` prereleases before the empty suffix.
+    # Descending version order then selects a final release before its prereleases.
+    baseline_ref="$(
+        git \
+            -c versionsort.suffix=- \
+            -c versionsort.suffix= \
+            tag --merged HEAD --sort=-version:refname --list 'v[0-9]*' |
+            sed -n '1p'
+    )"
+    [[ -n "$baseline_ref" ]] ||
+        fail "no reachable release tag was found; fetch the full tag history or set PCR_API_BASELINE_REF"
+fi
+
+baseline_commit="$(git rev-parse --verify "${baseline_ref}^{commit}" 2>/dev/null)" ||
+    fail "API baseline '$baseline_ref' does not resolve to a commit"
+git merge-base --is-ancestor "$baseline_commit" HEAD ||
+    fail "API baseline '$baseline_ref' is not an ancestor of HEAD"
+git cat-file -e "${baseline_commit}:Cargo.toml" 2>/dev/null ||
+    fail "API baseline '$baseline_ref' does not contain the root Cargo.toml"
+
+current_commit="$(git rev-parse HEAD)"
+metadata_path="$report_directory/baseline.txt"
+report_path="$report_directory/semver-report.txt"
+status_path="$report_directory/status.txt"
+
+{
+    printf 'baseline_ref=%s\n' "$baseline_ref"
+    printf 'baseline_commit=%s\n' "$baseline_commit"
+    printf 'current_commit=%s\n' "$current_commit"
+    printf 'feature_profile=all-features\n'
+    printf 'release_type=patch\n'
+} >"$metadata_path"
+
+set +e
+{
+    printf 'PacketcraftR public Rust API compatibility report\n'
+    printf 'Baseline: %s (%s)\n' "$baseline_ref" "$baseline_commit"
+    printf 'Current:  working tree at HEAD (%s)\n' "$current_commit"
+    printf 'Profile:  all features; patch-level compatibility\n\n'
+    cargo semver-checks \
+        --manifest-path Cargo.toml \
+        --baseline-rev "$baseline_ref" \
+        --all-features \
+        --release-type patch \
+        --color never
+} 2>&1 | tee "$report_path"
+pipeline_status=("${PIPESTATUS[@]}")
+status="${pipeline_status[0]}"
+if [[ "${pipeline_status[1]}" -ne 0 ]]; then
+    printf 'public API diff error: could not write %s\n' "$report_path" >&2
+    status=101
+fi
+set -e
+
+case "$status" in
+    0)
+        result=compatible
+        ;;
+    100)
+        result=breaking-changes-reported
+        ;;
+    *)
+        result=check-incomplete
+        ;;
+esac
+{
+    printf 'exit_code=%s\n' "$status"
+    printf 'result=%s\n' "$result"
+} >"$status_path"
+
+exit "$status"

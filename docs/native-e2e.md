@@ -104,10 +104,17 @@ stderr:
 - responder stdout and stderr;
 - every executed command with its exit status.
 
+Set `PCR_NATIVE_E2E_ARTIFACT_DIR` to an absolute directory to persist the same
+evidence as individual files. On a harness failure it contains the topology
+description, before- and after-cleanup diagnostics, responder stdout/stderr,
+cleanup errors, exception trace, and command audit. The workflow also captures
+the complete build-and-run transcript as `workflow.log`.
+
 Audit this path by intentionally failing one independent check:
 
 ```console
-scripts/test-native-e2e --force-failure ipv4-udp
+PCR_NATIVE_E2E_ARTIFACT_DIR=/tmp/packetcraftr-native-e2e \
+  scripts/test-native-e2e --force-failure ipv4-udp
 ```
 
 That command must exit nonzero, print diagnostics, and still leave no generated
@@ -129,10 +136,26 @@ which exposes the already-built PacketcraftR binary, the topology, the
 independent responders, and the audited command runner. The baseline remains
 the independent verifier rather than making PacketcraftR verify itself.
 
-## CI
+## CI and runner requirement
 
-The `Linux native namespace E2E` job in `.github/workflows/ci.yml` installs
-iproute2, libpcap development files, and shellcheck; compiles the Python helpers;
-then runs `scripts/test-native-e2e`. GitHub-hosted Ubuntu runners provide
-passwordless non-interactive sudo. A runner that cannot create the topology
-fails the job with the same prerequisite diagnostic as a local run.
+`.github/workflows/native-e2e.yml` is a reusable workflow called once by the
+main CI workflow and is also directly available through **Run workflow** in
+GitHub Actions. It uses the known `ubuntu-24.04` runner, installs iproute2,
+libpcap development files, and shellcheck, compiles the Python helpers, and
+runs `scripts/test-native-e2e`.
+
+The runner must provide passwordless non-interactive sudo and permission to
+create named network namespaces and veth pairs, change forwarding sysctls, and
+use the `/run/netns` mount. The harness tests those capabilities rather than
+assuming them. A runner that lacks any prerequisite fails; it is never reported
+as skipped or successful.
+
+On failure the workflow uploads
+`linux-native-e2e-diagnostics-<run-id>-<attempt>` for seven days. It contains
+`workflow.log` plus any topology diagnostics, responder logs, cleanup evidence,
+failure trace, and command audit produced by the harness.
+
+No self-hosted label is guessed or embedded. If repository policy prevents the
+GitHub-hosted runner from providing the required privileges, a repository
+administrator must provision an equivalent privileged Linux runner and update
+the reviewed `runs-on` label before using it.

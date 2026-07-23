@@ -2,6 +2,7 @@ version: 2
 updates:
   - package-ecosystem: cargo
     directory: "/"
+    # The nested fuzz package is scanned by the separate block below.
     exclude-paths:
       - "fuzz/**"
     schedule:

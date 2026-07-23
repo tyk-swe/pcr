@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added first-run documentation covering verified feature combinations,
+  platform prerequisites, live-traffic safety gates, privileges, examples, and
+  troubleshooting.
 - Added `0.4.0-beta.2` Phase 0 governance, including the native-stabilization
   scope and contract freeze, senior-review ownership, contribution and security
   guidance, repository labels, and GitHub issue and pull request templates.
@@ -27,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Release binary archives now include `README.md` and `CHANGELOG.md` alongside
+  the executable and license.
 - CLI help, version, and parse diagnostics now use one hardened document
   renderer with terminal-control escaping and semantic styling.
 - Route planning and live materialization now use only the outer IP envelope;

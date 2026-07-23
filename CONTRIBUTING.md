@@ -92,17 +92,18 @@ submodule worktrees.
 
 Existing files above the limit are recorded in
 `tests/source_size_baseline.txt`. Each non-comment line is a sorted,
-tab-separated repository-relative path and maximum normalized byte count:
+tab-separated repository-relative path and exact normalized byte count:
 
 ```text
-path/to/file.rs<TAB>maximum-bytes
+path/to/file.rs<TAB>normalized-bytes
 ```
 
-An allowlisted file may stay at its recorded size or shrink, but it may not
-grow. A missing allowlisted file also fails the test so obsolete entries are
-removed deliberately. The test never rewrites or regenerates the baseline.
-Once an allowlisted file is reduced to 20 KiB or less, the test requires its
-baseline entry to be removed in the same change.
+An allowlisted file must match its recorded size exactly. If it shrinks while
+remaining above 20 KiB, lower its baseline entry in the same change so it
+cannot regrow to a stale ceiling. A missing allowlisted file also fails the
+test so obsolete entries are removed deliberately. The test never rewrites or
+regenerates the baseline. Once an allowlisted file is reduced to 20 KiB or
+less, the test requires its baseline entry to be removed in the same change.
 
 Split large files along an existing domain boundary. Move a cohesive type,
 operation, platform adapter, or test group into a canonically named child

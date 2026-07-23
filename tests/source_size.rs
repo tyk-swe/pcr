@@ -253,12 +253,20 @@ fn source_size_violations(
                      {BASELINE_FILE}"
                 ),
             );
-        } else if *current > *permitted {
+        } else if current != permitted {
+            let guidance = if current < permitted {
+                format!("lower its stale baseline entry in {BASELINE_FILE} to {current} bytes")
+            } else {
+                format!(
+                    "split the file or obtain repository lead approval before raising its \
+                     {BASELINE_FILE} entry"
+                )
+            };
             violations.insert(
                 path.clone(),
                 format!(
-                    "- {path}: current size is {current} bytes; permitted baseline size is \
-                     {permitted} bytes"
+                    "- {path}: current size is {current} bytes; recorded baseline size is \
+                     {permitted} bytes; {guidance}"
                 ),
             );
         }
@@ -313,6 +321,23 @@ fn files_at_or_below_normal_limit_cannot_keep_baseline_exceptions() {
         assert!(violation.contains(&format!("current size is {current} bytes")));
         assert!(violation.contains("remove its obsolete entry"));
     }
+}
+
+#[test]
+fn shrinking_oversized_file_requires_matching_baseline_reduction() {
+    let path = "src/example.rs".to_owned();
+    let permitted = SOURCE_SIZE_LIMIT_BYTES + 100;
+    let current = permitted - 1;
+    let baseline = BTreeMap::from([(path.clone(), permitted)]);
+    let sources = BTreeMap::from([(path.clone(), current)]);
+    let violations = source_size_violations(&baseline, &sources);
+    let violation = violations
+        .get(&path)
+        .expect("a stale oversized-file baseline should be rejected");
+
+    assert!(violation.contains(&format!("current size is {current} bytes")));
+    assert!(violation.contains(&format!("recorded baseline size is {permitted} bytes")));
+    assert!(violation.contains(&format!("to {current} bytes")));
 }
 
 #[test]

@@ -1,5 +1,5 @@
 # Existing Rust source-size exceptions.
-# Format: <normalized repository-relative path><TAB><maximum normalized bytes>
+# Format: <normalized repository-relative path><TAB><exact normalized bytes>
 # Keep entries sorted. Add or increase an exception only with repository lead approval.
 src/capture/pcap/tests.rs	45787
 src/capture/pcap/writer.rs	25748

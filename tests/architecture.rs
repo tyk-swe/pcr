@@ -31,13 +31,12 @@ const LIBRARY_ROOT_MODULES: &[&str] = &[
     "capture", "client", "error", "net", "output", "packet", "protocol", "session", "workflow",
 ];
 
-const SAFETY_SENSITIVE_PROTOCOL_CONSUMERS: &[&str] = &[
+const FIXED_SAFETY_SENSITIVE_PROTOCOL_CONSUMERS: &[&str] = &[
     "src/client/client.rs",
     "src/client/helpers.rs",
     "src/net/route/planner.rs",
     "src/packet/build/engine.rs",
     "src/packet/decode/engine.rs",
-    "src/protocol/matcher.rs",
     "src/workflow/dns/engine.rs",
     "src/workflow/dns/wire.rs",
     "src/workflow/fuzz/mutation.rs",
@@ -101,6 +100,16 @@ fn source_files(root: &Path) -> Vec<PathBuf> {
 
     let mut files = Vec::new();
     visit(&root.join("src"), &mut files);
+    files
+}
+
+fn safety_sensitive_protocol_consumers(root: &Path) -> Vec<PathBuf> {
+    let mut files = FIXED_SAFETY_SENSITIVE_PROTOCOL_CONSUMERS
+        .iter()
+        .map(|relative| root.join(relative))
+        .collect::<Vec<_>>();
+    rust_files(&root.join("src/protocol/matcher"), &mut files);
+    files.sort();
     files
 }
 
@@ -1032,14 +1041,17 @@ fn safety_sensitive_consumers_use_centralized_builtin_protocol_semantics() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut violations = Vec::new();
 
-    for relative in SAFETY_SENSITIVE_PROTOCOL_CONSUMERS {
-        let file = root.join(relative);
+    for file in safety_sensitive_protocol_consumers(root) {
+        let relative = file.strip_prefix(root).unwrap_or(&file);
         let source = std::fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
         let literals = builtin_protocol_literals(&source)
             .unwrap_or_else(|error| panic!("failed to parse {}: {error}", file.display()));
         for literal in literals {
-            violations.push(format!("{relative}: built-in protocol literal `{literal}`"));
+            violations.push(format!(
+                "{}: built-in protocol literal `{literal}`",
+                relative.display()
+            ));
         }
     }
 

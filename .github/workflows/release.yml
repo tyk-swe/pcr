@@ -166,6 +166,8 @@ jobs:
           mkdir -p "$staging"
           cp "target/$TARGET/release/packetcraftr" "$staging/packetcraftr"
           cp LICENSE "$staging/LICENSE"
+          cp README.md "$staging/README.md"
+          cp CHANGELOG.md "$staging/CHANGELOG.md"
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz" \
             "$ARCHIVE_BASENAME"
       - if: runner.os == 'Windows'
@@ -178,6 +180,8 @@ jobs:
           New-Item -ItemType Directory -Path $staging | Out-Null
           Copy-Item "target/$env:TARGET/release/packetcraftr.exe" $staging
           Copy-Item "LICENSE" $staging
+          Copy-Item "README.md" $staging
+          Copy-Item "CHANGELOG.md" $staging
           Compress-Archive -Path $staging -DestinationPath $archive
       - if: runner.os != 'Windows'
         name: Smoke-test Unix archive
@@ -189,7 +193,9 @@ jobs:
           tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
           executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
           test -x "$executable"
-          test -f "$extraction/$ARCHIVE_BASENAME/LICENSE"
+          for document in LICENSE README.md CHANGELOG.md; do
+            test -s "$extraction/$ARCHIVE_BASENAME/$document"
+          done
           test "$("$executable" --version)" = "packetcraftr $VERSION"
       - if: runner.os == 'Windows'
         name: Smoke-test Windows archive
@@ -204,9 +210,14 @@ jobs:
           if (-not (Test-Path -PathType Leaf $executable)) {
             throw "packaged executable is missing"
           }
-          $license = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/LICENSE"
-          if (-not (Test-Path -PathType Leaf $license)) {
-            throw "packaged license is missing"
+          foreach ($document in @("LICENSE", "README.md", "CHANGELOG.md")) {
+            $documentPath = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/$document"
+            if (
+              -not (Test-Path -PathType Leaf $documentPath) -or
+              (Get-Item $documentPath).Length -eq 0
+            ) {
+              throw "packaged $document is missing or empty"
+            }
           }
           $reportedVersion = (& $executable --version | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) {

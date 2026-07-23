@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Added `0.4.0-beta.2` Phase 0 governance, including the native-stabilization
+  scope and contract freeze, senior-review ownership, contribution and security
+  guidance, repository labels, and GitHub issue and pull request templates.
 - Added terminal-aware coloured human output with explicit `--color <WHEN>`
   control (`auto`, `always`, or `never`); structured, hexadecimal, raw, and
   capture-file outputs remain free of terminal styling.

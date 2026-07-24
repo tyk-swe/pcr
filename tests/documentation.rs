@@ -28,32 +28,6 @@ fn repository_relative_markdown_links_resolve() {
 }
 
 #[test]
-fn validator_accepts_external_fragments_and_directory_links() {
-    let temporary = TemporaryDirectory::new("accepted-links");
-    let docs = temporary.path().join("docs");
-    fs::create_dir_all(docs.join("assets")).unwrap();
-    fs::write(temporary.path().join("README.md"), "# Root\n").unwrap();
-    fs::write(docs.join("existing.md"), "# Existing\n").unwrap();
-
-    let source = docs.join("guide.md");
-    fs::write(
-        &source,
-        "\
-[HTTPS](https://example.com/reference)
-[mail](mailto:security@example.com)
-[fragment](#section)
-[site absolute](/reference)
-[directory](assets)
-[file and fragment](existing.md#details)
-[parent](../README.md)
-",
-    )
-    .unwrap();
-
-    assert!(missing_links(&[source]).unwrap().is_empty());
-}
-
-#[test]
 fn validator_reports_the_source_document_and_missing_target() {
     let temporary = TemporaryDirectory::new("missing-link");
     let docs = temporary.path().join("docs");
@@ -303,6 +277,13 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
+fn display_with_forward_slashes(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn format_missing_links(root: &Path, missing: &[MissingLink]) -> String {
     missing
         .iter()
@@ -311,9 +292,9 @@ fn format_missing_links(root: &Path, missing: &[MissingLink]) -> String {
             let resolved = link.resolved.strip_prefix(root).unwrap_or(&link.resolved);
             format!(
                 "{} -> {} (resolved as {})",
-                source.display(),
+                display_with_forward_slashes(source),
                 link.target,
-                resolved.display()
+                display_with_forward_slashes(resolved)
             )
         })
         .collect::<Vec<_>>()

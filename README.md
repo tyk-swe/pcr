@@ -6,7 +6,7 @@ inspecting native routes and interfaces, and running bounded live-network
 workflows. Its live operations are policy-gated so that destination scope,
 hostname resolution, malformed traffic, and operation budgets are explicit.
 
-PacketcraftR is currently a pre-1.0 beta (`0.4.0-beta.1`). Interfaces and
+PacketcraftR is currently a pre-1.0 beta (`0.4.0-beta.2`). Interfaces and
 serialized v1 contracts can still change incompatibly between beta releases.
 Review the [changelog](CHANGELOG.md) before upgrading.
 

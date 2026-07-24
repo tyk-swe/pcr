@@ -160,7 +160,7 @@ cargo-semver-checks `0.49.0` and checks the Linux all-feature public API at
 patch-level compatibility. `scripts/public-api-diff` chooses the
 SemVer-newest `v*` release tag reachable from `HEAD`, explicitly ranking a
 final release above prereleases with the same core version. At this baseline,
-that release is `v0.4.0-beta.1`, the previous beta. A full-history checkout is
+that release is `v0.4.0-beta.2`, the current beta. A full-history checkout is
 used so the choice comes from release history instead of an arbitrary
 hardcoded version. The selector is compatible with the system Bash 3.2 shipped
 on supported macOS development hosts.
@@ -253,7 +253,7 @@ that revision to be an ancestor of `HEAD`. The local command preserves
 cargo-semver-checks exit `100` when breaking changes are found:
 
 ```console
-PCR_API_BASELINE_REF=v0.4.0-beta.1 scripts/public-api-diff
+PCR_API_BASELINE_REF=v0.4.0-beta.2 scripts/public-api-diff
 ```
 
 Probe or run the privileged native harness with:

@@ -88,15 +88,16 @@ cargo check --locked --all-targets --all-features
 FreeBSD portability checks `live` without defaults and then the complete
 all-feature/all-target profile.
 
-## Formatting, linting, architecture, and documentation
+## Formatting, linting, safety boundaries, and documentation
 
 - `cargo fmt --all -- --check` is enforced on Linux.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings` is
   enforced on Linux, both macOS architectures, and Windows.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps`
   rejects documentation warnings on Linux.
-- The normal Cargo test profiles execute `tests/architecture.rs`,
-  `tests/public_surface.rs`, and the other integration contracts.
+- The normal Cargo test profiles execute the focused unsafe-boundary check,
+  downstream `external_*` behavioral contracts, and the other integration
+  suites.
 - The Linux test job also invokes
   `cargo test --locked --test source_size` explicitly immediately after the
   default-profile test, reusing that build. It rejects new Rust files over
@@ -238,17 +239,18 @@ performed.
 
 ## Local reproduction
 
-Run the architecture and source-size contracts with:
+Run the focused source-boundary contracts with:
 
 ```console
-cargo test --locked --test architecture
-cargo test --locked --test public_surface
+cargo test --locked --test unsafe_boundary
 cargo test --locked --test source_size
 ```
 
-Generate the same API report after fetching release tags:
+Exercise representative downstream extension contracts and generate the same
+API report after fetching release tags:
 
 ```console
+cargo test --locked --test external_protocol --test external_provider --test external_output
 cargo install cargo-semver-checks --locked --version 0.49.0
 scripts/public-api-diff
 ```

@@ -150,8 +150,10 @@ to risk:
 
 - Packet, schema, or output changes: run the focused regression tests plus
   `cargo test --locked --test schema_contract --test document_examples`.
-- Public API or architecture changes: include `public_surface` and
-  `architecture` integration tests.
+- Public API changes: run the relevant `external_*` behavioral integration
+  tests and `scripts/public-api-diff`.
+- Unsafe or source-boundary changes: include the `unsafe_boundary` and
+  `source_size` integration tests.
 - Feature-gated changes: test no-default, default, and all-feature profiles.
 - Platform changes: include the affected platform and relevant failure-path
   evidence.

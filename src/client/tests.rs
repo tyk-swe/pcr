@@ -50,7 +50,7 @@ use crate::packet::{
     decode::Dissector,
     field::{FieldKind, FieldValue, WireValue},
     layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId, Raw},
-    matcher::{Matcher, Result as MatchResult},
+    matcher::{MatchResult, ResponseMatcher},
     registry::RegistryBuilder,
     template::{PacketTemplate, TemplateValues},
 };

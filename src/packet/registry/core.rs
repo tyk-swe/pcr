@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use super::super::codec::LayerCodec;
 use super::super::layer::ProtocolId;
-use super::super::matcher::Matcher;
+use super::super::matcher::ResponseMatcher;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Discriminator(pub u64);
@@ -62,7 +62,7 @@ pub struct ProtocolRegistry {
     roots: HashMap<u32, ProtocolId>,
     bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
     reverse_bindings: HashMap<(ProtocolId, ProtocolId), Vec<ReverseBinding>>,
-    matchers: BTreeMap<ProtocolId, Arc<dyn Matcher>>,
+    matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
 }
 
 impl fmt::Debug for ProtocolRegistry {
@@ -132,7 +132,7 @@ impl ProtocolRegistry {
             .map(|binding| binding.discriminator)
     }
 
-    pub fn matcher(&self, protocol: &ProtocolId) -> Option<&Arc<dyn Matcher>> {
+    pub fn matcher(&self, protocol: &ProtocolId) -> Option<&Arc<dyn ResponseMatcher>> {
         self.matchers.get(protocol)
     }
 
@@ -153,7 +153,7 @@ pub struct RegistryBuilder {
     aliases: HashMap<String, ProtocolId>,
     roots: HashMap<u32, ProtocolId>,
     bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
-    matchers: BTreeMap<ProtocolId, Arc<dyn Matcher>>,
+    matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
 }
 
 impl RegistryBuilder {
@@ -263,7 +263,7 @@ impl RegistryBuilder {
         matcher: M,
     ) -> Result<&mut Self, RegistryError>
     where
-        M: Matcher + 'static,
+        M: ResponseMatcher + 'static,
     {
         let protocol = protocol.into();
         if self.matchers.contains_key(&protocol) {

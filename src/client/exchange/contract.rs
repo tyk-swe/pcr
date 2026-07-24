@@ -342,7 +342,7 @@ impl ExchangeAccumulator {
             );
         }
 
-        let mut matched: Option<(usize, crate::packet::matcher::Result)> = None;
+        let mut matched: Option<(usize, crate::packet::matcher::MatchResult)> = None;
         for (request_index, prepared_request) in prepared.iter().take(sent_at.len()).enumerate() {
             if Instant::now() >= deadline {
                 return self.expire_decoded(decoded, options);
@@ -368,7 +368,7 @@ impl ExchangeAccumulator {
                 if candidate.matched
                     && result
                         .as_ref()
-                        .is_none_or(|best: &crate::packet::matcher::Result| {
+                        .is_none_or(|best: &crate::packet::matcher::MatchResult| {
                             candidate.confidence > best.confidence
                         })
                 {

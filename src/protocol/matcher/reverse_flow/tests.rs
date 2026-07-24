@@ -6,7 +6,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use crate::packet::{
-    Packet, field::FieldValue, layer::Raw, matcher::Matcher, semantics::BuiltinProtocol,
+    Packet, field::FieldValue, layer::Raw, matcher::ResponseMatcher, semantics::BuiltinProtocol,
 };
 use crate::protocol::{
     ipv6::SegmentRoutingHeader,

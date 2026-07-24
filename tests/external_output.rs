@@ -28,3 +28,20 @@ fn external_commands_can_reuse_typed_aggregate_and_stream_contracts() {
     assert_eq!(stream["sequence"], 0);
     assert_eq!(stream["result"]["frame"]["bytes_hex"], "dead");
 }
+
+#[test]
+fn canonical_output_modules_expose_concise_serializable_contracts() {
+    fn assert_serializable<T: serde::Serialize>() {}
+
+    assert_serializable::<packetcraftr::output::build::Result>();
+    assert_serializable::<packetcraftr::output::dissect::Result>();
+    assert_serializable::<packetcraftr::output::capture::Event>();
+    assert_serializable::<packetcraftr::output::network::plan::Result>();
+    assert_serializable::<packetcraftr::output::network::send::Result>();
+    assert_serializable::<packetcraftr::output::network::exchange::Event>();
+    assert_serializable::<packetcraftr::output::replay::Result>();
+    assert_serializable::<packetcraftr::output::scan::Result>();
+    assert_serializable::<packetcraftr::output::traceroute::Event>();
+    assert_serializable::<packetcraftr::output::dns::Result>();
+    assert_serializable::<packetcraftr::output::fuzz::Event>();
+}

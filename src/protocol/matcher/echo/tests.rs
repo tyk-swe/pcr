@@ -3,7 +3,7 @@
 
 use std::net::Ipv4Addr;
 
-use crate::packet::matcher::Matcher;
+use crate::packet::matcher::ResponseMatcher;
 
 use super::super::EchoMatcher;
 use super::super::tests::echo;

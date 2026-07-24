@@ -16,6 +16,7 @@ pub mod fuzz;
 mod probe;
 pub mod replay;
 pub mod scan;
+mod stats;
 pub mod target;
 mod target_adapter;
 pub mod traceroute;
@@ -38,9 +39,9 @@ fn push_diagnostic_once(
     }
 }
 
-pub use crate::client::Stats;
 pub use address_family::AddressFamily;
 pub use boundary_error::BoundaryError;
+pub use stats::Stats;
 
 #[cfg(test)]
 mod tests {

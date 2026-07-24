@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use crate::packet::{
     Packet,
     field::FieldValue,
-    matcher::{Matcher, Result as MatchResult},
+    matcher::{MatchResult, ResponseMatcher},
     semantics::{self, BuiltinProtocol},
 };
 use crate::protocol::transport::Tcp;
@@ -31,7 +31,7 @@ impl ReverseFlowMatcher {
     }
 }
 
-impl Matcher for ReverseFlowMatcher {
+impl ResponseMatcher for ReverseFlowMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
         let transport = match self.protocol {
             BuiltinProtocol::Tcp => QuotedProbeTransport::Tcp,

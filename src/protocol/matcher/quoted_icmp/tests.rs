@@ -10,7 +10,7 @@ use crate::packet::{
     Packet,
     build::{BuildContext, BuildMode, BuildOptions, Builder},
     field::WireValue,
-    matcher::Matcher,
+    matcher::ResponseMatcher,
     semantics::BuiltinProtocol,
 };
 use crate::protocol::{

@@ -4,7 +4,7 @@
 src/capture/pcap/tests.rs	45787
 src/capture/pcap/writer.rs	25748
 src/cli/tests.rs	21557
-src/client/exchange/contract.rs	25270
+src/client/exchange/contract.rs	25280
 src/net/neighbor/provider.rs	22988
 src/net/neighbor/tests.rs	25244
 src/net/platform/linux.rs	28102
@@ -36,4 +36,5 @@ src/workflow/fuzz/tests.rs	21789
 src/workflow/replay/tests.rs	31123
 src/workflow/scan/engine.rs	21441
 src/workflow/traceroute/engine.rs	21794
+tests/architecture.rs	38874
 tests/document_examples.rs	37331

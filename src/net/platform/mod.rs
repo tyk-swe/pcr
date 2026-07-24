@@ -33,7 +33,7 @@ mod npcap;
 ))]
 mod pcap_backend;
 #[cfg(all(
-    feature = "live",
+    feature = "native-interfaces",
     not(windows),
     not(all(
         feature = "native-route",
@@ -62,7 +62,7 @@ use super::Error as LiveIoError;
         feature = "native-route",
         any(target_os = "linux", target_os = "macos")
     ),
-    all(any(feature = "live", feature = "native-route"), windows)
+    all(any(feature = "native-interfaces", feature = "native-route"), windows)
 ))]
 use super::interface::InterfaceInfo;
 #[cfg(any(
@@ -104,7 +104,7 @@ use super::route::{RouteSelectionReason, classify_destination};
     all(
         feature = "native-route",
         not(any(target_os = "linux", target_os = "macos", windows)),
-        not(feature = "live")
+        not(feature = "native-interfaces")
     )
 ))]
 fn unsupported_live_io(message: &'static str) -> LiveIoError {
@@ -169,7 +169,7 @@ fn interface_identity_matches(actual: &InterfaceId, expected: &InterfaceId) -> b
         feature = "native-route",
         any(target_os = "linux", target_os = "macos")
     ),
-    all(any(feature = "live", feature = "native-route"), windows)
+    all(any(feature = "native-interfaces", feature = "native-route"), windows)
 ))]
 fn validate_native_interfaces(
     interfaces: Vec<InterfaceInfo>,
@@ -194,7 +194,7 @@ fn validate_native_interfaces(
         feature = "native-route",
         any(target_os = "linux", target_os = "macos")
     ),
-    all(any(feature = "live", feature = "native-route"), windows)
+    all(any(feature = "native-interfaces", feature = "native-route"), windows)
 ))]
 fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), NativeRouteError> {
     if interface.id.name.is_empty() || interface.id.index == 0 {
@@ -221,7 +221,7 @@ fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), NativeRout
         feature = "native-route",
         any(target_os = "linux", target_os = "macos")
     ),
-    all(any(feature = "live", feature = "native-route"), windows)
+    all(any(feature = "native-interfaces", feature = "native-route"), windows)
 ))]
 fn interface_error(error: NativeRouteError) -> LiveIoError {
     match error {

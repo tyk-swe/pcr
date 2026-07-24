@@ -5,7 +5,7 @@ use packetcraftr::capture::{Format as CaptureFormat, Reader};
 
 use super::support::{binary, write_capture};
 
-#[cfg(all(feature = "live", unix))]
+#[cfg(all(feature = "native-interfaces", unix))]
 #[test]
 fn interfaces_command_succeeds_end_to_end_on_supported_unix_profiles() {
     let output = binary()
@@ -86,7 +86,7 @@ fn empty_replay_supports_every_output_without_live_side_effects() {
     std::fs::remove_file(&path).unwrap();
 }
 
-#[cfg(all(windows, feature = "live", not(feature = "native-route")))]
+#[cfg(all(windows, feature = "native-interfaces", not(feature = "native-route")))]
 #[test]
 fn default_windows_interfaces_uses_ip_helper() {
     let output = binary()

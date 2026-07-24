@@ -61,6 +61,7 @@ fn committed_schemas_and_every_document_example_validate() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
 fn every_ndjson_line_is_an_independently_valid_record() {
     let output = validator("packetcraftr.output.v1.schema.json");
     let fixture =

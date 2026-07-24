@@ -55,14 +55,17 @@ ethtool, iproute2, libpcap development files, Python jsonschema, and shellcheck.
 
 The declared features are:
 
-- `default = ["live"]`;
-- `live`, for portable interface enumeration;
-- `native-route`;
-- `native-layer2`, which also enables `live`;
-- `native-layer3`, which also enables `live`.
+- `default = ["cli", "native-interfaces"]`;
+- `cli`, for the binary and its argument and terminal dependencies;
+- `native-interfaces`, for portable interface enumeration;
+- `native-route`, which also enables `native-interfaces`;
+- `native-layer2`, which also enables `native-interfaces`;
+- `native-layer3`, which also enables `native-interfaces`;
+- deprecated compatibility alias `live`, which enables `native-interfaces`.
 
-The cross-platform test matrix runs all Cargo-discovered unit, binary,
-integration, and documentation tests in each of these profiles:
+The cross-platform test matrix runs the library tests without default features,
+then all Cargo-discovered unit, binary, integration, and documentation tests in
+the default and complete profiles:
 
 ```console
 cargo test --locked --no-default-features
@@ -74,7 +77,7 @@ It also checks the release-mode pcap-free profile:
 
 ```console
 cargo check --locked --release --no-default-features \
-  --features live,native-route,native-layer3
+  --features cli,native-route,native-layer3
 ```
 
 Linux quality adds the depth-two pairwise feature powerset and a complete
@@ -85,8 +88,8 @@ cargo hack check --locked --feature-powerset --depth 2 --all-targets
 cargo check --locked --all-targets --all-features
 ```
 
-FreeBSD portability checks `live` without defaults and then the complete
-all-feature/all-target profile.
+FreeBSD portability checks `native-interfaces` without defaults and then the
+complete all-feature/all-target profile.
 
 ## Formatting, linting, and documentation
 

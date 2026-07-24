@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added an explicit default-enabled `cli` feature so library-only builds can
+  omit Clap and terminal-rendering dependencies.
+
+### Changed
+
+- Renamed the canonical interface-enumeration feature to
+  `native-interfaces`; native route, Layer 2, and Layer 3 capabilities now
+  enable it explicitly.
+
+### Deprecated
+
+- Deprecated `live` as a Cargo feature name. It remains a compatibility alias
+  for `native-interfaces`.
+
 ## [0.4.0-beta.2] - 2026-07-24
 
 ### Added

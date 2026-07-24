@@ -109,14 +109,22 @@ cargo build --locked --release
 ```
 
 Select a different feature set with one of the commands in the next section.
-The resulting executable is always `target/release/packetcraftr` on Unix-like
-systems or `target\release\packetcraftr.exe` on Windows.
+When `cli` is enabled, the resulting executable is
+`target/release/packetcraftr` on Unix-like systems or
+`target\release\packetcraftr.exe` on Windows.
 
 ## Cargo features and tested profiles
 
-`Cargo.toml` defines exactly four features: `live`, `native-route`,
-`native-layer2`, and `native-layer3`. `native-layer2` and `native-layer3`
-enable `live`; the default feature set contains only `live`.
+`Cargo.toml` defines `cli`, `native-interfaces`, `native-route`,
+`native-layer2`, and `native-layer3`. The `cli` feature enables the
+`packetcraftr` binary and its Clap and terminal-rendering dependencies.
+`native-interfaces` enables interface enumeration. Every other native feature
+enables `native-interfaces`, and the default feature set contains `cli` and
+`native-interfaces`, preserving the standard CLI experience.
+
+The deprecated `live` feature remains as a compatibility alias for
+`native-interfaces`. Existing manifests that enable `live` continue to work,
+but new integrations should use `native-interfaces`.
 
 The profile names below are repository, CI, or release labels, not additional
 Cargo feature names. In particular, there is no `portable` or `pcap-free`
@@ -124,18 +132,20 @@ feature.
 
 | Profile label | Cargo invocation | Enabled features | Available native behavior |
 | --- | --- | --- | --- |
-| Portable | `--no-default-features` | None | Offline build, dissection, capture-file reading/transcoding, and offline fuzzing. Native interface, route, capture, and send providers are unavailable. |
-| Default | no feature arguments | `live` | Portable behavior plus interface enumeration. It does not enable native route selection, capture, Layer 2 injection, or raw Layer 3 transmission. |
-| Pcap-free release variant | `--no-default-features --features live,native-route,native-layer3` | `live`, `native-route`, `native-layer3` | Interface enumeration, passive native routes, and raw Layer 3 send/replay on Linux, macOS, and Windows. No Layer 2 capture/injection; capture-based workflows are unavailable. |
-| Complete / all-features | `--all-features` | All four features | Native routes, raw Layer 3 transmission, and Layer 2 capture/injection on supported Linux, macOS, and Windows targets. |
+| Library-only portable | `--no-default-features --lib` | None | Offline library APIs without the CLI dependency graph. Native interface, route, capture, and send providers are unavailable. |
+| Portable CLI | `--no-default-features --features cli` | `cli` | Offline build, dissection, capture-file reading/transcoding, and offline fuzzing. Native providers fail closed with capability errors. |
+| Default | no feature arguments | `cli`, `native-interfaces` | Portable CLI behavior plus interface enumeration. It does not enable native route selection, capture, Layer 2 injection, or raw Layer 3 transmission. |
+| Pcap-free release variant | `--no-default-features --features cli,native-route,native-layer3` | `cli`, `native-interfaces`, `native-route`, `native-layer3` | Interface enumeration, passive native routes, and raw Layer 3 send/replay on Linux, macOS, and Windows. No Layer 2 capture/injection; capture-based workflows are unavailable. |
+| Complete / all-features | `--all-features` | All features | Native routes, raw Layer 3 transmission, and Layer 2 capture/injection on supported Linux, macOS, and Windows targets. |
 
 Build each profile with:
 
 ```console
-cargo build --locked --release --no-default-features
+cargo build --locked --release --no-default-features --lib
+cargo build --locked --release --no-default-features --features cli
 cargo build --locked --release
 cargo build --locked --release \
-  --no-default-features --features live,native-route,native-layer3
+  --no-default-features --features cli,native-route,native-layer3
 cargo build --locked --release --all-features
 ```
 

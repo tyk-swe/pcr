@@ -22,9 +22,13 @@ undocumented_unsafe_blocks = "deny"
 overflow-checks = true
 
 [features]
-default = ["live"]
-live = ["dep:pnet_datalink", "dep:windows"]
+default = ["cli", "native-interfaces"]
+cli = ["dep:anstream", "dep:anstyle", "dep:clap"]
+native-interfaces = ["dep:pnet_datalink", "dep:windows"]
+# Deprecated compatibility alias; use `native-interfaces` for new integrations.
+live = ["native-interfaces"]
 native-route = [
+    "native-interfaces",
     "dep:futures-util",
     "dep:libc",
     "dep:rtnetlink",
@@ -32,14 +36,14 @@ native-route = [
     "dep:tokio",
     "dep:windows",
 ]
-native-layer2 = ["live", "dep:libloading", "dep:pcap"]
-native-layer3 = ["live", "dep:socket2"]
+native-layer2 = ["native-interfaces", "dep:libloading", "dep:pcap"]
+native-layer3 = ["native-interfaces", "dep:socket2"]
 
 [dependencies]
-anstream = "1"
-anstyle = "1"
+anstream = { version = "1", optional = true }
+anstyle = { version = "1", optional = true }
 bytes = { version = "1", features = ["serde"] }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive"], optional = true }
 noyalib = { version = "0.0.15", default-features = false, features = ["std", "fast-int", "fast-float"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
@@ -75,6 +79,16 @@ windows = { version = "0.62", default-features = false, features = [
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
 jsonschema = { version = "0.48", default-features = false }
+
+[[bin]]
+name = "packetcraftr"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[[test]]
+name = "cli"
+path = "tests/cli.rs"
+required-features = ["cli"]
 
 [[bench]]
 name = "packet_pipeline"

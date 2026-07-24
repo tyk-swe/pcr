@@ -129,7 +129,7 @@ jobs:
           - name: all-features
             cargo_args: --all-features
           - name: pcap-free
-            cargo_args: --no-default-features --features live,native-route,native-layer3
+            cargo_args: --no-default-features --features cli,native-route,native-layer3
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
     env:

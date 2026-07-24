@@ -66,7 +66,7 @@ impl Provider for SystemProvider {
 pub use super::route::models::InterfaceId as Id;
 
 #[cfg(any(
-    feature = "live",
+    feature = "native-interfaces",
     all(
         feature = "native-route",
         any(target_os = "linux", target_os = "macos", windows)

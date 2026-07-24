@@ -7,9 +7,9 @@
 
 #![allow(unsafe_code)]
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use std::mem::{align_of, size_of};
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[cfg(feature = "native-route")]
@@ -17,9 +17,9 @@ use windows::Win32::Foundation::{
     ERROR_ADDRESS_NOT_ASSOCIATED, ERROR_HOST_UNREACHABLE, ERROR_NETWORK_UNREACHABLE, ERROR_NO_DATA,
     ERROR_NOT_FOUND,
 };
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use windows::Win32::Foundation::{ERROR_BUFFER_OVERFLOW, NO_ERROR, WIN32_ERROR};
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use windows::Win32::NetworkManagement::IpHelper::{
     GAA_FLAG_INCLUDE_PREFIX, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER,
     GAA_FLAG_SKIP_MULTICAST, GET_ADAPTERS_ADDRESSES_FLAGS, GetAdaptersAddresses,
@@ -28,11 +28,11 @@ use windows::Win32::NetworkManagement::IpHelper::{
 };
 #[cfg(feature = "native-route")]
 use windows::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use windows::Win32::NetworkManagement::Ndis::IfOperStatusUp;
 #[cfg(feature = "native-route")]
 use windows::Win32::NetworkManagement::Ndis::NET_LUID_LH;
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use windows::Win32::Networking::WinSock::{
     ADDRESS_FAMILY, AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
 };
@@ -45,18 +45,18 @@ use windows::Win32::Networking::WinSock::{
 use super::{
     NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
 };
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use crate::capture::LinkType;
 #[cfg(feature = "native-route")]
 use crate::net::route::{RouteDecision, RouteSelectionReason};
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 use crate::net::{
     interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{LinkCapability, MacAddress},
     route::{InterfaceId, NativeRouteError},
 };
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
     Ok(adapter_snapshots()?
         .into_iter()
@@ -64,7 +64,7 @@ pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
         .collect())
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 fn adapter_snapshots() -> Result<Vec<WindowsAdapter>, NativeRouteError> {
     const FLAGS: GET_ADAPTERS_ADDRESSES_FLAGS = GET_ADAPTERS_ADDRESSES_FLAGS(
         GAA_FLAG_INCLUDE_PREFIX.0
@@ -284,7 +284,7 @@ pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, 
     interface_decision(find_windows_adapter(&adapters, requested)?.interface)
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 #[derive(Clone)]
 struct WindowsAdapter {
     interface: InterfaceInfo,
@@ -296,14 +296,14 @@ struct WindowsAdapter {
     luid: NET_LUID_LH,
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 #[derive(Clone, Copy)]
 struct BufferBounds {
     start: usize,
     end: usize,
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 impl BufferBounds {
     fn new(start: *const u8, length: usize) -> Result<Self, NativeRouteError> {
         let start = start as usize;
@@ -379,7 +379,7 @@ fn find_windows_adapter(
     })
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 fn parse_adapters(
     head: *mut IP_ADAPTER_ADDRESSES_LH,
     bounds: BufferBounds,
@@ -469,7 +469,7 @@ fn parse_adapters(
     })
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 fn parse_unicast_addresses(
     mut current: *mut windows::Win32::NetworkManagement::IpHelper::IP_ADAPTER_UNICAST_ADDRESS_LH,
     bounds: BufferBounds,
@@ -514,7 +514,7 @@ fn parse_unicast_addresses(
     })
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 fn wide_string(
     value: windows::core::PWSTR,
     bounds: BufferBounds,
@@ -543,7 +543,7 @@ fn wide_string(
     Ok(String::from_utf16(&units[..length]).ok())
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 fn socket_address_ip(
     address: &windows::Win32::Networking::WinSock::SOCKET_ADDRESS,
     bounds: BufferBounds,
@@ -657,7 +657,7 @@ fn sockaddr_inet_ip(address: &SOCKADDR_INET) -> Option<IpAddr> {
     }
 }
 
-#[cfg(any(feature = "live", feature = "native-route"))]
+#[cfg(any(feature = "native-interfaces", feature = "native-route"))]
 fn win32_error(operation: &'static str, error: WIN32_ERROR) -> NativeRouteError {
     NativeRouteError::OperatingSystem {
         operation,
@@ -772,7 +772,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "live"))]
+#[cfg(all(test, feature = "native-interfaces"))]
 mod default_profile_tests {
     use super::*;
 

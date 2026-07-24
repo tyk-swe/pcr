@@ -3,6 +3,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+#[cfg(feature = "cli")]
 use std::process::Command;
 
 use packetcraftr::{
@@ -59,6 +60,7 @@ use packetcraftr::{
     workflow::replay::{Summary as ReplaySummary, Timing as ReplayTiming},
 };
 
+#[cfg(feature = "cli")]
 fn binary() -> Command {
     Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
 }
@@ -132,6 +134,7 @@ fn exact_frame() -> CapturedFrame {
     .unwrap()
 }
 
+#[cfg(feature = "cli")]
 fn packet_protocols(value: &serde_json::Value) -> Vec<&str> {
     value["result"]["packet"]["layers"]
         .as_array()
@@ -141,6 +144,7 @@ fn packet_protocols(value: &serde_json::Value) -> Vec<&str> {
         .collect()
 }
 
+#[cfg(feature = "cli")]
 fn assert_gre_sctp_example(value: &serde_json::Value) {
     assert_eq!(
         packet_protocols(value),
@@ -171,6 +175,7 @@ fn assert_gre_sctp_example(value: &serde_json::Value) {
     );
 }
 
+#[cfg(feature = "cli")]
 fn assert_igmp_example(value: &serde_json::Value) {
     assert_eq!(packet_protocols(value), ["ipv4", "igmp"]);
     assert_eq!(
@@ -209,6 +214,7 @@ fn every_command_has_published_success_and_error_goldens() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
 fn packet_document_examples_build_through_the_public_cli() {
     type ResultAssertion = fn(&serde_json::Value);
     for (name, expected_length, assert_result) in [
@@ -252,6 +258,7 @@ fn packet_document_examples_build_through_the_public_cli() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
 fn published_build_success_output_matches_the_cli() {
     let output = binary()
         .args(["--output", "json", "build", "--packet", "raw(hex=deadbeef)"])
@@ -264,6 +271,7 @@ fn published_build_success_output_matches_the_cli() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
 fn published_build_error_output_matches_the_cli() {
     let output = binary()
         .args(["--output", "json", "build", "--packet", "ethernet()/udp()"])
@@ -276,6 +284,7 @@ fn published_build_error_output_matches_the_cli() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
 fn published_dissect_success_output_matches_the_cli() {
     let output = binary()
         .args([
@@ -803,6 +812,7 @@ fn published_traceroute_stream_outputs_match_typed_contracts() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
 fn published_error_outputs_match_every_command_cli_path() {
     let cases: &[(&str, i32, &[&str])] = &[
         (
@@ -1056,6 +1066,7 @@ fn published_dns_stream_outputs_match_typed_contracts() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
 fn published_fuzz_outputs_match_the_deterministic_offline_cli() {
     let aggregate = binary()
         .args([

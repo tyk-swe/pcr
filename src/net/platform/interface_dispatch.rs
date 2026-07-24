@@ -21,7 +21,7 @@ pub(in crate::net) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoEr
         .map_err(super::interface_error)
 }
 
-#[cfg(all(any(feature = "live", feature = "native-route"), windows))]
+#[cfg(all(any(feature = "native-interfaces", feature = "native-route"), windows))]
 pub(in crate::net) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     super::windows::interfaces()
         .and_then(super::validate_native_interfaces)
@@ -31,7 +31,7 @@ pub(in crate::net) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoEr
 #[cfg(all(
     feature = "native-route",
     not(any(target_os = "linux", target_os = "macos", windows)),
-    not(feature = "live")
+    not(feature = "native-interfaces")
 ))]
 pub(in crate::net) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     Err(super::unsupported_live_io(
@@ -40,7 +40,7 @@ pub(in crate::net) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoEr
 }
 
 #[cfg(all(
-    feature = "live",
+    feature = "native-interfaces",
     not(windows),
     not(all(
         feature = "native-route",
@@ -51,9 +51,9 @@ pub(in crate::net) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoEr
     Ok(super::pnet_enumeration::interfaces())
 }
 
-#[cfg(all(not(feature = "native-route"), not(feature = "live")))]
+#[cfg(all(not(feature = "native-route"), not(feature = "native-interfaces")))]
 pub(in crate::net) fn system_interfaces() -> Result<Vec<InterfaceInfo>, LiveIoError> {
     Err(super::unsupported_live_io(
-        "interface enumeration is unavailable without the live feature",
+        "interface enumeration is unavailable without the native-interfaces feature",
     ))
 }

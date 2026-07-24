@@ -84,7 +84,7 @@ jobs:
       - name: Check release pcap-free profile
         run: >-
           cargo check --locked --release --no-default-features
-          --features live,native-route,native-layer3
+          --features cli,native-route,native-layer3
       - name: Clippy complete profile
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
@@ -227,7 +227,7 @@ jobs:
       - name: Check portable interface-enumeration profile
         run: >-
           cargo check --locked --target ${{ matrix.target }}
-          --no-default-features --features live
+          --no-default-features --features native-interfaces
       - name: Check complete portable profile
         run: cargo check --locked --target ${{ matrix.target }} --all-features --all-targets
 

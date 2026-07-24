@@ -6,7 +6,9 @@ use std::process::Stdio;
 
 use packetcraftr::capture::{Format as CaptureFormat, LinkType, Reader};
 
-use super::support::{binary, decode_output_hex, temp_path, write_capture, write_link_capture};
+#[cfg(unix)]
+use super::support::temp_path;
+use super::support::{binary, decode_output_hex, write_capture, write_link_capture};
 
 #[test]
 fn colour_is_terminal_aware_forceable_and_excluded_from_machine_output() {

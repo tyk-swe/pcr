@@ -159,11 +159,13 @@ The `public Rust API compatibility (report only)` job installs the pinned
 cargo-semver-checks `0.49.0` and checks the Linux all-feature public API at
 patch-level compatibility. `scripts/public-api-diff` chooses the
 SemVer-newest `v*` release tag reachable from `HEAD`, explicitly ranking a
-final release above prereleases with the same core version. At this baseline,
-that release is `v0.4.0-beta.2`, the current beta. A full-history checkout is
-used so the choice comes from release history instead of an arbitrary
-hardcoded version. The selector is compatible with the system Bash 3.2 shipped
-on supported macOS development hosts.
+final release above prereleases with the same core version. For the
+`v0.4.0-beta.2` release comparison, that baseline is `v0.4.0-beta.1`, the
+previous beta. After the beta.2 tag is published, subsequent full-history CI
+runs select `v0.4.0-beta.2`. A full-history checkout is used so the choice comes
+from release history instead of an arbitrary hardcoded version. The selector
+is compatible with the system Bash 3.2 shipped on supported macOS development
+hosts.
 
 cargo-semver-checks has distinct exit codes. Exit `100` means the comparison
 completed and found breaking API changes; under the current pre-1.0 policy, CI
@@ -253,7 +255,7 @@ that revision to be an ancestor of `HEAD`. The local command preserves
 cargo-semver-checks exit `100` when breaking changes are found:
 
 ```console
-PCR_API_BASELINE_REF=v0.4.0-beta.2 scripts/public-api-diff
+PCR_API_BASELINE_REF=v0.4.0-beta.1 scripts/public-api-diff
 ```
 
 Probe or run the privileged native harness with:

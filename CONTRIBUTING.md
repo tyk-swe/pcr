@@ -1,10 +1,9 @@
 # Contributing to PacketcraftR
 
 PacketcraftR welcomes focused fixes, tests, and documentation improvements.
-During the `0.4.0-beta.2` cycle, start with the
-[Phase 0 stabilization scope](docs/roadmap/0.4.0-beta.2-phase-0.md). New
+During the `0.4.0-beta.2` cycle New
 protocols, new commands, output v2, async migration, broad platform rewrites,
-and crates.io publication are not part of this milestone.
+are not welcomed
 
 Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), not a
 public issue.

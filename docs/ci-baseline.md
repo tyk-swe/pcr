@@ -207,8 +207,9 @@ addresses, so fixture traffic has no DNS or public Internet dependency. See
 When the harness step fails,
 `linux-native-e2e-diagnostics-<run-id>-<attempt>` is retained for seven days.
 It includes `workflow.log`; harness failures additionally include topology
-descriptions and before/after-cleanup diagnostics, responder stdout and stderr,
-cleanup errors, the exception trace, and the complete command audit.
+descriptions and before/after-cleanup diagnostics, fixture stdout and stderr,
+PacketcraftR invocation records, cleanup errors, the exception trace, and the
+complete command audit.
 
 No self-hosted runner label is assumed. If repository or organization policy
 removes the required capabilities from `ubuntu-24.04`, an administrator must
@@ -273,5 +274,5 @@ To preserve the same failure files CI uploads, provide an absolute directory:
 
 ```console
 PCR_NATIVE_E2E_ARTIFACT_DIR=/tmp/packetcraftr-native-e2e \
-  scripts/test-native-e2e --force-failure ipv4-udp
+  scripts/test-native-e2e --force-failure route-ipv4
 ```

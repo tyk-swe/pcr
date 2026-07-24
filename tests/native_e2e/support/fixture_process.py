@@ -32,35 +32,67 @@ class ResponderProcess:
         topology: Topology,
         native_e2e_root: Path,
         temporary_directory: Path,
+        *,
+        udp_port: int = UDP_PORT,
+        tcp_port: int = TCP_PORT,
+        udp_mode: str = "echo",
+        udp_response_port: int | None = None,
     ) -> None:
+        if udp_mode not in {"echo", "sink", "wrong-port"}:
+            raise ValueError(f"unsupported UDP fixture mode {udp_mode!r}")
+        for label, port in (
+            ("UDP", udp_port),
+            ("TCP", tcp_port),
+            ("UDP response", udp_response_port),
+        ):
+            if port is not None and not 1 <= port <= 65_535:
+                raise ValueError(f"{label} fixture port must be within 1..=65535")
+        if udp_mode == "wrong-port" and udp_response_port is None:
+            raise ValueError("wrong-port UDP mode requires a response port")
+        if udp_response_port == udp_port:
+            raise ValueError("UDP response port must differ from the listener port")
         self.runner = runner
         self.topology = topology
         self.script = native_e2e_root / "fixtures" / "responders.py"
         self.temporary_directory = temporary_directory
+        self.udp_port = udp_port
+        self.tcp_port = tcp_port
+        self.udp_mode = udp_mode
+        self.udp_response_port = udp_response_port
         self.stdout_path = temporary_directory / "responder.stdout"
         self.stderr_path = temporary_directory / "responder.stderr"
         self.readiness_path = temporary_directory / "ready.sock"
+        self.event_path = temporary_directory / "events.sock"
         self.process: subprocess.Popen[str] | None = None
         self.fixture_pid: int | None = None
         self._stdout: IO[str] | None = None
         self._stderr: IO[str] | None = None
+        self._event_listener: socket.socket | None = None
+        self._event_token: str | None = None
         self._exit_recorded = False
 
     def start(self, timeout: float = 10.0) -> None:
         if self.process is not None:
             raise FixtureError("responder process was started more than once")
-        if len(os.fsencode(self.readiness_path)) >= 100:
-            raise FixtureError(
-                f"readiness socket path is too long: {self.readiness_path}"
-            )
+        for label, path in (
+            ("readiness", self.readiness_path),
+            ("event", self.event_path),
+        ):
+            if len(os.fsencode(path)) >= 100:
+                raise FixtureError(f"{label} socket path is too long: {path}")
 
         token = os.urandom(16).hex()
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         listener.bind(str(self.readiness_path))
         listener.listen(1)
+        event_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        event_listener.bind(str(self.event_path))
+        event_listener.listen(8)
+        self._event_listener = event_listener
+        self._event_token = token
         self._stdout = self.stdout_path.open("w", encoding="utf-8")
         self._stderr = self.stderr_path.open("w", encoding="utf-8")
-        command = (
+        command = [
             "ip",
             "netns",
             "exec",
@@ -73,14 +105,22 @@ class ResponderProcess:
             "--ipv6",
             self.topology.addresses.server_ipv6,
             "--udp-port",
-            str(UDP_PORT),
+            str(self.udp_port),
             "--tcp-port",
-            str(TCP_PORT),
+            str(self.tcp_port),
+            "--udp-mode",
+            self.udp_mode,
             "--ready-socket",
             str(self.readiness_path),
             "--ready-token",
             token,
-        )
+            "--event-socket",
+            str(self.event_path),
+            "--event-token",
+            token,
+        ]
+        if self.udp_response_port is not None:
+            command.extend(("--udp-response-port", str(self.udp_response_port)))
         try:
             self.process = self.runner.start(
                 command,
@@ -90,6 +130,9 @@ class ResponderProcess:
             )
             ready = self._wait_ready(listener, timeout)
             self._validate_ready(ready, token)
+        except BaseException:
+            self._close_event_listener()
+            raise
         finally:
             listener.close()
             self.readiness_path.unlink(missing_ok=True)
@@ -155,7 +198,7 @@ class ResponderProcess:
                 ("ipv4", self.topology.addresses.server_ipv4),
                 ("ipv6", self.topology.addresses.server_ipv6),
             )
-            for transport, port in (("udp", UDP_PORT), ("tcp", TCP_PORT))
+            for transport, port in (("udp", self.udp_port), ("tcp", self.tcp_port))
         }
         listeners = ready.get("listeners")
         if not isinstance(listeners, list):
@@ -174,8 +217,40 @@ class ResponderProcess:
             raise FixtureError(
                 f"responder listener set {actual!r} did not equal {expected!r}"
             )
+        if ready.get("udp_mode") != self.udp_mode:
+            raise FixtureError(
+                f"responder reported UDP mode {ready.get('udp_mode')!r}, "
+                f"expected {self.udp_mode!r}"
+            )
+        if ready.get("udp_response_port") != self.udp_response_port:
+            raise FixtureError(
+                "responder reported an unexpected UDP response port: "
+                f"{ready.get('udp_response_port')!r}"
+            )
         self.fixture_pid = pid
         self.ensure_running()
+
+    def wait_event(
+        self,
+        event: str,
+        family: str,
+        *,
+        timeout: float = 5.0,
+    ) -> dict[str, Any]:
+        listener = self._event_listener
+        token = self._event_token
+        if listener is None or token is None:
+            raise FixtureError("responder event barrier is not active")
+        value = self._wait_ready(listener, timeout)
+        if value.get("token") != token:
+            raise FixtureError("responder event token did not match")
+        if value.get("event") != event or value.get("family") != family:
+            raise FixtureError(
+                f"responder event {(value.get('event'), value.get('family'))!r} "
+                f"did not equal {(event, family)!r}"
+            )
+        self.ensure_running()
+        return value
 
     def ensure_running(self) -> None:
         if self.process is None:
@@ -194,6 +269,7 @@ class ResponderProcess:
         process = self.process
         if process is None:
             self._close_logs()
+            self._close_event_listener()
             return errors
 
         try:
@@ -256,6 +332,7 @@ class ResponderProcess:
             errors.append(f"responder cleanup raised: {error}")
         finally:
             self._close_logs()
+            self._close_event_listener()
         return errors
 
     def _namespace_pids(self) -> tuple[int, ...]:
@@ -323,3 +400,9 @@ class ResponderProcess:
         for stream in (self._stdout, self._stderr):
             if stream is not None and not stream.closed:
                 stream.close()
+
+    def _close_event_listener(self) -> None:
+        if self._event_listener is not None:
+            self._event_listener.close()
+            self._event_listener = None
+        self.event_path.unlink(missing_ok=True)

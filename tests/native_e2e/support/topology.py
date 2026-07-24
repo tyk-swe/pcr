@@ -10,6 +10,7 @@ import ipaddress
 import json
 import os
 import secrets
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -97,6 +98,28 @@ class AddressPlan:
     client_ipv6_network: str = "fd70:6372:1::/64"
     server_ipv6_network: str = "fd70:6372:2::/64"
 
+    @classmethod
+    def isolated(cls, slot: int) -> "AddressPlan":
+        """Return non-overlapping private subnets for one native test case."""
+        if not 1 <= slot <= 200:
+            raise ValueError("native-E2E address slot must be within 1..=200")
+        ipv6_client_segment = 2 * slot - 1
+        ipv6_server_segment = 2 * slot
+        return cls(
+            client_ipv4=f"10.203.{slot}.2",
+            router_client_ipv4=f"10.203.{slot}.1",
+            router_server_ipv4=f"10.203.{slot}.5",
+            server_ipv4=f"10.203.{slot}.6",
+            client_ipv4_network=f"10.203.{slot}.0/30",
+            server_ipv4_network=f"10.203.{slot}.4/30",
+            client_ipv6=f"fd70:6372:{ipv6_client_segment:x}::2",
+            router_client_ipv6=f"fd70:6372:{ipv6_client_segment:x}::1",
+            router_server_ipv6=f"fd70:6372:{ipv6_server_segment:x}::1",
+            server_ipv6=f"fd70:6372:{ipv6_server_segment:x}::2",
+            client_ipv6_network=f"fd70:6372:{ipv6_client_segment:x}::/64",
+            server_ipv6_network=f"fd70:6372:{ipv6_server_segment:x}::/64",
+        )
+
     def validate(self) -> None:
         for address in (
             self.client_ipv4,
@@ -116,6 +139,18 @@ class AddressPlan:
             parsed = ipaddress.ip_address(address)
             if not isinstance(parsed, ipaddress.IPv6Address) or not parsed.is_private:
                 raise RuntimeError(f"{address} is not an IPv6 ULA address")
+        for address, network in (
+            (self.client_ipv4, self.client_ipv4_network),
+            (self.router_client_ipv4, self.client_ipv4_network),
+            (self.router_server_ipv4, self.server_ipv4_network),
+            (self.server_ipv4, self.server_ipv4_network),
+            (self.client_ipv6, self.client_ipv6_network),
+            (self.router_client_ipv6, self.client_ipv6_network),
+            (self.router_server_ipv6, self.server_ipv6_network),
+            (self.server_ipv6, self.server_ipv6_network),
+        ):
+            if ipaddress.ip_address(address) not in ipaddress.ip_network(network):
+                raise RuntimeError(f"{address} is outside native-E2E network {network}")
 
 
 class Topology:
@@ -277,6 +312,25 @@ class Topology:
         ipv4: str,
         ipv6: str,
     ) -> None:
+        # libpcap observes veth frames before deferred checksum and segmentation
+        # work is materialized. Disable those features so captured bytes match
+        # the packet accepted by the peer's network stack.
+        self._netns(
+            namespace,
+            "ethtool",
+            "--offload",
+            interface,
+            "rx",
+            "off",
+            "tx",
+            "off",
+            "tso",
+            "off",
+            "gso",
+            "off",
+            "gro",
+            "off",
+        )
         self._netns(namespace, "ip", "-4", "address", "add", ipv4, "dev", interface)
         self._netns(
             namespace,
@@ -380,7 +434,23 @@ class Topology:
 
     def cleanup(self) -> list[str]:
         errors: list[str] = []
+        undrained: set[str] = set()
+        for namespace in self.names.namespaces:
+            try:
+                drain_errors = self._terminate_namespace_processes(namespace)
+            except (CommandFailure, RuntimeError) as error:
+                drain_errors = [
+                    f"exception while draining namespace {namespace}: {error}"
+                ]
+            if drain_errors:
+                undrained.add(namespace)
+                errors.extend(drain_errors)
         for namespace in reversed(self.names.namespaces):
+            if namespace in undrained:
+                errors.append(
+                    f"refusing to remove undrained namespace {namespace}"
+                )
+                continue
             try:
                 completed = self._ip("netns", "del", namespace, check=False)
                 if completed.returncode != 0 and self._namespace_exists(namespace):
@@ -409,6 +479,87 @@ class Topology:
         except CommandFailure as error:
             errors.append(f"post-cleanup leak check failed: {error}")
         return errors
+
+    def _terminate_namespace_processes(self, namespace: str) -> list[str]:
+        """Drain test-owned namespace PIDs before removing its named handle."""
+        errors: list[str] = []
+        remaining = self._namespace_pids(namespace)
+        if not remaining:
+            return errors
+
+        signal_errors: list[str] = []
+        if error := self._signal_pids(namespace, "TERM", remaining):
+            signal_errors.append(error)
+        deadline = time.monotonic() + 1.0
+        while remaining and time.monotonic() < deadline:
+            time.sleep(0.05)
+            remaining = self._namespace_pids(namespace)
+
+        if remaining:
+            if error := self._signal_pids(namespace, "KILL", remaining):
+                signal_errors.append(error)
+            deadline = time.monotonic() + 2.0
+            while remaining and time.monotonic() < deadline:
+                time.sleep(0.05)
+                remaining = self._namespace_pids(namespace)
+
+        if remaining:
+            errors.extend(signal_errors)
+            errors.append(
+                f"namespace {namespace} still contains pids "
+                + ", ".join(str(pid) for pid in remaining)
+            )
+        return errors
+
+    def _namespace_pids(self, namespace: str) -> tuple[int, ...]:
+        completed = self._ip("netns", "pids", namespace, check=False)
+        if completed.returncode != 0:
+            if self._namespace_exists(namespace):
+                raise RuntimeError(
+                    f"could not enumerate pids in namespace {namespace}: "
+                    f"{completed.stderr.strip() or completed.stdout.strip()}"
+                )
+            return ()
+        pids: list[int] = []
+        for value in completed.stdout.split():
+            try:
+                pids.append(int(value))
+            except ValueError as error:
+                raise RuntimeError(
+                    f"ip netns pids {namespace} returned non-numeric "
+                    f"value {value!r}"
+                ) from error
+        return tuple(sorted(set(pids)))
+
+    def _signal_pids(
+        self,
+        namespace: str,
+        signal_name: str,
+        pids: tuple[int, ...],
+    ) -> str | None:
+        try:
+            completed = self.runner.run(
+                (
+                    "kill",
+                    f"-{signal_name}",
+                    "--",
+                    *[str(pid) for pid in pids],
+                ),
+                privileged=True,
+                check=False,
+                timeout=5.0,
+            )
+        except CommandFailure as error:
+            return (
+                f"could not send SIG{signal_name} to {namespace} "
+                f"pids {pids}: {error}"
+            )
+        if completed.returncode != 0:
+            return (
+                f"could not send SIG{signal_name} to {namespace} pids {pids}: "
+                f"{completed.stderr.strip() or completed.stdout.strip()}"
+            )
+        return None
 
     def verify_absent(self) -> list[str]:
         errors: list[str] = []
@@ -450,6 +601,22 @@ class Topology:
                 f"{self.addresses.server_ipv6}/64",
             )
         )
+
+    def interface_index(self, namespace: str, interface: str) -> int:
+        """Read the kernel-assigned interface index through independent iproute2."""
+        links = self._json_netns(
+            namespace, "ip", "-j", "link", "show", "dev", interface
+        )
+        if len(links) != 1:
+            raise RuntimeError(
+                f"{namespace}/{interface} returned unexpected link state: {links}"
+            )
+        index = links[0].get("ifindex")
+        if not isinstance(index, int) or index <= 0:
+            raise RuntimeError(
+                f"{namespace}/{interface} returned invalid interface index {index!r}"
+            )
+        return index
 
     def _assert_link_up(self, namespace: str, interface: str) -> None:
         links = self._json_netns(

@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added a strict Linux-native E2E harness with isolated client, router, and
   server namespaces, independent IPv4/IPv6 UDP and TCP fixtures, deterministic
   teardown, and failure-time network diagnostics.
+- Added deterministic native smoke coverage for IPv4/IPv6 route planning and
+  Layer 3 transmission, plus successful, timed-out, and unsolicited UDP
+  exchanges validated by independent socket fixtures and the output-v1 schema.
 - Added an explicit CI baseline, an independently visible Rust source-size
   gate, report-only public Rust API compatibility artifacts, and a reusable
   privileged Linux native-E2E workflow with failure evidence.
@@ -49,6 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Native E2E command timeouts and interruptions now terminate the complete
+  privileged process group, treat zombie descendants as exited during survival
+  checks, and drain remaining namespace PIDs before teardown.
 - Fixed `packetcraftr.output/v1` schema validation for embedded packet fields so
   malformed field values are rejected consistently with standalone packet
   documents.

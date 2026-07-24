@@ -30,11 +30,23 @@ def check_prerequisites(runner: CommandRunner) -> None:
             "Python 3.9 or newer is required; "
             f"detected {platform.python_version()}"
         )
-    for command in ("ip", "python3", "sysctl"):
+    for command in ("ethtool", "ip", "kill", "python3", "sysctl"):
         if shutil.which(command) is None:
             raise PrerequisiteError(
                 f"required command '{command}' was not found in PATH"
             )
+    try:
+        from jsonschema import Draft202012Validator
+    except ImportError as error:
+        raise PrerequisiteError(
+            "Python jsonschema with Draft 2020-12 support is required"
+        ) from error
+    if Draft202012Validator.META_SCHEMA.get("$schema") != (
+        "https://json-schema.org/draft/2020-12/schema"
+    ):
+        raise PrerequisiteError(
+            "the installed Python jsonschema package lacks Draft 2020-12 support"
+        )
     if not os.path.exists("/proc/self/ns/net"):
         raise PrerequisiteError(
             "the Linux network-namespace handle /proc/self/ns/net is unavailable"

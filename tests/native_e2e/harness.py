@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import signal
 import sys
@@ -22,10 +23,13 @@ TESTS_ROOT = NATIVE_E2E_ROOT.parent
 if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
-from native_e2e.cases import connectivity  # noqa: E402
+from native_e2e.cases import exchange, route, send  # noqa: E402
 from native_e2e.support import artifacts, diagnostics  # noqa: E402
 from native_e2e.support.command import CommandRunner  # noqa: E402
-from native_e2e.support.context import CaseContext  # noqa: E402
+from native_e2e.support.context import (  # noqa: E402
+    CaseContext,
+    NativeCase,
+)
 from native_e2e.support.fixture_process import (  # noqa: E402
     ResponderProcess,
 )
@@ -33,7 +37,11 @@ from native_e2e.support.prerequisites import (  # noqa: E402
     PrerequisiteError,
     check_prerequisites,
 )
-from native_e2e.support.topology import Topology, TopologyNames  # noqa: E402
+from native_e2e.support.topology import (  # noqa: E402
+    AddressPlan,
+    Topology,
+    TopologyNames,
+)
 
 
 class HarnessSignal(Exception):
@@ -64,22 +72,53 @@ class SignalGuard:
             signal.signal(signum, handler)
 
 
+class CaseExecutionError(RuntimeError):
+    def __init__(self, report: str, exit_code: int = 1) -> None:
+        self.report = report
+        self.exit_code = exit_code
+        super().__init__(report)
+
+
+def native_cases() -> tuple[NativeCase, ...]:
+    cases = (*route.cases(), *send.cases(), *exchange.cases())
+    names = [case.name for case in cases]
+    slots = [case.address_slot for case in cases]
+    ports = [
+        port
+        for case in cases
+        for port in (
+            case.source_port,
+            case.destination_port,
+            case.tcp_port,
+            case.response_port,
+        )
+        if port is not None
+    ]
+    if len(set(names)) != len(names):
+        raise RuntimeError(f"native-E2E case names are not unique: {names!r}")
+    if len(set(slots)) != len(slots):
+        raise RuntimeError(f"native-E2E address slots are not unique: {slots!r}")
+    if len(set(ports)) != len(ports):
+        raise RuntimeError(f"native-E2E ports are not unique: {ports!r}")
+    return cases
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build and exercise the isolated Linux namespace baseline. "
+            "Build and exercise isolated Linux namespace PacketcraftR paths. "
             "Missing prerequisites are errors, never skips."
         )
     )
     parser.add_argument(
         "--check-prerequisites",
         action="store_true",
-        help="probe namespace/veth/forwarding support without building or testing",
+        help="probe namespace/veth/forwarding/schema support without building or testing",
     )
     parser.add_argument(
         "--force-failure",
-        choices=("ipv4-udp", "ipv6-udp", "ipv4-tcp", "ipv6-tcp"),
-        help="intentionally fail one check to audit diagnostics and cleanup",
+        choices=tuple(case.name for case in native_cases()),
+        help="intentionally fail one case to audit diagnostics and cleanup",
     )
     parser.add_argument(
         "--skip-prerequisite-check",
@@ -158,56 +197,70 @@ def binary_from_environment() -> Path:
     return binary
 
 
-def run_harness(
+def run_case(
     runner: CommandRunner,
     binary: Path,
-    forced_failure: str | None,
+    case: NativeCase,
+    force_failure: bool,
     artifact_directory: Path | None,
-) -> int:
+) -> dict[str, object]:
     names = TopologyNames.unique()
-    topology = Topology(runner, names)
-    print("native-e2e topology:")
-    print(topology.describe())
-    print(f"packetcraftr_binary={binary}", flush=True)
-
-    temporary = tempfile.TemporaryDirectory(
-        prefix=f"packetcraftr-native-e2e-{names.run_id}-"
-    )
+    topology = Topology(runner, names, AddressPlan.isolated(case.address_slot))
+    temporary = tempfile.TemporaryDirectory(prefix=f"pcr-e2e-{names.run_id}-")
     temporary_path = Path(temporary.name)
-    responder = ResponderProcess(
-        runner,
-        topology,
-        NATIVE_E2E_ROOT,
-        temporary_path,
+    responder = (
+        ResponderProcess(
+            runner,
+            topology,
+            NATIVE_E2E_ROOT,
+            temporary_path,
+            udp_port=case.destination_port,
+            tcp_port=case.tcp_port,
+            udp_mode=case.udp_mode,
+            udp_response_port=case.response_port,
+        )
+        if case.udp_mode is not None
+        else None
+    )
+    context = CaseContext(
+        case=case,
+        packetcraftr_binary=binary,
+        native_e2e_root=NATIVE_E2E_ROOT,
+        temporary_directory=temporary_path,
+        runner=runner,
+        topology=topology,
+        responder=responder,
+        invocations=[],
     )
     signal_guard = SignalGuard()
     signal_guard.install()
 
     failure: BaseException | None = None
     failure_trace = ""
-    signal_exit: int | None = None
     before_cleanup = ""
     after_cleanup = ""
     cleanup_errors: list[str] = []
-    results: list[dict[str, object]] = []
-    responder_stdout = "<not collected>"
-    responder_stderr = "<not collected>"
+    responder_stdout = "<fixture not used>"
+    responder_stderr = "<fixture not used>"
+    result: dict[str, object] = {}
+
+    print(f"\nCASE {case.name}")
+    print(topology.describe())
+    print(
+        f"source_port={case.source_port} destination_port={case.destination_port} "
+        f"tcp_fixture_port={case.tcp_port} response_port={case.response_port}",
+        flush=True,
+    )
 
     try:
         topology.setup()
-        responder.start()
-        context = CaseContext(
-            packetcraftr_binary=binary,
-            native_e2e_root=NATIVE_E2E_ROOT,
-            runner=runner,
-            topology=topology,
-            responder=responder,
-        )
-        results = connectivity.run(context, forced_failure)
+        if responder is not None:
+            responder.start()
+        result = case.run(context)
+        if force_failure:
+            raise RuntimeError(f"intentional failure requested for {case.name}")
     except BaseException as error:
         failure = error
-        if isinstance(error, HarnessSignal):
-            signal_exit = 128 + error.signum
         failure_trace = "".join(
             traceback.format_exception(type(error), error, error.__traceback__)
         )
@@ -217,18 +270,20 @@ def run_harness(
             before_cleanup = f"diagnostic collection failed: {diagnostic_error}"
     finally:
         signal_guard.ignore_during_cleanup()
-        try:
-            cleanup_errors.extend(responder.stop())
-        except BaseException as error:
-            cleanup_errors.append(f"responder cleanup raised: {error}")
+        if responder is not None:
+            try:
+                cleanup_errors.extend(responder.stop())
+            except BaseException as error:
+                cleanup_errors.append(f"responder cleanup raised: {error}")
         try:
             cleanup_errors.extend(topology.cleanup())
         except BaseException as error:
             cleanup_errors.append(f"topology cleanup raised: {error}")
-        try:
-            responder_stdout, responder_stderr = responder.logs()
-        except BaseException as error:
-            cleanup_errors.append(f"responder log collection raised: {error}")
+        if responder is not None:
+            try:
+                responder_stdout, responder_stderr = responder.logs()
+            except BaseException as error:
+                cleanup_errors.append(f"responder log collection raised: {error}")
         if cleanup_errors:
             try:
                 after_cleanup = diagnostics.collect(runner, topology)
@@ -255,6 +310,7 @@ def run_harness(
         write_failure_artifacts(
             artifact_directory,
             {
+                "case.txt": case.name,
                 "topology.txt": topology.describe(),
                 "failure.txt": failure_trace.rstrip(),
                 "cleanup-errors.txt": cleanup_report or "<none>",
@@ -262,37 +318,74 @@ def run_harness(
                 "topology-after-cleanup.txt": after_cleanup or "<not collected>",
                 "responder-stdout.log": responder_stdout,
                 "responder-stderr.log": responder_stderr,
+                "packetcraftr-invocations.log": context.format_invocations(),
                 "commands.log": runner.format_log(),
             },
         )
-        print("\nNATIVE E2E FAILURE", file=sys.stderr)
-        print(topology.describe(), file=sys.stderr)
-        print(f"\nFailure:\n{failure_trace.rstrip()}", file=sys.stderr)
+        sections = [
+            f"NATIVE E2E CASE FAILURE: {case.name}",
+            topology.describe(),
+            f"Failure:\n{failure_trace.rstrip()}",
+        ]
         if cleanup_errors:
-            print("\nCleanup errors:", file=sys.stderr)
-            for error in cleanup_errors:
-                print(f"- {error}", file=sys.stderr)
+            sections.append(
+                "Cleanup errors:\n"
+                + "\n".join(f"- {error}" for error in cleanup_errors)
+            )
+        sections.append(
+            "PacketcraftR stdout/stderr/exit records:\n"
+            + context.format_invocations()
+        )
         if before_cleanup:
-            print("\nDiagnostics before cleanup:", file=sys.stderr)
-            print(before_cleanup, file=sys.stderr)
+            sections.append(f"Diagnostics before cleanup:\n{before_cleanup}")
         if after_cleanup:
-            print("\nDiagnostics after cleanup:", file=sys.stderr)
-            print(after_cleanup, file=sys.stderr)
-        print("\nResponder stdout:", file=sys.stderr)
-        print(responder_stdout.rstrip() or "<empty>", file=sys.stderr)
-        print("\nResponder stderr:", file=sys.stderr)
-        print(responder_stderr.rstrip() or "<empty>", file=sys.stderr)
+            sections.append(f"Diagnostics after cleanup:\n{after_cleanup}")
+        sections.extend(
+            (
+                "Fixture stdout:\n" + (responder_stdout.rstrip() or "<empty>"),
+                "Fixture stderr:\n" + (responder_stderr.rstrip() or "<empty>"),
+            )
+        )
+        exit_code = (
+            128 + failure.signum if isinstance(failure, HarnessSignal) else 1
+        )
+        raise CaseExecutionError("\n\n".join(sections), exit_code) from failure
+
+    print(f"PASS {case.name}: {json.dumps(result, sort_keys=True)}", flush=True)
+    return result
+
+
+def run_harness(
+    runner: CommandRunner,
+    binary: Path,
+    forced_failure: str | None,
+    artifact_directory: Path | None,
+) -> int:
+    print(f"packetcraftr_binary={binary}", flush=True)
+    results: list[dict[str, object]] = []
+    try:
+        for case in native_cases():
+            results.append(
+                run_case(
+                    runner,
+                    binary,
+                    case,
+                    force_failure=forced_failure == case.name,
+                    artifact_directory=artifact_directory,
+                )
+            )
+    except CaseExecutionError as error:
+        print(f"\n{error.report}", file=sys.stderr)
         print("\nExact commands executed:", file=sys.stderr)
         print(runner.format_log(), file=sys.stderr)
-        return signal_exit or 1
+        return error.exit_code
 
     print(
-        "native-e2e fixture connectivity: PASS "
-        f"({len(results)} independent socket checks)"
+        f"\nnative-e2e PacketcraftR cases: PASS ({len(results)} isolated cases)"
     )
     print(
         "native-e2e cleanup: PASS "
-        "(no namespaces, veth devices, responder processes, or temporary files)"
+        "(no namespaces, veth devices, fixture processes, or temporary files)"
     )
     return 0
 

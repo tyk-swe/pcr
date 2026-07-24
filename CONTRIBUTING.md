@@ -1,9 +1,6 @@
 # Contributing to PacketcraftR
 
 PacketcraftR welcomes focused fixes, tests, and documentation improvements.
-During the `0.4.0-beta.2` cycle New
-protocols, new commands, output v2, async migration, broad platform rewrites,
-are not welcomed
 
 Report suspected vulnerabilities through [SECURITY.md](SECURITY.md), not a
 public issue.
@@ -123,8 +120,8 @@ baseline. Never update the baseline only to make CI pass.
 
 CI compares the all-feature public Rust API with the newest reachable release
 tag by using the pinned cargo-semver-checks version. Breaking changes are
-visible but report-only during beta stabilization; failures to perform the
-comparison still fail CI. Reproduce the report with:
+reported but do not fail CI under the current pre-1.0 policy; failures to
+perform the comparison still fail CI. Reproduce the report with:
 
 ```console
 cargo install cargo-semver-checks --locked --version 0.49.0
@@ -134,26 +131,10 @@ scripts/public-api-diff
 See the [CI baseline](docs/ci-baseline.md#public-rust-api-compatibility) for
 baseline selection, exit-code handling, and artifact contents.
 
-## Temporary contract freeze
-
-The stabilization freeze covers:
-
-- `schemas/packetcraftr.packet.v1.schema.json`;
-- `schemas/packetcraftr.output.v1.schema.json`;
-- the output envelope and command/mode vocabulary;
-- the protocol-support manifest structure;
-- every published document under `examples/documents/`.
-
-Existing fields cannot be removed, renamed, made newly required, or
-semantically changed. Only backward-compatible optional additions may be
-considered, and they require recorded approval from the Contract Senior Owner.
-See the [Phase 0 scope](docs/roadmap/0.4.0-beta.2-phase-0.md) for the complete
-freeze and exception criteria.
-
 ## Code review
 
-All external PR require code review approval. A cross-boundary pull
-request needs approval for every affected boundary. 
+Every pull request requires code review approval. A cross-boundary pull
+request needs approval for every affected boundary.
 
 Native networking changes must test relevant failure paths, not only successful
 I/O. Depending on the change, cover permission or unavailable-backend errors,
@@ -183,8 +164,7 @@ serialization did not move.
 
 ## Labels
 
-Use one or more area labels, one type label, and a priority label when the
-stabilization coordinator assigns one.
+Use one or more area labels and one type label.
 
 | Label | Use |
 | --- | --- |
@@ -198,7 +178,5 @@ stabilization coordinator assigns one.
 | `type/refactor` | Behavior-preserving structural work. |
 | `type/bug` | A defect or regression. |
 | `type/test` | Test coverage or test infrastructure. |
-| `priority/p0` | A release-blocking stabilization issue. |
-| `priority/p1` | High-priority stabilization work that needs an explicit disposition. |
 
 Do not use `type/refactor` for a change that intentionally alters behavior.

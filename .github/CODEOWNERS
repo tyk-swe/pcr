@@ -1,5 +1,4 @@
-# Safety-sensitive review routing. Approval roles and escalation rules live in
-# docs/governance/review-ownership.md.
+# Safety-sensitive and serialized-contract review routing.
 
 /src/net/platform/** @tyk-swe
 /src/net/transmit.rs @tyk-swe
@@ -11,7 +10,6 @@
 /src/client/client.rs @tyk-swe
 /src/client/helpers.rs @tyk-swe
 
-/src/protocol/matcher.rs @tyk-swe
 /src/protocol/matcher/** @tyk-swe
 /src/workflow/probe.rs @tyk-swe
 

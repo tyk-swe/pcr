@@ -7,9 +7,8 @@ workflows. Its live operations are policy-gated so that destination scope,
 hostname resolution, malformed traffic, and operation budgets are explicit.
 
 PacketcraftR is currently a pre-1.0 beta (`0.4.0-beta.1`). Interfaces and
-serialized v1 contracts are being stabilized, but beta releases can still
-contain breaking changes. Review the [changelog](CHANGELOG.md) before
-upgrading.
+serialized v1 contracts can still change incompatibly between beta releases.
+Review the [changelog](CHANGELOG.md) before upgrading.
 
 Use PacketcraftR only on systems and networks you own or are explicitly
 authorized to test. Packet construction, capture, and transmission can expose
@@ -35,6 +34,37 @@ Packet documents use the
 [`packetcraftr.packet/v1` schema](schemas/packetcraftr.packet.v1.schema.json).
 Published packet and output examples are in
 [`examples/documents`](examples/documents).
+
+## Built-in protocol coverage
+
+The default registry provides exact construction and bounded dissection for
+these protocol families:
+
+- capture and link framing: BSD NULL and LOOP, Linux cooked capture v1 and v2,
+  Ethernet II, IEEE 802.1Q and 802.1ad VLANs, and ARP;
+- network and control: IPv4, IPv6, ICMPv4, ICMPv6, IGMP, GRE, and the IPv6
+  Hop-by-Hop, Destination Options, Fragment, and Segment Routing headers;
+- transport and payload: TCP, UDP, SCTP common headers with validated opaque
+  chunks, plus raw, padding, and malformed-byte preservation layers.
+
+IPv4 and IPv6 can be nested inside either IP version through their standard
+protocol/next-header bindings, and GRE can carry typed IPv4 or IPv6 payloads.
+Unknown numeric link types and unknown discriminators remain bounded and are
+preserved as raw bytes. Built-in protocol support is header-focused: SCTP
+chunks are not decoded into typed chunk models, DNS messages remain owned by
+the DNS workflow, and other application payloads are represented as raw bytes.
+
+## Output formats and terminal colour
+
+Global `--color <WHEN>` accepts `auto`, `always`, or `never` and affects only
+human-facing text, help, and diagnostics. `auto` is the default and emits
+colour only when the destination supports it; `always` forces human styling,
+and `never` disables it.
+
+Machine and binary formats never contain terminal styling, even with
+`--color always`. This guarantee covers JSON, NDJSON, hexadecimal, raw, PCAP,
+and PCAPNG output. A raw packet may naturally contain an escape byte as packet
+data; PacketcraftR does not add terminal control sequences around it.
 
 ## Installation
 

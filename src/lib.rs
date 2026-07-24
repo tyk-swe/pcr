@@ -1,8 +1,31 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! `PacketcraftR`'s runtime-neutral packet model, protocol registry, exact builder,
-//! bounded dissector, offline capture I/O, session stages, and high-level client.
+//! Packet construction, dissection, capture I/O, and policy-gated network
+//! workflows.
+//!
+//! # Domain map
+//!
+//! The crate keeps its public surface in nine canonical domains:
+//!
+//! - [`capture`] reads and writes bounded classic PCAP and PCAPNG streams;
+//! - [`client`] plans and executes policy-gated send and exchange operations;
+//! - [`error`] provides the shared classified error vocabulary;
+//! - [`net`] defines interfaces, routes, providers, and native I/O boundaries;
+//! - [`output`] defines render-neutral output models and versioned envelopes;
+//! - [`packet`] owns layers, documents, registries, exact building, and bounded
+//!   dissection;
+//! - [`protocol`] supplies the built-in codecs, matchers, capture roots, and
+//!   capability manifest;
+//! - [`session`] provides bounded fragment and transport reassembly state; and
+//! - [`workflow`] implements replay, scan, traceroute, DNS, and fuzz workflows.
+//!
+//! The packet and protocol domains are runtime-neutral. Native availability is
+//! selected separately through Cargo features and the providers in [`net`].
+//! Consumers that need the exact built-in build, dissect, matcher, capture-root,
+//! or workflow matrix should inspect
+//! [`protocol::support::BUILTIN_PROTOCOL_SUPPORT`] instead of inferring support
+//! from a protocol type's presence.
 //!
 //! ```
 //! use std::sync::Arc;

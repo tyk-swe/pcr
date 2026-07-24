@@ -186,7 +186,7 @@ jobs:
                 echo "No breaking public API changes were reported."
                 ;;
               100)
-                echo "Breaking changes were reported. This beta-stabilization check is review-only."
+                echo "Breaking changes were reported. Under the current pre-1.0 policy, this completed comparison is report-only."
                 ;;
               *)
                 echo "The comparison did not complete (exit $status); this is an infrastructure or tool failure."

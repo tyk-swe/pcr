@@ -39,8 +39,8 @@ The four release targets are `x86_64-unknown-linux-gnu`,
 `x86_64-pc-windows-msvc`. CI does not claim runtime FreeBSD qualification:
 that target is cross-checked only.
 
-Linux all-feature jobs install `libpcap-dev`. The native E2E job additionally
-installs iproute2 and shellcheck.
+Linux all-feature jobs install `libpcap-dev`. The native E2E job installs
+ethtool, iproute2, libpcap development files, Python jsonschema, and shellcheck.
 
 ## Rust versions
 
@@ -172,11 +172,11 @@ hardcoded version. The selector is compatible with the system Bash 3.2 shipped
 on supported macOS development hosts.
 
 cargo-semver-checks has distinct exit codes. Exit `100` means the comparison
-completed and found breaking API changes; CI emits a warning, uploads the
-report, and remains green because beta stabilization is report-only. Exit
-`101` or any other unexpected nonzero status means the comparison did not
-complete and fails the job. Installation, baseline resolution, rustdoc, and
-build failures are therefore never disguised as compatibility.
+completed and found breaking API changes; under the current pre-1.0 policy, CI
+emits a warning, uploads the report, and remains green. Exit `101` or any other
+unexpected nonzero status means the comparison did not complete and fails the
+job. Installation, baseline resolution, rustdoc, and build failures are
+therefore never disguised as compatibility.
 
 The seven-day `public-api-compatibility` artifact contains:
 

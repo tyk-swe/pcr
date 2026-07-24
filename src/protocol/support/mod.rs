@@ -1,4 +1,9 @@
 //! Versioned built-in capability information.
+//!
+//! [`BUILTIN_PROTOCOL_SUPPORT`] is the canonical machine-readable inventory for
+//! built-in codecs, capture roots, strict fallback behavior, and per-workflow
+//! protocol obligations. Individual rows distinguish construction, dissection,
+//! exact round trips, response matching, and decode-only support.
 
 mod manifest;
 

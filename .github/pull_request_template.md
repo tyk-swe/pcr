@@ -22,8 +22,8 @@ Schema or structured output:
 
 - [ ] No schema, output serialization, envelope, protocol-support manifest, or
       published-document change.
-- [ ] Contract change; the exact field-level impact and Contract Senior Owner
-      approval are linked below.
+- [ ] Contract change; the exact field-level and compatibility impact is
+      described below.
 
 Feature/platform effects:
 
@@ -59,12 +59,11 @@ all-feature, platform-specific, schema/example, and documentation checks. -->
       omission is explained.
 - [ ] Public API impact is disclosed above.
 - [ ] Schema/output impact is disclosed above.
-- [ ] Required senior owners for every touched boundary are identified and
-      have approved.
+- [ ] CODEOWNERS reviewers for every touched boundary are requested.
 - [ ] No new source file exceeds 20 KiB or roughly 600 lines.
 - [ ] Fixtures, goldens, examples, and schemas remain synchronized where
       applicable.
 
-Senior-review roles required:
+Review routing notes:
 
-<!-- See docs/governance/review-ownership.md. -->
+<!-- Note cross-boundary CODEOWNERS routing or additional reviewers. -->

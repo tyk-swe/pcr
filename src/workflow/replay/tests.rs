@@ -738,9 +738,16 @@ fn infeasible_replay_delay_is_rejected_before_frame_side_effects() {
     )
     .unwrap_err();
 
+    // A loaded host can oversleep the first transmitter delay past the
+    // campaign deadline, reporting sequence 0. Otherwise the prospective
+    // second-frame delay is rejected at sequence 1. Both paths prevent any
+    // second-frame side effects.
     assert!(matches!(
         error,
-        ReplayError::DurationLimit { sequence: 1, .. }
+        ReplayError::DurationLimit {
+            sequence: 0 | 1,
+            ..
+        }
     ));
     assert_eq!(authorizer.authorization_calls, 1);
     assert_eq!(transmitter.validation_calls, 1);

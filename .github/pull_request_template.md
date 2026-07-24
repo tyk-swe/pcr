@@ -60,7 +60,7 @@ all-feature, platform-specific, schema/example, and documentation checks. -->
 - [ ] Public API impact is disclosed above.
 - [ ] Schema/output impact is disclosed above.
 - [ ] CODEOWNERS reviewers for every touched boundary are requested.
-- [ ] No new source file exceeds 20 KiB or roughly 600 lines.
+- [ ] New or expanded modules remain cohesive.
 - [ ] Fixtures, goldens, examples, and schemas remain synchronized where
       applicable.
 

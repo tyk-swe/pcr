@@ -15,9 +15,9 @@ use crate::net::{
 };
 use crate::packet::{decode::Dissector, registry::ProtocolRegistry};
 
+use super::super::Stats;
 use super::super::helpers::{push_diagnostic_once, validate_send_report};
 use super::super::send::ClientError;
-use super::super::stats::OperationStats;
 use super::{
     CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
     ExchangeProcessOutcome, ExchangeResult, PreparedExchangePacket, WorkflowPromotionContext,
@@ -326,7 +326,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
             sent,
             self.sent_evidence,
             unanswered,
-            OperationStats {
+            Stats {
                 packets_attempted: self.packet_count,
                 packets_completed: self.completed_sends,
                 bytes: self.total_bytes,

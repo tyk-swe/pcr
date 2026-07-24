@@ -18,9 +18,9 @@ use crate::packet::{
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };
 
+use super::super::Stats;
 use super::super::helpers::{push_diagnostic_once, reserve_capture_evidence};
 use super::super::send::SendOptions;
-use super::super::stats::OperationStats;
 
 pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;
 pub const MAX_EXCHANGE_TIMEOUT: Duration = crate::net::capture::MAX_TIMEOUT;
@@ -147,7 +147,7 @@ pub struct ExchangeResult {
     /// limits. The complete raw frame is retained for evidence.
     pub undecoded: Vec<Frame>,
     pub diagnostics: Vec<crate::packet::diagnostic::Diagnostic>,
-    pub stats: OperationStats,
+    pub stats: Stats,
 }
 
 #[derive(Clone, Copy)]
@@ -648,7 +648,7 @@ impl ExchangeAccumulator {
         sent: Vec<BuiltPacket>,
         sent_evidence: Vec<Frame>,
         unanswered: Vec<usize>,
-        stats: OperationStats,
+        stats: Stats,
     ) -> ExchangeResult {
         debug_assert_eq!(self.unsolicited.len(), self.unsolicited_freshness.len());
         ExchangeResult {

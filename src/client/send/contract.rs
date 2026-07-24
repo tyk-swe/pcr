@@ -11,8 +11,8 @@ use crate::net::{
 };
 use crate::packet::build::{BuildError, BuildOptions, BuiltPacket};
 
+use super::super::Stats;
 use super::super::policy::TrafficPolicyError;
-use super::super::stats::OperationStats;
 use super::super::target::TargetResolutionError;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub struct SendReport {
     pub built: BuiltPacket,
     pub route: MaterializedRoute,
     pub wire_bytes: Option<Bytes>,
-    pub stats: OperationStats,
+    pub stats: Stats,
 }
 
 #[derive(Debug, Error)]

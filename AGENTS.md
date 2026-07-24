@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This Rust 2024 package provides the `packetcraftr` library and CLI. `src/lib.rs` exposes the canonical domains: `capture`, `client`, `error`, `net`, `output`, `packet`, `protocol`, `session`, and `workflow`. CLI code lives in `src/cli/` and enters through `src/main.rs`. Keep unit tests beside modules in `tests.rs`; place API, architecture, and end-to-end tests in `tests/*.rs`. Test data belongs in `tests/fixtures/`, CLI snapshots in `tests/golden/`, published documents in `examples/documents/`, and JSON contracts in `schemas/`. The separate `fuzz/` package holds libFuzzer targets, corpora, and dictionaries.
+This Rust 2024 package provides the `packetcraftr` library and CLI. `src/lib.rs` exposes the canonical domains: `capture`, `client`, `error`, `net`, `output`, `packet`, `protocol`, `session`, and `workflow`. CLI code lives in `src/cli/` and enters through `src/main.rs`. Keep unit tests beside modules in `tests.rs`; place API and end-to-end tests in `tests/*.rs`. Test data belongs in `tests/fixtures/`, CLI snapshots in `tests/golden/`, published documents in `examples/documents/`, and JSON contracts in `schemas/`. The separate `fuzz/` package holds libFuzzer targets, corpora, and dictionaries.
 
 ## Build, Test, and Development Commands
 
@@ -17,7 +17,7 @@ Rust 1.97 is pinned; 1.96 is the MSRV. Linux all-feature builds require `libpcap
 
 ## Coding Style & Naming Conventions
 
-Use rustfmt defaults and four-space indentation. Name modules, functions, and tests in `snake_case`, types and traits in `UpperCamelCase`, and constants in `SCREAMING_SNAKE_CASE`. Preserve canonical filesystem modules: architecture tests reject `internal`, `_impl`, and `#[path = ...]` modules. Keep unsafe code confined to `src/net/platform/`; every unsafe block needs a specific `SAFETY` explanation.
+Use rustfmt defaults and four-space indentation. Name modules, functions, and tests in `snake_case`, types and traits in `UpperCamelCase`, and constants in `SCREAMING_SNAKE_CASE`. Prefer cohesive, domain-specific modules over generic implementation buckets. Keep unsafe code confined to `src/net/platform/`; every unsafe block needs a specific `SAFETY` explanation.
 
 ## Testing Guidelines
 
@@ -33,8 +33,7 @@ PRs should explain intent and impact, link issues, list validation, and identify
 
 ## Other instructions
 
-Good code is maintainable code. Rust source files above 20 KiB (20,480 bytes,
-roughly 600 lines) are too large and should be split or refactored.
+Keep modules cohesive and split them when distinct responsibilities emerge.
 
 
 ## Instructions for OpenAI codex agents

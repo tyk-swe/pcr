@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
-use super::client::Client;
+use super::Client;
 use super::exchange::{
     CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
     ExchangeProcessOutcome, ExchangeResult, MAX_EXCHANGE_TIMEOUT, PreparedExchangePacket,

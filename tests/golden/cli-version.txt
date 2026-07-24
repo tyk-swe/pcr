@@ -1,1 +1,1 @@
-packetcraftr 0.4.0-beta.1
+packetcraftr 0.4.0-beta.2

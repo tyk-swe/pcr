@@ -13,7 +13,7 @@ members = ["."]
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-packetcraftr = { path = "..", version = "0.4.0-beta.1", default-features = false }
+packetcraftr = { path = "..", version = "0.4.0-beta.2", default-features = false }
 
 [[bin]]
 name = "capture_reader"

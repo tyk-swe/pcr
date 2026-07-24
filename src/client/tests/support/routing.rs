@@ -225,7 +225,7 @@ impl LayerCodec for MacSensitiveCodec {
 #[derive(Debug)]
 pub(crate) struct SlowMatcher(pub(crate) Duration);
 
-impl ResponseMatcher for SlowMatcher {
+impl Matcher for SlowMatcher {
     fn matches(&self, _request: &Packet, _response: &Packet) -> MatchResult {
         std::thread::sleep(self.0);
         MatchResult::matched(200, "slow test matcher")

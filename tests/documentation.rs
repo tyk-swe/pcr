@@ -277,6 +277,13 @@ fn hex_value(byte: u8) -> Option<u8> {
     }
 }
 
+fn display_with_forward_slashes(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn format_missing_links(root: &Path, missing: &[MissingLink]) -> String {
     missing
         .iter()
@@ -285,9 +292,9 @@ fn format_missing_links(root: &Path, missing: &[MissingLink]) -> String {
             let resolved = link.resolved.strip_prefix(root).unwrap_or(&link.resolved);
             format!(
                 "{} -> {} (resolved as {})",
-                source.display(),
+                display_with_forward_slashes(source),
                 link.target,
-                resolved.display()
+                display_with_forward_slashes(resolved)
             )
         })
         .collect::<Vec<_>>()

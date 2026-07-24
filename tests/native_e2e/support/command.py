@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import IO, Mapping, Sequence
 
 
@@ -250,8 +251,8 @@ class CommandRunner:
                 f"{completed.stderr.strip() or completed.stdout.strip()}"
             )
 
-    @staticmethod
-    def _process_group_exists(process_group: int) -> bool:
+    @classmethod
+    def _process_group_exists(cls, process_group: int) -> bool:
         try:
             os.killpg(process_group, 0)
         except ProcessLookupError:
@@ -260,7 +261,37 @@ class CommandRunner:
             return True
         except OSError:
             return True
-        return True
+        return cls._process_group_has_running_members(process_group)
+
+    @classmethod
+    def _process_group_has_running_members(cls, process_group: int) -> bool:
+        for stat_path in Path("/proc").glob("[0-9]*/stat"):
+            member = cls._process_stat(stat_path)
+            if member is None:
+                continue
+            member_group, member_state = member
+            if member_group == process_group and member_state not in ("X", "Z"):
+                return True
+        return False
+
+    @staticmethod
+    def _process_stat(stat_path: Path) -> tuple[int, str] | None:
+        try:
+            stat = stat_path.read_text(encoding="utf-8")
+        except (FileNotFoundError, ProcessLookupError, PermissionError, OSError):
+            return None
+        command_end = stat.rfind(")")
+        if command_end == -1:
+            return None
+        fields = stat[command_end + 2 :].split()
+        if len(fields) < 3:
+            return None
+        state = fields[0]
+        try:
+            process_group = int(fields[2])
+        except ValueError:
+            return None
+        return process_group, state
 
     def _collect_after_abort(
         self,

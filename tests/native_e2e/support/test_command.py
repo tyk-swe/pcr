@@ -56,6 +56,19 @@ print(child.pid, flush=True)
 time.sleep(30)
 """
 
+ZOMBIE_PROCESS_GROUP_SCRIPT = """
+import subprocess
+import sys
+import time
+
+child = subprocess.Popen(
+    [sys.executable, "-c", "pass"],
+    start_new_session=True,
+)
+print(child.pid, flush=True)
+time.sleep(30)
+"""
+
 
 class ProbeInterrupt(Exception):
     """Raised by the test signal handler while a command owns descendants."""
@@ -214,26 +227,44 @@ class CommandRunnerProcessTests(unittest.TestCase):
                     )
 
     def test_wait_for_exit_treats_zombie_as_exited(self) -> None:
+        child_pid, parent = self._start_zombie_fixture(ZOMBIE_DESCENDANT_SCRIPT)
+        try:
+            self._wait_for_exit((child_pid,))
+            self.assertEqual(self._process_state(child_pid), "Z")
+        finally:
+            self._stop_zombie_fixture(parent)
+
+    def test_process_group_exists_treats_zombie_group_as_exited(self) -> None:
+        child_pid, parent = self._start_zombie_fixture(ZOMBIE_PROCESS_GROUP_SCRIPT)
+        try:
+            self._wait_for_exit((child_pid,))
+            self.assertEqual(self._process_state(child_pid), "Z")
+            self.assertFalse(CommandRunner._process_group_exists(child_pid))
+        finally:
+            self._stop_zombie_fixture(parent)
+
+    def _start_zombie_fixture(
+        self,
+        script: str,
+    ) -> tuple[int, subprocess.Popen[str]]:
         parent = subprocess.Popen(
-            (sys.executable, "-c", ZOMBIE_DESCENDANT_SCRIPT),
+            (sys.executable, "-c", script),
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
         )
+        if parent.stdout is None:
+            self.fail("zombie fixture did not expose its child pid")
+        return int(parent.stdout.readline()), parent
+
+    def _stop_zombie_fixture(self, parent: subprocess.Popen[str]) -> None:
+        parent.terminate()
         try:
-            if parent.stdout is None:
-                self.fail("zombie fixture did not expose its child pid")
-            child_pid = int(parent.stdout.readline())
-            self._wait_for_exit((child_pid,))
-            self.assertEqual(self._process_state(child_pid), "Z")
-        finally:
-            parent.terminate()
-            try:
-                parent.communicate(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                parent.kill()
-                parent.communicate(timeout=2.0)
+            parent.communicate(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            parent.kill()
+            parent.communicate(timeout=2.0)
 
     def _assert_timeout_kills_tree(
         self,

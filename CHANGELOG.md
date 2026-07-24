@@ -53,7 +53,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Native E2E command timeouts and interruptions now terminate the complete
-  privileged process group and drain remaining namespace PIDs before teardown.
+  privileged process group, treat zombie descendants as exited during survival
+  checks, and drain remaining namespace PIDs before teardown.
 - Fixed `packetcraftr.output/v1` schema validation for embedded packet fields so
   malformed field values are rejected consistently with standalone packet
   documents.

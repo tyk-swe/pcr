@@ -150,12 +150,10 @@ considered, and they require recorded approval from the Contract Senior Owner.
 See the [Phase 0 scope](docs/roadmap/0.4.0-beta.2-phase-0.md) for the complete
 freeze and exception criteria.
 
-## Senior review
+## Code review
 
-Safety-sensitive paths require role-specific approval under
-[review ownership](docs/governance/review-ownership.md). A cross-boundary pull
-request needs approval for every affected boundary. Authors cannot approve
-their own changes.
+All external PR require code review approval. A cross-boundary pull
+request needs approval for every affected boundary. 
 
 Native networking changes must test relevant failure paths, not only successful
 I/O. Depending on the change, cover permission or unavailable-backend errors,

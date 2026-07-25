@@ -60,8 +60,7 @@ The declared features are:
 - `native-interfaces`, for portable interface enumeration;
 - `native-route`, which also enables `native-interfaces`;
 - `native-layer2`, which also enables `native-interfaces`;
-- `native-layer3`, which also enables `native-interfaces`;
-- deprecated compatibility alias `live`, which enables `native-interfaces`.
+- `native-layer3`, which also enables `native-interfaces`.
 
 The cross-platform test matrix runs the library tests without default features,
 then all Cargo-discovered unit, binary, integration, and documentation tests in

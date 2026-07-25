@@ -35,7 +35,6 @@ dictionaries.
   validate both dependency graphs.
 
 Rust 1.97 is pinned; 1.96 is the MSRV. Default features are `cli` and
-`native-interfaces`; `live` is only a deprecated alias for
 `native-interfaces`. The no-default profile omits the CLI target, while
 all-feature Linux builds require `libpcap-dev`. Run
 `scripts/test-native-e2e --check-prerequisites` before the opt-in privileged

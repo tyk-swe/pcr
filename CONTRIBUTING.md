@@ -27,8 +27,7 @@ cargo deny check
 The no-default test profile is intentionally library-only: Cargo skips the
 `packetcraftr` binary, its unit tests, and `tests/cli.rs` unless the `cli`
 feature is enabled. Default and all-feature profiles include `cli` and run the
-complete CLI test suite. Use `native-interfaces` for interface-enumeration
-feature work; `live` is retained only as a deprecated compatibility alias.
+complete CLI test suite.
 
 The complete enforced matrix, tool versions, thresholds, release checks, and
 artifacts are recorded in the [CI baseline](docs/ci-baseline.md).

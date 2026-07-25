@@ -23,11 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended the pre-1.0 public output API and `packetcraftr.output/v1` command
   vocabulary with the additive `protocols` aggregate result contracts.
 
-### Deprecated
-
-- Deprecated `live` as a Cargo feature name. It remains a compatibility alias
-  for `native-interfaces`.
-
 ## [0.4.0-beta.2] - 2026-07-24
 
 ### Added

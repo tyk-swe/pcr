@@ -23,11 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended the pre-1.0 public output API and `packetcraftr.output/v1` command
   vocabulary with the additive `protocols` aggregate result contracts.
 
-### Deprecated
-
-- Deprecated `live` as a Cargo feature name. It remains a compatibility alias
-  for `native-interfaces`.
-
 ## [0.4.0-beta.2] - 2026-07-24
 
 ### Added
@@ -54,9 +49,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added deterministic native smoke coverage for IPv4/IPv6 route planning and
   Layer 3 transmission, plus successful, timed-out, and unsolicited UDP
   exchanges validated by independent socket fixtures and the output-v1 schema.
-- Added an explicit CI baseline, report-only public Rust API compatibility
-  artifacts, and a reusable privileged Linux native-E2E workflow with failure
-  evidence.
+- Added an explicit CI baseline and a reusable privileged Linux native-E2E
+  workflow with failure evidence.
 
 ### Changed
 

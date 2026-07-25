@@ -126,24 +126,9 @@ impl Statistics {
 }
 
 pub trait Session: Send {
-    /// Returns whether this session guarantees monotonic ingress timestamps
-    /// for captured frames. Active exchanges require this capability before
-    /// they transmit; passive consumers may continue using frame-only sessions.
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        false
-    }
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<CaptureFrame>, Error>;
-    /// Returns the frame with a monotonic ingress marker. Implementations that
-    /// record ingress when the capture backend receives the frame should
-    /// override this method and return [`Captured::new`]. The compatibility
-    /// fallback deliberately leaves ingress time unavailable, which makes the
-    /// frame ineligible for freshness correlation and latency measurement.
-    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
-        self.next_frame(timeout)
-            .map(|frame| frame.map(Captured::without_ingress_time))
-    }
+    fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
     /// Stop the receiver and join all capture work before returning. An error
     /// means the implementation could not confirm complete cleanup.
     fn shutdown(&mut self) -> Result<(), Error>;
@@ -295,18 +280,9 @@ impl SystemSession {
 }
 
 impl Session for SystemSession {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        self.inner.supports_monotonic_ingress_time()
-    }
-
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
         validate_timeout(timeout)?;
         self.inner.wait_ready(timeout)
-    }
-
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<CaptureFrame>, Error> {
-        validate_timeout(timeout)?;
-        self.inner.next_frame(timeout)
     }
 
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
@@ -341,31 +317,8 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use bytes::Bytes;
-
     use super::*;
-    use crate::capture::LinkType;
     use crate::error::Classified;
-
-    struct FrameOnlyCapture(Option<CaptureFrame>);
-
-    impl Session for FrameOnlyCapture {
-        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
-            Ok(())
-        }
-
-        fn next_frame(&mut self, _timeout: Duration) -> Result<Option<CaptureFrame>, Error> {
-            Ok(self.0.take())
-        }
-
-        fn shutdown(&mut self) -> Result<(), Error> {
-            Ok(())
-        }
-
-        fn statistics(&self) -> Statistics {
-            Statistics::default()
-        }
-    }
 
     struct CountingCapture {
         calls: Arc<AtomicUsize>,
@@ -377,7 +330,7 @@ mod tests {
             Ok(())
         }
 
-        fn next_frame(&mut self, _timeout: Duration) -> Result<Option<CaptureFrame>, Error> {
+        fn next_captured_frame(&mut self, _timeout: Duration) -> Result<Option<Captured>, Error> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(None)
         }
@@ -401,7 +354,6 @@ mod tests {
 
         let errors = [
             session.wait_ready(Duration::MAX).unwrap_err(),
-            session.next_frame(Duration::MAX).unwrap_err(),
             session.next_captured_frame(Duration::MAX).unwrap_err(),
         ];
         for error in errors {
@@ -415,24 +367,6 @@ mod tests {
             assert_eq!(error.classification().code, "cli.capture_timeout");
         }
         assert_eq!(calls.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn frame_only_capture_fallback_has_no_fabricated_ingress_time() {
-        let frame = CaptureFrame::new(
-            std::time::SystemTime::UNIX_EPOCH,
-            LinkType::RAW,
-            Bytes::from_static(&[1]),
-        )
-        .unwrap();
-        let mut capture = FrameOnlyCapture(Some(frame));
-
-        let captured = capture
-            .next_captured_frame(Duration::ZERO)
-            .unwrap()
-            .unwrap();
-
-        assert!(captured.received_at.is_none());
     }
 
     #[test]

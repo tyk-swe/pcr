@@ -85,7 +85,7 @@ pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIo
         .map_err(|error| map_send_error(interface, error))?;
     Ok(IoSendReport {
         bytes_sent: frame.bytes().len(),
-        wire_bytes: Some(frame.bytes().clone()),
+        wire_bytes: frame.bytes().clone(),
     })
 }
 

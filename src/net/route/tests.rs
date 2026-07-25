@@ -30,10 +30,11 @@ struct FixedRoute(RouteDecision);
 impl RouteProvider for FixedRoute {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         Ok(self.0.clone())
     }
@@ -43,14 +44,6 @@ struct PreferenceAwareRoute;
 
 impl RouteProvider for PreferenceAwareRoute {
     type Error = Infallible;
-
-    fn lookup(
-        &self,
-        _destination: IpAddr,
-        _interface_hint: Option<&InterfaceId>,
-    ) -> Result<RouteDecision, Self::Error> {
-        Ok(route(None))
-    }
 
     fn lookup_with_preferences(
         &self,
@@ -86,10 +79,11 @@ impl InterfaceOnlyRoute {
 impl RouteProvider for InterfaceOnlyRoute {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         self.ip_lookups.fetch_add(1, Ordering::SeqCst);
         Ok(self.decision.clone())
@@ -107,12 +101,10 @@ impl RouteProvider for InterfaceOnlyRoute {
 struct NeverResolve;
 
 impl NeighborResolver for NeverResolve {
-    fn resolve(
+    fn resolve_request(
         &self,
-        _interface: &InterfaceId,
-        _interface_source: IpAddr,
-        _target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
+        _request: &NeighborRequest,
+    ) -> Result<NeighborResolution, NeighborError> {
         unreachable!("invalid plan must fail before calling the resolver")
     }
 }
@@ -123,15 +115,6 @@ struct RecordingResolver {
 }
 
 impl NeighborResolver for RecordingResolver {
-    fn resolve(
-        &self,
-        _interface: &InterfaceId,
-        _interface_source: IpAddr,
-        _target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
-        unreachable!("rich neighbor context must be used during materialization")
-    }
-
     fn resolve_request(
         &self,
         request: &NeighborRequest,
@@ -307,38 +290,6 @@ fn injected_provider_can_honor_a_source_preference() {
 }
 
 #[test]
-fn legacy_injected_provider_rejects_an_unhonored_source_preference() {
-    let preferred_source = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 99));
-    let mut packet = Packet::new();
-    packet.push(Ipv4 {
-        source: Ipv4Addr::new(192, 0, 2, 99),
-        destination: Ipv4Addr::new(198, 51, 100, 1),
-        ..Ipv4::default()
-    });
-
-    let error = RoutePlanner
-        .plan(
-            &packet,
-            None,
-            &PlanOptions {
-                link_mode: LinkMode::Layer3,
-                interface: None,
-                preferred_source: Some(preferred_source),
-            },
-            &FixedRoute(route(None)),
-        )
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        PlanError::PreferredSourceNotSelected {
-            requested,
-            selected: Some(selected),
-        } if requested == preferred_source
-            && selected == IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10))
-    ));
-}
-
-#[test]
 fn preferred_source_family_is_rejected_before_provider_lookup() {
     let provider = InterfaceOnlyRoute::new(route(None));
     let mut packet = Packet::new();
@@ -375,7 +326,11 @@ fn preferred_source_family_is_rejected_before_provider_lookup() {
 #[test]
 fn system_route_provider_reports_the_feature_boundary() {
     assert!(matches!(
-        SystemRouteProvider.lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None),
+        SystemRouteProvider.lookup_with_preferences(
+            IpAddr::V4(Ipv4Addr::LOCALHOST),
+            None,
+            None,
+        ),
         Err(NativeRouteError::Unsupported { message })
             if message.contains("native-route")
     ));

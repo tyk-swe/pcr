@@ -21,7 +21,7 @@ use crate::packet::{
 ))]
 use super::models::DestinationScope;
 use super::models::{
-    InterfaceId, LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborRequest, NeighborResolution,
+    LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborRequest, NeighborResolution,
     NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute, RouteProvider,
 };
 
@@ -470,30 +470,10 @@ pub(in crate::net) fn classify_destination(address: IpAddr) -> DestinationScope 
 }
 
 pub trait NeighborResolver: Send + Sync {
-    fn resolve(
-        &self,
-        interface: &InterfaceId,
-        interface_source: IpAddr,
-        target: IpAddr,
-    ) -> Result<MacAddress, NeighborError>;
-
-    /// Resolve with exact route/link context. Existing injected resolvers keep
-    /// source compatibility through the legacy method and receive an empty
-    /// evidence record; active resolvers override this method.
     fn resolve_request(
         &self,
         request: &NeighborRequest,
-    ) -> Result<NeighborResolution, NeighborError> {
-        self.resolve(&request.interface, request.interface_source, request.target)
-            .map(|mac_address| NeighborResolution {
-                mac_address,
-                attempts: 1,
-                cache_hit: false,
-                captured: Vec::new(),
-                evidence_truncated: false,
-                capture_statistics: CaptureStatistics::default(),
-            })
-    }
+    ) -> Result<NeighborResolution, NeighborError>;
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]

@@ -20,11 +20,14 @@ use crate::client::target::{Error as TargetResolutionError, Resolver as Hostname
 use crate::error::Classification as ErrorClassification;
 use crate::net::{
     Error as LiveIoError,
-    capture::{CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics},
-    link::{LinkCapability, LinkMode, MacAddress},
+    capture::{
+        CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
+    },
+    link::{LinkCapability, LinkMode},
     route::{
-        DestinationScope, InterfaceId, NeighborError, NeighborResolver, PlanOptions, PlannedRoute,
-        RouteDecision, RouteProvider, RouteSelectionReason,
+        DestinationScope, InterfaceId, NeighborError, NeighborRequest, NeighborResolution,
+        NeighborResolver, PlanOptions, PlannedRoute, RouteDecision, RouteProvider,
+        RouteSelectionReason,
     },
     transmit::{IoSendReport, PacketIo, TransmissionFrame},
 };
@@ -39,15 +42,13 @@ use std::result::Result;
 struct NoNeighbors;
 
 impl NeighborResolver for NoNeighbors {
-    fn resolve(
+    fn resolve_request(
         &self,
-        interface: &InterfaceId,
-        _interface_source: IpAddr,
-        target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
+        request: &NeighborRequest,
+    ) -> Result<NeighborResolution, NeighborError> {
         Err(NeighborError::Resolution {
-            interface: interface.name.clone(),
-            target,
+            interface: request.interface.name.clone(),
+            target: request.target,
             message: "test does not configure neighbor resolution".to_owned(),
         })
     }

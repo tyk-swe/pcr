@@ -190,7 +190,7 @@ fn send_with<B: RawIpBackend>(
     }
     Ok(IoSendReport {
         bytes_sent: packet.wire_bytes.len(),
-        wire_bytes: Some(packet.wire_bytes),
+        wire_bytes: packet.wire_bytes,
     })
 }
 
@@ -596,7 +596,7 @@ mod tests {
         let report = send_with(Layer3Frame::try_new(&bytes, &route).unwrap(), &backend).unwrap();
 
         assert_eq!(report.bytes_sent, bytes.len());
-        assert_eq!(report.wire_bytes, Some(bytes.clone()));
+        assert_eq!(report.wire_bytes, bytes.clone());
         let packet = backend.packet.lock().unwrap().clone().unwrap();
         assert_eq!(packet.interface_source, IpAddr::V4(interface_source));
         assert_eq!(packet.destination, IpAddr::V4(destination));
@@ -615,7 +615,7 @@ mod tests {
         {
             let report =
                 send_with(Layer3Frame::try_new(&bytes, &route).unwrap(), &backend).unwrap();
-            assert_eq!(report.wire_bytes, Some(bytes));
+            assert_eq!(report.wire_bytes, bytes);
         }
         #[cfg(target_os = "macos")]
         {

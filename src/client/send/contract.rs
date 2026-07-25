@@ -31,7 +31,7 @@ pub struct SendOptions {
 pub struct SendReport {
     pub built: BuiltPacket,
     pub route: MaterializedRoute,
-    pub wire_bytes: Option<Bytes>,
+    pub wire_bytes: Bytes,
     pub stats: Stats,
 }
 

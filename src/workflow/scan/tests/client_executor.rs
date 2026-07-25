@@ -9,10 +9,11 @@ struct FixedRoute(RouteDecision);
 impl RouteProvider for FixedRoute {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         Ok(self.0.clone())
     }
@@ -27,10 +28,11 @@ struct CountingRoute {
 impl RouteProvider for CountingRoute {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(self.decision.clone())
@@ -56,7 +58,7 @@ impl PacketIo for LifecycleIo {
         }
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -64,16 +66,15 @@ impl PacketIo for LifecycleIo {
 struct LifecycleCapture(Arc<Mutex<Vec<&'static str>>>);
 
 impl CaptureSession for LifecycleCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().unwrap().push("ready");
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         Ok(None)
     }
 

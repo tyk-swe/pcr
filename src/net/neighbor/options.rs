@@ -91,6 +91,6 @@ impl NeighborResolutionOptions {
     }
 }
 
-fn invalid_configuration(message: String) -> NeighborError {
+pub(super) fn invalid_configuration(message: String) -> NeighborError {
     NeighborError::InvalidConfiguration { message }
 }

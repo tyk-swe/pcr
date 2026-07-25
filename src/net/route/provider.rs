@@ -57,14 +57,6 @@ pub struct SystemRouteProvider;
 impl RouteProvider for SystemRouteProvider {
     type Error = NativeRouteError;
 
-    fn lookup(
-        &self,
-        destination: IpAddr,
-        interface_hint: Option<&InterfaceId>,
-    ) -> Result<RouteDecision, Self::Error> {
-        super::super::platform::system_route(destination, interface_hint, None)
-    }
-
     fn lookup_with_preferences(
         &self,
         destination: IpAddr,

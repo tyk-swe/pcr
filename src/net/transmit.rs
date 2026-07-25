@@ -112,7 +112,7 @@ fn require_link_mode(route: &MaterializedRoute, expected: LinkMode) -> Result<()
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Report {
     pub bytes_sent: usize,
-    pub wire_bytes: Option<Bytes>,
+    pub wire_bytes: Bytes,
 }
 
 /// Unified packet-I/O seam used by the root client and test providers.

@@ -82,10 +82,6 @@ pub struct Client<R, N, I> {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum ExchangeRouteLookupKey {
-    Lookup {
-        destination: IpAddr,
-        interface_hint: Option<InterfaceId>,
-    },
     LookupWithPreferences {
         destination: IpAddr,
         interface_hint: Option<InterfaceId>,
@@ -137,22 +133,6 @@ impl<'a, R: RouteProvider> ExchangeRouteProvider<'a, R> {
 
 impl<R: RouteProvider> RouteProvider for ExchangeRouteProvider<'_, R> {
     type Error = R::Error;
-
-    fn lookup(
-        &self,
-        destination: IpAddr,
-        interface_hint: Option<&InterfaceId>,
-    ) -> Result<RouteDecision, Self::Error> {
-        let key = ExchangeRouteLookupKey::Lookup {
-            destination,
-            interface_hint: interface_hint.cloned(),
-        };
-        Ok(self
-            .get_or_lookup(key, || {
-                self.inner.lookup(destination, interface_hint).map(Some)
-            })?
-            .expect("route provider lookup always returns a decision"))
-    }
 
     fn lookup_with_preferences(
         &self,
@@ -325,9 +305,7 @@ where
             .send(TransmissionFrame::try_new(&built.bytes, &route)?)?;
         validate_send_report(&built.bytes, &io_report)?;
         let bytes_sent = io_report.bytes_sent;
-        let wire_bytes = io_report
-            .wire_bytes
-            .or_else(|| route.plan.synthesized_ethernet.then(|| built.bytes.clone()));
+        let wire_bytes = io_report.wire_bytes;
         Ok(SendReport {
             built,
             route,

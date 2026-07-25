@@ -17,7 +17,7 @@ impl PacketIo for ScriptedExchangeIo {
         self.events.lock().unwrap().push("send");
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -30,7 +30,7 @@ impl PacketIo for RecordingIo {
         self.0.lock().unwrap().push(frame.bytes().clone());
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -42,7 +42,7 @@ impl PacketIo for PartialIo {
     fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len().saturating_sub(1),
-            wire_bytes: None,
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -56,7 +56,7 @@ impl PacketIo for ChangedWireIo {
         changed[0] ^= 1;
         Ok(IoSendReport {
             bytes_sent: changed.len(),
-            wire_bytes: Some(Bytes::from(changed)),
+            wire_bytes: Bytes::from(changed),
         })
     }
 }
@@ -69,16 +69,15 @@ pub(crate) struct ScriptedExchangeCapture {
 }
 
 impl CaptureSession for ScriptedExchangeCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.events.lock().unwrap().push("ready");
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         let sent = self.events.lock().unwrap().contains(&"send");
         if sent || self.deliver_before_send {
             let mut response = self.response.lock().unwrap().take();
@@ -94,18 +93,10 @@ impl CaptureSession for ScriptedExchangeCapture {
                     .checked_add(frame.bytes().len() as u64)
                     .expect("test capture byte counter");
             }
-            Ok(response)
+            Ok(response.map(|frame| CapturedFrame::new(frame, Instant::now())))
         } else {
             Ok(None)
         }
-    }
-
-    fn next_captured_frame(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Option<CapturedFrame>, LiveIoError> {
-        self.next_frame(timeout)
-            .map(|frame| frame.map(|frame| CapturedFrame::new(frame, Instant::now())))
     }
 
     fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -148,7 +139,7 @@ impl PacketIo for DeadlineConsumingExchangeIo {
         self.events.lock().unwrap().push("send");
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -160,22 +151,21 @@ pub(crate) struct DeadlineConsumingCapture {
 }
 
 impl CaptureSession for DeadlineConsumingCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.events.lock().unwrap().push("ready");
         Ok(())
     }
 
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         if self.events.lock().unwrap().contains(&"send") {
             let response = self.response.lock().unwrap().take();
             if let Some(frame) = &response {
                 self.statistics.received_frames += 1;
                 self.statistics.received_bytes += frame.bytes().len() as u64;
-                return Ok(response);
+                return Ok(response.map(|frame| CapturedFrame::new(frame, Instant::now())));
             }
         }
         if !timeout.is_zero() {
@@ -183,14 +173,6 @@ impl CaptureSession for DeadlineConsumingCapture {
             std::thread::sleep(timeout);
         }
         Ok(None)
-    }
-
-    fn next_captured_frame(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Option<CapturedFrame>, LiveIoError> {
-        self.next_frame(timeout)
-            .map(|frame| frame.map(|frame| CapturedFrame::new(frame, Instant::now())))
     }
 
     fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -232,25 +214,17 @@ impl PacketIo for UnmarkedExchangeIo {
 pub(crate) struct UnmarkedExchangeCapture(pub(crate) ScriptedExchangeCapture);
 
 impl CaptureSession for UnmarkedExchangeCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         self.0.wait_ready(timeout)
-    }
-
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
-        self.0.next_frame(timeout)
     }
 
     fn next_captured_frame(
         &mut self,
         timeout: Duration,
     ) -> Result<Option<CapturedFrame>, LiveIoError> {
-        self.0
-            .next_frame(timeout)
-            .map(|frame| frame.map(CapturedFrame::without_ingress_time))
+        self.0.next_captured_frame(timeout).map(|captured| {
+            captured.map(|captured| CapturedFrame::without_ingress_time(captured.frame))
+        })
     }
 
     fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -292,7 +266,7 @@ impl PacketIo for EndlessCaptureIo {
         self.sends.fetch_add(1, Ordering::SeqCst);
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -300,16 +274,15 @@ impl PacketIo for EndlessCaptureIo {
 pub(crate) struct EndlessCapture(pub(crate) Frame);
 
 impl CaptureSession for EndlessCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
-        Ok(Some(self.0.clone()))
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
+        Ok(Some(CapturedFrame::without_ingress_time(self.0.clone())))
     }
 
     fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -346,7 +319,7 @@ impl PacketIo for SlowSendIo {
         std::thread::sleep(self.delay);
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -354,15 +327,14 @@ impl PacketIo for SlowSendIo {
 pub(crate) struct EmptyCapture;
 
 impl CaptureSession for EmptyCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         Ok(None)
     }
 
@@ -400,10 +372,6 @@ impl PacketIo for ReadinessAndShutdownFailIo {
 pub(crate) struct ReadinessAndShutdownFailCapture(pub(crate) Arc<Mutex<Vec<&'static str>>>);
 
 impl CaptureSession for ReadinessAndShutdownFailCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().unwrap().push("ready");
         Err(LiveIoError::CaptureReadiness {
@@ -411,7 +379,10 @@ impl CaptureSession for ReadinessAndShutdownFailCapture {
         })
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         unreachable!("readiness failure prevents receive")
     }
 
@@ -443,15 +414,14 @@ impl CaptureProvider for ReadinessAndShutdownFailIo {
 pub(crate) struct DropObservedCapture(pub(crate) Arc<AtomicUsize>);
 
 impl CaptureSession for DropObservedCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         Ok(None)
     }
 
@@ -468,15 +438,14 @@ impl CaptureSession for DropObservedCapture {
 pub(crate) struct PanicShutdownCapture(pub(crate) Arc<AtomicUsize>);
 
 impl CaptureSession for PanicShutdownCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         Ok(None)
     }
 
@@ -487,50 +456,5 @@ impl CaptureSession for PanicShutdownCapture {
 
     fn statistics(&self) -> CaptureStatistics {
         CaptureStatistics::default()
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct MissingMonotonicIo(pub(crate) Arc<Mutex<Vec<&'static str>>>);
-
-impl PacketIo for MissingMonotonicIo {
-    fn send(&self, _frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
-        self.0.lock().unwrap().push("send");
-        unreachable!("missing monotonic ingress capability must prevent transmission")
-    }
-}
-
-pub(crate) struct MissingMonotonicCapture(pub(crate) Arc<Mutex<Vec<&'static str>>>);
-
-impl CaptureSession for MissingMonotonicCapture {
-    fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
-        self.0.lock().unwrap().push("ready");
-        Ok(())
-    }
-
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
-        Ok(None)
-    }
-
-    fn shutdown(&mut self) -> Result<(), LiveIoError> {
-        self.0.lock().unwrap().push("shutdown");
-        Ok(())
-    }
-
-    fn statistics(&self) -> CaptureStatistics {
-        CaptureStatistics::default()
-    }
-}
-
-impl CaptureProvider for MissingMonotonicIo {
-    type Capture = MissingMonotonicCapture;
-
-    fn arm_capture(
-        &self,
-        _route: &PlannedRoute,
-        _limits: CaptureQueueLimits,
-    ) -> Result<Self::Capture, LiveIoError> {
-        self.0.lock().unwrap().push("arm");
-        Ok(MissingMonotonicCapture(Arc::clone(&self.0)))
     }
 }

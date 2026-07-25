@@ -122,10 +122,6 @@ When `cli` is enabled, the resulting executable is
 enables `native-interfaces`, and the default feature set contains `cli` and
 `native-interfaces`, preserving the standard CLI experience.
 
-The deprecated `live` feature remains as a compatibility alias for
-`native-interfaces`. Existing manifests that enable `live` continue to work,
-but new integrations should use `native-interfaces`.
-
 The profile names below are repository, CI, or release labels, not additional
 Cargo feature names. In particular, there is no `portable` or `pcap-free`
 feature.

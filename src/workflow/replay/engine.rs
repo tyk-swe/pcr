@@ -28,7 +28,6 @@ where
     let mut deadline = Deadline::new(options.limits.max_duration);
     let limits = options.limits.validate()?;
     let timing = options.timing.validate()?;
-    authorizer.begin_operation();
     enforce_deadline(&deadline, 0)?;
     let source_format = reader.format();
     let mut previous_timestamp = None;

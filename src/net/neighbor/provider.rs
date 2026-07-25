@@ -15,7 +15,6 @@ use crate::net::{
         CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession,
         CaptureStatistics, CapturedFrame, SystemCaptureProvider,
     },
-    interface::{InterfaceInfo, InterfaceProvider, SystemInterfaceProvider},
     link::{LinkCapability, LinkMode, MacAddress},
     route::{
         DestinationScope, InterfaceId, MAX_NEIGHBOR_VLAN_TAGS, MaterializedRoute, NeighborError,
@@ -26,29 +25,26 @@ use crate::net::{
 };
 
 use super::cache::{NeighborCacheEntry, NeighborCacheKey, NeighborExchangeOutcome};
-use super::options::NeighborResolutionOptions;
+use super::options::{NeighborResolutionOptions, invalid_configuration};
 use super::wire::{build_request_frame, is_unicast_mac, match_neighbor_response};
 
 /// Injectable active resolver. Production composition uses the `System*`
 /// providers; tests and applications can supply deterministic providers.
 #[derive(Debug)]
-pub struct ActiveNeighborResolver<I, L, C> {
-    interfaces: I,
+pub struct ActiveNeighborResolver<L, C> {
     layer2: L,
     capture: C,
     options: NeighborResolutionOptions,
     cache: Arc<Mutex<HashMap<NeighborCacheKey, NeighborCacheEntry>>>,
 }
 
-impl<I, L, C> Clone for ActiveNeighborResolver<I, L, C>
+impl<L, C> Clone for ActiveNeighborResolver<L, C>
 where
-    I: Clone,
     L: Clone,
     C: Clone,
 {
     fn clone(&self) -> Self {
         Self {
-            interfaces: self.interfaces.clone(),
             layer2: self.layer2.clone(),
             capture: self.capture.clone(),
             options: self.options.clone(),
@@ -57,15 +53,13 @@ where
     }
 }
 
-impl<I, L, C> ActiveNeighborResolver<I, L, C> {
+impl<L, C> ActiveNeighborResolver<L, C> {
     pub fn try_new(
-        interfaces: I,
         layer2: L,
         capture: C,
         options: NeighborResolutionOptions,
     ) -> Result<Self, NeighborError> {
         Ok(Self {
-            interfaces,
             layer2,
             capture,
             options: options.validate()?,
@@ -88,15 +82,13 @@ impl<I, L, C> ActiveNeighborResolver<I, L, C> {
     }
 }
 
-impl<I, L, C> Default for ActiveNeighborResolver<I, L, C>
+impl<L, C> Default for ActiveNeighborResolver<L, C>
 where
-    I: Default,
     L: Default,
     C: Default,
 {
     fn default() -> Self {
         Self::try_new(
-            I::default(),
             L::default(),
             C::default(),
             NeighborResolutionOptions::default(),
@@ -105,28 +97,13 @@ where
     }
 }
 
-/// Native resolver composed from the current target's interface, Layer 2,
-/// and capture providers.
-pub type SystemNeighborResolver =
-    ActiveNeighborResolver<SystemInterfaceProvider, SystemLayer2Io, SystemCaptureProvider>;
+pub type SystemNeighborResolver = ActiveNeighborResolver<SystemLayer2Io, SystemCaptureProvider>;
 
-impl<I, L, C> NeighborResolver for ActiveNeighborResolver<I, L, C>
+impl<L, C> NeighborResolver for ActiveNeighborResolver<L, C>
 where
-    I: InterfaceProvider,
     L: Layer2Io,
     C: CaptureProvider,
 {
-    fn resolve(
-        &self,
-        interface: &InterfaceId,
-        interface_source: IpAddr,
-        target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
-        let request = self.request_from_interface(interface, interface_source, target)?;
-        self.resolve_active(&request)
-            .map(|resolution| resolution.mac_address)
-    }
-
     fn resolve_request(
         &self,
         request: &NeighborRequest,
@@ -135,36 +112,11 @@ where
     }
 }
 
-impl<I, L, C> ActiveNeighborResolver<I, L, C>
+impl<L, C> ActiveNeighborResolver<L, C>
 where
-    I: InterfaceProvider,
     L: Layer2Io,
     C: CaptureProvider,
 {
-    fn request_from_interface(
-        &self,
-        interface: &InterfaceId,
-        interface_source: IpAddr,
-        target: IpAddr,
-    ) -> Result<NeighborRequest, NeighborError> {
-        let interfaces = self
-            .interfaces
-            .interfaces()
-            .map_err(|source| NeighborError::Io {
-                interface: interface.name.clone(),
-                target,
-                operation: "discovering the selected interface",
-                source,
-            })?;
-        let selected = interfaces
-            .into_iter()
-            .find(|candidate| candidate.id == *interface)
-            .ok_or_else(|| {
-                resolution_error(interface, target, "interface was not found".to_owned())
-            })?;
-        request_from_interface_info(selected, interface_source, target)
-    }
-
     fn resolve_active(
         &self,
         request: &NeighborRequest,
@@ -402,58 +354,6 @@ where
     }
 }
 
-fn request_from_interface_info(
-    interface: InterfaceInfo,
-    interface_source: IpAddr,
-    target: IpAddr,
-) -> Result<NeighborRequest, NeighborError> {
-    if !interface.flags.up {
-        return Err(resolution_error(
-            &interface.id,
-            target,
-            "interface is down".to_owned(),
-        ));
-    }
-    if !matches!(
-        interface.capability,
-        LinkCapability::Layer2 | LinkCapability::Layer2And3
-    ) {
-        return Err(resolution_error(
-            &interface.id,
-            target,
-            "interface does not support Layer 2 discovery".to_owned(),
-        ));
-    }
-    if !interface
-        .addresses
-        .iter()
-        .any(|assigned| assigned.address == interface_source)
-    {
-        return Err(NeighborError::InvalidRequest {
-            message: format!(
-                "source {interface_source} is not assigned to {}",
-                interface.id.name
-            ),
-        });
-    }
-    let interface_mac = interface
-        .mac_address
-        .ok_or_else(|| NeighborError::MissingSourceMac {
-            interface: interface.id.name.clone(),
-        })?;
-    Ok(NeighborRequest {
-        interface: interface.id,
-        interface_source,
-        interface_mac,
-        target,
-        vlan_tags: Vec::new(),
-        mtu: interface.mtu.ok_or_else(|| NeighborError::InvalidRequest {
-            message: "interface has no native MTU".to_owned(),
-        })?,
-        link_type: interface.link_type,
-    })
-}
-
 fn validate_request(request: &NeighborRequest) -> Result<(), NeighborError> {
     if request.interface_source.is_ipv4() != request.target.is_ipv4() {
         return Err(NeighborError::InvalidRequest {
@@ -634,9 +534,7 @@ fn validate_send_report(
             },
         ));
     }
-    if let Some(wire_bytes) = report.wire_bytes
-        && wire_bytes != *expected
-    {
+    if report.wire_bytes != *expected {
         return Err(map_io_error(
             request,
             "validating discovery send evidence",
@@ -646,10 +544,6 @@ fn validate_send_report(
         ));
     }
     Ok(())
-}
-
-fn invalid_configuration(message: String) -> NeighborError {
-    NeighborError::InvalidConfiguration { message }
 }
 
 fn resolution_error(interface: &InterfaceId, target: IpAddr, message: String) -> NeighborError {

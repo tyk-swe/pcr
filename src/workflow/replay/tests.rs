@@ -97,12 +97,14 @@ fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
         [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
     );
     let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
-    let mut authorizer = SystemAuthorizer::new(
+    let authorizer = SystemAuthorizer::new(
         crate::client::policy::Policy::default(),
         Arc::clone(&registry),
         true,
     );
-    let error = authorizer.authorize(&frame, LinkMode::Layer3).unwrap_err();
+    let error = authorizer
+        .authorize_frame(&frame, LinkMode::Layer3)
+        .unwrap_err();
     assert_eq!(error.classification().code, "policy.public_destination");
 }
 
@@ -227,25 +229,6 @@ fn system_authorizer_uses_engine_budget_for_each_replay_operation() {
 }
 
 #[test]
-fn failed_frame_authorization_does_not_commit_campaign_budget() {
-    let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
-    let mut public_ipv4 = vec![0_u8; 20];
-    public_ipv4[0] = 0x45;
-    public_ipv4[16..20].copy_from_slice(&[8, 8, 8, 8]);
-    let denied = Frame::new(UNIX_EPOCH, LinkType::RAW, public_ipv4).unwrap();
-    let allowed = authorized_raw_frame();
-    let policy = crate::client::policy::Policy {
-        max_packets_per_operation: 1,
-        max_bytes_per_operation: u64::MAX,
-        allow_permissive_packets: true,
-        ..crate::client::policy::Policy::default()
-    };
-    let mut authorizer = SystemAuthorizer::new(policy, registry, true);
-    assert!(authorizer.authorize(&denied, LinkMode::Layer3).is_err());
-    authorizer.authorize(&allowed, LinkMode::Layer3).unwrap();
-}
-
-#[test]
 fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
     let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
     for mut unsupported in [vec![0_u8; 48], vec![0_u8; 40]] {
@@ -262,12 +245,14 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
                 .unwrap()
                 .has_unsupported_routing_header
         );
-        let mut authorizer = SystemAuthorizer::new(
+        let authorizer = SystemAuthorizer::new(
             crate::client::policy::Policy::default(),
             Arc::clone(&registry),
             true,
         );
-        let error = authorizer.authorize(&frame, LinkMode::Layer3).unwrap_err();
+        let error = authorizer
+            .authorize_frame(&frame, LinkMode::Layer3)
+            .unwrap_err();
         assert_eq!(
             error.classification().code,
             "capability.replay_routing_header"
@@ -321,12 +306,14 @@ fn raw_ip_link_types_must_match_the_packet_version() {
         let error = replay_network_envelope(&frame).unwrap_err();
         assert!(error.to_string().contains(declared));
 
-        let mut authorizer = SystemAuthorizer::new(
+        let authorizer = SystemAuthorizer::new(
             crate::client::policy::Policy::default(),
             Arc::clone(&registry),
             true,
         );
-        let error = authorizer.authorize(&frame, LinkMode::Layer3).unwrap_err();
+        let error = authorizer
+            .authorize_frame(&frame, LinkMode::Layer3)
+            .unwrap_err();
         assert_eq!(error.classification().code, "packet.replay_network");
         assert!(error.to_string().contains(declared));
     }
@@ -334,17 +321,17 @@ fn raw_ip_link_types_must_match_the_packet_version() {
 
 #[derive(Default)]
 struct ConfigurableRecordingAuthorizer {
-    operation_calls: usize,
     authorization_calls: usize,
     deny_authorization: bool,
 }
 
 impl ReplayAuthorizer for ConfigurableRecordingAuthorizer {
-    fn begin_operation(&mut self) {
-        self.operation_calls += 1;
-    }
-
-    fn authorize(&mut self, _frame: &Frame, _mode: LinkMode) -> Result<(), BoundaryError> {
+    fn authorize_operation(
+        &mut self,
+        _context: ReplayAuthorizationContext,
+        _frame: &Frame,
+        _mode: LinkMode,
+    ) -> Result<(), BoundaryError> {
         self.authorization_calls += 1;
         if self.deny_authorization {
             Err(BoundaryError::new(
@@ -365,7 +352,6 @@ struct ConfigurableRecordingTransmitter {
     validation_delay: Duration,
     transmission_delay: Duration,
     return_partial_send: bool,
-    omit_wire_bytes: bool,
     report_different_interface: bool,
 }
 
@@ -408,7 +394,7 @@ impl ReplayTransmitter for ConfigurableRecordingTransmitter {
                 } else {
                     frame.bytes().len()
                 },
-                wire_bytes: (!self.omit_wire_bytes).then(|| frame.bytes().clone()),
+                wire_bytes: frame.bytes().clone(),
             },
         })
     }
@@ -481,7 +467,6 @@ fn replay_capture_with_scaled_timing_streams_exact_frames_and_reports_summary() 
     .unwrap();
 
     assert_eq!(clock.delays, [Duration::ZERO, Duration::from_millis(500)]);
-    assert_eq!(authorizer.operation_calls, 1);
     assert_eq!(authorizer.authorization_calls, 2);
     assert_eq!(transmitter.transmission_calls, 2);
     assert_eq!(summary.frames_attempted, 2);
@@ -872,34 +857,6 @@ fn replay_capture_when_transmitter_reports_partial_send_returns_transmission_err
                 actual: 1
             }
         }
-    ));
-}
-
-#[test]
-fn replay_capture_when_transmitter_omits_wire_bytes_returns_invalid_evidence() {
-    let mut reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1, 2])]);
-    let mut authorizer = ConfigurableRecordingAuthorizer::default();
-    let mut transmitter = ConfigurableRecordingTransmitter {
-        omit_wire_bytes: true,
-        ..ConfigurableRecordingTransmitter::default()
-    };
-    let mut clock = RecordingClock::default();
-    let error = replay_capture(
-        &mut reader,
-        &replay_options(ReplayTiming::Immediate),
-        &mut authorizer,
-        &mut transmitter,
-        &mut clock,
-        |_| Ok(()),
-    )
-    .unwrap_err();
-
-    assert!(matches!(
-        &error,
-        ReplayError::InvalidEvidence {
-            sequence: 0,
-            message
-        } if message == "backend omitted exact wire bytes"
     ));
 }
 

@@ -60,8 +60,7 @@ The declared features are:
 - `native-interfaces`, for portable interface enumeration;
 - `native-route`, which also enables `native-interfaces`;
 - `native-layer2`, which also enables `native-interfaces`;
-- `native-layer3`, which also enables `native-interfaces`;
-- deprecated compatibility alias `live`, which enables `native-interfaces`.
+- `native-layer3`, which also enables `native-interfaces`.
 
 The cross-platform test matrix runs the library tests without default features,
 then all Cargo-discovered unit, binary, integration, and documentation tests in
@@ -162,33 +161,6 @@ memory limit, maximum input length, corpus, and dictionary. Evolving corpora
 are cached. A failing campaign uploads
 `fuzz-crash-<target>` for seven days.
 
-## Public Rust API compatibility
-
-The `public Rust API compatibility (report only)` job installs the pinned
-cargo-semver-checks `0.49.0` and checks the Linux all-feature public API at
-patch-level compatibility. `scripts/public-api-diff` chooses the
-SemVer-newest `v*` release tag reachable from `HEAD`, explicitly ranking a
-final release above prereleases with the same core version. For the
-`v0.4.0-beta.2` release comparison, that baseline is `v0.4.0-beta.1`, the
-previous beta. After the beta.2 tag is published, subsequent full-history CI
-runs select `v0.4.0-beta.2`. A full-history checkout is used so the choice comes
-from release history instead of an arbitrary hardcoded version. The selector
-is compatible with the system Bash 3.2 shipped on supported macOS development
-hosts.
-
-cargo-semver-checks has distinct exit codes. Exit `100` means the comparison
-completed and found breaking API changes; under the current pre-1.0 policy, CI
-emits a warning, uploads the report, and remains green. Exit `101` or any other
-unexpected nonzero status means the comparison did not complete and fails the
-job. Installation, baseline resolution, rustdoc, and build failures are
-therefore never disguised as compatibility.
-
-The seven-day `public-api-compatibility` artifact contains:
-
-- `baseline.txt`, with baseline/current commits and comparison profile;
-- `semver-report.txt`, the readable cargo-semver-checks report;
-- `status.txt`, with the tool exit code and classified result.
-
 ## Privileged Linux native E2E
 
 The reusable and manually dispatchable Linux workflow runs the repository entry
@@ -249,22 +221,6 @@ Run the downstream extension contracts with:
 cargo test --locked --test external_protocol
 cargo test --locked --test external_provider
 cargo test --locked --test external_output
-```
-
-Generate the same API report after fetching release tags:
-
-```console
-cargo install cargo-semver-checks --locked --version 0.49.0
-scripts/public-api-diff
-```
-
-The default report directory is `target/public-api-compatibility`. To audit a
-specific known baseline, set `PCR_API_BASELINE_REF`; the script still requires
-that revision to be an ancestor of `HEAD`. The local command preserves
-cargo-semver-checks exit `100` when breaking changes are found:
-
-```console
-PCR_API_BASELINE_REF=v0.4.0-beta.1 scripts/public-api-diff
 ```
 
 Probe or run the privileged native harness with:

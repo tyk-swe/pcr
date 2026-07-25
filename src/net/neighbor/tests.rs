@@ -23,7 +23,7 @@ use crate::net::{
     capture::{
         CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
     },
-    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo, InterfaceProvider},
+    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{LinkCapability, LinkMode, MacAddress},
     route::{
         InterfaceId, NeighborError, NeighborRequest, NeighborResolver, NeighborVlanKind,
@@ -53,15 +53,6 @@ struct CoordinatedResolutionIo {
 impl CoordinatedResolutionIo {
     fn lock(&self) -> MutexGuard<'_, ResolutionIoState> {
         self.state.lock().unwrap()
-    }
-}
-
-#[derive(Clone)]
-struct FixedInterfaceProvider(InterfaceInfo);
-
-impl InterfaceProvider for FixedInterfaceProvider {
-    fn interfaces(&self) -> Result<Vec<InterfaceInfo>, LiveIoError> {
-        Ok(vec![self.0.clone()])
     }
 }
 
@@ -99,7 +90,7 @@ impl Layer2Io for ScriptedLayer2Io {
         self.shared.changed.notify_all();
         Ok(IoSendReport {
             bytes_sent: bytes.len(),
-            wire_bytes: Some(bytes),
+            wire_bytes: bytes,
         })
     }
 }
@@ -124,19 +115,10 @@ impl CaptureProvider for CoordinatedCaptureProvider {
 struct CoordinatedCaptureSession(Arc<CoordinatedResolutionIo>);
 
 impl CaptureSession for CoordinatedCaptureSession {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().ready = true;
         self.0.changed.notify_all();
         Ok(())
-    }
-
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
-        self.next_captured_frame(timeout)
-            .map(|captured| captured.map(|captured| captured.frame))
     }
 
     fn next_captured_frame(
@@ -225,9 +207,8 @@ fn scripted_resolver(
     shared: Arc<CoordinatedResolutionIo>,
     response_script: Arc<FrameResponseScript>,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
+) -> ActiveNeighborResolver<ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        FixedInterfaceProvider(dual_stack_interface()),
         ScriptedLayer2Io {
             shared: Arc::clone(&shared),
             response_script,
@@ -245,9 +226,8 @@ fn scripted_resolver_with_pre_send_responses(
     response_script: Arc<FrameResponseScript>,
     pre_send_responses: usize,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
+) -> ActiveNeighborResolver<ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        FixedInterfaceProvider(dual_stack_interface()),
         ScriptedLayer2Io {
             shared: Arc::clone(&shared),
             response_script,
@@ -264,9 +244,8 @@ fn scripted_resolver_without_ingress_time(
     shared: Arc<CoordinatedResolutionIo>,
     response_script: Arc<FrameResponseScript>,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
+) -> ActiveNeighborResolver<ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        FixedInterfaceProvider(dual_stack_interface()),
         ScriptedLayer2Io {
             shared: Arc::clone(&shared),
             response_script,
@@ -726,25 +705,6 @@ fn undersized_snap_length_is_an_invalid_resolution_option() {
         invalid.validate(),
         Err(NeighborError::InvalidConfiguration { .. })
     ));
-}
-
-#[test]
-fn direct_resolve_uses_interface_owned_metadata() {
-    let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
-    let request = neighbor_request("192.0.2.7", "192.0.2.1");
-    let response_request = request.clone();
-    let shared = Arc::new(CoordinatedResolutionIo::default());
-    let resolver = scripted_resolver(
-        shared,
-        Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
-        resolution_options(),
-    );
-    assert_eq!(
-        resolver
-            .resolve(&request.interface, request.interface_source, request.target)
-            .unwrap(),
-        target_mac
-    );
 }
 
 #[test]

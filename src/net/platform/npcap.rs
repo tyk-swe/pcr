@@ -338,7 +338,7 @@ mod supported {
         }
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 

@@ -685,13 +685,13 @@ mod tests {
 
         let provider = crate::net::route::SystemProvider;
         let ipv4 = provider
-            .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+            .lookup_with_preferences(IpAddr::V4(Ipv4Addr::LOCALHOST), None, None)
             .unwrap();
         assert_eq!(ipv4.selection_reason, RouteSelectionReason::Local);
         assert!(ipv4.selected_address.is_some_and(|source| source.is_ipv4()));
 
         let ipv6 = provider
-            .lookup(IpAddr::V6(Ipv6Addr::LOCALHOST), None)
+            .lookup_with_preferences(IpAddr::V6(Ipv6Addr::LOCALHOST), None, None)
             .unwrap();
         assert_eq!(ipv6.selection_reason, RouteSelectionReason::Local);
         assert!(ipv6.selected_address.is_some_and(|source| source.is_ipv6()));

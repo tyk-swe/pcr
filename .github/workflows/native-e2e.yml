@@ -37,7 +37,7 @@ jobs:
         env:
           PYTHONPYCACHEPREFIX: ${{ runner.temp }}/native-e2e-pycache
         run: |
-          shellcheck scripts/test-native-e2e scripts/public-api-diff
+          shellcheck scripts/test-native-e2e
           python3 -m compileall -q tests/native_e2e
           PCR_NATIVE_E2E_PRIVILEGE_MODE=sudo \
             PCR_NATIVE_E2E_TEST_PRIVILEGED=1 \

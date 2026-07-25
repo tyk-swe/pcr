@@ -27,8 +27,7 @@ cargo deny check
 The no-default test profile is intentionally library-only: Cargo skips the
 `packetcraftr` binary, its unit tests, and `tests/cli.rs` unless the `cli`
 feature is enabled. Default and all-feature profiles include `cli` and run the
-complete CLI test suite. Use `native-interfaces` for interface-enumeration
-feature work; `live` is retained only as a deprecated compatibility alias.
+complete CLI test suite.
 
 The complete enforced matrix, tool versions, thresholds, release checks, and
 artifacts are recorded in the [CI baseline](docs/ci-baseline.md).
@@ -87,21 +86,6 @@ module names that describe their responsibility. Unsafe code is confined to
 `src/net/platform/`, and every unsafe block needs a specific `SAFETY`
 explanation.
 
-## Public API compatibility report
-
-CI compares the all-feature public Rust API with the newest reachable release
-tag by using the pinned cargo-semver-checks version. Breaking changes are
-reported but do not fail CI under the current pre-1.0 policy; failures to
-perform the comparison still fail CI. Reproduce the report with:
-
-```console
-cargo install cargo-semver-checks --locked --version 0.49.0
-scripts/public-api-diff
-```
-
-See the [CI baseline](docs/ci-baseline.md#public-rust-api-compatibility) for
-baseline selection, exit-code handling, and artifact contents.
-
 ## Code review
 
 Every pull request requires code review approval. A cross-boundary pull
@@ -122,7 +106,7 @@ to risk:
 - Packet, schema, or output changes: run the focused regression tests plus
   `cargo test --locked --test schema_contract --test document_examples`.
 - Public API changes: run the relevant downstream `external_*` integration
-  tests and inspect the cargo-semver-checks report.
+  tests.
 - Feature-gated changes: test no-default, default, and all-feature profiles.
 - Platform changes: include the affected platform and relevant failure-path
   evidence.

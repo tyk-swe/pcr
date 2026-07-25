@@ -14,9 +14,9 @@ use crate::net::{
     transmit::{PacketIo, TransmissionFrame},
 };
 use crate::packet::{decode::Dissector, registry::ProtocolRegistry};
+use crate::workflow::push_diagnostic_once;
 
 use super::super::Stats;
-use super::super::evidence::push_diagnostic_once;
 use super::super::send::ClientError;
 use super::super::validation::validate_send_report;
 use super::{
@@ -107,9 +107,6 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
     }
 
     fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {
-        if !self.capture.supports_monotonic_ingress_time() {
-            return Err(LiveIoError::MissingMonotonicCaptureTimestamp);
-        }
         let readiness_timeout = self.deadline.checked_duration_since(Instant::now()).ok_or(
             LiveIoError::DeadlineExceeded {
                 operation: "waiting for capture readiness",

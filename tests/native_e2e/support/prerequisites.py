@@ -7,10 +7,8 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import secrets
 import shutil
-import sys
 
 from .command import CommandFailure, CommandRunner
 from .topology import _base36
@@ -21,15 +19,6 @@ class PrerequisiteError(RuntimeError):
 
 
 def check_prerequisites(runner: CommandRunner) -> None:
-    if platform.system() != "Linux":
-        raise PrerequisiteError(
-            f"Linux is required; detected {platform.system() or sys.platform}"
-        )
-    if sys.version_info < (3, 9):
-        raise PrerequisiteError(
-            "Python 3.9 or newer is required; "
-            f"detected {platform.python_version()}"
-        )
     for command in ("ethtool", "ip", "kill", "python3", "sysctl"):
         if shutil.which(command) is None:
             raise PrerequisiteError(

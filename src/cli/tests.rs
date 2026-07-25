@@ -42,8 +42,14 @@ impl net::capture::Session for ScriptedCapture {
         self.ready.take().unwrap_or(Ok(()))
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, net::Error> {
-        self.frames.pop_front().unwrap_or(Ok(None))
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<net::capture::Captured>, net::Error> {
+        self.frames
+            .pop_front()
+            .unwrap_or(Ok(None))
+            .map(|frame| frame.map(net::capture::Captured::without_ingress_time))
     }
 
     fn shutdown(&mut self) -> Result<(), net::Error> {

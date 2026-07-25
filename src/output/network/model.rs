@@ -420,7 +420,7 @@ impl SendCommandResult {
             wire_bytes,
             stats,
         } = report;
-        let frame = WireFrameOutput::new(wire_bytes.unwrap_or_else(|| built.bytes.clone()));
+        let frame = WireFrameOutput::new(wire_bytes);
         Ok((
             Self {
                 frame,

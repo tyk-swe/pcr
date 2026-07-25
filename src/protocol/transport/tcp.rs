@@ -45,12 +45,7 @@ impl Tcp {
     pub const FIN: u16 = 0x001;
     pub const SYN: u16 = 0x002;
     pub const RST: u16 = 0x004;
-    pub const PSH: u16 = 0x008;
     pub const ACK: u16 = 0x010;
-    pub const URG: u16 = 0x020;
-    pub const ECE: u16 = 0x040;
-    pub const CWR: u16 = 0x080;
-    pub const NS: u16 = 0x100;
 }
 
 impl Default for Tcp {

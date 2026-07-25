@@ -186,13 +186,6 @@ impl RegistryBuilder {
         self.register_codec_with_origin(Arc::new(codec), false)
     }
 
-    pub fn register_codec_arc(
-        &mut self,
-        codec: Arc<dyn LayerCodec>,
-    ) -> Result<&mut Self, RegistryError> {
-        self.register_codec_with_origin(codec, false)
-    }
-
     pub(crate) fn register_builtin_codec<C>(&mut self, codec: C) -> Result<&mut Self, RegistryError>
     where
         C: LayerCodec + 'static,

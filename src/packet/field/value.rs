@@ -110,13 +110,6 @@ impl FieldValue {
         }
     }
 
-    pub fn as_text(&self) -> Option<&str> {
-        match self {
-            Self::Text(value) => Some(value),
-            _ => None,
-        }
-    }
-
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::Bytes(value) => Some(value),

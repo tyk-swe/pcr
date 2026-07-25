@@ -899,7 +899,7 @@ fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Pa
         return false;
     };
     registry
-        .matcher(&udp.protocol_id())
+        .matcher(udp.protocol_id().as_str())
         .is_some_and(|matcher| matcher.matches(request, response).matched)
 }
 

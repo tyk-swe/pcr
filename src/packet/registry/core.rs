@@ -60,8 +60,8 @@ pub struct ProtocolRegistry {
     builtin_codecs: BTreeSet<ProtocolId>,
     aliases: HashMap<String, ProtocolId>,
     roots: HashMap<u32, ProtocolId>,
-    bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
-    reverse_bindings: HashMap<(ProtocolId, ProtocolId), Vec<ReverseBinding>>,
+    bindings: HashMap<ProtocolId, HashMap<Discriminator, Vec<ChildBinding>>>,
+    reverse_bindings: HashMap<ProtocolId, HashMap<ProtocolId, Vec<ReverseBinding>>>,
     matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
 }
 
@@ -71,7 +71,10 @@ impl fmt::Debug for ProtocolRegistry {
             .debug_struct("ProtocolRegistry")
             .field("protocols", &self.codecs.keys().collect::<Vec<_>>())
             .field("link_types", &self.roots)
-            .field("binding_count", &self.bindings.len())
+            .field(
+                "binding_count",
+                &self.bindings.values().map(HashMap::len).sum::<usize>(),
+            )
             .finish()
     }
 }
@@ -81,7 +84,11 @@ impl ProtocolRegistry {
         RegistryBuilder::new()
     }
 
-    pub fn codec(&self, protocol: &ProtocolId) -> Option<&Arc<dyn LayerCodec>> {
+    pub fn codec<Q>(&self, protocol: &Q) -> Option<&Arc<dyn LayerCodec>>
+    where
+        ProtocolId: std::borrow::Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.codecs.get(protocol)
     }
 
@@ -91,7 +98,11 @@ impl ProtocolRegistry {
         self.codecs.get(protocol)
     }
 
-    pub(crate) fn is_builtin_codec(&self, protocol: &ProtocolId) -> bool {
+    pub(crate) fn is_builtin_codec<Q>(&self, protocol: &Q) -> bool
+    where
+        ProtocolId: std::borrow::Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.builtin_codecs.contains(protocol)
     }
 
@@ -110,29 +121,36 @@ impl ProtocolRegistry {
             .map(|(link_type, protocol)| (*link_type, protocol))
     }
 
-    pub fn child_for(
-        &self,
-        parent: &ProtocolId,
-        discriminator: Discriminator,
-    ) -> Option<&ProtocolId> {
+    pub fn child_for<Q>(&self, parent: &Q, discriminator: Discriminator) -> Option<&ProtocolId>
+    where
+        ProtocolId: std::borrow::Borrow<Q>,
+        Q: Eq + std::hash::Hash + ?Sized,
+    {
         self.bindings
-            .get(&(parent.clone(), discriminator))
+            .get(parent)?
+            .get(&discriminator)
             .and_then(|bindings| bindings.first())
             .map(|binding| &binding.child)
     }
 
-    pub fn discriminator_for(
-        &self,
-        parent: &ProtocolId,
-        child: &ProtocolId,
-    ) -> Option<Discriminator> {
+    pub fn discriminator_for<P, C>(&self, parent: &P, child: &C) -> Option<Discriminator>
+    where
+        ProtocolId: std::borrow::Borrow<P> + std::borrow::Borrow<C>,
+        P: Eq + std::hash::Hash + ?Sized,
+        C: Eq + std::hash::Hash + ?Sized,
+    {
         self.reverse_bindings
-            .get(&(parent.clone(), child.clone()))
+            .get(parent)?
+            .get(child)
             .and_then(|bindings| bindings.first())
             .map(|binding| binding.discriminator)
     }
 
-    pub fn matcher(&self, protocol: &ProtocolId) -> Option<&Arc<dyn ResponseMatcher>> {
+    pub fn matcher<Q>(&self, protocol: &Q) -> Option<&Arc<dyn ResponseMatcher>>
+    where
+        ProtocolId: std::borrow::Borrow<Q>,
+        Q: Ord + ?Sized,
+    {
         self.matchers.get(protocol)
     }
 
@@ -152,7 +170,7 @@ pub struct RegistryBuilder {
     builtin_codecs: BTreeSet<ProtocolId>,
     aliases: HashMap<String, ProtocolId>,
     roots: HashMap<u32, ProtocolId>,
-    bindings: HashMap<(ProtocolId, Discriminator), Vec<ChildBinding>>,
+    bindings: HashMap<ProtocolId, HashMap<Discriminator, Vec<ChildBinding>>>,
     matchers: BTreeMap<ProtocolId, Arc<dyn ResponseMatcher>>,
 }
 
@@ -239,7 +257,9 @@ impl RegistryBuilder {
         let child = child.into();
         let entries = self
             .bindings
-            .entry((parent.clone(), Discriminator(discriminator)))
+            .entry(parent.clone())
+            .or_default()
+            .entry(Discriminator(discriminator))
             .or_default();
         if entries.iter().any(|entry| {
             (entry.priority == priority && entry.child != child)
@@ -289,44 +309,50 @@ impl RegistryBuilder {
                 });
             }
         }
-        let mut reverse_bindings: HashMap<(ProtocolId, ProtocolId), Vec<ReverseBinding>> =
+        let mut reverse_bindings: HashMap<ProtocolId, HashMap<ProtocolId, Vec<ReverseBinding>>> =
             HashMap::new();
-        for ((parent, discriminator), entries) in &mut self.bindings {
+        for (parent, discriminators) in &mut self.bindings {
             if !self.codecs.contains_key(parent) {
                 return Err(RegistryError::UnknownProtocol {
                     protocol: parent.clone(),
                 });
             }
-            entries.sort_by(|left, right| {
-                right
-                    .priority
-                    .cmp(&left.priority)
-                    .then_with(|| left.child.cmp(&right.child))
-            });
-            for entry in entries.iter() {
-                if !self.codecs.contains_key(&entry.child) {
-                    return Err(RegistryError::UnknownProtocol {
-                        protocol: entry.child.clone(),
-                    });
-                }
-            }
-            entries.truncate(1);
-            let winner = entries.first().expect("bindings are never empty");
-            reverse_bindings
-                .entry((parent.clone(), winner.child.clone()))
-                .or_default()
-                .push(ReverseBinding {
-                    discriminator: *discriminator,
-                    priority: winner.priority,
+            for (discriminator, entries) in discriminators {
+                entries.sort_by(|left, right| {
+                    right
+                        .priority
+                        .cmp(&left.priority)
+                        .then_with(|| left.child.cmp(&right.child))
                 });
+                for entry in entries.iter() {
+                    if !self.codecs.contains_key(&entry.child) {
+                        return Err(RegistryError::UnknownProtocol {
+                            protocol: entry.child.clone(),
+                        });
+                    }
+                }
+                entries.truncate(1);
+                let winner = entries.first().expect("bindings are never empty");
+                reverse_bindings
+                    .entry(parent.clone())
+                    .or_default()
+                    .entry(winner.child.clone())
+                    .or_default()
+                    .push(ReverseBinding {
+                        discriminator: *discriminator,
+                        priority: winner.priority,
+                    });
+            }
         }
-        for entries in reverse_bindings.values_mut() {
-            entries.sort_by(|left, right| {
-                right
-                    .priority
-                    .cmp(&left.priority)
-                    .then_with(|| left.discriminator.cmp(&right.discriminator))
-            });
+        for children in reverse_bindings.values_mut() {
+            for entries in children.values_mut() {
+                entries.sort_by(|left, right| {
+                    right
+                        .priority
+                        .cmp(&left.priority)
+                        .then_with(|| left.discriminator.cmp(&right.discriminator))
+                });
+            }
         }
         for protocol in self.matchers.keys() {
             if !self.codecs.contains_key(protocol) {
@@ -379,25 +405,23 @@ mod tests {
             let registry = builder.build().unwrap();
 
             assert_eq!(
-                registry.child_for(&ProtocolId::new("ethernet"), Discriminator(0x0800)),
+                registry.child_for("ethernet", Discriminator(0x0800)),
                 Some(&ProtocolId::new("ipv6"))
             );
             assert_eq!(
-                registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("ipv6")),
+                registry.discriminator_for("ethernet", "ipv6"),
                 Some(Discriminator(0x0800))
             );
             assert_eq!(
-                registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("arp")),
+                registry.discriminator_for("ethernet", "arp"),
                 Some(Discriminator(0x0806))
             );
-            assert_eq!(
-                registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("ipv4")),
-                None
-            );
+            assert_eq!(registry.discriminator_for("ethernet", "ipv4"), None);
             assert_eq!(
                 registry
                     .bindings
-                    .get(&(ProtocolId::new("ethernet"), Discriminator(0x0800)))
+                    .get("ethernet")
+                    .and_then(|bindings| bindings.get(&Discriminator(0x0800)))
                     .unwrap()
                     .len(),
                 1

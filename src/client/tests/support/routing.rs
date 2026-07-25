@@ -127,7 +127,7 @@ impl Layer for MacSensitiveLayer {
 
     fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
         Err(FieldError::UnknownField {
-            protocol: self.protocol_id(),
+            protocol: self.protocol_id().clone(),
             field: name.to_owned(),
         })
     }
@@ -171,7 +171,7 @@ impl Layer for CustomRouteLayer {
 
     fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
         Err(FieldError::UnknownField {
-            protocol: self.protocol_id(),
+            protocol: self.protocol_id().clone(),
             field: name.to_owned(),
         })
     }
@@ -206,7 +206,7 @@ impl LayerCodec for MacSensitiveCodec {
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.is_empty() {
             return Err(CodecError::Truncated {
-                protocol: self.protocol_id(),
+                protocol: self.protocol_id().clone(),
                 needed: 1,
                 available: 0,
             });

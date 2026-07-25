@@ -89,7 +89,7 @@ impl Layer for ReflectiveUdp {
 
     fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
         Err(FieldError::UnknownField {
-            protocol: self.protocol_id(),
+            protocol: self.protocol_id().clone(),
             field: name.to_owned(),
         })
     }
@@ -143,7 +143,7 @@ impl Layer for MalformedIpv4 {
 
     fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
         Err(FieldError::UnknownField {
-            protocol: self.protocol_id(),
+            protocol: self.protocol_id().clone(),
             field: name.to_owned(),
         })
     }

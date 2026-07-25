@@ -169,7 +169,7 @@ impl Dissector {
                     limit: options.max_layers,
                 });
             }
-            let Some(codec) = self.registry.codec(&current_protocol) else {
+            let Some(codec) = self.registry.codec(current_protocol.as_str()) else {
                 if packet.is_empty() {
                     return Err(DecodeError::MissingRootCodec {
                         protocol: current_protocol,
@@ -226,10 +226,10 @@ impl Dissector {
                 }
             };
             let actual_protocol = decoded.layer.protocol_id();
-            if !codec.accepts_decoded_protocol(&actual_protocol) {
+            if !codec.accepts_decoded_protocol(actual_protocol) {
                 return Err(DecodeError::CodecLayerMismatch {
                     protocol: current_protocol,
-                    actual: actual_protocol,
+                    actual: actual_protocol.clone(),
                 });
             }
             decoded.layer.validate_required_fields().map_err(|source| {
@@ -299,9 +299,36 @@ impl Dissector {
                 .ok_or_else(|| DecodeError::InvalidCodecCursor {
                     protocol: current_protocol.clone(),
                 })?;
+            let next_protocol = decoded
+                .next
+                .iter()
+                .find_map(|value| self.registry.child_for(binding_parent.as_str(), *value))
+                .cloned();
+            let missing_required_message = (decoded.payload_len == 0)
+                .then(|| {
+                    next_protocol.as_ref().filter(|protocol| {
+                        !matches!(
+                            BuiltinProtocol::from_id(protocol),
+                            Some(
+                                BuiltinProtocol::Raw
+                                    | BuiltinProtocol::Malformed
+                                    | BuiltinProtocol::Padding
+                            )
+                        )
+                    })
+                })
+                .flatten()
+                .map(|required| {
+                    format!(
+                        "{binding_parent} discriminator requires {required}, but no bytes remain"
+                    )
+                });
+            let unknown_binding_message =
+                (decoded.payload_len > 0 && !decoded.stop && next_protocol.is_none())
+                    .then(|| format!("unknown child discriminator after {binding_parent}"));
             layouts.push(LayerLayout {
                 index,
-                protocol: decoded.layer.protocol_id(),
+                protocol: decoded.layer.protocol_id().clone(),
                 range: ByteRange::new(absolute_offset, layer_end),
                 fields,
             });
@@ -315,11 +342,6 @@ impl Dissector {
                 }
                 diagnostic
             }));
-            let next_protocol = decoded
-                .next
-                .iter()
-                .find_map(|value| self.registry.child_for(&binding_parent, *value))
-                .cloned();
             if decoded.payload_len == 0 {
                 if let Some(required) = next_protocol.filter(|protocol| {
                     !matches!(
@@ -336,18 +358,12 @@ impl Dissector {
                             limit: options.max_layers,
                         });
                     }
-                    append_missing_required_layer(
-                        &mut packet,
-                        &mut layouts,
-                        required.clone(),
-                        layer_end,
-                    );
+                    append_missing_required_layer(&mut packet, &mut layouts, required, layer_end);
                     diagnostics.push(
                         Diagnostic::error(
                             "decode.missing_required_child",
-                            format!(
-                                "{binding_parent} discriminator requires {required}, but no bytes remain"
-                            ),
+                            missing_required_message
+                                .expect("typed missing child has a prepared diagnostic"),
                         )
                         .at_layer(index),
                     );
@@ -394,7 +410,8 @@ impl Dissector {
                 );
                 diagnostics.push(Diagnostic::warning(
                     "decode.unknown_binding",
-                    format!("unknown child discriminator after {binding_parent}"),
+                    unknown_binding_message
+                        .expect("unknown child binding has a prepared diagnostic"),
                 ));
                 break;
             };

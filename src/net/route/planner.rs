@@ -171,7 +171,7 @@ impl RoutePlanner {
                         | BuiltinProtocol::LinuxSll2
                 )
             )
-            .then(|| layer.protocol_id())
+            .then(|| layer.protocol_id().clone())
         }) {
             return Err(PlanError::OfflineOnlyLinkHeader { protocol });
         }

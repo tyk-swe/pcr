@@ -186,7 +186,7 @@ impl Packet {
 
     pub fn by_protocol(&self, protocol: &ProtocolId) -> Option<&dyn Layer> {
         for layer in &self.layers {
-            if &layer.protocol_id() == protocol {
+            if layer.protocol_id() == protocol {
                 return Some(layer.as_ref());
             }
         }
@@ -196,7 +196,7 @@ impl Packet {
     pub fn by_protocol_mut(&mut self, protocol: &ProtocolId) -> Option<&mut dyn Layer> {
         self.invalidate_encoded_payload_lengths();
         for layer in &mut self.layers {
-            if &layer.protocol_id() == protocol {
+            if layer.protocol_id() == protocol {
                 return Some(layer.as_mut());
             }
         }
@@ -209,7 +209,7 @@ impl Packet {
     ) -> impl Iterator<Item = &'a dyn Layer> + 'a {
         self.layers
             .iter()
-            .filter_map(move |layer| (&layer.protocol_id() == protocol).then_some(layer.as_ref()))
+            .filter_map(move |layer| (layer.protocol_id() == protocol).then_some(layer.as_ref()))
     }
 
     pub fn layer(&self, index: usize) -> Option<&dyn Layer> {
@@ -389,7 +389,7 @@ mod tests {
 
         fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
             Err(FieldError::UnknownField {
-                protocol: self.protocol_id(),
+                protocol: self.protocol_id().clone(),
                 field: name.to_owned(),
             })
         }
@@ -408,6 +408,30 @@ mod tests {
         assert_eq!(
             packet.get::<Padding>().unwrap().bytes,
             Bytes::from_static(b"b")
+        );
+
+        let raw = ProtocolId::new("raw");
+        assert_eq!(
+            packet
+                .by_protocol(&raw)
+                .unwrap()
+                .as_any()
+                .downcast_ref::<Raw>()
+                .unwrap()
+                .bytes,
+            Bytes::from_static(b"a")
+        );
+        packet
+            .by_protocol_mut(&raw)
+            .unwrap()
+            .set_field("bytes", FieldValue::Bytes(Bytes::from_static(b"updated")))
+            .unwrap();
+        assert_eq!(
+            packet
+                .all_by_protocol(&raw)
+                .map(|layer| { layer.as_any().downcast_ref::<Raw>().unwrap().bytes.clone() })
+                .collect::<Vec<_>>(),
+            vec![Bytes::from_static(b"updated"), Bytes::from_static(b"c")]
         );
     }
 

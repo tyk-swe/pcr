@@ -32,18 +32,18 @@ pub(crate) fn protocol(name: &str) -> ProtocolId {
     ProtocolId::new(name)
 }
 
-pub(crate) fn binding_protocol(layer: &dyn Layer) -> ProtocolId {
+pub(crate) fn binding_protocol(layer: &dyn Layer) -> &ProtocolId {
     layer
         .as_any()
         .downcast_ref::<MalformedLayer>()
-        .and_then(|layer| layer.intended_protocol.clone())
+        .and_then(|layer| layer.intended_protocol.as_ref())
         .unwrap_or_else(|| layer.protocol_id())
 }
 
 pub(crate) fn wrong_layer(expected: &str, actual: &dyn Layer) -> CodecError {
     CodecError::WrongLayer {
         expected: protocol(expected),
-        actual: actual.protocol_id(),
+        actual: actual.protocol_id().clone(),
     }
 }
 
@@ -201,14 +201,14 @@ where
     if child.protocol_id().as_str() == "raw" {
         let expected = context
             .registry
-            .discriminator_for(&protocol(parent), &child.protocol_id())
+            .discriminator_for(parent, child.protocol_id().as_str())
             .and_then(|value| T::try_from(value.0).ok())
             .unwrap_or(fallback);
         return ValueExpectation::Suggested(expected);
     }
     context
         .registry
-        .discriminator_for(&protocol(parent), &binding_protocol(child))
+        .discriminator_for(parent, binding_protocol(child).as_str())
         .and_then(|value| T::try_from(value.0).ok())
         .map_or(
             ValueExpectation::Suggested(fallback),
@@ -426,7 +426,7 @@ pub(crate) fn validate_raw_child_discriminator(
 ) -> Result<(), CodecError> {
     let Some(bound) = context
         .registry
-        .child_for(&protocol(parent), Discriminator(discriminator))
+        .child_for(parent, Discriminator(discriminator))
     else {
         return Ok(());
     };
@@ -438,7 +438,7 @@ pub(crate) fn validate_raw_child_discriminator(
         (!matches!(child.protocol_id().as_str(), "padding" | "raw"))
             .then(|| binding_protocol(child))
     });
-    if actual.as_ref() == Some(bound) {
+    if actual == Some(bound) {
         return Ok(());
     }
     let absent_payload = context

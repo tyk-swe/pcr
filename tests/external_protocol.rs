@@ -125,7 +125,7 @@ impl LayerCodec for FooCodec {
             .downcast_ref::<Foo>()
             .ok_or_else(|| CodecError::WrongLayer {
                 expected: ProtocolId::new("example.foo"),
-                actual: layer.protocol_id(),
+                actual: layer.protocol_id().clone(),
             })?;
         Ok(EncodedLayer::header(
             layer.value.to_be_bytes().to_vec(),
@@ -226,7 +226,7 @@ impl Layer for MissingRequired {
 
     fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
         Err(FieldError::ReadOnly {
-            protocol: self.protocol_id(),
+            protocol: self.protocol_id().clone(),
             field: name.to_owned(),
         })
     }
@@ -263,6 +263,14 @@ impl LayerCodec for MissingRequiredCodec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         Ok(Box::new(MissingRequired))
     }
+}
+
+#[test]
+fn external_layer_uses_the_revised_borrowed_identity_contract() {
+    let layer = Foo { value: 7 };
+
+    assert!(std::ptr::eq(layer.protocol_id(), &schema().protocol));
+    assert!(std::ptr::eq(layer.protocol_id(), layer.protocol_id()));
 }
 
 #[test]
@@ -306,11 +314,11 @@ fn shadowed_binding_cannot_encode_a_winning_external_discriminator() {
     let registry = Arc::new(builder.build().unwrap());
 
     assert_eq!(
-        registry.child_for(&ProtocolId::new("ethernet"), Discriminator(0x88b5)),
+        registry.child_for("ethernet", Discriminator(0x88b5)),
         Some(&ProtocolId::new("example.foo"))
     );
     assert_eq!(
-        registry.discriminator_for(&ProtocolId::new("ethernet"), &ProtocolId::new("ipv4")),
+        registry.discriminator_for("ethernet", "ipv4"),
         Some(Discriminator(0x0800))
     );
 
@@ -391,7 +399,7 @@ fn tcp_matcher_counts_an_external_protocol_payload() {
             });
         packet
     };
-    let matcher = registry.matcher(&ProtocolId::new("tcp")).unwrap();
+    let matcher = registry.matcher("tcp").unwrap();
 
     // The two encoded Foo bytes and SYN consume three sequence numbers.
     assert!(matcher.matches(&request, &response(103)).matched);

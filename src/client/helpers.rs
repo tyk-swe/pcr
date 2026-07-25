@@ -378,7 +378,7 @@ pub(super) fn patch_builtin_ethernet(
 ) -> bool {
     if !packet
         .iter()
-        .all(|layer| registry.is_builtin_codec(&layer.schema().protocol))
+        .all(|layer| registry.is_builtin_codec(layer.protocol_id().as_str()))
     {
         return false;
     }

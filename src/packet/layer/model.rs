@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::any::Any;
+use std::borrow::Borrow;
 use std::fmt;
 
 use bytes::Bytes;
@@ -23,6 +24,18 @@ impl ProtocolId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl AsRef<str> for ProtocolId {
+    fn as_ref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl Borrow<str> for ProtocolId {
+    fn borrow(&self) -> &str {
+        self.as_str()
     }
 }
 
@@ -109,7 +122,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
         for field in self.schema().fields.iter().filter(|field| field.required) {
             if self.field(field.name).is_none() {
                 return Err(FieldError::MissingRequired {
-                    protocol: self.protocol_id(),
+                    protocol: self.protocol_id().clone(),
                     field: field.name.to_owned(),
                 });
             }
@@ -117,8 +130,9 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
         Ok(())
     }
 
-    fn protocol_id(&self) -> ProtocolId {
-        self.schema().protocol.clone()
+    /// Returns the stable protocol identifier stored by this layer's schema.
+    fn protocol_id(&self) -> &ProtocolId {
+        &self.schema().protocol
     }
 
     /// Reset dependent values to automatic derivation.
@@ -269,6 +283,8 @@ reflective_layer! {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use super::*;
 
     #[derive(Clone, Debug, Default)]
@@ -324,6 +340,32 @@ mod tests {
                 .map(|field| field.name.as_str())
                 .collect::<Vec<_>>(),
             vec!["value"]
+        );
+    }
+
+    #[test]
+    fn protocol_identity_is_borrowed_from_the_static_schema() {
+        let layer = ReflectionHooks::default();
+        let first = layer.protocol_id();
+        let second = layer.protocol_id();
+
+        assert!(std::ptr::eq(first, &layer.schema().protocol));
+        assert!(std::ptr::eq(first, second));
+    }
+
+    #[test]
+    fn protocol_id_supports_borrowed_hash_map_lookup() {
+        let mut protocols = HashMap::new();
+        protocols.insert(ProtocolId::new("ipv4"), 4);
+
+        assert_eq!(protocols.get("ipv4"), Some(&4));
+    }
+
+    #[test]
+    fn protocol_id_serialization_remains_transparent() {
+        assert_eq!(
+            serde_json::to_string(&ProtocolId::new("example.protocol")).unwrap(),
+            "\"example.protocol\""
         );
     }
 }

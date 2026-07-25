@@ -358,7 +358,7 @@ impl ExchangeAccumulator {
                 if Instant::now() >= deadline {
                     return self.expire_decoded(decoded, options);
                 }
-                let Some(matcher) = registry.matcher(&layer.protocol_id()) else {
+                let Some(matcher) = registry.matcher(layer.protocol_id().as_str()) else {
                     continue;
                 };
                 let candidate = matcher.matches(&prepared_request.built.packet, &decoded.packet);

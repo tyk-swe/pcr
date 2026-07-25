@@ -618,7 +618,7 @@ mod tests {
             assert_eq!(identity.has_matcher(), support.matcher);
             assert!(unique(support.aliases), "{} aliases", support.protocol);
             let codec = registry
-                .codec(&support.protocol.into())
+                .codec(support.protocol)
                 .expect("declared protocol must have a codec");
             assert_eq!(
                 codec.aliases(),
@@ -639,7 +639,7 @@ mod tests {
                     .unwrap_or_else(|error| panic!("{} defaults: {error}", support.protocol));
             }
             assert_eq!(
-                registry.matcher(&support.protocol.into()).is_some(),
+                registry.matcher(support.protocol).is_some(),
                 support.matcher,
                 "{} matcher",
                 support.protocol

@@ -101,7 +101,7 @@ pub(super) fn observe(
     }
     let direct_match = request
         .iter()
-        .filter_map(|layer| registry.matcher(&layer.protocol_id()))
+        .filter_map(|layer| registry.matcher(layer.protocol_id().as_str()))
         .filter_map(|matcher| {
             let result = matcher.matches(request, &response.packet);
             result.matched.then_some((matcher, result))

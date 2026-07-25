@@ -110,7 +110,7 @@ fn validate_family_binding(
     }
     let Some(expected) = context
         .registry
-        .discriminator_for(&protocol(parent), &binding_protocol(child))
+        .discriminator_for(parent, binding_protocol(child).as_str())
     else {
         return Ok(diagnostics);
     };

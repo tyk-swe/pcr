@@ -162,7 +162,7 @@ fn ip_path_at(
             None => ParsedIpv4SourceRoutes::default(),
             Some(_) => {
                 return Err(SemanticError::field(
-                    &layer.protocol_id(),
+                    layer.protocol_id(),
                     IPV4_OPTIONS,
                     "is not bytes",
                 ));
@@ -256,22 +256,22 @@ fn typed_segment_route(
             .map(|value| match value {
                 FieldValue::Ipv6(value) => Ok(value),
                 _ => Err(SemanticError::field(
-                    &protocol,
+                    protocol,
                     SEGMENTS,
                     "contains a non-IPv6 value",
                 )),
             })
             .collect::<Result<Vec<_>, _>>()?,
         Some(_) => {
-            return Err(SemanticError::field(&protocol, SEGMENTS, "is not a list"));
+            return Err(SemanticError::field(protocol, SEGMENTS, "is not a list"));
         }
-        None => return Err(SemanticError::field(&protocol, SEGMENTS, "is missing")),
+        None => return Err(SemanticError::field(protocol, SEGMENTS, "is missing")),
     };
     let expected_last = segments.len().checked_sub(1).ok_or_else(|| {
-        SemanticError::field(&protocol, SEGMENTS, "must contain at least one address")
+        SemanticError::field(protocol, SEGMENTS, "must contain at least one address")
     })?;
     let expected_last = u8::try_from(expected_last).map_err(|_| {
-        SemanticError::field(&protocol, SEGMENTS, "contains more than 256 addresses")
+        SemanticError::field(protocol, SEGMENTS, "contains more than 256 addresses")
     })?;
     let segments_left = wire_u8_field(layer, SEGMENTS_LEFT, expected_last)?;
     let last_entry = wire_u8_field(layer, LAST_ENTRY, expected_last)?;
@@ -288,17 +288,17 @@ fn typed_segment_route(
 fn wire_u8_field(layer: &dyn Layer, field: &str, automatic: u8) -> Result<u8, SemanticError> {
     match layer.field(field) {
         Some(FieldValue::Unsigned(value)) => u8::try_from(value).map_err(|_| {
-            SemanticError::field(&layer.protocol_id(), field, "is outside the u8 range")
+            SemanticError::field(layer.protocol_id(), field, "is outside the u8 range")
         }),
         Some(FieldValue::Bytes(value)) if value.len() == 1 => Ok(value[0]),
         Some(FieldValue::Text(value)) if value.eq_ignore_ascii_case("auto") => Ok(automatic),
         Some(_) => Err(SemanticError::field(
-            &layer.protocol_id(),
+            layer.protocol_id(),
             field,
             "is not Auto, an unsigned u8, or one raw byte",
         )),
         None => Err(SemanticError::field(
-            &layer.protocol_id(),
+            layer.protocol_id(),
             field,
             "is missing",
         )),
@@ -308,15 +308,15 @@ fn wire_u8_field(layer: &dyn Layer, field: &str, automatic: u8) -> Result<u8, Se
 fn required_u8_field(layer: &dyn Layer, field: &str) -> Result<u8, SemanticError> {
     match layer.field(field) {
         Some(FieldValue::Unsigned(value)) => u8::try_from(value).map_err(|_| {
-            SemanticError::field(&layer.protocol_id(), field, "is outside the u8 range")
+            SemanticError::field(layer.protocol_id(), field, "is outside the u8 range")
         }),
         Some(_) => Err(SemanticError::field(
-            &layer.protocol_id(),
+            layer.protocol_id(),
             field,
             "is not unsigned",
         )),
         None => Err(SemanticError::field(
-            &layer.protocol_id(),
+            layer.protocol_id(),
             field,
             "is missing",
         )),
@@ -332,17 +332,17 @@ fn ip_field(
         (BuiltinProtocol::Ipv4, Some(FieldValue::Ipv4(value))) => Ok(IpAddr::V4(value)),
         (BuiltinProtocol::Ipv6, Some(FieldValue::Ipv6(value))) => Ok(IpAddr::V6(value)),
         (BuiltinProtocol::Ipv4, Some(_)) => Err(SemanticError::field(
-            &layer.protocol_id(),
+            layer.protocol_id(),
             field,
             "is not IPv4",
         )),
         (BuiltinProtocol::Ipv6, Some(_)) => Err(SemanticError::field(
-            &layer.protocol_id(),
+            layer.protocol_id(),
             field,
             "is not IPv6",
         )),
         (_, None) => Err(SemanticError::field(
-            &layer.protocol_id(),
+            layer.protocol_id(),
             field,
             "is missing",
         )),
@@ -373,14 +373,14 @@ pub(crate) fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, Semantic
                 }
                 Some(_) => {
                     return Err(SemanticError::field(
-                        &layer.protocol_id(),
+                        layer.protocol_id(),
                         TARGET_PROTOCOL,
                         "is not IPv4",
                     ));
                 }
                 None => {
                     return Err(SemanticError::field(
-                        &layer.protocol_id(),
+                        layer.protocol_id(),
                         TARGET_PROTOCOL,
                         "is missing",
                     ));
@@ -563,7 +563,7 @@ pub(crate) fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, Semant
             let priority = required_u8_field(layer, "priority")?;
             if priority > 7 {
                 return Err(SemanticError::field(
-                    &layer.protocol_id(),
+                    layer.protocol_id(),
                     "priority",
                     "is outside 0..=7",
                 ));
@@ -572,14 +572,14 @@ pub(crate) fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, Semant
                 Some(FieldValue::Bool(value)) => value,
                 Some(_) => {
                     return Err(SemanticError::field(
-                        &layer.protocol_id(),
+                        layer.protocol_id(),
                         "drop_eligible",
                         "is not boolean",
                     ));
                 }
                 None => {
                     return Err(SemanticError::field(
-                        &layer.protocol_id(),
+                        layer.protocol_id(),
                         "drop_eligible",
                         "is missing",
                     ));
@@ -590,18 +590,18 @@ pub(crate) fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, Semant
                     .ok()
                     .filter(|value| *value <= 4095)
                     .ok_or_else(|| {
-                        SemanticError::field(&layer.protocol_id(), "vlan_id", "is outside 0..=4095")
+                        SemanticError::field(layer.protocol_id(), "vlan_id", "is outside 0..=4095")
                     })?,
                 Some(_) => {
                     return Err(SemanticError::field(
-                        &layer.protocol_id(),
+                        layer.protocol_id(),
                         "vlan_id",
                         "is not unsigned",
                     ));
                 }
                 None => {
                     return Err(SemanticError::field(
-                        &layer.protocol_id(),
+                        layer.protocol_id(),
                         "vlan_id",
                         "is missing",
                     ));
@@ -664,7 +664,7 @@ mod tests {
 
         fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
             Err(FieldError::UnknownField {
-                protocol: self.protocol_id(),
+                protocol: self.protocol_id().clone(),
                 field: name.to_owned(),
             })
         }

@@ -302,11 +302,14 @@ impl Builder {
                 .validate_required_fields()
                 .map_err(|source| BuildError::InvalidLayer {
                     index,
-                    protocol: layer.protocol_id(),
+                    protocol: layer.protocol_id().clone(),
                     source,
                 })?;
         }
-        let protocols: Vec<_> = packet.iter().map(|layer| layer.protocol_id()).collect();
+        let protocols: Vec<_> = packet
+            .iter()
+            .map(|layer| layer.protocol_id().clone())
+            .collect();
         self.validate_bindings(&packet, &protocols, options.mode, &mut diagnostics)?;
 
         // The reverse walk keeps the source packet intact for every codec and
@@ -320,13 +323,13 @@ impl Builder {
             let layer = packet
                 .layer(index)
                 .expect("validated layer index must remain present");
-            let codec = self
-                .registry
-                .codec(&protocol)
-                .ok_or_else(|| BuildError::MissingCodec {
-                    index,
-                    protocol: protocol.clone(),
-                })?;
+            let codec =
+                self.registry
+                    .codec(protocol.as_str())
+                    .ok_or_else(|| BuildError::MissingCodec {
+                        index,
+                        protocol: protocol.clone(),
+                    })?;
             let child = packet.layer(index + 1);
             encoded_payload_lengths.push(Some(bytes.len()));
             let remaining_packet_bytes = options.max_packet_size.checked_sub(bytes.len()).ok_or(
@@ -356,15 +359,18 @@ impl Builder {
                 })?;
 
             let actual = encoded.materialized.protocol_id();
-            if actual != protocol {
-                return Err(BuildError::MaterializedProtocolMismatch { protocol, actual });
+            if actual != &protocol {
+                return Err(BuildError::MaterializedProtocolMismatch {
+                    protocol,
+                    actual: actual.clone(),
+                });
             }
             encoded
                 .materialized
                 .validate_required_fields()
                 .map_err(|source| BuildError::InvalidLayer {
                     index,
-                    protocol: encoded.materialized.protocol_id(),
+                    protocol: encoded.materialized.protocol_id().clone(),
                     source,
                 })?;
 
@@ -541,7 +547,9 @@ impl Builder {
                     discriminator
                 }
                 _ => {
-                    let discriminator = self.registry.discriminator_for(parent, child);
+                    let discriminator = self
+                        .registry
+                        .discriminator_for(parent.as_str(), child.as_str());
                     previous_binding = Some((parent, child, discriminator));
                     discriminator
                 }
@@ -655,12 +663,12 @@ mod tests {
                     Ok(())
                 }
                 ("metadata", _) => Err(FieldError::WrongType {
-                    protocol: self.protocol_id(),
+                    protocol: self.protocol_id().clone(),
                     field: name.to_owned(),
                     expected: "bytes",
                 }),
                 _ => Err(FieldError::UnknownField {
-                    protocol: self.protocol_id(),
+                    protocol: self.protocol_id().clone(),
                     field: name.to_owned(),
                 }),
             }
@@ -753,7 +761,7 @@ mod tests {
 
         fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
             Err(FieldError::UnknownField {
-                protocol: self.protocol_id(),
+                protocol: self.protocol_id().clone(),
                 field: name.to_owned(),
             })
         }
@@ -778,7 +786,7 @@ mod tests {
                 .downcast_ref::<CloneCountingLayer>()
                 .ok_or_else(|| CodecError::WrongLayer {
                     expected: self.protocol_id(),
-                    actual: layer.protocol_id(),
+                    actual: layer.protocol_id().clone(),
                 })?;
             Ok(EncodedLayer::header(vec![layer.id], layer.clone_box()))
         }

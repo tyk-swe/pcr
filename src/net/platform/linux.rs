@@ -582,13 +582,13 @@ mod tests {
 
         let provider = crate::net::route::SystemProvider;
         let ipv4 = provider
-            .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+            .lookup_with_preferences(IpAddr::V4(Ipv4Addr::LOCALHOST), None, None)
             .unwrap();
         assert_eq!(ipv4.selection_reason, RouteSelectionReason::Local);
         assert!(ipv4.selected_address.is_some_and(|source| source.is_ipv4()));
 
         let ipv6 = provider
-            .lookup(IpAddr::V6(Ipv6Addr::LOCALHOST), None)
+            .lookup_with_preferences(IpAddr::V6(Ipv6Addr::LOCALHOST), None, None)
             .unwrap();
         assert_eq!(ipv6.selection_reason, RouteSelectionReason::Local);
         assert!(ipv6.selected_address.is_some_and(|source| source.is_ipv6()));
@@ -598,7 +598,7 @@ mod tests {
     fn repeated_lookups_reuse_the_calling_threads_netlink_worker() {
         let first_worker = worker_thread_id();
         crate::net::route::SystemProvider
-            .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+            .lookup_with_preferences(IpAddr::V4(Ipv4Addr::LOCALHOST), None, None)
             .unwrap();
         let second_worker = worker_thread_id();
 
@@ -680,7 +680,7 @@ mod tests {
             let worker = tokio::spawn(async {
                 let worker = worker_thread_id();
                 crate::net::route::SystemProvider
-                    .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+                    .lookup_with_preferences(IpAddr::V4(Ipv4Addr::LOCALHOST), None, None)
                     .unwrap();
                 worker
             })
@@ -700,7 +700,7 @@ mod tests {
                         let caller = thread::current().id();
                         let worker = worker_thread_id();
                         crate::net::route::SystemProvider
-                            .lookup(IpAddr::V4(Ipv4Addr::LOCALHOST), None)
+                            .lookup_with_preferences(IpAddr::V4(Ipv4Addr::LOCALHOST), None, None)
                             .unwrap();
                         (caller, worker)
                     })

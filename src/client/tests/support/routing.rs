@@ -19,10 +19,11 @@ pub(crate) struct FixedRoutes(pub(crate) RouteDecision);
 impl RouteProvider for FixedRoutes {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         Ok(self.0.clone())
     }
@@ -37,10 +38,11 @@ pub(crate) struct CountingRoutes {
 impl RouteProvider for CountingRoutes {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         Ok(self.decision.clone())
@@ -55,10 +57,11 @@ pub(crate) struct SlowRoutes {
 impl RouteProvider for SlowRoutes {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         std::thread::sleep(self.delay);
@@ -74,10 +77,11 @@ pub(crate) struct DestinationRoutes {
 impl RouteProvider for DestinationRoutes {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let mut decision = route(LinkCapability::Layer3);
@@ -266,10 +270,11 @@ pub(crate) struct InterfaceRoutes {
 impl RouteProvider for InterfaceRoutes {
     type Error = Infallible;
 
-    fn lookup(
+    fn lookup_with_preferences(
         &self,
         _destination: IpAddr,
         _interface_hint: Option<&InterfaceId>,
+        _preferred_source: Option<IpAddr>,
     ) -> Result<RouteDecision, Self::Error> {
         self.ip_lookups.fetch_add(1, Ordering::SeqCst);
         Ok(self.decision.clone())

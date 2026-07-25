@@ -83,25 +83,14 @@ pub trait RouteProvider: Send + Sync {
     /// A client may reuse a successful decision for identical arguments during
     /// one exchange, so implementations should provide a consistent snapshot
     /// for the duration of that operation.
-    fn lookup(
-        &self,
-        destination: IpAddr,
-        interface_hint: Option<&InterfaceId>,
-    ) -> Result<RouteDecision, Self::Error>;
-
     /// Passive lookup with an interface-owned source preference. This source
     /// is distinct from an explicitly spoofed source encoded in a packet.
-    /// Existing injected providers retain source compatibility through the
-    /// default implementation and receive a typed planner rejection if they
-    /// do not honor a requested source.
     fn lookup_with_preferences(
         &self,
         destination: IpAddr,
         interface_hint: Option<&InterfaceId>,
-        _preferred_source: Option<IpAddr>,
-    ) -> Result<RouteDecision, Self::Error> {
-        self.lookup(destination, interface_hint)
-    }
+        preferred_source: Option<IpAddr>,
+    ) -> Result<RouteDecision, Self::Error>;
 
     /// Select a concrete interface for a packet that has no network-layer
     /// destination. Implementations must perform passive interface discovery

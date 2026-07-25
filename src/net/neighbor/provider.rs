@@ -71,15 +71,6 @@ impl<L, C> ActiveNeighborResolver<L, C> {
         &self.options
     }
 
-    pub fn clear_cache(&self) -> Result<(), NeighborError> {
-        self.cache
-            .lock()
-            .map_err(|_| NeighborError::State {
-                message: "neighbor cache mutex was poisoned".to_owned(),
-            })?
-            .clear();
-        Ok(())
-    }
 }
 
 impl<L, C> Default for ActiveNeighborResolver<L, C>

@@ -42,14 +42,6 @@ impl Packet {
         }
     }
 
-    pub fn from_layers(layers: Vec<Box<dyn Layer>>) -> Self {
-        let encoded_payload_lengths = vec![None; layers.len()];
-        Self {
-            layers,
-            encoded_payload_lengths,
-        }
-    }
-
     pub(crate) fn from_encoded_layers(
         layers: Vec<Box<dyn Layer>>,
         encoded_payload_lengths: Vec<Option<usize>>,
@@ -175,13 +167,6 @@ impl Packet {
         self.layers
             .iter()
             .filter_map(|layer| layer.as_any().downcast_ref::<T>())
-    }
-
-    pub fn get_all_mut<T: Layer + 'static>(&mut self) -> impl Iterator<Item = &mut T> {
-        self.invalidate_encoded_payload_lengths();
-        self.layers
-            .iter_mut()
-            .filter_map(|layer| layer.as_any_mut().downcast_mut::<T>())
     }
 
     pub fn by_protocol(&self, protocol: &ProtocolId) -> Option<&dyn Layer> {

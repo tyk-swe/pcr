@@ -1,205 +1,24 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Route-driven materialization of link and network layer fields.
+
 use std::net::IpAddr;
-use std::time::Instant;
 
 use bytes::Bytes;
 
-use crate::net::{
-    Error as LiveIoError,
-    capture::CaptureQueueLimits,
-    route::{MaterializedRoute, PlannedRoute},
-    transmit::IoSendReport,
-};
+use crate::net::route::{MaterializedRoute, PlannedRoute};
 use crate::packet::{
     Packet,
     build::{BuildContext, BuiltPacket},
     field::FieldValue,
-    layer::Padding,
     registry::ProtocolRegistry,
     semantics::BuiltinProtocol,
 };
 use crate::protocol::link::Ethernet;
 
-use super::exchange::{ExchangeOptions, MAX_EXCHANGE_TIMEOUT};
 use super::send::ClientError;
 use super::target::IpVersion;
-
-impl ExchangeOptions {
-    /// Validates every finite timeout and aggregate retention bound before a
-    /// resolver, route, neighbor, capture, or transmission provider is used.
-    pub fn validate(&self) -> Result<CaptureQueueLimits, ClientError> {
-        if self.timeout > MAX_EXCHANGE_TIMEOUT {
-            return Err(ClientError::InvalidExchangeOption {
-                field: "timeout",
-                message: format!("must not exceed {MAX_EXCHANGE_TIMEOUT:?}"),
-            });
-        }
-        if self.max_template_packets == 0 {
-            return Err(ClientError::InvalidExchangeOption {
-                field: "max_template_packets",
-                message: "must be greater than zero".to_owned(),
-            });
-        }
-        for (field, value) in [
-            ("max_responses", self.max_responses),
-            ("max_unsolicited", self.max_unsolicited),
-        ] {
-            if value > self.max_capture_queue_frames {
-                return Err(ClientError::InvalidExchangeOption {
-                    field,
-                    message: format!(
-                        "{value} exceeds aggregate capture frame ceiling {}",
-                        self.max_capture_queue_frames
-                    ),
-                });
-            }
-        }
-        Instant::now().checked_add(self.timeout).ok_or_else(|| {
-            ClientError::InvalidExchangeOption {
-                field: "timeout",
-                message: "cannot be represented by the platform monotonic clock".to_owned(),
-            }
-        })?;
-        CaptureQueueLimits {
-            max_frames: self.max_capture_queue_frames,
-            max_bytes: self.max_captured_bytes,
-            snap_length: self.decode.max_packet_size,
-            overflow_policy: self.capture_overflow_policy,
-        }
-        .validate()
-        .map_err(ClientError::from)
-    }
-}
-
-pub(super) fn validate_send_report(
-    expected: &Bytes,
-    report: &IoSendReport,
-) -> Result<(), LiveIoError> {
-    if report.bytes_sent != expected.len() {
-        return Err(LiveIoError::PartialSend {
-            expected: expected.len(),
-            actual: report.bytes_sent,
-        });
-    }
-    if let Some(wire_bytes) = &report.wire_bytes {
-        if wire_bytes.len() != report.bytes_sent {
-            return Err(LiveIoError::InvalidSendReport {
-                bytes_sent: report.bytes_sent,
-                wire_bytes: wire_bytes.len(),
-            });
-        }
-        if wire_bytes != expected {
-            return Err(LiveIoError::InvalidSendEvidence {
-                message: "wire_bytes differ from the exact submitted packet".to_owned(),
-            });
-        }
-    }
-    Ok(())
-}
-
-pub(super) fn validate_mtu(built: &BuiltPacket, mtu: u32) -> Result<(), ClientError> {
-    let network_layer = built.packet.iter().enumerate().find_map(|(index, layer)| {
-        BuiltinProtocol::of(layer)
-            .is_some_and(BuiltinProtocol::is_ip)
-            .then_some(index)
-    });
-    let network_length = network_layer.and_then(|index| {
-        let start = built.layout.layer(index)?.range.start;
-        let outside_network = built
-            .packet
-            .iter()
-            .rev()
-            .take_while(|layer| layer.as_any().is::<Padding>())
-            .filter_map(|layer| layer.as_any().downcast_ref::<Padding>())
-            .filter(|padding| {
-                padding
-                    .outside_layer
-                    .is_none_or(|outside_layer| index >= outside_layer)
-            })
-            .try_fold(0_usize, |total, padding| {
-                total.checked_add(padding.bytes.len())
-            })?;
-        built
-            .bytes
-            .len()
-            .checked_sub(outside_network)?
-            .checked_sub(start)
-    });
-    if let Some(actual) = network_length
-        && actual > mtu as usize
-    {
-        return Err(ClientError::PacketExceedsMtu { actual, mtu });
-    }
-    Ok(())
-}
-
-pub(super) fn push_diagnostic_once(
-    diagnostics: &mut Vec<crate::packet::diagnostic::Diagnostic>,
-    diagnostic: crate::packet::diagnostic::Diagnostic,
-) {
-    if !diagnostics
-        .iter()
-        .any(|existing| existing.code == diagnostic.code)
-    {
-        diagnostics.push(diagnostic);
-    }
-}
-
-pub(super) fn reserve_capture_evidence(
-    retained_frames: &mut usize,
-    retained_bytes: &mut usize,
-    additional: usize,
-    frame_limit: usize,
-    byte_limit: usize,
-    diagnostics: &mut Vec<crate::packet::diagnostic::Diagnostic>,
-) -> bool {
-    let Some(frame_total) = retained_frames.checked_add(1) else {
-        push_diagnostic_once(
-            diagnostics,
-            crate::packet::diagnostic::Diagnostic::warning(
-                "exchange.capture_frame_limit",
-                "retained capture frame accounting overflowed; frame was not retained",
-            ),
-        );
-        return false;
-    };
-    if frame_total > frame_limit {
-        push_diagnostic_once(
-            diagnostics,
-            crate::packet::diagnostic::Diagnostic::warning(
-                "exchange.capture_frame_limit",
-                format!(
-                    "aggregate retained capture frame limit {frame_limit} reached; later frames were not retained"
-                ),
-            ),
-        );
-        return false;
-    }
-    let Some(byte_total) = retained_bytes.checked_add(additional) else {
-        push_diagnostic_once(
-            diagnostics,
-            crate::packet::diagnostic::Diagnostic::warning(
-                "exchange.capture_byte_limit",
-                "retained capture byte accounting overflowed; frame was not retained",
-            ),
-        );
-        return false;
-    };
-    if byte_total > byte_limit {
-        push_diagnostic_once(
-            diagnostics,
-            crate::packet::diagnostic::Diagnostic::warning(
-                "exchange.capture_byte_limit",
-                format!(
-                    "retained capture byte limit {byte_limit} reached; later frames were not retained"
-                ),
-            ),
-        );
-        return false;
-    }
-    *retained_frames = frame_total;
-    *retained_bytes = byte_total;
-    true
-}
 
 pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
     BuildContext {
@@ -480,30 +299,4 @@ pub(super) fn require_fixed_width_link_materialization(
         });
     }
     Ok(())
-}
-
-pub(super) fn is_public(address: IpAddr) -> bool {
-    match address {
-        IpAddr::V4(address) => {
-            address.is_multicast()
-                || !(address.is_private()
-                    || address.is_loopback()
-                    || address.is_link_local()
-                    || address.is_unspecified()
-                    || address.is_documentation())
-        }
-        IpAddr::V6(address) => {
-            address.is_multicast()
-                || !(address.is_loopback()
-                    || address.is_unspecified()
-                    || address.is_unique_local()
-                    || address.is_unicast_link_local()
-                    || is_ipv6_documentation(address))
-        }
-    }
-}
-
-fn is_ipv6_documentation(address: std::net::Ipv6Addr) -> bool {
-    let segments = address.segments();
-    segments[0] == 0x2001 && segments[1] == 0x0db8
 }

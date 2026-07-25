@@ -1,3 +1,8 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{BoundaryError, Classification, Classified, Duration, Error, Kind};
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum TracerouteError {
@@ -95,4 +100,3 @@ impl Classified for TracerouteError {
         }
     }
 }
-use super::{BoundaryError, Classification, Classified, Duration, Error, Kind};

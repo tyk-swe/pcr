@@ -1,3 +1,14 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{
+    AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DecodedPacket, Deserialize, Diagnostic, Duration,
+    Frame, IpAddr, MAX_SCAN_PROBES, MAX_SCAN_RATE, MAX_TRACEROUTE_DURATION,
+    MAX_TRACEROUTE_PROBES_PER_HOP, Packet, ProbeTransport, Serialize, Stats, SystemTime, Target,
+    TracerouteError, fmt,
+};
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TracerouteStrategy {
@@ -318,10 +329,3 @@ pub trait TracerouteExecutor {
         batch: &TracerouteBatch,
     ) -> Result<TracerouteBatchExecution, crate::workflow::BoundaryError>;
 }
-use super::{
-    AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    DEFAULT_MAX_UNDECODED_TRACEROUTE_FRAMES, DecodedPacket, Deserialize, Diagnostic, Duration,
-    Frame, IpAddr, MAX_SCAN_PROBES, MAX_SCAN_RATE, MAX_TRACEROUTE_DURATION,
-    MAX_TRACEROUTE_PROBES_PER_HOP, Packet, ProbeTransport, Serialize, Stats, SystemTime, Target,
-    TracerouteError, fmt,
-};

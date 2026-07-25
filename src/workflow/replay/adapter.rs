@@ -1,6 +1,24 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Production replay authorizer. It checks complete capture evidence, applies
 /// the traffic policy to raw routing destinations before any I/O, and requires
 /// an exact decode/build round trip.
+use super::wire::{
+    ReplayWireDestinations, map_replay_route_error, replay_network_envelope,
+    replay_wire_destinations,
+};
+use super::{
+    Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, DecodeOptions, Decoder,
+    DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo, InterfaceProvider, Kind,
+    LinkCapability, LinkMode, LiveIoError, MaterializedRoute, NetworkEnvelope, PacketIo,
+    PlannedRoute, ProtocolRegistry, ReplayAuthorizationContext, ReplayAuthorizer,
+    ReplayTransmission, ReplayTransmitter, RouteDecision, RouteProvider, RouteSelectionReason,
+    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemRouteProvider,
+    TransmissionFrame,
+};
+use crate::workflow::BoundaryError;
+
 pub struct SystemAuthorizer {
     policy: crate::client::policy::Policy,
     registry: Arc<ProtocolRegistry>,
@@ -399,20 +417,6 @@ impl ReplayTransmitter for SystemTransmitter {
         })
     }
 }
-use super::wire::{
-    ReplayWireDestinations, map_replay_route_error, replay_network_envelope,
-    replay_wire_destinations,
-};
-use super::{
-    Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, DecodeOptions, Decoder,
-    DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo, InterfaceProvider, Kind,
-    LinkCapability, LinkMode, LiveIoError, MaterializedRoute, NetworkEnvelope, PacketIo,
-    PlannedRoute, ProtocolRegistry, ReplayAuthorizationContext, ReplayAuthorizer,
-    ReplayTransmission, ReplayTransmitter, RouteDecision, RouteProvider, RouteSelectionReason,
-    SystemInterfaceProvider, SystemLayer2Io, SystemLayer3Io, SystemRouteProvider,
-    TransmissionFrame,
-};
-use crate::workflow::BoundaryError;
 
 #[cfg(test)]
 mod identity_tests {

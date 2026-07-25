@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Composition contracts for capture-before-send exchanges.
 
 use super::Error;
@@ -5,12 +8,12 @@ use super::capture::{CaptureProvider, CaptureQueueLimits};
 use super::route::PlannedRoute;
 use super::transmit::{IoSendReport, PacketIo, TransmissionFrame};
 
+pub(crate) use Io as ExchangeIo;
+
 /// A provider that supports both transmission and capture.
 pub trait Io: PacketIo + CaptureProvider {}
 
 impl<T> Io for T where T: PacketIo + CaptureProvider {}
-
-pub(crate) use Io as ExchangeIo;
 
 /// Composes separately owned transmission and capture providers.
 #[derive(Clone, Copy, Debug)]

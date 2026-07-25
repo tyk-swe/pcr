@@ -1,4 +1,14 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Maximum cumulative intentional delay accepted by one replay operation.
+use super::{
+    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Duration, Format, Frame,
+    Interface, InterfaceId, IoSendReport, LinkMode, LiveIoError, ReplayError, Serialize,
+    SystemTime,
+};
+use serde::Deserialize;
+
 pub const MAX_REPLAY_DURATION: Duration = crate::net::capture::MAX_TIMEOUT;
 
 /// Timing policy used when replaying captured frames.
@@ -216,9 +226,3 @@ pub struct ReplayTransmission {
     pub interface: InterfaceId,
     pub report: IoSendReport,
 }
-use super::{
-    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Duration, Format, Frame,
-    Interface, InterfaceId, IoSendReport, LinkMode, LiveIoError, ReplayError, Serialize,
-    SystemTime,
-};
-use serde::Deserialize;

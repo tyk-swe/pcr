@@ -1,6 +1,26 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Resolves and authorizes the complete target set before constructing any
 /// probe, applies operation-wide packet/byte/duration limits, schedules
 /// homogeneous batches, and classifies only checksum-valid correlated facts.
+use super::super::bounded_probe::{
+    ProbeBatch, ProbeExecution, ResponseSelector, approve_operation, resolve_selected,
+    retain_undecoded_frames, run_batches,
+};
+use super::{
+    Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
+    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, IPV4_PROBE_BYTES,
+    IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
+    ProtocolRegistry, ResponseEvidence, SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch, ScanBatchExecution,
+    ScanClassification, ScanEndpointResult, ScanError, ScanExecutor, ScanLimits,
+    ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult,
+    ScanTransport, Stats, Tcp, Udp, classify_scan_response, format_exchange_evidence_error,
+    nonzero_ipv4_identification, push_diagnostic_once, retain_evidence,
+    validate_shared_exchange_evidence,
+};
+use crate::packet::semantics::BuiltinProtocol;
+
 pub fn scan<A, E, C>(
     request: &ScanRequest,
     authorizer: &mut A,
@@ -582,19 +602,3 @@ impl ProbeExecution for ScanBatchExecution {
         &self.stats
     }
 }
-use super::super::bounded_probe::{
-    ProbeBatch, ProbeExecution, ResponseSelector, approve_operation, resolve_selected,
-    retain_undecoded_frames, run_batches,
-};
-use super::{
-    Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
-    EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, IPV4_PROBE_BYTES,
-    IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
-    ProtocolRegistry, ResponseEvidence, SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch, ScanBatchExecution,
-    ScanClassification, ScanEndpointResult, ScanError, ScanExecutor, ScanLimits,
-    ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult,
-    ScanTransport, Stats, Tcp, Udp, classify_scan_response, format_exchange_evidence_error,
-    nonzero_ipv4_identification, push_diagnostic_once, retain_evidence,
-    validate_shared_exchange_evidence,
-};
-use crate::packet::semantics::BuiltinProtocol;

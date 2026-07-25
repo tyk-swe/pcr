@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::{
     Frame, IoSendReport, IpAddr, Ipv4Addr, Ipv6Addr, Kind, LinkMode, LinkType, LiveIoError,
     NetworkEnvelope, ReplayError, RouteProvider, SystemRouteProvider,

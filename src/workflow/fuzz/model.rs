@@ -1,3 +1,18 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{
+    BuildOptions, BuiltPacket, CaptureStatistics, Classification, Classified,
+    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_FUZZ_CASES,
+    DEFAULT_MAX_FUZZ_CASES, DEFAULT_MAX_FUZZ_FIELD_BYTES, DEFAULT_MAX_FUZZ_LIST_ITEMS,
+    DEFAULT_MAX_FUZZ_SHRINK_STEPS, DEFAULT_MAX_PACKET_SIZE, DecodedPacket, Diagnostic, Duration,
+    Error, FieldValue, Frame, FuzzError, IpAddr, MAX_FUZZ_CASES, MAX_FUZZ_DURATION,
+    MAX_FUZZ_FIELD_BYTES, MAX_FUZZ_LIST_ITEMS, MAX_FUZZ_RATE, MAX_FUZZ_SHRINK_STEPS,
+    MAX_FUZZ_STRATEGIES, Packet, Serialize, fmt,
+};
+use serde::Deserialize;
+use std::str::FromStr;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FuzzStrategy {
@@ -426,14 +441,3 @@ pub trait FuzzExecutor {
         timeout: Duration,
     ) -> Result<FuzzCaseExecution, crate::workflow::BoundaryError>;
 }
-use super::{
-    BuildOptions, BuiltPacket, CaptureStatistics, Classification, Classified,
-    DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES, DEFAULT_FUZZ_CASES,
-    DEFAULT_MAX_FUZZ_CASES, DEFAULT_MAX_FUZZ_FIELD_BYTES, DEFAULT_MAX_FUZZ_LIST_ITEMS,
-    DEFAULT_MAX_FUZZ_SHRINK_STEPS, DEFAULT_MAX_PACKET_SIZE, DecodedPacket, Diagnostic, Duration,
-    Error, FieldValue, Frame, FuzzError, IpAddr, MAX_FUZZ_CASES, MAX_FUZZ_DURATION,
-    MAX_FUZZ_FIELD_BYTES, MAX_FUZZ_LIST_ITEMS, MAX_FUZZ_RATE, MAX_FUZZ_SHRINK_STEPS,
-    MAX_FUZZ_STRATEGIES, Packet, Serialize, fmt,
-};
-use serde::Deserialize;
-use std::str::FromStr;

@@ -1,3 +1,12 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{
+    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, TracerouteResponseKind,
+    TracerouteStrategy, probe,
+};
+use crate::packet::semantics::{self, BuiltinProtocol};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TracerouteResponseClassification {
     pub kind: TracerouteResponseKind,
@@ -53,9 +62,3 @@ fn packet_destination(packet: &Packet, strategy: TracerouteStrategy) -> Option<I
     let path = semantics::enclosing_ip_path(packet, transport_index).ok()??;
     Some(path.final_destination)
 }
-
-use super::{
-    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, TracerouteResponseKind,
-    TracerouteStrategy, probe,
-};
-use crate::packet::semantics::{self, BuiltinProtocol};

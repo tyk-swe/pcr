@@ -19,6 +19,8 @@ use crate::protocol::builtin::registry as default_registry;
 use crate::protocol::icmp::{Icmpv4, Icmpv6};
 use crate::workflow::target::Authorized;
 use crate::workflow::target_adapter::PolicyAuthorizer;
+use evidence_validation::{NoopClock, ScriptedResolver, TimeoutExecutor};
+use outcome::{PayloadExecutor, single_attempt_request};
 use std::result::Result;
 
 fn wire_name(name: &str) -> Vec<u8> {
@@ -97,6 +99,3 @@ mod outcome;
 mod policy_retry;
 mod wire_format;
 mod wire_record;
-
-use evidence_validation::{NoopClock, ScriptedResolver, TimeoutExecutor};
-use outcome::{PayloadExecutor, single_attempt_request};

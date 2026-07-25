@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! IPv6 extension-header models.
 
 mod model;

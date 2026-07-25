@@ -1,5 +1,14 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Executes homogeneous scan batches through the client's capture-ready
 /// exchange lifecycle.
+use super::{
+    BoundaryError, ExchangeIo, FieldValue, NeighborResolver, PacketTemplate, RouteProvider,
+    ScanBatch, ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport,
+    TemplateValues, classify_scan_response,
+};
+
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
     options: crate::client::exchange::Options,
@@ -115,8 +124,3 @@ fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
         "use homogeneous bounded scan batches and retain at least one response per probe",
     )
 }
-use super::{
-    BoundaryError, ExchangeIo, FieldValue, NeighborResolver, PacketTemplate, RouteProvider,
-    ScanBatch, ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport,
-    TemplateValues, classify_scan_response,
-};

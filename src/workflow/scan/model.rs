@@ -1,3 +1,14 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{
+    AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_TEMPLATE_PACKETS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES,
+    DEFAULT_SCAN_BATCH_SIZE, DecodedPacket, Deserialize, Diagnostic, Duration, Frame, HashSet,
+    IpAddr, MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE, Packet,
+    ScanError, Serialize, Stats, SystemTime, Target, fmt,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanTransport {
@@ -297,10 +308,3 @@ pub trait ScanExecutor {
         batch: &ScanBatch,
     ) -> Result<ScanBatchExecution, crate::workflow::BoundaryError>;
 }
-use super::{
-    AddressFamily, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    DEFAULT_MAX_SCAN_PORTS, DEFAULT_MAX_TEMPLATE_PACKETS, DEFAULT_MAX_UNDECODED_SCAN_FRAMES,
-    DEFAULT_SCAN_BATCH_SIZE, DecodedPacket, Deserialize, Diagnostic, Duration, Frame, HashSet,
-    IpAddr, MAX_SCAN_ATTEMPTS, MAX_SCAN_DURATION, MAX_SCAN_PROBES, MAX_SCAN_RATE, Packet,
-    ScanError, Serialize, Stats, SystemTime, Target, fmt,
-};

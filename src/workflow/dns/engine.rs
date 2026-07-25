@@ -1,7 +1,26 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Executes a bounded DNS workflow through the shared policy, retry clock,
 /// protocol registry, and exchange seams. Every retry repeats declared-name
 /// authorization, resolution, and authorization of every answer before a new
 /// probe is constructed.
+use super::Clock;
+use super::wire::raw_payload;
+use super::{
+    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, Deadline,
+    DeadlineExceeded, DecodedPacket, DnsAttemptEvidence, DnsAttemptStatus, DnsError, DnsExchange,
+    DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe,
+    DnsRequest, DnsResponseClassification, DnsResult, DnsUndecodedEvidence, Duration,
+    EvidenceBudget, ExchangeEvidenceError, MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet,
+    ProtocolRegistry, ResponseCandidate, ResponseEvidence, Stats, SystemTime,
+    classify_dns_response, encode_dns_query, push_diagnostic_once, push_undecoded_limit_diagnostic,
+    response_within_deadline, retain_evidence, select_response_candidate,
+    validate_aggregate_evidence_limits, validate_capture_statistics_evidence, validate_frame,
+    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
+};
+use crate::packet::semantics::BuiltinProtocol;
+
 pub fn dns<A, E, C>(
     request: &DnsRequest,
     authorizer: &mut A,
@@ -587,18 +606,3 @@ fn duration_limit(error: DeadlineExceeded) -> DnsError {
         limit: error.limit,
     }
 }
-use super::Clock;
-use super::wire::raw_payload;
-use super::{
-    Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, Deadline,
-    DeadlineExceeded, DecodedPacket, DnsAttemptEvidence, DnsAttemptStatus, DnsError, DnsExchange,
-    DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe,
-    DnsRequest, DnsResponseClassification, DnsResult, DnsUndecodedEvidence, Duration,
-    EvidenceBudget, ExchangeEvidenceError, MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet,
-    ProtocolRegistry, ResponseCandidate, ResponseEvidence, Stats, SystemTime,
-    classify_dns_response, encode_dns_query, push_diagnostic_once, push_undecoded_limit_diagnostic,
-    response_within_deadline, retain_evidence, select_response_candidate,
-    validate_aggregate_evidence_limits, validate_capture_statistics_evidence, validate_frame,
-    validate_response_frames_and_deadlines, validate_sent_byte_accounting,
-};
-use crate::packet::semantics::BuiltinProtocol;

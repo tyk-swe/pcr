@@ -1,5 +1,19 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Canonicalizes a bounded ASCII DNS name for wire construction and
 /// case-insensitive correlation. The returned form always has a trailing dot.
+use super::{
+    Bytes, DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE,
+    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
+    DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK,
+    DNS_RESERVED_MASK, DNS_TYPE_OPT, DecodedPacket, DiagnosticSeverity, DnsEdns, DnsEdnsOption,
+    DnsLimits, DnsName, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord,
+    DnsSection, DnsWireError, FieldValue, Ipv4Addr, Ipv6Addr, Packet, ProbeTransport,
+    ProtocolRegistry, ValidatedDnsResponse, probe,
+};
+use crate::packet::semantics::BuiltinProtocol;
+
 pub fn canonical_query_name(value: &str) -> Result<String, DnsWireError> {
     if value == "." {
         return Ok(".".to_owned());
@@ -913,13 +927,3 @@ pub(super) fn raw_payload(packet: &Packet) -> Option<Bytes> {
         _ => None,
     }
 }
-use super::{
-    Bytes, DNS_CLASS_IN, DNS_FLAG_AUTHENTICATED_DATA, DNS_FLAG_AUTHORITATIVE,
-    DNS_FLAG_CHECKING_DISABLED, DNS_FLAG_RECURSION_AVAILABLE, DNS_FLAG_RECURSION_DESIRED,
-    DNS_FLAG_RESPONSE, DNS_FLAG_TRUNCATED, DNS_HEADER_BYTES, DNS_OPCODE_MASK, DNS_RCODE_MASK,
-    DNS_RESERVED_MASK, DNS_TYPE_OPT, DecodedPacket, DiagnosticSeverity, DnsEdns, DnsEdnsOption,
-    DnsLimits, DnsName, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord,
-    DnsSection, DnsWireError, FieldValue, Ipv4Addr, Ipv6Addr, Packet, ProbeTransport,
-    ProtocolRegistry, ValidatedDnsResponse, probe,
-};
-use crate::packet::semantics::BuiltinProtocol;

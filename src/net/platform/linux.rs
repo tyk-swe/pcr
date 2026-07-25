@@ -5,7 +5,6 @@
 
 #![forbid(unsafe_code)]
 
-#[cfg(feature = "native-route")]
 use std::{
     any::Any,
     cell::RefCell,
@@ -20,37 +19,29 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-#[cfg(feature = "native-route")]
 use futures_util::TryStreamExt;
-#[cfg(feature = "native-route")]
 use rtnetlink::packet_route::{
     address::AddressAttribute,
     link::{LinkAttribute, LinkFlags, LinkLayerType},
     route::{RouteAddress, RouteAttribute, RouteMetric, RouteNextHopFlags, RouteType},
 };
-#[cfg(feature = "native-route")]
 use rtnetlink::{Handle, RouteMessageBuilder, new_connection};
 
-#[cfg(feature = "native-route")]
 use super::{
     NativeRouteSnapshot, find_interface, finish_route, interface_decision,
     validate_preferred_source_family,
 };
-#[cfg(feature = "native-route")]
 use crate::capture::LinkType;
-#[cfg(feature = "native-route")]
 use crate::net::{
     interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{LinkCapability, MacAddress},
     route::{InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason},
 };
 
-#[cfg(feature = "native-route")]
 pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
     with_netlink(|handle| async move { query_interfaces(&handle).await })
 }
 
-#[cfg(feature = "native-route")]
 pub(super) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -146,12 +137,10 @@ pub(super) fn route(
     })
 }
 
-#[cfg(feature = "native-route")]
 pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, NativeRouteError> {
     interface_decision(find_interface(interfaces()?, requested)?)
 }
 
-#[cfg(feature = "native-route")]
 fn with_netlink<F, Fut, T>(operation: F) -> Result<T, NativeRouteError>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
@@ -161,7 +150,6 @@ where
     with_netlink_for_namespace(current_network_namespace(), operation)
 }
 
-#[cfg(feature = "native-route")]
 fn with_netlink_for_namespace<F, Fut, T>(
     namespace: Option<NetworkNamespaceId>,
     operation: F,
@@ -183,7 +171,6 @@ where
     }
 }
 
-#[cfg(feature = "native-route")]
 fn with_netlink_in_namespace<F, Fut, T>(
     namespace: NetworkNamespaceId,
     operation: F,
@@ -223,14 +210,12 @@ where
     })
 }
 
-#[cfg(feature = "native-route")]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct NetworkNamespaceId {
     device: u64,
     inode: u64,
 }
 
-#[cfg(feature = "native-route")]
 fn current_network_namespace() -> Option<NetworkNamespaceId> {
     let metadata = fs::metadata("/proc/thread-self/ns/net").ok()?;
     Some(NetworkNamespaceId {
@@ -239,7 +224,6 @@ fn current_network_namespace() -> Option<NetworkNamespaceId> {
     })
 }
 
-#[cfg(feature = "native-route")]
 fn with_uncached_netlink<F, Fut, T>(operation: F) -> Result<T, NativeRouteError>
 where
     F: FnOnce(Handle) -> Fut + Send + 'static,
@@ -267,21 +251,16 @@ where
         .map_err(|_| netlink_worker_panicked())?
 }
 
-#[cfg(feature = "native-route")]
 thread_local! {
     static NETLINK_WORKER: RefCell<Option<NetlinkWorker>> = const { RefCell::new(None) };
 }
 
-#[cfg(feature = "native-route")]
 type ErasedNetlinkResult = Result<Box<dyn Any + Send>, NativeRouteError>;
 
-#[cfg(feature = "native-route")]
 type NetlinkFuture = Pin<Box<dyn Future<Output = ErasedNetlinkResult> + Send>>;
 
-#[cfg(feature = "native-route")]
 type NetlinkOperation = Box<dyn FnOnce(Handle) -> NetlinkFuture + Send>;
 
-#[cfg(feature = "native-route")]
 enum NetlinkCommand {
     Execute {
         operation: NetlinkOperation,
@@ -290,14 +269,12 @@ enum NetlinkCommand {
     Shutdown,
 }
 
-#[cfg(feature = "native-route")]
 struct NetlinkWorker {
     namespace: NetworkNamespaceId,
     commands: Sender<NetlinkCommand>,
     thread: Option<JoinHandle<()>>,
 }
 
-#[cfg(feature = "native-route")]
 impl NetlinkWorker {
     fn start(namespace: NetworkNamespaceId) -> Result<Self, NativeRouteError> {
         let (commands, command_receiver) = mpsc::channel();
@@ -372,21 +349,18 @@ impl NetlinkWorker {
     }
 }
 
-#[cfg(feature = "native-route")]
 impl Drop for NetlinkWorker {
     fn drop(&mut self) {
         let _ = self.shutdown();
     }
 }
 
-#[cfg(feature = "native-route")]
 #[derive(Debug)]
 enum NetlinkExecutionError {
     Operation(NativeRouteError),
     Worker(NativeRouteError),
 }
 
-#[cfg(feature = "native-route")]
 fn netlink_worker(
     commands: Receiver<NetlinkCommand>,
     setup: SyncSender<Result<(), NativeRouteError>>,
@@ -432,21 +406,18 @@ fn netlink_worker(
     connection.abort();
 }
 
-#[cfg(feature = "native-route")]
 fn netlink_worker_panicked() -> NativeRouteError {
     NativeRouteError::InvalidResponse {
         message: "Linux netlink worker panicked".to_owned(),
     }
 }
 
-#[cfg(feature = "native-route")]
 fn netlink_channel_error(message: &'static str) -> NativeRouteError {
     NativeRouteError::InvalidResponse {
         message: format!("Linux netlink worker {message}"),
     }
 }
 
-#[cfg(feature = "native-route")]
 async fn query_interfaces(handle: &Handle) -> Result<Vec<InterfaceInfo>, NativeRouteError> {
     let mut links = handle.link().get().execute();
     let mut interfaces = BTreeMap::new();
@@ -548,7 +519,6 @@ async fn query_interfaces(handle: &Handle) -> Result<Vec<InterfaceInfo>, NativeR
     Ok(interfaces.into_values().collect())
 }
 
-#[cfg(feature = "native-route")]
 fn route_request(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -580,7 +550,6 @@ fn route_request(
     }
 }
 
-#[cfg(feature = "native-route")]
 fn route_address(address: &RouteAddress) -> Option<IpAddr> {
     match address {
         RouteAddress::Inet(address) => Some(IpAddr::V4(*address)),
@@ -589,7 +558,6 @@ fn route_address(address: &RouteAddress) -> Option<IpAddr> {
     }
 }
 
-#[cfg(feature = "native-route")]
 fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRouteError {
     NativeRouteError::OperatingSystem {
         operation,
@@ -597,7 +565,7 @@ fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRou
     }
 }
 
-#[cfg(all(test, feature = "native-route"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::net::route::Provider as RouteProvider;

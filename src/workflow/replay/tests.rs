@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use std::convert::Infallible;
 use std::io::Cursor;
 use std::time::{SystemTime, UNIX_EPOCH};

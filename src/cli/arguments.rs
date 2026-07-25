@@ -3,13 +3,6 @@
 
 //! Clap argument and command models.
 
-mod capture_limits;
-mod network;
-mod offline;
-mod policy;
-mod root;
-mod workflow;
-
 pub(super) use network::{
     CaptureArgs, CliReplayTiming, ExchangeArgs, ReplayArgs, RouteArgs, SendArgs,
 };
@@ -25,3 +18,10 @@ pub(super) use network::CliLinkMode;
 pub(super) use workflow::{
     CliAddressFamily, CliDnsQueryType, CliScanTransport, CliTracerouteStrategy,
 };
+
+mod capture_limits;
+mod network;
+mod offline;
+mod policy;
+mod root;
+mod workflow;

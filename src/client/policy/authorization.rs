@@ -1,8 +1,11 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use std::net::IpAddr;
 
 use crate::packet::{Packet, semantics};
 
-use super::super::helpers::is_public;
+use super::super::address::is_public;
 use super::super::target::{
     Hostname, HostnameResolver, LiveTarget, ResolvedTarget, TargetResolutionError,
 };

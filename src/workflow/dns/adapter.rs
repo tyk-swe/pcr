@@ -1,5 +1,13 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.
+use super::{
+    BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse, ExchangeIo,
+    NeighborResolver, PacketTemplate, ProbeTransport, RouteProvider, probe,
+};
+
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
     options: crate::client::exchange::Options,
@@ -104,7 +112,3 @@ fn invalid_client_result(message: impl Into<String>) -> BoundaryError {
         "treat the DNS operation as incomplete because client evidence was inconsistent",
     )
 }
-use super::{
-    BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse, ExchangeIo,
-    NeighborResolver, PacketTemplate, ProbeTransport, RouteProvider, probe,
-};

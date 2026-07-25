@@ -1,5 +1,15 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Streams, authorizes, schedules, and transmits a capture without retaining
 /// more than the current frame.
+use super::wire::{replay_link_mode, validate_transmission_evidence};
+use super::{
+    Deadline, DeadlineExceeded, Duration, Format, Read, Reader, ReplayAuthorizationContext,
+    ReplayAuthorizer, ReplayError, ReplayFrameEvidence, ReplayOptions, ReplaySummary,
+    ReplayTransmitter, WorkflowClock,
+};
+
 pub fn replay_capture<R, A, T, C, F>(
     reader: &mut Reader<R>,
     options: &ReplayOptions,
@@ -212,9 +222,3 @@ fn duration_limit(sequence: u64, error: DeadlineExceeded) -> ReplayError {
         limit: error.limit,
     }
 }
-use super::wire::{replay_link_mode, validate_transmission_evidence};
-use super::{
-    Deadline, DeadlineExceeded, Duration, Format, Read, Reader, ReplayAuthorizationContext,
-    ReplayAuthorizer, ReplayError, ReplayFrameEvidence, ReplayOptions, ReplaySummary,
-    ReplayTransmitter, WorkflowClock,
-};

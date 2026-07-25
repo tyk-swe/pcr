@@ -122,6 +122,8 @@ jobs:
         run: cargo +1.96.0 check --locked --all-targets --all-features
       - name: Formatting
         run: cargo fmt --all -- --check
+      - name: Source conventions
+        run: scripts/check-source-conventions
       - name: Warning-free documentation
         env:
           RUSTDOCFLAGS: -D warnings

@@ -107,9 +107,6 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
     }
 
     fn await_capture_readiness(&mut self) -> Result<(), LiveIoError> {
-        if !self.capture.supports_monotonic_ingress_time() {
-            return Err(LiveIoError::MissingMonotonicCaptureTimestamp);
-        }
         let readiness_timeout = self.deadline.checked_duration_since(Instant::now()).ok_or(
             LiveIoError::DeadlineExceeded {
                 operation: "waiting for capture readiness",

@@ -66,16 +66,15 @@ impl PacketIo for LifecycleIo {
 struct LifecycleCapture(Arc<Mutex<Vec<&'static str>>>);
 
 impl CaptureSession for LifecycleCapture {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, _timeout: Duration) -> Result<(), LiveIoError> {
         self.0.lock().unwrap().push("ready");
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedFrame>, LiveIoError> {
         Ok(None)
     }
 

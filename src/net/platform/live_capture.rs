@@ -119,10 +119,6 @@ impl NativeCaptureSession {
 }
 
 impl CaptureSession for NativeCaptureSession {
-    fn supports_monotonic_ingress_time(&self) -> bool {
-        true
-    }
-
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         validate_timeout(timeout)?;
         let deadline = Instant::now()
@@ -154,11 +150,6 @@ impl CaptureSession for NativeCaptureSession {
                 message: "native capture worker closed before reporting readiness".to_owned(),
             })
         }
-    }
-
-    fn next_frame(&mut self, timeout: Duration) -> Result<Option<Frame>, LiveIoError> {
-        self.next_captured_frame(timeout)
-            .map(|captured| captured.map(|captured| captured.frame))
     }
 
     fn next_captured_frame(
@@ -780,7 +771,11 @@ mod tests {
             Arc::clone(&interrupts),
         );
         session.wait_ready(Duration::from_secs(1)).unwrap();
-        let frame = session.next_frame(Duration::from_secs(1)).unwrap().unwrap();
+        let frame = session
+            .next_captured_frame(Duration::from_secs(1))
+            .unwrap()
+            .unwrap()
+            .frame;
         assert_eq!(frame.interface, Some(7));
         assert_eq!(frame.bytes().as_ref(), &[1, 1, 1, 1]);
         session.shutdown().unwrap();
@@ -805,7 +800,7 @@ mod tests {
             Err(LiveIoError::InvalidCaptureTimeout { .. })
         ));
         assert!(matches!(
-            session.next_frame(Duration::MAX),
+            session.next_captured_frame(Duration::MAX),
             Err(LiveIoError::InvalidCaptureTimeout { .. })
         ));
         session.shutdown().unwrap();
@@ -832,7 +827,7 @@ mod tests {
             thread::yield_now();
         }
         let error = loop {
-            match session.next_frame(Duration::from_millis(50)) {
+            match session.next_captured_frame(Duration::from_millis(50)) {
                 Err(error) => break error,
                 Ok(_) if Instant::now() < deadline => thread::yield_now(),
                 Ok(_) => panic!("capture did not surface its overflow error"),
@@ -859,7 +854,11 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(1);
         let frame = loop {
             if session.statistics().dropped_frames == 1 {
-                break session.next_frame(Duration::ZERO).unwrap().unwrap();
+                break session
+                    .next_captured_frame(Duration::ZERO)
+                    .unwrap()
+                    .unwrap()
+                    .frame;
             }
             assert!(Instant::now() < deadline);
             thread::yield_now();
@@ -886,7 +885,11 @@ mod tests {
         let deadline = Instant::now() + Duration::from_secs(1);
         let frame = loop {
             if session.statistics().dropped_frames == 1 {
-                break session.next_frame(Duration::ZERO).unwrap().unwrap();
+                break session
+                    .next_captured_frame(Duration::ZERO)
+                    .unwrap()
+                    .unwrap()
+                    .frame;
             }
             assert!(Instant::now() < deadline);
             thread::yield_now();
@@ -928,7 +931,7 @@ mod tests {
         let error = match session.wait_ready(Duration::from_secs(1)) {
             Err(error) => error,
             Ok(()) => loop {
-                match session.next_frame(Duration::from_millis(50)) {
+                match session.next_captured_frame(Duration::from_millis(50)) {
                     Err(error) => break error,
                     Ok(_) if Instant::now() < deadline => thread::yield_now(),
                     Ok(_) => panic!("capture did not propagate its injected source failure"),
@@ -956,7 +959,9 @@ mod tests {
         }));
         session.wait_ready(Duration::from_secs(1)).unwrap();
         proceed.store(true, Ordering::Release);
-        let error = session.next_frame(Duration::from_secs(1)).unwrap_err();
+        let error = session
+            .next_captured_frame(Duration::from_secs(1))
+            .unwrap_err();
         assert!(matches!(error, LiveIoError::Capture { .. }));
         session.shutdown().unwrap();
     }

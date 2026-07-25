@@ -7,8 +7,8 @@ mod routing;
 
 pub(super) use capture_io::{
     ChangedWireIo, DeadlineConsumingExchangeIo, DropObservedCapture, EndlessCaptureIo,
-    MissingMonotonicIo, PanicShutdownCapture, PartialIo, ReadinessAndShutdownFailCapture,
-    ReadinessAndShutdownFailIo, RecordingIo, ScriptedExchangeIo, SlowSendIo, UnmarkedExchangeIo,
+    PanicShutdownCapture, PartialIo, ReadinessAndShutdownFailCapture, ReadinessAndShutdownFailIo,
+    RecordingIo, ScriptedExchangeIo, SlowSendIo, UnmarkedExchangeIo,
 };
 pub(super) use packet_codec::{
     canonical_link_intent_packets, exchange_with_capture_statistics, packet,

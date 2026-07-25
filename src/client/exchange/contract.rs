@@ -48,10 +48,6 @@ impl<C: CaptureSession> CaptureGuard<C> {
         }
     }
 
-    pub(crate) fn supports_monotonic_ingress_time(&self) -> bool {
-        self.inner.supports_monotonic_ingress_time()
-    }
-
     pub(crate) fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         self.inner.wait_ready(timeout)
     }

@@ -69,11 +69,10 @@ use support::{
     ChangedWireIo, CountingNeighbors, CountingRoutes, CustomRouteLayer,
     DeadlineConsumingExchangeIo, DestinationRoutes, DropObservedCapture, EndlessCaptureIo,
     FailingNeighbors, FixedRoutes, InterfaceRoutes, MacSensitiveCodec, MacSensitiveLayer,
-    MissingMonotonicIo, PanicShutdownCapture, PartialIo, ReadinessAndShutdownFailCapture,
-    ReadinessAndShutdownFailIo, RecordingHostnameResolver, RecordingIo, RejectingPacketIo,
-    ScriptedExchangeIo, SlowMatcher, SlowRoutes, SlowSendIo, UnmarkedExchangeIo,
-    canonical_link_intent_packets, exchange_with_capture_statistics, packet,
-    prepared_exchange_packet, route,
+    PanicShutdownCapture, PartialIo, ReadinessAndShutdownFailCapture, ReadinessAndShutdownFailIo,
+    RecordingHostnameResolver, RecordingIo, RejectingPacketIo, ScriptedExchangeIo, SlowMatcher,
+    SlowRoutes, SlowSendIo, UnmarkedExchangeIo, canonical_link_intent_packets,
+    exchange_with_capture_statistics, packet, prepared_exchange_packet, route,
 };
 
 mod support;

@@ -110,12 +110,18 @@ impl CaptureSession for ExternalCapture {
         Ok(())
     }
 
-    fn next_frame(&mut self, _timeout: Duration) -> Result<Option<CapturedFrame>, Error> {
+    fn next_captured_frame(
+        &mut self,
+        _timeout: Duration,
+    ) -> Result<Option<CapturedCaptureFrame>, Error> {
         assert!(
             self.ready,
             "capture must be explicitly readied before polling"
         );
-        Ok(self.frame.take())
+        Ok(self
+            .frame
+            .take()
+            .map(CapturedCaptureFrame::without_ingress_time))
     }
 
     fn shutdown(&mut self) -> Result<(), Error> {

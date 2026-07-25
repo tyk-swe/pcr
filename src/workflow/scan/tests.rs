@@ -20,7 +20,9 @@ use crate::client::target::{Error as TargetResolutionError, Resolver as Hostname
 use crate::error::Classification as ErrorClassification;
 use crate::net::{
     Error as LiveIoError,
-    capture::{CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics},
+    capture::{
+        CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
+    },
     link::{LinkCapability, LinkMode},
     route::{
         DestinationScope, InterfaceId, NeighborError, NeighborRequest, NeighborResolution,

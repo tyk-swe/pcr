@@ -255,8 +255,8 @@ where
         if remaining.is_zero() {
             break;
         }
-        let frame = match capture.next_frame(remaining) {
-            Ok(Some(frame)) => frame,
+        let frame = match capture.next_captured_frame(remaining) {
+            Ok(Some(captured)) => captured.frame,
             Ok(None) => break,
             Err(source) => {
                 let error = CliError::classified(source).at_sequence(frames);

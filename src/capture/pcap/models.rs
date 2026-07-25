@@ -288,8 +288,6 @@ pub enum Error {
         expected: u32,
         actual: u32,
     },
-    #[error("no pcapng interface is registered for link type {link_type}")]
-    NoInterfaceForLinkType { link_type: u32 },
     #[error("more than one pcapng interface uses link type {link_type}; select one explicitly")]
     AmbiguousInterface { link_type: u32 },
     #[error("{field} metadata cannot be represented in {format}")]

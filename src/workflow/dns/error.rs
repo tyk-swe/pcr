@@ -46,8 +46,6 @@ pub enum DnsWireError {
     ReservedLabelLength { offset: usize },
     #[error("DNS label at byte {offset} is {actual} bytes; maximum is 63")]
     LabelTooLong { offset: usize, actual: usize },
-    #[error("DNS label at byte {offset} contains unsupported non-ASCII/control data")]
-    InvalidLabelData { offset: usize },
     #[error("DNS response contains more than one EDNS OPT pseudo-record")]
     DuplicateEdns,
     #[error("DNS EDNS version {version} is unsupported")]

@@ -66,7 +66,7 @@ impl Layer2Sender for ExternalLayer2 {
         assert_eq!(frame.route().plan.mode, Mode::Layer2);
         Ok(Report {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -79,7 +79,7 @@ impl Layer3Sender for ExternalLayer3 {
         assert_eq!(frame.route().plan.mode, Mode::Layer3);
         Ok(Report {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: None,
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }

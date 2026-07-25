@@ -634,9 +634,7 @@ fn validate_send_report(
             },
         ));
     }
-    if let Some(wire_bytes) = report.wire_bytes
-        && wire_bytes != *expected
-    {
+    if report.wire_bytes != *expected {
         return Err(map_io_error(
             request,
             "validating discovery send evidence",

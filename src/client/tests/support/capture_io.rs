@@ -17,7 +17,7 @@ impl PacketIo for ScriptedExchangeIo {
         self.events.lock().unwrap().push("send");
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -30,7 +30,7 @@ impl PacketIo for RecordingIo {
         self.0.lock().unwrap().push(frame.bytes().clone());
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -42,7 +42,7 @@ impl PacketIo for PartialIo {
     fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, LiveIoError> {
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len().saturating_sub(1),
-            wire_bytes: None,
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -56,7 +56,7 @@ impl PacketIo for ChangedWireIo {
         changed[0] ^= 1;
         Ok(IoSendReport {
             bytes_sent: changed.len(),
-            wire_bytes: Some(Bytes::from(changed)),
+            wire_bytes: Bytes::from(changed),
         })
     }
 }
@@ -148,7 +148,7 @@ impl PacketIo for DeadlineConsumingExchangeIo {
         self.events.lock().unwrap().push("send");
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -292,7 +292,7 @@ impl PacketIo for EndlessCaptureIo {
         self.sends.fetch_add(1, Ordering::SeqCst);
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }
@@ -346,7 +346,7 @@ impl PacketIo for SlowSendIo {
         std::thread::sleep(self.delay);
         Ok(IoSendReport {
             bytes_sent: frame.bytes().len(),
-            wire_bytes: Some(frame.bytes().clone()),
+            wire_bytes: frame.bytes().clone(),
         })
     }
 }

@@ -99,7 +99,7 @@ impl Layer2Io for ScriptedLayer2Io {
         self.shared.changed.notify_all();
         Ok(IoSendReport {
             bytes_sent: bytes.len(),
-            wire_bytes: Some(bytes),
+            wire_bytes: bytes,
         })
     }
 }

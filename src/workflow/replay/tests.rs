@@ -352,7 +352,6 @@ struct ConfigurableRecordingTransmitter {
     validation_delay: Duration,
     transmission_delay: Duration,
     return_partial_send: bool,
-    omit_wire_bytes: bool,
     report_different_interface: bool,
 }
 
@@ -395,7 +394,7 @@ impl ReplayTransmitter for ConfigurableRecordingTransmitter {
                 } else {
                     frame.bytes().len()
                 },
-                wire_bytes: (!self.omit_wire_bytes).then(|| frame.bytes().clone()),
+                wire_bytes: frame.bytes().clone(),
             },
         })
     }
@@ -858,34 +857,6 @@ fn replay_capture_when_transmitter_reports_partial_send_returns_transmission_err
                 actual: 1
             }
         }
-    ));
-}
-
-#[test]
-fn replay_capture_when_transmitter_omits_wire_bytes_returns_invalid_evidence() {
-    let mut reader = capture_reader(LinkType::ETHERNET, &[(Duration::ZERO, &[1, 2])]);
-    let mut authorizer = ConfigurableRecordingAuthorizer::default();
-    let mut transmitter = ConfigurableRecordingTransmitter {
-        omit_wire_bytes: true,
-        ..ConfigurableRecordingTransmitter::default()
-    };
-    let mut clock = RecordingClock::default();
-    let error = replay_capture(
-        &mut reader,
-        &replay_options(ReplayTiming::Immediate),
-        &mut authorizer,
-        &mut transmitter,
-        &mut clock,
-        |_| Ok(()),
-    )
-    .unwrap_err();
-
-    assert!(matches!(
-        &error,
-        ReplayError::InvalidEvidence {
-            sequence: 0,
-            message
-        } if message == "backend omitted exact wire bytes"
     ));
 }
 

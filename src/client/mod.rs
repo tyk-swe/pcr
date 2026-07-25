@@ -325,9 +325,7 @@ where
             .send(TransmissionFrame::try_new(&built.bytes, &route)?)?;
         validate_send_report(&built.bytes, &io_report)?;
         let bytes_sent = io_report.bytes_sent;
-        let wire_bytes = io_report
-            .wire_bytes
-            .or_else(|| route.plan.synthesized_ethernet.then(|| built.bytes.clone()));
+        let wire_bytes = io_report.wire_bytes;
         Ok(SendReport {
             built,
             route,

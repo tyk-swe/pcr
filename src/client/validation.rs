@@ -20,18 +20,16 @@ pub(super) fn validate_send_report(
             actual: report.bytes_sent,
         });
     }
-    if let Some(wire_bytes) = &report.wire_bytes {
-        if wire_bytes.len() != report.bytes_sent {
-            return Err(LiveIoError::InvalidSendReport {
-                bytes_sent: report.bytes_sent,
-                wire_bytes: wire_bytes.len(),
-            });
-        }
-        if wire_bytes != expected {
-            return Err(LiveIoError::InvalidSendEvidence {
-                message: "wire_bytes differ from the exact submitted packet".to_owned(),
-            });
-        }
+    if report.wire_bytes.len() != report.bytes_sent {
+        return Err(LiveIoError::InvalidSendReport {
+            bytes_sent: report.bytes_sent,
+            wire_bytes: report.wire_bytes.len(),
+        });
+    }
+    if report.wire_bytes != *expected {
+        return Err(LiveIoError::InvalidSendEvidence {
+            message: "wire_bytes differ from the exact submitted packet".to_owned(),
+        });
     }
     Ok(())
 }

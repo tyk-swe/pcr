@@ -272,19 +272,12 @@ pub(super) fn validate_transmission_evidence(
             },
         });
     }
-    let wire_bytes = report
-        .wire_bytes
-        .as_ref()
-        .ok_or_else(|| ReplayError::InvalidEvidence {
-            sequence,
-            message: "backend omitted exact wire bytes".to_owned(),
-        })?;
-    if wire_bytes != frame.bytes() {
+    if report.wire_bytes != *frame.bytes() {
         return Err(ReplayError::InvalidEvidence {
             sequence,
             message: format!(
                 "backend returned {} wire bytes that differ from the {} submitted bytes",
-                wire_bytes.len(),
+                report.wire_bytes.len(),
                 frame.bytes().len()
             ),
         });

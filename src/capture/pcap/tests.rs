@@ -695,7 +695,6 @@ fn pcapng_writer_bounds_interfaces_atomically() {
         },
     )
     .unwrap();
-    assert_eq!(writer.interface_limit(), 1);
     assert_eq!(writer.add_interface(LinkType::ETHERNET).unwrap(), 0);
     let bytes_after_first = writer.get_ref().len();
 

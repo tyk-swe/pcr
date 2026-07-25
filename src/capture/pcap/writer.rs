@@ -210,11 +210,6 @@ impl<W: Write> Writer<W> {
         self.max_size
     }
 
-    /// Returns the configured PCAPNG interface limit.
-    pub fn interface_limit(&self) -> usize {
-        self.max_interfaces
-    }
-
     /// Applies aggregate frame and captured-payload limits to future writes.
     ///
     /// Lowering a limit below already committed output is rejected without

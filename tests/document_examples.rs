@@ -305,6 +305,29 @@ fn published_dissect_success_output_matches_the_cli() {
 }
 
 #[test]
+#[cfg(feature = "cli")]
+fn published_protocol_discovery_outputs_match_the_cli() {
+    for (arguments, example_name) in [
+        (
+            vec!["--output", "json", "protocols"],
+            "output-protocols-success.json",
+        ),
+        (
+            vec!["--output", "json", "protocols", "IP4"],
+            "output-protocols-detail-success.json",
+        ),
+        (
+            vec!["--output", "json", "protocols", "unknown"],
+            "output-protocols-error.json",
+        ),
+    ] {
+        let output = binary().args(arguments).output().unwrap();
+        let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(actual, json_file(example_name), "{example_name}");
+    }
+}
+
+#[test]
 fn published_route_and_live_success_outputs_match_typed_contracts() {
     let plan = AggregateOutput::success(
         CommandName::Plan,

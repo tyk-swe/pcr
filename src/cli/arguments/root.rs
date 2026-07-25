@@ -7,8 +7,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use packetcraftr::output;
 
 use super::{
-    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs, ReadArgs, ReplayArgs,
-    RouteArgs, ScanArgs, SendArgs, TracerouteArgs,
+    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs, ProtocolsArgs, ReadArgs,
+    ReplayArgs, RouteArgs, ScanArgs, SendArgs, TracerouteArgs,
 };
 
 const ROOT_AFTER_HELP: &str = r#"Output formats:
@@ -36,6 +36,10 @@ const DISSECT_AFTER_HELP: &str = r#"When neither --hex nor --file is supplied, r
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
   packetcraftr --output json dissect --file frame.bin --link-type 1"#;
+const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
+  packetcraftr protocols
+  packetcraftr protocols ipv4
+  packetcraftr --output json protocols IP4"#;
 const READ_AFTER_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcap"#;
@@ -186,6 +190,9 @@ pub(in crate::cli) enum Command {
     /// Decode a frame with bounded, registry-driven dissection.
     #[command(after_long_help = DISSECT_AFTER_HELP)]
     Dissect(DissectArgs),
+    /// List built-in protocols or describe one protocol.
+    #[command(after_long_help = PROTOCOLS_AFTER_HELP)]
+    Protocols(ProtocolsArgs),
     /// Stream frames from a classic PCAP or PCAPNG file.
     #[command(after_long_help = READ_AFTER_HELP)]
     Read(ReadArgs),

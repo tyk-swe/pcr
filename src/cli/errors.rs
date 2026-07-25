@@ -169,6 +169,7 @@ pub(super) fn command_from_env() -> Option<output::contract::Command> {
     const COMMANDS: &[(&str, output::contract::Command)] = &[
         ("build", output::contract::Command::Build),
         ("dissect", output::contract::Command::Dissect),
+        ("protocols", output::contract::Command::Protocols),
         ("plan", output::contract::Command::Plan),
         ("send", output::contract::Command::Send),
         ("exchange", output::contract::Command::Exchange),

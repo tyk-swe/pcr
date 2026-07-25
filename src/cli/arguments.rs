@@ -13,7 +13,9 @@ mod workflow;
 pub(super) use network::{
     CaptureArgs, CliReplayTiming, ExchangeArgs, ReplayArgs, RouteArgs, SendArgs,
 };
-pub(super) use offline::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs, RecipeArgs};
+pub(super) use offline::{
+    BuildArgs, CliBuildMode, DissectArgs, ProtocolsArgs, ReadArgs, RecipeArgs,
+};
 pub(super) use root::{Cli, CliColorChoice, Command};
 pub(super) use workflow::{DnsArgs, FuzzArgs, ScanArgs, TracerouteArgs};
 

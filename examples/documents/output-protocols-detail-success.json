@@ -1,0 +1,33 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "protocols",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "protocol": {
+      "protocol": "ipv4",
+      "aliases": ["ip", "ip4"],
+      "build": true,
+      "dissect": true,
+      "exact_round_trip": true,
+      "matcher": false,
+      "decode_only": false,
+      "fields": [
+        {"name": "dscp_ecn", "kind": "unsigned", "required": false, "derived": false, "description": "DSCP and ECN octet"},
+        {"name": "total_length", "kind": "unsigned", "required": false, "derived": true, "description": "IPv4 total length"},
+        {"name": "identification", "kind": "unsigned", "required": false, "derived": false, "description": "Fragment identification"},
+        {"name": "reserved_flag", "kind": "bool", "required": false, "derived": false, "description": "Reserved IPv4 flag bit"},
+        {"name": "dont_fragment", "kind": "bool", "required": false, "derived": false, "description": "Don't-fragment flag"},
+        {"name": "more_fragments", "kind": "bool", "required": false, "derived": false, "description": "More-fragments flag"},
+        {"name": "fragment_offset", "kind": "unsigned", "required": false, "derived": false, "description": "Fragment offset in eight-byte units"},
+        {"name": "ttl", "kind": "unsigned", "required": true, "derived": false, "description": "Time to live"},
+        {"name": "protocol", "kind": "unsigned", "required": false, "derived": true, "description": "Next protocol discriminator"},
+        {"name": "checksum", "kind": "unsigned", "required": false, "derived": true, "description": "IPv4 header checksum"},
+        {"name": "source", "kind": "ipv4", "required": true, "derived": false, "description": "Source IPv4 address"},
+        {"name": "destination", "kind": "ipv4", "required": true, "derived": false, "description": "Destination IPv4 address"},
+        {"name": "options", "kind": "bytes", "required": false, "derived": false, "description": "Verbatim IPv4 option bytes"}
+      ]
+    }
+  },
+  "diagnostics": []
+}

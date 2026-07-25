@@ -76,6 +76,21 @@ fn packet_sources_are_mutually_exclusive() {
 }
 
 #[test]
+fn protocols_cli_parses_an_optional_protocol_name() {
+    let list = Cli::try_parse_from(["packetcraftr", "protocols"]).unwrap();
+    let Command::Protocols(arguments) = list.command else {
+        panic!("expected protocols command");
+    };
+    assert_eq!(arguments.protocol, None);
+
+    let detail = Cli::try_parse_from(["packetcraftr", "protocols", "IP4"]).unwrap();
+    let Command::Protocols(arguments) = detail.command else {
+        panic!("expected protocols command");
+    };
+    assert_eq!(arguments.protocol.as_deref(), Some("IP4"));
+}
+
+#[test]
 fn global_colour_choice_parses_before_or_after_the_subcommand() {
     for arguments in [
         [

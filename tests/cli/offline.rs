@@ -126,3 +126,112 @@ fn packet_document_build_dissect_capture_read_pipeline_is_exact() {
         std::fs::remove_file(path).unwrap();
     }
 }
+
+#[test]
+fn protocols_text_lists_manifest_order_and_describes_ordered_fields() {
+    let list = binary().arg("protocols").output().unwrap();
+    assert!(list.status.success());
+    assert!(list.stderr.is_empty());
+    let lines = std::str::from_utf8(&list.stdout)
+        .unwrap()
+        .lines()
+        .collect::<Vec<_>>();
+    assert_eq!(
+        lines.len(),
+        packetcraftr::protocol::support::BUILTIN_PROTOCOLS.len()
+    );
+    assert!(lines[0].starts_with("arp aliases=[] build=true"));
+    assert!(lines[8].starts_with("ipv4 aliases=[ip, ip4] build=true"));
+    assert!(lines[19].starts_with("raw_ip aliases=[rawip] build=false"));
+    assert!(lines[24].starts_with("vlan8021ad aliases=[dot1ad, 8021ad, qinq]"));
+
+    let detail = binary().args(["protocols", "IP4"]).output().unwrap();
+    assert!(detail.status.success());
+    assert!(detail.stderr.is_empty());
+    let detail = String::from_utf8(detail.stdout).unwrap();
+    assert!(detail.starts_with("protocol: ipv4\naliases: [ip, ip4]\n"));
+    assert!(detail.contains("\nfields:\n  dscp_ecn kind=unsigned"));
+    assert!(
+        detail.find("dscp_ecn").unwrap() < detail.find("total_length").unwrap(),
+        "{detail}"
+    );
+    assert!(detail.contains("  options kind=bytes"));
+}
+
+#[test]
+fn protocols_json_lists_describes_aliases_and_classifies_unknown_names() {
+    let list = binary()
+        .args(["--output", "json", "protocols"])
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    assert!(list.stderr.is_empty());
+    let list: serde_json::Value = serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(list["command"], "protocols");
+    assert_eq!(
+        list["result"]["protocols"].as_array().unwrap().len(),
+        packetcraftr::protocol::support::BUILTIN_PROTOCOLS.len()
+    );
+    assert!(list["result"]["protocols"][0].get("fields").is_none());
+
+    let detail = binary()
+        .args(["--output", "json", "protocols", "IP4"])
+        .output()
+        .unwrap();
+    assert!(detail.status.success());
+    let detail: serde_json::Value = serde_json::from_slice(&detail.stdout).unwrap();
+    assert_eq!(detail["result"]["protocol"]["protocol"], "ipv4");
+    assert_eq!(
+        detail["result"]["protocol"]["fields"][0]["name"],
+        "dscp_ecn"
+    );
+
+    let raw_ip = binary()
+        .args(["--output", "json", "protocols", "RAWIP"])
+        .output()
+        .unwrap();
+    assert!(raw_ip.status.success());
+    let raw_ip: serde_json::Value = serde_json::from_slice(&raw_ip.stdout).unwrap();
+    assert_eq!(raw_ip["result"]["protocol"]["protocol"], "raw_ip");
+    assert_eq!(
+        raw_ip["result"]["protocol"]["fields"],
+        serde_json::json!([])
+    );
+
+    let unknown = binary()
+        .args(["--output", "json", "protocols", "unknown"])
+        .output()
+        .unwrap();
+    assert_eq!(unknown.status.code(), Some(2));
+    assert!(unknown.stderr.is_empty());
+    let unknown: serde_json::Value = serde_json::from_slice(&unknown.stdout).unwrap();
+    assert_eq!(unknown["command"], "protocols");
+    assert_eq!(unknown["error"]["code"], "cli.protocol");
+    assert_eq!(
+        unknown["error"]["remediation"],
+        "run `packetcraftr protocols` to list built-in protocols"
+    );
+}
+
+#[test]
+fn protocols_rejects_non_aggregate_formats_before_name_resolution() {
+    for format in ["ndjson", "hex", "raw", "pcap", "pcapng"] {
+        let output = binary()
+            .args(["--output", format, "protocols", "unknown"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{format}");
+        let structured = matches!(format, "ndjson");
+        if structured {
+            let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+            assert_eq!(value["command"], "protocols");
+            assert_eq!(value["error"]["code"], "cli.output_format");
+        } else {
+            assert!(output.stdout.is_empty(), "{format}");
+            assert!(
+                String::from_utf8_lossy(&output.stderr).contains("protocols does not support"),
+                "{format}"
+            );
+        }
+    }
+}

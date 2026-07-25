@@ -25,6 +25,7 @@ pub enum CommandName {
     Fuzz,
     Interfaces,
     Routes,
+    Protocols,
 }
 
 impl CommandName {
@@ -32,6 +33,7 @@ impl CommandName {
         match self {
             Self::Build => "build",
             Self::Dissect => "dissect",
+            Self::Protocols => "protocols",
             Self::Plan => "plan",
             Self::Send => "send",
             Self::Exchange => "exchange",
@@ -51,7 +53,7 @@ impl CommandName {
     pub const fn formats(self) -> &'static [OutputFormat] {
         match self {
             Self::Build | Self::Dissect => BUILD_FORMATS,
-            Self::Plan | Self::Interfaces | Self::Routes => AGGREGATE_FORMATS,
+            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes => AGGREGATE_FORMATS,
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
             Self::Capture => CAPTURE_FORMATS,
@@ -193,6 +195,10 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract {
         command: CommandName::Dissect,
         formats: BUILD_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Protocols,
+        formats: AGGREGATE_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Plan,

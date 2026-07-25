@@ -171,6 +171,14 @@ The following commands do not open an interface, perform route lookup, resolve
 a hostname, capture live traffic, or transmit packets. They work with the
 portable build.
 
+List the built-in protocol codecs and inspect the ordered reflective fields for
+one protocol. Canonical names and aliases are matched case-insensitively:
+
+```console
+packetcraftr protocols
+packetcraftr --output json protocols IP4
+```
+
 Build exact bytes from an inline expression:
 
 ```console

@@ -117,6 +117,8 @@ fn schemas_reject_representative_contract_violations() {
         json!({"schema": "packetcraftr.output/v1", "command": "build", "mode": "aggregate", "status": "success", "diagnostics": []}),
         json!({"schema": "packetcraftr.output/v1", "command": "unknown", "mode": "aggregate", "status": "error", "error": {}, "diagnostics": []}),
         json!({"schema": "packetcraftr.output/v1", "command": "build", "mode": "stream", "status": "success", "sequence": 0, "result": {}, "diagnostics": []}),
+        json!({"schema": "packetcraftr.output/v1", "command": "protocols", "mode": "aggregate", "status": "success", "result": {"protocols": [{"protocol": "ipv4", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false, "fields": []}]}, "diagnostics": []}),
+        json!({"schema": "packetcraftr.output/v1", "command": "protocols", "mode": "aggregate", "status": "success", "result": {"protocol": {"protocol": "ipv4", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false, "fields": [{"name": "ttl", "kind": "integer", "required": true, "derived": false, "description": ""}]}}, "diagnostics": []}),
     ] {
         assert!(
             !output.is_valid(&malformed),

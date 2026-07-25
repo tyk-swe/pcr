@@ -19,6 +19,7 @@ pub mod envelope;
 pub mod frame;
 pub mod fuzz;
 pub mod network;
+pub mod protocols;
 pub mod replay;
 pub mod scan;
 pub mod traceroute;

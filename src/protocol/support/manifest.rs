@@ -314,6 +314,15 @@ pub const STABLE_WORKFLOW_PROTOCOLS: &[WorkflowProtocolSupport] = &[
         notes: "bounded dissection starts from any registered or unknown numeric link type",
     },
     WorkflowProtocolSupport {
+        workflow: "protocols",
+        builds: NONE,
+        dissects: NONE,
+        matches: NONE,
+        capture_roots: false,
+        packet_independent: true,
+        notes: "built-in protocol inventory has no packet-layer obligation",
+    },
+    WorkflowProtocolSupport {
         workflow: "plan",
         builds: LIVE_BUILD,
         dissects: NONE,
@@ -676,6 +685,7 @@ mod tests {
         let output_commands = [
             "build",
             "dissect",
+            "protocols",
             "plan",
             "send",
             "exchange",
@@ -696,7 +706,7 @@ mod tests {
             .map(|workflow| workflow.workflow)
             .collect::<BTreeSet<_>>();
         assert_eq!(workflow_names, output_commands);
-        assert_eq!(workflow_names.len(), 14);
+        assert_eq!(workflow_names.len(), 15);
 
         for workflow in STABLE_WORKFLOW_PROTOCOLS {
             assert!(unique(workflow.builds), "{} build list", workflow.workflow);
@@ -779,7 +789,7 @@ mod tests {
         assert_eq!(value["schema"], PROTOCOL_SUPPORT_SCHEMA_V1);
         assert_eq!(value["protocols"].as_array().unwrap().len(), 25);
         assert_eq!(value["capture_roots"].as_array().unwrap().len(), 9);
-        assert_eq!(value["workflows"].as_array().unwrap().len(), 14);
+        assert_eq!(value["workflows"].as_array().unwrap().len(), 15);
     }
 
     #[test]

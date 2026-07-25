@@ -35,6 +35,12 @@ fn canonical_output_modules_expose_concise_serializable_contracts() {
 
     assert_serializable::<packetcraftr::output::build::Result>();
     assert_serializable::<packetcraftr::output::dissect::Result>();
+    assert_serializable::<packetcraftr::output::protocols::Summary>();
+    assert_serializable::<packetcraftr::output::protocols::Detail>();
+    assert_serializable::<packetcraftr::output::protocols::Field>();
+    assert_serializable::<packetcraftr::output::protocols::FieldKind>();
+    assert_serializable::<packetcraftr::output::protocols::ListResult>();
+    assert_serializable::<packetcraftr::output::protocols::DetailResult>();
     assert_serializable::<packetcraftr::output::capture::Event>();
     assert_serializable::<packetcraftr::output::network::plan::Result>();
     assert_serializable::<packetcraftr::output::network::send::Result>();

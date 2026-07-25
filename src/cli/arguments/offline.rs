@@ -48,6 +48,13 @@ pub(in crate::cli) struct DissectArgs {
 }
 
 #[derive(Debug, Args)]
+pub(in crate::cli) struct ProtocolsArgs {
+    /// Built-in protocol name or alias to describe.
+    #[arg(value_name = "PROTOCOL")]
+    pub(in crate::cli) protocol: Option<String>,
+}
+
+#[derive(Debug, Args)]
 pub(in crate::cli) struct ReadArgs {
     /// Classic PCAP or PCAPNG input path.
     pub(in crate::cli) path: PathBuf,

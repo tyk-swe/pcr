@@ -11,6 +11,7 @@ fn cli_help_parse_error_and_version_match_the_committed_goldens() {
     const COMMANDS: &[&str] = &[
         "build",
         "dissect",
+        "protocols",
         "read",
         "interfaces",
         "plan",
@@ -110,6 +111,19 @@ fn parse_error_output_detection_respects_the_end_of_options_marker() {
     let value: serde_json::Value =
         serde_json::from_slice(&command_shaped_positional.stdout).unwrap();
     assert!(value["command"].is_null());
+    assert_eq!(value["error"]["kind"], "cli");
+}
+
+#[test]
+fn structured_protocols_parse_errors_identify_the_command() {
+    let output = binary()
+        .args(["--output", "json", "protocols", "ipv4", "extra"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "protocols");
     assert_eq!(value["error"]["kind"], "cli");
 }
 

@@ -56,7 +56,7 @@ fn command_matrix_is_complete_and_has_no_duplicate_formats() {
         OutputFormat::Pcap,
         OutputFormat::Pcapng,
     ];
-    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 14);
+    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 15);
     for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
         assert!(!contract.formats.is_empty());
         assert_eq!(contract.formats, contract.command.formats());
@@ -286,6 +286,10 @@ fn unsupported_format_errors_name_all_supported_choices() {
 
 #[test]
 fn capture_and_replay_formats_are_stable() {
+    assert_eq!(
+        CommandName::Protocols.formats(),
+        &[OutputFormat::Text, OutputFormat::Json]
+    );
     assert_eq!(
         CommandName::Read.formats(),
         &[

@@ -20,7 +20,7 @@ use packetcraftr::{
 use super::arguments::{Cli, Command, RouteArgs};
 use super::commands::{
     run_build, run_capture, run_dissect, run_dns, run_exchange, run_fuzz, run_interfaces, run_plan,
-    run_read, run_replay, run_routes, run_scan, run_send, run_traceroute,
+    run_protocols, run_read, run_replay, run_routes, run_scan, run_send, run_traceroute,
 };
 use super::errors::{CliError, color_choice_from_env, command_from_env, machine_format_from_env};
 use super::input::read_recipe;
@@ -149,6 +149,7 @@ impl Command {
         match self {
             Self::Build(_) => output::contract::Command::Build,
             Self::Dissect(_) => output::contract::Command::Dissect,
+            Self::Protocols(_) => output::contract::Command::Protocols,
             Self::Read(_) => output::contract::Command::Read,
             Self::Interfaces => output::contract::Command::Interfaces,
             Self::Plan(_) => output::contract::Command::Plan,
@@ -174,6 +175,7 @@ pub(super) fn run(cli: Cli) -> Result<(), CliError> {
     match cli.command {
         Command::Build(arguments) => run_build(arguments, output),
         Command::Dissect(arguments) => run_dissect(arguments, output),
+        Command::Protocols(arguments) => run_protocols(arguments, output),
         Command::Read(arguments) => run_read(arguments, output),
         Command::Interfaces => run_interfaces(output),
         Command::Plan(arguments) => run_plan(arguments, output),

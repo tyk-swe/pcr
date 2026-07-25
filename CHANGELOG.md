@@ -11,12 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added an explicit default-enabled `cli` feature so library-only builds can
   omit Clap and terminal-rendering dependencies.
+- Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
+  built-in capability listings, case-insensitive alias lookup, reflective field
+  details, and text or aggregate JSON output.
 
 ### Changed
 
 - Renamed the canonical interface-enumeration feature to
   `native-interfaces`; native route, Layer 2, and Layer 3 capabilities now
   enable it explicitly.
+- Extended the pre-1.0 public output API and `packetcraftr.output/v1` command
+  vocabulary with the additive `protocols` aggregate result contracts.
 
 ### Deprecated
 

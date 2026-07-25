@@ -41,6 +41,7 @@
             null,
             "build",
             "dissect",
+            "protocols",
             "plan",
             "send",
             "exchange",
@@ -132,6 +133,9 @@
             },
             {
               "$ref": "#/$defs/dissectSuccess"
+            },
+            {
+              "$ref": "#/$defs/protocolsSuccess"
             },
             {
               "$ref": "#/$defs/planSuccess"
@@ -314,6 +318,21 @@
         },
         "result": {
           "$ref": "#/$defs/dissectResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "protocolsSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "protocols"
+        },
+        "result": {
+          "$ref": "#/$defs/protocolsResult"
         }
       },
       "required": [
@@ -645,6 +664,172 @@
         },
         "layout": {
           "$ref": "#/$defs/packetLayout"
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocolsResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/protocolListResult"
+        },
+        {
+          "$ref": "#/$defs/protocolDetailResult"
+        }
+      ]
+    },
+    "protocolListResult": {
+      "type": "object",
+      "required": [
+        "protocols"
+      ],
+      "properties": {
+        "protocols": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/protocolSummary"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocolDetailResult": {
+      "type": "object",
+      "required": [
+        "protocol"
+      ],
+      "properties": {
+        "protocol": {
+          "$ref": "#/$defs/protocolDetail"
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocolSummary": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "aliases",
+        "build",
+        "dissect",
+        "exact_round_trip",
+        "matcher",
+        "decode_only"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "build": {
+          "type": "boolean"
+        },
+        "dissect": {
+          "type": "boolean"
+        },
+        "exact_round_trip": {
+          "type": "boolean"
+        },
+        "matcher": {
+          "type": "boolean"
+        },
+        "decode_only": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocolDetail": {
+      "type": "object",
+      "required": [
+        "protocol",
+        "aliases",
+        "build",
+        "dissect",
+        "exact_round_trip",
+        "matcher",
+        "decode_only",
+        "fields"
+      ],
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "minLength": 1
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "build": {
+          "type": "boolean"
+        },
+        "dissect": {
+          "type": "boolean"
+        },
+        "exact_round_trip": {
+          "type": "boolean"
+        },
+        "matcher": {
+          "type": "boolean"
+        },
+        "decode_only": {
+          "type": "boolean"
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/protocolField"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "protocolField": {
+      "type": "object",
+      "required": [
+        "name",
+        "kind",
+        "required",
+        "derived",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "bool",
+            "unsigned",
+            "signed",
+            "text",
+            "bytes",
+            "ipv4",
+            "ipv6",
+            "mac",
+            "list"
+          ]
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "derived": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string"
         }
       },
       "additionalProperties": false

@@ -6,6 +6,7 @@ Usage: packetcraftr [OPTIONS] <COMMAND>
 Commands:
   build       Build exact packet bytes from an expression or document
   dissect     Decode a frame with bounded, registry-driven dissection
+  protocols   List built-in protocols or describe one protocol
   read        Stream frames from a classic PCAP or PCAPNG file
   interfaces  Enumerate local interfaces
   plan        Passively select route, source, MTU, and link mode
@@ -146,6 +147,41 @@ When neither --hex nor --file is supplied, raw frame bytes are read from standar
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
   packetcraftr --output json dissect --file frame.bin --link-type 1
+
+===== packetcraftr protocols --help =====
+List built-in protocols or describe one protocol
+
+Usage: packetcraftr protocols [OPTIONS] [PROTOCOL]
+
+Arguments:
+  [PROTOCOL]
+          Built-in protocol name or alias to describe
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Examples:
+  packetcraftr protocols
+  packetcraftr protocols ipv4
+  packetcraftr --output json protocols IP4
 
 ===== packetcraftr read --help =====
 Stream frames from a classic PCAP or PCAPNG file

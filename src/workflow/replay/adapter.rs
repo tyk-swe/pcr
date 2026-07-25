@@ -38,7 +38,11 @@ impl SystemAuthorizer {
         }
     }
 
-    fn authorize_frame(&self, frame: &Frame, mode: LinkMode) -> Result<(), BoundaryError> {
+    pub(super) fn authorize_frame(
+        &self,
+        frame: &Frame,
+        mode: LinkMode,
+    ) -> Result<(), BoundaryError> {
         if frame.captured_length() != frame.original_length() {
             return Err(BoundaryError::new(
                 format!(
@@ -186,13 +190,6 @@ impl ReplayAuthorizer for SystemAuthorizer {
     ) -> Result<(), BoundaryError> {
         self.policy
             .authorize_operation(context.packets, context.wire_bytes)
-            .map_err(BoundaryError::from_error)?;
-        self.authorize_frame(frame, mode)
-    }
-
-    fn authorize(&mut self, frame: &Frame, mode: LinkMode) -> Result<(), BoundaryError> {
-        self.policy
-            .authorize_operation(1, u64::from(frame.captured_length()))
             .map_err(BoundaryError::from_error)?;
         self.authorize_frame(frame, mode)
     }

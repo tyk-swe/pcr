@@ -181,22 +181,9 @@ pub struct ReplayAuthorizationContext {
 
 /// Explicit policy seam invoked before delay or transmission.
 pub trait ReplayAuthorizer {
-    /// Starts a new replay operation. Stateful authorizers can reset
-    /// operation-scoped accounting here.
-    fn begin_operation(&mut self) {}
-
     fn authorize_operation(
         &mut self,
         context: ReplayAuthorizationContext,
-        frame: &Frame,
-        mode: LinkMode,
-    ) -> Result<(), crate::workflow::BoundaryError> {
-        let _ = context;
-        self.authorize(frame, mode)
-    }
-
-    fn authorize(
-        &mut self,
         frame: &Frame,
         mode: LinkMode,
     ) -> Result<(), crate::workflow::BoundaryError>;

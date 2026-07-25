@@ -12,8 +12,8 @@ use packetcraftr::{
         BoundaryError,
         clock::Clock as ReplayClock,
         replay::{
-            Authorizer as ReplayAuthorizer, Limits, Options, Timing, Transmission,
-            Transmitter as ReplayTransmitter, run,
+            AuthorizationContext, Authorizer as ReplayAuthorizer, Limits, Options, Timing,
+            Transmission, Transmitter as ReplayTransmitter, run,
         },
     },
 };
@@ -21,7 +21,12 @@ use packetcraftr::{
 struct Authorizer;
 
 impl ReplayAuthorizer for Authorizer {
-    fn authorize(&mut self, _frame: &Frame, _mode: Mode) -> Result<(), BoundaryError> {
+    fn authorize_operation(
+        &mut self,
+        _context: AuthorizationContext,
+        _frame: &Frame,
+        _mode: Mode,
+    ) -> Result<(), BoundaryError> {
         Ok(())
     }
 }

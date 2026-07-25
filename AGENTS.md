@@ -4,7 +4,7 @@
 
 This Rust 2024 package provides the `packetcraftr` library and CLI. `src/lib.rs` exposes the canonical domains: `capture`, `client`, `error`, `net`, `output`, `packet`, `protocol`, `session`, and `workflow`. CLI code lives in `src/cli/` and enters through `src/main.rs`. Keep unit tests beside modules in `tests.rs`; place API and end-to-end tests in `tests/*.rs`. Test data belongs in `tests/fixtures/`, CLI snapshots in `tests/golden/`, published documents in `examples/documents/`, and JSON contracts in `schemas/`. The separate `fuzz/` package holds libFuzzer targets, corpora, and dictionaries.
 
-The package is pre-1.0 (`0.4.0-beta.2`) and AGPL-3.0-only. Every `.rs` file opens with the copyright/SPDX header pair, followed by a blank line; `scripts/check-source-conventions` enforces this in CI, so add it to any new file.
+The package is pre-1.0 (`0.4.0-beta.2`) and AGPL-3.0-only; domain-level modules open with a copyright/SPDX header pair, so match whatever neighboring files in the same directory do when adding one.
 
 ## Architecture
 
@@ -88,7 +88,7 @@ cargo hack check --locked --feature-powerset --depth 2 --all-targets
 
 ### Running one test
 
-All 520 unit tests live inside the library target, so filters need `--lib`. Integration targets are selected with `--test`.
+All 481 unit tests live inside the library target, so filters need `--lib`. Integration targets are selected with `--test`.
 
 ```console
 cargo test --locked --lib -- --list                       # enumerate unit tests
@@ -123,8 +123,6 @@ Fuzz targets: `capture_reader`, `decode_roundtrip`, `packet_inputs`, `dns_wire`,
 ## Coding Style & Naming Conventions
 
 Use rustfmt defaults and four-space indentation. Name modules, functions, and tests in `snake_case`, types and traits in `UpperCamelCase`, and constants in `SCREAMING_SNAKE_CASE`. Prefer cohesive, domain-specific modules over generic implementation buckets. Keep unsafe code confined to `src/net/platform/`; every unsafe block needs a specific `SAFETY` explanation.
-
-Top-level `use` declarations go at the top of the file, before the first item. `mod.rs` module roots are the exception: they declare the module tree and its `pub use` re-exports first, then import. `scripts/check-source-conventions` enforces both this and the license header, because rustfmt does not reorder across items.
 
 ### Descriptive internal name, short public re-export
 

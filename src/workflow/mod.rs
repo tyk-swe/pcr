@@ -27,7 +27,7 @@ const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
     ((sequence % u16::MAX as u64) + 1) as u16
 }
 
-fn push_diagnostic_once(
+pub(crate) fn push_diagnostic_once(
     diagnostics: &mut Vec<crate::packet::diagnostic::Diagnostic>,
     diagnostic: crate::packet::diagnostic::Diagnostic,
 ) {

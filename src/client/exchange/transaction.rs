@@ -14,9 +14,9 @@ use crate::net::{
     transmit::{PacketIo, TransmissionFrame},
 };
 use crate::packet::{decode::Dissector, registry::ProtocolRegistry};
+use crate::workflow::push_diagnostic_once;
 
 use super::super::Stats;
-use super::super::evidence::push_diagnostic_once;
 use super::super::send::ClientError;
 use super::super::validation::validate_send_report;
 use super::{

@@ -4,15 +4,7 @@
 //! Bounded diagnostic and capture-evidence retention for client operations.
 
 use crate::packet::diagnostic::Diagnostic;
-
-pub(super) fn push_diagnostic_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
-    if !diagnostics
-        .iter()
-        .any(|existing| existing.code == diagnostic.code)
-    {
-        diagnostics.push(diagnostic);
-    }
-}
+use crate::workflow::push_diagnostic_once;
 
 pub(super) fn reserve_capture_evidence(
     retained_frames: &mut usize,

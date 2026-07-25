@@ -20,9 +20,10 @@ use crate::packet::{
     registry::ProtocolRegistry,
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };
+use crate::workflow::push_diagnostic_once;
 
 use super::super::Stats;
-use super::super::evidence::{push_diagnostic_once, reserve_capture_evidence};
+use super::super::evidence::reserve_capture_evidence;
 use super::super::send::SendOptions;
 
 pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;

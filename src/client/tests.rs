@@ -36,8 +36,9 @@ use crate::net::{
     link::{LinkCapability, LinkMode, MacAddress},
     neighbor::Error as NeighborError,
     route::{
-        DestinationScope, InterfaceId, MaterializedRoute, NativeRouteError, NeighborResolver,
-        PlanError, PlanOptions, PlannedRoute, RouteDecision, RouteProvider, RouteSelectionReason,
+        DestinationScope, InterfaceId, MaterializedRoute, NativeRouteError, NeighborRequest,
+        NeighborResolution, NeighborResolver, PlanError, PlanOptions, PlannedRoute, RouteDecision,
+        RouteProvider, RouteSelectionReason,
     },
     transmit::{IoSendReport, PacketIo, TransmissionFrame},
 };

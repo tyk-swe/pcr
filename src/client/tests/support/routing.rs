@@ -293,14 +293,19 @@ impl RouteProvider for InterfaceRoutes {
 pub(crate) struct CountingNeighbors(pub(crate) Arc<AtomicUsize>);
 
 impl NeighborResolver for CountingNeighbors {
-    fn resolve(
+    fn resolve_request(
         &self,
-        _interface: &InterfaceId,
-        _interface_source: IpAddr,
-        _target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
+        _request: &NeighborRequest,
+    ) -> Result<NeighborResolution, NeighborError> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Ok(MacAddress([0, 1, 2, 3, 4, 5]))
+        Ok(NeighborResolution {
+            mac_address: MacAddress([0, 1, 2, 3, 4, 5]),
+            attempts: 1,
+            cache_hit: false,
+            captured: Vec::new(),
+            evidence_truncated: false,
+            capture_statistics: CaptureStatistics::default(),
+        })
     }
 }
 
@@ -308,15 +313,13 @@ impl NeighborResolver for CountingNeighbors {
 pub(crate) struct FailingNeighbors;
 
 impl NeighborResolver for FailingNeighbors {
-    fn resolve(
+    fn resolve_request(
         &self,
-        interface: &InterfaceId,
-        _interface_source: IpAddr,
-        target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
+        request: &NeighborRequest,
+    ) -> Result<NeighborResolution, NeighborError> {
         Err(NeighborError::Resolution {
-            interface: interface.name.clone(),
-            target,
+            interface: request.interface.name.clone(),
+            target: request.target,
             message: "deterministic test failure".to_owned(),
         })
     }

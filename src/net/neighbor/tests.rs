@@ -23,7 +23,7 @@ use crate::net::{
     capture::{
         CaptureProvider, CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame,
     },
-    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo, InterfaceProvider},
+    interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{LinkCapability, LinkMode, MacAddress},
     route::{
         InterfaceId, NeighborError, NeighborRequest, NeighborResolver, NeighborVlanKind,
@@ -53,15 +53,6 @@ struct CoordinatedResolutionIo {
 impl CoordinatedResolutionIo {
     fn lock(&self) -> MutexGuard<'_, ResolutionIoState> {
         self.state.lock().unwrap()
-    }
-}
-
-#[derive(Clone)]
-struct FixedInterfaceProvider(InterfaceInfo);
-
-impl InterfaceProvider for FixedInterfaceProvider {
-    fn interfaces(&self) -> Result<Vec<InterfaceInfo>, LiveIoError> {
-        Ok(vec![self.0.clone()])
     }
 }
 
@@ -225,9 +216,8 @@ fn scripted_resolver(
     shared: Arc<CoordinatedResolutionIo>,
     response_script: Arc<FrameResponseScript>,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
+) -> ActiveNeighborResolver<ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        FixedInterfaceProvider(dual_stack_interface()),
         ScriptedLayer2Io {
             shared: Arc::clone(&shared),
             response_script,
@@ -245,9 +235,8 @@ fn scripted_resolver_with_pre_send_responses(
     response_script: Arc<FrameResponseScript>,
     pre_send_responses: usize,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
+) -> ActiveNeighborResolver<ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        FixedInterfaceProvider(dual_stack_interface()),
         ScriptedLayer2Io {
             shared: Arc::clone(&shared),
             response_script,
@@ -264,9 +253,8 @@ fn scripted_resolver_without_ingress_time(
     shared: Arc<CoordinatedResolutionIo>,
     response_script: Arc<FrameResponseScript>,
     options: NeighborResolutionOptions,
-) -> ActiveNeighborResolver<FixedInterfaceProvider, ScriptedLayer2Io, CoordinatedCaptureProvider> {
+) -> ActiveNeighborResolver<ScriptedLayer2Io, CoordinatedCaptureProvider> {
     ActiveNeighborResolver::try_new(
-        FixedInterfaceProvider(dual_stack_interface()),
         ScriptedLayer2Io {
             shared: Arc::clone(&shared),
             response_script,
@@ -726,25 +714,6 @@ fn undersized_snap_length_is_an_invalid_resolution_option() {
         invalid.validate(),
         Err(NeighborError::InvalidConfiguration { .. })
     ));
-}
-
-#[test]
-fn direct_resolve_uses_interface_owned_metadata() {
-    let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
-    let request = neighbor_request("192.0.2.7", "192.0.2.1");
-    let response_request = request.clone();
-    let shared = Arc::new(CoordinatedResolutionIo::default());
-    let resolver = scripted_resolver(
-        shared,
-        Arc::new(move |_| vec![arp_reply(&response_request, target_mac)]),
-        resolution_options(),
-    );
-    assert_eq!(
-        resolver
-            .resolve(&request.interface, request.interface_source, request.target)
-            .unwrap(),
-        target_mac
-    );
 }
 
 #[test]

@@ -101,12 +101,10 @@ impl RouteProvider for InterfaceOnlyRoute {
 struct NeverResolve;
 
 impl NeighborResolver for NeverResolve {
-    fn resolve(
+    fn resolve_request(
         &self,
-        _interface: &InterfaceId,
-        _interface_source: IpAddr,
-        _target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
+        _request: &NeighborRequest,
+    ) -> Result<NeighborResolution, NeighborError> {
         unreachable!("invalid plan must fail before calling the resolver")
     }
 }
@@ -117,15 +115,6 @@ struct RecordingResolver {
 }
 
 impl NeighborResolver for RecordingResolver {
-    fn resolve(
-        &self,
-        _interface: &InterfaceId,
-        _interface_source: IpAddr,
-        _target: IpAddr,
-    ) -> Result<MacAddress, NeighborError> {
-        unreachable!("rich neighbor context must be used during materialization")
-    }
-
     fn resolve_request(
         &self,
         request: &NeighborRequest,

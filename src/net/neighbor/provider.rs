@@ -26,7 +26,7 @@ use crate::net::{
 };
 
 use super::cache::{NeighborCacheEntry, NeighborCacheKey, NeighborExchangeOutcome};
-use super::options::NeighborResolutionOptions;
+use super::options::{NeighborResolutionOptions, invalid_configuration};
 use super::wire::{build_request_frame, is_unicast_mac, match_neighbor_response};
 
 /// Injectable active resolver. Production composition uses the `System*`
@@ -646,10 +646,6 @@ fn validate_send_report(
         ));
     }
     Ok(())
-}
-
-fn invalid_configuration(message: String) -> NeighborError {
-    NeighborError::InvalidConfiguration { message }
 }
 
 fn resolution_error(interface: &InterfaceId, target: IpAddr, message: String) -> NeighborError {

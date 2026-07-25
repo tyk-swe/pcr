@@ -17,13 +17,6 @@ pub(crate) use self::{
     Session as CaptureSession, Statistics as CaptureStatistics,
     SystemProvider as SystemCaptureProvider,
 };
-#[cfg(all(
-    test,
-    feature = "native-layer2",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-pub(crate) use Completeness as CaptureEvidenceCompleteness;
-
 /// Aggregate backend capture-queue capacity used by default.
 pub(crate) const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
 /// Aggregate backend capture-queue byte capacity used by default.
@@ -31,15 +24,6 @@ pub(crate) const DEFAULT_CAPTURE_QUEUE_BYTES: usize = 256 * 1024 * 1024;
 
 /// Maximum blocking wait accepted by an owned capture session.
 pub const MAX_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-
-/// Whether delivered capture evidence is known to include every observed
-/// frame within the configured capture scope.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Completeness {
-    Complete,
-    Incomplete,
-}
 
 /// Backend capture counters. Received counters include frames accepted by the
 /// owned capture session. Dropped counters describe frames/bytes lost before
@@ -92,16 +76,6 @@ impl Statistics {
             || self.dropped_bytes != 0
             || self.overflow_events != 0
             || self.receiver_dropped_frames != 0
-    }
-
-    /// Returns the evidence-completeness state derived from all public loss
-    /// counters. Callers should not infer completeness from diagnostics.
-    pub fn evidence_completeness(self) -> Completeness {
-        if self.has_loss() {
-            Completeness::Incomplete
-        } else {
-            Completeness::Complete
-        }
     }
 
     /// Converts incomplete evidence into its typed queue-loss or receiver-loss
@@ -376,10 +350,7 @@ mod tests {
             receiver_dropped_frames: 2,
             ..Statistics::default()
         };
-        assert_eq!(
-            receiver_loss.validate().unwrap().evidence_completeness(),
-            Completeness::Incomplete
-        );
+        receiver_loss.validate().unwrap();
         assert!(matches!(
             receiver_loss.evidence_loss_error(),
             Some(Error::CaptureEvidenceLoss {

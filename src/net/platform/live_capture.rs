@@ -988,10 +988,6 @@ mod tests {
         assert_eq!(statistics.dropped_frames, 3);
         assert_eq!(statistics.receiver_dropped_frames, 3);
         assert_eq!(statistics.overflow_events, 0);
-        assert_eq!(
-            statistics.evidence_completeness(),
-            crate::net::capture::CaptureEvidenceCompleteness::Incomplete
-        );
     }
 
     #[test]

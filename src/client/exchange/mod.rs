@@ -1,6 +1,10 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Multi-packet capture-ready exchange contracts.
 
 mod contract;
+mod options;
 mod transaction;
 
 pub(crate) use contract::{

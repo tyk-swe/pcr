@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::time::{Duration, Instant};
 
@@ -19,7 +22,7 @@ use crate::packet::{
 };
 
 use super::super::Stats;
-use super::super::helpers::{push_diagnostic_once, reserve_capture_evidence};
+use super::super::evidence::{push_diagnostic_once, reserve_capture_evidence};
 use super::super::send::SendOptions;
 
 pub const DEFAULT_MAX_UNSOLICITED_FRAMES: usize = DEFAULT_CAPTURE_QUEUE_FRAMES;

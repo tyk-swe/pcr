@@ -12,12 +12,13 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 
 use super::Client;
+use super::evidence::reserve_capture_evidence;
 use super::exchange::{
     CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
     ExchangeProcessOutcome, ExchangeResult, MAX_EXCHANGE_TIMEOUT, PreparedExchangePacket,
     WorkflowPromotionContext,
 };
-use super::helpers::{patch_builtin_ethernet, reserve_capture_evidence};
+use super::materialize::patch_builtin_ethernet;
 use super::policy::{TrafficPolicy, TrafficPolicyError};
 use super::send::{ClientError, SendOptions};
 use super::target::{
@@ -63,8 +64,6 @@ use crate::protocol::{
     transport::Udp,
 };
 
-mod support;
-
 use support::{
     ChangedWireIo, CountingNeighbors, CountingRoutes, CustomRouteLayer,
     DeadlineConsumingExchangeIo, DestinationRoutes, DropObservedCapture, EndlessCaptureIo,
@@ -75,6 +74,8 @@ use support::{
     canonical_link_intent_packets, exchange_with_capture_statistics, packet,
     prepared_exchange_packet, route,
 };
+
+mod support;
 
 mod authorization;
 mod deadlines;

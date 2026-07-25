@@ -11,6 +11,21 @@ use super::Error;
 use super::link::{LinkCapability, MacAddress};
 use super::route::InterfaceId;
 
+pub use super::route::models::InterfaceId as Id;
+
+#[cfg(any(
+    feature = "native-interfaces",
+    all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos", windows)
+    ),
+    test
+))]
+pub(crate) use self::{Address as InterfaceAddress, Flags as InterfaceFlags};
+pub(crate) use self::{
+    Info as InterfaceInfo, Provider as InterfaceProvider, SystemProvider as SystemInterfaceProvider,
+};
+
 /// One address assigned to an interface, without any operating-system type in
 /// the public provider boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -62,18 +77,3 @@ impl Provider for SystemProvider {
         super::platform::system_interfaces()
     }
 }
-
-pub use super::route::models::InterfaceId as Id;
-
-#[cfg(any(
-    feature = "native-interfaces",
-    all(
-        feature = "native-route",
-        any(target_os = "linux", target_os = "macos", windows)
-    ),
-    test
-))]
-pub(crate) use self::{Address as InterfaceAddress, Flags as InterfaceFlags};
-pub(crate) use self::{
-    Info as InterfaceInfo, Provider as InterfaceProvider, SystemProvider as SystemInterfaceProvider,
-};

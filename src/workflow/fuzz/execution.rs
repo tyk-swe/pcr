@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 use super::{
     CASE_DOMAIN, Deadline, Diagnostic, Duration, EvidenceBudget, Frame, FuzzCase,
     FuzzCaseExecution, FuzzError, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION,

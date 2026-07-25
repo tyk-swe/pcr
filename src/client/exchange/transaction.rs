@@ -16,8 +16,9 @@ use crate::net::{
 use crate::packet::{decode::Dissector, registry::ProtocolRegistry};
 
 use super::super::Stats;
-use super::super::helpers::{push_diagnostic_once, validate_send_report};
+use super::super::evidence::push_diagnostic_once;
 use super::super::send::ClientError;
+use super::super::validation::validate_send_report;
 use super::{
     CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
     ExchangeProcessOutcome, ExchangeResult, PreparedExchangePacket, WorkflowPromotionContext,

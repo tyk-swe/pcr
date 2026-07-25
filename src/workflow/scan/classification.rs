@@ -1,3 +1,10 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{
+    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, ScanClassification, ScanTransport,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScanResponseClassification {
     pub classification: ScanClassification,
@@ -35,6 +42,3 @@ pub fn classify_scan_response(
         correlation: observation.correlation,
     })
 }
-use super::{
-    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, ScanClassification, ScanTransport,
-};

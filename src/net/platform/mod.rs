@@ -16,14 +16,14 @@ mod capture_dispatch;
 mod interface_dispatch;
 mod layer2_dispatch;
 mod layer3_dispatch;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "native-route"))]
 mod linux;
 #[cfg(all(
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 mod live_capture;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", feature = "native-route"))]
 mod macos;
 #[cfg(all(feature = "native-layer2", windows))]
 mod npcap;
@@ -47,7 +47,7 @@ mod pnet_enumeration;
 ))]
 mod raw_ip;
 mod route_dispatch;
-#[cfg(windows)]
+#[cfg(all(windows, any(feature = "native-interfaces", feature = "native-route")))]
 mod windows;
 
 pub(in crate::net) use capture_dispatch::system_capture;

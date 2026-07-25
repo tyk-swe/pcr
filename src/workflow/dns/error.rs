@@ -1,3 +1,8 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{BoundaryError, Classification, Classified, Duration, Error, Kind};
+
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum DnsWireError {
@@ -186,4 +191,3 @@ impl Classified for DnsError {
         }
     }
 }
-use super::{BoundaryError, Classification, Classified, Duration, Error, Kind};

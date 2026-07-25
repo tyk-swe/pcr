@@ -7,42 +7,29 @@
 
 #![allow(unsafe_code)]
 
-#[cfg(feature = "native-route")]
 use std::collections::BTreeMap;
-#[cfg(feature = "native-route")]
 use std::ffi::CStr;
-#[cfg(feature = "native-route")]
 use std::mem::{MaybeUninit, size_of};
-#[cfg(feature = "native-route")]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-#[cfg(feature = "native-route")]
 use std::ptr;
-#[cfg(feature = "native-route")]
 use std::sync::atomic::{AtomicI32, Ordering};
-#[cfg(feature = "native-route")]
 use std::time::{Duration, Instant};
 
-#[cfg(feature = "native-route")]
 use socket2::{Domain, Socket, Type};
 
-#[cfg(feature = "native-route")]
 use super::{
     NativeRouteSnapshot, find_interface, finish_route, interface_decision,
     validate_preferred_source_family,
 };
-#[cfg(feature = "native-route")]
 use crate::capture::LinkType;
-#[cfg(feature = "native-route")]
 use crate::net::{
     interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{LinkCapability, MacAddress},
     route::{InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason},
 };
 
-#[cfg(feature = "native-route")]
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
 
-#[cfg(feature = "native-route")]
 pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
     let mut head = ptr::null_mut();
     // SAFETY: `head` is a valid output pointer and a successful call owns a
@@ -128,7 +115,6 @@ pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
     Ok(by_index.into_values().collect())
 }
 
-#[cfg(feature = "native-route")]
 pub(super) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
@@ -209,15 +195,12 @@ pub(super) fn route(
     )
 }
 
-#[cfg(feature = "native-route")]
 pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, NativeRouteError> {
     interface_decision(find_interface(interfaces()?, requested)?)
 }
 
-#[cfg(feature = "native-route")]
 struct IfAddrsGuard(*mut libc::ifaddrs);
 
-#[cfg(feature = "native-route")]
 impl Drop for IfAddrsGuard {
     fn drop(&mut self) {
         if !self.0.is_null() {
@@ -227,7 +210,6 @@ impl Drop for IfAddrsGuard {
     }
 }
 
-#[cfg(feature = "native-route")]
 fn interface_flags(flags: libc::c_uint) -> InterfaceFlags {
     InterfaceFlags {
         up: flags & libc::IFF_UP as u32 != 0,
@@ -238,7 +220,6 @@ fn interface_flags(flags: libc::c_uint) -> InterfaceFlags {
     }
 }
 
-#[cfg(feature = "native-route")]
 fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32> {
     if i32::from(family) != libc::AF_LINK || data.is_null() {
         return None;
@@ -249,7 +230,6 @@ fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32>
     (data.ifi_mtu != 0).then_some(data.ifi_mtu)
 }
 
-#[cfg(feature = "native-route")]
 fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     // Darwin sockaddr starts with sa_len then sa_family. Never inspect the
     // family until both bytes are present.
@@ -271,7 +251,6 @@ fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
     }
 }
 
-#[cfg(feature = "native-route")]
 fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) -> Option<u8> {
     if address.is_null() {
         return None;
@@ -300,7 +279,6 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     }
 }
 
-#[cfg(feature = "native-route")]
 fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddress> {
     if length < size_of::<libc::sockaddr_dl>() {
         return None;
@@ -327,14 +305,12 @@ fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddr
     Some(MacAddress(bytes))
 }
 
-#[cfg(feature = "native-route")]
 struct RouteResponse {
     header: libc::rt_msghdr,
     gateway: Option<IpAddr>,
     selected_address: Option<IpAddr>,
 }
 
-#[cfg(feature = "native-route")]
 fn query_route(
     destination: IpAddr,
     interface_index: Option<u32>,
@@ -464,7 +440,6 @@ fn query_route(
     })
 }
 
-#[cfg(feature = "native-route")]
 fn encode_sockaddr(address: IpAddr) -> Vec<u8> {
     match address {
         IpAddr::V4(address) => {
@@ -486,14 +461,12 @@ fn encode_sockaddr(address: IpAddr) -> Vec<u8> {
     }
 }
 
-#[cfg(feature = "native-route")]
 fn structure_bytes<T>(value: &T) -> Vec<u8> {
     // SAFETY: callers use plain C structs whose full initialized object
     // representation may be copied into an operating-system message.
     unsafe { std::slice::from_raw_parts((value as *const T).cast::<u8>(), size_of::<T>()).to_vec() }
 }
 
-#[cfg(feature = "native-route")]
 fn parse_route_addresses(
     bytes: &[u8],
     mask: libc::c_int,
@@ -556,7 +529,6 @@ fn parse_route_addresses(
     Ok(output)
 }
 
-#[cfg(feature = "native-route")]
 fn roundup(length: usize) -> usize {
     // Darwin's routing socket uses ROUNDUP32 for sockaddr records on both
     // x86_64 and arm64. This is deliberately independent of pointer/long
@@ -570,12 +542,10 @@ fn roundup(length: usize) -> usize {
     }
 }
 
-#[cfg(feature = "native-route")]
 fn last_os_error(operation: &'static str) -> NativeRouteError {
     os_error(operation, std::io::Error::last_os_error())
 }
 
-#[cfg(feature = "native-route")]
 fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRouteError {
     NativeRouteError::OperatingSystem {
         operation,
@@ -583,7 +553,7 @@ fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRou
     }
 }
 
-#[cfg(all(test, feature = "native-route"))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::net::route::Provider as RouteProvider;

@@ -1,5 +1,14 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Applies the client's traffic policy to a complete live fuzz campaign before
 /// route, capture, neighbor, or transmission providers are invoked.
+use super::{
+    Duration, ExchangeIo, FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor,
+    IpAddr, NeighborResolver, Packet, PacketTemplate, RouteProvider,
+};
+use crate::workflow::BoundaryError;
+
 pub struct PolicyAuthorizer<'a> {
     policy: &'a crate::client::policy::Policy,
 }
@@ -120,8 +129,3 @@ fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
         "execute exactly one bounded fuzz case per capture-ready exchange",
     )
 }
-use super::{
-    Duration, ExchangeIo, FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor,
-    IpAddr, NeighborResolver, Packet, PacketTemplate, RouteProvider,
-};
-use crate::workflow::BoundaryError;

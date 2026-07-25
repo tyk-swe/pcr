@@ -1,4 +1,19 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Generate, build, and dissect deterministic cases without any live seam.
+use super::execution::{
+    ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
+    worst_case_duration,
+};
+use super::mutation::{dissect_built, has_link_root, prepare};
+use super::{
+    Arc, Clock, Deadline, Dissector, Duration, EvidenceBudget, FieldKind, FuzzAuthorizer, FuzzCase,
+    FuzzCaseOutcome, FuzzError, FuzzExecutionCase, FuzzExecutor, FuzzLiveOptions, FuzzMode,
+    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Packet, ProtocolRegistry,
+    SYNTHESIZED_ETHERNET_BYTES, duration_limit,
+};
+
 pub fn fuzz(
     request: &FuzzRequest,
     packet: Packet,
@@ -230,14 +245,3 @@ pub(super) struct ResolvedField {
     pub(super) kind: FieldKind,
     pub(super) is_derived: bool,
 }
-use super::execution::{
-    ExecutionEvidence, add_execution_stats, rate_delay, retain_evidence, validate_execution,
-    worst_case_duration,
-};
-use super::mutation::{dissect_built, has_link_root, prepare};
-use super::{
-    Arc, Clock, Deadline, Dissector, Duration, EvidenceBudget, FieldKind, FuzzAuthorizer, FuzzCase,
-    FuzzCaseOutcome, FuzzError, FuzzExecutionCase, FuzzExecutor, FuzzLiveOptions, FuzzMode,
-    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Packet, ProtocolRegistry,
-    SYNTHESIZED_ETHERNET_BYTES, duration_limit,
-};

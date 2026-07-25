@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Link-layer addressing and transmission capabilities.
 
 pub(crate) use super::route::models::{LinkCapability, LinkMode};

@@ -1,4 +1,11 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Failure from a bounded replay operation.
+use super::{
+    CaptureError, Classification, Classified, Duration, Error, Kind, LinkMode, LiveIoError,
+};
+
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum ReplayError {
@@ -190,6 +197,3 @@ impl Classified for ReplayError {
         }
     }
 }
-use super::{
-    CaptureError, Classification, Classified, Duration, Error, Kind, LinkMode, LiveIoError,
-};

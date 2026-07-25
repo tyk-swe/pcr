@@ -9,6 +9,12 @@ use super::Error;
 use super::link::LinkMode;
 use super::route::MaterializedRoute;
 
+pub(crate) use self::{
+    Dispatch as DispatchPacketIo, Frame as TransmissionFrame, Layer2Sender as Layer2Io,
+    Report as IoSendReport, Sender as PacketIo, SystemLayer2 as SystemLayer2Io,
+    SystemLayer3 as SystemLayer3Io,
+};
+
 /// A complete Layer 2 frame. Construction rejects a route selected for raw
 /// Layer 3 transmission.
 #[derive(Clone, Copy, Debug)]
@@ -183,9 +189,3 @@ where
         }
     }
 }
-
-pub(crate) use self::{
-    Dispatch as DispatchPacketIo, Frame as TransmissionFrame, Layer2Sender as Layer2Io,
-    Report as IoSendReport, Sender as PacketIo, SystemLayer2 as SystemLayer2Io,
-    SystemLayer3 as SystemLayer3Io,
-};

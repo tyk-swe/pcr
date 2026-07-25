@@ -1,5 +1,14 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 /// Executes homogeneous traceroute hop batches through the client's
 /// capture-ready exchange lifecycle.
+use super::{
+    BoundaryError, ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
+    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
+    TracerouteStrategy, classify_traceroute_response,
+};
+
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
     options: crate::client::exchange::Options,
@@ -143,8 +152,3 @@ fn invalid_client_execution(message: impl Into<String>) -> BoundaryError {
         "use homogeneous bounded hop batches and retain at least one response per probe",
     )
 }
-use super::{
-    BoundaryError, ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
-    TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
-    TracerouteStrategy, classify_traceroute_response,
-};

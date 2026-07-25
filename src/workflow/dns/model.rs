@@ -1,3 +1,18 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{
+    AddressFamily, Bytes, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+    DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
+    DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
+    DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_TYPE_OPT, DecodedPacket, Diagnostic, DnsError,
+    DnsWireError, Duration, Frame, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, MAX_DNS_ATTEMPTS,
+    MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS, MAX_DNS_RECORDS, MAX_SCAN_RATE,
+    Packet, Raw, Serialize, Stats, SystemTime, Target, Udp, canonical_query_name, fmt,
+    nonzero_ipv4_identification, response_code_name,
+};
+use serde::Deserialize;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DnsQueryType {
@@ -582,14 +597,3 @@ pub trait DnsExecutor {
         exchange: &DnsExchange,
     ) -> Result<DnsExchangeExecution, crate::workflow::BoundaryError>;
 }
-use super::{
-    AddressFamily, Bytes, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
-    DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
-    DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_TYPE_OPT, DecodedPacket, Diagnostic, DnsError,
-    DnsWireError, Duration, Frame, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, MAX_DNS_ATTEMPTS,
-    MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS, MAX_DNS_RECORDS, MAX_SCAN_RATE,
-    Packet, Raw, Serialize, Stats, SystemTime, Target, Udp, canonical_query_name, fmt,
-    nonzero_ipv4_identification, response_code_name,
-};
-use serde::Deserialize;

@@ -5,11 +5,14 @@
 
 //! Policy-gated packet transmission and response exchange.
 
+mod address;
+mod evidence;
 pub mod exchange;
-mod helpers;
+mod materialize;
 pub mod policy;
 pub mod send;
 pub mod target;
+mod validation;
 
 pub use send::contract::ClientError as Error;
 
@@ -45,16 +48,16 @@ use self::exchange::{
     ExchangeOptions, ExchangeResult, ExchangeTransaction, PlannedExchangePacket, PreparedExchange,
     PreparedExchangePacket, WorkflowResponseMatcher,
 };
-use self::helpers::{
+use self::materialize::{
     build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
-    patch_builtin_ethernet, require_fixed_width_link_materialization, validate_mtu,
-    validate_send_report,
+    patch_builtin_ethernet, require_fixed_width_link_materialization,
 };
 use self::policy::{TrafficPolicy, TrafficPolicyError};
 use self::send::{ClientError, SendOptions, SendReport};
 use self::target::{
     HostnameResolver, IpVersion, LiveTarget, ResolvedTarget, TargetResolutionError,
 };
+use self::validation::{validate_mtu, validate_send_report};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Stats {

@@ -11,6 +11,19 @@ use super::Error;
 use super::route::PlannedRoute;
 use crate::capture::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
 
+pub(crate) use self::{
+    Captured as CapturedFrame, Limits as CaptureQueueLimits,
+    OverflowPolicy as CaptureOverflowPolicy, Provider as CaptureProvider,
+    Session as CaptureSession, Statistics as CaptureStatistics,
+    SystemProvider as SystemCaptureProvider,
+};
+#[cfg(all(
+    test,
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub(crate) use Completeness as CaptureEvidenceCompleteness;
+
 /// Aggregate backend capture-queue capacity used by default.
 pub(crate) const DEFAULT_CAPTURE_QUEUE_FRAMES: usize = 4_096;
 /// Aggregate backend capture-queue byte capacity used by default.
@@ -322,19 +335,6 @@ impl Provider for SystemProvider {
         super::platform::system_capture(route, limits).map(SystemSession::new)
     }
 }
-
-pub(crate) use self::{
-    Captured as CapturedFrame, Limits as CaptureQueueLimits,
-    OverflowPolicy as CaptureOverflowPolicy, Provider as CaptureProvider,
-    Session as CaptureSession, Statistics as CaptureStatistics,
-    SystemProvider as SystemCaptureProvider,
-};
-#[cfg(all(
-    test,
-    feature = "native-layer2",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-pub(crate) use Completeness as CaptureEvidenceCompleteness;
 
 #[cfg(test)]
 mod tests {

@@ -98,6 +98,12 @@ complete all-feature/all-target profile.
   enforced on Linux, both macOS architectures, and Windows.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps`
   rejects documentation warnings on Linux.
+- `scripts/check-source-conventions` is enforced on Linux. It checks the two
+  conventions rustfmt and clippy cannot express: every Rust file under `src/`,
+  `tests/`, `benches/`, and `fuzz/fuzz_targets/` opens with the copyright and
+  SPDX header pair, and top-level `use` declarations precede the first item
+  (`mod.rs` module roots exempted). The script needs no toolchain beyond bash
+  and awk, so it adds no measurable time to the quality job.
 - The normal Cargo test profiles execute the behavior, schema, CLI, and
   downstream extension integration contracts.
 

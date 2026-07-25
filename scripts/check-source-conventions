@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 tyk-swe
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Enforces the two source conventions that rustfmt and clippy cannot express:
+#
+#   1. every Rust file opens with the copyright/SPDX header pair, and
+#   2. top-level `use` declarations precede the first item.
+#
+# Both drifted before being normalised: 114 of 264 files were missing the
+# AGPL header, and 23 files under src/workflow/ placed their imports after
+# every item in the file.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+status=0
+
+expected_copyright='// Copyright (C) 2026 tyk-swe'
+expected_spdx='// SPDX-License-Identifier: AGPL-3.0-only'
+
+report() {
+    printf '%s: %s\n' "$1" "$2" >&2
+    status=1
+}
+
+files() {
+    find src tests benches fuzz/fuzz_targets -name '*.rs' -type f 2>/dev/null | sort
+}
+
+# --- 1. license headers -----------------------------------------------------
+
+while IFS= read -r file; do
+    mapfile -t header < <(sed -n '1,2p' "$file")
+    if [[ ${header[0]-} != "$expected_copyright" || ${header[1]-} != "$expected_spdx" ]]; then
+        report "$file" 'missing the copyright/SPDX header pair on lines 1-2'
+    fi
+done < <(files)
+
+# --- 2. import placement ----------------------------------------------------
+
+# `mod.rs` module roots legitimately declare the module tree and its `pub use`
+# re-exports before importing, so they are exempt from the ordering rule.
+while IFS= read -r file; do
+    case "$file" in */mod.rs | src/lib.rs | src/main.rs) continue ;; esac
+
+    offender=$(
+        awk '
+            # Track brace depth so only column-zero, top-level items count.
+            function visible_use(line) {
+                return line ~ /^(pub([[:space:]]+|\([^)]*\)[[:space:]]+))?use[[:space:]]/
+            }
+
+            function remember_macro(line, name) {
+                if (line ~ /^macro_rules![[:space:]]+/) {
+                    name = line
+                    sub(/^macro_rules![[:space:]]+/, "", name)
+                    sub(/[[:space:]].*$/, "", name)
+                    macro_rules[name] = 1
+                }
+            }
+
+            function macro_reexport(line, name) {
+                name = line
+                sub(/^(pub([[:space:]]+|\([^)]*\)[[:space:]]+))?use[[:space:]]+/, "", name)
+                sub(/[[:space:]]*;[[:space:]]*$/, "", name)
+                return name in macro_rules
+            }
+
+            function item(line) {
+                if (line ~ /^(pub([[:space:]]+|\([^)]*\)[[:space:]]+))?((unsafe|async)[[:space:]]+)*(extern([[:space:]]+"[^"]+")?[[:space:]]+)?(fn|struct|enum|trait|union|mod|const|static|type|macro)[[:space:]!(<;]/) {
+                    return 1
+                }
+                if (line ~ /^impl([[:space:]]|<)/) {
+                    return 1
+                }
+                if (line ~ /^macro_rules!/) {
+                    return 1
+                }
+                if (line ~ /^([[:alpha:]_][[:alnum:]_]*::)*[[:alpha:]_][[:alnum:]_]*![[:space:]]*[\({]/) {
+                    return 1
+                }
+                return 0
+            }
+
+            visible_use($0) && depth == 0 {
+                if (seen_item && macro_reexport($0)) { next }
+                if (seen_item) { print NR; exit }
+                next
+            }
+            item($0) && depth == 0 {
+                remember_macro($0)
+                seen_item = 1
+            }
+            {
+                line = $0
+                sub(/^[[:space:]]*\/\/.*$/, "", line)
+                depth += gsub(/\{/, "{", line) - gsub(/\}/, "}", line)
+                if (depth < 0) depth = 0
+            }
+        ' "$file"
+    )
+
+    if [[ -n $offender ]]; then
+        report "$file:$offender" 'top-level `use` appears after the first item; move imports to the top'
+    fi
+done < <(files)
+
+if ((status == 0)); then
+    printf 'source conventions: %s files checked, all clean\n' "$(files | wc -l | tr -d ' ')"
+fi
+
+exit "$status"

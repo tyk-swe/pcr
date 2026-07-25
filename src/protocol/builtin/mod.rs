@@ -1,3 +1,6 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
 //! Deterministic registration of every codec and capture root declared by the
 //! built-in capability manifest.
 //!

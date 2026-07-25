@@ -10,11 +10,11 @@ use thiserror::Error;
 
 use super::ReassemblyLimits;
 
+use state::TcpFlowState;
+
 mod engine;
 mod pending;
 mod state;
-
-use state::TcpFlowState;
 
 // Conservative accounting for a BTree node, key, and Bytes handle. The
 // allocator may use more, but never charging metadata allowed sparse one-byte

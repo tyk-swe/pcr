@@ -70,7 +70,6 @@ impl<L, C> ActiveNeighborResolver<L, C> {
     pub fn options(&self) -> &NeighborResolutionOptions {
         &self.options
     }
-
 }
 
 impl<L, C> Default for ActiveNeighborResolver<L, C>

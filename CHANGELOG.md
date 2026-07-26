@@ -91,6 +91,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Buffered exact byte output and capture-file reads. Capture bytes previously
   went through the line-buffered standard-output handle, which flushes once per
   `0x0a` byte in binary payloads.
+- A truncated DNS answer now says what to do about it. The workflow still
+  refuses to present partial records, and the reason it reports names querying
+  over TCP as the way to read the complete answer.
 - A capture copy that cannot carry the source's annotation now says so.
   `TranscodeReport.dropped_metadata` counts the comments, name records, and
   statistics blocks the target format could not represent, and `read` reports

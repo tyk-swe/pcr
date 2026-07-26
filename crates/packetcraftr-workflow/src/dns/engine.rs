@@ -216,8 +216,16 @@ where
                 DnsResponseClassification::Response(response) => {
                     let truncated = response.truncated;
                     let response_code = Some(response.response_code);
+                    // A truncated answer is reported as such rather than
+                    // completed: this workflow crafts exact UDP datagrams, and
+                    // retrying over TCP would need a userspace handshake, which
+                    // is a different transport with different authorization
+                    // consequences. Any future fallback must reuse the
+                    // destination this operation already authorized and the
+                    // same packet, byte, and duration budgets rather than
+                    // opening a channel outside them.
                     let reason = if truncated {
-                        "validated DNS response set the truncation flag; partial records were not accepted"
+                        "validated DNS response set the truncation flag; partial records were not accepted, so query this name over TCP to read the complete answer"
                             .to_owned()
                     } else {
                         format!(

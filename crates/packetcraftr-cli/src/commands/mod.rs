@@ -30,6 +30,8 @@ pub(super) use traceroute::run_traceroute;
 #[cfg(test)]
 pub(super) use capture::{CaptureBudget, drive_capture};
 #[cfg(test)]
+pub(super) use decode::frame_summary;
+#[cfg(test)]
 pub(super) use dns::dns_cli_error;
 #[cfg(test)]
 pub(super) use fuzz::fuzz_cli_error;

@@ -342,6 +342,8 @@ interface would accept anyway:
 ```console
 packetcraftr capture --interface eth0 --timeout-ms 1000
 
+packetcraftr decode --interface eth0 --timeout-ms 5000 --max-frames 50
+
 packetcraftr capture \
   --packet 'ipv4(dst=192.168.56.10)/icmpv4(type=8,code=0)' \
   --interface eth0 --timeout-ms 1000

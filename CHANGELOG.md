@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added `decode --interface <NAME_OR_INDEX>`, which dissects frames as they are
+  captured from one interface under the same capture window, budgets, and
+  shutdown accounting as `capture`. A live source streams, so it supports text
+  and NDJSON but not the aggregate JSON result.
 - Added recipe-free capture: `packetcraftr capture --interface <NAME_OR_INDEX>`
   observes one interface directly instead of requiring a packet whose only
   purpose was to select a route. Passive observation has no destination to

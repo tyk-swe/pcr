@@ -32,7 +32,7 @@ pub(crate) fn cli_build_mode(mode: CliBuildMode) -> packet::build::Mode {
 
 #[derive(Debug)]
 pub(crate) struct CaptureOutcome {
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    pub(crate) diagnostics: Vec<packet::diagnostic::Diagnostic>,
     pub(crate) stats: output::envelope::Stats,
 }
 
@@ -219,7 +219,7 @@ pub(crate) fn run_capture(
     }
 }
 
-fn validate_capture_window(timeout: Duration) -> Result<(), CliError> {
+pub(crate) fn validate_capture_window(timeout: Duration) -> Result<(), CliError> {
     if timeout > net::capture::MAX_TIMEOUT || Instant::now().checked_add(timeout).is_none() {
         return Err(CliError::classified(net::Error::InvalidCaptureTimeout {
             timeout,

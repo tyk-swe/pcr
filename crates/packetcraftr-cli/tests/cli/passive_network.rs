@@ -168,3 +168,53 @@ fn interface_only_capture_rejects_an_unknown_interface_before_arming() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
 }
+
+#[test]
+fn live_decode_rejects_aggregate_json_before_arming_a_capture() {
+    let output = binary()
+        .args([
+            "--output",
+            "json",
+            "decode",
+            "--interface",
+            "lab0",
+            "--timeout-ms",
+            "1",
+        ])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "decode");
+    assert_eq!(value["status"], "error");
+    assert!(
+        value["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("streams frames as they arrive"),
+        "{value}"
+    );
+}
+
+#[test]
+fn decode_takes_exactly_one_of_a_capture_file_or_an_interface() {
+    let neither = binary().arg("decode").output().unwrap();
+    assert_eq!(neither.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&neither.stderr).contains("required arguments were not provided"),
+        "{}",
+        String::from_utf8_lossy(&neither.stderr)
+    );
+
+    let both = binary()
+        .args(["decode", "capture.pcapng", "--interface", "lab0"])
+        .output()
+        .unwrap();
+    assert_eq!(both.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&both.stderr).contains("cannot be used with"),
+        "{}",
+        String::from_utf8_lossy(&both.stderr)
+    );
+}

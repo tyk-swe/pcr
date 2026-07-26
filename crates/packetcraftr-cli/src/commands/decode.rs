@@ -1,13 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Batch capture-file dissection.
+// Batch and live frame dissection.
 
 use std::fmt::Write as _;
+use std::time::Duration;
 
+use packetcraftr::net::capture::Provider as _;
 use packetcraftr::{
     capture::{self, Frame},
-    output, packet,
+    net, output, packet,
 };
 
 use super::super::arguments::{CaptureStreamLimitArgs, DecodeArgs};
@@ -15,7 +17,10 @@ use super::super::errors::CliError;
 use super::super::rendering::{
     emit_json, emit_json_compact, output_timestamp_text, spaced_hex, write_stdout_line,
 };
-use super::super::runtime::default_registry_arc;
+use super::super::runtime::{default_registry_arc, observe_interface_route};
+use super::capture::{
+    CaptureBudget, drive_capture, render_diagnostics_text, validate_capture_window,
+};
 use super::offline::{open_capture_reader, validate_capture_stream_limits};
 
 pub(crate) fn run_decode(
@@ -24,7 +29,10 @@ pub(crate) fn run_decode(
 ) -> Result<(), CliError> {
     let DecodeArgs {
         path,
+        interface,
         verbose,
+        timeout_ms,
+        no_promiscuous,
         limits:
             CaptureStreamLimitArgs {
                 max_frames,
@@ -32,6 +40,7 @@ pub(crate) fn run_decode(
                 max_frame_bytes,
                 max_interfaces,
             },
+        capture_limits,
     } = arguments;
     validate_capture_stream_limits(max_frames, max_bytes, max_frame_bytes, max_interfaces)?;
     let registry = default_registry_arc()?;
@@ -40,6 +49,25 @@ pub(crate) fn run_decode(
         max_packet_size: max_frame_bytes,
         ..packet::decode::Options::default()
     };
+    if let Some(selector) = interface {
+        return run_live_decode(
+            LiveDecode {
+                selector,
+                verbose,
+                timeout: Duration::from_millis(timeout_ms),
+                no_promiscuous,
+                budget: CaptureBudget {
+                    max_frames,
+                    max_bytes,
+                },
+                limits: capture_limits.into_limits(),
+            },
+            decoder,
+            decode_options,
+            output,
+        );
+    }
+    let path = path.expect("clap requires a path when no interface is selected");
     let mut reader = open_capture_reader(&path, max_frame_bytes, max_interfaces)?;
 
     let mut sequence = 0_u64;
@@ -118,6 +146,110 @@ pub(crate) fn run_decode(
         ))
         .map_err(|error| error.at_sequence(sequence)),
         _ => unreachable!("unsupported formats are rejected inside the frame loop"),
+    }
+}
+
+struct LiveDecode {
+    selector: String,
+    verbose: bool,
+    timeout: Duration,
+    no_promiscuous: bool,
+    budget: CaptureBudget,
+    limits: net::capture::Limits,
+}
+
+/// Dissects frames as they are captured from one interface.
+///
+/// Live decoding shares the capture drive loop with `capture`, so the same
+/// readiness barrier, budgets, shutdown, and loss accounting apply; only the
+/// per-frame rendering differs. The aggregate JSON result is deliberately
+/// offline-only: it would have to buffer an unbounded live stream before
+/// emitting anything.
+fn run_live_decode(
+    arguments: LiveDecode,
+    decoder: packet::decode::Decoder,
+    decode_options: packet::decode::Options,
+    output: output::contract::Format,
+) -> Result<(), CliError> {
+    let LiveDecode {
+        selector,
+        verbose,
+        timeout,
+        no_promiscuous,
+        budget,
+        limits,
+    } = arguments;
+    if matches!(output, output::contract::Format::Json) {
+        return Err(CliError::new(
+            2,
+            "decode --interface streams frames as they arrive; use text or ndjson output",
+        ));
+    }
+    validate_capture_window(timeout)?;
+    let limits = limits.validate().map_err(CliError::classified)?;
+    let route = observe_interface_route(selector)?;
+    let capture = net::capture::SystemProvider
+        .arm_capture_with(
+            &route,
+            net::capture::Options {
+                limits,
+                promiscuous: if no_promiscuous {
+                    net::capture::Promiscuous::Disabled
+                } else {
+                    net::capture::Promiscuous::Enabled
+                },
+            },
+        )
+        .map_err(CliError::classified)?;
+
+    let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
+        let decoded = decoder
+            .decode(frame, decode_options.clone())
+            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?;
+        match output {
+            output::contract::Format::Text => render_decoded_text(sequence, &decoded, verbose),
+            output::contract::Format::Ndjson => {
+                let decoded = decoded_output(decoded, sequence)?;
+                emit_json_compact(&output::envelope::Stream::success(
+                    output::contract::Command::Decode,
+                    sequence,
+                    output::decode::Event::Frame { decoded },
+                    Vec::new(),
+                ))
+                .map_err(|error| error.at_sequence(sequence))
+            }
+            _ => Err(CliError::classified(
+                output::contract::Error::UnsupportedFormat {
+                    command: output::contract::Command::Decode,
+                    format: output,
+                },
+            )),
+        }
+    })?;
+
+    let frames = outcome.stats.packets_completed;
+    match output {
+        output::contract::Format::Text => {
+            write_stdout_line(format_args!(
+                "decoded {frames} frame(s), {} byte(s)",
+                outcome.stats.bytes
+            ))?;
+            render_diagnostics_text(&outcome.diagnostics)
+        }
+        output::contract::Format::Ndjson => emit_json_compact(
+            &output::envelope::Stream::success(
+                output::contract::Command::Decode,
+                frames,
+                output::decode::Event::Complete {
+                    frames,
+                    filtered: 0,
+                },
+                outcome.diagnostics,
+            )
+            .with_stats(outcome.stats),
+        )
+        .map_err(|error| error.at_sequence(frames)),
+        _ => unreachable!("unsupported formats are rejected before the capture is armed"),
     }
 }
 
@@ -201,7 +333,7 @@ pub(crate) fn render_decoded_text(
 /// Endpoints are discovered reflectively rather than by protocol name, so a
 /// tunnelled stack reports its innermost addressed layer and an external codec
 /// that names its fields `source`/`destination` participates without changes.
-fn frame_summary(decoded: &packet::decode::Result) -> String {
+pub(crate) fn frame_summary(decoded: &packet::decode::Result) -> String {
     let mut path = String::new();
     let mut endpoints: Option<(String, String)> = None;
     let mut ports: Option<(u64, u64)> = None;

@@ -17,8 +17,8 @@ use super::arguments::{
     CliTracerouteStrategy, Command,
 };
 use super::commands::{
-    CaptureBudget, dns_cli_error, drive_capture, fuzz_cli_error, replay_cli_error, scan_cli_error,
-    send_capture_link_type, traceroute_cli_error, write_replay_capture_evidence,
+    CaptureBudget, dns_cli_error, drive_capture, frame_summary, fuzz_cli_error, replay_cli_error,
+    scan_cli_error, send_capture_link_type, traceroute_cli_error, write_replay_capture_evidence,
 };
 use super::errors::CliError;
 use super::input::read_bounded_allow_empty;
@@ -716,4 +716,86 @@ fn replay_pcapng_evidence_preserves_source_timestamp_metadata() {
             timestamp_offset: -1,
         }
     );
+}
+
+fn decode_frame(link_type: LinkType, bytes: Vec<u8>) -> packetcraftr::packet::decode::Result {
+    use std::sync::Arc;
+
+    packetcraftr::packet::decode::Decoder::new(Arc::new(
+        packetcraftr::protocol::builtin::registry().unwrap(),
+    ))
+    .decode(
+        Frame::new(SystemTime::UNIX_EPOCH, link_type, bytes).unwrap(),
+        packetcraftr::packet::decode::Options::default(),
+    )
+    .unwrap()
+}
+
+fn built_frame(expression: &str) -> Vec<u8> {
+    use std::sync::Arc;
+
+    let registry = Arc::new(packetcraftr::protocol::builtin::registry().unwrap());
+    let packet = packetcraftr::packet::expression::parse(
+        expression,
+        &registry,
+        packetcraftr::packet::expression::Options::default(),
+    )
+    .unwrap();
+    packetcraftr::packet::build::Builder::new(registry)
+        .build(
+            packet,
+            packetcraftr::packet::build::Context::default(),
+            packetcraftr::packet::build::Options::default(),
+        )
+        .unwrap()
+        .bytes
+        .to_vec()
+}
+
+#[test]
+fn frame_summaries_report_the_innermost_addressed_layer_and_its_ports() {
+    let ethernet = decode_frame(
+        LinkType::ETHERNET,
+        built_frame(
+            "ethernet(source=02:00:00:00:00:01,destination=02:00:00:00:00:02)\
+             /ipv4(src=192.0.2.1,dst=192.0.2.53,ttl=64)/udp(sport=40000,dport=53)/raw(text=hi)",
+        ),
+    );
+    assert_eq!(
+        frame_summary(&ethernet),
+        "ethernet/ipv4/udp/raw 192.0.2.1:40000 > 192.0.2.53:53"
+    );
+
+    // The outer IPv4 endpoints are superseded by the tunnelled IPv6 layer, and
+    // the inner transport ports replace nothing because none were seen above.
+    let tunnelled = decode_frame(
+        LinkType::RAW,
+        built_frame(
+            "ipv4(src=192.0.2.1,dst=192.0.2.9,ttl=64)/gre()\
+             /ipv6(src=2001:db8::1,dst=2001:db8::2,hop_limit=64)/tcp(sport=1234,dport=443)",
+        ),
+    );
+    assert_eq!(
+        frame_summary(&tunnelled),
+        "ipv4/gre/ipv6/tcp [2001:db8::1]:1234 > [2001:db8::2]:443"
+    );
+
+    // An addressed layer with no transport reports endpoints alone.
+    let icmp = decode_frame(
+        LinkType::RAW,
+        built_frame("ipv4(src=192.0.2.1,dst=192.0.2.9,ttl=64)/icmpv4(type=8,code=0)"),
+    );
+    assert_eq!(frame_summary(&icmp), "ipv4/icmpv4 192.0.2.1 > 192.0.2.9");
+}
+
+#[test]
+fn frame_summaries_count_diagnostics_and_omit_absent_endpoints() {
+    // A truncated IPv4 header decodes to a malformed layer, which has no
+    // addresses to report and carries the diagnostic that explains why.
+    let malformed = decode_frame(LinkType::RAW, vec![0x45, 0x00, 0x00, 0x14, 0x00]);
+    assert_eq!(malformed.diagnostics.len(), 1);
+    assert_eq!(frame_summary(&malformed), "malformed diagnostics=1");
+
+    let opaque = decode_frame(LinkType(147), vec![0xde, 0xad, 0xbe, 0xef]);
+    assert_eq!(frame_summary(&opaque), "raw diagnostics=1");
 }

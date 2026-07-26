@@ -153,15 +153,26 @@ Examples:
 ===== packetcraftr decode --help =====
 Dissect every frame in a classic PCAP or PCAPNG file
 
-Usage: packetcraftr decode [OPTIONS] <PATH>
+Usage: packetcraftr decode [OPTIONS] [PATH]
 
 Arguments:
-  <PATH>
-          Classic PCAP or PCAPNG input path
+  [PATH]
+          Classic PCAP or PCAPNG input path; conflicts with --interface
 
 Options:
+      --interface <NAME_OR_INDEX>
+          Interface name or numeric index to observe live; conflicts with PATH
+
       --verbose
           Print every decoded layer field instead of one summary line per frame
+
+      --timeout-ms <TIMEOUT_MS>
+          Live capture window in milliseconds; used only with --interface
+
+          [default: 3000]
+
+      --no-promiscuous
+          Capture only traffic the interface would accept anyway
 
       --max-frames <MAX_FRAMES>
           Maximum frames accepted from the capture stream
@@ -182,6 +193,27 @@ Options:
           Maximum PCAPNG interfaces accepted from the input
 
           [default: 4096]
+
+      --max-queue-frames <MAX_QUEUE_FRAMES>
+          Aggregate backend capture-queue frame bound
+
+          [default: 4096]
+
+      --max-captured-bytes <MAX_CAPTURED_BYTES>
+          Aggregate retained/queued capture byte bound
+
+          [default: 268435456]
+
+      --snap-length <SNAP_LENGTH>
+          Maximum bytes retained from any one captured frame
+
+          [default: 16777216]
+
+      --overflow-policy <OVERFLOW_POLICY>
+          Backend queue behavior when a configured bound is reached
+
+          [default: fail]
+          [possible values: fail, drop-newest, drop-oldest]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -205,9 +237,12 @@ Global options:
 
 Decode dissects every frame in a capture file; read copies the same frames byte for byte.
 
+With --interface, decode observes one interface and dissects frames as they arrive, under the same budgets and capture window as capture. A live source streams, so it supports text and NDJSON but not the aggregate JSON result.
+
 Examples:
   packetcraftr decode capture.pcapng --max-frames 100
   packetcraftr decode capture.pcap --verbose
+  packetcraftr decode --interface eth0 --timeout-ms 5000
   packetcraftr --output ndjson decode capture.pcapng
 
 ===== packetcraftr protocols --help =====

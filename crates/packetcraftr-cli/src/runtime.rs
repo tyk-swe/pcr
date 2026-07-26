@@ -258,6 +258,17 @@ pub(super) fn workflow_exchange_options(
     Ok(options)
 }
 
+/// Resolves one interface selector into the passive description a capture
+/// arms from. This performs interface lookup only: no route lookup, neighbor
+/// resolution, or transmission decision.
+pub(super) fn observe_interface_route(selector: String) -> Result<net::route::Plan, CliError> {
+    let interface = resolve_interface(Some(selector), &net::interface::SystemProvider)?
+        .expect("an explicit selector always resolves to an interface identity");
+    net::route::Planner
+        .observe_interface(&interface, &net::route::SystemProvider)
+        .map_err(CliError::classified)
+}
+
 /// A capture is armed either from a planned packet route or from one
 /// interface observed directly.
 pub(super) struct PreparedCaptureRequest {
@@ -312,11 +323,7 @@ pub(super) fn prepare_capture_request(
                 "interface-only capture observes the link, so --link-mode layer3 cannot be honored",
             ));
         }
-        let interface = resolve_interface(Some(selector), &net::interface::SystemProvider)?
-            .expect("an explicit selector always resolves to an interface identity");
-        let route = net::route::Planner
-            .observe_interface(&interface, &net::route::SystemProvider)
-            .map_err(CliError::classified)?;
+        let route = observe_interface_route(selector)?;
         return Ok(PreparedCaptureRequest { route, policy });
     };
 

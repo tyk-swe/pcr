@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use clap::{Args, ValueEnum};
 use packetcraftr::capture;
 
+use super::capture_limits::CaptureLimitArgs;
 use super::sink::CaptureSinkArgs;
 
 #[derive(Debug, Args)]
@@ -85,11 +86,23 @@ pub(crate) struct ReadArgs {
 
 #[derive(Debug, Args)]
 pub(crate) struct DecodeArgs {
-    /// Classic PCAP or PCAPNG input path.
-    pub(crate) path: PathBuf,
+    /// Classic PCAP or PCAPNG input path; conflicts with --interface.
+    #[arg(required_unless_present = "interface")]
+    pub(crate) path: Option<PathBuf>,
+    /// Interface name or numeric index to observe live; conflicts with PATH.
+    #[arg(long, value_name = "NAME_OR_INDEX", conflicts_with = "path")]
+    pub(crate) interface: Option<String>,
     /// Print every decoded layer field instead of one summary line per frame.
     #[arg(long)]
     pub(crate) verbose: bool,
+    /// Live capture window in milliseconds; used only with --interface.
+    #[arg(long, default_value_t = 3_000)]
+    pub(crate) timeout_ms: u64,
+    /// Capture only traffic the interface would accept anyway.
+    #[arg(long)]
+    pub(crate) no_promiscuous: bool,
     #[command(flatten)]
     pub(crate) limits: CaptureStreamLimitArgs,
+    #[command(flatten)]
+    pub(crate) capture_limits: CaptureLimitArgs,
 }

@@ -39,9 +39,12 @@ Examples:
   packetcraftr --output json dissect --file frame.bin --link-type 1"#;
 const DECODE_AFTER_HELP: &str = r#"Decode dissects every frame in a capture file; read copies the same frames byte for byte.
 
+With --interface, decode observes one interface and dissects frames as they arrive, under the same budgets and capture window as capture. A live source streams, so it supports text and NDJSON but not the aggregate JSON result.
+
 Examples:
   packetcraftr decode capture.pcapng --max-frames 100
   packetcraftr decode capture.pcap --verbose
+  packetcraftr decode --interface eth0 --timeout-ms 5000
   packetcraftr --output ndjson decode capture.pcapng"#;
 const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
   packetcraftr protocols

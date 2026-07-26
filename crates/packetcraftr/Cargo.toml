@@ -36,6 +36,10 @@ serde.workspace = true
 serde_json.workspace = true
 
 [[bench]]
+name = "capture_write"
+harness = false
+
+[[bench]]
 name = "packet_pipeline"
 harness = false
 

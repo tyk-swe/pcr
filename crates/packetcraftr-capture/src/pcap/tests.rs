@@ -1483,3 +1483,58 @@ fn an_unannotated_capture_reports_no_metadata_loss() {
     assert!(report.dropped_metadata.is_empty());
     assert_eq!(report.dropped_metadata.total(), 0);
 }
+
+/// Counts how many calls reach the destination, which is the property a
+/// buffered sink actually changes. Wall-clock timing against memory would not
+/// show it, so this is asserted rather than benchmarked.
+#[derive(Debug, Default)]
+struct CountingSink {
+    bytes: Vec<u8>,
+    calls: usize,
+}
+
+impl Write for CountingSink {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        self.calls += 1;
+        self.bytes.extend_from_slice(buffer);
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_buffered_destination_collapses_per_frame_writer_calls() {
+    const FRAMES: usize = 64;
+    let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![0xa5; 1_472]).unwrap();
+
+    let mut direct = Writer::pcap(CountingSink::default(), LinkType::ETHERNET).unwrap();
+    for _ in 0..FRAMES {
+        direct.write_frame(&frame).unwrap();
+    }
+    direct.flush().unwrap();
+    let direct = direct.into_inner();
+
+    let mut buffered = Writer::pcap(
+        std::io::BufWriter::with_capacity(128 * 1024, CountingSink::default()),
+        LinkType::ETHERNET,
+    )
+    .unwrap();
+    for _ in 0..FRAMES {
+        buffered.write_frame(&frame).unwrap();
+    }
+    buffered.flush().unwrap();
+    let buffered = buffered.into_inner().into_inner().unwrap();
+
+    // The bytes are identical; only the call pattern differs.
+    assert_eq!(direct.bytes, buffered.bytes);
+    assert!(direct.calls >= FRAMES, "{} calls", direct.calls);
+    assert!(
+        buffered.calls * 8 < direct.calls,
+        "buffered {} calls vs direct {} calls",
+        buffered.calls,
+        direct.calls
+    );
+}

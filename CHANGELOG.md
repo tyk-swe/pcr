@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added a `capture_write` benchmark covering capture encode, decode, and
+  transcode throughput, as a baseline for changes to those paths.
 - Added PCAPNG annotation fidelity: `Reader::metadata` retains section,
   interface, and packet comments with their scope, name-resolution records, and
   interface-statistics counters, bounded by

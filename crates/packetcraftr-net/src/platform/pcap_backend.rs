@@ -76,6 +76,17 @@ pub(super) fn open_capture(
     })
 }
 
+/// Sends one Layer 2 frame, opening and closing its own handle.
+///
+/// Reopening per frame is deliberate for now: the interface identity is
+/// revalidated immediately before the handle is opened, so a frame can never
+/// be transmitted through an interface that was renamed or replaced after the
+/// route was planned. A reusable session would amortize the open across a
+/// replay or scan loop, but only if it re-establishes that guarantee on a
+/// bounded schedule and fails closed the moment identity stops matching.
+/// Holding the handle without that is a correctness regression, not an
+/// optimization, so the loop keeps paying the open until the session carries
+/// the same guarantee.
 pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
     let interface = &frame.route().plan.route.interface;
     i32::try_from(frame.bytes().len()).map_err(|_| LiveIoError::InvalidTransmissionFrame {

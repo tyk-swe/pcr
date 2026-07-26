@@ -377,3 +377,126 @@ fn protocols_rejects_non_aggregate_formats_before_name_resolution() {
         }
     }
 }
+
+#[test]
+fn decode_filters_frames_after_dissection_and_reports_what_it_skipped() {
+    let capture = fixture("captures/pcapng/multi-link.pcapng");
+
+    // The capture holds one UDP frame and one ICMP frame.
+    let udp = binary()
+        .arg("decode")
+        .arg(&capture)
+        .args(["--filter", "udp.destination_port == 9"])
+        .output()
+        .unwrap();
+    assert!(
+        udp.status.success(),
+        "{}",
+        String::from_utf8_lossy(&udp.stderr)
+    );
+    let rendered = String::from_utf8(udp.stdout).unwrap();
+    let mut lines = rendered.lines();
+    // The summary keeps the source frame index, so a filtered run still names
+    // the same frame `read` would.
+    assert!(lines.next().unwrap().starts_with("0: "), "{rendered}");
+    assert_eq!(
+        lines.next().unwrap(),
+        "decoded 1 frame(s), 47 byte(s), 1 filtered out"
+    );
+    assert!(lines.next().is_none());
+
+    let cidr = binary()
+        .arg("decode")
+        .arg(&capture)
+        .args([
+            "--filter",
+            "ipv4.source == 192.0.2.0/24 && icmpv4.type == 8",
+        ])
+        .output()
+        .unwrap();
+    assert!(cidr.status.success());
+    let rendered = String::from_utf8(cidr.stdout).unwrap();
+    assert!(
+        rendered.contains("\n1: ") || rendered.starts_with("1: "),
+        "{rendered}"
+    );
+    assert!(
+        rendered.ends_with("decoded 1 frame(s), 32 byte(s), 1 filtered out\n"),
+        "{rendered}"
+    );
+
+    let none = binary()
+        .arg("decode")
+        .arg(&capture)
+        .args(["--filter", "tcp"])
+        .output()
+        .unwrap();
+    assert!(none.status.success());
+    assert_eq!(
+        String::from_utf8(none.stdout).unwrap(),
+        "decoded 0 frame(s), 0 byte(s), 2 filtered out\n"
+    );
+}
+
+#[test]
+fn filtered_decode_keeps_contiguous_stream_sequences_and_reports_counts() {
+    let capture = fixture("captures/pcapng/multi-link.pcapng");
+    let output = binary()
+        .args(["--output", "ndjson", "decode"])
+        .arg(&capture)
+        .args(["--filter", "icmpv4"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let records = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    // The skipped frame leaves no gap: envelope sequences count records.
+    assert_eq!(records[0]["sequence"], 0);
+    assert_eq!(records[0]["result"]["event"], "frame");
+    assert_eq!(records[1]["sequence"], 1);
+    assert_eq!(records[1]["result"]["event"], "complete");
+    assert_eq!(records[1]["result"]["frames"], 1);
+    assert_eq!(records[1]["result"]["filtered"], 1);
+
+    let aggregate = binary()
+        .args(["--output", "json", "decode"])
+        .arg(&capture)
+        .args(["--filter", "icmpv4"])
+        .output()
+        .unwrap();
+    assert!(aggregate.status.success());
+    let value: serde_json::Value = serde_json::from_slice(&aggregate.stdout).unwrap();
+    assert_eq!(value["result"]["count"], 1);
+    assert_eq!(value["result"]["filtered"], 1);
+    assert_eq!(value["result"]["frames"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn an_invalid_filter_fails_before_the_capture_file_is_opened() {
+    for (expression, expected) in [
+        ("nope", "unknown protocol nope at byte 0"),
+        ("ipv4.nope == 1", "protocol ipv4 has no field nope"),
+        ("ipv4.source < 192.0.2.1", "supports only == and !="),
+        ("udp.destination_port == ", "filter syntax error"),
+    ] {
+        let output = binary()
+            .arg("decode")
+            .arg("definitely-missing.pcap")
+            .args(["--filter", expression])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{expression}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(expected), "{expression}: {stderr}");
+        // The missing input never surfaces, so compilation ran first.
+        assert!(!stderr.contains("definitely-missing"), "{expression}");
+    }
+}

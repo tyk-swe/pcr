@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added `decode --filter <EXPRESSION>` for both capture files and live
+  interfaces. The filter is compiled before any input is opened, so a mistyped
+  protocol or field name is a CLI error rather than a partial run, and the
+  number of frames it excluded is reported in the text summary, the aggregate
+  result, and the terminal stream record.
 - Added `packet::filter`, a bounded display-filter engine over the reflective
   field vocabulary a registry already exposes, so it covers external codecs
   without changes. It supports protocol presence, `==`/`!=` on every scalar

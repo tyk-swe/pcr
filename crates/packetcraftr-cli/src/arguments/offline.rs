@@ -92,6 +92,10 @@ pub(crate) struct DecodeArgs {
     /// Interface name or numeric index to observe live; conflicts with PATH.
     #[arg(long, value_name = "NAME_OR_INDEX", conflicts_with = "path")]
     pub(crate) interface: Option<String>,
+    /// Emit only frames matching a field expression, such as
+    /// 'ipv4.source == 192.0.2.0/24 && tcp.destination_port == 443'.
+    #[arg(long, value_name = "EXPRESSION")]
+    pub(crate) filter: Option<String>,
     /// Print every decoded layer field instead of one summary line per frame.
     #[arg(long)]
     pub(crate) verbose: bool,

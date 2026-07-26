@@ -30,6 +30,7 @@ pub(crate) fn run_decode(
     let DecodeArgs {
         path,
         interface,
+        filter,
         verbose,
         timeout_ms,
         no_promiscuous,
@@ -44,6 +45,9 @@ pub(crate) fn run_decode(
     } = arguments;
     validate_capture_stream_limits(max_frames, max_bytes, max_frame_bytes, max_interfaces)?;
     let registry = default_registry_arc()?;
+    // Compiled before any input is opened so a mistyped filter fails without
+    // reading a capture file or arming an interface.
+    let filter = compile_filter(filter.as_deref(), &registry)?;
     let decoder = packet::decode::Decoder::new(registry);
     let decode_options = packet::decode::Options {
         max_packet_size: max_frame_bytes,
@@ -53,6 +57,7 @@ pub(crate) fn run_decode(
         return run_live_decode(
             LiveDecode {
                 selector,
+                filter,
                 verbose,
                 timeout: Duration::from_millis(timeout_ms),
                 no_promiscuous,
@@ -70,46 +75,61 @@ pub(crate) fn run_decode(
     let path = path.expect("clap requires a path when no interface is selected");
     let mut reader = open_capture_reader(&path, max_frame_bytes, max_interfaces)?;
 
-    let mut sequence = 0_u64;
+    // `source_index` identifies a frame within the input, so a text line keeps
+    // naming the same frame `read` would. `emitted` is the envelope record
+    // sequence, which stays contiguous even when a filter skips frames.
+    let mut source_index = 0_u64;
+    let mut emitted = 0_u64;
+    let mut emitted_bytes = 0_u64;
+    let mut filtered = 0_u64;
     let mut captured_bytes = 0_u64;
     let mut aggregate = Vec::new();
     loop {
         let Some(frame) = reader
             .next_frame()
-            .map_err(|source| CliError::classified(source).at_sequence(sequence))?
+            .map_err(|source| CliError::classified(source).at_sequence(emitted))?
         else {
             break;
         };
-        let next_sequence = sequence.checked_add(1).ok_or_else(|| {
-            CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(sequence)
+        let next_index = source_index.checked_add(1).ok_or_else(|| {
+            CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(emitted)
         })?;
-        if next_sequence > max_frames {
+        if next_index > max_frames {
             return Err(CliError::classified(capture::Error::FrameLimitExceeded {
-                actual: next_sequence,
+                actual: next_index,
                 limit: max_frames,
             })
-            .at_sequence(sequence));
+            .at_sequence(emitted));
         }
-        captured_bytes = next_captured_bytes(captured_bytes, &frame, max_bytes, sequence)?;
+        captured_bytes = next_captured_bytes(captured_bytes, &frame, max_bytes, emitted)?;
 
         let decoded = decoder
             .decode(frame, decode_options.clone())
-            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?;
+            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(emitted))?;
+        if filter
+            .as_ref()
+            .is_some_and(|filter| !filter.matches(&decoded.packet))
+        {
+            filtered += 1;
+            source_index = next_index;
+            continue;
+        }
+        emitted_bytes += u64::from(decoded.frame.captured_length());
         match output {
             output::contract::Format::Text => {
-                render_decoded_text(sequence, &decoded, verbose)?;
+                render_decoded_text(source_index, &decoded, verbose)?;
             }
             output::contract::Format::Ndjson => {
-                let decoded = decoded_output(decoded, sequence)?;
+                let decoded = decoded_output(decoded, emitted)?;
                 emit_json_compact(&output::envelope::Stream::success(
                     output::contract::Command::Decode,
-                    sequence,
+                    emitted,
                     output::decode::Event::Frame { decoded },
                     Vec::new(),
                 ))
-                .map_err(|error| error.at_sequence(sequence))?;
+                .map_err(|error| error.at_sequence(emitted))?;
             }
-            output::contract::Format::Json => aggregate.push(decoded_output(decoded, sequence)?),
+            output::contract::Format::Json => aggregate.push(decoded_output(decoded, emitted)?),
             _ => {
                 return Err(CliError::classified(
                     output::contract::Error::UnsupportedFormat {
@@ -119,38 +139,61 @@ pub(crate) fn run_decode(
                 ));
             }
         }
-        sequence = next_sequence;
+        source_index = next_index;
+        emitted += 1;
     }
 
     match output {
         output::contract::Format::Text => write_stdout_line(format_args!(
-            "decoded {sequence} frame(s), {captured_bytes} byte(s)"
+            "decoded {emitted} frame(s), {emitted_bytes} byte(s){}",
+            filtered_suffix(filtered)
         )),
         output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
             output::contract::Command::Decode,
             output::decode::Result {
                 frames: aggregate,
-                count: sequence,
-                filtered: 0,
+                count: emitted,
+                filtered,
             },
             Vec::new(),
         )),
         output::contract::Format::Ndjson => emit_json_compact(&output::envelope::Stream::success(
             output::contract::Command::Decode,
-            sequence,
+            emitted,
             output::decode::Event::Complete {
-                frames: sequence,
-                filtered: 0,
+                frames: emitted,
+                filtered,
             },
             Vec::new(),
         ))
-        .map_err(|error| error.at_sequence(sequence)),
+        .map_err(|error| error.at_sequence(emitted)),
         _ => unreachable!("unsupported formats are rejected inside the frame loop"),
     }
 }
 
+/// Compiles a display filter before any capture source is opened.
+fn compile_filter(
+    source: Option<&str>,
+    registry: &packet::registry::Registry,
+) -> Result<Option<packet::filter::Filter>, CliError> {
+    source
+        .map(|source| {
+            packet::filter::Filter::compile(source, registry, packet::filter::Options::default())
+                .map_err(|error| CliError::new(2, error.to_string()))
+        })
+        .transpose()
+}
+
+fn filtered_suffix(filtered: u64) -> String {
+    if filtered == 0 {
+        return String::new();
+    }
+    format!(", {filtered} filtered out")
+}
+
 struct LiveDecode {
     selector: String,
+    filter: Option<packet::filter::Filter>,
     verbose: bool,
     timeout: Duration,
     no_promiscuous: bool,
@@ -173,6 +216,7 @@ fn run_live_decode(
 ) -> Result<(), CliError> {
     let LiveDecode {
         selector,
+        filter,
         verbose,
         timeout,
         no_promiscuous,
@@ -202,21 +246,32 @@ fn run_live_decode(
         )
         .map_err(CliError::classified)?;
 
-    let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
+    let mut emitted = 0_u64;
+    let mut emitted_bytes = 0_u64;
+    let mut filtered = 0_u64;
+    let outcome = drive_capture(capture, timeout, limits, budget, |frame, source_index| {
         let decoded = decoder
             .decode(frame, decode_options.clone())
-            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(sequence))?;
-        match output {
-            output::contract::Format::Text => render_decoded_text(sequence, &decoded, verbose),
+            .map_err(|source| CliError::new(3, source.to_string()).at_sequence(emitted))?;
+        if filter
+            .as_ref()
+            .is_some_and(|filter| !filter.matches(&decoded.packet))
+        {
+            filtered += 1;
+            return Ok(());
+        }
+        emitted_bytes += u64::from(decoded.frame.captured_length());
+        let result = match output {
+            output::contract::Format::Text => render_decoded_text(source_index, &decoded, verbose),
             output::contract::Format::Ndjson => {
-                let decoded = decoded_output(decoded, sequence)?;
+                let decoded = decoded_output(decoded, emitted)?;
                 emit_json_compact(&output::envelope::Stream::success(
                     output::contract::Command::Decode,
-                    sequence,
+                    emitted,
                     output::decode::Event::Frame { decoded },
                     Vec::new(),
                 ))
-                .map_err(|error| error.at_sequence(sequence))
+                .map_err(|error| error.at_sequence(emitted))
             }
             _ => Err(CliError::classified(
                 output::contract::Error::UnsupportedFormat {
@@ -224,31 +279,31 @@ fn run_live_decode(
                     format: output,
                 },
             )),
-        }
+        };
+        result.inspect(|()| emitted += 1)
     })?;
 
-    let frames = outcome.stats.packets_completed;
     match output {
         output::contract::Format::Text => {
             write_stdout_line(format_args!(
-                "decoded {frames} frame(s), {} byte(s)",
-                outcome.stats.bytes
+                "decoded {emitted} frame(s), {emitted_bytes} byte(s){}",
+                filtered_suffix(filtered)
             ))?;
             render_diagnostics_text(&outcome.diagnostics)
         }
         output::contract::Format::Ndjson => emit_json_compact(
             &output::envelope::Stream::success(
                 output::contract::Command::Decode,
-                frames,
+                emitted,
                 output::decode::Event::Complete {
-                    frames,
-                    filtered: 0,
+                    frames: emitted,
+                    filtered,
                 },
                 outcome.diagnostics,
             )
             .with_stats(outcome.stats),
         )
-        .map_err(|error| error.at_sequence(frames)),
+        .map_err(|error| error.at_sequence(emitted)),
         _ => unreachable!("unsupported formats are rejected before the capture is armed"),
     }
 }

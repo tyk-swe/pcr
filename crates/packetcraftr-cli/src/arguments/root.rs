@@ -41,10 +41,13 @@ const DECODE_AFTER_HELP: &str = r#"Decode dissects every frame in a capture file
 
 With --interface, decode observes one interface and dissects frames as they arrive, under the same budgets and capture window as capture. A live source streams, so it supports text and NDJSON but not the aggregate JSON result.
 
+--filter selects frames after dissection using the reflective field names each protocol declares. It supports protocol presence, == and != on every scalar field, ordering on numeric fields, CIDR containment for address fields, &&, ||, !, and parentheses. Run `packetcraftr protocols <PROTOCOL>` to list the fields one protocol exposes. A comparison matches when any layer of that protocol satisfies it.
+
 Examples:
   packetcraftr decode capture.pcapng --max-frames 100
   packetcraftr decode capture.pcap --verbose
-  packetcraftr decode --interface eth0 --timeout-ms 5000
+  packetcraftr decode capture.pcapng --filter 'ipv4.source == 192.0.2.0/24 && tcp.destination_port == 443'
+  packetcraftr decode --interface eth0 --timeout-ms 5000 --filter 'dns'
   packetcraftr --output ndjson decode capture.pcapng"#;
 const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
   packetcraftr protocols

@@ -224,6 +224,17 @@ packetcraftr decode capture.pcapng --max-frames 100
 packetcraftr decode capture.pcapng --verbose
 ```
 
+Select frames with a display filter over the reflective field names each
+protocol declares. `packetcraftr protocols <PROTOCOL>` lists the fields one
+protocol exposes. The filter is compiled against the registry before the input
+is opened, so an unknown protocol or field is reported immediately:
+
+```console
+packetcraftr decode capture.pcapng \
+  --filter 'ipv4.source == 192.0.2.0/24 && tcp.destination_port == 443'
+packetcraftr decode capture.pcapng --filter 'icmpv4 && !(ipv4.ttl > 64)'
+```
+
 Write exact capture bytes to a file instead of standard output. `--write`
 accepts the `pcap`, `pcapng`, and `raw` formats on `read`, `capture`, `send`,
 `exchange`, and `replay`:

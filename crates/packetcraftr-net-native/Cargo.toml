@@ -1,0 +1,52 @@
+[package]
+name = "packetcraftr-net-native"
+description = "Operating-system providers for PacketcraftR interfaces, routes, live capture, and transmission"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+native-interfaces = ["dep:pnet_datalink", "dep:windows"]
+native-route = [
+    "native-interfaces",
+    "dep:futures-util",
+    "dep:libc",
+    "dep:rtnetlink",
+    "dep:socket2",
+    "dep:tokio",
+    "dep:windows",
+]
+native-layer2 = ["native-interfaces", "dep:libloading", "dep:pcap"]
+native-layer3 = ["native-interfaces", "dep:socket2"]
+
+[dependencies]
+bytes.workspace = true
+packetcraftr-model.workspace = true
+packetcraftr-net.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(not(windows))'.dependencies]
+pnet_datalink = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+futures-util = { workspace = true, optional = true }
+pcap = { workspace = true, optional = true }
+rtnetlink = { workspace = true, optional = true }
+socket2 = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = { workspace = true, optional = true }
+pcap = { workspace = true, optional = true }
+socket2 = { workspace = true, optional = true }
+
+[target.'cfg(windows)'.dependencies]
+libloading = { workspace = true, optional = true }
+socket2 = { workspace = true, optional = true }
+windows = { workspace = true, optional = true }

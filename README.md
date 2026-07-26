@@ -113,13 +113,42 @@ When `cli` is enabled, the resulting executable is
 `target/release/packetcraftr` on Unix-like systems or
 `target\release\packetcraftr.exe` on Windows.
 
+## Workspace layout
+
+PacketcraftR is a Cargo workspace. The `packetcraftr` package at the repository
+root is a façade: its library re-exports the public domains and maps the public
+Cargo features, and its binary is a thin launcher. Implementation lives in
+member crates under `crates/`, which depend on each other in one direction and
+never on the root package:
+
+| Crate | Responsibility |
+| --- | --- |
+| `packetcraftr-model` | Classified errors, frames and link types, stable identities |
+| `packetcraftr-capture` | Classic PCAP and PCAPNG reading, writing, transcoding |
+| `packetcraftr-packet` | Layers, schemas, documents, expressions, building, dissection |
+| `packetcraftr-protocols` | Built-in protocols, codecs, matchers, capture roots |
+| `packetcraftr-session` | Bounded fragment and TCP reassembly |
+| `packetcraftr-net` | Platform-neutral interface, route, capture, transmission contracts |
+| `packetcraftr-net-native` | Operating-system providers behind those contracts |
+| `packetcraftr-policy` | The non-bypassable traffic-authorization boundary |
+| `packetcraftr-client` | Audited send and capture-ready exchange orchestration |
+| `packetcraftr-workflow` | Replay, scan, traceroute, DNS, and fuzz engines |
+| `packetcraftr-workflow-client` | Client-backed executors and the native replay transmitter |
+| `packetcraftr-output` | Versioned render-neutral output contracts |
+| `packetcraftr-cli` | Arguments, commands, rendering, runtime composition |
+
+Library consumers can depend on the `packetcraftr` façade for the familiar
+domain paths, or on individual member crates to compile only what they use.
+
 ## Cargo features and tested profiles
 
-`Cargo.toml` defines `cli`, `native-interfaces`, `native-route`,
-`native-layer2`, and `native-layer3`. The `cli` feature enables the
-`packetcraftr` binary and its Clap and terminal-rendering dependencies.
-`native-interfaces` enables interface enumeration. Every other native feature
-enables `native-interfaces`, and the default feature set contains `cli` and
+The root `packetcraftr` package defines `cli`, `native-interfaces`,
+`native-route`, `native-layer2`, and `native-layer3`. The `cli` feature enables
+the `packetcraftr` binary together with `packetcraftr-cli` and its Clap and
+terminal-rendering dependencies. `native-interfaces` enables interface
+enumeration. Every other native feature enables `native-interfaces`, and each
+one forwards to the same feature on `packetcraftr-net-native`, which owns the
+target-specific dependencies. The default feature set contains `cli` and
 `native-interfaces`, preserving the standard CLI experience.
 
 The profile names below are repository, CI, or release labels, not additional

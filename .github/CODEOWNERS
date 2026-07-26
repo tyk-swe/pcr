@@ -1,33 +1,38 @@
 # Safety-sensitive and serialized-contract review routing.
 
-/src/net/platform/** @tyk-swe
-/src/net/transmit.rs @tyk-swe
-/src/net/capture.rs @tyk-swe
-/src/net/route/** @tyk-swe
-/src/net/interface.rs @tyk-swe
+/crates/packetcraftr-net-native/** @tyk-swe
+/crates/packetcraftr-net/src/transmit.rs @tyk-swe
+/crates/packetcraftr-net/src/capture.rs @tyk-swe
+/crates/packetcraftr-net/src/route/** @tyk-swe
+/crates/packetcraftr-net/src/interface.rs @tyk-swe
 
-/src/client/exchange/** @tyk-swe
-/src/client/client.rs @tyk-swe
-/src/client/helpers.rs @tyk-swe
+/crates/packetcraftr-policy/** @tyk-swe
+/crates/packetcraftr-client/src/exchange/** @tyk-swe
 
-/src/protocol/matcher/** @tyk-swe
-/src/workflow/probe.rs @tyk-swe
+/crates/packetcraftr-protocols/src/matcher/** @tyk-swe
+/crates/packetcraftr-workflow/src/probe.rs @tyk-swe
+/crates/packetcraftr-workflow-client/** @tyk-swe
 
-/src/output/** @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-output/** @tyk-swe @rkdxodud-tyk
 /schemas/** @tyk-swe @rkdxodud-tyk
 /examples/documents/** @tyk-swe @rkdxodud-tyk
-/src/packet/document/model.rs @tyk-swe @rkdxodud-tyk
-/src/packet/field/value.rs @tyk-swe @rkdxodud-tyk
-/src/packet/layout/model.rs @tyk-swe @rkdxodud-tyk
-/src/protocol/**/model.rs @tyk-swe @rkdxodud-tyk
-/src/protocol/network/igmp.rs @tyk-swe @rkdxodud-tyk
-/src/protocol/transport/sctp.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-packet/src/document/model.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-packet/src/field/value.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-packet/src/layout/model.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-protocols/src/**/model.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-protocols/src/network/igmp.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-protocols/src/transport/sctp.rs @tyk-swe @rkdxodud-tyk
 
-/src/packet/protocol_catalog.rs @tyk-swe
-/src/protocol/builtin/registry.rs @tyk-swe
+/crates/packetcraftr-model/** @tyk-swe
+/crates/packetcraftr-packet/src/protocol_catalog.rs @tyk-swe
+/crates/packetcraftr-protocols/src/builtin/registry.rs @tyk-swe
+
+# The workspace manifest owns member membership, shared package metadata,
+# lints, and the checked release arithmetic profile.
+/Cargo.toml @tyk-swe
 
 # GitHub uses only the last matching CODEOWNERS pattern. Keep every owner for
 # this contract-and-catalog overlap on the same line.
-/src/protocol/support/manifest.rs @tyk-swe @rkdxodud-tyk
+/crates/packetcraftr-protocols/src/support/manifest.rs @tyk-swe @rkdxodud-tyk
 
 /.github/workflows/release.yml @tyk-swe

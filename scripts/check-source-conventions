@@ -2,14 +2,18 @@
 # Copyright (C) 2026 tyk-swe
 # SPDX-License-Identifier: AGPL-3.0-only
 
-# Enforces the two source conventions that rustfmt and clippy cannot express:
+# Enforces the source conventions that rustfmt and clippy cannot express:
 #
-#   1. every Rust file opens with the copyright/SPDX header pair, and
-#   2. top-level `use` declarations precede the first item.
+#   1. every Rust file opens with the copyright/SPDX header pair,
+#   2. top-level `use` declarations precede the first item, and
+#   3. no workspace member reaches back through the root `packetcraftr` façade.
 #
-# Both drifted before being normalised: 114 of 264 files were missing the
-# AGPL header, and 23 files under src/workflow/ placed their imports after
-# every item in the file.
+# The first two drifted before being normalised: 114 of 264 files were missing
+# the AGPL header, and 23 files under the workflow domain placed their imports
+# after every item in the file. The third keeps the multi-crate dependency
+# direction acyclic: `packetcraftr` re-exports its members, so a member that
+# imported it would close a cycle that Cargo alone cannot reject, because the
+# root package is not in any member's dependency list.
 
 set -euo pipefail
 
@@ -25,8 +29,16 @@ report() {
     status=1
 }
 
+# Root package sources, every workspace member (src, tests, and benches), the
+# root integration tests, and the separately manifested fuzz targets.
 files() {
-    find src tests benches fuzz/fuzz_targets -name '*.rs' -type f 2>/dev/null | sort
+    find src crates tests fuzz/fuzz_targets \
+        -name '*.rs' -type f -not -path '*/target/*' 2>/dev/null | sort
+}
+
+# Rust files belonging to a workspace member crate.
+member_files() {
+    find crates -name '*.rs' -type f -not -path '*/target/*' 2>/dev/null | sort
 }
 
 # --- 1. license headers -----------------------------------------------------
@@ -43,7 +55,7 @@ done < <(files)
 # `mod.rs` module roots legitimately declare the module tree and its `pub use`
 # re-exports before importing, so they are exempt from the ordering rule.
 while IFS= read -r file; do
-    case "$file" in */mod.rs | src/lib.rs | src/main.rs) continue ;; esac
+    case "$file" in */mod.rs | */lib.rs | */main.rs) continue ;; esac
 
     offender=$(
         awk '
@@ -106,6 +118,16 @@ while IFS= read -r file; do
         report "$file:$offender" 'top-level `use` appears after the first item; move imports to the top'
     fi
 done < <(files)
+
+# --- 3. member crates never import through the root façade -------------------
+
+while IFS= read -r file; do
+    if grep -Eqn '(^|[^_[:alnum:]])packetcraftr::' "$file"; then
+        offender=$(grep -En '(^|[^_[:alnum:]])packetcraftr::' "$file" | head -n 1 | cut -d: -f1)
+        report "$file:$offender" \
+            'workspace members must depend on member crates, not the root `packetcraftr` façade'
+    fi
+done < <(member_files)
 
 if ((status == 0)); then
     printf 'source conventions: %s files checked, all clean\n' "$(files | wc -l | tr -d ' ')"

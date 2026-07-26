@@ -17,6 +17,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING**: Restructured PacketcraftR as a Cargo workspace. The root
+  `packetcraftr` package is now a façade whose library re-exports the public
+  domains from thirteen member crates under `crates/` and whose binary is a thin
+  launcher into `packetcraftr-cli`; no domain implementation remains in the root
+  package. Member crates are `packetcraftr-model`, `-capture`, `-packet`,
+  `-protocols`, `-session`, `-net`, `-net-native`, `-policy`, `-client`,
+  `-workflow`, `-workflow-client`, `-output`, and `-cli`. The dependency graph is
+  acyclic, no member depends on the root package, native platform code and
+  target-specific dependencies are confined to `packetcraftr-net-native`, and the
+  traffic-authorization boundary is confined to `packetcraftr-policy`. Package
+  metadata, dependency versions, lints, and the checked release arithmetic
+  profile are declared once at the workspace level. The `packetcraftr` binary
+  name, the `cli`/`native-interfaces`/`native-route`/`native-layer2`/
+  `native-layer3` features, default-feature behaviour, CLI output, schemas,
+  goldens, and published examples are unchanged.
+- **BREAKING**: Moved traffic policy and live target resolution out of `client`.
+  `packetcraftr::client::policy` is now `packetcraftr::policy`, and
+  `packetcraftr::client::target` is now `packetcraftr::policy::target`.
+- **BREAKING**: Moved `Frame`, `LinkType`, `Direction`, and `ProtocolId` into the
+  shared model. Frame constructors and `Frame::validate` now return the dedicated
+  `FrameError` instead of a PCAP parser error, and `capture::Error` reports those
+  three length invariants through a transparent `Error::Frame` variant with
+  unchanged messages and classification.
+- **BREAKING**: `FieldKind`, `FieldValue`, and `workflow::replay::Timing` are no
+  longer `#[non_exhaustive]`, so first-party mapping layers in sibling crates
+  keep translating them exhaustively.
+- Promoted the seams that out-of-crate workflow executors need to public API:
+  `Client::exchange_for_workflow`, `workflow::scan::classify_response`,
+  `workflow::traceroute::classify_response`, `workflow::dns::correlates`,
+  `Stats::checked_add`, and `Layer::declared_layout_fields`.
 - Renamed the canonical interface-enumeration feature to
   `native-interfaces`; native route, Layer 2, and Layer 3 capabilities now
   enable it explicitly.

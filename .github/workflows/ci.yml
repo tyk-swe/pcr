@@ -76,17 +76,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add clippy rustfmt
       - name: Test portable profile
-        run: cargo test --locked --no-default-features
+        run: cargo test --locked --workspace --no-default-features
       - name: Test default profile
-        run: cargo test --locked
+        run: cargo test --locked --workspace
       - name: Test complete profile
-        run: cargo test --locked --all-features
+        run: cargo test --locked --workspace --all-features
       - name: Check release pcap-free profile
         run: >-
-          cargo check --locked --release --no-default-features
+          cargo check --locked --workspace --release --no-default-features
           --features cli,native-route,native-layer3
       - name: Clippy complete profile
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
   native-e2e:
     name: Linux native namespace E2E
@@ -117,9 +117,9 @@ jobs:
       - run: rustup component add rustfmt
       - run: cargo install cargo-hack --locked --version 0.6.45
       - name: Minimum supported Rust 1.96 portable profile
-        run: cargo +1.96.0 check --locked --all-targets --no-default-features
+        run: cargo +1.96.0 check --locked --workspace --all-targets --no-default-features
       - name: Minimum supported Rust 1.96 complete profile
-        run: cargo +1.96.0 check --locked --all-targets --all-features
+        run: cargo +1.96.0 check --locked --workspace --all-targets --all-features
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Source conventions
@@ -127,11 +127,11 @@ jobs:
       - name: Warning-free documentation
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked --all-features --no-deps
+        run: cargo doc --locked --workspace --all-features --no-deps
       - name: Pairwise feature powerset
-        run: cargo hack check --locked --feature-powerset --depth 2 --all-targets
+        run: cargo hack check --locked --workspace --feature-powerset --depth 2 --all-targets
       - name: Complete feature profile
-        run: cargo check --locked --all-targets --all-features
+        run: cargo check --locked --workspace --all-targets --all-features
 
   portable-targets:
     name: portable target (${{ matrix.target }})
@@ -155,10 +155,10 @@ jobs:
       - run: rustup target add ${{ matrix.target }}
       - name: Check portable interface-enumeration profile
         run: >-
-          cargo check --locked --target ${{ matrix.target }}
+          cargo check --locked --workspace --target ${{ matrix.target }}
           --no-default-features --features native-interfaces
       - name: Check complete portable profile
-        run: cargo check --locked --target ${{ matrix.target }} --all-features --all-targets
+        run: cargo check --locked --workspace --target ${{ matrix.target }} --all-features --all-targets
 
   coverage:
     name: Linux line coverage

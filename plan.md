@@ -6,7 +6,7 @@
 - Migration policy: breaking internal and public API changes are allowed while the project is in beta.
 - Compatibility policy: do not preserve obsolete architecture through forwarding modules, deprecated aliases, compatibility adapters, or duplicate execution paths.
 - Implementation strategy: seven ordered, independently reviewable phases.
-- Current phase: Phase 1 not started.
+- Current phase: Phase 1 complete; Phase 2 not started.
 
 Mark a phase complete only after its implementation, tests, documentation, and validation gates are complete. Add a short completion note beneath the phase describing important decisions and any deliberate deviations from this plan.
 
@@ -640,7 +640,7 @@ Repeated traps, deadlines, resource exhaustion, or contract violations contribut
 
 ## Ordered implementation phases
 
-### [ ] Phase 1 — Multi-crate workspace and dependency boundaries
+### [x] Phase 1 — Multi-crate workspace and dependency boundaries
 
 Deliver:
 
@@ -663,7 +663,78 @@ Acceptance:
 
 Completion notes:
 
-- Not completed.
+The workspace root keeps the `packetcraftr` package, the `packetcraftr` binary
+name, Rust 2024, the 1.96 MSRV, AGPL-3.0-only, repository metadata, the
+`unsafe_code = "deny"` policy, and `overflow-checks = true` in the release
+profile. Package metadata, dependency versions, and lints are now declared once
+in `[workspace.package]`, `[workspace.dependencies]`, and `[workspace.lints]`;
+members declare only what is specific to them. Root `src/lib.rs` is a façade of
+re-exports and small explicit modules, and `src/main.rs` only calls
+`packetcraftr_cli::run_entrypoint`.
+
+Final crate graph (arrows point at dependencies):
+
+    packetcraftr-model      (no first-party dependencies)
+    packetcraftr-capture    -> model
+    packetcraftr-packet     -> model
+    packetcraftr-protocols  -> model, packet
+    packetcraftr-session    (no first-party dependencies)
+    packetcraftr-net        -> model, packet          [dev: protocols]
+    packetcraftr-net-native -> model, net
+    packetcraftr-policy     -> model, packet
+    packetcraftr-client     -> model, packet, policy, protocols, net
+    packetcraftr-workflow   -> model, capture, packet, protocols, policy, net
+    packetcraftr-workflow-client
+                            -> model, capture, packet, protocols, policy, net,
+                               net-native, client, workflow
+    packetcraftr-output     -> model, capture, packet, protocols, net, client,
+                               workflow
+    packetcraftr-cli        -> every public domain crate above
+    packetcraftr (root)     -> every domain crate; cli behind the `cli` feature
+
+Important decisions:
+
+- `Frame`, `FrameError`, `LinkType`, `Direction`, and `ProtocolId` moved to
+  `packetcraftr-model`. Frame construction and validation now return
+  `FrameError`; `capture::Error` gained a transparent `Frame` variant that
+  preserves the previous messages and classification exactly.
+- `packetcraftr-net` keeps only contracts. Every `System*` provider moved to
+  `packetcraftr-net-native`, which stays the sole holder of target-specific
+  dependencies, `platform/` FFI, and `#![allow(unsafe_code)]` files. The
+  unsafe-code policy is unchanged.
+- Operation counters (`Stats`) moved to `packetcraftr-net`, so client and
+  workflow both re-export one definition instead of workflow importing client.
+- `push_diagnostic_once` moved to `packetcraftr-packet::diagnostic`, removing
+  the last client-to-workflow dependency.
+- Policy-only authorizers (`workflow::PolicyAuthorizer`, `fuzz::PolicyAuthorizer`,
+  `replay::SystemAuthorizer`) deliberately stay in `packetcraftr-workflow`: after
+  the policy extraction they carry no client dependency, and keeping them beside
+  the engines they gate preserves the engine unit tests without a dev-dependency
+  cycle. `packetcraftr-workflow-client` holds exactly the adapters that need a
+  live `Client` or a native provider.
+- `FieldKind`, `FieldValue`, and `replay::Timing` dropped `#[non_exhaustive]`.
+  They are closed vocabularies that codecs, mutators, renderers, and output
+  mappings translate exhaustively; across a crate boundary the attribute would
+  have forced silent lossy fallbacks instead of a compile error.
+- `Layer::declared_layout_fields` and `BuiltinProtocol::{has_exact_round_trip,
+  from_name_or_alias}` are no longer `#[cfg(test)]`, because the built-in support
+  manifest that asserts against them now lives in a different crate.
+
+Intentional public API breaks:
+
+- `packetcraftr::client::policy` and `packetcraftr::client::target` are now
+  `packetcraftr::policy` and `packetcraftr::policy::target`.
+- `packetcraftr::capture::Error` no longer has `CapturedLengthTooLarge`,
+  `CapturedLengthMismatch`, or `OriginalLengthTooSmall`; they are
+  `Error::Frame(FrameError::…)` with unchanged `Display` output.
+- `packetcraftr::net::route::SystemError` is `packetcraftr_net_native`'s
+  `NativeRouteError`; the façade path is unchanged.
+- `packetcraftr::workflow::Stats` and `packetcraftr::client::Stats` are the same
+  `packetcraftr_net::Stats`, and `Stats::checked_add` is public.
+- `packetcraftr::workflow::scan::classify_response`,
+  `traceroute::classify_response`, and the new `dns::correlates` are the
+  supported seams for out-of-crate executors, alongside the now-public
+  `Client::exchange_for_workflow`.
 
 ### [ ] Phase 2 — Extensible packet core and immutable protocol catalog
 

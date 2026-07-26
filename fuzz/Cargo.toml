@@ -13,7 +13,12 @@ members = ["."]
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-packetcraftr = { path = "..", version = "0.4.0-beta.2", default-features = false }
+packetcraftr-capture = { path = "../crates/packetcraftr-capture", version = "0.4.0-beta.2" }
+packetcraftr-model = { path = "../crates/packetcraftr-model", version = "0.4.0-beta.2" }
+packetcraftr-packet = { path = "../crates/packetcraftr-packet", version = "0.4.0-beta.2" }
+packetcraftr-protocols = { path = "../crates/packetcraftr-protocols", version = "0.4.0-beta.2" }
+packetcraftr-session = { path = "../crates/packetcraftr-session", version = "0.4.0-beta.2" }
+packetcraftr-workflow = { path = "../crates/packetcraftr-workflow", version = "0.4.0-beta.2" }
 
 [[bin]]
 name = "capture_reader"

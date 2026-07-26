@@ -1,0 +1,21 @@
+[package]
+name = "packetcraftr-client"
+description = "Audited PacketcraftR active-network orchestration: materialization, send, and capture-ready exchange"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+packetcraftr-model.workspace = true
+packetcraftr-net.workspace = true
+packetcraftr-packet.workspace = true
+packetcraftr-policy.workspace = true
+packetcraftr-protocols.workspace = true
+thiserror.workspace = true

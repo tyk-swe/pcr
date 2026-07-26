@@ -16,6 +16,7 @@ fuzz_target!(|data: &[u8]| {
             max_interfaces_per_section: 16,
             max_total_interfaces: 32,
             max_metadata_blocks_per_frame: 64,
+            max_metadata_records: 64,
         },
     ) else {
         return;

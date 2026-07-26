@@ -16,11 +16,20 @@ pub(super) const PCAPNG_SECTION_HEADER_BLOCK: u32 = 0x0a0d_0d0a;
 pub(super) const PCAPNG_INTERFACE_DESCRIPTION_BLOCK: u32 = 0x0000_0001;
 pub(super) const PCAPNG_PACKET_BLOCK: u32 = 0x0000_0002;
 pub(super) const PCAPNG_SIMPLE_PACKET_BLOCK: u32 = 0x0000_0003;
+pub(super) const PCAPNG_NAME_RESOLUTION_BLOCK: u32 = 0x0000_0004;
+pub(super) const PCAPNG_INTERFACE_STATISTICS_BLOCK: u32 = 0x0000_0005;
 pub(super) const PCAPNG_ENHANCED_PACKET_BLOCK: u32 = 0x0000_0006;
+pub(super) const PCAPNG_NAME_RECORD_END: u16 = 0;
+pub(super) const PCAPNG_NAME_RECORD_IPV4: u16 = 1;
+pub(super) const PCAPNG_NAME_RECORD_IPV6: u16 = 2;
 pub(super) const PCAPNG_OPTION_END: u16 = 0;
+pub(super) const PCAPNG_OPTION_COMMENT: u16 = 1;
 pub(super) const PCAPNG_OPTION_EPB_FLAGS: u16 = 2;
 pub(super) const PCAPNG_OPTION_IF_TSRESOL: u16 = 9;
 pub(super) const PCAPNG_OPTION_IF_TSOFFSET: u16 = 14;
+pub(super) const PCAPNG_OPTION_ISB_IFRECV: u16 = 4;
+pub(super) const PCAPNG_OPTION_ISB_IFDROP: u16 = 5;
+pub(super) const PCAPNG_OPTION_ISB_FILTERACCEPT: u16 = 6;
 pub(super) const DEFAULT_TIMESTAMP_RESOLUTION: TimestampResolution =
     TimestampResolution::Decimal(6);
 pub(super) const WRITER_TIMESTAMP_RESOLUTION: TimestampResolution = TimestampResolution::Decimal(9);
@@ -350,6 +359,14 @@ pub(super) fn decode_i64(endianness: Endianness, bytes: &[u8]) -> i64 {
     match endianness {
         Endianness::Little => i64::from_le_bytes(word),
         Endianness::Big => i64::from_be_bytes(word),
+    }
+}
+
+pub(super) fn decode_u64(endianness: Endianness, bytes: &[u8]) -> u64 {
+    let word: [u8; 8] = bytes[..8].try_into().expect("eight-byte slice");
+    match endianness {
+        Endianness::Little => u64::from_le_bytes(word),
+        Endianness::Big => u64::from_be_bytes(word),
     }
 }
 

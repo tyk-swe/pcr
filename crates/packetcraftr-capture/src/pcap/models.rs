@@ -17,6 +17,10 @@ pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
 pub const DEFAULT_TOTAL_INTERFACE_LIMIT: usize = 65_536;
 /// Default maximum metadata blocks consumed before one packet is returned.
 pub const DEFAULT_METADATA_BLOCK_LIMIT: usize = 4_096;
+/// Default maximum non-frame metadata records retained from a PCAPNG stream.
+pub const DEFAULT_METADATA_RECORD_LIMIT: usize = 4_096;
+/// Maximum bytes retained from any one comment or resolved name.
+pub const MAX_METADATA_TEXT_BYTES: usize = 4 * 1024;
 /// Default maximum frames accepted by one streaming capture writer or copy.
 pub const DEFAULT_STREAM_FRAMES: u64 = 10_000;
 /// Default maximum captured payload bytes accepted by one streaming writer or copy.
@@ -68,6 +72,12 @@ pub struct ReaderOptions {
     pub max_total_interfaces: usize,
     /// Maximum metadata blocks consumed while seeking the next frame.
     pub max_metadata_blocks_per_frame: usize,
+    /// Maximum comments, resolved names, and statistics records retained.
+    ///
+    /// Records past this bound are counted in [`CaptureMetadata::dropped`]
+    /// rather than failing the stream, so a capture that carries more
+    /// annotation than a caller wants to hold is still readable.
+    pub max_metadata_records: usize,
 }
 
 impl Default for ReaderOptions {
@@ -77,6 +87,7 @@ impl Default for ReaderOptions {
             max_interfaces_per_section: DEFAULT_INTERFACE_LIMIT,
             max_total_interfaces: DEFAULT_TOTAL_INTERFACE_LIMIT,
             max_metadata_blocks_per_frame: DEFAULT_METADATA_BLOCK_LIMIT,
+            max_metadata_records: DEFAULT_METADATA_RECORD_LIMIT,
         }
     }
 }
@@ -204,6 +215,100 @@ pub struct Interface {
     pub timestamp_offset: i64,
 }
 
+/// Where a retained PCAPNG comment came from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommentScope {
+    /// A section header comment, describing the capture as a whole.
+    Section,
+    /// An interface description comment.
+    Interface { interface: u32 },
+    /// A packet comment, attached to the frame at this stream position.
+    Frame { sequence: u64 },
+}
+
+/// One `opt_comment` retained from a PCAPNG stream.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Comment {
+    pub scope: CommentScope,
+    /// Comment text, truncated to [`MAX_METADATA_TEXT_BYTES`] on a UTF-8
+    /// boundary. `truncated` records whether anything was cut.
+    pub text: String,
+    pub truncated: bool,
+}
+
+/// One address-to-name record from a PCAPNG name-resolution block.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NameRecord {
+    pub address: std::net::IpAddr,
+    pub names: Vec<String>,
+}
+
+/// Counters from one PCAPNG interface-statistics block.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterfaceStatistics {
+    pub interface: u32,
+    /// Frames the capture source reported receiving, when it reported any.
+    pub received: Option<u64>,
+    /// Frames the capture source reported dropping, when it reported any.
+    pub dropped: Option<u64>,
+    /// Frames the operating-system filter accepted, when reported.
+    pub filter_accepted: Option<u64>,
+}
+
+/// Non-frame metadata retained from a PCAPNG stream.
+///
+/// Retention is bounded by [`ReaderOptions::max_metadata_records`]; anything
+/// past that bound is counted rather than stored, so this can never grow with
+/// untrusted input.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureMetadata {
+    pub comments: Vec<Comment>,
+    pub name_records: Vec<NameRecord>,
+    pub interface_statistics: Vec<InterfaceStatistics>,
+    /// Records seen but not retained because the bound was reached.
+    pub dropped: u64,
+}
+
+impl CaptureMetadata {
+    /// Whether anything at all was retained or observed.
+    pub fn is_empty(&self) -> bool {
+        self.comments.is_empty()
+            && self.name_records.is_empty()
+            && self.interface_statistics.is_empty()
+            && self.dropped == 0
+    }
+
+    /// Total records observed, including any the bound excluded.
+    pub fn observed(&self) -> u64 {
+        let retained =
+            self.comments.len() + self.name_records.len() + self.interface_statistics.len();
+        self.dropped.saturating_add(retained as u64)
+    }
+}
+
+/// Metadata a transcode could not carry into the target format.
+///
+/// A copy that loses annotation says so; nothing is dropped silently.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MetadataLoss {
+    pub comments: u64,
+    pub name_records: u64,
+    pub interface_statistics: u64,
+}
+
+impl MetadataLoss {
+    pub fn is_empty(self) -> bool {
+        self.comments == 0 && self.name_records == 0 && self.interface_statistics == 0
+    }
+
+    pub fn total(self) -> u64 {
+        self.comments
+            .saturating_add(self.name_records)
+            .saturating_add(self.interface_statistics)
+    }
+}
+
 /// Result of a bounded streaming capture copy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranscodeReport {
@@ -213,6 +318,8 @@ pub struct TranscodeReport {
     pub frames: u64,
     pub captured_bytes: u64,
     pub interfaces: usize,
+    /// Source metadata the target format could not represent.
+    pub dropped_metadata: MetadataLoss,
 }
 
 /// An error while reading or writing an offline capture.

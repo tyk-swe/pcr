@@ -3,7 +3,9 @@
 
 use std::io::{Read, Write};
 
-use super::models::{Error, Format, Limits, PcapNgOptions, PcapOptions, TranscodeReport};
+use super::models::{
+    Error, Format, Limits, MetadataLoss, PcapNgOptions, PcapOptions, TranscodeReport,
+};
 use super::reader::Reader;
 use super::writer::{Writer, WriterState};
 
@@ -78,6 +80,7 @@ pub fn transcode<R: Read, W: Write>(
         frames: writer.frames_written(),
         captured_bytes: writer.captured_bytes_written(),
         interfaces: writer_interface_count(&writer),
+        dropped_metadata: dropped_metadata(reader),
     };
     Ok((writer.into_inner(), report))
 }
@@ -97,5 +100,19 @@ fn writer_interface_count<W>(writer: &Writer<W>) -> usize {
     match &writer.state {
         WriterState::Pcap { .. } => 1,
         WriterState::PcapNg { interfaces, .. } => interfaces.len(),
+    }
+}
+
+/// Reports source metadata this copy could not carry.
+///
+/// The writer emits frames, interface descriptions, and nothing else, so every
+/// comment, resolved name, and statistics record the reader observed is lost.
+/// Reporting the counts keeps a lossy copy honest instead of silent.
+fn dropped_metadata<R: Read>(reader: &Reader<R>) -> MetadataLoss {
+    let metadata = reader.metadata();
+    MetadataLoss {
+        comments: metadata.comments.len() as u64,
+        name_records: metadata.name_records.len() as u64,
+        interface_statistics: metadata.interface_statistics.len() as u64,
     }
 }

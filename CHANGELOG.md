@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added PCAPNG annotation fidelity: `Reader::metadata` retains section,
+  interface, and packet comments with their scope, name-resolution records, and
+  interface-statistics counters, bounded by
+  `ReaderOptions::max_metadata_records` with anything past the bound counted
+  rather than stored.
 - Added a hidden `packetcraftr generate` command that emits shell completions
   for bash, elvish, fish, PowerShell, and zsh, plus one man page per command.
   Release archives now ship both, generated from the packaged binary so they
@@ -78,6 +83,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Buffered exact byte output and capture-file reads. Capture bytes previously
   went through the line-buffered standard-output handle, which flushes once per
   `0x0a` byte in binary payloads.
+- A capture copy that cannot carry the source's annotation now says so.
+  `TranscodeReport.dropped_metadata` counts the comments, name records, and
+  statistics blocks the target format could not represent, and `read` reports
+  them as a `capture.metadata_dropped` warning on standard error. These records
+  were previously skipped without a trace.
 - Restructured the repository into a Cargo workspace of per-domain crates under
   `crates/`, with a virtual root manifest owning shared dependency versions,
   lints, and the release profile. Cargo now enforces the domain layering that

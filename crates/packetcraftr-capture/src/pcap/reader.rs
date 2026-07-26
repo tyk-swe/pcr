@@ -7,15 +7,17 @@ use crate::{Frame, LinkType};
 
 use super::classic::{read_next_pcap_frame, read_pcap_header};
 use super::models::{
-    Endianness, Error, Format, Interface, ReaderOptions, TimestampPrecision, TimestampResolution,
+    CaptureMetadata, CommentScope, Endianness, Error, Format, Interface, ReaderOptions,
+    TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{
-    parse_enhanced_packet, parse_interface_description, parse_obsolete_packet, parse_simple_packet,
-    read_pcapng_block_header, read_section_header_after_type, read_section_header_with_length,
-    validate_pcapng_block_length,
+    parse_comments, parse_enhanced_packet, parse_interface_description, parse_interface_statistics,
+    parse_name_resolution, parse_obsolete_packet, parse_simple_packet, read_pcapng_block_header,
+    read_section_header_after_type, read_section_header_with_length, validate_pcapng_block_length,
 };
 use super::wire::{
-    PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_PACKET_BLOCK,
+    PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
+    PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RESOLUTION_BLOCK, PCAPNG_PACKET_BLOCK,
     PCAPNG_SECTION_HEADER, PCAPNG_SIMPLE_PACKET_BLOCK, decode_u32, read_exact_or_eof,
     read_exact_vec,
 };
@@ -48,6 +50,9 @@ pub struct Reader<R> {
     max_interfaces: usize,
     pub(super) max_total_interfaces: usize,
     max_metadata_blocks_per_frame: usize,
+    max_metadata_records: usize,
+    metadata: CaptureMetadata,
+    frames_read: u64,
     scratch: Vec<u8>,
     finished: bool,
 }
@@ -65,8 +70,10 @@ impl<R: Read> Reader<R> {
             max_interfaces_per_section: max_interfaces,
             max_total_interfaces,
             max_metadata_blocks_per_frame,
+            max_metadata_records,
         } = options;
         let mut scratch = Vec::new();
+        let mut section_comments = Vec::new();
         let mut magic = [0_u8; 4];
         if !read_exact_or_eof(&mut inner, &mut magic, "capture magic")? {
             return Err(Error::EmptyInput);
@@ -93,6 +100,7 @@ impl<R: Read> Reader<R> {
             }
             PCAPNG_SECTION_HEADER => {
                 let header = read_section_header_after_type(&mut inner, max_size, &mut scratch)?;
+                section_comments = header.comments;
                 ReaderState::PcapNg {
                     endianness: header.endianness,
                     interfaces: Vec::new(),
@@ -138,6 +146,12 @@ impl<R: Read> Reader<R> {
             max_interfaces,
             max_total_interfaces,
             max_metadata_blocks_per_frame,
+            max_metadata_records,
+            metadata: CaptureMetadata {
+                comments: section_comments,
+                ..CaptureMetadata::default()
+            },
+            frames_read: 0,
             scratch,
             finished: false,
         })
@@ -172,6 +186,33 @@ impl<R: Read> Reader<R> {
     /// advances the stream, before any frame that references them is returned.
     pub fn interfaces(&self) -> &[Interface] {
         &self.interfaces
+    }
+
+    /// Non-frame metadata parsed so far.
+    ///
+    /// Comments, name-resolution records, and interface statistics accumulate
+    /// while [`next_frame`](Self::next_frame) advances the stream, bounded by
+    /// [`ReaderOptions::max_metadata_records`].
+    pub fn metadata(&self) -> &CaptureMetadata {
+        &self.metadata
+    }
+
+    /// Retains one metadata record unless the configured bound is reached.
+    fn retain_metadata<T>(
+        &mut self,
+        records: Vec<T>,
+        select: fn(&mut CaptureMetadata) -> &mut Vec<T>,
+    ) {
+        for record in records {
+            let retained = self.metadata.comments.len()
+                + self.metadata.name_records.len()
+                + self.metadata.interface_statistics.len();
+            if retained >= self.max_metadata_records {
+                self.metadata.dropped = self.metadata.dropped.saturating_add(1);
+                continue;
+            }
+            select(&mut self.metadata).push(record);
+        }
     }
 
     /// Reads the next frame, or `None` after a clean end of file.
@@ -254,6 +295,7 @@ impl<R: Read> Reader<R> {
                     self.max_size,
                     &mut self.scratch,
                 )?;
+                self.retain_metadata(header.comments, |metadata| &mut metadata.comments);
                 match &mut self.state {
                     ReaderState::PcapNg {
                         endianness,
@@ -334,6 +376,14 @@ impl<R: Read> Reader<R> {
             match block_type {
                 PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
                     let description = parse_interface_description(body, section_endianness)?;
+                    let interface = u32::try_from(self.interfaces.len()).unwrap_or(u32::MAX);
+                    let comments = parse_comments(
+                        &body[8..],
+                        section_endianness,
+                        "pcapng interface options",
+                        CommentScope::Interface { interface },
+                    )?;
+                    self.retain_metadata(comments, |metadata| &mut metadata.comments);
                     match &mut self.state {
                         ReaderState::PcapNg { interfaces, .. } => {
                             if interfaces.len() >= self.max_interfaces {
@@ -357,14 +407,39 @@ impl<R: Read> Reader<R> {
                         ReaderState::PcapNg { interfaces, .. } => interfaces,
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     };
-                    return parse_enhanced_packet(
+                    let frame = parse_enhanced_packet(
                         body,
                         section_endianness,
                         interfaces,
                         section_interface_base,
                         self.max_size,
-                    )
-                    .map(Some);
+                    )?;
+                    // Packet comments are retained after the frame parses, so
+                    // a malformed record still fails on the record itself.
+                    let captured = usize::try_from(frame.captured_length()).unwrap_or(usize::MAX);
+                    if let Some(options) = body.get(20 + captured.next_multiple_of(4)..) {
+                        let comments = parse_comments(
+                            options,
+                            section_endianness,
+                            "pcapng packet options",
+                            CommentScope::Frame {
+                                sequence: self.frames_read,
+                            },
+                        )?;
+                        self.retain_metadata(comments, |metadata| &mut metadata.comments);
+                    }
+                    self.frames_read = self.frames_read.saturating_add(1);
+                    return Ok(Some(frame));
+                }
+                PCAPNG_NAME_RESOLUTION_BLOCK => {
+                    let records = parse_name_resolution(body, section_endianness)?;
+                    self.retain_metadata(records, |metadata| &mut metadata.name_records);
+                }
+                PCAPNG_INTERFACE_STATISTICS_BLOCK => {
+                    let statistics = parse_interface_statistics(body, section_endianness)?;
+                    self.retain_metadata(vec![statistics], |metadata| {
+                        &mut metadata.interface_statistics
+                    });
                 }
                 PCAPNG_PACKET_BLOCK => {
                     let interfaces = match &self.state {

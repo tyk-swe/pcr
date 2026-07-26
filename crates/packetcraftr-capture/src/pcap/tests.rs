@@ -9,8 +9,9 @@ use bytes::Bytes;
 use crate::{Direction, Frame, LinkType};
 
 use super::models::{
-    DEFAULT_SIZE_LIMIT, Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions,
-    ReaderOptions, TimestampResolution, TranscodeReport,
+    Comment, CommentScope, DEFAULT_SIZE_LIMIT, Endianness, Error, Format, Interface,
+    InterfaceStatistics, Limits, NameRecord, PcapNgOptions, PcapOptions, ReaderOptions,
+    TimestampResolution, TranscodeReport,
 };
 use super::reader::Reader;
 use super::transcode::transcode;
@@ -373,6 +374,7 @@ fn bounded_transcode_preserves_pcapng_interface_metadata_and_frames() {
     assert_eq!(
         report,
         TranscodeReport {
+            dropped_metadata: Default::default(),
             source_format: Format::PcapNg,
             target_format: Format::PcapNg,
             endianness: Endianness::Big,
@@ -1350,4 +1352,134 @@ fn classic_format_rejects_metadata_it_cannot_preserve() {
             ..
         })
     ));
+}
+
+fn annotated_fixture() -> Vec<u8> {
+    std::fs::read(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/captures/pcapng/annotated.pcapng"),
+    )
+    .unwrap()
+}
+
+#[test]
+fn pcapng_comments_names_and_statistics_are_retained_with_their_scope() {
+    let mut reader = Reader::new(Cursor::new(annotated_fixture())).unwrap();
+    // The section comment is available before any block is consumed.
+    assert_eq!(
+        reader.metadata().comments,
+        vec![Comment {
+            scope: CommentScope::Section,
+            text: "lab capture with annotations".to_owned(),
+            truncated: false,
+        }]
+    );
+
+    let frames = std::iter::from_fn(|| reader.next_frame().transpose())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(frames.len(), 2);
+
+    let metadata = reader.metadata();
+    assert_eq!(metadata.dropped, 0);
+    assert_eq!(
+        metadata.comments,
+        vec![
+            Comment {
+                scope: CommentScope::Section,
+                text: "lab capture with annotations".to_owned(),
+                truncated: false,
+            },
+            Comment {
+                scope: CommentScope::Interface { interface: 0 },
+                text: "span port on lab0".to_owned(),
+                truncated: false,
+            },
+            Comment {
+                scope: CommentScope::Frame { sequence: 0 },
+                text: "first probe".to_owned(),
+                truncated: false,
+            },
+        ]
+    );
+    assert_eq!(
+        metadata.name_records,
+        vec![
+            NameRecord {
+                address: "192.0.2.1".parse().unwrap(),
+                names: vec!["alpha.lab".to_owned()],
+            },
+            NameRecord {
+                address: "2001:db8::1".parse().unwrap(),
+                names: vec!["beta.lab".to_owned(), "beta".to_owned()],
+            },
+        ]
+    );
+    assert_eq!(
+        metadata.interface_statistics,
+        vec![InterfaceStatistics {
+            interface: 0,
+            received: Some(2),
+            dropped: Some(1),
+            filter_accepted: Some(3),
+        }]
+    );
+    assert_eq!(metadata.observed(), 6);
+    assert!(!metadata.is_empty());
+}
+
+#[test]
+fn metadata_retention_is_bounded_and_reports_what_it_dropped() {
+    let mut reader = Reader::with_options(
+        Cursor::new(annotated_fixture()),
+        ReaderOptions {
+            max_metadata_records: 2,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
+    while reader.next_frame().unwrap().is_some() {}
+
+    let metadata = reader.metadata();
+    let retained =
+        metadata.comments.len() + metadata.name_records.len() + metadata.interface_statistics.len();
+    assert_eq!(retained, 2);
+    // Everything past the bound is counted, so the loss is visible.
+    assert_eq!(metadata.dropped, 4);
+    assert_eq!(metadata.observed(), 6);
+}
+
+#[test]
+fn a_lossy_transcode_reports_the_metadata_it_could_not_carry() {
+    let mut reader = Reader::new(Cursor::new(annotated_fixture())).unwrap();
+    let (bytes, report) =
+        transcode(&mut reader, Vec::new(), Format::PcapNg, Limits::default()).unwrap();
+
+    assert_eq!(report.frames, 2);
+    // The writer emits frames and interface descriptions only, so every
+    // annotation the source carried is reported rather than silently dropped.
+    assert_eq!(report.dropped_metadata.comments, 3);
+    assert_eq!(report.dropped_metadata.name_records, 2);
+    assert_eq!(report.dropped_metadata.interface_statistics, 1);
+    assert_eq!(report.dropped_metadata.total(), 6);
+    assert!(!report.dropped_metadata.is_empty());
+
+    // The copied frames themselves are unaffected.
+    let mut copied = Reader::new(Cursor::new(bytes)).unwrap();
+    assert_eq!(copied.next_frame().unwrap().unwrap().captured_length(), 47);
+    assert!(copied.metadata().is_empty());
+}
+
+#[test]
+fn an_unannotated_capture_reports_no_metadata_loss() {
+    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    writer
+        .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, vec![1, 2, 3, 4]).unwrap())
+        .unwrap();
+    let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+    let (_bytes, report) =
+        transcode(&mut reader, Vec::new(), Format::PcapNg, Limits::default()).unwrap();
+
+    assert!(report.dropped_metadata.is_empty());
+    assert_eq!(report.dropped_metadata.total(), 0);
 }

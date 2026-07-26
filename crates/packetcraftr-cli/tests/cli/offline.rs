@@ -500,3 +500,46 @@ fn an_invalid_filter_fails_before_the_capture_file_is_opened() {
         assert!(!stderr.contains("definitely-missing"), "{expression}");
     }
 }
+
+#[test]
+fn transcoding_an_annotated_capture_reports_the_annotation_it_drops() {
+    let source = fixture("captures/pcapng/annotated.pcapng");
+    let output = binary()
+        .args(["--output", "pcapng", "read"])
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    // The exact capture bytes stay on stdout; the loss report goes to stderr.
+    let mut reader =
+        packetcraftr::capture::Reader::new(std::io::Cursor::new(output.stdout)).unwrap();
+    assert_eq!(reader.next_frame().unwrap().unwrap().captured_length(), 47);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("capture.metadata_dropped"), "{stderr}");
+    assert!(stderr.contains("6 source annotation record(s)"), "{stderr}");
+    assert!(stderr.contains("3 comment(s)"), "{stderr}");
+    assert!(stderr.contains("2 name record(s)"), "{stderr}");
+    assert!(stderr.contains("1 statistics block(s)"), "{stderr}");
+}
+
+#[test]
+fn transcoding_an_unannotated_capture_stays_quiet() {
+    let source = fixture("captures/pcapng/multi-link.pcapng");
+    let output = binary()
+        .args(["--output", "pcapng", "read"])
+        .arg(&source)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

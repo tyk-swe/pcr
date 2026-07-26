@@ -44,6 +44,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "pcapng_blocks"
+path = "fuzz_targets/pcapng_blocks.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "filter_expression"
 path = "fuzz_targets/filter_expression.rs"
 test = false

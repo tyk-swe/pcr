@@ -19,8 +19,8 @@ use super::super::arguments::{
 use super::super::errors::CliError;
 use super::super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
 use super::super::rendering::{
-    CaptureSink, capture_file_format, capture_sink_path, emit_json, emit_json_compact, spaced_hex,
-    write_bytes, write_plain_line, write_stdout_line,
+    CaptureSink, capture_file_format, capture_sink_path, emit_json, emit_json_compact,
+    emit_stderr_message, spaced_hex, write_bytes, write_plain_line, write_stdout_line,
 };
 use super::super::runtime::default_registry_arc;
 
@@ -179,14 +179,27 @@ pub(crate) fn run_read(
         output::contract::Format::Pcap | output::contract::Format::Pcapng
     ) {
         let format = capture_file_format(output)?;
-        let (sink, _report) = transcode(
+        let (sink, report) = transcode(
             &mut reader,
             CaptureSink::open(destination.as_deref())?,
             format,
             stream_limits,
         )
         .map_err(CliError::classified)?;
-        return sink.finish();
+        sink.finish()?;
+        // A copy that lost annotation says so on stderr, where it cannot
+        // corrupt the exact capture bytes on stdout.
+        let dropped = report.dropped_metadata;
+        if !dropped.is_empty() {
+            emit_stderr_message(&format!(
+                "Warning capture.metadata_dropped: {} source annotation record(s) are not representable in {format} output ({} comment(s), {} name record(s), {} statistics block(s))",
+                dropped.total(),
+                dropped.comments,
+                dropped.name_records,
+                dropped.interface_statistics
+            ))?;
+        }
+        return Ok(());
     }
 
     let mut sequence = 0_u64;

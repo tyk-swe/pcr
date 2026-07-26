@@ -13,10 +13,11 @@ use serde::{Deserialize, Deserializer, Serialize};
 mod pcap;
 
 pub use pcap::{
-    DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT, DEFAULT_SIZE_LIMIT,
-    DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Error,
-    Format, Interface, Limits, PcapNgOptions, PcapOptions, Reader, ReaderOptions,
-    TimestampResolution, TranscodeReport, Writer, transcode,
+    CaptureMetadata, Comment, CommentScope, DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT,
+    DEFAULT_METADATA_RECORD_LIMIT, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES,
+    DEFAULT_TOTAL_INTERFACE_LIMIT, Endianness, Error, Format, Interface, InterfaceStatistics,
+    Limits, MAX_METADATA_TEXT_BYTES, MetadataLoss, NameRecord, PcapNgOptions, PcapOptions, Reader,
+    ReaderOptions, TimestampResolution, TranscodeReport, Writer, transcode,
 };
 
 /// Open numeric libpcap link-layer type.

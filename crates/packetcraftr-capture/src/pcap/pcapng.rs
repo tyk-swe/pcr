@@ -2,24 +2,30 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::Read;
+use std::net::IpAddr;
 use std::time::UNIX_EPOCH;
 
 use bytes::Bytes;
 
 use crate::{Direction, Frame, LinkType};
 
-use super::models::{Endianness, Error, Format, Interface, TimestampResolution};
+use super::models::{
+    Comment, CommentScope, Endianness, Error, Format, Interface, InterfaceStatistics,
+    MAX_METADATA_TEXT_BYTES, NameRecord, TimestampResolution,
+};
 use super::wire::{
-    DEFAULT_TIMESTAMP_RESOLUTION, PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS,
-    PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, align_to_usize, copy_bytes_fallibly,
-    decode_i64, decode_u16, decode_u32, read_exact_counted, read_exact_or_eof, read_exact_vec,
-    timestamp_from_ticks, validate_declared_lengths,
+    DEFAULT_TIMESTAMP_RESOLUTION, PCAPNG_NAME_RECORD_END, PCAPNG_NAME_RECORD_IPV4,
+    PCAPNG_NAME_RECORD_IPV6, PCAPNG_OPTION_COMMENT, PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS,
+    PCAPNG_OPTION_IF_TSOFFSET, PCAPNG_OPTION_IF_TSRESOL, PCAPNG_OPTION_ISB_FILTERACCEPT,
+    PCAPNG_OPTION_ISB_IFDROP, PCAPNG_OPTION_ISB_IFRECV, align_to_usize, copy_bytes_fallibly,
+    decode_i64, decode_u16, decode_u32, decode_u64, read_exact_counted, read_exact_or_eof,
+    read_exact_vec, timestamp_from_ticks, validate_declared_lengths,
 };
 
-#[derive(Clone, Copy)]
 pub(super) struct SectionHeader {
     pub endianness: Endianness,
     pub length: Option<u64>,
+    pub comments: Vec<Comment>,
 }
 
 pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option<[u8; 8]>, Error> {
@@ -102,15 +108,16 @@ pub(super) fn read_section_header_with_length<R: Read>(
             reason: "section length is not a multiple of four",
         });
     }
-    visit_options(
+    let comments = parse_comments(
         &scratch[12..footer_offset],
         endianness,
         "pcapng section options",
-        |_, _| Ok(()),
+        CommentScope::Section,
     )?;
     Ok(SectionHeader {
         endianness,
         length: u64::try_from(section_length).ok(),
+        comments,
     })
 }
 
@@ -504,4 +511,162 @@ where
         offset = end;
     }
     Ok(())
+}
+
+/// Reads every `opt_comment` from an option area.
+///
+/// Comment text is retained on a UTF-8 boundary up to
+/// [`MAX_METADATA_TEXT_BYTES`]; longer text is truncated and marked rather
+/// than rejected, because a comment is annotation and not packet evidence.
+pub(super) fn parse_comments(
+    options: &[u8],
+    endianness: Endianness,
+    context: &'static str,
+    scope: CommentScope,
+) -> Result<Vec<Comment>, Error> {
+    let mut comments = Vec::new();
+    visit_options(options, endianness, context, |code, value| {
+        if code == PCAPNG_OPTION_COMMENT {
+            comments.push(bounded_text(value).map(|(text, truncated)| Comment {
+                scope,
+                text,
+                truncated,
+            })?);
+        }
+        Ok(())
+    })?;
+    Ok(comments)
+}
+
+/// Parses a name-resolution block into its address-to-name records.
+pub(super) fn parse_name_resolution(
+    body: &[u8],
+    endianness: Endianness,
+) -> Result<Vec<NameRecord>, Error> {
+    let mut records = Vec::new();
+    let mut offset = 0_usize;
+    while offset < body.len() {
+        if body.len() - offset < 4 {
+            return Err(Error::Truncated {
+                context: "pcapng name resolution record",
+                expected: offset + 4,
+                actual: body.len(),
+            });
+        }
+        let record_type = decode_u16(endianness, &body[offset..offset + 2]);
+        let length = usize::from(decode_u16(endianness, &body[offset + 2..offset + 4]));
+        offset += 4;
+        if record_type == PCAPNG_NAME_RECORD_END {
+            // The option area that follows an nrb_record_end is not part of the
+            // name table, so parsing stops here.
+            return Ok(records);
+        }
+        let padded = align_to_usize(length)?;
+        let end = offset.checked_add(padded).ok_or(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "name resolution record length overflow",
+        })?;
+        if end > body.len() {
+            return Err(Error::Truncated {
+                context: "pcapng name resolution record",
+                expected: end,
+                actual: body.len(),
+            });
+        }
+        let value = &body[offset..offset + length];
+        let address_length = match record_type {
+            PCAPNG_NAME_RECORD_IPV4 => Some(4),
+            PCAPNG_NAME_RECORD_IPV6 => Some(16),
+            // An unknown record type is length-delimited, so it is skipped
+            // rather than guessed at.
+            _ => None,
+        };
+        if let Some(address_length) = address_length {
+            if value.len() < address_length {
+                return Err(Error::InvalidData {
+                    format: Format::PcapNg,
+                    reason: "name resolution record is shorter than its address",
+                });
+            }
+            let address = if address_length == 4 {
+                let mut octets = [0_u8; 4];
+                octets.copy_from_slice(&value[..4]);
+                IpAddr::from(octets)
+            } else {
+                let mut octets = [0_u8; 16];
+                octets.copy_from_slice(&value[..16]);
+                IpAddr::from(octets)
+            };
+            let mut names = Vec::new();
+            for name in value[address_length..].split(|byte| *byte == 0) {
+                if name.is_empty() {
+                    continue;
+                }
+                names.push(bounded_text(name)?.0);
+            }
+            records.push(NameRecord { address, names });
+        }
+        if body[offset + length..end].iter().any(|byte| *byte != 0) {
+            return Err(Error::InvalidData {
+                format: Format::PcapNg,
+                reason: "name resolution record padding is non-zero",
+            });
+        }
+        offset = end;
+    }
+    Ok(records)
+}
+
+/// Parses an interface-statistics block into the counters it reported.
+pub(super) fn parse_interface_statistics(
+    body: &[u8],
+    endianness: Endianness,
+) -> Result<InterfaceStatistics, Error> {
+    if body.len() < 12 {
+        return Err(Error::InvalidData {
+            format: Format::PcapNg,
+            reason: "interface statistics block is shorter than 12 bytes",
+        });
+    }
+    let mut statistics = InterfaceStatistics {
+        interface: decode_u32(endianness, &body[0..4]),
+        ..InterfaceStatistics::default()
+    };
+    visit_options(
+        &body[12..],
+        endianness,
+        "pcapng interface statistics options",
+        |code, value| {
+            let counter = match code {
+                PCAPNG_OPTION_ISB_IFRECV => &mut statistics.received,
+                PCAPNG_OPTION_ISB_IFDROP => &mut statistics.dropped,
+                PCAPNG_OPTION_ISB_FILTERACCEPT => &mut statistics.filter_accepted,
+                _ => return Ok(()),
+            };
+            if value.len() != 8 {
+                return Err(Error::InvalidData {
+                    format: Format::PcapNg,
+                    reason: "interface statistics counter must contain eight bytes",
+                });
+            }
+            *counter = Some(decode_u64(endianness, value));
+            Ok(())
+        },
+    )?;
+    Ok(statistics)
+}
+
+/// Retains text up to the metadata byte bound, on a UTF-8 boundary.
+fn bounded_text(value: &[u8]) -> Result<(String, bool), Error> {
+    let truncated = value.len() > MAX_METADATA_TEXT_BYTES;
+    let mut end = value.len().min(MAX_METADATA_TEXT_BYTES);
+    // `from_utf8_lossy` never fails, but cutting mid-sequence would replace a
+    // valid character with a replacement marker, so back up to a boundary.
+    while end > 0 && (value[end - 1] & 0b1100_0000) == 0b1000_0000 {
+        end -= 1;
+    }
+    Ok((
+        String::from_utf8_lossy(&value[..end]).into_owned(),
+        truncated,
+    ))
 }

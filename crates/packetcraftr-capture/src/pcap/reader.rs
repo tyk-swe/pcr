@@ -11,9 +11,10 @@ use super::models::{
     TimestampPrecision, TimestampResolution,
 };
 use super::pcapng::{
-    parse_comments, parse_enhanced_packet, parse_interface_description, parse_interface_statistics,
-    parse_name_resolution, parse_obsolete_packet, parse_simple_packet, read_pcapng_block_header,
-    read_section_header_after_type, read_section_header_with_length, validate_pcapng_block_length,
+    ParsedMetadata, parse_comments, parse_enhanced_packet, parse_interface_description,
+    parse_interface_statistics, parse_name_resolution, parse_obsolete_packet, parse_simple_packet,
+    read_pcapng_block_header, read_section_header_after_type, read_section_header_with_length,
+    validate_pcapng_block_length,
 };
 use super::wire::{
     PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
@@ -74,6 +75,7 @@ impl<R: Read> Reader<R> {
         } = options;
         let mut scratch = Vec::new();
         let mut section_comments = Vec::new();
+        let mut section_dropped_metadata = 0_u64;
         let mut magic = [0_u8; 4];
         if !read_exact_or_eof(&mut inner, &mut magic, "capture magic")? {
             return Err(Error::EmptyInput);
@@ -99,8 +101,14 @@ impl<R: Read> Reader<R> {
                 read_pcap_header(&mut inner, Endianness::Big, TimestampPrecision::Nanoseconds)?
             }
             PCAPNG_SECTION_HEADER => {
-                let header = read_section_header_after_type(&mut inner, max_size, &mut scratch)?;
+                let header = read_section_header_after_type(
+                    &mut inner,
+                    max_size,
+                    max_metadata_records,
+                    &mut scratch,
+                )?;
                 section_comments = header.comments;
+                section_dropped_metadata = header.dropped_metadata;
                 ReaderState::PcapNg {
                     endianness: header.endianness,
                     interfaces: Vec::new(),
@@ -152,10 +160,8 @@ impl<R: Read> Reader<R> {
             scratch,
             finished: false,
         };
-        // Routed through the same retention path as every later record, so the
-        // opening section header cannot place more comments in memory than
-        // `max_metadata_records` allows.
-        reader.retain_metadata(section_comments, |metadata| &mut metadata.comments);
+        reader.metadata.comments = section_comments;
+        reader.metadata.dropped = section_dropped_metadata;
         Ok(reader)
     }
 
@@ -199,20 +205,29 @@ impl<R: Read> Reader<R> {
         &self.metadata
     }
 
-    /// Retains one metadata record unless the configured bound is reached.
-    fn retain_metadata<T>(
+    fn metadata_records_remaining(&self) -> usize {
+        self.max_metadata_records
+            .saturating_sub(self.metadata.retained_records())
+    }
+
+    fn retain_parsed_metadata<T>(
         &mut self,
-        records: Vec<T>,
+        parsed: ParsedMetadata<T>,
         select: fn(&mut CaptureMetadata) -> &mut Vec<T>,
     ) {
-        for record in records {
-            let retained = self.metadata.comments.len()
-                + self.metadata.name_records.len()
-                + self.metadata.interface_statistics.len();
-            if retained >= self.max_metadata_records {
-                self.metadata.dropped = self.metadata.dropped.saturating_add(1);
-                continue;
-            }
+        debug_assert!(parsed.retained <= self.metadata_records_remaining());
+        select(&mut self.metadata).extend(parsed.records);
+        self.metadata.dropped = self.metadata.dropped.saturating_add(parsed.dropped);
+    }
+
+    fn retain_one_metadata<T>(
+        &mut self,
+        record: T,
+        select: fn(&mut CaptureMetadata) -> &mut Vec<T>,
+    ) {
+        if self.metadata_records_remaining() == 0 {
+            self.metadata.dropped = self.metadata.dropped.saturating_add(1);
+        } else {
             select(&mut self.metadata).push(record);
         }
     }
@@ -291,13 +306,23 @@ impl<R: Read> Reader<R> {
                         limit: self.max_metadata_blocks_per_frame,
                     });
                 }
+                let max_metadata_records = self.metadata_records_remaining();
                 let header = read_section_header_with_length(
                     &mut self.inner,
                     raw_header[4..8].try_into().expect("four-byte slice"),
                     self.max_size,
+                    max_metadata_records,
                     &mut self.scratch,
                 )?;
-                self.retain_metadata(header.comments, |metadata| &mut metadata.comments);
+                let retained = header.comments.len();
+                self.retain_parsed_metadata(
+                    ParsedMetadata {
+                        records: header.comments,
+                        dropped: header.dropped_metadata,
+                        retained,
+                    },
+                    |metadata| &mut metadata.comments,
+                );
                 match &mut self.state {
                     ReaderState::PcapNg {
                         endianness,
@@ -384,8 +409,9 @@ impl<R: Read> Reader<R> {
                         section_endianness,
                         "pcapng interface options",
                         CommentScope::Interface { interface },
+                        self.metadata_records_remaining(),
                     )?;
-                    self.retain_metadata(comments, |metadata| &mut metadata.comments);
+                    self.retain_parsed_metadata(comments, |metadata| &mut metadata.comments);
                     match &mut self.state {
                         ReaderState::PcapNg { interfaces, .. } => {
                             if interfaces.len() >= self.max_interfaces {
@@ -427,22 +453,27 @@ impl<R: Read> Reader<R> {
                             CommentScope::Frame {
                                 sequence: self.frames_read,
                             },
+                            self.metadata_records_remaining(),
                         )?;
-                        self.retain_metadata(comments, |metadata| &mut metadata.comments);
+                        self.retain_parsed_metadata(comments, |metadata| &mut metadata.comments);
                     }
                     self.frames_read = self.frames_read.saturating_add(1);
                     return Ok(Some(frame));
                 }
                 PCAPNG_NAME_RESOLUTION_BLOCK => {
-                    let records = parse_name_resolution(body, section_endianness)?;
-                    self.retain_metadata(records, |metadata| &mut metadata.name_records);
+                    let records = parse_name_resolution(
+                        body,
+                        section_endianness,
+                        self.metadata_records_remaining(),
+                    )?;
+                    self.retain_parsed_metadata(records, |metadata| &mut metadata.name_records);
                 }
                 PCAPNG_INTERFACE_STATISTICS_BLOCK => {
                     let mut statistics = parse_interface_statistics(body, section_endianness)?;
                     statistics.interface = section_interface_base
                         .checked_add(statistics.interface)
                         .ok_or(Error::InterfaceLimit { limit: usize::MAX })?;
-                    self.retain_metadata(vec![statistics], |metadata| {
+                    self.retain_one_metadata(statistics, |metadata| {
                         &mut metadata.interface_statistics
                     });
                 }
@@ -467,8 +498,9 @@ impl<R: Read> Reader<R> {
                             CommentScope::Frame {
                                 sequence: self.frames_read,
                             },
+                            self.metadata_records_remaining(),
                         )?;
-                        self.retain_metadata(comments, |metadata| &mut metadata.comments);
+                        self.retain_parsed_metadata(comments, |metadata| &mut metadata.comments);
                     }
                     // Every returned frame advances the stream position that
                     // `CommentScope::Frame` names, not only enhanced packets.

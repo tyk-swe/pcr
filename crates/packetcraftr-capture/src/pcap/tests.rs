@@ -17,7 +17,8 @@ use super::reader::Reader;
 use super::transcode::transcode;
 use super::wire::{
     PCAP_GLOBAL_HEADER_LEN, PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK,
-    PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_OPTION_COMMENT,
+    PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_NAME_RECORD_END,
+    PCAPNG_NAME_RECORD_IPV4, PCAPNG_NAME_RESOLUTION_BLOCK, PCAPNG_OPTION_COMMENT,
     PCAPNG_OPTION_END, PCAPNG_OPTION_ISB_IFRECV, PCAPNG_PACKET_BLOCK, PCAPNG_SECTION_HEADER_BLOCK,
     PCAPNG_SIMPLE_PACKET_BLOCK, system_time_from_signed_unix, timestamp_from_ticks,
     timestamp_to_ticks,
@@ -1394,6 +1395,15 @@ fn pcapng_option_end() -> Vec<u8> {
     pcapng_option(PCAPNG_OPTION_END, &[])
 }
 
+fn pcapng_name_record(record_type: u16, value: &[u8]) -> Vec<u8> {
+    let mut record = Vec::new();
+    record.extend_from_slice(&record_type.to_le_bytes());
+    record.extend_from_slice(&(value.len() as u16).to_le_bytes());
+    record.extend_from_slice(value);
+    record.resize(record.len().next_multiple_of(4), 0);
+    record
+}
+
 /// A section header carrying the given comments, followed by one interface.
 fn pcapng_section(comments: &[&[u8]]) -> Vec<u8> {
     let mut header = Vec::new();
@@ -1440,6 +1450,56 @@ fn section_header_comments_obey_the_metadata_bound() {
     assert_eq!(metadata.comments.len(), 2);
     assert_eq!(metadata.dropped, 1);
     assert_eq!(metadata.observed(), 3);
+}
+
+#[test]
+fn section_header_comments_are_dropped_during_parse_when_the_budget_is_full() {
+    let capture = pcapng_section(&[b"one", b"two", b"three"]);
+    let reader = Reader::with_options(
+        Cursor::new(capture),
+        ReaderOptions {
+            max_metadata_records: 0,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
+
+    let metadata = reader.metadata();
+    assert!(metadata.comments.is_empty());
+    assert_eq!(metadata.dropped, 3);
+    assert_eq!(metadata.observed(), 3);
+}
+
+#[test]
+fn name_resolution_aliases_share_the_metadata_budget() {
+    let mut capture = pcapng_section(&[b"section"]);
+    let mut value = Vec::from([192, 0, 2, 10]);
+    value.extend_from_slice(b"one\0two\0three\0");
+    let mut names = pcapng_name_record(PCAPNG_NAME_RECORD_IPV4, &value);
+    names.extend_from_slice(&pcapng_name_record(PCAPNG_NAME_RECORD_END, &[]));
+    capture.extend_from_slice(&pcapng_block(PCAPNG_NAME_RESOLUTION_BLOCK, &names));
+
+    let mut reader = Reader::with_options(
+        Cursor::new(capture),
+        ReaderOptions {
+            max_metadata_records: 2,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(reader.next_frame().unwrap(), None);
+
+    let metadata = reader.metadata();
+    assert_eq!(metadata.comments.len(), 1);
+    assert_eq!(
+        metadata.name_records,
+        vec![NameRecord {
+            address: "192.0.2.10".parse().unwrap(),
+            names: vec!["one".to_owned()],
+        }]
+    );
+    assert_eq!(metadata.dropped, 2);
+    assert_eq!(metadata.observed(), 4);
 }
 
 #[test]
@@ -1624,7 +1684,7 @@ fn pcapng_comments_names_and_statistics_are_retained_with_their_scope() {
             filter_accepted: Some(3),
         }]
     );
-    assert_eq!(metadata.observed(), 6);
+    assert_eq!(metadata.observed(), 7);
     assert!(!metadata.is_empty());
 }
 
@@ -1645,8 +1705,8 @@ fn metadata_retention_is_bounded_and_reports_what_it_dropped() {
         metadata.comments.len() + metadata.name_records.len() + metadata.interface_statistics.len();
     assert_eq!(retained, 2);
     // Everything past the bound is counted, so the loss is visible.
-    assert_eq!(metadata.dropped, 4);
-    assert_eq!(metadata.observed(), 6);
+    assert_eq!(metadata.dropped, 5);
+    assert_eq!(metadata.observed(), 7);
 }
 
 #[test]
@@ -1683,12 +1743,11 @@ fn a_lossy_transcode_also_reports_what_the_reader_never_retained() {
     let (_bytes, report) =
         transcode(&mut reader, Vec::new(), Format::PcapNg, Limits::default()).unwrap();
 
-    // Two records reached memory and four never did. The copy carries neither
-    // kind, so counting only the retained two would understate the loss by two
-    // thirds — the opposite of what the report exists to say.
+    // Two records reached memory and five never did. The copy carries neither
+    // kind, so counting only the retained two would understate the loss.
     assert_eq!(report.dropped_metadata.comments, 2);
-    assert_eq!(report.dropped_metadata.unretained, 4);
-    assert_eq!(report.dropped_metadata.total(), 6);
+    assert_eq!(report.dropped_metadata.unretained, 5);
+    assert_eq!(report.dropped_metadata.total(), 7);
 }
 
 #[test]

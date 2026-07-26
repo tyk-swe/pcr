@@ -271,6 +271,18 @@ pub struct CaptureMetadata {
 }
 
 impl CaptureMetadata {
+    pub(super) fn retained_records(&self) -> usize {
+        let resolved_names = self
+            .name_records
+            .iter()
+            .map(|record| record.names.len().max(1))
+            .sum::<usize>();
+        self.comments
+            .len()
+            .saturating_add(resolved_names)
+            .saturating_add(self.interface_statistics.len())
+    }
+
     /// Whether anything at all was retained or observed.
     pub fn is_empty(&self) -> bool {
         self.comments.is_empty()
@@ -281,9 +293,7 @@ impl CaptureMetadata {
 
     /// Total records observed, including any the bound excluded.
     pub fn observed(&self) -> u64 {
-        let retained =
-            self.comments.len() + self.name_records.len() + self.interface_statistics.len();
-        self.dropped.saturating_add(retained as u64)
+        self.dropped.saturating_add(self.retained_records() as u64)
     }
 }
 

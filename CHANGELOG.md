@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Bounded PCAPNG metadata retention during parsing, including comment options
+  and aliases inside name-resolution records, so captures cannot force metadata
+  allocation past `ReaderOptions::max_metadata_records`.
+
 ## [0.5.0-beta.1] - 2026-07-26
 
 ### Added

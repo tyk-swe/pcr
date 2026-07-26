@@ -26,6 +26,7 @@ pub(super) struct SectionHeader {
     pub endianness: Endianness,
     pub length: Option<u64>,
     pub comments: Vec<Comment>,
+    pub dropped_metadata: u64,
 }
 
 pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option<[u8; 8]>, Error> {
@@ -40,17 +41,19 @@ pub(super) fn read_pcapng_block_header<R: Read>(reader: &mut R) -> Result<Option
 pub(super) fn read_section_header_after_type<R: Read>(
     reader: &mut R,
     max_size: usize,
+    max_metadata_records: usize,
     scratch: &mut Vec<u8>,
 ) -> Result<SectionHeader, Error> {
     let mut length = [0_u8; 4];
     read_exact_counted(reader, &mut length, "pcapng section header length")?;
-    read_section_header_with_length(reader, length, max_size, scratch)
+    read_section_header_with_length(reader, length, max_size, max_metadata_records, scratch)
 }
 
 pub(super) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
+    max_metadata_records: usize,
     scratch: &mut Vec<u8>,
 ) -> Result<SectionHeader, Error> {
     let mut raw_bom = [0_u8; 4];
@@ -113,11 +116,13 @@ pub(super) fn read_section_header_with_length<R: Read>(
         endianness,
         "pcapng section options",
         CommentScope::Section,
+        max_metadata_records,
     )?;
     Ok(SectionHeader {
         endianness,
         length: u64::try_from(section_length).ok(),
-        comments,
+        comments: comments.records,
+        dropped_metadata: comments.dropped,
     })
 }
 
@@ -513,7 +518,13 @@ where
     Ok(())
 }
 
-/// Reads every `opt_comment` from an option area.
+pub(super) struct ParsedMetadata<T> {
+    pub records: Vec<T>,
+    pub dropped: u64,
+    pub retained: usize,
+}
+
+/// Reads bounded `opt_comment` entries from an option area.
 ///
 /// Comment text is retained on a UTF-8 boundary up to
 /// [`MAX_METADATA_TEXT_BYTES`]; longer text is truncated and marked rather
@@ -523,10 +534,16 @@ pub(super) fn parse_comments(
     endianness: Endianness,
     context: &'static str,
     scope: CommentScope,
-) -> Result<Vec<Comment>, Error> {
+    max_records: usize,
+) -> Result<ParsedMetadata<Comment>, Error> {
     let mut comments = Vec::new();
+    let mut dropped = 0_u64;
     visit_options(options, endianness, context, |code, value| {
         if code == PCAPNG_OPTION_COMMENT {
+            if comments.len() >= max_records {
+                dropped = dropped.saturating_add(1);
+                return Ok(());
+            }
             comments.push(bounded_text(value).map(|(text, truncated)| Comment {
                 scope,
                 text,
@@ -535,15 +552,23 @@ pub(super) fn parse_comments(
         }
         Ok(())
     })?;
-    Ok(comments)
+    let retained = comments.len();
+    Ok(ParsedMetadata {
+        records: comments,
+        dropped,
+        retained,
+    })
 }
 
 /// Parses a name-resolution block into its address-to-name records.
 pub(super) fn parse_name_resolution(
     body: &[u8],
     endianness: Endianness,
-) -> Result<Vec<NameRecord>, Error> {
+    max_records: usize,
+) -> Result<ParsedMetadata<NameRecord>, Error> {
     let mut records = Vec::new();
+    let mut retained = 0_usize;
+    let mut dropped = 0_u64;
     let mut offset = 0_usize;
     while offset < body.len() {
         if body.len() - offset < 4 {
@@ -559,7 +584,11 @@ pub(super) fn parse_name_resolution(
         if record_type == PCAPNG_NAME_RECORD_END {
             // The option area that follows an nrb_record_end is not part of the
             // name table, so parsing stops here.
-            return Ok(records);
+            return Ok(ParsedMetadata {
+                records,
+                dropped,
+                retained,
+            });
         }
         let padded = align_to_usize(length)?;
         let end = offset.checked_add(padded).ok_or(Error::InvalidData {
@@ -598,13 +627,29 @@ pub(super) fn parse_name_resolution(
                 IpAddr::from(octets)
             };
             let mut names = Vec::new();
+            let mut observed_names = 0_usize;
             for name in value[address_length..].split(|byte| *byte == 0) {
                 if name.is_empty() {
                     continue;
                 }
+                observed_names = observed_names.saturating_add(1);
+                if retained >= max_records {
+                    dropped = dropped.saturating_add(1);
+                    continue;
+                }
                 names.push(bounded_text(name)?.0);
+                retained += 1;
             }
-            records.push(NameRecord { address, names });
+            if observed_names == 0 {
+                if retained < max_records {
+                    records.push(NameRecord { address, names });
+                    retained += 1;
+                } else {
+                    dropped = dropped.saturating_add(1);
+                }
+            } else if !names.is_empty() {
+                records.push(NameRecord { address, names });
+            }
         }
         if body[offset + length..end].iter().any(|byte| *byte != 0) {
             return Err(Error::InvalidData {
@@ -614,7 +659,11 @@ pub(super) fn parse_name_resolution(
         }
         offset = end;
     }
-    Ok(records)
+    Ok(ParsedMetadata {
+        records,
+        dropped,
+        retained,
+    })
 }
 
 /// Parses an interface-statistics block into the counters it reported.

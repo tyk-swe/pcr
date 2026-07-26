@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added `--bpf <FILTER>` to `capture` and to `decode --interface`, applying a
+  libpcap-syntax filter in the capture backend so unwanted frames never reach
+  this process. It is orthogonal to `--filter`, which selects among frames that
+  were already captured, and the two combine. Requesting it for a capture file
+  is a CLI error that names `--filter` instead.
 - Added `decode --filter <EXPRESSION>` for both capture files and live
   interfaces. The filter is compiled before any input is opened, so a mistyped
   protocol or field name is a CLI error rather than a partial run, and the

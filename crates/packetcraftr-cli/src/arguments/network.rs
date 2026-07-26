@@ -102,6 +102,9 @@ pub(crate) struct CaptureArgs {
     /// Capture only traffic the interface would accept anyway.
     #[arg(long)]
     pub(crate) no_promiscuous: bool,
+    /// Kernel capture filter in libpcap syntax, such as 'udp port 53'.
+    #[arg(long, value_name = "FILTER")]
+    pub(crate) bpf: Option<String>,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]

@@ -88,6 +88,8 @@ pub enum Error {
     },
     #[error("capture backend returned invalid statistics: {message}")]
     InvalidCaptureStatistics { message: String },
+    #[error("kernel capture filter {filter} was rejected: {message}")]
+    InvalidCaptureFilter { filter: String, message: String },
 }
 
 impl Classified for Error {
@@ -186,6 +188,11 @@ impl Classified for Error {
                 "cli.capture_timeout",
                 Kind::Cli,
                 Some("use a finite capture wait no longer than the documented one-hour maximum"),
+            ),
+            Self::InvalidCaptureFilter { .. } => Classification::new(
+                "cli.capture_filter",
+                Kind::Cli,
+                Some("write the kernel filter in libpcap syntax, as in `udp port 53`"),
             ),
             Self::InvalidTransmissionFrame { .. } => Classification::new(
                 "packet.transmission_frame",

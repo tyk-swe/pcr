@@ -105,6 +105,9 @@ pub(crate) struct DecodeArgs {
     /// Capture only traffic the interface would accept anyway.
     #[arg(long)]
     pub(crate) no_promiscuous: bool,
+    /// Kernel capture filter in libpcap syntax; requires --interface.
+    #[arg(long, value_name = "FILTER")]
+    pub(crate) bpf: Option<String>,
     #[command(flatten)]
     pub(crate) limits: CaptureStreamLimitArgs,
     #[command(flatten)]

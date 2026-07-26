@@ -43,6 +43,8 @@ With --interface, decode observes one interface and dissects frames as they arri
 
 --filter selects frames after dissection using the reflective field names each protocol declares. It supports protocol presence, == and != on every scalar field, ordering on numeric fields, CIDR containment for address fields, &&, ||, !, and parentheses. Run `packetcraftr protocols <PROTOCOL>` to list the fields one protocol exposes. A comparison matches when any layer of that protocol satisfies it.
 
+--bpf is a different mechanism: it narrows what the capture backend delivers, in libpcap syntax, so it applies only with --interface. The two combine.
+
 Examples:
   packetcraftr decode capture.pcapng --max-frames 100
   packetcraftr decode capture.pcap --verbose
@@ -75,8 +77,11 @@ const CAPTURE_AFTER_HELP: &str = r#"Live capture may require native features, de
 
 With --interface and no recipe, capture observes one interface directly. Passive observation has no destination to authorize, so it is bound by the capture window and the packet and byte budgets rather than by destination policy.
 
+--bpf narrows what the capture backend delivers, in libpcap syntax, before frames reach this process at all.
+
 Examples:
   packetcraftr capture --interface eth0 --timeout-ms 1000
+  packetcraftr capture --interface eth0 --bpf 'udp port 53' --timeout-ms 1000
   packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000"#;
 const REPLAY_AFTER_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
 

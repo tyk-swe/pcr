@@ -34,6 +34,7 @@ pub(crate) fn run_decode(
         verbose,
         timeout_ms,
         no_promiscuous,
+        bpf,
         limits:
             CaptureStreamLimitArgs {
                 max_frames,
@@ -61,6 +62,7 @@ pub(crate) fn run_decode(
                 verbose,
                 timeout: Duration::from_millis(timeout_ms),
                 no_promiscuous,
+                bpf,
                 budget: CaptureBudget {
                     max_frames,
                     max_bytes,
@@ -71,6 +73,15 @@ pub(crate) fn run_decode(
             decode_options,
             output,
         );
+    }
+    if bpf.is_some() {
+        // A kernel filter decides what a capture backend delivers, so it has
+        // nothing to act on when the frames come from a file. --filter is the
+        // one that selects frames from an existing capture.
+        return Err(CliError::new(
+            2,
+            "--bpf configures the capture backend and requires --interface; use --filter to select frames from a capture file",
+        ));
     }
     let path = path.expect("clap requires a path when no interface is selected");
     let mut reader = open_capture_reader(&path, max_frame_bytes, max_interfaces)?;
@@ -197,6 +208,7 @@ struct LiveDecode {
     verbose: bool,
     timeout: Duration,
     no_promiscuous: bool,
+    bpf: Option<String>,
     budget: CaptureBudget,
     limits: net::capture::Limits,
 }
@@ -220,6 +232,7 @@ fn run_live_decode(
         verbose,
         timeout,
         no_promiscuous,
+        bpf,
         budget,
         limits,
     } = arguments;
@@ -242,6 +255,7 @@ fn run_live_decode(
                 } else {
                     net::capture::Promiscuous::Enabled
                 },
+                filter: bpf,
             },
         )
         .map_err(CliError::classified)?;

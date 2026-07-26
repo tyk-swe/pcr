@@ -15,7 +15,9 @@ use crate::{
 
 #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
 mod supported {
-    use std::ffi::{CStr, CString, OsString, c_char, c_int, c_long, c_uchar, c_uint, c_void};
+    use std::ffi::{
+        CStr, CString, OsString, c_char, c_int, c_long, c_uchar, c_uint, c_ushort, c_void,
+    };
     use std::os::windows::ffi::OsStringExt;
     use std::path::PathBuf;
     use std::ptr::NonNull;
@@ -51,6 +53,9 @@ mod supported {
     const PCAP_CHAR_ENC_UTF_8: c_uint = 1;
     const READ_TIMEOUT_MILLIS: c_int = 50;
     const SEND_SNAPSHOT_LENGTH: c_int = 65_535;
+
+    /// `PCAP_NETMASK_UNKNOWN` from the pinned Npcap SDK 1.16 pcap.h.
+    const PCAP_NETMASK_UNKNOWN: c_uint = 0xffff_ffff;
 
     const PCAP_ERROR: c_int = -1;
     const PCAP_ERROR_BREAK: c_int = -2;
@@ -93,6 +98,10 @@ mod supported {
     type PcapNextEx =
         unsafe extern "C" fn(*mut c_void, *mut *mut PcapPacketHeader, *mut *const c_uchar) -> c_int;
     type PcapSendPacket = unsafe extern "C" fn(*mut c_void, *const c_uchar, c_int) -> c_int;
+    type PcapCompile =
+        unsafe extern "C" fn(*mut c_void, *mut BpfProgram, *const c_char, c_int, c_uint) -> c_int;
+    type PcapSetFilter = unsafe extern "C" fn(*mut c_void, *mut BpfProgram) -> c_int;
+    type PcapFreeCode = unsafe extern "C" fn(*mut BpfProgram);
     type PcapStats = unsafe extern "C" fn(*mut c_void, *mut PcapStatistics) -> c_int;
     type PcapBreakLoop = unsafe extern "C" fn(*mut c_void);
     type PcapGetError = unsafe extern "C" fn(*mut c_void) -> *mut c_char;
@@ -127,6 +136,31 @@ mod supported {
         network_dropped: c_uint,
     }
 
+    // struct bpf_insn and struct bpf_program from the pinned Npcap SDK 1.16
+    // pcap/bpf.h. Only libpcap constructs and frees these, so the layout is
+    // asserted rather than trusted.
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct BpfInstruction {
+        code: c_ushort,
+        jt: c_uchar,
+        jf: c_uchar,
+        k: c_uint,
+    }
+
+    #[repr(C)]
+    struct BpfProgram {
+        length: c_uint,
+        instructions: *mut BpfInstruction,
+    }
+
+    const _: () = {
+        assert!(size_of::<BpfInstruction>() == 8);
+        assert!(align_of::<BpfInstruction>() == 4);
+        assert!(size_of::<BpfProgram>() == 2 * size_of::<*mut c_void>());
+        assert!(align_of::<BpfProgram>() == align_of::<*mut c_void>());
+    };
+
     struct NpcapApi {
         // Function pointers remain valid only while their defining module is
         // loaded. This owner keeps it live for every use of the inert pointers.
@@ -140,6 +174,9 @@ mod supported {
         pcap_datalink: PcapDatalink,
         pcap_next_ex: PcapNextEx,
         pcap_sendpacket: PcapSendPacket,
+        pcap_compile: PcapCompile,
+        pcap_setfilter: PcapSetFilter,
+        pcap_freecode: PcapFreeCode,
         pcap_stats: PcapStats,
         pcap_breakloop: PcapBreakLoop,
         pcap_geterr: PcapGetError,
@@ -195,6 +232,14 @@ mod supported {
             let pcap_sendpacket =
                 unsafe { load_symbol::<PcapSendPacket>(&library, b"pcap_sendpacket\0")? };
             // SAFETY: see the ABI note above.
+            let pcap_compile = unsafe { load_symbol::<PcapCompile>(&library, b"pcap_compile\0")? };
+            // SAFETY: see the ABI note above.
+            let pcap_setfilter =
+                unsafe { load_symbol::<PcapSetFilter>(&library, b"pcap_setfilter\0")? };
+            // SAFETY: see the ABI note above.
+            let pcap_freecode =
+                unsafe { load_symbol::<PcapFreeCode>(&library, b"pcap_freecode\0")? };
+            // SAFETY: see the ABI note above.
             let pcap_stats = unsafe { load_symbol::<PcapStats>(&library, b"pcap_stats\0")? };
             // SAFETY: see the ABI note above.
             let pcap_breakloop =
@@ -230,6 +275,9 @@ mod supported {
                 pcap_datalink,
                 pcap_next_ex,
                 pcap_sendpacket,
+                pcap_compile,
+                pcap_setfilter,
+                pcap_freecode,
                 pcap_stats,
                 pcap_breakloop,
                 pcap_geterr,
@@ -293,6 +341,11 @@ mod supported {
             snap_length,
             PromiscuousMode::from(options.promiscuous),
         )?;
+        if let Some(filter) = &options.filter {
+            // Applied to the activated handle before any frame is read, so the
+            // first delivered frame already satisfies the caller's filter.
+            apply_capture_filter(&handle, filter)?;
+        }
         // SAFETY: handle is activated and live; pcap_datalink only reads its
         // negotiated link-layer type.
         let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
@@ -470,6 +523,52 @@ mod supported {
             // SAFETY: libpcap documents pcap_breakloop as callable from a
             // different thread; the Arc keeps the handle live for this call.
             unsafe { (self.0.api.pcap_breakloop)(self.0.raw.as_ptr()) };
+        }
+    }
+
+    /// Compiles and installs a libpcap-syntax filter on an activated handle.
+    fn apply_capture_filter(handle: &Arc<NpcapHandle>, filter: &str) -> Result<(), LiveIoError> {
+        let program_text = CString::new(filter).map_err(|_| LiveIoError::InvalidCaptureFilter {
+            filter: filter.to_owned(),
+            message: "kernel capture filter contains an embedded NUL byte".to_owned(),
+        })?;
+        let mut program = BpfProgram {
+            length: 0,
+            instructions: std::ptr::null_mut(),
+        };
+        // SAFETY: the handle is activated and live, program_text is a valid
+        // NUL-terminated string for this synchronous call, and program is a
+        // writable BpfProgram that libpcap fills in on success. PCAP_NETMASK_UNKNOWN
+        // is the documented value for "the netmask is not known".
+        let compiled = unsafe {
+            (handle.api.pcap_compile)(
+                handle.raw.as_ptr(),
+                &raw mut program,
+                program_text.as_ptr(),
+                1,
+                PCAP_NETMASK_UNKNOWN,
+            )
+        };
+        if compiled != 0 {
+            return Err(LiveIoError::InvalidCaptureFilter {
+                filter: filter.to_owned(),
+                message: handle.error_message(),
+            });
+        }
+        // SAFETY: program was filled by a successful pcap_compile against this
+        // same live handle.
+        let installed =
+            unsafe { (handle.api.pcap_setfilter)(handle.raw.as_ptr(), &raw mut program) };
+        let message = (installed != 0).then(|| handle.error_message());
+        // SAFETY: pcap_compile succeeded, so program owns an allocation that
+        // must be released exactly once on both the success and failure paths.
+        unsafe { (handle.api.pcap_freecode)(&raw mut program) };
+        match message {
+            None => Ok(()),
+            Some(message) => Err(LiveIoError::InvalidCaptureFilter {
+                filter: filter.to_owned(),
+                message,
+            }),
         }
     }
 

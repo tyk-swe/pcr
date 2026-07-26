@@ -218,3 +218,20 @@ fn decode_takes_exactly_one_of_a_capture_file_or_an_interface() {
         String::from_utf8_lossy(&both.stderr)
     );
 }
+
+#[test]
+fn a_kernel_filter_is_refused_for_a_capture_file() {
+    let output = binary()
+        .args(["decode", "capture.pcapng", "--bpf", "udp port 53"])
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--bpf configures the capture backend"),
+        "{stderr}"
+    );
+    // The message points at the filter that does work offline.
+    assert!(stderr.contains("--filter"), "{stderr}");
+}

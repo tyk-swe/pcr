@@ -59,6 +59,7 @@ pub(crate) fn run_capture(
         route,
         timeout_ms,
         no_promiscuous,
+        bpf,
         limits,
         sink,
     } = arguments;
@@ -79,6 +80,7 @@ pub(crate) fn run_capture(
         } else {
             net::capture::Promiscuous::Enabled
         },
+        filter: bpf,
     };
 
     match output {

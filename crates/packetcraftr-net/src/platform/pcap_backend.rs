@@ -44,6 +44,16 @@ pub(super) fn open_capture(
         .immediate_mode(true)
         .open()
         .map_err(|error| map_open_error(interface, error))?;
+    if let Some(filter) = &options.filter {
+        // Applied before the readiness barrier so the very first delivered
+        // frame already satisfies the caller's filter.
+        capture
+            .filter(filter, true)
+            .map_err(|error| LiveIoError::InvalidCaptureFilter {
+                filter: filter.clone(),
+                message: error.to_string(),
+            })?;
+    }
     let datalink = capture.get_datalink().0;
     let link_type =
         u32::try_from(datalink)

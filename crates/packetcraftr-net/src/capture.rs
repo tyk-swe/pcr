@@ -230,6 +230,13 @@ pub struct Options {
     /// Promiscuous capture is the default here and in `tcpdump`; disabling it
     /// narrows capture to traffic the interface would have accepted anyway.
     pub promiscuous: Promiscuous,
+    /// A libpcap-syntax filter applied by the capture backend, before frames
+    /// reach this process at all.
+    ///
+    /// This is a different mechanism from a display filter: it decides what is
+    /// captured, not what is shown, and it is expressed in the backend's own
+    /// syntax rather than the reflective field vocabulary.
+    pub filter: Option<String>,
 }
 
 /// Whether an armed capture asks the interface for all visible traffic.
@@ -252,6 +259,7 @@ impl Options {
         Self {
             limits,
             promiscuous: Promiscuous::Enabled,
+            filter: None,
         }
     }
 
@@ -270,6 +278,12 @@ impl Options {
         if !self.promiscuous.is_enabled() {
             return Err(Error::Unsupported {
                 message: "this capture provider cannot disable promiscuous mode".to_owned(),
+            });
+        }
+        if let Some(filter) = &self.filter {
+            return Err(Error::InvalidCaptureFilter {
+                filter: filter.clone(),
+                message: "this capture provider cannot apply a kernel filter".to_owned(),
             });
         }
         Ok(())
@@ -486,8 +500,9 @@ mod tests {
             .unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        // Silently capturing promiscuously here would give the caller more
-        // traffic than it asked for, so the fallback refuses instead.
+        // Silently capturing promiscuously, or ignoring a kernel filter, would
+        // give the caller more traffic than it asked for, so the fallback
+        // refuses instead.
         let refused = provider
             .arm_capture_with(
                 &plan,
@@ -498,12 +513,27 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(refused, Error::Unsupported { .. }));
+
+        let refused = provider
+            .arm_capture_with(
+                &plan,
+                Options {
+                    filter: Some("udp port 53".to_owned()),
+                    ..Options::new(Limits::default())
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(
+            refused,
+            Error::InvalidCaptureFilter { ref filter, .. } if filter == "udp port 53"
+        ));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]
     fn capture_options_validate_their_bounds_and_default_to_promiscuous() {
         assert_eq!(Options::default().promiscuous, Promiscuous::Enabled);
+        assert_eq!(Options::default().filter, None);
         assert!(Promiscuous::Enabled.is_enabled());
         assert!(!Promiscuous::Disabled.is_enabled());
 

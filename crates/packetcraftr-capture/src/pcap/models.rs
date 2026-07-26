@@ -295,17 +295,23 @@ pub struct MetadataLoss {
     pub comments: u64,
     pub name_records: u64,
     pub interface_statistics: u64,
+    /// Records the source declared that the reader could not retain, because
+    /// [`ReaderOptions::max_metadata_records`] was reached. Their kind is not
+    /// known, so they are counted here rather than in one of the categories
+    /// above; leaving them out would understate the loss.
+    pub unretained: u64,
 }
 
 impl MetadataLoss {
     pub fn is_empty(self) -> bool {
-        self.comments == 0 && self.name_records == 0 && self.interface_statistics == 0
+        self.total() == 0
     }
 
     pub fn total(self) -> u64 {
         self.comments
             .saturating_add(self.name_records)
             .saturating_add(self.interface_statistics)
+            .saturating_add(self.unretained)
     }
 }
 

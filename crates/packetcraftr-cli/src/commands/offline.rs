@@ -191,12 +191,16 @@ pub(crate) fn run_read(
         // corrupt the exact capture bytes on stdout.
         let dropped = report.dropped_metadata;
         if !dropped.is_empty() {
+            // The two causes are reported apart because they are not the same
+            // problem: one is a property of the target format, the other is the
+            // reader's own bound on how much annotation it will hold.
             emit_stderr_message(&format!(
-                "Warning capture.metadata_dropped: {} source annotation record(s) are not representable in {format} output ({} comment(s), {} name record(s), {} statistics block(s))",
+                "Warning capture.metadata_dropped: {} source annotation record(s) are missing from {format} output ({} comment(s), {} name record(s), {} statistics block(s) the format cannot carry; {} past the reader's retention bound)",
                 dropped.total(),
                 dropped.comments,
                 dropped.name_records,
-                dropped.interface_statistics
+                dropped.interface_statistics,
+                dropped.unretained
             ))?;
         }
         return Ok(());

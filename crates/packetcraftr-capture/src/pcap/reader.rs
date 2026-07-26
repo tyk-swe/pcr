@@ -138,7 +138,7 @@ impl<R: Read> Reader<R> {
             });
         }
 
-        Ok(Self {
+        let mut reader = Self {
             inner,
             state,
             interfaces,
@@ -147,14 +147,16 @@ impl<R: Read> Reader<R> {
             max_total_interfaces,
             max_metadata_blocks_per_frame,
             max_metadata_records,
-            metadata: CaptureMetadata {
-                comments: section_comments,
-                ..CaptureMetadata::default()
-            },
+            metadata: CaptureMetadata::default(),
             frames_read: 0,
             scratch,
             finished: false,
-        })
+        };
+        // Routed through the same retention path as every later record, so the
+        // opening section header cannot place more comments in memory than
+        // `max_metadata_records` allows.
+        reader.retain_metadata(section_comments, |metadata| &mut metadata.comments);
+        Ok(reader)
     }
 
     /// Returns the detected capture format.
@@ -446,28 +448,32 @@ impl<R: Read> Reader<R> {
                         ReaderState::PcapNg { interfaces, .. } => interfaces,
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     };
-                    return parse_obsolete_packet(
+                    let frame = parse_obsolete_packet(
                         body,
                         section_endianness,
                         interfaces,
                         section_interface_base,
                         self.max_size,
-                    )
-                    .map(Some);
+                    )?;
+                    // Every returned frame advances the stream position that
+                    // `CommentScope::Frame` names, not only enhanced packets.
+                    self.frames_read = self.frames_read.saturating_add(1);
+                    return Ok(Some(frame));
                 }
                 PCAPNG_SIMPLE_PACKET_BLOCK => {
                     let interfaces = match &self.state {
                         ReaderState::PcapNg { interfaces, .. } => interfaces,
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     };
-                    return parse_simple_packet(
+                    let frame = parse_simple_packet(
                         body,
                         section_endianness,
                         interfaces,
                         section_interface_base,
                         self.max_size,
-                    )
-                    .map(Some);
+                    )?;
+                    self.frames_read = self.frames_read.saturating_add(1);
+                    return Ok(Some(frame));
                 }
                 _ => {
                     // Metadata and extension blocks are length-delimited, so an

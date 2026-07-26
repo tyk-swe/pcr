@@ -657,16 +657,27 @@ pub(super) fn parse_interface_statistics(
 }
 
 /// Retains text up to the metadata byte bound, on a UTF-8 boundary.
+///
+/// The bound applies to the retained `String`, not to the source slice:
+/// `from_utf8_lossy` replaces every invalid byte with a three-byte replacement
+/// character, so a bound checked only against the input would let an all-invalid
+/// comment grow to three times [`MAX_METADATA_TEXT_BYTES`].
 fn bounded_text(value: &[u8]) -> Result<(String, bool), Error> {
-    let truncated = value.len() > MAX_METADATA_TEXT_BYTES;
     let mut end = value.len().min(MAX_METADATA_TEXT_BYTES);
     // `from_utf8_lossy` never fails, but cutting mid-sequence would replace a
     // valid character with a replacement marker, so back up to a boundary.
     while end > 0 && (value[end - 1] & 0b1100_0000) == 0b1000_0000 {
         end -= 1;
     }
-    Ok((
-        String::from_utf8_lossy(&value[..end]).into_owned(),
-        truncated,
-    ))
+    let mut truncated = end < value.len();
+    let mut text = String::from_utf8_lossy(&value[..end]).into_owned();
+    if text.len() > MAX_METADATA_TEXT_BYTES {
+        let mut cut = MAX_METADATA_TEXT_BYTES;
+        while cut > 0 && !text.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        text.truncate(cut);
+        truncated = true;
+    }
+    Ok((text, truncated))
 }

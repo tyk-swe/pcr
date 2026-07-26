@@ -114,5 +114,8 @@ fn dropped_metadata<R: Read>(reader: &Reader<R>) -> MetadataLoss {
         comments: metadata.comments.len() as u64,
         name_records: metadata.name_records.len() as u64,
         interface_statistics: metadata.interface_statistics.len() as u64,
+        // Records the reader's retention bound excluded are lost by this copy
+        // just the same, so they are reported rather than silently omitted.
+        unretained: metadata.dropped,
     }
 }

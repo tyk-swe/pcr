@@ -10,13 +10,16 @@ use crate::{Direction, Frame, LinkType};
 
 use super::models::{
     Comment, CommentScope, DEFAULT_SIZE_LIMIT, Endianness, Error, Format, Interface,
-    InterfaceStatistics, Limits, NameRecord, PcapNgOptions, PcapOptions, ReaderOptions,
-    TimestampResolution, TranscodeReport,
+    InterfaceStatistics, Limits, MAX_METADATA_TEXT_BYTES, NameRecord, PcapNgOptions, PcapOptions,
+    ReaderOptions, TimestampResolution, TranscodeReport,
 };
 use super::reader::Reader;
 use super::transcode::transcode;
 use super::wire::{
-    PCAP_GLOBAL_HEADER_LEN, system_time_from_signed_unix, timestamp_from_ticks, timestamp_to_ticks,
+    PCAP_GLOBAL_HEADER_LEN, PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK,
+    PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_OPTION_COMMENT, PCAPNG_OPTION_END,
+    PCAPNG_PACKET_BLOCK, PCAPNG_SECTION_HEADER_BLOCK, PCAPNG_SIMPLE_PACKET_BLOCK,
+    system_time_from_signed_unix, timestamp_from_ticks, timestamp_to_ticks,
 };
 use super::writer::Writer;
 
@@ -1362,6 +1365,147 @@ fn annotated_fixture() -> Vec<u8> {
     .unwrap()
 }
 
+/// Frames one little-endian PCAPNG block around a body.
+///
+/// The committed fixture cannot express the shapes the retention bounds have to
+/// survive — a section header carrying more comments than the bound allows, or
+/// a file mixing packet block kinds — so those cases are assembled here.
+fn pcapng_block(block_type: u32, body: &[u8]) -> Vec<u8> {
+    let total = (12 + body.len()) as u32;
+    let mut block = Vec::with_capacity(total as usize);
+    block.extend_from_slice(&block_type.to_le_bytes());
+    block.extend_from_slice(&total.to_le_bytes());
+    block.extend_from_slice(body);
+    block.extend_from_slice(&total.to_le_bytes());
+    block
+}
+
+fn pcapng_option(code: u16, value: &[u8]) -> Vec<u8> {
+    let mut option = Vec::new();
+    option.extend_from_slice(&code.to_le_bytes());
+    option.extend_from_slice(&(value.len() as u16).to_le_bytes());
+    option.extend_from_slice(value);
+    option.resize(option.len().next_multiple_of(4), 0);
+    option
+}
+
+fn pcapng_option_end() -> Vec<u8> {
+    pcapng_option(PCAPNG_OPTION_END, &[])
+}
+
+/// A section header carrying the given comments, followed by one interface.
+fn pcapng_section(comments: &[&[u8]]) -> Vec<u8> {
+    let mut header = Vec::new();
+    header.extend_from_slice(&PCAPNG_BYTE_ORDER_MAGIC.to_le_bytes());
+    header.extend_from_slice(&1_u16.to_le_bytes());
+    header.extend_from_slice(&0_u16.to_le_bytes());
+    header.extend_from_slice(&(-1_i64).to_le_bytes());
+    for comment in comments {
+        header.extend_from_slice(&pcapng_option(PCAPNG_OPTION_COMMENT, comment));
+    }
+    if !comments.is_empty() {
+        header.extend_from_slice(&pcapng_option_end());
+    }
+
+    let mut interface = Vec::new();
+    interface.extend_from_slice(&1_u16.to_le_bytes());
+    interface.extend_from_slice(&0_u16.to_le_bytes());
+    interface.extend_from_slice(&65_535_u32.to_le_bytes());
+
+    let mut capture = pcapng_block(PCAPNG_SECTION_HEADER_BLOCK, &header);
+    capture.extend_from_slice(&pcapng_block(
+        PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
+        &interface,
+    ));
+    capture
+}
+
+#[test]
+fn section_header_comments_obey_the_metadata_bound() {
+    let capture = pcapng_section(&[b"one", b"two", b"three"]);
+    let reader = Reader::with_options(
+        Cursor::new(capture),
+        ReaderOptions {
+            max_metadata_records: 2,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
+
+    // The opening section header is parsed while the reader is built, before
+    // any frame is asked for, so it is the one place retention could bypass the
+    // bound entirely rather than merely exceed it.
+    let metadata = reader.metadata();
+    assert_eq!(metadata.comments.len(), 2);
+    assert_eq!(metadata.dropped, 1);
+    assert_eq!(metadata.observed(), 3);
+}
+
+#[test]
+fn an_invalid_comment_is_bounded_by_the_text_it_retains() {
+    // `from_utf8_lossy` widens every invalid byte into a three-byte replacement
+    // character, so a bound checked against the source slice would let this
+    // comment reach three times the documented limit.
+    let source = vec![0xff_u8; MAX_METADATA_TEXT_BYTES];
+    let reader = Reader::new(Cursor::new(pcapng_section(&[&source]))).unwrap();
+
+    let comment = &reader.metadata().comments[0];
+    assert!(
+        comment.text.len() <= MAX_METADATA_TEXT_BYTES,
+        "retained {} bytes",
+        comment.text.len()
+    );
+    assert!(comment.truncated);
+}
+
+#[test]
+fn frame_comment_scope_counts_every_packet_block_kind() {
+    let mut capture = pcapng_section(&[]);
+
+    let mut obsolete = Vec::new();
+    obsolete.extend_from_slice(&0_u16.to_le_bytes());
+    obsolete.extend_from_slice(&0_u16.to_le_bytes());
+    obsolete.extend_from_slice(&0_u32.to_le_bytes());
+    obsolete.extend_from_slice(&0_u32.to_le_bytes());
+    obsolete.extend_from_slice(&4_u32.to_le_bytes());
+    obsolete.extend_from_slice(&4_u32.to_le_bytes());
+    obsolete.extend_from_slice(&[1, 2, 3, 4]);
+    capture.extend_from_slice(&pcapng_block(PCAPNG_PACKET_BLOCK, &obsolete));
+
+    let mut simple = Vec::new();
+    simple.extend_from_slice(&4_u32.to_le_bytes());
+    simple.extend_from_slice(&[5, 6, 7, 8]);
+    capture.extend_from_slice(&pcapng_block(PCAPNG_SIMPLE_PACKET_BLOCK, &simple));
+
+    let mut enhanced = Vec::new();
+    enhanced.extend_from_slice(&0_u32.to_le_bytes());
+    enhanced.extend_from_slice(&0_u32.to_le_bytes());
+    enhanced.extend_from_slice(&0_u32.to_le_bytes());
+    enhanced.extend_from_slice(&4_u32.to_le_bytes());
+    enhanced.extend_from_slice(&4_u32.to_le_bytes());
+    enhanced.extend_from_slice(&[9, 10, 11, 12]);
+    enhanced.extend_from_slice(&pcapng_option(PCAPNG_OPTION_COMMENT, b"third"));
+    enhanced.extend_from_slice(&pcapng_option_end());
+    capture.extend_from_slice(&pcapng_block(PCAPNG_ENHANCED_PACKET_BLOCK, &enhanced));
+
+    let mut reader = Reader::new(Cursor::new(capture)).unwrap();
+    let frames = std::iter::from_fn(|| reader.next_frame().transpose())
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+
+    // A comment names its frame by stream position, so obsolete and simple
+    // packet blocks have to advance that position like any other frame.
+    assert_eq!(frames.len(), 3);
+    assert_eq!(
+        reader.metadata().comments,
+        vec![Comment {
+            scope: CommentScope::Frame { sequence: 2 },
+            text: "third".to_owned(),
+            truncated: false,
+        }]
+    );
+}
+
 #[test]
 fn pcapng_comments_names_and_statistics_are_retained_with_their_scope() {
     let mut reader = Reader::new(Cursor::new(annotated_fixture())).unwrap();
@@ -1468,6 +1612,27 @@ fn a_lossy_transcode_reports_the_metadata_it_could_not_carry() {
     let mut copied = Reader::new(Cursor::new(bytes)).unwrap();
     assert_eq!(copied.next_frame().unwrap().unwrap().captured_length(), 47);
     assert!(copied.metadata().is_empty());
+}
+
+#[test]
+fn a_lossy_transcode_also_reports_what_the_reader_never_retained() {
+    let mut reader = Reader::with_options(
+        Cursor::new(annotated_fixture()),
+        ReaderOptions {
+            max_metadata_records: 2,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
+    let (_bytes, report) =
+        transcode(&mut reader, Vec::new(), Format::PcapNg, Limits::default()).unwrap();
+
+    // Two records reached memory and four never did. The copy carries neither
+    // kind, so counting only the retained two would understate the loss by two
+    // thirds — the opposite of what the report exists to say.
+    assert_eq!(report.dropped_metadata.comments, 2);
+    assert_eq!(report.dropped_metadata.unretained, 4);
+    assert_eq!(report.dropped_metadata.total(), 6);
 }
 
 #[test]

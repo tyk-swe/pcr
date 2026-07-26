@@ -21,7 +21,7 @@ use packetcraftr_packet::{
 ))]
 use super::models::DestinationScope;
 use super::models::{
-    LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborRequest, NeighborResolution,
+    InterfaceId, LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborRequest, NeighborResolution,
     NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute, RouteProvider,
 };
 
@@ -396,6 +396,56 @@ impl RoutePlanner {
             visited_destinations,
             packet_source,
             neighbor_source,
+        })
+    }
+
+    /// Describes one interface for passive observation.
+    ///
+    /// A capture has no destination, so this performs interface lookup only:
+    /// no route lookup, no neighbor resolution, and no transmission decision.
+    /// The result carries the interface identity and link type that arming a
+    /// capture needs, and every transmission-related field stays empty so it
+    /// cannot be mistaken for a plan that authorizes sending.
+    pub fn observe_interface<P: RouteProvider>(
+        &self,
+        interface: &InterfaceId,
+        provider: &P,
+    ) -> Result<PlannedRoute, PlanError> {
+        let route = provider
+            .lookup_interface(interface)
+            .map_err(|source| PlanError::InterfaceLookup {
+                interface: interface.name.clone(),
+                failure: provider.classify_error(&source),
+                message: source.to_string(),
+            })?
+            .ok_or_else(|| PlanError::InterfaceLookupUnsupported {
+                interface: interface.name.clone(),
+            })?;
+        if route.interface != *interface {
+            return Err(PlanError::InterfaceMismatch {
+                requested: interface.name.clone(),
+                requested_index: interface.index,
+                selected: route.interface.name.clone(),
+                selected_index: route.interface.index,
+            });
+        }
+        Ok(PlannedRoute {
+            route,
+            // Observation decides no transmission mode. Leaving this
+            // unresolved keeps `needs_neighbor_resolution` false and makes any
+            // code that mistakes this plan for a transmission plan fail closed
+            // on the unresolved mode instead of emitting neighbor traffic.
+            mode: LinkMode::Auto,
+            lookup_destination: None,
+            final_destination: None,
+            visited_destinations: Vec::new(),
+            packet_source: None,
+            neighbor_source: None,
+            neighbor_target: None,
+            destination_mac: None,
+            source_mac: None,
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
         })
     }
 

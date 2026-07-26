@@ -676,6 +676,9 @@ Options:
 
           [default: 3000]
 
+      --no-promiscuous
+          Capture only traffic the interface would accept anyway
+
       --max-queue-frames <MAX_QUEUE_FRAMES>
           Aggregate backend capture-queue frame bound
 
@@ -722,7 +725,10 @@ Global options:
 
 Live capture may require native features, dependencies, and privileges.
 
-Example:
+With --interface and no recipe, capture observes one interface directly. Passive observation has no destination to authorize, so it is bound by the capture window and the packet and byte budgets rather than by destination policy.
+
+Examples:
+  packetcraftr capture --interface eth0 --timeout-ms 1000
   packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
 
 ===== packetcraftr replay --help =====

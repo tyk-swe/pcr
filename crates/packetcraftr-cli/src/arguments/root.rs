@@ -67,7 +67,10 @@ Example:
   packetcraftr exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000"#;
 const CAPTURE_AFTER_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
 
-Example:
+With --interface and no recipe, capture observes one interface directly. Passive observation has no destination to authorize, so it is bound by the capture window and the packet and byte budgets rather than by destination policy.
+
+Examples:
+  packetcraftr capture --interface eth0 --timeout-ms 1000
   packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000"#;
 const REPLAY_AFTER_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
 

@@ -1043,3 +1043,66 @@ fn unspecified_outer_ip_does_not_route_to_an_explicit_inner_destination() {
     assert_eq!(plan.final_destination, Some(requested_destination));
     assert_eq!(plan.visited_destinations, vec![requested_destination]);
 }
+
+#[test]
+fn observing_an_interface_uses_interface_lookup_and_carries_no_transmission_intent() {
+    let provider = InterfaceOnlyRoute::new(route(None));
+    let interface = InterfaceId {
+        name: "test0".to_owned(),
+        index: 7,
+    };
+
+    let plan = RoutePlanner
+        .observe_interface(&interface, &provider)
+        .unwrap();
+
+    assert_eq!(provider.ip_lookups.load(Ordering::SeqCst), 0);
+    assert_eq!(provider.interface_lookups.load(Ordering::SeqCst), 1);
+    assert_eq!(plan.route.interface, interface);
+    assert_eq!(plan.route.link_type, LinkType::ETHERNET);
+    // Nothing about the result may read as authorization to transmit.
+    assert_eq!(plan.mode, LinkMode::Auto);
+    assert_eq!(plan.lookup_destination, None);
+    assert_eq!(plan.final_destination, None);
+    assert!(plan.visited_destinations.is_empty());
+    assert_eq!(plan.packet_source, None);
+    assert_eq!(plan.neighbor_source, None);
+    assert_eq!(plan.neighbor_target, None);
+    assert_eq!(plan.destination_mac, None);
+    assert_eq!(plan.source_mac, None);
+    assert!(plan.neighbor_vlan_tags.is_empty());
+    assert!(!plan.synthesized_ethernet);
+    assert!(!plan.needs_neighbor_resolution());
+}
+
+#[test]
+fn observing_an_interface_rejects_a_provider_that_returns_a_different_interface() {
+    let provider = InterfaceOnlyRoute::new(route(None));
+    let requested = InterfaceId {
+        name: "other0".to_owned(),
+        index: 9,
+    };
+
+    assert!(matches!(
+        RoutePlanner.observe_interface(&requested, &provider),
+        Err(PlanError::InterfaceMismatch {
+            selected_index: 7,
+            requested_index: 9,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn observing_an_interface_reports_a_provider_without_interface_lookup() {
+    let provider = FixedRoute(route(None));
+    let interface = InterfaceId {
+        name: "test0".to_owned(),
+        index: 7,
+    };
+
+    assert!(matches!(
+        RoutePlanner.observe_interface(&interface, &provider),
+        Err(PlanError::InterfaceLookupUnsupported { .. })
+    ));
+}

@@ -13,7 +13,7 @@ use packetcraftr_capture::{DEFAULT_SIZE_LIMIT, Frame as CaptureFrame};
 
 #[doc(hidden)]
 pub use self::{
-    Captured as CapturedFrame, Limits as CaptureQueueLimits,
+    Captured as CapturedFrame, Limits as CaptureQueueLimits, Options as CaptureOptions,
     OverflowPolicy as CaptureOverflowPolicy, Provider as CaptureProvider,
     Session as CaptureSession, Statistics as CaptureStatistics,
     SystemProvider as SystemCaptureProvider,
@@ -217,6 +217,65 @@ impl Limits {
     }
 }
 
+/// Everything one capture session is armed with.
+///
+/// Bounds live in [`Limits`]; this adds the backend behaviour a caller can
+/// choose. Providers that cannot honor a non-default choice must reject it
+/// rather than capture more traffic than was asked for.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Options {
+    pub limits: Limits,
+    /// Whether the backend places the interface in promiscuous mode.
+    ///
+    /// Promiscuous capture is the default here and in `tcpdump`; disabling it
+    /// narrows capture to traffic the interface would have accepted anyway.
+    pub promiscuous: Promiscuous,
+}
+
+/// Whether an armed capture asks the interface for all visible traffic.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Promiscuous {
+    #[default]
+    Enabled,
+    Disabled,
+}
+
+impl Promiscuous {
+    pub const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
+}
+
+impl Options {
+    /// Arms with the default backend behaviour under explicit bounds.
+    pub fn new(limits: Limits) -> Self {
+        Self {
+            limits,
+            promiscuous: Promiscuous::Enabled,
+        }
+    }
+
+    pub fn validate(self) -> Result<Self, Error> {
+        Ok(Self {
+            limits: self.limits.validate()?,
+            ..self
+        })
+    }
+
+    /// Rejects every option a provider cannot honor.
+    ///
+    /// A provider that silently ignored these would capture more traffic than
+    /// the caller asked for, so the shared fallback fails closed instead.
+    pub fn require_backend_defaults(&self) -> Result<(), Error> {
+        if !self.promiscuous.is_enabled() {
+            return Err(Error::Unsupported {
+                message: "this capture provider cannot disable promiscuous mode".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
 pub(crate) fn validate_timeout(timeout: Duration) -> Result<(), Error> {
     if timeout > MAX_TIMEOUT {
         return Err(Error::InvalidCaptureTimeout {
@@ -238,6 +297,21 @@ pub trait Provider: Send + Sync {
     type Capture: Session;
 
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error>;
+
+    /// Starts a capture with the complete option set.
+    ///
+    /// The default accepts only the backend defaults and rejects everything
+    /// else, so a provider written before an option existed fails closed
+    /// instead of quietly capturing more traffic than was requested. Override
+    /// this to honor the options a backend can actually apply.
+    fn arm_capture_with(
+        &self,
+        route: &PlannedRoute,
+        options: Options,
+    ) -> Result<Self::Capture, Error> {
+        options.require_backend_defaults()?;
+        self.arm_capture(route, options.limits)
+    }
 }
 
 /// Owned native capture session. The native handle and capture worker remain
@@ -283,7 +357,15 @@ impl Provider for SystemProvider {
     type Capture = SystemSession;
 
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error> {
-        super::platform::system_capture(route, limits).map(SystemSession::new)
+        self.arm_capture_with(route, Options::new(limits))
+    }
+
+    fn arm_capture_with(
+        &self,
+        route: &PlannedRoute,
+        options: Options,
+    ) -> Result<Self::Capture, Error> {
+        super::platform::system_capture(route, options).map(SystemSession::new)
     }
 }
 
@@ -295,6 +377,7 @@ mod tests {
     use super::*;
     use packetcraftr_error::Classified;
 
+    #[derive(Debug)]
     struct CountingCapture {
         calls: Arc<AtomicUsize>,
     }
@@ -342,6 +425,99 @@ mod tests {
             assert_eq!(error.classification().code, "cli.capture_timeout");
         }
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    struct DefaultsOnlyProvider(Arc<AtomicUsize>);
+
+    impl Provider for DefaultsOnlyProvider {
+        type Capture = CountingCapture;
+
+        fn arm_capture(
+            &self,
+            _route: &PlannedRoute,
+            _limits: Limits,
+        ) -> Result<Self::Capture, Error> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(CountingCapture {
+                calls: Arc::clone(&self.0),
+            })
+        }
+    }
+
+    fn observation_plan() -> PlannedRoute {
+        PlannedRoute {
+            route: crate::route::RouteDecision {
+                interface: crate::route::InterfaceId {
+                    name: "test0".to_owned(),
+                    index: 7,
+                },
+                source_mac: None,
+                selected_address: None,
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: crate::route::RouteSelectionReason::InterfaceOnly,
+                destination_scope: crate::route::DestinationScope::Link,
+                mtu: 1500,
+                capability: crate::link::Capability::Layer2,
+                link_type: packetcraftr_capture::LinkType::ETHERNET,
+            },
+            mode: crate::link::Mode::Auto,
+            lookup_destination: None,
+            final_destination: None,
+            visited_destinations: Vec::new(),
+            packet_source: None,
+            neighbor_source: None,
+            neighbor_target: None,
+            destination_mac: None,
+            source_mac: None,
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
+        }
+    }
+
+    #[test]
+    fn a_provider_without_option_support_refuses_non_default_options() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = DefaultsOnlyProvider(Arc::clone(&calls));
+        let plan = observation_plan();
+
+        provider
+            .arm_capture_with(&plan, Options::new(Limits::default()))
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Silently capturing promiscuously here would give the caller more
+        // traffic than it asked for, so the fallback refuses instead.
+        let refused = provider
+            .arm_capture_with(
+                &plan,
+                Options {
+                    promiscuous: Promiscuous::Disabled,
+                    ..Options::new(Limits::default())
+                },
+            )
+            .unwrap_err();
+        assert!(matches!(refused, Error::Unsupported { .. }));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn capture_options_validate_their_bounds_and_default_to_promiscuous() {
+        assert_eq!(Options::default().promiscuous, Promiscuous::Enabled);
+        assert!(Promiscuous::Enabled.is_enabled());
+        assert!(!Promiscuous::Disabled.is_enabled());
+
+        let invalid = Options::new(Limits {
+            max_frames: 0,
+            ..Limits::default()
+        });
+        assert!(matches!(
+            invalid.validate(),
+            Err(Error::InvalidCaptureQueueLimit {
+                field: "max_frames",
+                ..
+            })
+        ));
     }
 
     #[test]

@@ -19,7 +19,9 @@ use super::super::rendering::{
     emit_json_compact, emit_stderr_message, emit_stream_record, spaced_hex, write_capture_file,
     write_plain_line, write_stdout_line,
 };
-use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
+use super::super::runtime::{
+    default_registry_arc, prepare_capture_request, prepare_route_request, system_client,
+};
 
 pub(crate) fn cli_build_mode(mode: CliBuildMode) -> packet::build::Mode {
     match mode {
@@ -56,6 +58,7 @@ pub(crate) fn run_capture(
     let CaptureArgs {
         route,
         timeout_ms,
+        no_promiscuous,
         limits,
         sink,
     } = arguments;
@@ -66,18 +69,22 @@ pub(crate) fn run_capture(
         .into_limits()
         .validate()
         .map_err(CliError::classified)?;
-    let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, &registry)?;
+    let request = prepare_capture_request(route, default_registry_arc()?)?;
     let budget = CaptureBudget::from(&request.policy);
-    let client = system_client(Arc::clone(&registry), request.policy);
-    let route = client
-        .plan(&request.packet, request.destination, &request.options)
-        .map_err(CliError::classified)?;
+    let route = request.route;
+    let capture_options = net::capture::Options {
+        limits,
+        promiscuous: if no_promiscuous {
+            net::capture::Promiscuous::Disabled
+        } else {
+            net::capture::Promiscuous::Enabled
+        },
+    };
 
     match output {
         output::contract::Format::Text => {
             let capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with(&route, capture_options.clone())
                 .map_err(CliError::classified)?;
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
                 let frame =
@@ -98,7 +105,7 @@ pub(crate) fn run_capture(
         }
         output::contract::Format::Hex => {
             let capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with(&route, capture_options.clone())
                 .map_err(CliError::classified)?;
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, _| {
                 let frame =
@@ -109,7 +116,7 @@ pub(crate) fn run_capture(
         }
         output::contract::Format::Ndjson => {
             let capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with(&route, capture_options.clone())
                 .map_err(CliError::classified)?;
             let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
                 let frame =
@@ -140,7 +147,7 @@ pub(crate) fn run_capture(
             // never leaves a live capture session to clean up.
             let sink = CaptureSink::open(destination.as_deref())?;
             let mut capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
+                .arm_capture_with(&route, capture_options)
                 .map_err(CliError::classified)?;
             let writer = match format {
                 capture::Format::Pcap => Writer::pcap_with_options(

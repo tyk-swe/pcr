@@ -258,6 +258,12 @@ Replay checks each decoded frame. A policy rejection is reported as
 `policy.public_destination` before interface discovery, route lookup, capture,
 or transmission.
 
+Recipe-free `capture --interface` declares no destination, so it has nothing
+for these gates to authorize. It observes an interface and is bound instead by
+`--timeout-ms`, `--max-packets`, and `--max-bytes`. Capture privileges are
+still required, and observing a network you are not authorized to observe
+remains out of scope for this tool.
+
 ### Hostname resolution
 
 Live hostnames are not resolved unless the command includes
@@ -328,9 +334,14 @@ packetcraftr send \
 ```
 
 Layer 2 capture and every capture-based active workflow require the
-all-features build plus libpcap/Npcap and capture privileges:
+all-features build plus libpcap/Npcap and capture privileges. Capture accepts
+an interface on its own; a recipe is only needed when the route should be
+planned from a packet. Add `--no-promiscuous` to observe only traffic the
+interface would accept anyway:
 
 ```console
+packetcraftr capture --interface eth0 --timeout-ms 1000
+
 packetcraftr capture \
   --packet 'ipv4(dst=192.168.56.10)/icmpv4(type=8,code=0)' \
   --interface eth0 --timeout-ms 1000

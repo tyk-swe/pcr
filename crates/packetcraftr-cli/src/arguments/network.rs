@@ -99,6 +99,9 @@ pub(crate) struct CaptureArgs {
     /// Overall capture window in milliseconds.
     #[arg(long, default_value_t = 3_000)]
     pub(crate) timeout_ms: u64,
+    /// Capture only traffic the interface would accept anyway.
+    #[arg(long)]
+    pub(crate) no_promiscuous: bool,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
     #[command(flatten)]

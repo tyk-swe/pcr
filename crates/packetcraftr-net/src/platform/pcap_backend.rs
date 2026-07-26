@@ -17,7 +17,7 @@ use super::live_capture::{
 };
 use crate::{
     Error as LiveIoError,
-    capture::CaptureQueueLimits,
+    capture::CaptureOptions,
     route::InterfaceId,
     transmit::{IoSendReport, Layer2Frame},
 };
@@ -27,8 +27,9 @@ const READ_TIMEOUT_MILLIS: i32 = 50;
 
 pub(super) fn open_capture(
     interface: &InterfaceId,
-    limits: CaptureQueueLimits,
+    options: &CaptureOptions,
 ) -> Result<NativeCaptureParts, LiveIoError> {
+    let limits = options.limits;
     let snap_length =
         i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
             field: "snap_length",
@@ -38,7 +39,7 @@ pub(super) fn open_capture(
     let mut capture = Capture::from_device(interface.name.as_str())
         .map_err(|error| map_open_error(interface, error))?
         .snaplen(snap_length)
-        .promisc(true)
+        .promisc(options.promiscuous.is_enabled())
         .timeout(READ_TIMEOUT_MILLIS)
         .immediate_mode(true)
         .open()

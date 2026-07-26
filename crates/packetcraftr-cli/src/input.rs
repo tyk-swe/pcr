@@ -16,6 +16,23 @@ pub(super) fn read_recipe(
     arguments: RecipeArgs,
     registry: &packet::registry::Registry,
 ) -> Result<Packet, CliError> {
+    read_optional_recipe(arguments, registry)?.ok_or_else(|| {
+        CliError::new(
+            2,
+            "exactly one of --packet, --packet-file, or non-empty stdin is required",
+        )
+    })
+}
+
+/// Reads a recipe when one was supplied.
+///
+/// `Ok(None)` means no source was present at all, which lets a command that
+/// can also operate without a packet take its other path. Supplying more than
+/// one source stays an error.
+pub(super) fn read_optional_recipe(
+    arguments: RecipeArgs,
+    registry: &packet::registry::Registry,
+) -> Result<Option<Packet>, CliError> {
     let stdin = read_nonterminal_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
     let RecipeArgs {
         packet,
@@ -24,6 +41,9 @@ pub(super) fn read_recipe(
     let source_count = usize::from(packet.is_some())
         + usize::from(packet_file.is_some())
         + usize::from(stdin.is_some());
+    if source_count == 0 {
+        return Ok(None);
+    }
     if source_count != 1 {
         return Err(CliError::new(
             2,
@@ -32,7 +52,9 @@ pub(super) fn read_recipe(
     }
 
     let (input, path) = match (packet, packet_file, stdin) {
-        (Some(expression), None, None) => return parse_expression(&expression, registry),
+        (Some(expression), None, None) => {
+            return parse_expression(&expression, registry).map(Some);
+        }
         (None, Some(path), None) => {
             let bytes = read_bounded_file(&path, packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
             let input = String::from_utf8(bytes).map_err(|source| {
@@ -70,9 +92,10 @@ pub(super) fn read_recipe(
             packet::document::DEFAULT_MAX_DOCUMENT_NESTING,
         )
         .and_then(|document| document.to_packet(registry, packet::build::DEFAULT_MAX_LAYERS))
-        .map_err(|source| CliError::new(2, source.to_string()));
+        .map_err(|source| CliError::new(2, source.to_string()))
+        .map(Some);
     }
-    parse_expression(&input, registry)
+    parse_expression(&input, registry).map(Some)
 }
 
 fn parse_expression(

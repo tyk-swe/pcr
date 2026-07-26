@@ -4,7 +4,7 @@
 //! Composition contracts for capture-before-send exchanges.
 
 use super::Error;
-use super::capture::{CaptureProvider, CaptureQueueLimits};
+use super::capture::{CaptureOptions, CaptureProvider, CaptureQueueLimits};
 use super::route::PlannedRoute;
 use super::transmit::{IoSendReport, PacketIo, TransmissionFrame};
 
@@ -56,5 +56,13 @@ where
         limits: CaptureQueueLimits,
     ) -> Result<Self::Capture, Error> {
         self.capture.arm_capture(route, limits)
+    }
+
+    fn arm_capture_with(
+        &self,
+        route: &PlannedRoute,
+        options: CaptureOptions,
+    ) -> Result<Self::Capture, Error> {
+        self.capture.arm_capture_with(route, options)
     }
 }

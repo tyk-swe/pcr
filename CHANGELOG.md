@@ -17,6 +17,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added recipe-free capture: `packetcraftr capture --interface <NAME_OR_INDEX>`
+  observes one interface directly instead of requiring a packet whose only
+  purpose was to select a route. Passive observation has no destination to
+  authorize, so it is bound by the capture window and the packet and byte
+  budgets; the recipe path keeps every destination gate unchanged.
+- Added `capture --no-promiscuous` for capturing only traffic the interface
+  would accept anyway. Promiscuous mode remains the default.
+- Added `net::capture::Options` and `Provider::arm_capture_with`, which carry
+  backend behaviour alongside the queue bounds. A provider that predates an
+  option refuses it rather than capturing more traffic than requested.
+- Added `net::route::Planner::observe_interface`, which describes one interface
+  for passive observation through interface lookup alone — no route lookup, no
+  neighbor resolution, and no transmission mode.
 - Added `packetcraftr decode <PATH>`, which dissects every frame in a capture
   file instead of copying bytes like `read`. Text output prints one
   reflection-driven summary line per frame — protocol path plus the innermost

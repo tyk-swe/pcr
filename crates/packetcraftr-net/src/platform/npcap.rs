@@ -8,7 +8,7 @@
 use super::live_capture::NativeCaptureParts;
 use crate::{
     Error as LiveIoError,
-    capture::CaptureQueueLimits,
+    capture::CaptureOptions,
     route::InterfaceId,
     transmit::{IoSendReport, Layer2Frame},
 };
@@ -40,7 +40,7 @@ mod supported {
     };
     use crate::{
         Error as LiveIoError,
-        capture::CaptureQueueLimits,
+        capture::{CaptureOptions, Promiscuous},
         route::InterfaceId,
         transmit::{IoSendReport, Layer2Frame},
     };
@@ -72,6 +72,15 @@ mod supported {
             match self {
                 Self::Disabled => 0,
                 Self::Enabled => 1,
+            }
+        }
+    }
+
+    impl From<Promiscuous> for PromiscuousMode {
+        fn from(value: Promiscuous) -> Self {
+            match value {
+                Promiscuous::Enabled => Self::Enabled,
+                Promiscuous::Disabled => Self::Disabled,
             }
         }
     }
@@ -269,8 +278,9 @@ mod supported {
 
     pub(super) fn open_capture(
         interface: &InterfaceId,
-        limits: CaptureQueueLimits,
+        options: &CaptureOptions,
     ) -> Result<NativeCaptureParts, LiveIoError> {
+        let limits = options.limits;
         let snap_length = c_int::try_from(limits.snap_length).map_err(|_| {
             LiveIoError::InvalidCaptureQueueLimit {
                 field: "snap_length",
@@ -278,7 +288,11 @@ mod supported {
                 reason: "Npcap snap length exceeds i32",
             }
         })?;
-        let handle = open_handle(interface, snap_length, PromiscuousMode::Enabled)?;
+        let handle = open_handle(
+            interface,
+            snap_length,
+            PromiscuousMode::from(options.promiscuous),
+        )?;
         // SAFETY: handle is activated and live; pcap_datalink only reads its
         // negotiated link-layer type.
         let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
@@ -763,15 +777,15 @@ mod supported {
 
 pub(super) fn open_capture(
     interface: &InterfaceId,
-    limits: CaptureQueueLimits,
+    options: &CaptureOptions,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
     {
-        supported::open_capture(interface, limits)
+        supported::open_capture(interface, options)
     }
     #[cfg(not(all(target_arch = "x86_64", target_env = "msvc")))]
     {
-        let _ = (interface, limits);
+        let _ = (interface, options);
         Err(LiveIoError::Unsupported {
             message: "native Windows Layer 2 I/O supports only x86_64-pc-windows-msvc".to_owned(),
         })

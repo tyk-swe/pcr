@@ -4,17 +4,16 @@
 //! Clap argument and command models.
 
 pub(super) use network::{
-    CaptureArgs, CliReplayTiming, ExchangeArgs, ReplayArgs, RouteArgs, SendArgs,
+    CaptureArgs, CliLinkMode, CliReplayTiming, ExchangeArgs, ReplayArgs, RouteArgs, SendArgs,
 };
 pub(super) use offline::{
     BuildArgs, CaptureStreamLimitArgs, CliBuildMode, DecodeArgs, DissectArgs, ProtocolsArgs,
     ReadArgs, RecipeArgs,
 };
+pub(super) use policy::TrafficPolicyArgs;
 pub(super) use root::{Cli, CliColorChoice, Command};
 pub(super) use workflow::{DnsArgs, FuzzArgs, ScanArgs, TracerouteArgs};
 
-#[cfg(test)]
-pub(super) use network::CliLinkMode;
 #[cfg(test)]
 pub(super) use workflow::{
     CliAddressFamily, CliDnsQueryType, CliScanTransport, CliTracerouteStrategy,

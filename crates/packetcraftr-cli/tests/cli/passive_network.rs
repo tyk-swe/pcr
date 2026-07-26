@@ -109,3 +109,62 @@ fn default_windows_interfaces_uses_ip_helper() {
             && interface["mtu"].as_u64().is_some_and(|mtu| mtu != 0)
     }));
 }
+
+#[test]
+fn interface_only_capture_requires_an_interface_and_rejects_route_arguments() {
+    // A recipe-free capture observes one interface, so every argument that
+    // configures a route lookup is refused rather than quietly ignored.
+    for (arguments, expected) in [
+        (
+            vec!["capture"],
+            "capture requires --interface when no --packet, --packet-file, or stdin recipe is supplied",
+        ),
+        (
+            vec![
+                "capture",
+                "--interface",
+                "lab0",
+                "--destination",
+                "192.0.2.1",
+            ],
+            "--destination configures a route lookup that interface-only capture does not perform",
+        ),
+        (
+            vec!["capture", "--interface", "lab0", "--source", "192.0.2.9"],
+            "--source configures a route lookup that interface-only capture does not perform",
+        ),
+        (
+            vec!["capture", "--interface", "lab0", "--link-mode", "layer3"],
+            "interface-only capture observes the link, so --link-mode layer3 cannot be honored",
+        ),
+    ] {
+        let output = binary().args(&arguments).output().unwrap();
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(output.stdout.is_empty(), "{arguments:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(expected),
+            "{arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn interface_only_capture_rejects_an_unknown_interface_before_arming() {
+    let output = binary()
+        .args([
+            "capture",
+            "--interface",
+            "definitely-not-an-interface",
+            "--timeout-ms",
+            "1",
+        ])
+        .output()
+        .unwrap();
+
+    // Without the native interface capability the failure is a capability
+    // error; with it, the selector simply matches nothing. Either way nothing
+    // is armed and the exit code is not success.
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}

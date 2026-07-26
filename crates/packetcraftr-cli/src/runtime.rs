@@ -17,14 +17,14 @@ use packetcraftr::{
     protocol, workflow,
 };
 
-use super::arguments::{Cli, Command, RouteArgs};
+use super::arguments::{Cli, CliLinkMode, Command, RouteArgs, TrafficPolicyArgs};
 use super::commands::{
     run_build, run_capture, run_decode, run_dissect, run_dns, run_exchange, run_fuzz,
     run_interfaces, run_plan, run_protocols, run_read, run_replay, run_routes, run_scan, run_send,
     run_traceroute,
 };
 use super::errors::{CliError, color_choice_from_env, command_from_env, machine_format_from_env};
-use super::input::read_recipe;
+use super::input::{read_optional_recipe, read_recipe};
 use super::rendering::{
     emit_json, emit_json_compact, emit_stderr_document, emit_stderr_error, emit_stdout_document,
     terminal_document,
@@ -258,6 +258,79 @@ pub(super) fn workflow_exchange_options(
     Ok(options)
 }
 
+/// A capture is armed either from a planned packet route or from one
+/// interface observed directly.
+pub(super) struct PreparedCaptureRequest {
+    pub(super) route: net::route::Plan,
+    pub(super) policy: client::policy::Policy,
+}
+
+/// Resolves whatever a capture needs to arm, with or without a recipe.
+///
+/// Passive capture has no destination, so `TrafficPolicy`'s destination,
+/// resolution, and permissive-packet gates have nothing to authorize on the
+/// interface-only path; the operation stays bound by its packet, byte, and
+/// duration budgets. The recipe path is unchanged and keeps every gate: its
+/// route is planned from an actual packet destination.
+pub(super) fn prepare_capture_request(
+    arguments: RouteArgs,
+    registry: Arc<packet::registry::Registry>,
+) -> Result<PreparedCaptureRequest, CliError> {
+    let RouteArgs {
+        recipe,
+        destination,
+        interface,
+        source,
+        link_mode,
+        policy,
+    } = arguments;
+    let Some(packet) = read_optional_recipe(recipe, &registry)? else {
+        let policy = policy.into_policy();
+        policy.validate().map_err(CliError::classified)?;
+        let Some(selector) = interface else {
+            return Err(CliError::new(
+                2,
+                "capture requires --interface when no --packet, --packet-file, or stdin recipe is supplied",
+            ));
+        };
+        for (name, present) in [
+            ("--destination", destination.is_some()),
+            ("--source", source.is_some()),
+        ] {
+            if present {
+                return Err(CliError::new(
+                    2,
+                    format!(
+                        "{name} configures a route lookup that interface-only capture does not perform"
+                    ),
+                ));
+            }
+        }
+        if matches!(link_mode, CliLinkMode::Layer3) {
+            return Err(CliError::new(
+                2,
+                "interface-only capture observes the link, so --link-mode layer3 cannot be honored",
+            ));
+        }
+        let interface = resolve_interface(Some(selector), &net::interface::SystemProvider)?
+            .expect("an explicit selector always resolves to an interface identity");
+        let route = net::route::Planner
+            .observe_interface(&interface, &net::route::SystemProvider)
+            .map_err(CliError::classified)?;
+        return Ok(PreparedCaptureRequest { route, policy });
+    };
+
+    let request = prepare_planned_route(packet, destination, interface, source, link_mode, policy)?;
+    let client = system_client(registry, request.policy.clone());
+    let route = client
+        .plan(&request.packet, request.destination, &request.options)
+        .map_err(CliError::classified)?;
+    Ok(PreparedCaptureRequest {
+        route,
+        policy: request.policy,
+    })
+}
+
 pub(super) fn prepare_route_request(
     arguments: RouteArgs,
     registry: &packet::registry::Registry,
@@ -271,6 +344,17 @@ pub(super) fn prepare_route_request(
         policy,
     } = arguments;
     let packet = read_recipe(recipe, registry)?;
+    prepare_planned_route(packet, destination, interface, source, link_mode, policy)
+}
+
+fn prepare_planned_route(
+    packet: Packet,
+    destination: Option<String>,
+    interface: Option<String>,
+    source: Option<IpAddr>,
+    link_mode: CliLinkMode,
+    policy: TrafficPolicyArgs,
+) -> Result<PreparedRouteRequest, CliError> {
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.

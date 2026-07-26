@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use packetcraftr::output;
 
 use super::{
-    BuildArgs, CaptureArgs, DecodeArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs,
+    BuildArgs, CaptureArgs, DecodeArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs, GenerateArgs,
     ProtocolsArgs, ReadArgs, ReplayArgs, RouteArgs, ScanArgs, SendArgs, TracerouteArgs,
 };
 
@@ -106,6 +106,11 @@ const FUZZ_AFTER_HELP: &str = r#"Examples:
 const ROUTES_AFTER_HELP: &str = r#"Examples:
   packetcraftr routes
   packetcraftr --output json routes"#;
+const GENERATE_AFTER_HELP: &str = r#"Generated artifacts describe this exact build, so regenerate them whenever the command surface changes.
+
+Examples:
+  packetcraftr generate completions bash > /usr/share/bash-completion/completions/packetcraftr
+  packetcraftr generate man /usr/share/man/man1"#;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -259,4 +264,10 @@ pub(crate) enum Command {
     /// Enumerate passive interface-bound route decisions.
     #[command(after_long_help = ROUTES_AFTER_HELP)]
     Routes,
+    /// Emit packaging artifacts for this exact build.
+    ///
+    /// Hidden because it produces files for packagers rather than results for
+    /// operators, and its output describes the interface rather than a network.
+    #[command(hide = true, after_long_help = GENERATE_AFTER_HELP)]
+    Generate(GenerateArgs),
 }

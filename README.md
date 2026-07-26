@@ -90,9 +90,13 @@ then extract it. Every binary archive contains:
 - `LICENSE`
 - `README.md`
 - `CHANGELOG.md`
+- `completions/` — shell completions for bash, elvish, fish, PowerShell, and zsh
+- `man/` — one man page per command
 
 Run `packetcraftr --version` and `packetcraftr --help` after placing the
-executable on your `PATH`.
+executable on your `PATH`. The packaged completions and man pages describe the
+exact build they shipped with; regenerate them for a build from source with
+`packetcraftr generate completions <SHELL>` and `packetcraftr generate man <DIR>`.
 
 The `all-features` Linux and macOS archives need libpcap at runtime. The
 `all-features` Windows archive needs Npcap 1.88 at runtime. The `pcap-free`

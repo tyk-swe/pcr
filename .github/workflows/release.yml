@@ -168,6 +168,14 @@ jobs:
           cp LICENSE "$staging/LICENSE"
           cp README.md "$staging/README.md"
           cp CHANGELOG.md "$staging/CHANGELOG.md"
+          # Generated from the packaged binary so the artifacts describe the
+          # exact command surface this variant was built with.
+          mkdir -p "$staging/completions" "$staging/man"
+          for shell in bash elvish fish power-shell zsh; do
+            "$staging/packetcraftr" generate completions "$shell" \
+              > "$staging/completions/packetcraftr.$shell"
+          done
+          "$staging/packetcraftr" generate man "$staging/man"
           tar -C "$RUNNER_TEMP" -czf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz" \
             "$ARCHIVE_BASENAME"
       - if: runner.os == 'Windows'
@@ -182,6 +190,22 @@ jobs:
           Copy-Item "LICENSE" $staging
           Copy-Item "README.md" $staging
           Copy-Item "CHANGELOG.md" $staging
+          # Generated from the packaged binary so the artifacts describe the
+          # exact command surface this variant was built with.
+          $executable = Join-Path $staging "packetcraftr.exe"
+          $completions = Join-Path $staging "completions"
+          New-Item -ItemType Directory -Path $completions | Out-Null
+          foreach ($shell in @("bash", "elvish", "fish", "power-shell", "zsh")) {
+            & $executable generate completions $shell |
+              Set-Content -Path (Join-Path $completions "packetcraftr.$shell")
+            if ($LASTEXITCODE -ne 0) {
+              throw "generating $shell completions failed"
+            }
+          }
+          & $executable generate man (Join-Path $staging "man")
+          if ($LASTEXITCODE -ne 0) {
+            throw "generating man pages failed"
+          }
           Compress-Archive -Path $staging -DestinationPath $archive
       - if: runner.os != 'Windows'
         name: Smoke-test Unix archive
@@ -193,7 +217,8 @@ jobs:
           tar -C "$extraction" -xzf "$RUNNER_TEMP/$ARCHIVE_BASENAME.tar.gz"
           executable="$extraction/$ARCHIVE_BASENAME/packetcraftr"
           test -x "$executable"
-          for document in LICENSE README.md CHANGELOG.md; do
+          for document in LICENSE README.md CHANGELOG.md \
+            completions/packetcraftr.bash man/packetcraftr.1; do
             test -s "$extraction/$ARCHIVE_BASENAME/$document"
           done
           test "$("$executable" --version)" = "packetcraftr $VERSION"
@@ -210,7 +235,13 @@ jobs:
           if (-not (Test-Path -PathType Leaf $executable)) {
             throw "packaged executable is missing"
           }
-          foreach ($document in @("LICENSE", "README.md", "CHANGELOG.md")) {
+          foreach ($document in @(
+            "LICENSE",
+            "README.md",
+            "CHANGELOG.md",
+            "completions/packetcraftr.bash",
+            "man/packetcraftr.1"
+          )) {
             $documentPath = Join-Path $extraction "$($env:ARCHIVE_BASENAME)/$document"
             if (
               -not (Test-Path -PathType Leaf $documentPath) -or

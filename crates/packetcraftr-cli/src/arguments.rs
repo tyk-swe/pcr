@@ -3,6 +3,7 @@
 
 //! Clap argument and command models.
 
+pub(super) use generate::{CliShell, GenerateArgs, GenerateTarget};
 pub(super) use network::{
     CaptureArgs, CliLinkMode, CliReplayTiming, ExchangeArgs, ReplayArgs, RouteArgs, SendArgs,
 };
@@ -20,6 +21,7 @@ pub(super) use workflow::{
 };
 
 mod capture_limits;
+mod generate;
 mod network;
 mod offline;
 mod policy;

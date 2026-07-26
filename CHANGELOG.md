@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added a hidden `packetcraftr generate` command that emits shell completions
+  for bash, elvish, fish, PowerShell, and zsh, plus one man page per command.
+  Release archives now ship both, generated from the packaged binary so they
+  describe the exact command surface that variant was built with.
 - Added `read --output json`, an aggregate result carrying every copied frame
   with its count, so a bounded capture can be consumed as one document instead
   of a stream. `raw` remains unsupported for `read`.

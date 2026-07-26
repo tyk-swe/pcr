@@ -242,3 +242,72 @@ fn non_utf8_arguments_do_not_panic_the_structured_parse_error_path() {
     assert_eq!(value["status"], "error");
     assert_eq!(value["error"]["kind"], "cli");
 }
+
+#[test]
+fn packaging_artifacts_generate_for_every_shell_and_command() {
+    for shell in ["bash", "elvish", "fish", "power-shell", "zsh"] {
+        let output = binary()
+            .args(["generate", "completions", shell])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{shell}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(output.stderr.is_empty(), "{shell}");
+        let script = String::from_utf8(output.stdout).unwrap();
+        assert!(script.contains("packetcraftr"), "{shell}");
+        // Completions describe this build, so a command added after the
+        // scripts were generated would be missing from them.
+        assert!(script.contains("decode"), "{shell}");
+    }
+
+    let directory = std::env::temp_dir().join(format!(
+        "packetcraftr-man-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let output = binary()
+        .args(["generate", "man"])
+        .arg(&directory)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for name in [
+        "packetcraftr.1",
+        "packetcraftr-decode.1",
+        "packetcraftr-capture.1",
+    ] {
+        let page = directory.join(name);
+        assert!(std::fs::metadata(&page).unwrap().len() > 0, "{name}");
+    }
+    // The hidden generator documents packaging rather than the tool, so it
+    // ships no page of its own.
+    assert!(!directory.join("packetcraftr-generate.1").exists());
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn the_artifact_generator_stays_out_of_the_command_listing() {
+    let output = binary().arg("--help").output().unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    assert!(!help.contains("generate"), "{help}");
+
+    // It is still reachable for packagers.
+    let generate = binary().args(["generate", "--help"]).output().unwrap();
+    assert!(generate.status.success());
+    assert!(
+        String::from_utf8_lossy(&generate.stdout).contains("packaging artifacts"),
+        "{}",
+        String::from_utf8_lossy(&generate.stdout)
+    );
+}

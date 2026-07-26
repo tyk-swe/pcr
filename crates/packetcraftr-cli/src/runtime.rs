@@ -19,7 +19,7 @@ use packetcraftr::{
 
 use super::arguments::{Cli, CliLinkMode, Command, RouteArgs, TrafficPolicyArgs};
 use super::commands::{
-    run_build, run_capture, run_decode, run_dissect, run_dns, run_exchange, run_fuzz,
+    run_build, run_capture, run_decode, run_dissect, run_dns, run_exchange, run_fuzz, run_generate,
     run_interfaces, run_plan, run_protocols, run_read, run_replay, run_routes, run_scan, run_send,
     run_traceroute,
 };
@@ -164,6 +164,9 @@ impl Command {
             Self::Dns(_) => output::contract::Command::Dns,
             Self::Fuzz(_) => output::contract::Command::Fuzz,
             Self::Routes => output::contract::Command::Routes,
+            // Packaging artifacts are not a command result, so they carry no
+            // output contract. `require_format` still rejects a machine format.
+            Self::Generate(_) => output::contract::Command::Protocols,
         }
     }
 }
@@ -191,6 +194,7 @@ pub(super) fn run(cli: Cli) -> Result<(), CliError> {
         Command::Dns(arguments) => run_dns(arguments, output),
         Command::Fuzz(arguments) => run_fuzz(arguments, output),
         Command::Routes => run_routes(output),
+        Command::Generate(arguments) => run_generate(arguments),
     }
 }
 

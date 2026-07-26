@@ -205,6 +205,8 @@ jobs:
             max_len: 65538
           - target: reassembly_state
             max_len: 4096
+          - target: filter_expression
+            max_len: 4096
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:

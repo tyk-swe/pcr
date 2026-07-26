@@ -120,11 +120,11 @@ pub(crate) fn run_entrypoint() -> ExitCode {
         Err(error) => {
             let emitted = match output {
                 output::contract::Format::Json => emit_json(
-                    &output::envelope::AggregateError::error(Some(command), error.output_error()),
+                    &output::envelope::AggregateError::error(command, error.output_error()),
                 ),
                 output::contract::Format::Ndjson => {
                     emit_json_compact(&output::envelope::StreamError::error(
-                        Some(command),
+                        command,
                         error.sequence.unwrap_or(0),
                         error.output_error(),
                     ))
@@ -146,8 +146,15 @@ pub(crate) fn run_entrypoint() -> ExitCode {
 }
 
 impl Command {
-    fn name(&self) -> output::contract::Command {
-        match self {
+    /// The output contract this invocation answers under, when it has one.
+    ///
+    /// `generate` writes packaging artifacts rather than a command result, so
+    /// there is no contract row to consult and no machine format that could
+    /// carry a completion script. Borrowing a sibling command's row would make
+    /// its error documents name a command the caller never ran, so it reports
+    /// no command instead — a shape the envelope schema already allows.
+    fn name(&self) -> Option<output::contract::Command> {
+        Some(match self {
             Self::Build(_) => output::contract::Command::Build,
             Self::Dissect(_) => output::contract::Command::Dissect,
             Self::Decode(_) => output::contract::Command::Decode,
@@ -164,19 +171,29 @@ impl Command {
             Self::Dns(_) => output::contract::Command::Dns,
             Self::Fuzz(_) => output::contract::Command::Fuzz,
             Self::Routes => output::contract::Command::Routes,
-            // Packaging artifacts are not a command result, so they carry no
-            // output contract. `require_format` still rejects a machine format.
-            Self::Generate(_) => output::contract::Command::Protocols,
-        }
+            Self::Generate(_) => return None,
+        })
     }
 }
 
 pub(super) fn run(cli: Cli) -> Result<(), CliError> {
     let output = output::contract::Format::from(cli.output);
-    cli.command
-        .name()
-        .require_format(output)
-        .map_err(CliError::classified)?;
+    match cli.command.name() {
+        Some(command) => command
+            .require_format(output)
+            .map_err(CliError::classified)?,
+        // A completion script or a man page is not an output document, so a
+        // machine format has nothing to render it as.
+        None if !matches!(output, output::contract::Format::Text) => {
+            return Err(CliError::new(
+                2,
+                format!(
+                    "generate emits packaging artifacts and supports only --output text; {output} was requested"
+                ),
+            ));
+        }
+        None => {}
+    }
     match cli.command {
         Command::Build(arguments) => run_build(arguments, output),
         Command::Dissect(arguments) => run_dissect(arguments, output),

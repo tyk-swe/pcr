@@ -296,6 +296,48 @@ fn packaging_artifacts_generate_for_every_shell_and_command() {
 }
 
 #[test]
+fn a_machine_format_is_refused_rather_than_answered_with_a_completion_script() {
+    // Every other command answers `--output json` with a JSON envelope. The
+    // generator has no result to render, so it has to refuse the request rather
+    // than write a shell script where a caller parsing stdout expects JSON.
+    for format in ["json", "ndjson", "raw", "hex", "pcap"] {
+        let output = binary()
+            .args(["--output", format, "generate", "completions", "bash"])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{format}");
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(combined.contains("--output text"), "{format}: {combined}");
+        assert!(!combined.contains("complete"), "{format}: {combined}");
+    }
+
+    // The refusal reports no command rather than borrowing a sibling's row, so
+    // a caller is never told it ran something it did not run.
+    for (format, mode) in [("json", "aggregate"), ("ndjson", "stream")] {
+        let output = binary()
+            .args(["--output", format, "generate", "completions", "bash"])
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        let document: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+        assert_eq!(document["command"], serde_json::Value::Null, "{format}");
+        assert_eq!(document["mode"], mode);
+        assert_eq!(document["status"], "error");
+        assert_eq!(document["error"]["kind"], "cli");
+    }
+
+    let text = binary()
+        .args(["--output", "text", "generate", "completions", "bash"])
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+}
+
+#[test]
 fn the_artifact_generator_stays_out_of_the_command_listing() {
     let output = binary().arg("--help").output().unwrap();
     assert!(output.status.success());

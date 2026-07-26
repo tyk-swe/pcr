@@ -4,10 +4,11 @@
 /// Executes homogeneous traceroute hop batches through the client's
 /// capture-ready exchange lifecycle.
 use super::{
-    BoundaryError, ExchangeIo, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
+    BoundaryError, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
     TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
     TracerouteStrategy, classify_traceroute_response,
 };
+use crate::net::{capture::CaptureProvider, transmit::PacketIo};
 
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
@@ -27,7 +28,7 @@ impl<R, N, I> TracerouteExecutor for ClientExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
-    I: ExchangeIo,
+    I: PacketIo + CaptureProvider,
 {
     fn execute(
         &mut self,

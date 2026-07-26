@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extended the pre-1.0 public output API and `packetcraftr.output/v1` command
   vocabulary with the additive `protocols` aggregate result contracts.
 
+### Removed
+
+- Removed the redundant `net::exchange::Io` marker trait; generic code can use
+  the public `net::transmit::Sender + net::capture::Provider` bounds directly.
+
 ## [0.4.0-beta.2] - 2026-07-24
 
 ### Added

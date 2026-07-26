@@ -28,8 +28,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::net::{
     Error as LiveIoError,
-    capture::CaptureStatistics,
-    exchange::ExchangeIo,
+    capture::{CaptureProvider, CaptureStatistics},
     route::{
         InterfaceId, NeighborResolver, PlanOptions, PlannedRoute, RouteDecision, RoutePlanner,
         RouteProvider,
@@ -351,7 +350,7 @@ impl<R, N, I> Client<R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
-    I: ExchangeIo,
+    I: PacketIo + CaptureProvider,
 {
     pub fn exchange(
         &self,

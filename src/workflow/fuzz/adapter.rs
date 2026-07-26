@@ -4,9 +4,10 @@
 /// Applies the client's traffic policy to a complete live fuzz campaign before
 /// route, capture, neighbor, or transmission providers are invoked.
 use super::{
-    Duration, ExchangeIo, FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor,
-    IpAddr, NeighborResolver, Packet, PacketTemplate, RouteProvider,
+    Duration, FuzzAuthorizer, FuzzCaseExecution, FuzzExecutionCase, FuzzExecutor, IpAddr,
+    NeighborResolver, Packet, PacketTemplate, RouteProvider,
 };
+use crate::net::{capture::CaptureProvider, transmit::PacketIo};
 use crate::workflow::BoundaryError;
 
 pub struct PolicyAuthorizer<'a> {
@@ -71,7 +72,7 @@ impl<R, N, I> FuzzExecutor for ClientExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
-    I: ExchangeIo,
+    I: PacketIo + CaptureProvider,
 {
     fn execute(
         &mut self,

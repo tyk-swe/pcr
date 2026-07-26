@@ -4,10 +4,11 @@
 /// Executes homogeneous scan batches through the client's capture-ready
 /// exchange lifecycle.
 use super::{
-    BoundaryError, ExchangeIo, FieldValue, NeighborResolver, PacketTemplate, RouteProvider,
-    ScanBatch, ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport,
-    TemplateValues, classify_scan_response,
+    BoundaryError, FieldValue, NeighborResolver, PacketTemplate, RouteProvider, ScanBatch,
+    ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport, TemplateValues,
+    classify_scan_response,
 };
+use crate::net::{capture::CaptureProvider, transmit::PacketIo};
 
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
@@ -27,7 +28,7 @@ impl<R, N, I> ScanExecutor for ClientExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
-    I: ExchangeIo,
+    I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
         let Some(first) = batch.probes.first() else {

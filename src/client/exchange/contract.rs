@@ -8,8 +8,8 @@ use crate::capture::Frame;
 use crate::net::{
     Error as LiveIoError,
     capture::{
-        CaptureOverflowPolicy, CaptureSession, CaptureStatistics, CapturedFrame,
-        DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
+        CaptureOverflowPolicy, CaptureSession, CapturedFrame, DEFAULT_CAPTURE_QUEUE_BYTES,
+        DEFAULT_CAPTURE_QUEUE_FRAMES,
     },
     route::{MaterializedRoute, PlannedRoute},
 };
@@ -36,7 +36,7 @@ pub(crate) enum CaptureShutdownState {
 }
 
 pub(crate) struct CaptureGuard<C: CaptureSession> {
-    inner: C,
+    pub(super) inner: C,
     shutdown_state: CaptureShutdownState,
 }
 
@@ -46,17 +46,6 @@ impl<C: CaptureSession> CaptureGuard<C> {
             inner,
             shutdown_state: CaptureShutdownState::NotAttempted,
         }
-    }
-
-    pub(crate) fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
-        self.inner.wait_ready(timeout)
-    }
-
-    pub(crate) fn next_captured_frame(
-        &mut self,
-        timeout: Duration,
-    ) -> Result<Option<CapturedFrame>, LiveIoError> {
-        self.inner.next_captured_frame(timeout)
     }
 
     pub(crate) fn shutdown(&mut self) -> Result<(), LiveIoError> {
@@ -79,10 +68,6 @@ impl<C: CaptureSession> CaptureGuard<C> {
             self.shutdown_state = CaptureShutdownState::Failed(error.clone());
         }
         result
-    }
-
-    pub(crate) fn statistics(&self) -> CaptureStatistics {
-        self.inner.statistics()
     }
 }
 
@@ -217,7 +202,7 @@ pub(crate) fn drain_available<C: CaptureSession>(
                 operation: "draining capture before all requests were sent",
             });
         }
-        let Some(frame) = capture.next_captured_frame(Duration::ZERO)? else {
+        let Some(frame) = capture.inner.next_captured_frame(Duration::ZERO)? else {
             return Ok(());
         };
         if captured.process(frame, context) == ExchangeProcessOutcome::CorrelationDeadlineExpired {

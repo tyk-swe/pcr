@@ -133,7 +133,10 @@ pub(in crate::cli) fn run_replay(
                 &mut authorizer,
                 &mut transmitter,
                 &mut clock,
-                |evidence| collect_replay_evidence(&mut frames, evidence),
+                |evidence| {
+                    frames.push(replay_output_frame(evidence)?);
+                    Ok(())
+                },
             )?;
             let stats = replay_stats(&summary, started.elapsed());
             let result = output::replay::Result::from_summary(
@@ -249,14 +252,6 @@ fn write_replay_text_evidence(
         spaced_hex(result.frame.bytes())
     ))
     .map_err(|source| workflow::replay::Error::output(result.source_sequence, source.message))
-}
-
-fn collect_replay_evidence(
-    frames: &mut Vec<output::replay::Frame>,
-    evidence: workflow::replay::FrameEvidence,
-) -> Result<(), workflow::replay::Error> {
-    frames.push(replay_output_frame(evidence)?);
-    Ok(())
 }
 
 fn emit_replay_ndjson_evidence(

@@ -19,7 +19,6 @@ use packetcraftr::{
             Captured as CapturedCaptureFrame, Limits as CaptureLimits, Provider as CaptureProvider,
             Session as CaptureSession, Statistics as CaptureStatistics,
         },
-        exchange::Io as ExchangeIo,
         interface::{Address, Flags, Id, Info, Provider as InterfaceProvider},
         link::{Capability, MacAddress, Mode},
         route::{Decision, Materialized, Plan, Scope, SelectionReason},
@@ -204,7 +203,7 @@ fn route(mode: Mode) -> Materialized {
     }
 }
 
-fn assert_exchange_provider<T: ExchangeIo>(_provider: &T) {}
+fn assert_exchange_provider<T: Sender + CaptureProvider>(_provider: &T) {}
 
 #[test]
 fn external_provider_uses_only_platform_neutral_contracts() {

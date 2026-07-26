@@ -4,9 +4,10 @@
 /// Executes one DNS query through the client's capture-ready exchange
 /// lifecycle.
 use super::{
-    BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse, ExchangeIo,
+    BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse,
     NeighborResolver, PacketTemplate, ProbeTransport, RouteProvider, probe,
 };
+use crate::net::{capture::CaptureProvider, transmit::PacketIo};
 
 pub struct ClientExecutor<'a, R, N, I> {
     client: &'a crate::client::Client<R, N, I>,
@@ -26,7 +27,7 @@ impl<R, N, I> DnsExecutor for ClientExecutor<'_, R, N, I>
 where
     R: RouteProvider,
     N: NeighborResolver,
-    I: ExchangeIo,
+    I: PacketIo + CaptureProvider,
 {
     fn execute(&mut self, exchange: &DnsExchange) -> Result<DnsExchangeExecution, BoundaryError> {
         if exchange.max_responses == 0 {

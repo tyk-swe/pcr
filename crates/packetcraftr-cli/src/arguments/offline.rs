@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use clap::{Args, ValueEnum};
 use packetcraftr::capture;
 
+use super::sink::CaptureSinkArgs;
+
 #[derive(Debug, Args)]
 pub(crate) struct RecipeArgs {
     /// Inline packet layer expression; conflicts with --packet-file.
@@ -70,4 +72,6 @@ pub(crate) struct ReadArgs {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
+    #[command(flatten)]
+    pub(crate) sink: CaptureSinkArgs,
 }

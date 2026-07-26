@@ -6,9 +6,7 @@ use std::process::Stdio;
 
 use packetcraftr::capture::{Format as CaptureFormat, LinkType, Reader};
 
-#[cfg(unix)]
-use super::support::temp_path;
-use super::support::{binary, decode_output_hex, write_capture, write_link_capture};
+use super::support::{binary, decode_output_hex, temp_path, write_capture, write_link_capture};
 
 #[test]
 fn colour_is_terminal_aware_forceable_and_excluded_from_machine_output() {
@@ -321,6 +319,95 @@ fn read_exposes_bounded_capture_file_writers() {
         b"two"
     );
     assert!(reader.next_frame().unwrap().is_none());
+}
+
+#[test]
+fn write_destination_matches_redirected_stdout_byte_for_byte() {
+    // Frames carry 0x0a bytes so a line-buffered destination would differ in
+    // syscall pattern while still producing identical bytes.
+    let source = write_capture(&[b"one\nline", b"two\n\nlines"], false);
+    let destination = temp_path("write-flag");
+    for format in ["pcap", "pcapng"] {
+        let streamed = binary()
+            .args(["--output", format, "read"])
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert!(
+            streamed.status.success(),
+            "{}",
+            String::from_utf8_lossy(&streamed.stderr)
+        );
+        let written = binary()
+            .args(["--output", format, "read"])
+            .arg(&source)
+            .arg("--write")
+            .arg(&destination)
+            .output()
+            .unwrap();
+        assert!(
+            written.status.success(),
+            "{}",
+            String::from_utf8_lossy(&written.stderr)
+        );
+        assert!(written.stdout.is_empty(), "{format} wrote to stdout too");
+        assert_eq!(std::fs::read(&destination).unwrap(), streamed.stdout);
+    }
+    std::fs::remove_file(&destination).unwrap();
+    std::fs::remove_file(&source).unwrap();
+}
+
+#[test]
+fn write_is_rejected_for_formats_that_render_to_the_terminal() {
+    let source = write_capture(&[b"one"], false);
+    let destination = temp_path("write-rejected");
+    for format in ["text", "ndjson", "hex"] {
+        let output = binary()
+            .args(["--output", format, "read"])
+            .arg(&source)
+            .arg("--write")
+            .arg(&destination)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{format}");
+        // NDJSON reports the refusal as a stream error record on stdout; text
+        // and hex report it on stderr.
+        let reported = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            reported.contains("--write requires --output"),
+            "{format}: {reported}"
+        );
+        assert!(!destination.exists(), "{format} created the destination");
+    }
+    std::fs::remove_file(&source).unwrap();
+}
+
+#[test]
+fn an_unwritable_write_destination_is_classified_as_io() {
+    let source = write_capture(&[b"one"], false);
+    let destination = temp_path("write-unwritable")
+        .join("nested")
+        .join("out.pcap");
+    let output = binary()
+        .args(["--output", "pcap", "read"])
+        .arg(&source)
+        .arg("--write")
+        .arg(&destination)
+        .output()
+        .unwrap();
+    std::fs::remove_file(&source).unwrap();
+
+    assert_eq!(output.status.code(), Some(5));
+    assert!(output.stdout.is_empty());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("for writing failed"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

@@ -17,9 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added `--write <PATH>` to `read`, `capture`, `send`, `exchange`, and `replay`,
+  writing exact `pcap`, `pcapng`, or `raw` bytes to a file instead of standard
+  output. Requesting it with a terminal-facing format is a CLI error rather than
+  a partially redirected result.
 
 ### Changed
 
+- Buffered exact byte output and capture-file reads. Capture bytes previously
+  went through the line-buffered standard-output handle, which flushes once per
+  `0x0a` byte in binary payloads.
 - Restructured the repository into a Cargo workspace of per-domain crates under
   `crates/`, with a virtual root manifest owning shared dependency versions,
   lints, and the release profile. Cargo now enforces the domain layering that

@@ -213,6 +213,9 @@ Options:
 
           [default: 4096]
 
+      --write <PATH>
+          Write exact pcap, pcapng, or raw bytes to PATH instead of stdout
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -403,6 +406,9 @@ Options:
       --allow-permissive-live
           Per-operation opt-in required for a permissively built live frame
 
+      --write <PATH>
+          Write exact pcap, pcapng, or raw bytes to PATH instead of stdout
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -487,6 +493,9 @@ Options:
 
       --allow-permissive-live
           Per-operation opt-in required for a permissively built live frame
+
+      --write <PATH>
+          Write exact pcap, pcapng, or raw bytes to PATH instead of stdout
 
       --timeout-ms <TIMEOUT_MS>
           Overall response window in milliseconds
@@ -626,6 +635,9 @@ Options:
           [default: fail]
           [possible values: fail, drop-newest, drop-oldest]
 
+      --write <PATH>
+          Write exact pcap, pcapng, or raw bytes to PATH instead of stdout
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -715,6 +727,9 @@ Options:
           Maximum wire bytes authorized for one operation
 
           [default: 268435456]
+
+      --write <PATH>
+          Write exact pcap, pcapng, or raw bytes to PATH instead of stdout
 
   -h, --help
           Print help (see a summary with '-h')

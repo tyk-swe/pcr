@@ -24,4 +24,5 @@ mod network;
 mod offline;
 mod policy;
 mod root;
+mod sink;
 mod workflow;

@@ -4,21 +4,22 @@
 // Capture replay command.
 
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{BufReader, Write};
 use std::time::{Duration, Instant};
 
 use packetcraftr::{
-    capture::{self, Format, Limits, Reader, ReaderOptions, Writer},
+    capture::{self, Format, Limits, Reader, Writer},
     net, output, workflow,
 };
 
 use super::super::arguments::{CliReplayTiming, ReplayArgs};
 use super::super::errors::CliError;
 use super::super::rendering::{
-    capture_file_format, emit_json, emit_json_compact, spaced_hex, write_stdout_line,
+    CaptureSink, capture_file_format, capture_sink_path, emit_json, emit_json_compact, spaced_hex,
+    write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, validate_interface_selector};
-use super::offline::validate_capture_stream_limits;
+use super::offline::{open_capture_reader, validate_capture_stream_limits};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ReplayInterfaceMapping {
@@ -70,6 +71,7 @@ pub(crate) fn run_replay(
         arguments.max_frame_bytes,
         arguments.max_interfaces,
     )?;
+    let destination = capture_sink_path(arguments.sink.write.clone(), output)?;
     let timing = replay_timing(&arguments)?;
     let requested_interface = requested_replay_interface(&arguments.interface)?;
     let policy = arguments.policy.clone().into_policy();
@@ -82,21 +84,11 @@ pub(crate) fn run_replay(
     }
     .validate()
     .map_err(CliError::classified)?;
-    let file = File::open(&arguments.path).map_err(|source| {
-        CliError::new(
-            5,
-            format!("open {} failed: {source}", arguments.path.display()),
-        )
-    })?;
-    let mut reader = Reader::with_options(
-        file,
-        ReaderOptions {
-            max_size: arguments.max_frame_bytes,
-            max_interfaces_per_section: arguments.max_interfaces,
-            ..ReaderOptions::default()
-        },
-    )
-    .map_err(CliError::classified)?;
+    let mut reader = open_capture_reader(
+        &arguments.path,
+        arguments.max_frame_bytes,
+        arguments.max_interfaces,
+    )?;
     let registry = default_registry_arc()?;
     let mut authorizer =
         workflow::replay::SystemAuthorizer::new(policy, registry, arguments.allow_malformed_live);
@@ -184,10 +176,9 @@ pub(crate) fn run_replay(
         }
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let format = capture_file_format(output)?;
-            let stdout = io::stdout();
             let mut writer = replay_capture_writer(
                 &reader,
-                stdout.lock(),
+                CaptureSink::open(destination.as_deref())?,
                 format,
                 limits,
                 arguments.max_interfaces,
@@ -203,7 +194,8 @@ pub(crate) fn run_replay(
                     write_replay_capture_evidence(&mut writer, format, &mut interfaces, evidence)
                 },
             )?;
-            writer.flush().map_err(CliError::classified)
+            writer.flush().map_err(CliError::classified)?;
+            writer.into_inner().finish()
         }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
@@ -215,7 +207,7 @@ pub(crate) fn run_replay(
 }
 
 fn execute_replay<F>(
-    reader: &mut Reader<File>,
+    reader: &mut Reader<BufReader<File>>,
     options: &workflow::replay::Options,
     authorizer: &mut workflow::replay::SystemAuthorizer,
     transmitter: &mut workflow::replay::SystemTransmitter,
@@ -269,7 +261,7 @@ fn emit_replay_ndjson_evidence(
 }
 
 fn replay_capture_writer<W: Write>(
-    reader: &Reader<File>,
+    reader: &Reader<BufReader<File>>,
     output: W,
     format: Format,
     limits: workflow::replay::Limits,

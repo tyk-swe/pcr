@@ -3,7 +3,6 @@
 
 // Live capture and exchange commands.
 
-use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -16,8 +15,9 @@ use packetcraftr::{
 use super::super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs};
 use super::super::errors::CliError;
 use super::super::rendering::{
-    capture_file_format, capture_file_frame, emit_json, emit_json_compact, emit_stderr_message,
-    emit_stream_record, spaced_hex, write_capture_file, write_plain_line, write_stdout_line,
+    CaptureSink, capture_file_format, capture_file_frame, capture_sink_path, emit_json,
+    emit_json_compact, emit_stderr_message, emit_stream_record, spaced_hex, write_capture_file,
+    write_plain_line, write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
@@ -57,7 +57,9 @@ pub(crate) fn run_capture(
         route,
         timeout_ms,
         limits,
+        sink,
     } = arguments;
+    let destination = capture_sink_path(sink.write, output)?;
     let timeout = Duration::from_millis(timeout_ms);
     validate_capture_window(timeout)?;
     let limits = limits
@@ -134,13 +136,15 @@ pub(crate) fn run_capture(
         }
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let format = capture_file_format(output)?;
+            // Opened before the backend is armed so an unwritable destination
+            // never leaves a live capture session to clean up.
+            let sink = CaptureSink::open(destination.as_deref())?;
             let mut capture = net::capture::SystemProvider
                 .arm_capture(&route, limits)
                 .map_err(CliError::classified)?;
-            let stdout = io::stdout();
             let writer = match format {
                 capture::Format::Pcap => Writer::pcap_with_options(
-                    stdout.lock(),
+                    sink,
                     route.route.link_type,
                     PcapOptions {
                         snap_len: limits.snap_length,
@@ -150,7 +154,7 @@ pub(crate) fn run_capture(
                 ),
                 capture::Format::PcapNg => (|| {
                     // Reject mandatory-interface configuration before the
-                    // section header is committed to stdout.
+                    // section header is committed to the destination.
                     if limits.snap_length < 32 {
                         return Err(capture::Error::SizeLimitExceeded {
                             kind: "pcapng interface description",
@@ -164,7 +168,7 @@ pub(crate) fn run_capture(
                         });
                     }
                     let mut writer = Writer::pcapng_with_options(
-                        stdout.lock(),
+                        sink,
                         PcapNgOptions {
                             max_size: limits.snap_length,
                             ..PcapNgOptions::default()
@@ -196,10 +200,7 @@ pub(crate) fn run_capture(
                         CliError::new(5, format!("write capture output failed: {source}"))
                     })
             })?;
-            let mut stdout = writer.into_inner();
-            stdout
-                .flush()
-                .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))?;
+            writer.into_inner().finish()?;
             render_diagnostics_stderr(&outcome.diagnostics)
         }
         _ => Err(CliError::classified(
@@ -402,7 +403,9 @@ pub(crate) fn run_exchange(
         route,
         mode,
         allow_permissive_live,
+        sink,
     } = send;
+    let destination = capture_sink_path(sink.write, output)?;
     let limits = limits.into_limits();
     let mut options = client::exchange::Options {
         timeout: Duration::from_millis(timeout_ms),
@@ -453,7 +456,7 @@ pub(crate) fn run_exchange(
             .collect::<Vec<_>>();
         let mut frames = frames;
         frames.sort_by_key(|frame| frame.timestamp);
-        return write_capture_file(output, frames);
+        return write_capture_file(output, frames, destination.as_deref());
     }
 
     let (result, diagnostics, stats) = output::network::exchange::Result::try_from_exchange(result)

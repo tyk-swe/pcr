@@ -15,7 +15,8 @@ use packetcraftr::{
 use super::super::arguments::{RouteArgs, SendArgs};
 use super::super::errors::CliError;
 use super::super::rendering::{
-    emit_json, write_capture_file, write_plain_line, write_raw, write_stdout_line,
+    capture_sink_path, emit_json, write_bytes, write_capture_file, write_plain_line,
+    write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 use super::capture::cli_build_mode;
@@ -140,7 +141,9 @@ pub(crate) fn run_send(
         route,
         mode,
         allow_permissive_live,
+        sink,
     } = arguments;
+    let destination = capture_sink_path(sink.write, output)?;
     let registry = default_registry_arc()?;
     let request = prepare_route_request(route, &registry)?;
     let client = system_client(Arc::clone(&registry), request.policy);
@@ -190,7 +193,7 @@ pub(crate) fn run_send(
         output::contract::Format::Hex => {
             write_plain_line(format_args!("{}", result.frame.bytes_hex))
         }
-        output::contract::Format::Raw => write_raw(result.frame.bytes()),
+        output::contract::Format::Raw => write_bytes(result.frame.bytes(), destination.as_deref()),
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let frame = Frame::new(
                 SystemTime::now(),
@@ -198,7 +201,7 @@ pub(crate) fn run_send(
                 result.frame.bytes().to_vec(),
             )
             .map_err(|source| CliError::new(3, source.to_string()))?;
-            write_capture_file(output, [frame])
+            write_capture_file(output, [frame], destination.as_deref())
         }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {

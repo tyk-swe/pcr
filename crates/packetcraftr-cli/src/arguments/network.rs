@@ -12,6 +12,7 @@ use packetcraftr::{capture, client, net};
 use super::capture_limits::CaptureLimitArgs;
 use super::offline::{CliBuildMode, RecipeArgs};
 use super::policy::{ReplayPolicyArgs, TrafficPolicyArgs};
+use super::sink::CaptureSinkArgs;
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 pub(crate) enum CliReplayTiming {
@@ -53,6 +54,8 @@ pub(crate) struct ReplayArgs {
     pub(crate) allow_malformed_live: bool,
     #[command(flatten)]
     pub(crate) policy: ReplayPolicyArgs,
+    #[command(flatten)]
+    pub(crate) sink: CaptureSinkArgs,
 }
 
 #[derive(Debug, Args)]
@@ -85,6 +88,8 @@ pub(crate) struct SendArgs {
     /// Per-operation opt-in required for a permissively built live frame.
     #[arg(long)]
     pub(crate) allow_permissive_live: bool,
+    #[command(flatten)]
+    pub(crate) sink: CaptureSinkArgs,
 }
 
 #[derive(Debug, Args)]
@@ -96,6 +101,8 @@ pub(crate) struct CaptureArgs {
     pub(crate) timeout_ms: u64,
     #[command(flatten)]
     pub(crate) limits: CaptureLimitArgs,
+    #[command(flatten)]
+    pub(crate) sink: CaptureSinkArgs,
 }
 
 #[derive(Debug, Args)]

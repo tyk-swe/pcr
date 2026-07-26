@@ -3,7 +3,9 @@
 
 // Shared capture-file and terminal rendering.
 
-use std::io::{self, Write};
+use std::fs::File;
+use std::io::{self, BufWriter, Write};
+use std::path::{Path, PathBuf};
 
 use anstyle::{AnsiColor, Style};
 use packetcraftr::{
@@ -14,10 +16,114 @@ use serde::Serialize;
 
 use super::errors::CliError;
 
+/// Buffer size for exact byte output. Capture writers emit each block header,
+/// each record header, and each payload as separate calls, so the destination
+/// is always wrapped rather than written through directly.
+const SINK_BUFFER_BYTES: usize = 128 * 1024;
+
 #[derive(Clone, Copy, Debug)]
 struct CaptureInterfaceMapping {
     link_type: LinkType,
     output_id: u32,
+}
+
+/// Destination for exact capture-file and raw frame bytes.
+///
+/// `io::Stdout` is a `LineWriter`: writing capture bytes straight to it flushes
+/// once per `0x0a` byte in the payload, which is a syscall per occurrence in
+/// binary data. Both variants buffer explicitly instead.
+pub(super) enum CaptureSink {
+    Stdout(BufWriter<io::StdoutLock<'static>>),
+    File {
+        path: PathBuf,
+        writer: BufWriter<File>,
+    },
+}
+
+impl CaptureSink {
+    /// Opens `path` for writing, or standard output when no path is given.
+    pub(super) fn open(path: Option<&Path>) -> Result<Self, CliError> {
+        let Some(path) = path else {
+            return Ok(Self::Stdout(BufWriter::with_capacity(
+                SINK_BUFFER_BYTES,
+                io::stdout().lock(),
+            )));
+        };
+        let file = File::create(path).map_err(|source| {
+            CliError::new(
+                5,
+                format!("open {} for writing failed: {source}", path.display()),
+            )
+        })?;
+        Ok(Self::File {
+            path: path.to_path_buf(),
+            writer: BufWriter::with_capacity(SINK_BUFFER_BYTES, file),
+        })
+    }
+
+    /// Flushes buffered bytes. `BufWriter` discards write errors when dropped,
+    /// so every capture-file path must finish its sink explicitly.
+    pub(super) fn finish(mut self) -> Result<(), CliError> {
+        let target = self.target();
+        self.flush()
+            .map_err(|source| CliError::new(5, format!("write {target} failed: {source}")))
+    }
+
+    fn target(&self) -> String {
+        match self {
+            Self::Stdout(_) => "stdout".to_owned(),
+            Self::File { path, .. } => path.display().to_string(),
+        }
+    }
+}
+
+impl Write for CaptureSink {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Stdout(writer) => writer.write(bytes),
+            Self::File { writer, .. } => writer.write(bytes),
+        }
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        match self {
+            Self::Stdout(writer) => writer.write_all(bytes),
+            Self::File { writer, .. } => writer.write_all(bytes),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Stdout(writer) => writer.flush(),
+            Self::File { writer, .. } => writer.flush(),
+        }
+    }
+}
+
+/// Rejects `--write` for formats whose bytes are not an exact byte stream.
+///
+/// Text, JSON, NDJSON, and hex output interleave diagnostics and envelopes with
+/// the terminal, so redirecting only part of that stream to a file would split
+/// one logical result across two destinations.
+pub(super) fn capture_sink_path(
+    write: Option<PathBuf>,
+    output: output::contract::Format,
+) -> Result<Option<PathBuf>, CliError> {
+    let Some(path) = write else {
+        return Ok(None);
+    };
+    if matches!(
+        output,
+        output::contract::Format::Pcap
+            | output::contract::Format::Pcapng
+            | output::contract::Format::Raw
+    ) {
+        return Ok(Some(path));
+    }
+    Err(CliError::new(
+        2,
+        format!("--write requires --output pcap, pcapng, or raw; {output} writes to the terminal"),
+    ))
 }
 
 pub(super) fn capture_file_format(output: output::contract::Format) -> Result<Format, CliError> {
@@ -42,8 +148,9 @@ pub(super) fn capture_file_frame(mut frame: Frame, format: Format) -> Frame {
 pub(super) fn write_capture_file(
     output: output::contract::Format,
     frames: impl IntoIterator<Item = Frame>,
+    destination: Option<&Path>,
 ) -> Result<(), CliError> {
-    write_raw(&encode_capture_file(output, frames)?)
+    write_bytes(&encode_capture_file(output, frames)?, destination)
 }
 
 pub(super) fn encode_capture_file(
@@ -411,10 +518,10 @@ fn terminal_safe_with_layout(value: &str, preserve_newlines: bool) -> String {
     safe
 }
 
-pub(super) fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
-    let mut stdout = io::stdout().lock();
-    stdout
-        .write_all(bytes)
-        .and_then(|()| stdout.flush())
-        .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+pub(super) fn write_bytes(bytes: &[u8], destination: Option<&Path>) -> Result<(), CliError> {
+    let mut sink = CaptureSink::open(destination)?;
+    let target = sink.target();
+    sink.write_all(bytes)
+        .map_err(|source| CliError::new(5, format!("write {target} failed: {source}")))?;
+    sink.finish()
 }

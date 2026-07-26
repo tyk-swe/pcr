@@ -4,7 +4,7 @@
 // Offline build, dissect, and capture-read commands.
 
 use std::fs::File;
-use std::io;
+use std::io::BufReader;
 use std::time::SystemTime;
 
 use packetcraftr::{
@@ -17,10 +17,33 @@ use super::super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
 use super::super::errors::CliError;
 use super::super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
 use super::super::rendering::{
-    capture_file_format, emit_json, emit_json_compact, spaced_hex, write_plain_line, write_raw,
-    write_stdout_line,
+    CaptureSink, capture_file_format, capture_sink_path, emit_json, emit_json_compact, spaced_hex,
+    write_bytes, write_plain_line, write_stdout_line,
 };
 use super::super::runtime::default_registry_arc;
+
+/// Buffer size for capture-file reads. `Reader` pulls one block header and one
+/// payload at a time, so an unbuffered file would issue two syscalls per frame.
+pub(crate) const READ_BUFFER_BYTES: usize = 128 * 1024;
+
+/// Opens a capture file for bounded streaming with buffered reads.
+pub(crate) fn open_capture_reader(
+    path: &std::path::Path,
+    max_frame_bytes: usize,
+    max_interfaces: usize,
+) -> Result<Reader<BufReader<File>>, CliError> {
+    let file = File::open(path)
+        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
+    Reader::with_options(
+        BufReader::with_capacity(READ_BUFFER_BYTES, file),
+        ReaderOptions {
+            max_size: max_frame_bytes,
+            max_interfaces_per_section: max_interfaces,
+            ..ReaderOptions::default()
+        },
+    )
+    .map_err(CliError::classified)
+}
 
 pub(crate) fn run_build(
     arguments: BuildArgs,
@@ -55,7 +78,7 @@ pub(crate) fn run_build(
             Ok(())
         }
         output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
-        output::contract::Format::Raw => write_raw(result.bytes()),
+        output::contract::Format::Raw => write_bytes(result.bytes(), None),
         output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
             output::contract::Command::Build,
             result,
@@ -112,7 +135,7 @@ pub(crate) fn run_dissect(
             Ok(())
         }
         output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
-        output::contract::Format::Raw => write_raw(result.bytes()),
+        output::contract::Format::Raw => write_bytes(result.bytes(), None),
         output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
             output::contract::Command::Dissect,
             result,
@@ -137,19 +160,11 @@ pub(crate) fn run_read(
         max_bytes,
         max_frame_bytes,
         max_interfaces,
+        sink,
     } = arguments;
     validate_capture_stream_limits(max_frames, max_bytes, max_frame_bytes, max_interfaces)?;
-    let file = File::open(&path)
-        .map_err(|source| CliError::new(5, format!("open {} failed: {source}", path.display())))?;
-    let mut reader = Reader::with_options(
-        file,
-        ReaderOptions {
-            max_size: max_frame_bytes,
-            max_interfaces_per_section: max_interfaces,
-            ..ReaderOptions::default()
-        },
-    )
-    .map_err(CliError::classified)?;
+    let destination = capture_sink_path(sink.write, output)?;
+    let mut reader = open_capture_reader(&path, max_frame_bytes, max_interfaces)?;
     let stream_limits = Limits {
         max_frames,
         max_bytes,
@@ -159,10 +174,14 @@ pub(crate) fn run_read(
         output::contract::Format::Pcap | output::contract::Format::Pcapng
     ) {
         let format = capture_file_format(output)?;
-        let stdout = io::stdout();
-        let (_output, _report) = transcode(&mut reader, stdout.lock(), format, stream_limits)
-            .map_err(CliError::classified)?;
-        return Ok(());
+        let (sink, _report) = transcode(
+            &mut reader,
+            CaptureSink::open(destination.as_deref())?,
+            format,
+            stream_limits,
+        )
+        .map_err(CliError::classified)?;
+        return sink.finish();
     }
 
     let mut sequence = 0_u64;

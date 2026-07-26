@@ -148,7 +148,7 @@ fn parse_layer(
     if arguments.trim().is_empty() {
         return Ok((name, fields));
     }
-    for argument in split_top_level(arguments, ',')? {
+    for argument in split_top_level_bounded(arguments, ',', None)? {
         let Some((field, raw_value)) = split_assignment(argument)? else {
             return Err(ExpressionError::Syntax {
                 offset: 0,
@@ -198,7 +198,7 @@ fn parse_value_bounded(
         if body.trim().is_empty() {
             return Ok(FieldValue::List(Vec::new()));
         }
-        let values = split_top_level(body, ',')?
+        let values = split_top_level_bounded(body, ',', None)?
             .into_iter()
             .map(|value| parse_value_bounded(value.trim(), depth + 1, max_nesting))
             .collect::<Result<Vec<_>, _>>()?;
@@ -313,10 +313,6 @@ fn split_assignment(input: &str) -> Result<Option<(&str, &str)>, ExpressionError
         }
     }
     Ok(None)
-}
-
-fn split_top_level(input: &str, delimiter: char) -> Result<Vec<&str>, ExpressionError> {
-    split_top_level_bounded(input, delimiter, None)
 }
 
 fn split_top_level_bounded(
@@ -455,7 +451,7 @@ mod tests {
 
     #[test]
     fn top_level_split_ignores_slashes_and_commas_in_quotes() {
-        let layers = split_top_level("raw(text=\"a/b,c\")/raw()", '/').unwrap();
+        let layers = split_top_level_bounded("raw(text=\"a/b,c\")/raw()", '/', None).unwrap();
         assert_eq!(layers, ["raw(text=\"a/b,c\")", "raw()"]);
     }
 

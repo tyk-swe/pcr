@@ -26,7 +26,7 @@ use crate::net::{
 use crate::packet::{
     Packet,
     decode::DecodedPacket,
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, push_diagnostic_once},
     registry::ProtocolRegistry,
     template::{PacketTemplate, TemplateValues},
 };
@@ -47,7 +47,7 @@ use super::nonzero_ipv4_identification;
 use super::probe::{self, Correlation, Transport as ProbeTransport};
 use super::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
 use super::target::{Authorizer, Target};
-use super::{AddressFamily, BoundaryError, Stats, push_diagnostic_once};
+use super::{AddressFamily, BoundaryError, Stats};
 
 pub const DEFAULT_TRACEROUTE_FIRST_HOP: u8 = 1;
 pub const DEFAULT_TRACEROUTE_MAX_HOPS: u8 = 30;

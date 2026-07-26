@@ -28,7 +28,7 @@ use crate::net::{
 use crate::packet::{
     Packet,
     decode::DecodedPacket,
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, push_diagnostic_once},
     field::FieldValue,
     registry::ProtocolRegistry,
     template::{DEFAULT_MAX_TEMPLATE_PACKETS, PacketTemplate, TemplateValues},
@@ -49,7 +49,7 @@ use super::evidence::{
 use super::nonzero_ipv4_identification;
 use super::probe::Correlation;
 use super::target::{Authorizer, Target};
-use super::{AddressFamily, BoundaryError, Stats, push_diagnostic_once};
+use super::{AddressFamily, BoundaryError, Stats};
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;

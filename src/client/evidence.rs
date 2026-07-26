@@ -3,8 +3,7 @@
 
 //! Bounded diagnostic and capture-evidence retention for client operations.
 
-use crate::packet::diagnostic::Diagnostic;
-use crate::workflow::push_diagnostic_once;
+use crate::packet::diagnostic::{Diagnostic, push_diagnostic_once};
 
 pub(super) fn reserve_capture_evidence(
     retained_frames: &mut usize,

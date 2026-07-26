@@ -13,8 +13,9 @@ use crate::net::{
     link::LinkMode,
     transmit::{PacketIo, TransmissionFrame},
 };
-use crate::packet::{decode::Dissector, registry::ProtocolRegistry};
-use crate::workflow::push_diagnostic_once;
+use crate::packet::{
+    decode::Dissector, diagnostic::push_diagnostic_once, registry::ProtocolRegistry,
+};
 
 use super::super::Stats;
 use super::super::send::ClientError;

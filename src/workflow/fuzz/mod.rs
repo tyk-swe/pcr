@@ -19,7 +19,6 @@ use thiserror::Error;
 use super::clock::Clock;
 use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::EvidenceBudget;
-use super::push_diagnostic_once;
 use crate::capture::{Frame, LinkType};
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
@@ -30,7 +29,7 @@ use crate::packet::{
     Packet,
     build::{BuildContext, BuildOptions, Builder, BuiltPacket, DEFAULT_MAX_PACKET_SIZE},
     decode::{DecodeOptions, DecodedPacket, Dissector},
-    diagnostic::Diagnostic,
+    diagnostic::{Diagnostic, push_diagnostic_once},
     field::{FieldKind, FieldValue},
     registry::ProtocolRegistry,
     semantics::BuiltinProtocol,

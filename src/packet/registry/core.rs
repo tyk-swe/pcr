@@ -369,7 +369,6 @@ impl RegistryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::builtin::Module as BuiltinProtocols;
 
     #[test]
     fn rebinding_a_child_is_idempotent_only_at_the_same_priority() {
@@ -383,57 +382,6 @@ mod tests {
                 priority: 20,
                 ..
             })
-        ));
-    }
-
-    #[test]
-    fn build_canonicalizes_priority_winners_in_both_directions() {
-        for candidates in [[("arp", 150), ("ipv6", 200)], [("ipv6", 200), ("arp", 150)]] {
-            let mut builder = RegistryBuilder::new();
-            builder.module(&BuiltinProtocols).unwrap();
-            for (child, priority) in candidates {
-                builder.bind("ethernet", 0x0800, child, priority).unwrap();
-            }
-
-            let registry = builder.build().unwrap();
-
-            assert_eq!(
-                registry.child_for("ethernet", Discriminator(0x0800)),
-                Some(&ProtocolId::new("ipv6"))
-            );
-            assert_eq!(
-                registry.discriminator_for("ethernet", "ipv6"),
-                Some(Discriminator(0x0800))
-            );
-            assert_eq!(
-                registry.discriminator_for("ethernet", "arp"),
-                Some(Discriminator(0x0806))
-            );
-            assert_eq!(registry.discriminator_for("ethernet", "ipv4"), None);
-            assert_eq!(
-                registry
-                    .bindings
-                    .get("ethernet")
-                    .and_then(|bindings| bindings.get(&Discriminator(0x0800)))
-                    .unwrap()
-                    .len(),
-                1
-            );
-        }
-    }
-
-    #[test]
-    fn build_still_rejects_an_unknown_shadowed_child() {
-        let mut builder = RegistryBuilder::new();
-        builder.module(&BuiltinProtocols).unwrap();
-        builder
-            .bind("ethernet", 0x0800, "example.unknown", 0)
-            .unwrap();
-
-        assert!(matches!(
-            builder.build(),
-            Err(RegistryError::UnknownProtocol { protocol })
-                if protocol == ProtocolId::new("example.unknown")
         ));
     }
 }

@@ -22,7 +22,7 @@ use crate::packet::{
     Packet,
     codec::NetworkEnvelope,
     decode::DecodedPacket,
-    diagnostic::{Diagnostic, DiagnosticSeverity},
+    diagnostic::{Diagnostic, DiagnosticSeverity, push_diagnostic_once},
     field::FieldValue,
     layer::Raw,
     registry::ProtocolRegistry,
@@ -46,7 +46,7 @@ use super::nonzero_ipv4_identification;
 use super::probe::{self, Transport as ProbeTransport};
 use super::scan::MAX_SCAN_RATE;
 use super::target::{Authorizer, Target};
-use super::{AddressFamily, BoundaryError, Stats, push_diagnostic_once};
+use super::{AddressFamily, BoundaryError, Stats};
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;

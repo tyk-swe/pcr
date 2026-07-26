@@ -73,3 +73,13 @@ impl Diagnostic {
         self
     }
 }
+
+/// Appends `diagnostic` unless one with the same code is already present.
+pub fn push_diagnostic_once(diagnostics: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
+    if !diagnostics
+        .iter()
+        .any(|existing| existing.code == diagnostic.code)
+    {
+        diagnostics.push(diagnostic);
+    }
+}

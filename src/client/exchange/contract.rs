@@ -17,10 +17,10 @@ use crate::packet::{
     Packet,
     build::{BuildContext, BuiltPacket},
     decode::{DecodeOptions, DecodedPacket, Dissector},
+    diagnostic::push_diagnostic_once,
     registry::ProtocolRegistry,
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };
-use crate::workflow::push_diagnostic_once;
 
 use super::super::Stats;
 use super::super::evidence::reserve_capture_evidence;

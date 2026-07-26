@@ -7,9 +7,13 @@ use std::time::{Duration, SystemTime};
 
 use crate::capture::Frame;
 use crate::net::capture::Statistics as CaptureStatistics;
-use crate::packet::{Packet, decode::Result as DecodedPacket, diagnostic::Diagnostic};
+use crate::packet::{
+    Packet,
+    decode::Result as DecodedPacket,
+    diagnostic::{Diagnostic, push_diagnostic_once},
+};
 
-use super::{Stats, push_diagnostic_once};
+use super::Stats;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum EvidenceBudgetError {

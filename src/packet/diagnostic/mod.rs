@@ -6,4 +6,4 @@
 mod model;
 
 pub(crate) use model::DiagnosticSeverity;
-pub use model::{Diagnostic, DiagnosticSeverity as Severity};
+pub use model::{Diagnostic, DiagnosticSeverity as Severity, push_diagnostic_once};

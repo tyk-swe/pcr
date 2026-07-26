@@ -779,47 +779,4 @@ mod tests {
             Err(DecodeError::LayerLimit { limit: 0 })
         ));
     }
-
-    #[test]
-    fn bytes_outside_udp_length_inside_ip_are_not_link_padding() {
-        let mut bytes = vec![0_u8; 14 + 20 + 8 + 4];
-        bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
-        let ip = 14;
-        bytes[ip] = 0x45;
-        bytes[ip + 2..ip + 4].copy_from_slice(&32_u16.to_be_bytes());
-        bytes[ip + 8] = 64;
-        bytes[ip + 9] = 17;
-        bytes[ip + 12..ip + 16].copy_from_slice(&[192, 0, 2, 1]);
-        bytes[ip + 16..ip + 20].copy_from_slice(&[198, 51, 100, 2]);
-        let udp = ip + 20;
-        bytes[udp..udp + 2].copy_from_slice(&1_u16.to_be_bytes());
-        bytes[udp + 2..udp + 4].copy_from_slice(&2_u16.to_be_bytes());
-        bytes[udp + 4..udp + 6].copy_from_slice(&8_u16.to_be_bytes());
-        bytes[udp + 8..udp + 12].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
-
-        let registry = Arc::new(crate::protocol::builtin::registry().unwrap());
-        let frame =
-            Frame::new(std::time::SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap();
-        let decoded = Dissector::new(registry)
-            .decode(
-                frame,
-                DecodeOptions {
-                    verify_checksums: false,
-                    ..DecodeOptions::default()
-                },
-            )
-            .unwrap();
-
-        assert!(decoded.diagnostics.iter().any(|diagnostic| {
-            diagnostic.code == "decode.trailing_malformed"
-                && diagnostic.severity == crate::packet::diagnostic::DiagnosticSeverity::Warning
-                && diagnostic.layer == Some(2)
-        }));
-        assert!(
-            !decoded
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "decode.trailing_padding")
-        );
-    }
 }

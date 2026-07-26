@@ -17,7 +17,6 @@ use crate::capture::Frame;
 use crate::error::{Classified, Kind};
 use crate::net::{
     capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
-    exchange::ExchangeIo,
     route::{NeighborResolver, RouteProvider},
 };
 use crate::packet::{

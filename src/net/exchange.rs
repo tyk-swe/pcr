@@ -8,13 +8,6 @@ use super::capture::{CaptureProvider, CaptureQueueLimits};
 use super::route::PlannedRoute;
 use super::transmit::{IoSendReport, PacketIo, TransmissionFrame};
 
-pub(crate) use Io as ExchangeIo;
-
-/// A provider that supports both transmission and capture.
-pub trait Io: PacketIo + CaptureProvider {}
-
-impl<T> Io for T where T: PacketIo + CaptureProvider {}
-
 /// Composes separately owned transmission and capture providers.
 #[derive(Clone, Copy, Debug)]
 pub struct Composite<S, C> {

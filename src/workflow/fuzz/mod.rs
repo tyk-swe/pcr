@@ -24,7 +24,6 @@ use crate::capture::{Frame, LinkType};
 use crate::error::{Classification, Classified, Kind};
 use crate::net::{
     capture::{CaptureStatistics, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
-    exchange::ExchangeIo,
     route::{NeighborResolver, RouteProvider},
 };
 use crate::packet::{

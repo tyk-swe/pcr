@@ -112,7 +112,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
                 operation: "waiting for capture readiness",
             },
         )?;
-        self.capture.wait_ready(readiness_timeout)
+        self.capture.inner.wait_ready(readiness_timeout)
     }
 
     fn send_and_correlate<I: PacketIo>(
@@ -187,7 +187,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
     ) -> Result<(), LiveIoError> {
         if !self.correlation_stopped {
             while let Some(remaining) = self.deadline.checked_duration_since(Instant::now()) {
-                let Some(frame) = self.capture.next_captured_frame(remaining)? else {
+                let Some(frame) = self.capture.inner.next_captured_frame(remaining)? else {
                     break;
                 };
                 let context = Self::process_context(
@@ -306,7 +306,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
     }
 
     fn finalize_exchange(mut self) -> Result<ExchangeResult, ClientError> {
-        let capture_statistics = self.capture.statistics().validate()?;
+        let capture_statistics = self.capture.inner.statistics().validate()?;
         self.apply_capture_loss_policy(capture_statistics)?;
         let unanswered = self
             .captured

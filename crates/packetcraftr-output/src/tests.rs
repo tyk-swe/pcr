@@ -36,6 +36,7 @@ use super::capture::Read as ReadFrameCommandResult;
 use super::contract::{
     CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName, Format as OutputFormat,
 };
+use super::decode::{Event as DecodeFrameCommandResult, Result as DecodeCommandResult};
 use super::dns::{
     AttemptStatus as DnsAttemptStatus, RecordData as DnsRecordData, Result as DnsCommandResult,
 };
@@ -59,7 +60,7 @@ fn command_matrix_is_complete_and_has_no_duplicate_formats() {
         OutputFormat::Pcap,
         OutputFormat::Pcapng,
     ];
-    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 15);
+    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 16);
     for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
         assert!(!contract.formats.is_empty());
         assert_eq!(contract.formats, contract.command.formats());
@@ -315,6 +316,47 @@ fn capture_and_replay_formats_are_stable() {
             OutputFormat::Pcapng,
         ]
     );
+    // `decode` renders decoded layers, so it deliberately excludes the
+    // exact-byte formats that `read` offers for the same inputs.
+    assert_eq!(
+        CommandName::Decode.formats(),
+        &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson]
+    );
+}
+
+#[test]
+fn decode_results_report_emitted_and_filtered_counts_separately() {
+    let aggregate = serde_json::to_value(AggregateOutput::success(
+        CommandName::Decode,
+        DecodeCommandResult {
+            frames: Vec::new(),
+            count: 0,
+            filtered: 7,
+        },
+        Vec::new(),
+    ))
+    .unwrap();
+    assert_eq!(aggregate["command"], "decode");
+    assert_eq!(aggregate["mode"], "aggregate");
+    assert_eq!(aggregate["result"]["count"], 0);
+    assert_eq!(aggregate["result"]["filtered"], 7);
+    assert!(aggregate["result"]["frames"].as_array().unwrap().is_empty());
+
+    let complete = serde_json::to_value(StreamRecord::success(
+        CommandName::Decode,
+        4,
+        DecodeFrameCommandResult::Complete {
+            frames: 3,
+            filtered: 7,
+        },
+        Vec::new(),
+    ))
+    .unwrap();
+    assert_eq!(complete["mode"], "stream");
+    assert_eq!(complete["sequence"], 4);
+    assert_eq!(complete["result"]["event"], "complete");
+    assert_eq!(complete["result"]["frames"], 3);
+    assert_eq!(complete["result"]["filtered"], 7);
 }
 
 #[test]

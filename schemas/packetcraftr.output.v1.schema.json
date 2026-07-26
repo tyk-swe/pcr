@@ -41,6 +41,7 @@
             null,
             "build",
             "dissect",
+            "decode",
             "protocols",
             "plan",
             "send",
@@ -135,6 +136,9 @@
               "$ref": "#/$defs/dissectSuccess"
             },
             {
+              "$ref": "#/$defs/decodeSuccess"
+            },
+            {
               "$ref": "#/$defs/protocolsSuccess"
             },
             {
@@ -207,6 +211,9 @@
             },
             {
               "$ref": "#/$defs/captureSuccess"
+            },
+            {
+              "$ref": "#/$defs/decodeStreamSuccess"
             },
             {
               "$ref": "#/$defs/exchangeStreamSuccess"
@@ -318,6 +325,36 @@
         },
         "result": {
           "$ref": "#/$defs/dissectResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "decodeSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "decode"
+        },
+        "result": {
+          "$ref": "#/$defs/decodeResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "decodeStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "decode"
+        },
+        "result": {
+          "$ref": "#/$defs/decodeStreamResult"
         }
       },
       "required": [
@@ -875,6 +912,69 @@
               "const": "complete"
             },
             "frames": {
+              "$ref": "#/$defs/uint64"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "decodeResult": {
+      "type": "object",
+      "required": [
+        "frames",
+        "count",
+        "filtered"
+      ],
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decodedFrame"
+          }
+        },
+        "count": {
+          "$ref": "#/$defs/uint64"
+        },
+        "filtered": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "decodeStreamResult": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "decoded"
+          ],
+          "properties": {
+            "event": {
+              "const": "frame"
+            },
+            "decoded": {
+              "$ref": "#/$defs/decodedFrame"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event",
+            "frames",
+            "filtered"
+          ],
+          "properties": {
+            "event": {
+              "const": "complete"
+            },
+            "frames": {
+              "$ref": "#/$defs/uint64"
+            },
+            "filtered": {
               "$ref": "#/$defs/uint64"
             }
           },

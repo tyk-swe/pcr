@@ -13,6 +13,7 @@ pub mod build;
 pub mod capture;
 mod common;
 pub mod contract;
+pub mod decode;
 pub mod dissect;
 pub mod dns;
 pub mod envelope;

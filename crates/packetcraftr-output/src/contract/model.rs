@@ -16,6 +16,7 @@ pub const OUTPUT_SCHEMA_V1: &str = "packetcraftr.output/v1";
 pub enum CommandName {
     Build,
     Dissect,
+    Decode,
     Plan,
     Send,
     Exchange,
@@ -36,6 +37,7 @@ impl CommandName {
         match self {
             Self::Build => "build",
             Self::Dissect => "dissect",
+            Self::Decode => "decode",
             Self::Protocols => "protocols",
             Self::Plan => "plan",
             Self::Send => "send",
@@ -56,6 +58,7 @@ impl CommandName {
     pub const fn formats(self) -> &'static [OutputFormat] {
         match self {
             Self::Build | Self::Dissect => BUILD_FORMATS,
+            Self::Decode => DECODE_FORMATS,
             Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes => AGGREGATE_FORMATS,
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
@@ -150,6 +153,8 @@ const BUILD_FORMATS: &[OutputFormat] = &[
     OutputFormat::Raw,
 ];
 const AGGREGATE_FORMATS: &[OutputFormat] = &[OutputFormat::Text, OutputFormat::Json];
+const DECODE_FORMATS: &[OutputFormat] =
+    &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson];
 const SEND_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Json,
@@ -198,6 +203,10 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract {
         command: CommandName::Dissect,
         formats: BUILD_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Decode,
+        formats: DECODE_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Protocols,

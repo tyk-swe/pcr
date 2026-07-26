@@ -212,4 +212,34 @@ fn schemas_reject_representative_contract_violations() {
     let mut dns = json_file(root().join("examples/documents/output-dns-success.json"));
     dns["result"]["transport"] = json!("tcp");
     assert!(!output.is_valid(&dns), "accepted unsupported DNS transport");
+
+    let decode_success = json_file(root().join("examples/documents/output-decode-success.json"));
+
+    let mut missing_filtered = decode_success.clone();
+    missing_filtered["result"]
+        .as_object_mut()
+        .unwrap()
+        .remove("filtered");
+    assert!(
+        !output.is_valid(&missing_filtered),
+        "accepted decode result without a filtered count"
+    );
+
+    let mut undecoded_frame = decode_success.clone();
+    undecoded_frame["result"]["frames"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("layout");
+    assert!(
+        !output.is_valid(&undecoded_frame),
+        "accepted decode result whose frame carries no layout"
+    );
+
+    let mut extra_stream_property =
+        json_file(root().join("examples/documents/output-decode-complete.json"));
+    extra_stream_property["result"]["frame"] = json!({});
+    assert!(
+        !output.is_valid(&extra_stream_property),
+        "accepted decode completion carrying a frame"
+    );
 }

@@ -22,6 +22,7 @@ use packetcraftr::{
     output::{
         capture::{Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult},
         contract::{CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName},
+        decode::{Event as DecodeFrameCommandResult, Result as DecodeCommandResult},
         dns::{
             Attempt as DnsAttemptOutput, AttemptStatus as DnsAttemptStatus,
             Event as DnsStreamCommandResult, Outcome as DnsOutcome, Record as DnsRecordOutput,
@@ -132,6 +133,19 @@ fn exact_frame() -> CapturedFrame {
     .unwrap()
 }
 
+/// Decodes the shared four-byte example frame exactly as `decode` does.
+fn decoded_example_frame() -> packetcraftr::output::frame::Decoded {
+    use std::sync::Arc;
+
+    use packetcraftr::packet::decode::{Decoder, Options as DecodeOptions};
+    use packetcraftr::protocol::builtin::registry;
+
+    let decoded = Decoder::new(Arc::new(registry().unwrap()))
+        .decode(exact_frame(), DecodeOptions::default())
+        .unwrap();
+    packetcraftr::output::frame::Decoded::try_from_decoded(decoded).unwrap()
+}
+
 fn packet_protocols(value: &serde_json::Value) -> Vec<&str> {
     value["result"]["packet"]["layers"]
         .as_array()
@@ -189,6 +203,83 @@ fn assert_igmp_example(value: &serde_json::Value) {
         value["result"]["packet"]["layers"][1]["fields"]["checksum"]["type"],
         "unsigned"
     );
+}
+
+type DecodeExamples = (
+    AggregateOutput<DecodeCommandResult>,
+    StreamRecord<DecodeFrameCommandResult>,
+    StreamRecord<DecodeFrameCommandResult>,
+);
+
+fn decode_examples() -> DecodeExamples {
+    let decoded = decoded_example_frame();
+    (
+        AggregateOutput::success(
+            CommandName::Decode,
+            DecodeCommandResult {
+                frames: vec![decoded.clone()],
+                count: 1,
+                filtered: 0,
+            },
+            Vec::new(),
+        ),
+        StreamRecord::success(
+            CommandName::Decode,
+            0,
+            DecodeFrameCommandResult::Frame { decoded },
+            Vec::new(),
+        ),
+        StreamRecord::success(
+            CommandName::Decode,
+            1,
+            DecodeFrameCommandResult::Complete {
+                frames: 1,
+                filtered: 0,
+            },
+            Vec::new(),
+        )
+        .with_stats(OperationStats {
+            packets_attempted: 1,
+            packets_completed: 1,
+            bytes: 4,
+            elapsed: std::time::Duration::ZERO,
+            capture: CaptureStatistics::default(),
+        }),
+    )
+}
+
+#[test]
+fn published_decode_outputs_match_typed_contracts() {
+    let (aggregate, event, complete) = decode_examples();
+    assert_eq!(
+        serde_json::to_value(aggregate).unwrap(),
+        json_file("output-decode-success.json")
+    );
+    assert_eq!(
+        serde_json::to_value(event).unwrap(),
+        json_file("output-decode-event.json")
+    );
+    assert_eq!(
+        serde_json::to_value(complete).unwrap(),
+        json_file("output-decode-complete.json")
+    );
+}
+
+#[test]
+#[ignore = "regenerates committed examples"]
+fn dump_decode_examples() {
+    let (aggregate, event, complete) = decode_examples();
+    // Serialized from the typed values rather than through `serde_json::Value`
+    // so the committed documents keep contract field order.
+    write_example("output-decode-success.json", &aggregate);
+    write_example("output-decode-event.json", &event);
+    write_example("output-decode-complete.json", &complete);
+}
+
+fn write_example(name: &str, value: &impl serde::Serialize) {
+    let mut rendered = serde_json::to_string_pretty(value).unwrap();
+    rendered.push('\n');
+    fs::write(example(name), rendered).unwrap();
 }
 
 #[test]

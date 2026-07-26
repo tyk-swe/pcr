@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added the `decode` command contract to `packetcraftr.output/v1`: an aggregate
+  result carrying decoded frames with emitted and filtered counts, and a stream
+  event pairing per-frame records with a terminal completion record. The schema
+  id is unchanged; every addition is additive.
 - Added `--write <PATH>` to `read`, `capture`, `send`, `exchange`, and `replay`,
   writing exact `pcap`, `pcapng`, or `raw` bytes to a file instead of standard
   output. Requesting it with a terminal-facing format is a CLI error rather than

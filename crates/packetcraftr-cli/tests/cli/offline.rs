@@ -127,6 +127,148 @@ fn packet_document_build_dissect_capture_read_pipeline_is_exact() {
     }
 }
 
+fn fixture(relative: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures")
+        .join(relative)
+}
+
+#[test]
+fn decode_summarizes_every_frame_and_dumps_fields_on_request() {
+    let capture = fixture("captures/pcapng/multi-link.pcapng");
+    let summary = binary().arg("decode").arg(&capture).output().unwrap();
+    assert!(
+        summary.status.success(),
+        "{}",
+        String::from_utf8_lossy(&summary.stderr)
+    );
+    let lines = String::from_utf8(summary.stdout).unwrap();
+    let mut lines = lines.lines();
+    // Endpoints come from reflective source/destination fields, so the
+    // innermost addressed layer wins and transport ports are appended.
+    assert_eq!(
+        lines.next().unwrap(),
+        "0: 1700000000.125000000 dlt=1 caplen=47 wirelen=47 ethernet/ipv4/udp/raw 192.0.2.1:49152 > 198.51.100.2:9"
+    );
+    assert_eq!(
+        lines.next().unwrap(),
+        "1: 1700000001.125000000 dlt=101 caplen=32 wirelen=32 ipv4/icmpv4 192.0.2.1 > 198.51.100.2"
+    );
+    assert_eq!(lines.next().unwrap(), "decoded 2 frame(s), 79 byte(s)");
+    assert!(lines.next().is_none());
+
+    let verbose = binary()
+        .arg("decode")
+        .arg(&capture)
+        .arg("--verbose")
+        .output()
+        .unwrap();
+    assert!(verbose.status.success());
+    let verbose = String::from_utf8(verbose.stdout).unwrap();
+    assert!(verbose.contains("\n  1 ipv4 "), "{verbose}");
+    assert!(verbose.contains(" ttl=64 "), "{verbose}");
+    assert!(verbose.contains(" source=192.0.2.1 "), "{verbose}");
+    assert!(
+        verbose.contains("\n  2 udp source_port=49152 "),
+        "{verbose}"
+    );
+}
+
+#[test]
+fn decode_reports_malformed_frames_without_failing_the_stream() {
+    // A valid capture file whose second frame carries a truncated IPv4 header:
+    // dissection is bounded, so the frame decodes to a malformed layer with a
+    // diagnostic rather than aborting the stream.
+    let mut writer = Writer::pcap(Vec::new(), LinkType::RAW).unwrap();
+    for (index, bytes) in [
+        &b"\x45\x00\x00\x1c\x00\x00\x00\x00\x40\x11\x00\x00\xc0\x00\x02\x01\xc6\x33\x64\x02\x00\x50\x00\x35\x00\x08\x00\x00"[..],
+        &b"\x45\x00\x00\x14\x00\x00\x00\x00\x40"[..],
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        writer
+            .write_frame(
+                &Frame::new(
+                    UNIX_EPOCH + std::time::Duration::from_secs(index as u64),
+                    LinkType::RAW,
+                    bytes.to_vec(),
+                )
+                .unwrap(),
+            )
+            .unwrap();
+    }
+    let path = temp_path("decode-malformed");
+    std::fs::write(&path, writer.into_inner()).unwrap();
+
+    let text = binary().arg("decode").arg(&path).output().unwrap();
+    assert!(
+        text.status.success(),
+        "{}",
+        String::from_utf8_lossy(&text.stderr)
+    );
+    let rendered = String::from_utf8(text.stdout).unwrap();
+    assert!(rendered.contains("ipv4/udp"), "{rendered}");
+    assert!(
+        rendered.contains("1: 1.000000000 dlt=101 caplen=9 wirelen=9 malformed diagnostics=1"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.ends_with("decoded 2 frame(s), 37 byte(s)\n"),
+        "{rendered}"
+    );
+
+    let ndjson = binary()
+        .args(["--output", "ndjson", "decode"])
+        .arg(&path)
+        .output()
+        .unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(ndjson.status.success());
+    let records = String::from_utf8(ndjson.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 3);
+    assert_eq!(
+        records[1]["result"]["decoded"]["diagnostics"][0]["code"],
+        "decode.malformed_layer"
+    );
+    assert_eq!(records[2]["result"]["event"], "complete");
+    assert_eq!(records[2]["result"]["frames"], 2);
+    assert_eq!(records[2]["result"]["filtered"], 0);
+}
+
+#[test]
+fn decode_aggregate_json_carries_every_decoded_layer() {
+    let output = binary()
+        .args(["--output", "json", "decode"])
+        .arg(fixture("captures/pcap/ethernet-ipv4-udp.pcap"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "decode");
+    assert_eq!(value["result"]["count"], 1);
+    assert_eq!(value["result"]["filtered"], 0);
+    let protocols = value["result"]["frames"][0]["packet"]["layers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|layer| layer["protocol"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(protocols, ["ethernet", "ipv4", "udp", "raw"]);
+    assert_eq!(
+        value["result"]["frames"][0]["layout"]["layers"][1]["protocol"],
+        "ipv4"
+    );
+}
+
 #[test]
 fn protocols_text_lists_manifest_order_and_describes_ordered_fields() {
     let list = binary().arg("protocols").output().unwrap();

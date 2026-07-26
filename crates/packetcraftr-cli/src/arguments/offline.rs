@@ -56,14 +56,13 @@ pub(crate) struct ProtocolsArgs {
     pub(crate) protocol: Option<String>,
 }
 
-#[derive(Debug, Args)]
-pub(crate) struct ReadArgs {
-    /// Classic PCAP or PCAPNG input path.
-    pub(crate) path: PathBuf,
-    /// Maximum frames read or copied from the capture stream.
+/// Bounds shared by every command that streams a capture file.
+#[derive(Clone, Copy, Debug, Args)]
+pub(crate) struct CaptureStreamLimitArgs {
+    /// Maximum frames accepted from the capture stream.
     #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
     pub(crate) max_frames: u64,
-    /// Maximum aggregate captured payload bytes read or copied.
+    /// Maximum aggregate captured payload bytes accepted from the stream.
     #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
     pub(crate) max_bytes: u64,
     /// Maximum bytes accepted from any one captured frame or PCAPNG block.
@@ -72,6 +71,25 @@ pub(crate) struct ReadArgs {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ReadArgs {
+    /// Classic PCAP or PCAPNG input path.
+    pub(crate) path: PathBuf,
+    #[command(flatten)]
+    pub(crate) limits: CaptureStreamLimitArgs,
     #[command(flatten)]
     pub(crate) sink: CaptureSinkArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DecodeArgs {
+    /// Classic PCAP or PCAPNG input path.
+    pub(crate) path: PathBuf,
+    /// Print every decoded layer field instead of one summary line per frame.
+    #[arg(long)]
+    pub(crate) verbose: bool,
+    #[command(flatten)]
+    pub(crate) limits: CaptureStreamLimitArgs,
 }

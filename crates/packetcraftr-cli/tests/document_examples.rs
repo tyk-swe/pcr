@@ -929,6 +929,18 @@ fn published_error_outputs_match_every_command_cli_path() {
             &["--output", "json", "dissect", "--hex", "zz"],
         ),
         (
+            "decode",
+            2,
+            &[
+                "--output",
+                "json",
+                "decode",
+                "missing.pcap",
+                "--max-frames",
+                "0",
+            ],
+        ),
+        (
             "plan",
             2,
             &["--output", "json", "plan", "--packet", "raw()"],

@@ -4,6 +4,7 @@
 //! Command-specific CLI adapters.
 
 mod capture;
+mod decode;
 mod dns;
 mod fuzz;
 mod interfaces;
@@ -15,6 +16,7 @@ mod scan;
 mod traceroute;
 
 pub(super) use capture::{run_capture, run_exchange};
+pub(super) use decode::run_decode;
 pub(super) use dns::run_dns;
 pub(super) use fuzz::run_fuzz;
 pub(super) use interfaces::run_interfaces;

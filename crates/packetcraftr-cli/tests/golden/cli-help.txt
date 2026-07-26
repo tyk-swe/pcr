@@ -6,6 +6,7 @@ Usage: packetcraftr [OPTIONS] <COMMAND>
 Commands:
   build       Build exact packet bytes from an expression or document
   dissect     Decode a frame with bounded, registry-driven dissection
+  decode      Dissect every frame in a classic PCAP or PCAPNG file
   protocols   List built-in protocols or describe one protocol
   read        Stream frames from a classic PCAP or PCAPNG file
   interfaces  Enumerate local interfaces
@@ -59,6 +60,7 @@ Output availability is command-specific. Machine formats never contain terminal 
 Examples:
   packetcraftr build --packet 'raw(text=hello)'
   packetcraftr --output json dissect --hex '45000014000000004001f6e7c0000201c6336402'
+  packetcraftr decode capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcapng --max-frames 100
 
 Run `packetcraftr <COMMAND> --help` for command-specific options and examples.
@@ -148,6 +150,66 @@ Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
   packetcraftr --output json dissect --file frame.bin --link-type 1
 
+===== packetcraftr decode --help =====
+Dissect every frame in a classic PCAP or PCAPNG file
+
+Usage: packetcraftr decode [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Classic PCAP or PCAPNG input path
+
+Options:
+      --verbose
+          Print every decoded layer field instead of one summary line per frame
+
+      --max-frames <MAX_FRAMES>
+          Maximum frames accepted from the capture stream
+
+          [default: 10000]
+
+      --max-bytes <MAX_BYTES>
+          Maximum aggregate captured payload bytes accepted from the stream
+
+          [default: 268435456]
+
+      --max-frame-bytes <MAX_FRAME_BYTES>
+          Maximum bytes accepted from any one captured frame or PCAPNG block
+
+          [default: 16777216]
+
+      --max-interfaces <MAX_INTERFACES>
+          Maximum PCAPNG interfaces accepted from the input
+
+          [default: 4096]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Decode dissects every frame in a capture file; read copies the same frames byte for byte.
+
+Examples:
+  packetcraftr decode capture.pcapng --max-frames 100
+  packetcraftr decode capture.pcap --verbose
+  packetcraftr --output ndjson decode capture.pcapng
+
 ===== packetcraftr protocols --help =====
 List built-in protocols or describe one protocol
 
@@ -194,12 +256,12 @@ Arguments:
 
 Options:
       --max-frames <MAX_FRAMES>
-          Maximum frames read or copied from the capture stream
+          Maximum frames accepted from the capture stream
 
           [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum aggregate captured payload bytes read or copied
+          Maximum aggregate captured payload bytes accepted from the stream
 
           [default: 268435456]
 

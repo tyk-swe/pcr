@@ -7,8 +7,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use packetcraftr::output;
 
 use super::{
-    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs, ProtocolsArgs, ReadArgs,
-    ReplayArgs, RouteArgs, ScanArgs, SendArgs, TracerouteArgs,
+    BuildArgs, CaptureArgs, DecodeArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs,
+    ProtocolsArgs, ReadArgs, ReplayArgs, RouteArgs, ScanArgs, SendArgs, TracerouteArgs,
 };
 
 const ROOT_AFTER_HELP: &str = r#"Output formats:
@@ -25,6 +25,7 @@ Output availability is command-specific. Machine formats never contain terminal 
 Examples:
   packetcraftr build --packet 'raw(text=hello)'
   packetcraftr --output json dissect --hex '45000014000000004001f6e7c0000201c6336402'
+  packetcraftr decode capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcapng --max-frames 100
 
 Run `packetcraftr <COMMAND> --help` for command-specific options and examples."#;
@@ -36,6 +37,12 @@ const DISSECT_AFTER_HELP: &str = r#"When neither --hex nor --file is supplied, r
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
   packetcraftr --output json dissect --file frame.bin --link-type 1"#;
+const DECODE_AFTER_HELP: &str = r#"Decode dissects every frame in a capture file; read copies the same frames byte for byte.
+
+Examples:
+  packetcraftr decode capture.pcapng --max-frames 100
+  packetcraftr decode capture.pcap --verbose
+  packetcraftr --output ndjson decode capture.pcapng"#;
 const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
   packetcraftr protocols
   packetcraftr protocols ipv4
@@ -190,6 +197,9 @@ pub(crate) enum Command {
     /// Decode a frame with bounded, registry-driven dissection.
     #[command(after_long_help = DISSECT_AFTER_HELP)]
     Dissect(DissectArgs),
+    /// Dissect every frame in a classic PCAP or PCAPNG file.
+    #[command(after_long_help = DECODE_AFTER_HELP)]
+    Decode(DecodeArgs),
     /// List built-in protocols or describe one protocol.
     #[command(after_long_help = PROTOCOLS_AFTER_HELP)]
     Protocols(ProtocolsArgs),

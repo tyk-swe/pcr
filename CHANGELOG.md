@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added `packetcraftr decode <PATH>`, which dissects every frame in a capture
+  file instead of copying bytes like `read`. Text output prints one
+  reflection-driven summary line per frame — protocol path plus the innermost
+  addressed endpoints and transport ports — and `--verbose` adds an indented
+  dump of every decoded layer field. JSON and NDJSON emit the decoded-frame
+  contract.
 - Added the `decode` command contract to `packetcraftr.output/v1`: an aggregate
   result carrying decoded frames with emitted and filtered counts, and a stream
   event pairing per-frame records with a terminal completion record. The schema

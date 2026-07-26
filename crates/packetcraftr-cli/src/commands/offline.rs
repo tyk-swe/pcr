@@ -13,7 +13,9 @@ use packetcraftr::{
     output, packet,
 };
 
-use super::super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
+use super::super::arguments::{
+    BuildArgs, CaptureStreamLimitArgs, CliBuildMode, DissectArgs, ReadArgs,
+};
 use super::super::errors::CliError;
 use super::super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
 use super::super::rendering::{
@@ -156,10 +158,13 @@ pub(crate) fn run_read(
 ) -> Result<(), CliError> {
     let ReadArgs {
         path,
-        max_frames,
-        max_bytes,
-        max_frame_bytes,
-        max_interfaces,
+        limits:
+            CaptureStreamLimitArgs {
+                max_frames,
+                max_bytes,
+                max_frame_bytes,
+                max_interfaces,
+            },
         sink,
     } = arguments;
     validate_capture_stream_limits(max_frames, max_bytes, max_frame_bytes, max_interfaces)?;

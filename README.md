@@ -215,6 +215,23 @@ packetcraftr --output ndjson read capture.pcapng \
   --max-frames 100 --max-bytes 10485760 --max-frame-bytes 1048576
 ```
 
+Dissect every frame in that capture instead of copying its bytes. `--verbose`
+replaces the per-frame summary line with an indented dump of every decoded
+layer field:
+
+```console
+packetcraftr decode capture.pcapng --max-frames 100
+packetcraftr decode capture.pcapng --verbose
+```
+
+Write exact capture bytes to a file instead of standard output. `--write`
+accepts the `pcap`, `pcapng`, and `raw` formats on `read`, `capture`, `send`,
+`exchange`, and `replay`:
+
+```console
+packetcraftr --output pcapng read capture.pcap --write converted.pcapng
+```
+
 From a source checkout, a published packet document can be built directly:
 
 ```console

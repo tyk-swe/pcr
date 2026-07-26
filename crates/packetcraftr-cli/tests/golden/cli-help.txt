@@ -57,6 +57,10 @@ Output formats:
 
 Output availability is command-specific. Machine formats never contain terminal colour codes.
 
+An aggregate JSON document is built in memory before it is written, so reading a whole capture that
+way costs several times what the input holds. NDJSON reports the same records in constant memory;
+prefer it, or lower --max-bytes, for a large capture.
+
 Examples:
   packetcraftr build --packet 'raw(text=hello)'
   packetcraftr --output json dissect --hex '45000014000000004001f6e7c0000201c6336402'

@@ -413,6 +413,11 @@ Run `packetcraftr <COMMAND> --help` for the command's exact formats, limits,
 and examples. Global `--output` supports command-specific combinations of
 `text`, `json`, `ndjson`, `hex`, `raw`, `pcap`, and `pcapng`.
 
+`json` builds one aggregate document in memory before writing it, so reading a
+whole capture that way costs several times what the input holds. `ndjson`
+reports the same records in constant memory; prefer it, or lower `--max-bytes`,
+for a large capture.
+
 ## Platform notes
 
 ### Linux

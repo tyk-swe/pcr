@@ -19,12 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
-- Added `--policy-file <PATH>` to every traffic-policy command, reading a JSON
-  or YAML file that states any of the six `TrafficPolicy` values. Precedence
-  runs command line, then file, then built-in defaults. The file is read only
-  from a path given on the command line — there is no ambient discovery — and
-  an unknown key is rejected rather than ignored, so a misspelled gate name
-  cannot read as "gate not requested".
+- Added `--policy-file <PATH>` to every command carrying the shared
+  traffic-policy flags — `plan`, `send`, `exchange`, `capture`, `scan`,
+  `traceroute`, `dns`, and `fuzz` — reading a JSON or YAML file that states any
+  of the six `TrafficPolicy` values. `replay` keeps its own narrower replay
+  policy and does not take one. Precedence runs command line, then file, then
+  built-in defaults. The file is read only from a path given on the command
+  line — there is no ambient discovery — and an unknown key is rejected rather
+  than ignored, so a misspelled gate name cannot read as "gate not requested".
 - Added a `capture_write` benchmark covering capture encode, decode, and
   transcode throughput, as a baseline for changes to those paths.
 - Added PCAPNG annotation fidelity: `Reader::metadata` retains section,
@@ -38,7 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   describe the exact command surface that variant was built with.
 - Added `read --output json`, an aggregate result carrying every copied frame
   with its count, so a bounded capture can be consumed as one document instead
-  of a stream. `raw` remains unsupported for `read`.
+  of a stream. An aggregate document is assembled in memory before it is
+  written, so `--output ndjson` remains the streaming choice for a large
+  capture. `raw` remains unsupported for `read`.
 - Added `--bpf <FILTER>` to `capture` and to `decode --interface`, applying a
   libpcap-syntax filter in the capture backend so unwanted frames never reach
   this process. It is orthogonal to `--filter`, which selects among frames that
@@ -98,9 +102,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over TCP as the way to read the complete answer.
 - A capture copy that cannot carry the source's annotation now says so.
   `TranscodeReport.dropped_metadata` counts the comments, name records, and
-  statistics blocks the target format could not represent, and `read` reports
-  them as a `capture.metadata_dropped` warning on standard error. These records
-  were previously skipped without a trace.
+  statistics blocks the target format could not represent, plus any the reader's
+  own retention bound excluded, and `read` reports the total as a
+  `capture.metadata_dropped` warning on standard error. These records were
+  previously skipped without a trace.
 - Restructured the repository into a Cargo workspace of per-domain crates under
   `crates/`, with a virtual root manifest owning shared dependency versions,
   lints, and the release profile. Cargo now enforces the domain layering that

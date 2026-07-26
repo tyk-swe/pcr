@@ -20,7 +20,10 @@ use packetcraftr::{
         },
     },
     output::{
-        capture::{Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult},
+        capture::{
+            Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult,
+            ReadResult as ReadAggregateCommandResult,
+        },
         contract::{CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName},
         decode::{Event as DecodeFrameCommandResult, Result as DecodeCommandResult},
         dns::{
@@ -508,6 +511,19 @@ fn published_read_and_replay_stream_events_match_typed_contracts() {
     assert_eq!(
         serde_json::to_value(read).unwrap(),
         json_file("output-read-event.json")
+    );
+
+    let aggregate = AggregateOutput::success(
+        CommandName::Read,
+        ReadAggregateCommandResult {
+            frames: vec![FrameOutput::try_from_frame(exact_frame()).unwrap()],
+            count: 1,
+        },
+        Vec::new(),
+    );
+    assert_eq!(
+        serde_json::to_value(aggregate).unwrap(),
+        json_file("output-read-success.json")
     );
 
     let replay = StreamRecord::success(

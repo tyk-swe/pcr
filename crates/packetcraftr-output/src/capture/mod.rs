@@ -4,4 +4,7 @@
 //! Offline-read and live-capture stream output.
 
 mod model;
-pub use model::{CaptureFrameCommandResult as Event, ReadFrameCommandResult as Read};
+pub use model::{
+    CaptureFrameCommandResult as Event, ReadAggregateCommandResult as ReadResult,
+    ReadFrameCommandResult as Read,
+};

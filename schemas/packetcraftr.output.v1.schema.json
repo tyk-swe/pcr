@@ -139,6 +139,9 @@
               "$ref": "#/$defs/decodeSuccess"
             },
             {
+              "$ref": "#/$defs/readAggregateSuccess"
+            },
+            {
               "$ref": "#/$defs/protocolsSuccess"
             },
             {
@@ -355,6 +358,21 @@
         },
         "result": {
           "$ref": "#/$defs/decodeStreamResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "readAggregateSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "read"
+        },
+        "result": {
+          "$ref": "#/$defs/readAggregateResult"
         }
       },
       "required": [
@@ -918,6 +936,25 @@
           "additionalProperties": false
         }
       ]
+    },
+    "readAggregateResult": {
+      "type": "object",
+      "required": [
+        "frames",
+        "count"
+      ],
+      "properties": {
+        "frames": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frame"
+          }
+        },
+        "count": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
     },
     "decodeResult": {
       "type": "object",

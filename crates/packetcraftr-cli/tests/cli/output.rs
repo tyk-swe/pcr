@@ -524,22 +524,49 @@ fn malformed_read_preserves_completed_binary_output_before_terminal_error() {
 }
 
 #[test]
-fn unsupported_json_for_read_is_typed_before_opening_the_input() {
+fn an_unsupported_format_for_read_is_typed_before_opening_the_input() {
+    // `raw` has no meaning for a multi-frame stream, so it stays unsupported.
     let output = binary()
-        .args(["--output", "json", "read", "definitely-missing.pcap"])
+        .args(["--output", "raw", "read", "definitely-missing.pcap"])
         .output()
         .unwrap();
 
     assert_eq!(output.status.code(), Some(2));
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(value["mode"], "aggregate");
-    assert_eq!(value["error"]["code"], "cli.output_format");
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        value["error"]["message"]
-            .as_str()
-            .unwrap()
-            .contains("text, ndjson, hex")
+        stderr.contains("read does not support raw output"),
+        "{stderr}"
     );
+    assert!(stderr.contains("text, json, ndjson, hex"), "{stderr}");
+    // Nothing about the missing input surfaced, so the contract check ran
+    // before the file was opened.
+    assert!(!stderr.contains("definitely-missing"), "{stderr}");
+}
+
+#[test]
+fn read_aggregate_json_collects_every_frame_with_its_count() {
+    let source = write_capture(&[b"one", b"two"], false);
+    let output = binary()
+        .args(["--output", "json", "read"])
+        .arg(&source)
+        .output()
+        .unwrap();
+    std::fs::remove_file(&source).unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["command"], "read");
+    assert_eq!(value["mode"], "aggregate");
+    assert_eq!(value["result"]["count"], 2);
+    let frames = value["result"]["frames"].as_array().unwrap();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[0]["bytes_hex"], "6f6e65");
+    assert_eq!(frames[1]["bytes_hex"], "74776f");
 }
 
 #[cfg(unix)]

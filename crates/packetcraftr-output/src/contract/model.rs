@@ -179,6 +179,7 @@ const CAPTURE_FORMATS: &[OutputFormat] = &[
 ];
 const READ_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
+    OutputFormat::Json,
     OutputFormat::Ndjson,
     OutputFormat::Hex,
     OutputFormat::Pcap,

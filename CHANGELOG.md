@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added `read --output json`, an aggregate result carrying every copied frame
+  with its count, so a bounded capture can be consumed as one document instead
+  of a stream. `raw` remains unsupported for `read`.
 - Added `--bpf <FILTER>` to `capture` and to `decode --interface`, applying a
   libpcap-syntax filter in the capture backend so unwanted frames never reach
   this process. It is orthogonal to `--filter`, which selects among frames that

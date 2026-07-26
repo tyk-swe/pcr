@@ -22,6 +22,16 @@ impl ReadFrameCommandResult {
     }
 }
 
+/// The aggregate result of reading a bounded capture stream.
+///
+/// `count` repeats `frames.len()` so a consumer that reads the envelope
+/// incrementally can check completeness without buffering the array.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct ReadAggregateCommandResult {
+    pub frames: Vec<FrameOutput>,
+    pub count: u64,
+}
+
 /// One NDJSON event produced by `capture`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]

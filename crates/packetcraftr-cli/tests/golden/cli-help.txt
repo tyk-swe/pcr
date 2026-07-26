@@ -344,8 +344,11 @@ Global options:
 
           [default: auto]
 
+Read copies frames without dissecting them; decode dissects the same input.
+
 Examples:
   packetcraftr read capture.pcapng --max-frames 100
+  packetcraftr --output json read capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcap
 
 ===== packetcraftr interfaces --help =====

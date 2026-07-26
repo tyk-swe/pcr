@@ -281,12 +281,12 @@ fn frame_results_preserve_capture_fields() {
 #[test]
 fn unsupported_format_errors_name_all_supported_choices() {
     let error = CommandName::Read
-        .require_format(OutputFormat::Json)
+        .require_format(OutputFormat::Raw)
         .unwrap_err();
     assert_eq!(error.classification().code, "cli.output_format");
     assert_eq!(
         error.to_string(),
-        "read does not support json output; choose text, ndjson, hex, pcap, pcapng"
+        "read does not support raw output; choose text, json, ndjson, hex, pcap, pcapng"
     );
 }
 
@@ -300,6 +300,7 @@ fn capture_and_replay_formats_are_stable() {
         CommandName::Read.formats(),
         &[
             OutputFormat::Text,
+            OutputFormat::Json,
             OutputFormat::Ndjson,
             OutputFormat::Hex,
             OutputFormat::Pcap,

@@ -55,8 +55,11 @@ const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
   packetcraftr protocols
   packetcraftr protocols ipv4
   packetcraftr --output json protocols IP4"#;
-const READ_AFTER_HELP: &str = r#"Examples:
+const READ_AFTER_HELP: &str = r#"Read copies frames without dissecting them; decode dissects the same input.
+
+Examples:
   packetcraftr read capture.pcapng --max-frames 100
+  packetcraftr --output json read capture.pcapng --max-frames 100
   packetcraftr --output ndjson read capture.pcap"#;
 const INTERFACES_AFTER_HELP: &str = r#"Examples:
   packetcraftr interfaces

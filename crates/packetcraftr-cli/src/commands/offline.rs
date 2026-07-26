@@ -191,12 +191,13 @@ pub(crate) fn run_read(
 
     let mut sequence = 0_u64;
     let mut captured_bytes = 0_u64;
+    let mut aggregate = Vec::new();
     loop {
         let Some(frame) = reader
             .next_frame()
             .map_err(|source| CliError::classified(source).at_sequence(sequence))?
         else {
-            return Ok(());
+            break;
         };
         let next_sequence = sequence.checked_add(1).ok_or_else(|| {
             CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(sequence)
@@ -248,6 +249,7 @@ pub(crate) fn run_read(
                 ))
                 .map_err(|error| error.at_sequence(sequence))?
             }
+            output::contract::Format::Json => aggregate.push(result.frame),
             _ => {
                 return Err(CliError::classified(
                     output::contract::Error::UnsupportedFormat {
@@ -260,6 +262,18 @@ pub(crate) fn run_read(
         sequence = next_sequence;
         captured_bytes = next_bytes;
     }
+
+    if matches!(output, output::contract::Format::Json) {
+        return emit_json(&output::envelope::Aggregate::success(
+            output::contract::Command::Read,
+            output::capture::ReadResult {
+                frames: aggregate,
+                count: sequence,
+            },
+            Vec::new(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn validate_capture_stream_limits(

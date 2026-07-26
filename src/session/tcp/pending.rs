@@ -12,9 +12,7 @@ use super::state::{
 };
 use super::{Error, ReassemblyLimits, Segment};
 
-pub(super) use commit::commit_push;
-
-mod commit;
+pub(super) mod commit;
 
 pub(super) fn plan_push(
     limits: &ReassemblyLimits,

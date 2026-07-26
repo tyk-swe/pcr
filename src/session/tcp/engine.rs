@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use super::pending::{commit_push, plan_push};
+use super::pending::{commit::commit_push, plan_push};
 use super::state::{TcpFlowState, flow_memory_charge, retained_bytes};
 use super::{Error, Event, FlowKey, Reassembler, ReassemblyLimits, Segment, TCP_SERIAL_HALF_SPACE};
 

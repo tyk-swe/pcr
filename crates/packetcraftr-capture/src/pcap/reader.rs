@@ -438,7 +438,10 @@ impl<R: Read> Reader<R> {
                     self.retain_metadata(records, |metadata| &mut metadata.name_records);
                 }
                 PCAPNG_INTERFACE_STATISTICS_BLOCK => {
-                    let statistics = parse_interface_statistics(body, section_endianness)?;
+                    let mut statistics = parse_interface_statistics(body, section_endianness)?;
+                    statistics.interface = section_interface_base
+                        .checked_add(statistics.interface)
+                        .ok_or(Error::InterfaceLimit { limit: usize::MAX })?;
                     self.retain_metadata(vec![statistics], |metadata| {
                         &mut metadata.interface_statistics
                     });
@@ -455,6 +458,18 @@ impl<R: Read> Reader<R> {
                         section_interface_base,
                         self.max_size,
                     )?;
+                    let captured = usize::try_from(frame.captured_length()).unwrap_or(usize::MAX);
+                    if let Some(options) = body.get(20 + captured.next_multiple_of(4)..) {
+                        let comments = parse_comments(
+                            options,
+                            section_endianness,
+                            "pcapng packet options",
+                            CommentScope::Frame {
+                                sequence: self.frames_read,
+                            },
+                        )?;
+                        self.retain_metadata(comments, |metadata| &mut metadata.comments);
+                    }
                     // Every returned frame advances the stream position that
                     // `CommentScope::Frame` names, not only enhanced packets.
                     self.frames_read = self.frames_read.saturating_add(1);

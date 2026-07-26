@@ -17,9 +17,10 @@ use super::reader::Reader;
 use super::transcode::transcode;
 use super::wire::{
     PCAP_GLOBAL_HEADER_LEN, PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK,
-    PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_OPTION_COMMENT, PCAPNG_OPTION_END,
-    PCAPNG_PACKET_BLOCK, PCAPNG_SECTION_HEADER_BLOCK, PCAPNG_SIMPLE_PACKET_BLOCK,
-    system_time_from_signed_unix, timestamp_from_ticks, timestamp_to_ticks,
+    PCAPNG_INTERFACE_DESCRIPTION_BLOCK, PCAPNG_INTERFACE_STATISTICS_BLOCK, PCAPNG_OPTION_COMMENT,
+    PCAPNG_OPTION_END, PCAPNG_OPTION_ISB_IFRECV, PCAPNG_PACKET_BLOCK, PCAPNG_SECTION_HEADER_BLOCK,
+    PCAPNG_SIMPLE_PACKET_BLOCK, system_time_from_signed_unix, timestamp_from_ticks,
+    timestamp_to_ticks,
 };
 use super::writer::Writer;
 
@@ -1459,6 +1460,19 @@ fn an_invalid_comment_is_bounded_by_the_text_it_retains() {
 }
 
 #[test]
+fn a_multibyte_comment_at_the_metadata_limit_is_preserved() {
+    let mut retained = vec![b'a'; MAX_METADATA_TEXT_BYTES - 2];
+    retained.extend_from_slice(&[0xc3, 0xa9]);
+    let mut source = retained.clone();
+    source.push(b'z');
+    let reader = Reader::new(Cursor::new(pcapng_section(&[&source]))).unwrap();
+
+    let comment = &reader.metadata().comments[0];
+    assert_eq!(comment.text.as_bytes(), retained);
+    assert!(comment.truncated);
+}
+
+#[test]
 fn frame_comment_scope_counts_every_packet_block_kind() {
     let mut capture = pcapng_section(&[]);
 
@@ -1470,6 +1484,8 @@ fn frame_comment_scope_counts_every_packet_block_kind() {
     obsolete.extend_from_slice(&4_u32.to_le_bytes());
     obsolete.extend_from_slice(&4_u32.to_le_bytes());
     obsolete.extend_from_slice(&[1, 2, 3, 4]);
+    obsolete.extend_from_slice(&pcapng_option(PCAPNG_OPTION_COMMENT, b"first"));
+    obsolete.extend_from_slice(&pcapng_option_end());
     capture.extend_from_slice(&pcapng_block(PCAPNG_PACKET_BLOCK, &obsolete));
 
     let mut simple = Vec::new();
@@ -1498,10 +1514,50 @@ fn frame_comment_scope_counts_every_packet_block_kind() {
     assert_eq!(frames.len(), 3);
     assert_eq!(
         reader.metadata().comments,
-        vec![Comment {
-            scope: CommentScope::Frame { sequence: 2 },
-            text: "third".to_owned(),
-            truncated: false,
+        vec![
+            Comment {
+                scope: CommentScope::Frame { sequence: 0 },
+                text: "first".to_owned(),
+                truncated: false,
+            },
+            Comment {
+                scope: CommentScope::Frame { sequence: 2 },
+                text: "third".to_owned(),
+                truncated: false,
+            },
+        ]
+    );
+}
+
+#[test]
+fn interface_statistics_use_global_interface_ids_across_sections() {
+    let mut capture = pcapng_section(&[]);
+    capture.extend_from_slice(&pcapng_section(&[]));
+
+    let mut statistics = Vec::new();
+    statistics.extend_from_slice(&0_u32.to_le_bytes());
+    statistics.extend_from_slice(&0_u32.to_le_bytes());
+    statistics.extend_from_slice(&0_u32.to_le_bytes());
+    statistics.extend_from_slice(&pcapng_option(
+        PCAPNG_OPTION_ISB_IFRECV,
+        &7_u64.to_le_bytes(),
+    ));
+    statistics.extend_from_slice(&pcapng_option_end());
+    capture.extend_from_slice(&pcapng_block(
+        PCAPNG_INTERFACE_STATISTICS_BLOCK,
+        &statistics,
+    ));
+
+    let mut reader = Reader::new(Cursor::new(capture)).unwrap();
+    assert_eq!(reader.next_frame().unwrap(), None);
+
+    assert_eq!(
+        reader.metadata().interface_statistics,
+        vec![InterfaceStatistics {
+            interface: 1,
+            received: Some(7),
+            dropped: None,
+            filter_accepted: None,
         }]
     );
 }

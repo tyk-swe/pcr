@@ -666,8 +666,16 @@ fn bounded_text(value: &[u8]) -> Result<(String, bool), Error> {
     let mut end = value.len().min(MAX_METADATA_TEXT_BYTES);
     // `from_utf8_lossy` never fails, but cutting mid-sequence would replace a
     // valid character with a replacement marker, so back up to a boundary.
-    while end > 0 && (value[end - 1] & 0b1100_0000) == 0b1000_0000 {
-        end -= 1;
+    if end < value.len() {
+        let mut sequence_start = end.saturating_sub(1);
+        while sequence_start > 0 && (value[sequence_start] & 0b1100_0000) == 0b1000_0000 {
+            sequence_start -= 1;
+        }
+        if let Some(width) = utf8_sequence_width(value[sequence_start])
+            && end - sequence_start < width
+        {
+            end = sequence_start;
+        }
     }
     let mut truncated = end < value.len();
     let mut text = String::from_utf8_lossy(&value[..end]).into_owned();
@@ -680,4 +688,14 @@ fn bounded_text(value: &[u8]) -> Result<(String, bool), Error> {
         truncated = true;
     }
     Ok((text, truncated))
+}
+
+fn utf8_sequence_width(lead: u8) -> Option<usize> {
+    match lead {
+        0x00..=0x7f => Some(1),
+        0xc2..=0xdf => Some(2),
+        0xe0..=0xef => Some(3),
+        0xf0..=0xf4 => Some(4),
+        _ => None,
+    }
 }

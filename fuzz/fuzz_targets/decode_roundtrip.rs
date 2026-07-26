@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::capture::{Frame, LinkType};
-use packetcraftr::packet::{
+use packetcraftr_model::{Frame, LinkType};
+use packetcraftr_packet::{
     build::{Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions},
     decode::{Decoder, Options as DecodeOptions},
 };
-use packetcraftr::protocol::builtin::registry;
+use packetcraftr_protocols::builtin::registry;
 
 const ROOTS: [LinkType; 10] = [
     LinkType::NULL,

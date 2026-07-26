@@ -1,0 +1,26 @@
+[package]
+name = "packetcraftr-session"
+description = "Bounded IPv4/IPv6 fragment and TCP stream reassembly for PacketcraftR"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+criterion.workspace = true
+packetcraftr-packet.workspace = true
+packetcraftr-protocols.workspace = true
+
+[[bench]]
+name = "reassembly"
+harness = false

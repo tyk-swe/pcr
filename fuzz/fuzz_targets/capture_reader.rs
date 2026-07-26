@@ -6,7 +6,7 @@
 use std::io::Cursor;
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::capture::{Reader, ReaderOptions};
+use packetcraftr_capture::{Reader, ReaderOptions};
 
 fuzz_target!(|data: &[u8]| {
     let Ok(mut reader) = Reader::with_options(

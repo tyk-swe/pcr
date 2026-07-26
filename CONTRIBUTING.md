@@ -7,26 +7,34 @@ public issue.
 
 ## Development setup
 
-The package uses Rust 2024. Rust 1.97 is pinned in `rust-toolchain.toml`, and
-Rust 1.96 is the minimum supported version. Linux all-feature builds require
-the `libpcap-dev` development package.
+The workspace uses Rust 2024. Rust 1.97 is pinned in `rust-toolchain.toml`, and
+Rust 1.96 is the minimum supported version, declared once in
+`[workspace.package]`. Linux all-feature builds require the `libpcap-dev`
+development package.
+
+The root `packetcraftr` package is a façade over the member crates in
+`crates/`; see [AGENTS.md](AGENTS.md) for the crate map and the dependency
+direction. Add implementation to the member crate that owns the domain, never
+to the root package.
 
 Common checks are:
 
 ```console
 cargo build --locked
-cargo test --locked --no-default-features
-cargo test --locked
-cargo test --locked --all-features
+cargo test --locked --workspace --no-default-features
+cargo test --locked --workspace
+cargo test --locked --workspace --all-features
 cargo fmt --all -- --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
+scripts/check-source-conventions
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps
 cargo deny check
 ```
 
 The no-default test profile is intentionally library-only: Cargo skips the
-`packetcraftr` binary, its unit tests, and `tests/cli.rs` unless the `cli`
-feature is enabled. Default and all-feature profiles include `cli` and run the
+`packetcraftr` binary and `tests/cli.rs` unless the `cli` feature is enabled.
+`packetcraftr-cli` itself still compiles and runs its own unit tests, because a
+member crate has no feature gates of its own. Default and all-feature profiles include `cli` and run the
 complete CLI test suite.
 
 The complete enforced matrix, tool versions, thresholds, release checks, and
@@ -81,10 +89,11 @@ Every pull request must have one primary responsibility.
   serialized or CLI contract changes.
 
 The canonical library domains are `capture`, `client`, `error`, `net`,
-`output`, `packet`, `protocol`, `session`, and `workflow`. Prefer specific
-module names that describe their responsibility. Unsafe code is confined to
-`src/net/platform/`, and every unsafe block needs a specific `SAFETY`
-explanation.
+`output`, `packet`, `policy`, `protocol`, `session`, and `workflow`, each backed
+by the member crate of the same name. Prefer specific module names that describe
+their responsibility. Unsafe code is confined to
+`crates/packetcraftr-net-native/src/platform/`, and every unsafe block needs a
+specific `SAFETY` explanation.
 
 ## Code review
 

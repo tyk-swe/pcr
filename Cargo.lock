@@ -1009,24 +1009,202 @@ name = "packetcraftr"
 version = "0.4.0-beta.2"
 dependencies = [
  "anstream",
+ "bytes",
+ "jsonschema",
+ "packetcraftr-capture",
+ "packetcraftr-cli",
+ "packetcraftr-client",
+ "packetcraftr-model",
+ "packetcraftr-net",
+ "packetcraftr-net-native",
+ "packetcraftr-output",
+ "packetcraftr-packet",
+ "packetcraftr-policy",
+ "packetcraftr-protocols",
+ "packetcraftr-session",
+ "packetcraftr-workflow",
+ "packetcraftr-workflow-client",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-capture"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-model",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-cli"
+version = "0.4.0-beta.2"
+dependencies = [
+ "anstream",
  "anstyle",
  "bytes",
  "clap",
- "criterion",
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-model",
+ "packetcraftr-net",
+ "packetcraftr-net-native",
+ "packetcraftr-output",
+ "packetcraftr-packet",
+ "packetcraftr-policy",
+ "packetcraftr-protocols",
+ "packetcraftr-workflow",
+ "packetcraftr-workflow-client",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-client"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-model",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-policy",
+ "packetcraftr-protocols",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-model"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-net"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-model",
+ "packetcraftr-packet",
+ "packetcraftr-protocols",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-net-native"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
  "futures-util",
- "jsonschema",
  "libc",
  "libloading 0.9.0",
- "noyalib",
+ "packetcraftr-model",
+ "packetcraftr-net",
  "pcap",
  "pnet_datalink",
  "rtnetlink",
- "serde",
- "serde_json",
  "socket2",
  "thiserror 2.0.19",
  "tokio",
  "windows",
+]
+
+[[package]]
+name = "packetcraftr-output"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-model",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-protocols",
+ "packetcraftr-workflow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-packet"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "noyalib",
+ "packetcraftr-model",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-policy"
+version = "0.4.0-beta.2"
+dependencies = [
+ "packetcraftr-model",
+ "packetcraftr-packet",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-protocols"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "criterion",
+ "packetcraftr-model",
+ "packetcraftr-packet",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-session"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "criterion",
+ "packetcraftr-packet",
+ "packetcraftr-protocols",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-workflow"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "criterion",
+ "packetcraftr-capture",
+ "packetcraftr-model",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-policy",
+ "packetcraftr-protocols",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-workflow-client"
+version = "0.4.0-beta.2"
+dependencies = [
+ "packetcraftr-client",
+ "packetcraftr-model",
+ "packetcraftr-net",
+ "packetcraftr-net-native",
+ "packetcraftr-packet",
+ "packetcraftr-policy",
+ "packetcraftr-protocols",
+ "packetcraftr-workflow",
 ]
 
 [[package]]

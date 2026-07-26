@@ -9,10 +9,6 @@ use std::time::{Duration, SystemTime};
 use bytes::Bytes;
 use packetcraftr::{
     capture::{Frame as CapturedFrame, LinkType},
-    client::{
-        policy::Policy,
-        target::{Error as TargetResolutionError, Hostname, Resolver, Target},
-    },
     net::{
         Error,
         capture::{
@@ -26,6 +22,10 @@ use packetcraftr::{
             Dispatch, Frame as TransmissionFrame, Layer2Frame, Layer2Sender, Layer3Frame,
             Layer3Sender, Report, Sender,
         },
+    },
+    policy::{
+        Policy,
+        target::{Error as TargetResolutionError, Hostname, Resolver, Target},
     },
 };
 

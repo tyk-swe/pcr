@@ -45,37 +45,44 @@ ethtool, iproute2, libpcap development files, Python jsonschema, and shellcheck.
 ## Rust versions
 
 - `rust-toolchain.toml` pins Rust `1.97.0` with clippy and rustfmt.
-- `Cargo.toml` declares `rust-version = "1.96"`.
+- The workspace manifest declares `rust-version = "1.96"` under
+  `[workspace.package]`, and every member inherits it.
 - Linux quality installs `1.96.0` and checks both the no-default-feature and
-  all-feature profiles with all Cargo targets. This is an MSRV compile
-  contract, not a second full test matrix.
+  all-feature profiles with all Cargo targets across the whole workspace. This
+  is an MSRV compile contract, not a second full test matrix.
 - Fuzzing uses `nightly-2026-07-11` and cargo-fuzz `0.13.2`.
 
 ## Features and build profiles
 
-The declared features are:
+The root `packetcraftr` package declares the public features:
 
 - `default = ["cli", "native-interfaces"]`;
-- `cli`, for the binary and its argument and terminal dependencies;
+- `cli`, which pulls in `packetcraftr-cli` for the binary and its argument and
+  terminal dependencies;
 - `native-interfaces`, for portable interface enumeration;
 - `native-route`, which also enables `native-interfaces`;
 - `native-layer2`, which also enables `native-interfaces`;
 - `native-layer3`, which also enables `native-interfaces`.
 
-The cross-platform test matrix runs the library tests without default features,
-then all Cargo-discovered unit, binary, integration, and documentation tests in
-the default and complete profiles:
+Every `native-*` feature forwards to the same feature on
+`packetcraftr-net-native`, which owns the target-specific dependencies. Members
+below it have no features at all, so a portable consumer never compiles a
+native backend.
+
+The cross-platform test matrix runs the whole workspace without default
+features, then all Cargo-discovered unit, binary, integration, and documentation
+tests in the default and complete profiles:
 
 ```console
-cargo test --locked --no-default-features
-cargo test --locked
-cargo test --locked --all-features
+cargo test --locked --workspace --no-default-features
+cargo test --locked --workspace
+cargo test --locked --workspace --all-features
 ```
 
 It also checks the release-mode pcap-free profile:
 
 ```console
-cargo check --locked --release --no-default-features \
+cargo check --locked --workspace --release --no-default-features \
   --features cli,native-route,native-layer3
 ```
 
@@ -83,8 +90,8 @@ Linux quality adds the depth-two pairwise feature powerset and a complete
 all-target profile:
 
 ```console
-cargo hack check --locked --feature-powerset --depth 2 --all-targets
-cargo check --locked --all-targets --all-features
+cargo hack check --locked --workspace --feature-powerset --depth 2 --all-targets
+cargo check --locked --workspace --all-targets --all-features
 ```
 
 FreeBSD portability checks `native-interfaces` without defaults and then the
@@ -93,23 +100,26 @@ complete all-feature/all-target profile.
 ## Formatting, linting, and documentation
 
 - `cargo fmt --all -- --check` is enforced on Linux.
-- `cargo clippy --locked --all-targets --all-features -- -D warnings` is
-  enforced on Linux, both macOS architectures, and Windows.
-- `RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps`
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+  is enforced on Linux, both macOS architectures, and Windows.
+- `RUSTDOCFLAGS="-D warnings" cargo doc --locked --workspace --all-features --no-deps`
   rejects documentation warnings on Linux.
-- `scripts/check-source-conventions` is enforced on Linux. It checks the two
+- `scripts/check-source-conventions` is enforced on Linux. It checks the three
   conventions rustfmt and clippy cannot express: every Rust file under `src/`,
-  `tests/`, `benches/`, and `fuzz/fuzz_targets/` opens with the copyright and
-  SPDX header pair, and top-level `use` declarations precede the first item
-  (`mod.rs` module roots exempted). The script needs no toolchain beyond bash
-  and awk, so it adds no measurable time to the quality job.
+  `crates/`, `tests/`, and `fuzz/fuzz_targets/` opens with the copyright and
+  SPDX header pair; top-level `use` declarations precede the first item
+  (`mod.rs`, `lib.rs`, and `main.rs` roots exempted); and no workspace member
+  imports through the root `packetcraftr` façade. The script needs no toolchain
+  beyond bash and awk, so it adds no measurable time to the quality job.
 - The normal Cargo test profiles execute the behavior, schema, CLI, and
   downstream extension integration contracts.
 
 ## Benchmark compilation
 
-The Criterion targets `packet_pipeline`, `reassembly`, and `workflow_scan` are
-included in the all-target clippy and cargo-hack compilations. These commands
+The Criterion targets `packet_pipeline` (in `packetcraftr-protocols`),
+`reassembly` (in `packetcraftr-session`), and `workflow_scan` (in
+`packetcraftr-workflow`) are included in the all-target clippy and cargo-hack
+compilations. These commands
 compile-check and lint the benchmark targets without executing their harnesses.
 CI does not impose a benchmark performance threshold.
 

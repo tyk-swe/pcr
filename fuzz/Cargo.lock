@@ -130,13 +130,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "packetcraftr"
+name = "packetcraftr-capture"
 version = "0.4.0-beta.2"
 dependencies = [
  "bytes",
- "noyalib",
+ "packetcraftr-model",
  "serde",
- "serde_json",
  "thiserror",
 ]
 
@@ -145,7 +144,88 @@ name = "packetcraftr-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
- "packetcraftr",
+ "packetcraftr-capture",
+ "packetcraftr-model",
+ "packetcraftr-packet",
+ "packetcraftr-protocols",
+ "packetcraftr-session",
+ "packetcraftr-workflow",
+]
+
+[[package]]
+name = "packetcraftr-model"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-net"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-model",
+ "packetcraftr-packet",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-packet"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "noyalib",
+ "packetcraftr-model",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-policy"
+version = "0.4.0-beta.2"
+dependencies = [
+ "packetcraftr-model",
+ "packetcraftr-packet",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-protocols"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-model",
+ "packetcraftr-packet",
+ "serde",
+]
+
+[[package]]
+name = "packetcraftr-session"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-workflow"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-model",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-policy",
+ "packetcraftr-protocols",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

@@ -1,10 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Thin launcher for the `packetcraftr` executable. Every argument, command,
+//! and rendering decision lives in `packetcraftr-cli`.
+
 #![forbid(unsafe_code)]
 
-mod cli;
-
 fn main() -> std::process::ExitCode {
-    cli::run_entrypoint()
+    packetcraftr_cli::run_entrypoint()
 }

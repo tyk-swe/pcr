@@ -1,0 +1,252 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use super::{
+    CASE_DOMAIN, Deadline, Diagnostic, Duration, EvidenceBudget, Frame, FuzzCase,
+    FuzzCaseExecution, FuzzError, FuzzLimits, FuzzLiveOptions, FuzzStats, MAX_FUZZ_DURATION,
+    SPLITMIX_INCREMENT, duration_limit, push_diagnostic_once,
+};
+
+pub(super) fn worst_case_duration(
+    live: FuzzLiveOptions,
+    cases: usize,
+) -> Result<Duration, FuzzError> {
+    let exchange = live
+        .timeout
+        .checked_mul(cases as u32)
+        .ok_or(FuzzError::DurationLimit {
+            actual: Duration::MAX,
+            limit: MAX_FUZZ_DURATION,
+        })?;
+    let delay = rate_delay(live.cases_per_second)?
+        .checked_mul(cases.saturating_sub(1) as u32)
+        .ok_or(FuzzError::DurationLimit {
+            actual: Duration::MAX,
+            limit: MAX_FUZZ_DURATION,
+        })?;
+    exchange.checked_add(delay).ok_or(FuzzError::DurationLimit {
+        actual: Duration::MAX,
+        limit: MAX_FUZZ_DURATION,
+    })
+}
+
+pub(super) fn rate_delay(rate: Option<u32>) -> Result<Duration, FuzzError> {
+    crate::clock::rate_delay(1, rate).ok_or(FuzzError::InvalidLimit {
+        field: "cases_per_second",
+        value: u64::from(rate.unwrap_or_default()),
+        reason: "rate-delay arithmetic overflowed".to_owned(),
+    })
+}
+
+pub(super) fn validate_execution(
+    case: &FuzzCase,
+    execution: &FuzzCaseExecution,
+    limits: FuzzLimits,
+    timeout: Duration,
+    deadline: &Deadline,
+) -> Result<(), FuzzError> {
+    if execution.stats.packets_attempted != 1 || execution.stats.packets_completed != 1 {
+        return Err(FuzzError::InvalidEvidence {
+            case_index: case.index,
+            message: "successful live execution must account for exactly one attempted and completed packet".to_owned(),
+        });
+    }
+    if execution.stats.bytes != execution.sent.bytes().len() as u64
+        || execution.built.bytes != execution.sent.bytes()
+    {
+        return Err(FuzzError::InvalidEvidence {
+            case_index: case.index,
+            message: "sent frame, built bytes, and byte statistics disagree".to_owned(),
+        });
+    }
+    if execution.built.bytes.len() > limits.max_packet_bytes {
+        return Err(FuzzError::InvalidEvidence {
+            case_index: case.index,
+            message: format!(
+                "executor built {} bytes, exceeding max_packet_bytes={}",
+                execution.built.bytes.len(),
+                limits.max_packet_bytes
+            ),
+        });
+    }
+    execution
+        .sent
+        .validate()
+        .map_err(|source| FuzzError::InvalidEvidence {
+            case_index: case.index,
+            message: format!("invalid sent evidence: {source}"),
+        })?;
+    execution
+        .stats
+        .capture
+        .validate()
+        .map_err(|source| FuzzError::InvalidEvidence {
+            case_index: case.index,
+            message: format!("invalid capture statistics: {source}"),
+        })?;
+    for (kind, frames) in [
+        ("response", &execution.responses),
+        ("unmatched", &execution.unmatched),
+        ("undecoded", &execution.undecoded),
+    ] {
+        for frame in frames {
+            deadline.check().map_err(duration_limit)?;
+            frame
+                .validate()
+                .map_err(|source| FuzzError::InvalidEvidence {
+                    case_index: case.index,
+                    message: format!("invalid {kind} evidence: {source}"),
+                })?;
+        }
+    }
+    for response in &execution.responses {
+        deadline.check().map_err(duration_limit)?;
+        let within_deadline = response
+            .timestamp
+            .duration_since(execution.sent.timestamp)
+            .is_ok_and(|latency| latency <= timeout);
+        if !within_deadline {
+            return Err(FuzzError::InvalidEvidence {
+                case_index: case.index,
+                message: format!(
+                    "response timestamp is outside the sent frame's {timeout:?} deadline"
+                ),
+            });
+        }
+    }
+    deadline.check().map_err(duration_limit)?;
+    Ok(())
+}
+
+pub(super) fn add_execution_stats(
+    total: &mut FuzzStats,
+    value: &crate::Stats,
+    case_index: u64,
+) -> Result<(), FuzzError> {
+    macro_rules! add {
+        ($field:ident) => {
+            total.$field = total
+                .$field
+                .checked_add(value.$field)
+                .ok_or(FuzzError::StatisticsOverflow { case_index })?;
+        };
+    }
+    add!(packets_attempted);
+    add!(packets_completed);
+    add!(bytes);
+    total.elapsed = total
+        .elapsed
+        .checked_add(value.elapsed)
+        .ok_or(FuzzError::StatisticsOverflow { case_index })?;
+    macro_rules! add_capture {
+        ($field:ident) => {
+            total.capture.$field = total
+                .capture
+                .$field
+                .checked_add(value.capture.$field)
+                .ok_or(FuzzError::StatisticsOverflow { case_index })?;
+        };
+    }
+    add_capture!(received_frames);
+    add_capture!(received_bytes);
+    add_capture!(dropped_frames);
+    add_capture!(dropped_bytes);
+    add_capture!(overflow_events);
+    add_capture!(receiver_dropped_frames);
+    Ok(())
+}
+
+fn retain_fuzz_evidence(budget: &mut EvidenceBudget, frame: &Frame, limits: FuzzLimits) -> bool {
+    budget
+        .retain(frame, limits.max_evidence_frames, limits.max_evidence_bytes)
+        .is_ok()
+}
+
+pub(super) struct ExecutionEvidence {
+    pub(super) responses: Vec<Frame>,
+    pub(super) unmatched: Vec<Frame>,
+    pub(super) undecoded: Vec<Frame>,
+}
+
+pub(super) fn retain_evidence(
+    case: &mut FuzzCase,
+    evidence: ExecutionEvidence,
+    limits: FuzzLimits,
+    budget: &mut EvidenceBudget,
+    diagnostics: &mut Vec<Diagnostic>,
+    deadline: &Deadline,
+) -> Result<(), FuzzError> {
+    let mut omitted = false;
+    for frame in evidence.responses {
+        deadline.check().map_err(duration_limit)?;
+        if retain_fuzz_evidence(budget, &frame, limits) {
+            case.responses.push(frame);
+        } else {
+            omitted = true;
+        }
+    }
+    for frame in evidence.unmatched {
+        deadline.check().map_err(duration_limit)?;
+        if retain_fuzz_evidence(budget, &frame, limits) {
+            case.unmatched.push(frame);
+        } else {
+            omitted = true;
+        }
+    }
+    for frame in evidence.undecoded {
+        deadline.check().map_err(duration_limit)?;
+        if retain_fuzz_evidence(budget, &frame, limits) {
+            case.undecoded.push(frame);
+        } else {
+            omitted = true;
+        }
+    }
+    if omitted {
+        push_diagnostic_once(
+            diagnostics,
+            Diagnostic::warning(
+                "fuzz.evidence_limit",
+                format!(
+                    "fuzz response evidence exceeded {} frame(s) or {} byte(s); later exact frames were omitted",
+                    limits.max_evidence_frames, limits.max_evidence_bytes
+                ),
+            ),
+        );
+    }
+    deadline.check().map_err(duration_limit)?;
+    Ok(())
+}
+
+pub(super) fn case_seed(operation_seed: u64, case_index: u64) -> u64 {
+    let mut random =
+        SplitMix64::new(operation_seed ^ case_index.wrapping_mul(SPLITMIX_INCREMENT) ^ CASE_DOMAIN);
+    random.next_u64()
+}
+
+pub(super) struct SplitMix64 {
+    state: u64,
+}
+
+impl SplitMix64 {
+    pub(super) fn new(seed: u64) -> Self {
+        Self { state: seed }
+    }
+
+    pub(super) fn next_u64(&mut self) -> u64 {
+        self.state = self.state.wrapping_add(SPLITMIX_INCREMENT);
+        let mut value = self.state;
+        value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        value ^ (value >> 31)
+    }
+
+    pub(super) fn bytes(&mut self, length: usize) -> Vec<u8> {
+        let mut output = Vec::with_capacity(length);
+        while output.len() < length {
+            let bytes = self.next_u64().to_le_bytes();
+            let remaining = length - output.len();
+            output.extend_from_slice(&bytes[..remaining.min(bytes.len())]);
+        }
+        output
+    }
+}

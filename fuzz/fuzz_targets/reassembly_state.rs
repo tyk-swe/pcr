@@ -7,7 +7,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::session::{ReassemblyLimits, fragment, tcp};
+use packetcraftr_session::{ReassemblyLimits, fragment, tcp};
 
 fuzz_target!(|data: &[u8]| {
     let limits = ReassemblyLimits {

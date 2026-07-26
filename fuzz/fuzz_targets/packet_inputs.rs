@@ -6,12 +6,12 @@
 use std::sync::Arc;
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::packet::{
+use packetcraftr_packet::{
     build::{Builder, Context as BuildContext, Options as BuildOptions},
     document::{Format, Packet as PacketDocument},
     expression::{Options as ExpressionOptions, parse},
 };
-use packetcraftr::protocol::builtin::registry;
+use packetcraftr_protocols::builtin::registry;
 
 fuzz_target!(|data: &[u8]| {
     let Some((&mode, input)) = data.split_first() else {

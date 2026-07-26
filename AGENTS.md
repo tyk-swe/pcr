@@ -1,5 +1,37 @@
 # Repository Guidelines
 
+## Project Purpose & Scope
+
+PacketcraftR is a network protocol analysis toolkit: a Rust library and CLI for
+constructing exact packet bytes, dissecting packet stacks, reading and writing
+capture files, and running bounded diagnostic workflows. It belongs to the same
+category as Wireshark, tcpdump, and scapy, and exists for network engineers
+debugging protocol behaviour, protocol implementers validating encoders and
+decoders against the wire format, and QA engineers testing parser robustness
+against malformed input.
+
+Most of the crate never touches a network. Packet building, dissection, capture
+file I/O, and fuzz-case generation are offline and runtime-neutral;
+`workflow::fuzz::run` deliberately has no resolver, route, or native-I/O seam,
+and `run_live` is a separate entry point that requires operation authorization.
+
+Live operations are authorization-gated by design. `TrafficPolicy`
+(`src/client/policy/authorization.rs`) validates every destination before any
+resolver, route, capture, or transmission provider is invoked, and reaching a
+public destination, resolving a hostname, or transmitting permissive or
+malformed bytes each requires its own explicit opt-in. Every active workflow
+runs under finite packet, byte, duration, and evidence budgets, and dissection
+is bounded so untrusted input cannot exhaust memory. The crate denies
+`unsafe_code` outside `src/net/platform/`, and keeps `overflow-checks` enabled
+in release so packet offsets and lengths fail closed in optimized builds.
+
+Use PacketcraftR only on systems and networks you own or are explicitly
+authorized to test. When changing anything under `src/client/policy/`,
+`src/net/platform/`, or the live paths in `src/workflow/`, preserve these gates
+rather than adding ways around them. See the "Safety gates for live operations"
+section of `README.md` for the operator-facing rules and `SECURITY.md` for
+vulnerability reporting.
+
 ## Project Structure & Module Organization
 
 This Rust 2024 package provides the `packetcraftr` library and CLI. `src/lib.rs`

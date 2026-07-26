@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! Typed Layer 2 and Layer 3 transmission contracts.
+//!
+//! These traits describe how a materialized route reaches a backend; they
+//! carry no policy of their own. Callers authorize a destination through the
+//! client policy layer before constructing a transmitter.
 
 use bytes::Bytes;
 

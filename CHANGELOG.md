@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   enable it explicitly.
 - Extended the pre-1.0 public output API and `packetcraftr.output/v1` command
   vocabulary with the additive `protocols` aggregate result contracts.
+- Documented project purpose, intended audience, and authorization scope in the
+  crate root, the contributor guide, and the transmission, replay, scan,
+  traceroute, and ARP module docs.
 
 ### Removed
 

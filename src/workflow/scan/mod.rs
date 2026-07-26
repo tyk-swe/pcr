@@ -3,6 +3,12 @@
 
 //! Bounded structured scanning over the shared resolver, policy, template,
 //! exchange, matcher, and capture-evidence APIs.
+//!
+//! Scanning here means reachability and service-response inventory on networks
+//! the operator is authorized to test: send a templated probe, correlate the
+//! response, and classify it with capture-backed evidence. Every run requires
+//! destination authorization and terminates on finite packet, byte, duration,
+//! and evidence budgets.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;

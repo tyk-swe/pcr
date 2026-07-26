@@ -4,6 +4,14 @@
 //! Packet construction, dissection, capture I/O, and policy-gated network
 //! workflows.
 //!
+//! PacketcraftR is a network protocol analysis toolkit for engineers debugging
+//! protocol behaviour, validating encoders and decoders against the wire
+//! format, and testing parser robustness against malformed input. Building,
+//! dissection, capture-file I/O, and fuzz-case generation are offline and
+//! runtime-neutral; the live paths are separate, require operation
+//! authorization through [`client::policy::Policy`], and run under finite
+//! packet, byte, duration, and evidence budgets.
+//!
 //! # Domain map
 //!
 //! The crate keeps its public surface in nine canonical domains:

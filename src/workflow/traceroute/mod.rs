@@ -3,6 +3,11 @@
 
 //! Bounded, structured traceroute over the shared authorization, exchange,
 //! protocol-correlation, and capture-evidence contracts.
+//!
+//! Traceroute maps the forwarding path to an authorized destination by sending
+//! TTL-limited probes and correlating the ICMP responses, for diagnosing
+//! routing and reachability problems. Destination authorization is required
+//! before the first probe, and hop count, attempts, and timeouts are finite.
 
 use std::fmt;
 use std::net::IpAddr;

@@ -2,6 +2,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 //! ARP message model and codec.
+//!
+//! This is a wire-format encoder and decoder only. It models the header fields
+//! so ARP frames can be built for tests and dissected out of captures; it
+//! performs no address resolution, caching, or announcement of its own.
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;

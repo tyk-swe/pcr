@@ -76,7 +76,7 @@ pub(crate) fn run_traceroute(
         limits: trace_limits,
     };
     request.validate().map_err(traceroute_cli_error)?;
-    let policy = policy.into_policy();
+    let policy = policy.resolve_policy()?;
     policy.validate().map_err(CliError::classified)?;
     validate_live_interface_selector("traceroute", interface.as_deref())?;
     let max_template_packets = usize::try_from(attempts).map_err(|_| {

@@ -408,6 +408,9 @@ Options:
           [default: auto]
           [possible values: auto, layer2, layer3]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -418,19 +421,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -484,6 +481,9 @@ Options:
           [default: auto]
           [possible values: auto, layer2, layer3]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -494,19 +494,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
       --mode <MODE>
           Strict or permissive packet construction
@@ -572,6 +566,9 @@ Options:
           [default: auto]
           [possible values: auto, layer2, layer3]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -582,19 +579,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
       --mode <MODE>
           Strict or permissive packet construction
@@ -696,6 +687,9 @@ Options:
           [default: auto]
           [possible values: auto, layer2, layer3]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -706,19 +700,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
       --timeout-ms <TIMEOUT_MS>
           Overall capture window in milliseconds
@@ -976,6 +964,9 @@ Options:
           [default: fail]
           [possible values: fail, drop-newest, drop-oldest]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -986,19 +977,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1120,6 +1105,9 @@ Options:
           [default: fail]
           [possible values: fail, drop-newest, drop-oldest]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -1130,19 +1118,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1293,6 +1275,9 @@ Options:
           [default: fail]
           [possible values: fail, drop-newest, drop-oldest]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -1303,19 +1288,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -1463,6 +1442,9 @@ Options:
           [default: fail]
           [possible values: fail, drop-newest, drop-oldest]
 
+      --policy-file <PATH>
+          Read policy defaults from a JSON or YAML file; flags override it
+
       --allow-public-destinations
           Deliberately authorize globally routable destinations
 
@@ -1473,19 +1455,13 @@ Options:
           Policy-level opt-in for permissively built live packets
 
       --max-packets <MAX_PACKETS>
-          Maximum packets authorized for one operation
-
-          [default: 10000]
+          Maximum packets authorized for one operation [default: 10000]
 
       --max-bytes <MAX_BYTES>
-          Maximum wire bytes authorized for one operation
-
-          [default: 268435456]
+          Maximum wire bytes authorized for one operation [default: 268435456]
 
       --max-resolved-addresses <MAX_RESOLVED_ADDRESSES>
-          Maximum distinct addresses accepted from one hostname resolution
-
-          [default: 64]
+          Maximum distinct addresses accepted from one hostname resolution [default: 64]
 
   -h, --help
           Print help (see a summary with '-h')

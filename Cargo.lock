@@ -1063,6 +1063,7 @@ dependencies = [
  "clap_complete",
  "clap_mangen",
  "jsonschema",
+ "noyalib",
  "packetcraftr",
  "serde",
  "serde_json",

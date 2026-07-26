@@ -1,0 +1,4 @@
+{
+  "allow_hostname_resolution": true,
+  "max_bytes_per_operation": 65536
+}

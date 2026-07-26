@@ -24,6 +24,7 @@ anstyle.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 clap_mangen.workspace = true
+noyalib.workspace = true
 packetcraftr.workspace = true
 serde.workspace = true
 serde_json.workspace = true

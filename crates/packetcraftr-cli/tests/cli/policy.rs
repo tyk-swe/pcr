@@ -397,3 +397,112 @@ fn replay_rejects_unsupported_roots_and_public_targets_before_interface_io() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["error"]["code"], "policy.public_destination");
 }
+
+fn policy_fixture(name: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/policy")
+        .join(name)
+}
+
+#[test]
+fn a_policy_file_authorizes_only_what_it_states() {
+    let denied = binary()
+        .args([
+            "--output",
+            "json",
+            "send",
+            "--packet",
+            "ipv4(src=192.0.2.1,dst=8.8.8.8)/udp(dport=9)",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(denied.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&denied.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.public_destination");
+
+    // The same command with the file gets past the destination gate; what it
+    // fails on next is the native capability, not policy.
+    let authorized = binary()
+        .args([
+            "--output",
+            "json",
+            "send",
+            "--packet",
+            "ipv4(src=192.0.2.1,dst=8.8.8.8)/udp(dport=9)",
+            "--policy-file",
+        ])
+        .arg(policy_fixture("lab.yaml"))
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&authorized.stdout).unwrap();
+    assert_ne!(value["error"]["kind"], "policy", "{value}");
+
+    // A file that does not mention hostname resolution leaves it denied.
+    let hostname = binary()
+        .args([
+            "--output",
+            "json",
+            "plan",
+            "--packet",
+            "ipv4(dst=192.0.2.1)/udp(dport=9)",
+            "--destination",
+            "example.test",
+            "--policy-file",
+        ])
+        .arg(policy_fixture("lab.yaml"))
+        .output()
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&hostname.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.hostname_resolution");
+}
+
+#[test]
+fn a_policy_file_is_read_from_json_or_yaml_and_never_discovered() {
+    for fixture in ["lab.yaml", "lab.json"] {
+        let output = binary()
+            .args([
+                "--output",
+                "json",
+                "plan",
+                "--packet",
+                "ipv4(dst=192.0.2.1)/udp(dport=9)",
+                "--policy-file",
+            ])
+            .arg(policy_fixture(fixture))
+            .output()
+            .unwrap();
+        // Both formats parse; neither is a CLI error.
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_ne!(value["error"]["code"], "cli.error", "{fixture}: {value}");
+    }
+}
+
+#[test]
+fn a_malformed_or_missing_policy_file_is_a_cli_error() {
+    let unknown_key = binary()
+        .args(["send", "--packet", "raw()", "--policy-file"])
+        .arg(policy_fixture("unknown-key.yaml"))
+        .output()
+        .unwrap();
+    assert_eq!(unknown_key.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&unknown_key.stderr);
+    // A misspelled gate must not read as "gate not requested".
+    assert!(stderr.contains("unknown field"), "{stderr}");
+
+    let missing = binary()
+        .args([
+            "send",
+            "--packet",
+            "raw()",
+            "--policy-file",
+            "definitely-missing-policy.yaml",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("definitely-missing-policy.yaml"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+}

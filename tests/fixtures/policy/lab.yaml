@@ -1,0 +1,3 @@
+# Authorizes one lab workflow: a public destination under a small budget.
+allow_public_destinations: true
+max_packets_per_operation: 16

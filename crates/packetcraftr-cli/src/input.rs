@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
+use packetcraftr::client;
 use packetcraftr::packet::{self, Packet};
 
 use super::arguments::RecipeArgs;
@@ -112,6 +113,50 @@ fn document_format_from_path(path: &Path) -> Option<packet::document::Format> {
         "yaml" | "yml" => Some(packet::document::Format::Yaml),
         _ => None,
     }
+}
+
+/// Largest traffic-policy file accepted. A policy names six values.
+const MAX_POLICY_FILE_BYTES: usize = 64 * 1024;
+
+/// Loads a traffic policy from an explicitly named JSON or YAML file.
+///
+/// There is no ambient discovery: a policy relaxes safety gates, so it is only
+/// ever read from a path the operator named on the command line. Unknown keys
+/// are rejected by the contract, so a misspelled gate cannot read as "gate not
+/// requested".
+pub(super) fn read_policy_file(path: &Path) -> Result<client::policy::File, CliError> {
+    let bytes = read_bounded_file(path, MAX_POLICY_FILE_BYTES)?;
+    let input = String::from_utf8(bytes).map_err(|source| {
+        CliError::new(
+            2,
+            format!("policy file {} is not UTF-8: {source}", path.display()),
+        )
+    })?;
+    let trimmed = input.trim_start();
+    let json = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        || trimmed.starts_with('{');
+    if json {
+        return serde_json::from_str(&input).map_err(|source| {
+            CliError::new(
+                2,
+                format!("policy file {} is not valid JSON: {source}", path.display()),
+            )
+        });
+    }
+    let config = noyalib::ParserConfig::new()
+        .max_document_length(MAX_POLICY_FILE_BYTES)
+        .max_alias_expansions(0)
+        .duplicate_key_policy(noyalib::DuplicateKeyPolicy::Error)
+        .strict_booleans(true);
+    noyalib::from_str_with_config(&input, &config).map_err(|source| {
+        CliError::new(
+            2,
+            format!("policy file {} is not valid YAML: {source}", path.display()),
+        )
+    })
 }
 
 pub(super) fn read_bounded_file(path: &Path, maximum: usize) -> Result<Vec<u8>, CliError> {

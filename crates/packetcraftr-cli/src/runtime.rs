@@ -300,7 +300,7 @@ pub(super) fn prepare_capture_request(
         policy,
     } = arguments;
     let Some(packet) = read_optional_recipe(recipe, &registry)? else {
-        let policy = policy.into_policy();
+        let policy = policy.resolve_policy()?;
         policy.validate().map_err(CliError::classified)?;
         let Some(selector) = interface else {
             return Err(CliError::new(
@@ -366,7 +366,7 @@ fn prepare_planned_route(
     link_mode: CliLinkMode,
     policy: TrafficPolicyArgs,
 ) -> Result<PreparedRouteRequest, CliError> {
-    let policy = policy.into_policy();
+    let policy = policy.resolve_policy()?;
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.
     policy

@@ -80,7 +80,7 @@ pub(crate) fn run_dns(
             max_duration: Duration::from_millis(max_duration_ms),
         },
     };
-    let policy = policy.into_policy();
+    let policy = policy.resolve_policy()?;
     policy.validate().map_err(CliError::classified)?;
     validate_live_interface_selector("dns", interface.as_deref())?;
 

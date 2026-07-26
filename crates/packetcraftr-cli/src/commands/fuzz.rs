@@ -90,7 +90,7 @@ pub(crate) fn run_fuzz(
     request.validate().map_err(fuzz_cli_error)?;
 
     let result = if live {
-        let policy = policy.into_policy();
+        let policy = policy.resolve_policy()?;
         policy.validate().map_err(CliError::classified)?;
         validate_live_interface_selector("fuzz", interface.as_deref())?;
         let exchange = workflow_exchange_options(

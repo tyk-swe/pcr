@@ -799,3 +799,50 @@ fn frame_summaries_count_diagnostics_and_omit_absent_endpoints() {
     let opaque = decode_frame(LinkType(147), vec![0xde, 0xad, 0xbe, 0xef]);
     assert_eq!(frame_summary(&opaque), "raw diagnostics=1");
 }
+
+#[test]
+fn documented_policy_defaults_match_the_resolved_policy() {
+    // The budget flags are optional so the policy file can supply them, which
+    // means clap no longer renders their defaults. The help text states them
+    // literally, so it has to be checked against the values it describes.
+    let help = {
+        let error = Cli::try_parse_from(["packetcraftr", "send", "--help"]).unwrap_err();
+        error.to_string()
+    };
+    let policy = client::policy::Policy::default();
+    for expected in [
+        format!(
+            "Maximum packets authorized for one operation [default: {}]",
+            policy.max_packets_per_operation
+        ),
+        format!(
+            "Maximum wire bytes authorized for one operation [default: {}]",
+            policy.max_bytes_per_operation
+        ),
+        format!(
+            "Maximum distinct addresses accepted from one hostname resolution [default: {}]",
+            policy.max_resolved_addresses
+        ),
+    ] {
+        assert!(help.contains(&expected), "missing {expected}\n{help}");
+    }
+}
+
+#[test]
+fn an_absent_policy_file_leaves_every_gate_at_its_default() {
+    let cli = Cli::try_parse_from([
+        "packetcraftr",
+        "plan",
+        "--packet",
+        "ipv4(dst=192.0.2.1)/udp(dport=9)",
+    ])
+    .unwrap();
+    let Command::Plan(arguments) = cli.command else {
+        panic!("expected plan command");
+    };
+    assert_eq!(arguments.policy.policy_file, None);
+    assert_eq!(
+        arguments.policy.resolve_policy().unwrap(),
+        client::policy::Policy::default()
+    );
+}

@@ -55,7 +55,7 @@ pub(crate) fn run_scan(
         max_undecoded,
     };
     scan_limits.validate().map_err(scan_cli_error)?;
-    let policy = policy.into_policy();
+    let policy = policy.resolve_policy()?;
     policy.validate().map_err(CliError::classified)?;
     validate_live_interface_selector("scan", interface.as_deref())?;
     let request = workflow::scan::Request {

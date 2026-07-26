@@ -273,6 +273,24 @@ Replay checks each decoded frame. A policy rejection is reported as
 `policy.public_destination` before interface discovery, route lookup, capture,
 or transmission.
 
+A repeated policy can live in a file instead of being retyped. `--policy-file`
+reads JSON or YAML stating any of the six policy values, and command-line flags
+override it:
+
+```yaml
+allow_public_destinations: true
+max_packets_per_operation: 16
+```
+
+```console
+packetcraftr send --packet 'ipv4(dst=198.51.100.10)/icmpv4(type=8,code=0)' \
+  --policy-file lab-policy.yaml
+```
+
+The file is read only from a path you name; PacketcraftR never searches for one.
+An unrecognized key is an error rather than a silent no-op, so a misspelled gate
+cannot look like an authorization you did not grant.
+
 Recipe-free `capture --interface` declares no destination, so it has nothing
 for these gates to authorize. It observes an interface and is bound instead by
 `--timeout-ms`, `--max-packets`, and `--max-bytes`. Capture privileges are

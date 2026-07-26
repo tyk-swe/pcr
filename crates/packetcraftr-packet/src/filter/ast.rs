@@ -9,7 +9,7 @@ use super::super::layer::ProtocolId;
 
 /// A comparison spelled by a display filter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Operator {
+pub(super) enum Operator {
     Equal,
     NotEqual,
     Less,
@@ -24,18 +24,6 @@ impl Operator {
             self,
             Self::Less | Self::LessOrEqual | Self::Greater | Self::GreaterOrEqual
         )
-    }
-
-    /// The exact spelling accepted by the filter grammar.
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Equal => "==",
-            Self::NotEqual => "!=",
-            Self::Less => "<",
-            Self::LessOrEqual => "<=",
-            Self::Greater => ">",
-            Self::GreaterOrEqual => ">=",
-        }
     }
 }
 

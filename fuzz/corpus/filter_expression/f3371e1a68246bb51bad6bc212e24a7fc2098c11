@@ -1,0 +1,1 @@
+udp && !(ipv6.hop_limit < 64) || icmp.type == 8

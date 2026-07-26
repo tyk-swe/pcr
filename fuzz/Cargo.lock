@@ -131,7 +131,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "packetcraftr-capture",
  "packetcraftr-client",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-capture"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "packetcraftr-error",
@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-client"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "packetcraftr-capture",
@@ -170,7 +170,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-error"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "serde",
 ]
@@ -185,7 +185,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-net"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "packetcraftr-capture",
@@ -197,7 +197,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-output"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "packetcraftr-capture",
@@ -212,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-packet"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "noyalib",
@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-protocol"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "packetcraftr-capture",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-session"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "serde",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-workflow"
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 dependencies = [
  "bytes",
  "packetcraftr-capture",

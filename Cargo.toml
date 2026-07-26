@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
-version = "0.4.0-beta.2"
+version = "0.5.0-beta.1"
 edition = "2024"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
@@ -21,16 +21,16 @@ undocumented_unsafe_blocks = "deny"
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency
 # pins the shared workspace version. Bump these with `workspace.package.version`.
-packetcraftr = { path = "crates/packetcraftr", version = "0.4.0-beta.2", default-features = false }
-packetcraftr-capture = { path = "crates/packetcraftr-capture", version = "0.4.0-beta.2" }
-packetcraftr-client = { path = "crates/packetcraftr-client", version = "0.4.0-beta.2" }
-packetcraftr-error = { path = "crates/packetcraftr-error", version = "0.4.0-beta.2" }
-packetcraftr-net = { path = "crates/packetcraftr-net", version = "0.4.0-beta.2" }
-packetcraftr-output = { path = "crates/packetcraftr-output", version = "0.4.0-beta.2" }
-packetcraftr-packet = { path = "crates/packetcraftr-packet", version = "0.4.0-beta.2" }
-packetcraftr-protocol = { path = "crates/packetcraftr-protocol", version = "0.4.0-beta.2" }
-packetcraftr-session = { path = "crates/packetcraftr-session", version = "0.4.0-beta.2" }
-packetcraftr-workflow = { path = "crates/packetcraftr-workflow", version = "0.4.0-beta.2" }
+packetcraftr = { path = "crates/packetcraftr", version = "0.5.0-beta.1", default-features = false }
+packetcraftr-capture = { path = "crates/packetcraftr-capture", version = "0.5.0-beta.1" }
+packetcraftr-client = { path = "crates/packetcraftr-client", version = "0.5.0-beta.1" }
+packetcraftr-error = { path = "crates/packetcraftr-error", version = "0.5.0-beta.1" }
+packetcraftr-net = { path = "crates/packetcraftr-net", version = "0.5.0-beta.1" }
+packetcraftr-output = { path = "crates/packetcraftr-output", version = "0.5.0-beta.1" }
+packetcraftr-packet = { path = "crates/packetcraftr-packet", version = "0.5.0-beta.1" }
+packetcraftr-protocol = { path = "crates/packetcraftr-protocol", version = "0.5.0-beta.1" }
+packetcraftr-session = { path = "crates/packetcraftr-session", version = "0.5.0-beta.1" }
+packetcraftr-workflow = { path = "crates/packetcraftr-workflow", version = "0.5.0-beta.1" }
 
 anstream = "1"
 anstyle = "1"

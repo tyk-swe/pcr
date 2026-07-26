@@ -1,0 +1,1 @@
+udp && !(ipv6.hop_limit < 64) p_licmpv4.type == 8

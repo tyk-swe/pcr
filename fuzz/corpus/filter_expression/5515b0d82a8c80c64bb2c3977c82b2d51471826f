@@ -1,0 +1,1 @@
+ipv4.source == 192.0.2.24/0 && tcp.destination_port == 277

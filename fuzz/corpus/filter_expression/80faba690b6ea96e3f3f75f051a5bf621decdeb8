@@ -1,0 +1,1 @@
+ud.hop_limip && !(ipv6.hop_limit < 64) || icmpv4.type == 8

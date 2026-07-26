@@ -25,7 +25,6 @@ mod parser;
 #[cfg(test)]
 mod tests;
 
-pub use ast::Operator;
 pub use engine::{DEFAULT_MAX_FILTER_BYTES, Filter, FilterOptions as Options, MAX_FILTER_NESTING};
 pub use error::FilterError as Error;
 

@@ -1,0 +1,2 @@
+udp && !(ipv6.hop_l
+mit < 6==4) || icmpv4.type == 8

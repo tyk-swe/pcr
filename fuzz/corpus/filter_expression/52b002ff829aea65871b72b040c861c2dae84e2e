@@ -1,0 +1,1 @@
+udp && !(ipv6.hop_lhmit < 6==4) 

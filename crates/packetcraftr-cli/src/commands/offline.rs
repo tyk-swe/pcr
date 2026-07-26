@@ -20,15 +20,15 @@ use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_plain_line, write_raw,
     write_stdout_line,
 };
-use super::super::runtime::default_registry_arc;
+use super::super::runtime::default_catalog_arc;
 
 pub(crate) fn run_build(
     arguments: BuildArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
-    let registry = default_registry_arc()?;
-    let packet = read_recipe(arguments.recipe, &registry)?;
-    let built = packet::build::Builder::new(registry)
+    let catalog = default_catalog_arc()?;
+    let packet = read_recipe(arguments.recipe, &catalog)?;
+    let built = packet::build::Builder::new(catalog)
         .build(
             packet,
             packet::build::Context::default(),
@@ -84,8 +84,8 @@ pub(crate) fn run_dissect(
         (None, None) => read_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
-    let registry = default_registry_arc()?;
-    let decoded = packet::decode::Decoder::new(registry)
+    let catalog = default_catalog_arc()?;
+    let decoded = packet::decode::Decoder::new(catalog)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
                 .map_err(|source| CliError::new(3, source.to_string()))?,

@@ -96,11 +96,11 @@ pub struct ProtocolField {
 impl From<&field::Schema> for ProtocolField {
     fn from(value: &field::Schema) -> Self {
         Self {
-            name: value.name.to_owned(),
+            name: value.name.to_string(),
             kind: value.kind.into(),
             required: value.required,
             derived: value.derived,
-            description: value.description.to_owned(),
+            description: value.description.to_string(),
         }
     }
 }
@@ -147,8 +147,6 @@ pub struct ProtocolDetailResult {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     #[test]
@@ -174,7 +172,7 @@ mod tests {
 
     #[test]
     fn details_copy_every_constructible_reflective_field_exactly() {
-        let registry = packetcraftr_protocols::builtin::registry().unwrap();
+        let catalog = packetcraftr_protocols::builtin::catalog().unwrap();
 
         for support in support::BUILTIN_PROTOCOLS {
             if support.decode_only {
@@ -184,30 +182,29 @@ mod tests {
                 continue;
             }
 
-            let layer = registry
-                .codec(support.protocol)
-                .unwrap()
-                .make_layer(&BTreeMap::new())
-                .unwrap();
-            let fields = layer
-                .schema()
+            let descriptor = catalog
+                .descriptor_named(support.protocol)
+                .expect("built-in protocol must have a catalog descriptor");
+            let fields = descriptor
+                .schema
                 .fields
                 .iter()
                 .map(ProtocolField::from)
                 .collect::<Vec<_>>();
             assert_eq!(
                 fields.len(),
-                layer.schema().fields.len(),
+                descriptor.schema.fields.len(),
                 "{}",
                 support.protocol
             );
-            for (actual, expected) in fields.iter().zip(layer.schema().fields) {
-                assert_eq!(actual.name, expected.name, "{}", support.protocol);
+            for (actual, expected) in fields.iter().zip(descriptor.schema.fields.iter()) {
+                assert_eq!(actual.name, expected.name.as_ref(), "{}", support.protocol);
                 assert_eq!(actual.kind, expected.kind.into(), "{}", support.protocol);
                 assert_eq!(actual.required, expected.required, "{}", support.protocol);
                 assert_eq!(actual.derived, expected.derived, "{}", support.protocol);
                 assert_eq!(
-                    actual.description, expected.description,
+                    actual.description,
+                    expected.description.as_ref(),
                     "{}",
                     support.protocol
                 );

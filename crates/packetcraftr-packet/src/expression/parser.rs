@@ -4,13 +4,15 @@
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
+use std::sync::Arc;
 
 use bytes::Bytes;
 use thiserror::Error;
 
 use super::super::Packet;
+use super::super::catalog::{ProtocolCatalogSnapshot, ProtocolOperationError};
+use super::super::codec::CodecError;
 use super::super::field::FieldValue;
-use super::super::registry::{CodecError, ProtocolRegistry};
 
 pub const DEFAULT_MAX_EXPRESSION_BYTES: usize = 1024 * 1024;
 /// Absolute recursive list nesting accepted by the expression parser.
@@ -40,7 +42,7 @@ pub enum ExpressionError {
         layer: usize,
         name: String,
         #[source]
-        source: CodecError,
+        source: ProtocolOperationError,
     },
 }
 
@@ -63,7 +65,7 @@ impl Default for ExpressionOptions {
 
 pub fn parse_packet_expression(
     input: &str,
-    registry: &ProtocolRegistry,
+    catalog: &Arc<ProtocolCatalogSnapshot>,
     options: ExpressionOptions,
 ) -> Result<Packet, ExpressionError> {
     if input.trim().is_empty() {
@@ -87,32 +89,82 @@ pub fn parse_packet_expression(
     // even when the caller allows only a handful of layers.
     let segments = split_top_level_bounded(input, '/', Some(options.max_layers))?;
     let mut packet = Packet::with_capacity(segments.len());
+    let mut operation = catalog.operation();
     for (layer_index, segment) in segments.into_iter().enumerate() {
-        let (name, fields) = parse_layer(segment, layer_index, options.max_nesting)?;
-        let codec =
-            registry
-                .codec_named(&name)
+        let (name, mut fields) = parse_layer(segment, layer_index, options.max_nesting)?;
+        let registration =
+            catalog
+                .descriptor_named(&name)
                 .ok_or_else(|| ExpressionError::UnknownProtocol {
                     layer: layer_index,
                     name: name.clone(),
                 })?;
-        let layer = codec
-            .make_layer(&fields)
-            .map_err(|source| ExpressionError::Layer {
+        normalize_byte_shortcuts(&registration.protocol, &mut fields).map_err(|source| {
+            ExpressionError::Layer {
                 layer: layer_index,
                 name: name.clone(),
-                source,
-            })?;
-        layer
-            .validate_required_fields()
-            .map_err(|source| ExpressionError::Layer {
-                layer: layer_index,
-                name,
-                source: CodecError::Field(source),
-            })?;
+                source: ProtocolOperationError::Codec {
+                    protocol: registration.protocol.clone(),
+                    source,
+                },
+            }
+        })?;
+        let layer =
+            operation
+                .construct_named(&name, fields)
+                .map_err(|source| ExpressionError::Layer {
+                    layer: layer_index,
+                    name: name.clone(),
+                    source,
+                })?;
         packet.push_boxed(layer);
     }
     Ok(packet)
+}
+
+fn normalize_byte_shortcuts(
+    protocol: &super::super::layer::ProtocolId,
+    fields: &mut BTreeMap<String, FieldValue>,
+) -> Result<(), CodecError> {
+    if !matches!(protocol.as_str(), "raw" | "padding") {
+        return Ok(());
+    }
+    let hex = fields.remove("hex");
+    let text = fields.remove("text");
+    let derived = match (hex, text) {
+        (None, None) => None,
+        (Some(_), Some(_)) => {
+            return Err(CodecError::Invalid {
+                protocol: protocol.clone(),
+                message: "hex and text cannot be combined".to_owned(),
+            });
+        }
+        (Some(FieldValue::Text(value)), None) => Some(FieldValue::Bytes(decode_hex(&value)?)),
+        (None, Some(FieldValue::Text(value))) => {
+            Some(FieldValue::Bytes(Bytes::from(value.into_bytes())))
+        }
+        (Some(_), None) => {
+            return Err(CodecError::Invalid {
+                protocol: protocol.clone(),
+                message: "hex must be a quoted hexadecimal string".to_owned(),
+            });
+        }
+        (None, Some(_)) => {
+            return Err(CodecError::Invalid {
+                protocol: protocol.clone(),
+                message: "text must be a quoted string".to_owned(),
+            });
+        }
+    };
+    if let Some(value) = derived
+        && fields.insert("bytes".to_owned(), value).is_some()
+    {
+        return Err(CodecError::Invalid {
+            protocol: protocol.clone(),
+            message: "bytes cannot be combined with hex or text".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn parse_layer(
@@ -404,7 +456,7 @@ fn parse_mac(input: &str) -> Option<[u8; 6]> {
 }
 
 pub fn decode_hex(input: &str) -> Result<Bytes, CodecError> {
-    let protocol = super::super::layer::ProtocolId::new("raw");
+    let protocol = super::super::layer::ProtocolId::from_static("raw");
     let compact = input
         .strip_prefix("0x")
         .or_else(|| input.strip_prefix("0X"))
@@ -491,10 +543,10 @@ mod tests {
 
     #[test]
     fn expression_list_nesting_is_bounded() {
-        let registry = ProtocolRegistry::builder().build().unwrap();
+        let catalog = Arc::new(ProtocolCatalogSnapshot::builder().build().unwrap());
         let error = parse_packet_expression(
             "raw(bytes=[[[[1]]]])",
-            &registry,
+            &catalog,
             ExpressionOptions {
                 max_nesting: 2,
                 ..ExpressionOptions::default()
@@ -506,10 +558,10 @@ mod tests {
 
     #[test]
     fn expression_nesting_limit_cannot_disable_the_stack_guard() {
-        let registry = ProtocolRegistry::builder().build().unwrap();
+        let catalog = Arc::new(ProtocolCatalogSnapshot::builder().build().unwrap());
         let error = parse_packet_expression(
             "raw()",
-            &registry,
+            &catalog,
             ExpressionOptions {
                 max_nesting: MAX_EXPRESSION_NESTING + 1,
                 ..ExpressionOptions::default()
@@ -527,10 +579,10 @@ mod tests {
 
     #[test]
     fn layer_limit_is_enforced_during_expression_splitting() {
-        let registry = ProtocolRegistry::builder().build().unwrap();
+        let catalog = Arc::new(ProtocolCatalogSnapshot::builder().build().unwrap());
         let error = parse_packet_expression(
             "raw()/raw()/raw()",
-            &registry,
+            &catalog,
             ExpressionOptions {
                 max_layers: 1,
                 ..ExpressionOptions::default()
@@ -541,7 +593,7 @@ mod tests {
 
         let error = parse_packet_expression(
             "raw()",
-            &registry,
+            &catalog,
             ExpressionOptions {
                 max_layers: 0,
                 ..ExpressionOptions::default()

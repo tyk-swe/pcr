@@ -5,16 +5,7 @@ use super::*;
 
 #[test]
 fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
-    let mut registry_builder = RegistryBuilder::new();
-    registry_builder.module(&BuiltinProtocols).unwrap();
-    registry_builder.register_codec(MacSensitiveCodec).unwrap();
-    registry_builder
-        .bind("ethernet", 0x88b5, "test.mac_sensitive", 200)
-        .unwrap();
-    registry_builder
-        .register_matcher("test.mac_sensitive", SlowMatcher(Duration::from_millis(75)))
-        .unwrap();
-    let registry = Arc::new(registry_builder.build().unwrap());
+    let catalog = catalog_with_mac_sensitive(Some(Duration::from_millis(75)));
     let mut packet = Packet::new();
     packet
         .push(Ethernet {
@@ -22,7 +13,7 @@ fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
             ..Ethernet::default()
         })
         .push(MacSensitiveLayer);
-    let built = Builder::new(Arc::clone(&registry))
+    let built = Builder::new(Arc::clone(&catalog))
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
     let prepared = vec![PreparedExchangePacket {
@@ -47,7 +38,7 @@ fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
     }];
     let sent_at = vec![Instant::now()];
     let deadline = sent_at[0].checked_add(Duration::from_millis(50)).unwrap();
-    let dissector = Dissector::new(Arc::clone(&registry));
+    let dissector = Dissector::new(Arc::clone(&catalog));
     let options = ExchangeOptions::default();
     let mut accumulator = ExchangeAccumulator::new(1);
 
@@ -57,7 +48,7 @@ fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
             sent_at[0],
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -85,10 +76,10 @@ fn workflow_accumulator_with_unsolicited(
     Vec<Instant>,
     Instant,
 ) {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let source = Ipv4Addr::new(10, 0, 0, 1);
     let destination = Ipv4Addr::new(10, 0, 0, 2);
-    let built = Builder::new(Arc::clone(&registry))
+    let built = Builder::new(Arc::clone(&catalog))
         .build(
             packet(source, destination, 12_345, 9),
             BuildContext::default(),
@@ -117,7 +108,7 @@ fn workflow_accumulator_with_unsolicited(
     }];
     let sent_at = vec![Instant::now()];
     let process_deadline = sent_at[0].checked_add(Duration::from_secs(1)).unwrap();
-    let dissector = Dissector::new(Arc::clone(&registry));
+    let dissector = Dissector::new(Arc::clone(&catalog));
     let options = ExchangeOptions::default();
     let mut accumulator = ExchangeAccumulator::new(1);
 
@@ -127,7 +118,7 @@ fn workflow_accumulator_with_unsolicited(
             sent_at[0],
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -217,11 +208,11 @@ fn workflow_promotion_crossing_deadline_is_not_committed() {
 
 #[test]
 fn workflow_promotion_runs_before_native_capture_wait_consumes_deadline() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let source = Ipv4Addr::new(10, 0, 0, 1);
     let destination = Ipv4Addr::new(10, 0, 0, 2);
     let request = packet(source, destination, 12_345, 9);
-    let response = Builder::new(Arc::clone(&registry))
+    let response = Builder::new(Arc::clone(&catalog))
         .build(
             request.clone(),
             BuildContext::default(),
@@ -230,7 +221,7 @@ fn workflow_promotion_runs_before_native_capture_wait_consumes_deadline() {
         .unwrap();
     let events = Arc::new(Mutex::new(Vec::new()));
     let client = Client::new(
-        registry,
+        catalog,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         DeadlineConsumingExchangeIo {
@@ -284,8 +275,8 @@ fn workflow_promotion_runs_before_native_capture_wait_consumes_deadline() {
 
 #[test]
 fn built_in_workflow_path_cannot_promote_a_frame_without_ingress_time() {
-    let registry = Arc::new(default_registry().unwrap());
-    let response = Builder::new(Arc::clone(&registry))
+    let catalog = Arc::new(default_catalog().unwrap());
+    let response = Builder::new(Arc::clone(&catalog))
         .build(
             packet(
                 Ipv4Addr::new(10, 0, 0, 2),
@@ -307,7 +298,7 @@ fn built_in_workflow_path_cannot_promote_a_frame_without_ingress_time() {
         capture_statistics: CaptureStatistics::default(),
     });
     let client = Client::new(
-        registry,
+        catalog,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         io,

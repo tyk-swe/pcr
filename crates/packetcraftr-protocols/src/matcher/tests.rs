@@ -15,7 +15,9 @@ use crate::{
 use packetcraftr_packet::{
     Packet,
     field::{FieldKind, FieldValue, WireValue},
-    layer::{FieldError, FieldSchema, Layer, LayerSchema, ProtocolId, Raw},
+    layer::{
+        FieldConstraints, FieldError, FieldId, FieldSchema, Layer, LayerSchema, ProtocolId, Raw,
+    },
     semantics::BuiltinProtocol,
 };
 
@@ -42,28 +44,33 @@ struct ReflectiveUdp {
 }
 
 impl Layer for ReflectiveUdp {
-    fn schema(&self) -> &'static LayerSchema {
+    fn schema(&self) -> &LayerSchema {
         static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-        static FIELDS: &[FieldSchema] = &[
-            FieldSchema {
-                name: "source_port",
-                kind: FieldKind::Unsigned,
-                derived: false,
-                required: false,
-                description: "test source port",
-            },
-            FieldSchema {
-                name: "destination_port",
-                kind: FieldKind::Unsigned,
-                derived: false,
-                required: false,
-                description: "test destination port",
-            },
-        ];
-        SCHEMA.get_or_init(|| LayerSchema {
-            protocol: ProtocolId::new(BuiltinProtocol::Udp.as_str()),
-            name: "Reflective UDP test layer",
-            fields: FIELDS,
+        SCHEMA.get_or_init(|| {
+            LayerSchema::new(
+                ProtocolId::from_static(BuiltinProtocol::Udp.as_str()),
+                "Reflective UDP test layer",
+                std::iter::empty::<&str>(),
+                1,
+                ["source_port", "destination_port"].map(|name| {
+                    FieldSchema::new(
+                        FieldId::from_static(name),
+                        name,
+                        std::iter::empty::<&str>(),
+                        FieldKind::Unsigned,
+                        false,
+                        false,
+                        if name == "source_port" {
+                            "test source port"
+                        } else {
+                            "test destination port"
+                        },
+                        FieldConstraints::default(),
+                    )
+                    .unwrap()
+                }),
+            )
+            .unwrap()
         })
     }
 
@@ -79,18 +86,18 @@ impl Layer for ReflectiveUdp {
         self
     }
 
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        match name {
+    fn field_by_id(&self, id: &FieldId) -> Option<FieldValue> {
+        match id.as_str() {
             "source_port" => self.source_port.clone(),
             "destination_port" => self.destination_port.clone(),
             _ => None,
         }
     }
 
-    fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-        Err(FieldError::UnknownField {
+    fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+        Err(FieldError::UnknownFieldId {
             protocol: self.protocol_id().clone(),
-            field: name.to_owned(),
+            field: id.clone(),
         })
     }
 }
@@ -99,28 +106,33 @@ impl Layer for ReflectiveUdp {
 pub(super) struct MalformedIpv4;
 
 impl Layer for MalformedIpv4 {
-    fn schema(&self) -> &'static LayerSchema {
+    fn schema(&self) -> &LayerSchema {
         static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-        static FIELDS: &[FieldSchema] = &[
-            FieldSchema {
-                name: "source",
-                kind: FieldKind::Ipv4,
-                derived: false,
-                required: true,
-                description: "test source",
-            },
-            FieldSchema {
-                name: "destination",
-                kind: FieldKind::Ipv4,
-                derived: false,
-                required: true,
-                description: "test destination",
-            },
-        ];
-        SCHEMA.get_or_init(|| LayerSchema {
-            protocol: ProtocolId::new(BuiltinProtocol::Ipv4.as_str()),
-            name: "Malformed IPv4 test layer",
-            fields: FIELDS,
+        SCHEMA.get_or_init(|| {
+            LayerSchema::new(
+                ProtocolId::from_static(BuiltinProtocol::Ipv4.as_str()),
+                "Malformed IPv4 test layer",
+                std::iter::empty::<&str>(),
+                1,
+                ["source", "destination"].map(|name| {
+                    FieldSchema::new(
+                        FieldId::from_static(name),
+                        name,
+                        std::iter::empty::<&str>(),
+                        FieldKind::Ipv4,
+                        true,
+                        false,
+                        if name == "source" {
+                            "test source"
+                        } else {
+                            "test destination"
+                        },
+                        FieldConstraints::default(),
+                    )
+                    .unwrap()
+                }),
+            )
+            .unwrap()
         })
     }
 
@@ -136,15 +148,15 @@ impl Layer for MalformedIpv4 {
         self
     }
 
-    fn field(&self, name: &str) -> Option<FieldValue> {
-        matches!(name, "source" | "destination")
+    fn field_by_id(&self, id: &FieldId) -> Option<FieldValue> {
+        matches!(id.as_str(), "source" | "destination")
             .then(|| FieldValue::Text("not-an-address".to_owned()))
     }
 
-    fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-        Err(FieldError::UnknownField {
+    fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+        Err(FieldError::UnknownFieldId {
             protocol: self.protocol_id().clone(),
-            field: name.to_owned(),
+            field: id.clone(),
         })
     }
 }

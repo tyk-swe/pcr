@@ -16,13 +16,16 @@ macro_rules! reflective_layer {
         fn $schema:ident() => {
             protocol: $protocol:expr_2021,
             name: $layer_name:literal
+            $(, aliases: [$($layer_alias:literal),* $(,)?])?
         }
         impl $ty:ty {
             $(
                 $field:literal $(| $alias:literal)* => {
+                    id: $field_id:literal,
                     kind: $kind:ident,
                     derived: $derived:literal,
                     required: $required:literal,
+                    $(constraints: $constraints:expr_2021,)?
                     description: $description:literal,
                     get |$getter:ident| $get:expr_2021,
                     set |$setter:ident, $value:ident, $field_name:ident| $set:expr_2021
@@ -36,26 +39,32 @@ macro_rules! reflective_layer {
         fn $schema() -> &'static $crate::layer::LayerSchema {
             static SCHEMA: std::sync::OnceLock<$crate::layer::LayerSchema> =
                 std::sync::OnceLock::new();
-            static FIELDS: &[$crate::layer::FieldSchema] = &[
-                $(
-                    $crate::layer::FieldSchema {
-                        name: $field,
-                        kind: $crate::field::FieldKind::$kind,
-                        derived: $derived,
-                        required: $required,
-                        description: $description,
-                    }
-                ),*
-            ];
-            SCHEMA.get_or_init(|| $crate::layer::LayerSchema {
-                protocol: $protocol,
-                name: $layer_name,
-                fields: FIELDS,
+            SCHEMA.get_or_init(|| {
+                $crate::layer::LayerSchema::new(
+                    $protocol,
+                    $layer_name,
+                    (&[$($($layer_alias),*)?] as &[&str]).iter().copied(),
+                    1,
+                    vec![
+                        $(
+                            $crate::layer::FieldSchema::new(
+                                $crate::layer::FieldId::from_static($field_id),
+                                $field,
+                                (&[$($alias),*] as &[&str]).iter().copied(),
+                                $crate::field::FieldKind::$kind,
+                                $required,
+                                $derived,
+                                $description,
+                                reflective_layer!(@constraints $($constraints)?),
+                            ).expect("built-in field schema must be valid")
+                        ),*
+                    ],
+                ).expect("built-in layer schema must be valid")
             })
         }
 
         impl $crate::layer::Layer for $ty {
-            fn schema(&self) -> &'static $crate::layer::LayerSchema {
+            fn schema(&self) -> &$crate::layer::LayerSchema {
                 $schema()
             }
 
@@ -71,10 +80,13 @@ macro_rules! reflective_layer {
                 self
             }
 
-            fn field(&self, name: &str) -> Option<$crate::field::FieldValue> {
-                match name {
+            fn field_by_id(
+                &self,
+                id: &$crate::layer::FieldId,
+            ) -> Option<$crate::field::FieldValue> {
+                match id.as_str() {
                     $(
-                        $field $(| $alias)* => {
+                        $field_id => {
                             let $getter = self;
                             $get
                         }
@@ -83,23 +95,23 @@ macro_rules! reflective_layer {
                 }
             }
 
-            fn set_field(
+            fn set_field_by_id(
                 &mut self,
-                name: &str,
+                id: &$crate::layer::FieldId,
                 value: $crate::field::FieldValue,
             ) -> Result<(), $crate::layer::FieldError> {
-                match name {
+                match id.as_str() {
                     $(
-                        $field $(| $alias)* => {
+                        $field_id => {
                             let $setter = self;
                             let $value = value;
-                            let $field_name = name;
+                            let $field_name = $field;
                             $set
                         }
                     ),*
-                    _ => Err($crate::layer::FieldError::UnknownField {
+                    _ => Err($crate::layer::FieldError::UnknownFieldId {
                         protocol: $schema().protocol.clone(),
-                        field: name.to_owned(),
+                        field: id.clone(),
                     }),
                 }
             }
@@ -111,10 +123,10 @@ macro_rules! reflective_layer {
                 }
             )?
 
-            fn declared_layout_fields(&self) -> Vec<&'static str> {
+            fn declared_layout_fields(&self) -> Vec<$crate::layer::FieldId> {
                 vec![
                     $(
-                        reflective_layer!(@layout_name $field $(, $start, $end)?)
+                        reflective_layer!(@layout_name $field_id $(, $start, $end)?)
                     ),*
                 ].into_iter().flatten().collect()
             }
@@ -125,7 +137,7 @@ macro_rules! reflective_layer {
         {
             let mut fields: Vec<_> = vec![
                 $(
-                    reflective_layer!(@layout $field $(, $start, $end)?)
+                    reflective_layer!(@layout $field_id $(, $start, $end)?)
                 ),*
             ].into_iter().flatten().collect();
             // Schema order is a public reflection contract, while layout
@@ -140,7 +152,7 @@ macro_rules! reflective_layer {
     };
     (@layout $field:literal, $start:expr, $end:expr) => {
         Some($crate::layout::Field {
-            name: $field.to_owned(),
+            id: $crate::layer::FieldId::from_static($field),
             range: $crate::layout::Range::new($start, $end),
         })
     };
@@ -148,7 +160,13 @@ macro_rules! reflective_layer {
         None
     };
     (@layout_name $field:literal, $start:expr, $end:expr) => {
-        Some($field)
+        Some($crate::layer::FieldId::from_static($field))
+    };
+    (@constraints) => {
+        $crate::layer::FieldConstraints::default()
+    };
+    (@constraints $constraints:expr) => {
+        $constraints
     };
 }
 
@@ -170,7 +188,7 @@ pub fn reflect_get<T: ReflectiveField>(value: &T) -> FieldValue {
 
 pub fn reflect_set<T: ReflectiveField>(
     target: &mut T,
-    schema: &'static LayerSchema,
+    schema: &LayerSchema,
     field: &str,
     value: FieldValue,
 ) -> Result<(), FieldError> {

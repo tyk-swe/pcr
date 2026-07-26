@@ -10,10 +10,14 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::super::Packet;
+use super::super::catalog::{ProtocolCatalogSnapshot, ProtocolOperationError};
+use super::super::codec::{CodecError, NativeLayerEncodeContext, ParentBindingFacts};
 use super::super::diagnostic::Diagnostic;
-use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
+use super::super::invariant::{
+    layer_count_within_limit, optional_network_pair_is_valid, packet_size_within_limit,
+};
+use super::super::layer::{FieldError, Layer, MalformedLayer, Padding, ProtocolId, Raw};
 use super::super::layout::{ByteRange, LayerLayout, PacketLayout};
-use super::super::registry::{CodecError, LayerEncodeContext, ProtocolRegistry};
 use super::super::semantics::BuiltinProtocol;
 
 pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
@@ -62,6 +66,8 @@ pub enum BuildError {
     LayerLimit { actual: usize, limit: usize },
     #[error("packet size {actual} exceeds configured limit {limit}")]
     PacketSizeLimit { actual: usize, limit: usize },
+    #[error("build context source and destination use different address families")]
+    InvalidNetworkEnvelope,
     #[error("no codec is registered for layer {protocol} at index {index}")]
     MissingCodec { index: usize, protocol: ProtocolId },
     #[error("layer {protocol} at index {index} violates its reflective schema: {source}")]
@@ -92,6 +98,13 @@ pub enum BuildError {
     },
     #[error("codec for layer {protocol} returned an invalid byte layout")]
     InvalidCodecLayout { protocol: ProtocolId },
+    #[error("protocol provider failed for layer {protocol} at index {index}: {source}")]
+    Provider {
+        index: usize,
+        protocol: ProtocolId,
+        #[source]
+        source: ProtocolOperationError,
+    },
     #[error("padding layer at index {index} has invalid outside-layer boundary {outside_layer}")]
     InvalidPaddingBoundary { index: usize, outside_layer: usize },
     #[error("padding layer at index {index} has no enclosing link-layer frame")]
@@ -257,16 +270,16 @@ impl PacketBuffer {
 
 #[derive(Clone, Debug)]
 pub struct Builder {
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
 }
 
 impl Builder {
-    pub fn new(registry: Arc<ProtocolRegistry>) -> Self {
-        Self { registry }
+    pub fn new(catalog: Arc<ProtocolCatalogSnapshot>) -> Self {
+        Self { catalog }
     }
 
-    pub fn registry(&self) -> &Arc<ProtocolRegistry> {
-        &self.registry
+    pub fn catalog(&self) -> &Arc<ProtocolCatalogSnapshot> {
+        &self.catalog
     }
 
     pub fn build(
@@ -278,7 +291,10 @@ impl Builder {
         if packet.is_empty() {
             return Err(BuildError::EmptyPacket);
         }
-        if packet.len() > options.max_layers {
+        if !optional_network_pair_is_valid(context.source, context.destination) {
+            return Err(BuildError::InvalidNetworkEnvelope);
+        }
+        if !layer_count_within_limit(packet.len(), options.max_layers) {
             return Err(BuildError::LayerLimit {
                 actual: packet.len(),
                 limit: options.max_layers,
@@ -289,7 +305,7 @@ impl Builder {
         // field is not necessarily emitted on the wire, so it cannot safely be
         // included in this lower bound.
         let pass_through_bytes = pass_through_byte_length(&packet)?;
-        if pass_through_bytes > options.max_packet_size {
+        if !packet_size_within_limit(pass_through_bytes, options.max_packet_size) {
             return Err(BuildError::PacketSizeLimit {
                 actual: pass_through_bytes,
                 limit: options.max_packet_size,
@@ -318,19 +334,24 @@ impl Builder {
         let mut layouts = Vec::with_capacity(packet.len());
         let mut materialized_layers = Vec::with_capacity(packet.len());
         let mut encoded_payload_lengths = Vec::with_capacity(packet.len());
+        let mut operation = self.catalog.operation();
+        let empty_bindings = BTreeMap::new();
 
         for (index, protocol) in protocols.into_iter().enumerate().rev() {
             let layer = packet
                 .layer(index)
                 .expect("validated layer index must remain present");
-            let codec =
-                self.registry
-                    .codec(protocol.as_str())
-                    .ok_or_else(|| BuildError::MissingCodec {
-                        index,
-                        protocol: protocol.clone(),
-                    })?;
+            if self.catalog.descriptor(&protocol).is_none() {
+                return Err(BuildError::MissingCodec { index, protocol });
+            }
             let child = packet.layer(index + 1);
+            let child_protocol = child.map(binding_protocol);
+            let canonical_child_discriminator =
+                child_protocol.and_then(|child| self.catalog.discriminator_for(&protocol, child));
+            let parent_bindings = self
+                .catalog
+                .parent_bindings(&protocol)
+                .unwrap_or(&empty_bindings);
             encoded_payload_lengths.push(Some(bytes.len()));
             let remaining_packet_bytes = options.max_packet_size.checked_sub(bytes.len()).ok_or(
                 BuildError::PacketSizeLimit {
@@ -338,47 +359,25 @@ impl Builder {
                     limit: options.max_packet_size,
                 },
             )?;
-            let encoded = codec
+            let encoded = operation
                 .encode(
+                    &protocol,
                     layer,
                     bytes.as_slice(),
-                    &LayerEncodeContext {
+                    &NativeLayerEncodeContext {
                         packet: &packet,
                         index,
                         build_context: &context,
                         mode: options.mode,
-                        registry: &self.registry,
                         child,
+                        child_protocol,
+                        canonical_child_discriminator,
+                        parent_bindings: ParentBindingFacts::new(parent_bindings),
                         remaining_packet_bytes,
                     },
                 )
-                .map_err(|source| BuildError::Codec {
-                    index,
-                    protocol: protocol.clone(),
-                    source,
-                })?;
+                .map_err(|source| map_operation_error(index, &protocol, source))?;
 
-            let actual = encoded.materialized.protocol_id();
-            if actual != &protocol {
-                return Err(BuildError::MaterializedProtocolMismatch {
-                    protocol,
-                    actual: actual.clone(),
-                });
-            }
-            encoded
-                .materialized
-                .validate_required_fields()
-                .map_err(|source| BuildError::InvalidLayer {
-                    index,
-                    protocol: encoded.materialized.protocol_id().clone(),
-                    source,
-                })?;
-
-            if encoded.fields.iter().any(|field| {
-                field.range.start > field.range.end || field.range.end > encoded.prefix.len()
-            }) {
-                return Err(BuildError::InvalidCodecLayout { protocol });
-            }
             let fields = encoded.fields;
             layouts.push(LayerLayout {
                 index,
@@ -547,9 +546,7 @@ impl Builder {
                     discriminator
                 }
                 _ => {
-                    let discriminator = self
-                        .registry
-                        .discriminator_for(parent.as_str(), child.as_str());
+                    let discriminator = self.catalog.discriminator_for(parent, child);
                     previous_binding = Some((parent, child, discriminator));
                     discriminator
                 }
@@ -581,6 +578,52 @@ impl Builder {
     }
 }
 
+fn binding_protocol(layer: &dyn Layer) -> &ProtocolId {
+    layer
+        .as_any()
+        .downcast_ref::<MalformedLayer>()
+        .and_then(|layer| layer.intended_protocol.as_ref())
+        .unwrap_or_else(|| layer.protocol_id())
+}
+
+fn map_operation_error(
+    index: usize,
+    protocol: &ProtocolId,
+    source: ProtocolOperationError,
+) -> BuildError {
+    match source {
+        ProtocolOperationError::Codec { source, .. } => BuildError::Codec {
+            index,
+            protocol: protocol.clone(),
+            source,
+        },
+        ProtocolOperationError::UnknownProtocol { .. }
+        | ProtocolOperationError::UnknownProtocolName { .. } => BuildError::MissingCodec {
+            index,
+            protocol: protocol.clone(),
+        },
+        ProtocolOperationError::ProtocolOwnership { actual, .. } => {
+            BuildError::MaterializedProtocolMismatch {
+                protocol: protocol.clone(),
+                actual,
+            }
+        }
+        ProtocolOperationError::InvalidLayer { source, .. } => BuildError::InvalidLayer {
+            index,
+            protocol: protocol.clone(),
+            source,
+        },
+        ProtocolOperationError::InvalidLayout { .. } => BuildError::InvalidCodecLayout {
+            protocol: protocol.clone(),
+        },
+        source => BuildError::Provider {
+            index,
+            protocol: protocol.clone(),
+            source,
+        },
+    }
+}
+
 fn pass_through_byte_length(packet: &Packet) -> Result<usize, BuildError> {
     packet.iter().try_fold(0_usize, |total, layer| {
         let length = layer
@@ -607,37 +650,48 @@ fn pass_through_byte_length(packet: &Packet) -> Result<usize, BuildError> {
 #[cfg(test)]
 mod tests {
     use std::any::Any;
-    use std::collections::BTreeMap;
-    use std::sync::OnceLock;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, OnceLock};
 
     use super::*;
     use crate::layer::Raw;
     use crate::{
-        codec::{DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext},
+        codec::{DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext},
         field::{FieldKind, FieldValue},
-        layer::{FieldSchema, Layer, LayerSchema},
-        registry::RegistryBuilder,
+        layer::{FieldConstraints, FieldId, FieldSchema, Layer, LayerSchema, ValidatedFieldSet},
+        test_support::native_catalog,
     };
 
     #[derive(Clone, Debug)]
     struct ExternalMetadata(Bytes);
 
+    fn external_metadata_schema() -> &'static LayerSchema {
+        static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
+        SCHEMA.get_or_init(|| {
+            LayerSchema::new(
+                ProtocolId::from_static("external.metadata"),
+                "External metadata",
+                std::iter::empty::<&str>(),
+                1,
+                [FieldSchema::new(
+                    FieldId::from_static("metadata"),
+                    "metadata",
+                    std::iter::empty::<&str>(),
+                    FieldKind::Bytes,
+                    false,
+                    false,
+                    "Reflective metadata that is not emitted on the wire",
+                    FieldConstraints::default(),
+                )
+                .unwrap()],
+            )
+            .unwrap()
+        })
+    }
+
     impl Layer for ExternalMetadata {
-        fn schema(&self) -> &'static LayerSchema {
-            static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-            static FIELDS: &[FieldSchema] = &[FieldSchema {
-                name: "metadata",
-                kind: FieldKind::Bytes,
-                derived: false,
-                required: false,
-                description: "Reflective metadata that is not emitted on the wire",
-            }];
-            SCHEMA.get_or_init(|| LayerSchema {
-                protocol: ProtocolId::new("external.metadata"),
-                name: "External metadata",
-                fields: FIELDS,
-            })
+        fn schema(&self) -> &LayerSchema {
+            external_metadata_schema()
         }
 
         fn clone_box(&self) -> Box<dyn Layer> {
@@ -652,24 +706,24 @@ mod tests {
             self
         }
 
-        fn field(&self, name: &str) -> Option<FieldValue> {
-            (name == "metadata").then(|| FieldValue::Bytes(self.0.clone()))
+        fn field_by_id(&self, id: &FieldId) -> Option<FieldValue> {
+            (id.as_str() == "metadata").then(|| FieldValue::Bytes(self.0.clone()))
         }
 
-        fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
-            match (name, value) {
+        fn set_field_by_id(&mut self, id: &FieldId, value: FieldValue) -> Result<(), FieldError> {
+            match (id.as_str(), value) {
                 ("metadata", FieldValue::Bytes(value)) => {
                     self.0 = value;
                     Ok(())
                 }
                 ("metadata", _) => Err(FieldError::WrongType {
                     protocol: self.protocol_id().clone(),
-                    field: name.to_owned(),
+                    field: id.to_string(),
                     expected: "bytes",
                 }),
-                _ => Err(FieldError::UnknownField {
+                _ => Err(FieldError::UnknownFieldId {
                     protocol: self.protocol_id().clone(),
-                    field: name.to_owned(),
+                    field: id.clone(),
                 }),
             }
         }
@@ -678,16 +732,12 @@ mod tests {
     #[derive(Debug)]
     struct ExternalMetadataCodec;
 
-    impl LayerCodec for ExternalMetadataCodec {
-        fn protocol_id(&self) -> ProtocolId {
-            ProtocolId::new("external.metadata")
-        }
-
+    impl NativeLayerCodec for ExternalMetadataCodec {
         fn encode(
             &self,
             layer: &dyn Layer,
             _payload: &[u8],
-            _context: &LayerEncodeContext<'_>,
+            _context: &NativeLayerEncodeContext<'_>,
         ) -> Result<EncodedLayer, CodecError> {
             Ok(EncodedLayer {
                 prefix: vec![0],
@@ -701,7 +751,7 @@ mod tests {
         fn decode(
             &self,
             input: &[u8],
-            _context: &LayerDecodeContext<'_>,
+            _context: &NativeLayerDecodeContext,
         ) -> Result<DecodedLayerValue, CodecError> {
             Ok(DecodedLayerValue::terminal(
                 Box::new(ExternalMetadata(Bytes::new())),
@@ -709,10 +759,7 @@ mod tests {
             ))
         }
 
-        fn make_layer(
-            &self,
-            _fields: &BTreeMap<String, FieldValue>,
-        ) -> Result<Box<dyn Layer>, CodecError> {
+        fn make_layer(&self, _fields: &ValidatedFieldSet) -> Result<Box<dyn Layer>, CodecError> {
             Ok(Box::new(ExternalMetadata(Bytes::new())))
         }
     }
@@ -734,12 +781,15 @@ mod tests {
     }
 
     impl Layer for CloneCountingLayer {
-        fn schema(&self) -> &'static LayerSchema {
+        fn schema(&self) -> &LayerSchema {
             static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-            SCHEMA.get_or_init(|| LayerSchema {
-                protocol: ProtocolId::new("clone.counting"),
-                name: "Clone counting",
-                fields: &[],
+            SCHEMA.get_or_init(|| {
+                LayerSchema::empty(
+                    ProtocolId::from_static("clone.counting"),
+                    "Clone counting",
+                    std::iter::empty::<&str>(),
+                )
+                .unwrap()
             })
         }
 
@@ -755,14 +805,14 @@ mod tests {
             self
         }
 
-        fn field(&self, _name: &str) -> Option<FieldValue> {
+        fn field_by_id(&self, _id: &FieldId) -> Option<FieldValue> {
             None
         }
 
-        fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-            Err(FieldError::UnknownField {
+        fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+            Err(FieldError::UnknownFieldId {
                 protocol: self.protocol_id().clone(),
-                field: name.to_owned(),
+                field: id.clone(),
             })
         }
     }
@@ -770,22 +820,18 @@ mod tests {
     #[derive(Debug)]
     struct CloneCountingCodec;
 
-    impl LayerCodec for CloneCountingCodec {
-        fn protocol_id(&self) -> ProtocolId {
-            ProtocolId::new("clone.counting")
-        }
-
+    impl NativeLayerCodec for CloneCountingCodec {
         fn encode(
             &self,
             layer: &dyn Layer,
             _payload: &[u8],
-            _context: &LayerEncodeContext<'_>,
+            _context: &NativeLayerEncodeContext<'_>,
         ) -> Result<EncodedLayer, CodecError> {
             let layer = layer
                 .as_any()
                 .downcast_ref::<CloneCountingLayer>()
                 .ok_or_else(|| CodecError::WrongLayer {
-                    expected: self.protocol_id(),
+                    expected: ProtocolId::from_static("clone.counting"),
                     actual: layer.protocol_id().clone(),
                 })?;
             Ok(EncodedLayer::header(vec![layer.id], layer.clone_box()))
@@ -794,7 +840,7 @@ mod tests {
         fn decode(
             &self,
             input: &[u8],
-            _context: &LayerDecodeContext<'_>,
+            _context: &NativeLayerDecodeContext,
         ) -> Result<DecodedLayerValue, CodecError> {
             Ok(DecodedLayerValue::terminal(
                 Box::new(CloneCountingLayer {
@@ -805,10 +851,7 @@ mod tests {
             ))
         }
 
-        fn make_layer(
-            &self,
-            _fields: &BTreeMap<String, FieldValue>,
-        ) -> Result<Box<dyn Layer>, CodecError> {
+        fn make_layer(&self, _fields: &ValidatedFieldSet) -> Result<Box<dyn Layer>, CodecError> {
             Ok(Box::new(CloneCountingLayer {
                 id: 0,
                 clone_count: Arc::new(AtomicUsize::new(0)),
@@ -816,8 +859,8 @@ mod tests {
         }
     }
 
-    fn empty_registry() -> Arc<ProtocolRegistry> {
-        Arc::new(ProtocolRegistry::builder().build().unwrap())
+    fn empty_catalog() -> Arc<ProtocolCatalogSnapshot> {
+        Arc::new(ProtocolCatalogSnapshot::builder().build().unwrap())
     }
 
     #[test]
@@ -825,7 +868,7 @@ mod tests {
         let mut packet = Packet::new();
         packet.push(Raw::new(vec![0_u8; 1024]));
         assert!(matches!(
-            Builder::new(empty_registry()).build(
+            Builder::new(empty_catalog()).build(
                 packet,
                 BuildContext::default(),
                 BuildOptions {
@@ -841,14 +884,33 @@ mod tests {
     }
 
     #[test]
+    fn build_context_rejects_a_mixed_address_family_envelope() {
+        let mut packet = Packet::new();
+        packet.push(Raw::new(vec![0]));
+        assert!(matches!(
+            Builder::new(empty_catalog()).build(
+                packet,
+                BuildContext {
+                    source: Some(std::net::Ipv4Addr::LOCALHOST.into()),
+                    destination: Some(std::net::Ipv6Addr::LOCALHOST.into()),
+                    ..BuildContext::default()
+                },
+                BuildOptions::default(),
+            ),
+            Err(BuildError::InvalidNetworkEnvelope)
+        ));
+    }
+
+    #[test]
     fn external_byte_fields_are_not_assumed_to_be_wire_bytes() {
         let mut packet = Packet::new();
         packet.push(ExternalMetadata(Bytes::from(vec![0_u8; 1024])));
-        let mut registry = RegistryBuilder::new();
-        registry.register_codec(ExternalMetadataCodec).unwrap();
-        let registry = Arc::new(registry.build().unwrap());
+        let catalog = native_catalog(
+            Arc::new(external_metadata_schema().clone()),
+            ExternalMetadataCodec,
+        );
 
-        let built = Builder::new(registry)
+        let built = Builder::new(catalog)
             .build(
                 packet,
                 BuildContext::default(),
@@ -867,9 +929,11 @@ mod tests {
         packet
             .push(ExternalMetadata(Bytes::new()))
             .push(ExternalMetadata(Bytes::new()));
-        let mut registry = RegistryBuilder::new();
-        registry.register_codec(ExternalMetadataCodec).unwrap();
-        let built = Builder::new(Arc::new(registry.build().unwrap()))
+        let catalog = native_catalog(
+            Arc::new(external_metadata_schema().clone()),
+            ExternalMetadataCodec,
+        );
+        let built = Builder::new(catalog)
             .build(
                 packet,
                 BuildContext::default(),
@@ -897,10 +961,19 @@ mod tests {
                 clone_count: Arc::clone(&clone_count),
             });
         }
-        let mut registry = RegistryBuilder::new();
-        registry.register_codec(CloneCountingCodec).unwrap();
+        let catalog = native_catalog(
+            Arc::new(
+                CloneCountingLayer {
+                    id: 0,
+                    clone_count: Arc::new(AtomicUsize::new(0)),
+                }
+                .schema()
+                .clone(),
+            ),
+            CloneCountingCodec,
+        );
 
-        let built = Builder::new(Arc::new(registry.build().unwrap()))
+        let built = Builder::new(catalog)
             .build(
                 packet,
                 BuildContext::default(),
@@ -936,9 +1009,11 @@ mod tests {
         for _ in 0..DEFAULT_MAX_LAYERS {
             packet.push(ExternalMetadata(Bytes::new()));
         }
-        let mut registry = RegistryBuilder::new();
-        registry.register_codec(ExternalMetadataCodec).unwrap();
-        let built = Builder::new(Arc::new(registry.build().unwrap()))
+        let catalog = native_catalog(
+            Arc::new(external_metadata_schema().clone()),
+            ExternalMetadataCodec,
+        );
+        let built = Builder::new(catalog)
             .build(
                 packet,
                 BuildContext::default(),
@@ -990,7 +1065,7 @@ mod tests {
             .push(Raw::default())
             .push(Padding::new(vec![0_u8; 4]));
         assert!(matches!(
-            Builder::new(empty_registry()).build(
+            Builder::new(empty_catalog()).build(
                 packet,
                 BuildContext::default(),
                 BuildOptions::default(),
@@ -1006,7 +1081,7 @@ mod tests {
             .push(Raw::default())
             .push(Padding::after_layer(vec![0_u8; 4], 1));
         assert!(matches!(
-            Builder::new(empty_registry()).build(
+            Builder::new(empty_catalog()).build(
                 packet,
                 BuildContext::default(),
                 BuildOptions::default(),

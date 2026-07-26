@@ -7,7 +7,7 @@ use crate::transport::Tcp;
 use packetcraftr_packet::{
     Packet,
     field::FieldValue,
-    matcher::{MatchResult, ResponseMatcher},
+    matcher::{MatchResult, NativeResponseMatcher},
     semantics::{self, BuiltinProtocol},
 };
 
@@ -31,7 +31,7 @@ impl ReverseFlowMatcher {
     }
 }
 
-impl ResponseMatcher for ReverseFlowMatcher {
+impl NativeResponseMatcher for ReverseFlowMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
         let transport = match self.protocol {
             BuiltinProtocol::Tcp => QuotedProbeTransport::Tcp,

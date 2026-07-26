@@ -13,7 +13,7 @@ fn hostname_policy_precedes_resolution_and_resolved_policy_precedes_routes() {
         )]]))),
     };
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),
@@ -61,7 +61,7 @@ fn every_resolution_reauthorizes_all_addresses_before_route_use() {
         ]))),
     };
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),
@@ -289,7 +289,7 @@ fn invalid_exchange_limits_fail_before_route_or_live_side_effects() {
         capture_statistics: CaptureStatistics::default(),
     };
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),

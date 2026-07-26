@@ -10,10 +10,11 @@ use thiserror::Error;
 use super::super::Packet;
 use super::super::build::{BuildContext, BuildMode};
 use super::super::diagnostic::Diagnostic;
-use super::super::field::FieldValue;
-use super::super::layer::{FieldError, Layer, ProtocolId};
+use super::super::layer::{FieldError, Layer, ProtocolId, ValidatedFieldSet};
 use super::super::layout::FieldLayout;
-use super::super::registry::{Discriminator, ProtocolRegistry};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Discriminator(pub u64);
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -45,16 +46,61 @@ pub enum CodecError {
     Field(#[from] FieldError),
 }
 
-pub struct LayerEncodeContext<'a> {
+/// Bounded parent-local decode bindings exposed as resolved encode facts.
+#[derive(Clone, Copy)]
+pub struct ParentBindingFacts<'a> {
+    bindings: Option<&'a BTreeMap<Discriminator, ProtocolId>>,
+}
+
+impl<'a> ParentBindingFacts<'a> {
+    pub(crate) const fn new(bindings: &'a BTreeMap<Discriminator, ProtocolId>) -> Self {
+        Self {
+            bindings: Some(bindings),
+        }
+    }
+
+    /// Empty resolved facts for a parent with no registered decode bindings.
+    pub const fn empty() -> Self {
+        Self { bindings: None }
+    }
+
+    pub fn child_for(&self, discriminator: Discriminator) -> Option<&'a ProtocolId> {
+        self.bindings?.get(&discriminator)
+    }
+}
+
+impl fmt::Debug for ParentBindingFacts<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ParentBindingFacts")
+            .field("binding_count", &self.bindings.map_or(0, BTreeMap::len))
+            .finish()
+    }
+}
+
+/// Host-resolved facts for one trusted native encode call.
+///
+/// The complete catalog is intentionally absent. A codec receives only packet
+/// state and the child/binding facts already selected by the host.
+///
+/// ```compile_fail
+/// use packetcraftr_packet::codec::NativeLayerEncodeContext;
+///
+/// fn inspect_catalog(context: &NativeLayerEncodeContext<'_>) {
+///     let _ = &context.catalog;
+/// }
+/// ```
+pub struct NativeLayerEncodeContext<'a> {
     pub packet: &'a Packet,
     pub index: usize,
     pub build_context: &'a BuildContext,
     pub mode: BuildMode,
-    pub registry: &'a ProtocolRegistry,
     pub child: Option<&'a dyn Layer>,
+    pub child_protocol: Option<&'a ProtocolId>,
+    pub canonical_child_discriminator: Option<Discriminator>,
+    pub parent_bindings: ParentBindingFacts<'a>,
     /// Maximum additional bytes this layer may contribute without exceeding
-    /// the operation's configured packet-size limit. External codecs should
-    /// check this before allocating output buffers.
+    /// the operation's configured packet-size limit.
     pub remaining_packet_bytes: usize,
 }
 
@@ -78,8 +124,8 @@ impl EncodedLayer {
     }
 }
 
-pub struct LayerDecodeContext<'a> {
-    pub registry: &'a ProtocolRegistry,
+/// Bounded packet facts for one trusted native decode call.
+pub struct NativeLayerDecodeContext {
     pub layer_index: usize,
     pub absolute_offset: usize,
     pub verify_checksums: bool,
@@ -124,41 +170,23 @@ impl DecodedLayerValue {
     }
 }
 
-/// Encoder, bounded decoder, and expression factory for one protocol.
-pub trait LayerCodec: Send + Sync + fmt::Debug {
-    fn protocol_id(&self) -> ProtocolId;
-
-    /// Whether a decoded layer protocol is a valid result for this codec.
-    /// Most codecs return their own protocol. A decode-only multiplexing root
-    /// may explicitly admit the concrete protocols it selects.
-    fn accepts_decoded_protocol(&self, protocol: &ProtocolId) -> bool {
-        *protocol == self.protocol_id()
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        &[]
-    }
-
+/// Trusted in-process Rust implementation for one native protocol key.
+///
+/// Protocol identity, aliases, schema, accepted decode protocols, and
+/// provenance live in catalog registration descriptors, not on the codec.
+pub trait NativeLayerCodec: Send + Sync + fmt::Debug {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError>;
 
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError>;
 
-    /// Constructs one layer from caller-supplied reflective fields.
-    ///
-    /// Implementations may fill omitted fields with defaults. The returned
-    /// layer must satisfy [`Layer::validate_required_fields`]; the public
-    /// expression/document paths and the builder enforce that invariant.
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError>;
+    fn make_layer(&self, fields: &ValidatedFieldSet) -> Result<Box<dyn Layer>, CodecError>;
 }

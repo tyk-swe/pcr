@@ -17,12 +17,12 @@ use packetcraftr_model::error::{Classification, Classified, Kind};
 use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 use packetcraftr_packet::{
     Packet,
+    catalog::ProtocolCatalogSnapshot,
     codec::NetworkEnvelope,
     decode::DecodedPacket,
     diagnostic::{Diagnostic, DiagnosticSeverity},
     field::FieldValue,
     layer::Raw,
-    registry::ProtocolRegistry,
 };
 use packetcraftr_protocols::{
     network::{Ipv4, Ipv6},

@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn batching_attempts_rate_and_timeout_evidence_are_deterministic() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let target = Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)));
     let mut operation = tcp_scan_request(target);
     operation.ports = vec![80, 81, 82, 83];
@@ -21,7 +21,7 @@ fn batching_attempts_rate_and_timeout_evidence_are_deterministic() {
     let result = scan(
         &operation,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut clock,
     )
@@ -61,7 +61,7 @@ fn duplicate_addresses_and_ports_preserve_first_seen_order_after_family_filterin
         &mut AddressListAuthorizer {
             addresses: vec![excluded, first, first, second, first, excluded],
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut TimeoutExecutor::new(),
         &mut NoopClock,
     )
@@ -146,7 +146,7 @@ fn unsorted_matched_groups_preserve_endpoint_attempt_and_fully_tied_evidence_ord
         &mut AddressListAuthorizer {
             addresses: vec![first, second],
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut ReverseTiedResponses(TimeoutExecutor::new()),
         &mut NoopClock,
     )
@@ -181,7 +181,7 @@ fn unsorted_matched_groups_preserve_endpoint_attempt_and_fully_tied_evidence_ord
 
 #[test]
 fn undecodable_evidence_is_bounded_across_the_scan() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let mut operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     operation.limits.batch_size = 1;
     operation.limits.max_evidence_frames = 2;
@@ -195,7 +195,7 @@ fn undecodable_evidence_is_bounded_across_the_scan() {
     let result = scan(
         &operation,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut NoopClock,
     )
@@ -212,7 +212,7 @@ fn undecodable_evidence_is_bounded_across_the_scan() {
 
 #[test]
 fn correlated_response_becomes_exact_open_evidence() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let mut operation = tcp_scan_request(Target::Address(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))));
     operation.timeout = Duration::from_millis(10);
     let resolver = ScriptedResolver::new([]);
@@ -223,7 +223,7 @@ fn correlated_response_becomes_exact_open_evidence() {
     let result = scan(
         &operation,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut NoopClock,
     )
@@ -260,7 +260,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
     let result = scan(
         &operation,
         &mut PolicyAuthorizer::new(&private_scan_policy(), &ScriptedResolver::new([])),
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut PreSendMatchedExecutor,
         &mut NoopClock,
     )
@@ -372,7 +372,7 @@ fn unsolicited_response_after_the_probe_deadline_remains_a_timeout() {
     let result = scan(
         &operation,
         &mut PolicyAuthorizer::new(&private_scan_policy(), &ScriptedResolver::new([])),
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut LateResponseExecutor(TimeoutExecutor::new()),
         &mut NoopClock,
     )
@@ -427,7 +427,7 @@ fn equal_rank_candidates_choose_earliest_evidence_independent_of_source_list() {
     let result = scan(
         &operation,
         &mut PolicyAuthorizer::new(&private_scan_policy(), &ScriptedResolver::new([])),
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut ReorderedResponses(TimeoutExecutor::new()),
         &mut NoopClock,
     )

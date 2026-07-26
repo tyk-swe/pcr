@@ -16,7 +16,7 @@ use packetcraftr_capture::Frame;
 use packetcraftr_model::error::{Classification, Classified, Kind};
 use packetcraftr_net::capture::{DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES};
 use packetcraftr_packet::{
-    Packet, decode::DecodedPacket, diagnostic::Diagnostic, registry::ProtocolRegistry,
+    Packet, catalog::ProtocolCatalogSnapshot, decode::DecodedPacket, diagnostic::Diagnostic,
 };
 use packetcraftr_protocols::{
     icmp::{Icmpv4, Icmpv6},

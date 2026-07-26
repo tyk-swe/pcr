@@ -112,7 +112,7 @@ where
             .exchange_for_workflow(&template, options, |request_index, sent, response| {
                 batch.probes.get(request_index).is_some_and(|probe| {
                     classify_traceroute_response(
-                        self.client.registry(),
+                        self.client.catalog(),
                         probe.strategy,
                         sent,
                         response,

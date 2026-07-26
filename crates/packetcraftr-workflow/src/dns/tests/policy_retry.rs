@@ -39,7 +39,7 @@ fn hostname_intent_is_denied_before_resolver_or_executor_side_effects() {
     let error = dns(
         &retry_request(),
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )
@@ -65,7 +65,7 @@ fn every_mixed_answer_is_authorized_before_family_selection() {
     let error = dns(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )
@@ -88,7 +88,7 @@ fn every_retry_reresolves_and_reauthorizes_rebinding_before_probe_construction()
     let error = dns(
         &retry_request(),
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )
@@ -113,7 +113,7 @@ fn complete_operation_budget_precedes_resolution_and_queries() {
     let error = dns(
         &retry_request(),
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )
@@ -152,7 +152,7 @@ fn aggregate_duration_is_rejected_before_operation_authorization() {
     let error = dns(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut TimeoutExecutor::default(),
         &mut NoopClock,
     )
@@ -195,7 +195,7 @@ fn slow_resolver_expires_before_executor_side_effects() {
     let error = dns(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )
@@ -266,7 +266,7 @@ fn candidate_heavy_result_expires_before_a_second_dns_attempt() {
     let error = dns(
         &request,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )

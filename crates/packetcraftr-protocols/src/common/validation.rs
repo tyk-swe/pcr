@@ -5,18 +5,18 @@
 
 use packetcraftr_packet::{
     build::BuildMode,
-    codec::{CodecError, LayerEncodeContext},
+    codec::Discriminator,
+    codec::{CodecError, NativeLayerEncodeContext},
     diagnostic::Diagnostic,
     field::WireValue,
-    registry::Discriminator,
 };
 
-use super::errors::{binding_protocol, invalid, protocol};
+use super::errors::{invalid, protocol};
 
 pub(crate) fn validate_ipv6_routing_child(
     name: &str,
     next_header: u8,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), CodecError> {
     let raw_routing_header = next_header == 43
@@ -45,12 +45,12 @@ pub(crate) fn validate_ipv6_routing_child(
 pub(crate) fn validate_raw_child_discriminator(
     parent: &str,
     discriminator: u64,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), CodecError> {
     let Some(bound) = context
-        .registry
-        .child_for(parent, Discriminator(discriminator))
+        .parent_bindings
+        .child_for(Discriminator(discriminator))
     else {
         return Ok(());
     };
@@ -58,10 +58,9 @@ pub(crate) fn validate_raw_child_discriminator(
         return Ok(());
     }
 
-    let actual = context.child.and_then(|child| {
-        (!matches!(child.protocol_id().as_str(), "padding" | "raw"))
-            .then(|| binding_protocol(child))
-    });
+    let actual = context
+        .child_protocol
+        .filter(|child| !matches!(child.as_str(), "padding" | "raw"));
     if actual == Some(bound) {
         return Ok(());
     }
@@ -102,7 +101,7 @@ pub(crate) fn validate_auto_raw_discriminator<T>(
     name: &str,
     field: &'static str,
     value: &WireValue<T>,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), CodecError> {
     if !matches!(value, WireValue::Auto)
@@ -127,7 +126,7 @@ pub(crate) fn strict_or_diagnostic(
     code: &'static str,
     field: &'static str,
     message: impl Into<String>,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), CodecError> {
     let message = message.into();
@@ -141,7 +140,7 @@ pub(crate) fn strict_or_diagnostic(
 pub(crate) fn ensure_encode_budget(
     name: &str,
     contribution: usize,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
 ) -> Result<(), CodecError> {
     if contribution > context.remaining_packet_bytes {
         return Err(invalid(

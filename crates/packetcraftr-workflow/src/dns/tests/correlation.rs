@@ -67,11 +67,11 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
             diagnostics,
         }
     };
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
 
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &probe,
             &sent,
             &decoded(server, 42, Vec::new()),
@@ -83,7 +83,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
     renamed_probe.query_name = "api.example.".to_owned();
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &renamed_probe,
             &sent,
             &decoded(server, 42, Vec::new()),
@@ -95,7 +95,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
     retyped_probe.query_type = DnsQueryType::Aaaa;
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &retyped_probe,
             &sent,
             &decoded(server, 42, Vec::new()),
@@ -105,7 +105,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
     ));
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &probe,
             &sent,
             &decoded(server, 43, Vec::new()),
@@ -115,7 +115,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
     ));
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &probe,
             &sent,
             &decoded(
@@ -129,7 +129,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
     ));
     assert!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &probe,
             &sent,
             &decoded(Ipv4Addr::new(10, 0, 0, 99), 42, Vec::new()),
@@ -199,7 +199,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
     };
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &probe_v6,
             &sent_v6,
             &decoded_v6,
@@ -209,7 +209,7 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
     ));
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &probe,
             &sent,
             &quoted_icmp_time_exceeded(&sent, IpAddr::V4(Ipv4Addr::new(10, 0, 0, 254))),
@@ -224,19 +224,13 @@ fn correlation_requires_exact_reverse_tuple_checksum_and_dns_identity() {
         .diagnostics
         .push(Diagnostic::error("icmpv4.checksum", "invalid checksum"));
     assert!(
-        classify_dns_response(
-            &registry,
-            &probe,
-            &sent,
-            &corrupt_icmp,
-            DnsLimits::default(),
-        )
-        .is_none()
+        classify_dns_response(&catalog, &probe, &sent, &corrupt_icmp, DnsLimits::default(),)
+            .is_none()
     );
 
     assert!(matches!(
         classify_dns_response(
-            &registry,
+            &catalog,
             &probe_v6,
             &sent_v6,
             &quoted_icmp_time_exceeded(&sent_v6, IpAddr::V6("fd00::fe".parse().unwrap())),

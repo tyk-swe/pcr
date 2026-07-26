@@ -19,7 +19,7 @@ use packetcraftr_net::capture::CaptureStatistics;
 use packetcraftr_packet::layout::PacketLayout;
 use packetcraftr_policy::TrafficPolicy;
 use packetcraftr_policy::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 use std::result::Result;
 
 fn private_scan_policy() -> TrafficPolicy {

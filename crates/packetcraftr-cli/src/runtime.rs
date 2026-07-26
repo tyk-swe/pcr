@@ -206,20 +206,19 @@ pub(super) type SystemClient = Client<
     SystemExchangeIo,
 >;
 
-pub(super) fn default_registry_arc() -> Result<Arc<packet::registry::Registry>, CliError> {
-    protocol::builtin::registry()
+pub(super) fn default_catalog_arc()
+-> Result<Arc<packet::catalog::ProtocolCatalogSnapshot>, CliError> {
+    protocol::builtin::catalog()
         .map(Arc::new)
-        .map_err(|source| {
-            CliError::new(70, format!("built-in registry invariant failed: {source}"))
-        })
+        .map_err(|source| CliError::new(70, format!("built-in catalog invariant failed: {source}")))
 }
 
 pub(super) fn system_client(
-    registry: Arc<packet::registry::Registry>,
+    catalog: Arc<packet::catalog::ProtocolCatalogSnapshot>,
     policy: policy::Policy,
 ) -> SystemClient {
     Client::new(
-        registry,
+        catalog,
         net_native::route::SystemProvider,
         net_native::neighbor::SystemResolver::default(),
         Composite::new(
@@ -269,7 +268,7 @@ pub(super) fn workflow_exchange_options(
 
 pub(super) fn prepare_route_request(
     arguments: RouteArgs,
-    registry: &packet::registry::Registry,
+    catalog: &Arc<packet::catalog::ProtocolCatalogSnapshot>,
 ) -> Result<PreparedRouteRequest, CliError> {
     let RouteArgs {
         recipe,
@@ -279,7 +278,7 @@ pub(super) fn prepare_route_request(
         link_mode,
         policy,
     } = arguments;
-    let packet = read_recipe(recipe, registry)?;
+    let packet = read_recipe(recipe, catalog)?;
     let policy = policy.into_policy();
     policy.validate().map_err(CliError::classified)?;
     // This check intentionally precedes interface discovery and route lookup.

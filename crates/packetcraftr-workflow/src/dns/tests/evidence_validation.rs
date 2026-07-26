@@ -364,7 +364,7 @@ fn dns_evidence_diagnostics_preserve_casing_deduplication_and_response_priority(
     let result = dns(
         &request,
         &mut TwoAttemptAuthorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut ResponseAndUndecodedExecutor,
         &mut NoopClock,
     )

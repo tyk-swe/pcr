@@ -4,10 +4,10 @@
 use super::*;
 #[test]
 fn exchange_deadline_boundary_and_equal_confidence_ties_are_deterministic() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let source = Ipv4Addr::new(10, 0, 0, 1);
     let destination = Ipv4Addr::new(10, 0, 0, 2);
-    let builder = Builder::new(Arc::clone(&registry));
+    let builder = Builder::new(Arc::clone(&catalog));
     let request = builder
         .build(
             packet(source, destination, 12_345, 9),
@@ -29,7 +29,7 @@ fn exchange_deadline_boundary_and_equal_confidence_ties_are_deterministic() {
     let now = Instant::now();
     let sent_at = vec![now, now];
     let deadline = now.checked_add(Duration::from_millis(10)).unwrap();
-    let dissector = Dissector::new(Arc::clone(&registry));
+    let dissector = Dissector::new(Arc::clone(&catalog));
     let options = ExchangeOptions::default();
 
     let mut exact_boundary = ExchangeAccumulator::new(2);
@@ -44,7 +44,7 @@ fn exchange_deadline_boundary_and_equal_confidence_ties_are_deterministic() {
             deadline,
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -70,7 +70,7 @@ fn exchange_deadline_boundary_and_equal_confidence_ties_are_deterministic() {
             deadline.checked_add(Duration::from_nanos(1)).unwrap(),
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -89,7 +89,7 @@ fn exchange_deadline_boundary_and_equal_confidence_ties_are_deterministic() {
             deadline,
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -102,10 +102,10 @@ fn exchange_deadline_boundary_and_equal_confidence_ties_are_deterministic() {
 
 #[test]
 fn quoted_icmp_error_uses_monotonic_ingress_latency() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let source = Ipv4Addr::new(10, 0, 0, 1);
     let destination = Ipv4Addr::new(10, 0, 0, 2);
-    let request = Builder::new(Arc::clone(&registry))
+    let request = Builder::new(Arc::clone(&catalog))
         .build(
             packet(source, destination, 12_345, 9),
             BuildContext::default(),
@@ -126,14 +126,14 @@ fn quoted_icmp_error_uses_monotonic_ingress_latency() {
             body: Bytes::from(quote),
             ..Icmpv4::default()
         });
-    let error = Builder::new(Arc::clone(&registry))
+    let error = Builder::new(Arc::clone(&catalog))
         .build(error, BuildContext::default(), BuildOptions::default())
         .unwrap();
     let prepared = vec![prepared_exchange_packet(request, source, destination)];
     let sent_at = vec![Instant::now()];
     let received_at = sent_at[0].checked_add(Duration::from_millis(1)).unwrap();
     let deadline = sent_at[0].checked_add(Duration::from_millis(10)).unwrap();
-    let dissector = Dissector::new(Arc::clone(&registry));
+    let dissector = Dissector::new(Arc::clone(&catalog));
     let options = ExchangeOptions::default();
     let mut accumulator = ExchangeAccumulator::new(1);
 
@@ -143,7 +143,7 @@ fn quoted_icmp_error_uses_monotonic_ingress_latency() {
             received_at,
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -161,7 +161,7 @@ fn quoted_icmp_error_uses_monotonic_ingress_latency() {
 fn endless_zero_time_capture_drain_is_bounded_and_send_progresses() {
     let sends = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         EndlessCaptureIo {
@@ -215,7 +215,7 @@ fn endless_zero_time_capture_drain_is_bounded_and_send_progresses() {
 fn slow_send_consumes_absolute_deadline_and_stops_later_requests() {
     let sends = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         SlowSendIo {

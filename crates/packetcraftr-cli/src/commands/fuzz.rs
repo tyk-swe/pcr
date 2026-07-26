@@ -21,7 +21,7 @@ use super::super::rendering::{
     emit_json, emit_json_compact, emit_stream_record, spaced_hex, write_stdout_line,
 };
 use super::super::runtime::{
-    DeferredInterface, default_registry_arc, system_client, workflow_exchange_options,
+    DeferredInterface, default_catalog_arc, system_client, workflow_exchange_options,
 };
 use super::capture::{render_diagnostics_text, render_output_diagnostics_text};
 use super::scan::validate_live_interface_selector;
@@ -55,8 +55,8 @@ pub(crate) fn run_fuzz(
         limits,
         policy,
     } = arguments;
-    let registry = default_registry_arc()?;
-    let packet = read_recipe(recipe, &registry)?;
+    let catalog = default_catalog_arc()?;
+    let packet = read_recipe(recipe, &catalog)?;
     let targets = fields
         .into_iter()
         .map(|field| {
@@ -115,7 +115,7 @@ pub(crate) fn run_fuzz(
             queue_limits,
         )?;
         let mut executor = CliFuzzExecutor {
-            registry: Arc::clone(&registry),
+            catalog: Arc::clone(&catalog),
             policy: policy.clone(),
             exchange,
             interface: DeferredInterface::new(interface),
@@ -131,7 +131,7 @@ pub(crate) fn run_fuzz(
                 allow_malformed_live,
             },
             packet,
-            registry,
+            catalog,
             &mut authorizer,
             &mut executor,
             &mut clock,
@@ -140,7 +140,7 @@ pub(crate) fn run_fuzz(
     } else {
         // This branch intentionally never validates or resolves the live
         // interface and never constructs a native client.
-        workflow::fuzz::run(&request, packet, registry).map_err(fuzz_cli_error)?
+        workflow::fuzz::run(&request, packet, catalog).map_err(fuzz_cli_error)?
     };
     let (result, diagnostics, stats) =
         output::fuzz::Result::try_from_fuzz(result).map_err(CliError::classified)?;
@@ -165,7 +165,7 @@ pub(crate) fn run_fuzz(
 }
 
 struct CliFuzzExecutor {
-    registry: Arc<packet::registry::Registry>,
+    catalog: Arc<packet::catalog::ProtocolCatalogSnapshot>,
     policy: policy::Policy,
     exchange: client::exchange::Options,
     interface: DeferredInterface,
@@ -180,7 +180,7 @@ impl workflow::fuzz::Executor for CliFuzzExecutor {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
-        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
+        let client = system_client(Arc::clone(&self.catalog), self.policy.clone());
         workflow_client::fuzz::ClientExecutor::new(&client, self.exchange.clone())
             .execute(case, timeout)
     }

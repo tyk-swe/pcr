@@ -24,7 +24,7 @@ use packetcraftr_packet::build::{
     Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions,
 };
 use packetcraftr_packet::decode::{Decoder, Options as DecodeOptions};
-use packetcraftr_packet::{codec::NetworkEnvelope, registry::ProtocolRegistry};
+use packetcraftr_packet::{catalog::ProtocolCatalogSnapshot, codec::NetworkEnvelope};
 
 mod authorizer;
 mod engine;

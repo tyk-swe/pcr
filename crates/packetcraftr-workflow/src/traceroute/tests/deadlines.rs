@@ -6,7 +6,7 @@ use std::result::Result;
 
 use super::super::*;
 use super::support::{FixedAuthorizer, MixedHopExecutor, NoopClock, udp_traceroute_request};
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 
 #[test]
 fn slow_executor_expires_before_the_next_traceroute_hop() {
@@ -38,7 +38,7 @@ fn slow_executor_expires_before_the_next_traceroute_hop() {
             address: destination,
             operations: Vec::new(),
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock::default(),
     )
@@ -81,7 +81,7 @@ fn candidate_heavy_hop_expires_before_the_next_traceroute_execution() {
             address: destination,
             operations: Vec::new(),
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock::default(),
     )
@@ -116,7 +116,7 @@ fn unsolicited_hop_response_after_the_deadline_cannot_finish_the_trace() {
             address: destination,
             operations: Vec::new(),
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut LateHopExecutor,
         &mut NoopClock::default(),
     )
@@ -163,7 +163,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
             address: destination,
             operations: Vec::new(),
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut PreSendMatchedExecutor,
         &mut NoopClock::default(),
     )

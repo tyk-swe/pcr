@@ -14,7 +14,7 @@ use packetcraftr_net::{
     transmit::{PacketIo, TransmissionFrame},
 };
 use packetcraftr_packet::diagnostic::push_diagnostic_once;
-use packetcraftr_packet::{decode::Dissector, registry::ProtocolRegistry};
+use packetcraftr_packet::{catalog::ProtocolCatalogSnapshot, decode::Dissector};
 
 use super::super::Stats;
 use super::super::send::ClientError;
@@ -39,7 +39,7 @@ pub(crate) struct PreparedExchange {
 /// makes every post-arm exit pass through one shutdown-composition boundary;
 /// `CaptureGuard::drop` remains the panic fallback.
 pub(crate) struct ExchangeTransaction<C: CaptureSession> {
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
     capture: CaptureGuard<C>,
     started: Instant,
     deadline: Instant,
@@ -58,14 +58,14 @@ pub(crate) struct ExchangeTransaction<C: CaptureSession> {
 
 impl<C: CaptureSession> ExchangeTransaction<C> {
     pub(crate) fn new(
-        registry: Arc<ProtocolRegistry>,
+        catalog: Arc<ProtocolCatalogSnapshot>,
         capture: C,
         prepared: PreparedExchange,
     ) -> Self {
         let request_count = prepared.packets.len();
         Self {
-            dissector: Dissector::new(Arc::clone(&registry)),
-            registry,
+            dissector: Dissector::new(Arc::clone(&catalog)),
+            catalog,
             capture: CaptureGuard::new(capture),
             started: prepared.started,
             deadline: prepared.deadline,
@@ -191,7 +191,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
                     break;
                 };
                 let context = Self::process_context(
-                    &self.registry,
+                    &self.catalog,
                     &self.dissector,
                     &self.prepared,
                     &self.sent_at,
@@ -217,7 +217,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
 
     fn drain(&mut self, enforced_deadline: Option<Instant>) -> Result<(), LiveIoError> {
         let context = Self::process_context(
-            &self.registry,
+            &self.catalog,
             &self.dissector,
             &self.prepared,
             &self.sent_at,
@@ -251,7 +251,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
     }
 
     fn process_context<'a>(
-        registry: &'a ProtocolRegistry,
+        catalog: &'a Arc<ProtocolCatalogSnapshot>,
         dissector: &'a Dissector,
         prepared: &'a [PreparedExchangePacket],
         sent_at: &'a [Instant],
@@ -259,7 +259,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
         options: &'a ExchangeOptions,
     ) -> ExchangeProcessContext<'a> {
         ExchangeProcessContext {
-            registry,
+            catalog,
             dissector,
             prepared,
             sent_at,

@@ -10,7 +10,7 @@ use super::{
     DNS_RESERVED_MASK, DNS_TYPE_OPT, DecodedPacket, DiagnosticSeverity, DnsEdns, DnsEdnsOption,
     DnsLimits, DnsName, DnsProbe, DnsQueryType, DnsRecord, DnsRecordValue, DnsRejectedRecord,
     DnsSection, DnsWireError, FieldValue, Ipv4Addr, Ipv6Addr, Packet, ProbeTransport,
-    ProtocolRegistry, ValidatedDnsResponse, probe,
+    ProtocolCatalogSnapshot, ValidatedDnsResponse, probe,
 };
 use packetcraftr_packet::semantics::BuiltinProtocol;
 
@@ -851,20 +851,20 @@ impl DnsResponseClassification {
 }
 
 pub fn classify_dns_response(
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     probe: &DnsProbe,
     sent: &Packet,
     response: &DecodedPacket,
     limits: DnsLimits,
 ) -> Option<DnsResponseClassification> {
-    if let Some(observation) = probe::observe(registry, ProbeTransport::Udp, sent, response)
+    if let Some(observation) = probe::observe(catalog, ProbeTransport::Udp, sent, response)
         && observation.correlation.is_network_failure()
     {
         return Some(DnsResponseClassification::NetworkFailure {
             reason: observation.reason.to_owned(),
         });
     }
-    if direct_udp_match(registry, sent, &response.packet) {
+    if direct_udp_match(catalog, sent, &response.packet) {
         if response.diagnostics.iter().any(|diagnostic| {
             diagnostic.code.contains("checksum") && diagnostic.severity != DiagnosticSeverity::Info
         }) {
@@ -899,7 +899,11 @@ pub fn classify_dns_response(
     None
 }
 
-fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Packet) -> bool {
+fn direct_udp_match(
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
+    request: &Packet,
+    response: &Packet,
+) -> bool {
     if !response
         .iter()
         .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
@@ -912,9 +916,10 @@ fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Pa
     else {
         return false;
     };
-    registry
-        .matcher(udp.protocol_id().as_str())
-        .is_some_and(|matcher| matcher.matches(request, response).matched)
+    catalog
+        .operation()
+        .match_response(udp.protocol_id(), request, response)
+        .is_ok_and(|candidate| candidate.is_some_and(|candidate| candidate.result.matched))
 }
 
 pub(super) fn raw_payload(packet: &Packet) -> Option<Bytes> {

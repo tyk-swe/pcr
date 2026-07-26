@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, ScanClassification, ScanTransport,
+    Correlation, DecodedPacket, IpAddr, Packet, ProtocolCatalogSnapshot, ScanClassification,
+    ScanTransport,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -17,13 +18,13 @@ pub struct ScanResponseClassification {
 /// return value of `None` means the response is corrupt, unrelated, or not
 /// protocol-consistent with the request and must not influence classification.
 pub fn classify_scan_response(
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     transport: ScanTransport,
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<ScanResponseClassification> {
     let observation =
-        crate::probe::observe(registry, transport.probe_transport(), request, response)?;
+        crate::probe::observe(catalog, transport.probe_transport(), request, response)?;
     let classification = match observation.correlation {
         Correlation::TcpReset | Correlation::PortUnreachable => ScanClassification::Closed,
         Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {

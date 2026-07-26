@@ -1,40 +1,28 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use packetcraftr_packet::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    expression::decode_hex,
-    field::FieldValue,
-    layer::{Layer, MalformedLayer, Padding, ProtocolId, Raw},
+    layer::{Layer, MalformedLayer, Padding, Raw},
 };
 
-use super::common::{ensure_encode_budget, invalid, make_layer, protocol, wrong_layer};
+use super::common::{ensure_encode_budget, make_layer, wrong_layer};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct RawCodec;
 
-impl LayerCodec for RawCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("raw")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for RawCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -49,7 +37,7 @@ impl LayerCodec for RawCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         let mut decoded = DecodedLayerValue::terminal(
             Box::new(Raw::new(Bytes::copy_from_slice(input))),
@@ -61,9 +49,9 @@ impl LayerCodec for RawCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(Raw::default(), &raw_fields(fields, "raw")?)
+        make_layer(Raw::default(), fields)
     }
 }
 
@@ -73,20 +61,12 @@ pub(super) struct PaddingCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct MalformedCodec;
 
-impl LayerCodec for MalformedCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("malformed")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for MalformedCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -105,7 +85,7 @@ impl LayerCodec for MalformedCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         let mut decoded = DecodedLayerValue::terminal(
             Box::new(MalformedLayer::new(
@@ -121,30 +101,22 @@ impl LayerCodec for MalformedCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         let mut layer = MalformedLayer::new(None, Bytes::new(), "explicit malformed bytes");
-        for (name, value) in fields {
-            layer.set_field(name, value.clone())?;
+        for (field, value) in fields.iter() {
+            layer.set_field_by_id(&field.id, value.clone())?;
         }
         Ok(Box::new(layer))
     }
 }
 
-impl LayerCodec for PaddingCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("padding")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for PaddingCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -159,7 +131,7 @@ impl LayerCodec for PaddingCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         let mut decoded = DecodedLayerValue::terminal(
             Box::new(Padding::new(Bytes::copy_from_slice(input))),
@@ -171,38 +143,8 @@ impl LayerCodec for PaddingCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(Padding::default(), &raw_fields(fields, "padding")?)
+        make_layer(Padding::default(), fields)
     }
-}
-
-fn raw_fields(
-    fields: &BTreeMap<String, FieldValue>,
-    name: &str,
-) -> Result<BTreeMap<String, FieldValue>, CodecError> {
-    let mut normalized = fields.clone();
-    let derived = match normalized.remove("hex") {
-        Some(value) => {
-            let FieldValue::Text(value) = value else {
-                return Err(invalid(name, "hex must be a quoted hexadecimal string"));
-            };
-            Some(FieldValue::Bytes(decode_hex(&value)?))
-        }
-        None => match normalized.remove("text") {
-            Some(value) => {
-                let FieldValue::Text(value) = value else {
-                    return Err(invalid(name, "text must be a quoted string"));
-                };
-                Some(FieldValue::Bytes(Bytes::from(value.into_bytes())))
-            }
-            None => None,
-        },
-    };
-    if let Some(value) = derived
-        && normalized.insert("bytes".to_string(), value).is_some()
-    {
-        return Err(invalid(name, "bytes cannot be combined with hex or text"));
-    }
-    Ok(normalized)
 }

@@ -1,11 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Exact packet round trips.
+
 use super::*;
 
 #[test]
 fn ethernet_ipv4_udp_round_trip_rebuilds_identical_bytes() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ethernet {
@@ -25,14 +27,14 @@ fn ethernet_ipv4_udp_round_trip_rebuilds_identical_bytes() {
             ..Udp::default()
         })
         .push(Raw::new(Bytes::from_static(b"packet")));
-    let builder = Builder::new(Arc::clone(&registry));
+    let builder = Builder::new(Arc::clone(&catalog));
     let built = builder
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    let decoded = Dissector::new(Arc::clone(&registry))
+    let decoded = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built.bytes.clone(),
-            "ethernet".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -50,7 +52,7 @@ fn ethernet_ipv4_udp_round_trip_rebuilds_identical_bytes() {
 
 #[test]
 fn ipv4_udp_odd_payload_emits_known_checksum() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -67,21 +69,25 @@ fn ipv4_udp_odd_payload_emits_known_checksum() {
             0xde, 0xad, 0xbe, 0xef, 0x01,
         ])));
 
-    let built = Builder::new(Arc::clone(&registry))
+    let built = Builder::new(Arc::clone(&catalog))
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
     assert_eq!(&built.bytes[26..28], &[0x61, 0x42]);
 
-    let decoded = Dissector::new(registry)
-        .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+    let decoded = Dissector::new(catalog)
+        .decode_with_root(
+            built.bytes,
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(decoded.diagnostics.is_empty());
 }
 
 #[test]
 fn icmpv4_and_icmpv6_codec_paths_round_trip_exact_bytes() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
 
     let mut ipv4 = Packet::new();
     ipv4.push(Ipv4 {
@@ -96,10 +102,10 @@ fn icmpv4_and_icmpv6_codec_paths_round_trip_exact_bytes() {
     let built4 = builder
         .build(ipv4, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    let decoded4 = Dissector::new(Arc::clone(&registry))
+    let decoded4 = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built4.bytes.clone(),
-            "ipv4".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -127,10 +133,10 @@ fn icmpv4_and_icmpv6_codec_paths_round_trip_exact_bytes() {
     let built6 = builder
         .build(ipv6, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    let decoded6 = Dissector::new(Arc::clone(&registry))
+    let decoded6 = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built6.bytes.clone(),
-            "ipv6".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv6"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -148,7 +154,7 @@ fn icmpv4_and_icmpv6_codec_paths_round_trip_exact_bytes() {
 
 #[test]
 fn ethernet_padding_is_preserved_without_changing_ip_or_udp_lengths() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ethernet::default())
@@ -164,7 +170,7 @@ fn ethernet_padding_is_preserved_without_changing_ip_or_udp_lengths() {
         })
         .push(Raw::new(Bytes::from_static(b"abc")))
         .push(Padding::new(Bytes::from_static(&[0; 15])));
-    let builder = Builder::new(Arc::clone(&registry));
+    let builder = Builder::new(Arc::clone(&catalog));
     let built = builder
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
@@ -172,10 +178,10 @@ fn ethernet_padding_is_preserved_without_changing_ip_or_udp_lengths() {
     assert_eq!(u16::from_be_bytes([built.bytes[16], built.bytes[17]]), 31);
     assert_eq!(u16::from_be_bytes([built.bytes[38], built.bytes[39]]), 11);
 
-    let decoded = Dissector::new(Arc::clone(&registry))
+    let decoded = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built.bytes.clone(),
-            "ethernet".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -196,7 +202,7 @@ fn ethernet_padding_is_preserved_without_changing_ip_or_udp_lengths() {
 
 #[test]
 fn udp_trailer_remains_inside_ipv4_length_but_outside_udp_length() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ethernet::default())
@@ -212,7 +218,7 @@ fn udp_trailer_remains_inside_ipv4_length_but_outside_udp_length() {
         })
         .push(Raw::new(Bytes::from_static(b"abc")))
         .push(Padding::after_layer(Bytes::from_static(b"trail"), 2));
-    let builder = Builder::new(Arc::clone(&registry));
+    let builder = Builder::new(Arc::clone(&catalog));
     let built = builder
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
@@ -220,10 +226,10 @@ fn udp_trailer_remains_inside_ipv4_length_but_outside_udp_length() {
     assert_eq!(u16::from_be_bytes([built.bytes[16], built.bytes[17]]), 36);
     assert_eq!(u16::from_be_bytes([built.bytes[38], built.bytes[39]]), 11);
 
-    let decoded = Dissector::new(Arc::clone(&registry))
+    let decoded = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built.bytes.clone(),
-            "ethernet".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -232,7 +238,7 @@ fn udp_trailer_remains_inside_ipv4_length_but_outside_udp_length() {
         Some(2)
     );
     let document = packetcraftr_packet::document::PacketDocument::from_packet(&decoded.packet);
-    let reloaded = document.to_packet(&registry, 64).unwrap();
+    let reloaded = document.to_packet(&catalog, 64).unwrap();
     let rebuilt = builder
         .build(reloaded, BuildContext::default(), BuildOptions::default())
         .unwrap();
@@ -241,7 +247,7 @@ fn udp_trailer_remains_inside_ipv4_length_but_outside_udp_length() {
 
 #[test]
 fn initial_ipv4_fragment_payload_stays_raw_until_reassembly() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -254,11 +260,15 @@ fn initial_ipv4_fragment_payload_stays_raw_until_reassembly() {
         .push(Raw::new(Bytes::from_static(&[
             0x30, 0x39, 0, 53, 0, 32, 0, 0,
         ])));
-    let built = Builder::new(Arc::clone(&registry))
+    let built = Builder::new(Arc::clone(&catalog))
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    let decoded = Dissector::new(registry)
-        .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+    let decoded = Dissector::new(catalog)
+        .decode_with_root(
+            built.bytes,
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+            DecodeOptions::default(),
+        )
         .unwrap();
 
     assert!(decoded.packet.get::<Raw>().is_some());

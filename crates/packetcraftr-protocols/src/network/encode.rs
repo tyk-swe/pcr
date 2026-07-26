@@ -6,7 +6,7 @@
 use std::net::IpAddr;
 
 use packetcraftr_packet::{
-    codec::{CodecError, LayerEncodeContext, NetworkEnvelope},
+    codec::{CodecError, NativeLayerEncodeContext, NetworkEnvelope},
     layer::Layer,
 };
 
@@ -22,7 +22,7 @@ pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
 }
 
 pub(crate) fn encode_network(
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
 ) -> Result<NetworkEnvelope, CodecError> {
     for index in (0..context.index).rev() {
         let Some(layer) = context.packet.layer(index) else {

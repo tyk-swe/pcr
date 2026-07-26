@@ -3,24 +3,23 @@
 
 //! IPv4 header model and codec.
 
-use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 
 use bytes::Bytes;
 
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, checksum, expected_discriminator, invalid, make_layer,
+    ValueExpectation, checksum, expected_discriminator, invalid, make_layer,
     network_from_addresses, out_of_range, payload_without_padding, protocol, resolve_u8,
     resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
     validate_raw_child_discriminator, wrong_layer, wrong_type,
@@ -68,21 +67,21 @@ impl Default for Ipv4 {
 }
 
 reflective_layer! {
-    fn ipv4_schema() => { protocol: protocol("ipv4"), name: "IPv4" }
+    fn ipv4_schema() => { protocol: protocol("ipv4"), name: "IPv4", aliases: ["ip", "ip4"] }
     impl Ipv4 {
-        "dscp_ecn" => { kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", get |layer| Some(reflect_get(&layer.dscp_ecn)), set |layer, value, name| reflect_set(&mut layer.dscp_ecn, ipv4_schema(), name, value), layout: (1, 2) },
-        "total_length" => { kind: Unsigned, derived: true, required: false, description: "IPv4 total length", get |layer| Some(reflect_get(&layer.total_length)), set |layer, value, name| reflect_set(&mut layer.total_length, ipv4_schema(), name, value), layout: (2, 4) },
-        "identification" => { kind: Unsigned, derived: false, required: false, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, ipv4_schema(), name, value), layout: (4, 6) },
-        "reserved_flag" => { kind: Bool, derived: false, required: false, description: "Reserved IPv4 flag bit", get |layer| Some(reflect_get(&layer.reserved_flag)), set |layer, value, name| reflect_set(&mut layer.reserved_flag, ipv4_schema(), name, value), layout: (6, 8) },
-        "dont_fragment" => { kind: Bool, derived: false, required: false, description: "Don't-fragment flag", get |layer| Some(reflect_get(&layer.dont_fragment)), set |layer, value, name| reflect_set(&mut layer.dont_fragment, ipv4_schema(), name, value), layout: (6, 8) },
-        "more_fragments" => { kind: Bool, derived: false, required: false, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, ipv4_schema(), name, value), layout: (6, 8) },
-        "fragment_offset" => { kind: Unsigned, derived: false, required: false, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(ipv4_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv4_schema(), name, "unsigned")) }, layout: (6, 8) },
-        "ttl" => { kind: Unsigned, derived: false, required: true, description: "Time to live", get |layer| Some(reflect_get(&layer.ttl)), set |layer, value, name| reflect_set(&mut layer.ttl, ipv4_schema(), name, value), layout: (8, 9) },
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, ipv4_schema(), name, value), layout: (9, 10) },
-        "checksum" => { kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", get |layer| Some(reflect_get(&layer.checksum)), set |layer, value, name| reflect_set(&mut layer.checksum, ipv4_schema(), name, value), layout: (10, 12) },
-        "source" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv4_schema(), name, value), layout: (12, 16) },
-        "destination" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv4_schema(), name, value), layout: (16, 20) },
-        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, ipv4_schema(), name, value), layout: (20, header_len) },
+        "dscp_ecn" => { id: "dscp_ecn", kind: Unsigned, derived: false, required: false, description: "DSCP and ECN octet", get |layer| Some(reflect_get(&layer.dscp_ecn)), set |layer, value, name| reflect_set(&mut layer.dscp_ecn, ipv4_schema(), name, value), layout: (1, 2) },
+        "total_length" => { id: "total_length", kind: Unsigned, derived: true, required: false, description: "IPv4 total length", get |layer| Some(reflect_get(&layer.total_length)), set |layer, value, name| reflect_set(&mut layer.total_length, ipv4_schema(), name, value), layout: (2, 4) },
+        "identification" => { id: "identification", kind: Unsigned, derived: false, required: false, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, ipv4_schema(), name, value), layout: (4, 6) },
+        "reserved_flag" => { id: "reserved_flag", kind: Bool, derived: false, required: false, description: "Reserved IPv4 flag bit", get |layer| Some(reflect_get(&layer.reserved_flag)), set |layer, value, name| reflect_set(&mut layer.reserved_flag, ipv4_schema(), name, value), layout: (6, 8) },
+        "dont_fragment" => { id: "dont_fragment", kind: Bool, derived: false, required: false, description: "Don't-fragment flag", get |layer| Some(reflect_get(&layer.dont_fragment)), set |layer, value, name| reflect_set(&mut layer.dont_fragment, ipv4_schema(), name, value), layout: (6, 8) },
+        "more_fragments" => { id: "more_fragments", kind: Bool, derived: false, required: false, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, ipv4_schema(), name, value), layout: (6, 8) },
+        "fragment_offset" => { id: "fragment_offset", kind: Unsigned, derived: false, required: false, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(ipv4_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv4_schema(), name, "unsigned")) }, layout: (6, 8) },
+        "ttl" => { id: "ttl", kind: Unsigned, derived: false, required: true, description: "Time to live", get |layer| Some(reflect_get(&layer.ttl)), set |layer, value, name| reflect_set(&mut layer.ttl, ipv4_schema(), name, value), layout: (8, 9) },
+        "protocol" => { id: "protocol", kind: Unsigned, derived: true, required: false, description: "Next protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, ipv4_schema(), name, value), layout: (9, 10) },
+        "checksum" => { id: "checksum", kind: Unsigned, derived: true, required: false, description: "IPv4 header checksum", get |layer| Some(reflect_get(&layer.checksum)), set |layer, value, name| reflect_set(&mut layer.checksum, ipv4_schema(), name, value), layout: (10, 12) },
+        "source" | "src" => { id: "source", kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv4_schema(), name, value), layout: (12, 16) },
+        "destination" | "dst" => { id: "destination", kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv4_schema(), name, value), layout: (16, 20) },
+        "options" => { id: "options", kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, ipv4_schema(), name, value), layout: (20, header_len) },
         normalize |layer| { layer.total_length.normalize(); layer.protocol.normalize(); layer.checksum.normalize(); }
     }
     layout fn ipv4_layout(header_len: usize);
@@ -91,20 +90,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Ipv4Codec;
 
-impl LayerCodec for Ipv4Codec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("ipv4")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for Ipv4Codec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -283,7 +274,7 @@ impl LayerCodec for Ipv4Codec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < IPV4_MIN_LEN {
             return Err(truncated("ipv4", IPV4_MIN_LEN, input.len()));
@@ -369,11 +360,8 @@ impl LayerCodec for Ipv4Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Ipv4::default(),
-            &aliased_fields("ipv4", fields, &[("src", "source"), ("dst", "destination")])?,
-        )
+        make_layer(Ipv4::default(), fields)
     }
 }

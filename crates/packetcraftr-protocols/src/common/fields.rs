@@ -3,18 +3,17 @@
 
 //! Field resolution, layer construction, and declared-value expectations.
 
-use std::collections::BTreeMap;
 use std::fmt;
 
 use packetcraftr_packet::{
     build::BuildMode,
-    codec::{CodecError, LayerEncodeContext},
+    codec::{CodecError, NativeLayerEncodeContext},
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
+    field::WireValue,
     layer::Layer,
 };
 
-use super::errors::{binding_protocol, invalid};
+use super::errors::invalid;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ValueExpectation<T> {
@@ -137,27 +136,25 @@ where
 }
 
 pub(crate) fn expected_discriminator<T>(
-    parent: &str,
-    context: &LayerEncodeContext<'_>,
+    _parent: &str,
+    context: &NativeLayerEncodeContext<'_>,
     fallback: T,
 ) -> ValueExpectation<T>
 where
     T: Copy + TryFrom<u64>,
 {
-    let Some(child) = context.child else {
+    let Some(child) = context.child_protocol else {
         return ValueExpectation::Suggested(fallback);
     };
-    if child.protocol_id().as_str() == "raw" {
+    if child.as_str() == "raw" {
         let expected = context
-            .registry
-            .discriminator_for(parent, child.protocol_id().as_str())
+            .canonical_child_discriminator
             .and_then(|value| T::try_from(value.0).ok())
             .unwrap_or(fallback);
         return ValueExpectation::Suggested(expected);
     }
     context
-        .registry
-        .discriminator_for(parent, binding_protocol(child).as_str())
+        .canonical_child_discriminator
         .and_then(|value| T::try_from(value.0).ok())
         .map_or(
             ValueExpectation::Suggested(fallback),
@@ -167,33 +164,13 @@ where
 
 pub(crate) fn make_layer<L>(
     mut layer: L,
-    fields: &BTreeMap<String, FieldValue>,
+    fields: &packetcraftr_packet::layer::ValidatedFieldSet,
 ) -> Result<Box<dyn Layer>, CodecError>
 where
     L: Layer + 'static,
 {
-    for (name, value) in fields {
-        layer.set_field(name, value.clone())?;
+    for (field, value) in fields.iter() {
+        layer.set_field_by_id(&field.id, value.clone())?;
     }
     Ok(Box::new(layer))
-}
-
-pub(crate) fn aliased_fields(
-    name: &str,
-    fields: &BTreeMap<String, FieldValue>,
-    aliases: &[(&str, &str)],
-) -> Result<BTreeMap<String, FieldValue>, CodecError> {
-    let mut normalized = fields.clone();
-    for (alias, canonical) in aliases {
-        let Some(value) = normalized.remove(*alias) else {
-            continue;
-        };
-        if normalized.insert((*canonical).to_string(), value).is_some() {
-            return Err(invalid(
-                name,
-                format!("both {alias} and {canonical} were supplied"),
-            ));
-        }
-    }
-    Ok(normalized)
 }

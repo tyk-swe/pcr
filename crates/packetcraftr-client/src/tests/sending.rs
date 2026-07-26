@@ -4,9 +4,9 @@
 use super::*;
 #[test]
 fn permissive_send_requires_option_and_policy_approval() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let client = Client::new(
-        registry,
+        catalog,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         RejectingPacketIo,
@@ -46,7 +46,7 @@ fn permissive_send_requires_option_and_policy_approval() {
 fn send_materializes_route_selected_ip_source() {
     let io = RecordingIo::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         io.clone(),
@@ -76,7 +76,7 @@ fn send_materializes_route_selected_ip_source() {
 fn send_materializes_only_the_outer_ip_envelope() {
     let io = RecordingIo::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         io,
@@ -121,7 +121,7 @@ fn send_materializes_resolved_and_interface_owned_macs() {
     let io = RecordingIo::default();
     let neighbors = CountingNeighbors::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(RouteDecision {
             capability: LinkCapability::Layer2And3,
             link_type: LinkType::ETHERNET,
@@ -155,8 +155,8 @@ fn send_materializes_resolved_and_interface_owned_macs() {
 
 #[test]
 fn built_in_ethernet_mac_patch_matches_a_full_rebuild_and_keeps_metadata() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let mut packet = packet(
         Ipv4Addr::new(10, 0, 0, 1),
         Ipv4Addr::new(10, 0, 0, 2),
@@ -177,7 +177,7 @@ fn built_in_ethernet_mac_patch_matches_a_full_rebuild_and_keeps_metadata() {
     ethernet.source = [2, 0, 0, 0, 0, 1];
 
     assert!(patch_builtin_ethernet(
-        &registry,
+        &catalog,
         &mut patched,
         &materialized
     ));
@@ -205,13 +205,7 @@ fn built_in_ethernet_mac_patch_matches_a_full_rebuild_and_keeps_metadata() {
 
 #[test]
 fn external_codec_dependent_on_ethernet_macs_uses_the_rebuild_fallback() {
-    let mut builder = RegistryBuilder::new();
-    builder.module(&BuiltinProtocols).unwrap();
-    builder.register_codec(MacSensitiveCodec).unwrap();
-    builder
-        .bind("ethernet", 0x88b5, "test.mac_sensitive", 200)
-        .unwrap();
-    let registry = Arc::new(builder.build().unwrap());
+    let catalog = catalog_with_mac_sensitive(None);
     let mut decision = RouteDecision {
         selected_address: None,
         preferred_source: None,
@@ -226,7 +220,7 @@ fn external_codec_dependent_on_ethernet_macs_uses_the_rebuild_fallback() {
     let interface_lookups = Arc::new(AtomicUsize::new(0));
     let io = RecordingIo::default();
     let client = Client::new(
-        registry,
+        catalog,
         InterfaceRoutes {
             decision,
             ip_lookups: Arc::clone(&ip_lookups),
@@ -269,7 +263,7 @@ fn external_codec_dependent_on_ethernet_macs_uses_the_rebuild_fallback() {
 #[test]
 fn partial_backend_send_is_a_typed_failure() {
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         PartialIo,
@@ -302,7 +296,7 @@ fn partial_backend_send_is_a_typed_failure() {
 #[test]
 fn changed_post_build_wire_evidence_is_an_invariant_failure() {
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         ChangedWireIo,

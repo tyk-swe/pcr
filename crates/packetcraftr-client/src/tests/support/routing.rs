@@ -100,16 +100,18 @@ pub(crate) struct MacSensitiveLayer;
 
 pub(crate) fn mac_sensitive_schema() -> &'static LayerSchema {
     static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-    static FIELDS: &[FieldSchema] = &[];
-    SCHEMA.get_or_init(|| LayerSchema {
-        protocol: ProtocolId::new("test.mac_sensitive"),
-        name: "MAC-sensitive test layer",
-        fields: FIELDS,
+    SCHEMA.get_or_init(|| {
+        LayerSchema::empty(
+            ProtocolId::from_static("test.mac_sensitive"),
+            "MAC-sensitive test layer",
+            std::iter::empty::<&str>(),
+        )
+        .unwrap()
     })
 }
 
 impl Layer for MacSensitiveLayer {
-    fn schema(&self) -> &'static LayerSchema {
+    fn schema(&self) -> &LayerSchema {
         mac_sensitive_schema()
     }
 
@@ -125,14 +127,14 @@ impl Layer for MacSensitiveLayer {
         self
     }
 
-    fn field(&self, _name: &str) -> Option<FieldValue> {
+    fn field_by_id(&self, _id: &FieldId) -> Option<FieldValue> {
         None
     }
 
-    fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-        Err(FieldError::UnknownField {
+    fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+        Err(FieldError::UnknownFieldId {
             protocol: self.protocol_id().clone(),
-            field: name.to_owned(),
+            field: id.clone(),
         })
     }
 }
@@ -141,19 +143,27 @@ impl Layer for MacSensitiveLayer {
 pub(crate) struct CustomRouteLayer;
 
 impl Layer for CustomRouteLayer {
-    fn schema(&self) -> &'static LayerSchema {
+    fn schema(&self) -> &LayerSchema {
         static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-        static FIELDS: &[FieldSchema] = &[FieldSchema {
-            name: "destination",
-            kind: FieldKind::Ipv4,
-            derived: false,
-            required: true,
-            description: "custom route-bearing destination",
-        }];
-        SCHEMA.get_or_init(|| LayerSchema {
-            protocol: ProtocolId::new("test.custom_route"),
-            name: "Custom route-bearing test layer",
-            fields: FIELDS,
+        SCHEMA.get_or_init(|| {
+            LayerSchema::new(
+                ProtocolId::from_static("test.custom_route"),
+                "Custom route-bearing test layer",
+                std::iter::empty::<&str>(),
+                1,
+                [FieldSchema::new(
+                    FieldId::from_static("destination"),
+                    "destination",
+                    std::iter::empty::<&str>(),
+                    FieldKind::Ipv4,
+                    true,
+                    false,
+                    "custom route-bearing destination",
+                    FieldConstraints::default(),
+                )
+                .unwrap()],
+            )
+            .unwrap()
         })
     }
 
@@ -169,14 +179,14 @@ impl Layer for CustomRouteLayer {
         self
     }
 
-    fn field(&self, _name: &str) -> Option<FieldValue> {
+    fn field_by_id(&self, _id: &FieldId) -> Option<FieldValue> {
         None
     }
 
-    fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-        Err(FieldError::UnknownField {
+    fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+        Err(FieldError::UnknownFieldId {
             protocol: self.protocol_id().clone(),
-            field: name.to_owned(),
+            field: id.clone(),
         })
     }
 }
@@ -184,16 +194,12 @@ impl Layer for CustomRouteLayer {
 #[derive(Debug)]
 pub(crate) struct MacSensitiveCodec;
 
-impl LayerCodec for MacSensitiveCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        ProtocolId::new("test.mac_sensitive")
-    }
-
+impl NativeLayerCodec for MacSensitiveCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let source = context
             .packet
@@ -206,11 +212,11 @@ impl LayerCodec for MacSensitiveCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.is_empty() {
             return Err(CodecError::Truncated {
-                protocol: self.protocol_id().clone(),
+                protocol: ProtocolId::from_static("test.mac_sensitive"),
                 needed: 1,
                 available: 0,
             });
@@ -218,18 +224,55 @@ impl LayerCodec for MacSensitiveCodec {
         Ok(DecodedLayerValue::terminal(Box::new(MacSensitiveLayer), 1))
     }
 
-    fn make_layer(
-        &self,
-        _fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
+    fn make_layer(&self, _fields: &ValidatedFieldSet) -> Result<Box<dyn Layer>, CodecError> {
         Ok(Box::new(MacSensitiveLayer))
     }
+}
+
+pub(crate) fn catalog_with_mac_sensitive(
+    matcher_delay: Option<Duration>,
+) -> Arc<ProtocolCatalogSnapshot> {
+    let provider_id = ProviderId::from_static("test.client.protocols");
+    let origin = RegistrationOrigin::Native {
+        provider: provider_id.clone(),
+    };
+    let key = ProviderProtocolKey::from_static("mac_sensitive");
+    let implementation = NativeProtocolImplementation::new(key.clone(), MacSensitiveCodec);
+    let implementation = match matcher_delay {
+        Some(delay) => implementation.with_matcher(SlowMatcher(delay)),
+        None => implementation,
+    };
+    let provider =
+        NativeProtocolProvider::new(provider_id.clone(), origin.clone(), [implementation]).unwrap();
+    let mut registrations = ProtocolRegistrationSet::new();
+    registrations
+        .register_provider(Arc::new(provider))
+        .register_protocol(
+            ProtocolRegistration::new(
+                Arc::new(mac_sensitive_schema().clone()),
+                provider_id,
+                key,
+                origin.clone(),
+            )
+            .with_matcher(matcher_delay.is_some()),
+        )
+        .binding(ProtocolBindingRegistration::canonical(
+            ProtocolId::from_static("ethernet"),
+            0x88b5,
+            ProtocolId::from_static("test.mac_sensitive"),
+            origin,
+        ));
+
+    let mut builder = ProtocolCatalogSnapshot::builder();
+    builder.native_module(&BuiltinProtocols).unwrap();
+    builder.registration_set(registrations);
+    Arc::new(builder.build().unwrap())
 }
 
 #[derive(Debug)]
 pub(crate) struct SlowMatcher(pub(crate) Duration);
 
-impl ResponseMatcher for SlowMatcher {
+impl NativeResponseMatcher for SlowMatcher {
     fn matches(&self, _request: &Packet, _response: &Packet) -> MatchResult {
         std::thread::sleep(self.0);
         MatchResult::matched(200, "slow test matcher")

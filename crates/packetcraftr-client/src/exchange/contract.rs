@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use packetcraftr_model::Frame;
@@ -17,8 +18,8 @@ use packetcraftr_packet::diagnostic::push_diagnostic_once;
 use packetcraftr_packet::{
     Packet,
     build::{BuildContext, BuiltPacket},
+    catalog::ProtocolCatalogSnapshot,
     decode::{DecodeOptions, DecodedPacket, Dissector},
-    registry::ProtocolRegistry,
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };
 
@@ -171,7 +172,7 @@ pub(crate) struct PreparedExchangePacket {
 
 #[derive(Clone, Copy)]
 pub(crate) struct ExchangeProcessContext<'a> {
-    pub(crate) registry: &'a ProtocolRegistry,
+    pub(crate) catalog: &'a Arc<ProtocolCatalogSnapshot>,
     pub(crate) dissector: &'a Dissector,
     pub(crate) prepared: &'a [PreparedExchangePacket],
     pub(crate) sent_at: &'a [Instant],
@@ -252,7 +253,7 @@ impl ExchangeAccumulator {
         context: ExchangeProcessContext<'_>,
     ) -> ExchangeProcessOutcome {
         let ExchangeProcessContext {
-            registry,
+            catalog,
             dissector,
             prepared,
             sent_at,
@@ -327,6 +328,7 @@ impl ExchangeAccumulator {
             );
         }
 
+        let mut operation = catalog.operation();
         let mut matched: Option<(usize, packetcraftr_packet::matcher::MatchResult)> = None;
         for (request_index, prepared_request) in prepared.iter().take(sent_at.len()).enumerate() {
             if Instant::now() >= deadline {
@@ -343,10 +345,24 @@ impl ExchangeAccumulator {
                 if Instant::now() >= deadline {
                     return self.expire_decoded(decoded, options);
                 }
-                let Some(matcher) = registry.matcher(layer.protocol_id().as_str()) else {
-                    continue;
+                let candidate = match operation.match_response(
+                    layer.protocol_id(),
+                    &prepared_request.built.packet,
+                    &decoded.packet,
+                ) {
+                    Ok(Some(candidate)) => candidate.result,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        push_diagnostic_once(
+                            &mut self.diagnostics,
+                            packetcraftr_packet::diagnostic::Diagnostic::warning(
+                                "exchange.matcher_error",
+                                format!("response matcher failed: {error}"),
+                            ),
+                        );
+                        continue;
+                    }
                 };
-                let candidate = matcher.matches(&prepared_request.built.packet, &decoded.packet);
                 if Instant::now() >= deadline {
                     return self.expire_decoded(decoded, options);
                 }

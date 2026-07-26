@@ -6,6 +6,7 @@
 use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::Path;
+use std::sync::Arc;
 
 use packetcraftr_packet as packet;
 use packetcraftr_packet::Packet;
@@ -15,7 +16,7 @@ use super::errors::CliError;
 
 pub(super) fn read_recipe(
     arguments: RecipeArgs,
-    registry: &packet::registry::Registry,
+    catalog: &Arc<packet::catalog::ProtocolCatalogSnapshot>,
 ) -> Result<Packet, CliError> {
     let stdin = read_nonterminal_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
     let RecipeArgs {
@@ -33,7 +34,7 @@ pub(super) fn read_recipe(
     }
 
     let (input, path) = match (packet, packet_file, stdin) {
-        (Some(expression), None, None) => return parse_expression(&expression, registry),
+        (Some(expression), None, None) => return parse_expression(&expression, catalog),
         (None, Some(path), None) => {
             let bytes = read_bounded_file(&path, packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?;
             let input = String::from_utf8(bytes).map_err(|source| {
@@ -70,17 +71,17 @@ pub(super) fn read_recipe(
             packet::build::DEFAULT_MAX_LAYERS,
             packet::document::DEFAULT_MAX_DOCUMENT_NESTING,
         )
-        .and_then(|document| document.to_packet(registry, packet::build::DEFAULT_MAX_LAYERS))
+        .and_then(|document| document.to_packet(catalog, packet::build::DEFAULT_MAX_LAYERS))
         .map_err(|source| CliError::new(2, source.to_string()));
     }
-    parse_expression(&input, registry)
+    parse_expression(&input, catalog)
 }
 
 fn parse_expression(
     input: &str,
-    registry: &packet::registry::Registry,
+    catalog: &Arc<packet::catalog::ProtocolCatalogSnapshot>,
 ) -> Result<Packet, CliError> {
-    packet::expression::parse(input, registry, packet::expression::Options::default())
+    packet::expression::parse(input, catalog, packet::expression::Options::default())
         .map_err(|source| CliError::new(2, source.to_string()))
 }
 

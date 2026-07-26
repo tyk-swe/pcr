@@ -12,7 +12,7 @@ use packetcraftr::{
         build::{Builder, Context as BuildContext, Options as BuildOptions},
         expression::{Options as ExpressionOptions, parse as parse_packet_expression},
     },
-    protocol::builtin::registry as default_registry,
+    protocol::builtin::catalog as default_catalog,
 };
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -89,14 +89,14 @@ pub(super) fn write_link_capture(link_type: LinkType, frames: &[&[u8]]) -> PathB
 pub(super) fn write_public_raw_capture() -> PathBuf {
     use std::sync::Arc;
 
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let packet = parse_packet_expression(
         "ipv4(src=192.0.2.1,dst=8.8.8.8,identification=1)/udp(sport=40000,dport=9)/raw(text=hi)",
-        &registry,
+        &catalog,
         ExpressionOptions::default(),
     )
     .unwrap();
-    let built = Builder::new(registry)
+    let built = Builder::new(catalog)
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
     write_link_capture(LinkType::RAW, &[built.bytes.as_ref()])

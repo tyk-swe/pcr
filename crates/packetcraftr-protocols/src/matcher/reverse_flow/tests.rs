@@ -11,7 +11,8 @@ use crate::{
     transport::{Tcp, Udp},
 };
 use packetcraftr_packet::{
-    Packet, field::FieldValue, layer::Raw, matcher::ResponseMatcher, semantics::BuiltinProtocol,
+    Packet, field::FieldValue, layer::Raw, matcher::NativeResponseMatcher,
+    semantics::BuiltinProtocol,
 };
 
 use super::super::ReverseFlowMatcher;

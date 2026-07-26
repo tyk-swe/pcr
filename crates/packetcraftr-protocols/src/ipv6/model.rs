@@ -1,23 +1,22 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 
 use bytes::Bytes;
 
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext, NetworkEnvelope,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext, NetworkEnvelope,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, expected_discriminator, invalid, make_layer, out_of_range,
+    ValueExpectation, expected_discriminator, invalid, make_layer, out_of_range,
     payload_without_padding, protocol, resolve_u8, strict_or_diagnostic, truncated,
     validate_auto_raw_discriminator, validate_ipv6_routing_child, validate_raw_child_discriminator,
     wrong_layer, wrong_type,
@@ -54,12 +53,12 @@ impl Default for DestinationOptions {
 }
 
 macro_rules! declare_options_layer {
-    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, $layout:ident) => {
+    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, [$($alias:literal),*], $layout:ident) => {
         reflective_layer! {
-            fn $schema() => { protocol: protocol($protocol), name: $name }
+            fn $schema() => { protocol: protocol($protocol), name: $name, aliases: [$($alias),*] }
             impl $ty {
-                "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, $schema(), name, value), layout: (0, 1) },
-                "options" => { kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, $schema(), name, value), layout: (2, header_len) },
+                "next_header" => { id: "next_header", kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, $schema(), name, value), layout: (0, 1) },
+                "options" => { id: "options", kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, $schema(), name, value), layout: (2, header_len) },
                 normalize |layer| { layer.next_header.normalize(); }
             }
             layout fn $layout(header_len: usize);
@@ -72,6 +71,7 @@ declare_options_layer!(
     hop_schema,
     "ipv6_hop_by_hop",
     "IPv6 Hop-by-Hop Options",
+    ["hop", "hopopts", "hbh"],
     hop_layout
 );
 declare_options_layer!(
@@ -79,6 +79,7 @@ declare_options_layer!(
     destination_schema,
     "ipv6_destination_options",
     "IPv6 Destination Options",
+    ["destopts", "destination_options"],
     destination_layout
 );
 
@@ -94,7 +95,7 @@ fn encode_options<L>(
     next_header: &WireValue<u8>,
     options: &Bytes,
     layout: fn(usize) -> Vec<packetcraftr_packet::layout::FieldLayout>,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
 ) -> Result<EncodedLayer, CodecError>
 where
     L: Layer + Clone + 'static,
@@ -180,20 +181,12 @@ where
     })
 }
 
-impl LayerCodec for HopByHopCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("ipv6_hop_by_hop")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for HopByHopCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -212,7 +205,7 @@ impl LayerCodec for HopByHopCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         decode_options(
             "ipv6_hop_by_hop",
@@ -227,26 +220,18 @@ impl LayerCodec for HopByHopCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(HopByHop::default(), fields)
     }
 }
 
-impl LayerCodec for DestinationOptionsCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("ipv6_destination_options")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for DestinationOptionsCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -265,7 +250,7 @@ impl LayerCodec for DestinationOptionsCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         decode_options(
             "ipv6_destination_options",
@@ -280,7 +265,7 @@ impl LayerCodec for DestinationOptionsCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(DestinationOptions::default(), fields)
     }
@@ -307,12 +292,12 @@ impl Default for Ipv6Fragment {
 }
 
 reflective_layer! {
-    fn fragment_schema() => { protocol: protocol("ipv6_fragment"), name: "IPv6 Fragment" }
+    fn fragment_schema() => { protocol: protocol("ipv6_fragment"), name: "IPv6 Fragment", aliases: ["fragment6", "frag6"] }
     impl Ipv6Fragment {
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, fragment_schema(), name, value), layout: (0, 1) },
-        "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(fragment_schema(), name))?; Ok(()) }, _ => Err(wrong_type(fragment_schema(), name, "unsigned")) }, layout: (2, 4) },
-        "more_fragments" => { kind: Bool, derived: false, required: true, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, fragment_schema(), name, value), layout: (2, 4) },
-        "identification" => { kind: Unsigned, derived: false, required: true, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, fragment_schema(), name, value), layout: (4, 8) },
+        "next_header" => { id: "next_header", kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, fragment_schema(), name, value), layout: (0, 1) },
+        "fragment_offset" => { id: "fragment_offset", kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(fragment_schema(), name))?; Ok(()) }, _ => Err(wrong_type(fragment_schema(), name, "unsigned")) }, layout: (2, 4) },
+        "more_fragments" => { id: "more_fragments", kind: Bool, derived: false, required: true, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, fragment_schema(), name, value), layout: (2, 4) },
+        "identification" => { id: "identification", kind: Unsigned, derived: false, required: true, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, fragment_schema(), name, value), layout: (4, 8) },
         normalize |layer| { layer.next_header.normalize(); }
     }
     layout fn fragment_layout();
@@ -321,20 +306,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Ipv6FragmentCodec;
 
-impl LayerCodec for Ipv6FragmentCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("ipv6_fragment")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for Ipv6FragmentCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -419,7 +396,7 @@ impl LayerCodec for Ipv6FragmentCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < 8 {
             return Err(truncated("ipv6_fragment", 8, input.len()));
@@ -455,7 +432,7 @@ impl LayerCodec for Ipv6FragmentCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Ipv6Fragment::default(), fields)
     }
@@ -486,14 +463,14 @@ impl Default for SegmentRoutingHeader {
 }
 
 reflective_layer! {
-    fn srh_schema() => { protocol: protocol("ipv6_srh"), name: "IPv6 Segment Routing Header" }
+    fn srh_schema() => { protocol: protocol("ipv6_srh"), name: "IPv6 Segment Routing Header", aliases: ["srh", "segment_routing"] }
     impl SegmentRoutingHeader {
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, srh_schema(), name, value), layout: (0, 1) },
-        "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", get |layer| Some(reflect_get(&layer.segments_left)), set |layer, value, name| reflect_set(&mut layer.segments_left, srh_schema(), name, value), layout: (3, 4) },
-        "last_entry" => { kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", get |layer| Some(reflect_get(&layer.last_entry)), set |layer, value, name| reflect_set(&mut layer.last_entry, srh_schema(), name, value), layout: (4, 5) },
-        "flags" => { kind: Unsigned, derived: false, required: false, description: "SRH flags", get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| reflect_set(&mut layer.flags, srh_schema(), name, value), layout: (5, 6) },
-        "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", get |layer| Some(reflect_get(&layer.tag)), set |layer, value, name| reflect_set(&mut layer.tag, srh_schema(), name, value), layout: (6, 8) },
-        "segments" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, header_len) },
+        "next_header" => { id: "next_header", kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, srh_schema(), name, value), layout: (0, 1) },
+        "segments_left" => { id: "segments_left", kind: Unsigned, derived: true, required: false, description: "Remaining segments", get |layer| Some(reflect_get(&layer.segments_left)), set |layer, value, name| reflect_set(&mut layer.segments_left, srh_schema(), name, value), layout: (3, 4) },
+        "last_entry" => { id: "last_entry", kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", get |layer| Some(reflect_get(&layer.last_entry)), set |layer, value, name| reflect_set(&mut layer.last_entry, srh_schema(), name, value), layout: (4, 5) },
+        "flags" => { id: "flags", kind: Unsigned, derived: false, required: false, description: "SRH flags", get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| reflect_set(&mut layer.flags, srh_schema(), name, value), layout: (5, 6) },
+        "tag" => { id: "tag", kind: Unsigned, derived: false, required: false, description: "SRH tag", get |layer| Some(reflect_get(&layer.tag)), set |layer, value, name| reflect_set(&mut layer.tag, srh_schema(), name, value), layout: (6, 8) },
+        "segments" | "segs" => { id: "segments", kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, header_len) },
         normalize |layer| { layer.next_header.normalize(); layer.segments_left.normalize(); layer.last_entry.normalize(); }
     }
     layout fn srh_layout(header_len: usize);
@@ -502,20 +479,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SegmentRoutingHeaderCodec;
 
-impl LayerCodec for SegmentRoutingHeaderCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("ipv6_srh")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for SegmentRoutingHeaderCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -602,7 +571,7 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < 8 {
             return Err(truncated("ipv6_srh", 8, input.len()));
@@ -671,12 +640,9 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            SegmentRoutingHeader::default(),
-            &aliased_fields("ipv6_srh", fields, &[("segs", "segments")])?,
-        )
+        make_layer(SegmentRoutingHeader::default(), fields)
     }
 }
 
@@ -685,7 +651,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
-    use crate::{builtin::registry as default_registry, network::Ipv6, transport::Udp};
+    use crate::{builtin::catalog as default_catalog, network::Ipv6, transport::Udp};
     use packetcraftr_packet::{
         Packet,
         build::{BuildContext, BuildOptions, Builder},
@@ -696,8 +662,8 @@ mod tests {
     fn srh_encodes_rfc8754_segment_list_and_round_trips() {
         let first: Ipv6Addr = "2001:db8::10".parse().unwrap();
         let final_destination: Ipv6Addr = "2001:db8::20".parse().unwrap();
-        let registry = Arc::new(default_registry().unwrap());
-        let builder = Builder::new(Arc::clone(&registry));
+        let catalog = Arc::new(default_catalog().unwrap());
+        let builder = Builder::new(Arc::clone(&catalog));
         let mut packet = Packet::new();
         packet
             .push(Ipv6 {
@@ -727,7 +693,7 @@ mod tests {
         assert_eq!(&built.bytes[48..64], &final_destination.octets());
         assert_eq!(&built.bytes[64..80], &first.octets());
 
-        let decoded = Dissector::new(Arc::clone(&registry))
+        let decoded = Dissector::new(Arc::clone(&catalog))
             .decode_with_root(
                 built.bytes.clone(),
                 protocol("ipv6"),
@@ -754,7 +720,7 @@ mod tests {
 
     #[test]
     fn routing_type_zero_is_preserved_as_malformed_not_misdecoded() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let mut bytes = vec![0u8; 40 + 24];
         bytes[0] = 0x60;
         bytes[4..6].copy_from_slice(&24u16.to_be_bytes());
@@ -766,7 +732,7 @@ mod tests {
         bytes[43] = 0;
 
         let expected = Bytes::from(bytes.clone());
-        let decoded = Dissector::new(Arc::clone(&registry))
+        let decoded = Dissector::new(Arc::clone(&catalog))
             .decode_with_root(bytes, protocol("ipv6"), DecodeOptions::default())
             .unwrap();
         assert!(
@@ -783,8 +749,8 @@ mod tests {
         );
 
         let document = packetcraftr_packet::document::PacketDocument::from_packet(&decoded.packet);
-        let reloaded = document.to_packet(&registry, 64).unwrap();
-        let rebuilt = Builder::new(registry)
+        let reloaded = document.to_packet(&catalog, 64).unwrap();
+        let rebuilt = Builder::new(catalog)
             .build(reloaded, BuildContext::default(), BuildOptions::default())
             .unwrap();
         assert_eq!(rebuilt.bytes, expected);
@@ -793,7 +759,7 @@ mod tests {
 
     #[test]
     fn option_header_materializes_emitted_alignment_padding() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let mut packet = Packet::new();
         packet
             .push(Ipv6 {
@@ -806,11 +772,11 @@ mod tests {
                 ..HopByHop::default()
             })
             .push(Udp::default());
-        let built = Builder::new(Arc::clone(&registry))
+        let built = Builder::new(Arc::clone(&catalog))
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap();
         assert_eq!(built.packet.get::<HopByHop>().unwrap().options.len(), 6);
-        let decoded = Dissector::new(registry)
+        let decoded = Dissector::new(catalog)
             .decode_with_root(built.bytes, protocol("ipv6"), DecodeOptions::default())
             .unwrap();
         assert_eq!(decoded.packet.get::<HopByHop>().unwrap().options.len(), 6);

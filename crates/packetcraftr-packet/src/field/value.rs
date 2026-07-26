@@ -100,6 +100,20 @@ mod bytes_as_array {
 }
 
 impl FieldValue {
+    pub const fn kind(&self) -> FieldKind {
+        match self {
+            Self::Bool(_) => FieldKind::Bool,
+            Self::Unsigned(_) => FieldKind::Unsigned,
+            Self::Signed(_) => FieldKind::Signed,
+            Self::Text(_) => FieldKind::Text,
+            Self::Bytes(_) => FieldKind::Bytes,
+            Self::Ipv4(_) => FieldKind::Ipv4,
+            Self::Ipv6(_) => FieldKind::Ipv6,
+            Self::Mac(_) => FieldKind::Mac,
+            Self::List(_) => FieldKind::List,
+        }
+    }
+
     pub fn as_u64(&self) -> Option<u64> {
         match self {
             Self::Unsigned(value) => Some(*value),

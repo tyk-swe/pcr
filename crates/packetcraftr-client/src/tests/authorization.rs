@@ -6,7 +6,7 @@ use super::*;
 fn synthesized_ethernet_is_authorized_before_neighbor_traffic() {
     let neighbors = CountingNeighbors::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(RouteDecision {
             capability: LinkCapability::Layer2And3,
             link_type: LinkType::ETHERNET,
@@ -50,7 +50,7 @@ fn synthesized_ethernet_is_authorized_before_neighbor_traffic() {
 #[test]
 fn mtu_uses_actual_network_span_even_for_permissive_lengths() {
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         RecordingIo::default(),
@@ -102,7 +102,7 @@ fn arp_target_is_authorized_before_route_lookup() {
     });
     let route_calls = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer2),
             calls: Arc::clone(&route_calls),
@@ -127,7 +127,7 @@ fn unknown_route_bearing_custom_layer_fails_closed_before_route_lookup() {
     request.push(CustomRouteLayer);
     let route_calls = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),
@@ -164,7 +164,7 @@ fn srh_policy_checks_final_segment_not_only_first_hop() {
         .push(Udp::default());
     let route_calls = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: RouteDecision {
                 selected_address: Some(IpAddr::V6(source)),
@@ -214,7 +214,7 @@ fn ipv4_source_routes_and_multicast_are_authorized_before_route_lookup() {
         request.get_mut::<Ipv4>().unwrap().options =
             Bytes::from(vec![option_type, 7, 4, 8, 8, 8, 8]);
         let client = Client::new(
-            Arc::new(default_registry().unwrap()),
+            Arc::new(default_catalog().unwrap()),
             CountingRoutes {
                 decision: route(LinkCapability::Layer3),
                 calls: Arc::clone(&route_calls),
@@ -246,7 +246,7 @@ fn ipv4_source_routes_and_multicast_are_authorized_before_route_lookup() {
         );
         request.get_mut::<Ipv4>().unwrap().options = Bytes::from(malformed);
         let client = Client::new(
-            Arc::new(default_registry().unwrap()),
+            Arc::new(default_catalog().unwrap()),
             CountingRoutes {
                 decision: route(LinkCapability::Layer3),
                 calls: Arc::clone(&route_calls),
@@ -308,7 +308,7 @@ fn exchange_accounts_generated_template_packets_lazily() {
         },
     );
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         ScriptedExchangeIo {

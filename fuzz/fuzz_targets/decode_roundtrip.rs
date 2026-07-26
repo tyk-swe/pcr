@@ -12,7 +12,7 @@ use packetcraftr_packet::{
     build::{Builder, Context as BuildContext, Mode as BuildMode, Options as BuildOptions},
     decode::{Decoder, Options as DecodeOptions},
 };
-use packetcraftr_protocols::builtin::registry;
+use packetcraftr_protocols::builtin::catalog;
 
 const ROOTS: [LinkType; 10] = [
     LinkType::NULL,
@@ -32,8 +32,8 @@ fuzz_target!(|data: &[u8]| {
         return;
     };
     let bytes = bytes[..bytes.len().min(64 * 1024)].to_vec();
-    let registry = Arc::new(registry().unwrap());
-    let decoded = Decoder::new(Arc::clone(&registry))
+    let catalog = Arc::new(catalog().unwrap());
+    let decoded = Decoder::new(Arc::clone(&catalog))
         .decode(
             Frame::new(
                 SystemTime::UNIX_EPOCH,
@@ -61,7 +61,7 @@ fuzz_target!(|data: &[u8]| {
         );
     }
     if !bytes.is_empty() {
-        let rebuilt = Builder::new(registry)
+        let rebuilt = Builder::new(catalog)
             .build(
                 decoded.packet,
                 BuildContext::default(),

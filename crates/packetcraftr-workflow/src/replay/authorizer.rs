@@ -12,25 +12,25 @@ use packetcraftr_policy::TrafficPolicy;
 use super::wire::{ReplayWireDestinations, replay_network_envelope, replay_wire_destinations};
 use super::{
     BuildContext, BuildMode, BuildOptions, Builder, Classification, DecodeOptions, Decoder, Frame,
-    Kind, LinkMode, ProtocolRegistry, ReplayAuthorizationContext, ReplayAuthorizer,
+    Kind, LinkMode, ProtocolCatalogSnapshot, ReplayAuthorizationContext, ReplayAuthorizer,
 };
 use crate::BoundaryError;
 
 pub struct SystemAuthorizer {
     policy: TrafficPolicy,
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
     allow_malformed_live: bool,
 }
 
 impl SystemAuthorizer {
     pub fn new(
         policy: TrafficPolicy,
-        registry: Arc<ProtocolRegistry>,
+        catalog: Arc<ProtocolCatalogSnapshot>,
         allow_malformed_live: bool,
     ) -> Self {
         Self {
             policy,
-            registry,
+            catalog,
             allow_malformed_live,
         }
     }
@@ -104,7 +104,7 @@ impl SystemAuthorizer {
                 Vec::new(),
             ));
         }
-        let decoded = Decoder::new(Arc::clone(&self.registry))
+        let decoded = Decoder::new(Arc::clone(&self.catalog))
             .decode(frame.clone(), DecodeOptions::default())
             .map_err(|source| {
                 BoundaryError::with_source(
@@ -118,7 +118,7 @@ impl SystemAuthorizer {
                     source,
                 )
             })?;
-        let rebuilt = Builder::new(Arc::clone(&self.registry))
+        let rebuilt = Builder::new(Arc::clone(&self.catalog))
             .build(
                 decoded.packet.clone(),
                 BuildContext::default(),

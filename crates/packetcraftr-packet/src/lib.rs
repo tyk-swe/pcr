@@ -6,19 +6,24 @@
 //! Runtime-neutral packet model, construction, decoding, and extension contracts.
 
 pub mod build;
+pub mod catalog;
 pub mod codec;
 pub mod decode;
 pub mod diagnostic;
 pub mod document;
 pub mod expression;
 pub mod field;
+mod invariant;
 pub mod layer;
 pub mod layout;
 pub mod matcher;
 mod model;
 mod protocol_catalog;
-pub mod registry;
+pub mod provider;
 pub mod semantics;
 pub mod template;
+
+#[cfg(test)]
+mod test_support;
 
 pub use model::{Packet, PacketError as Error};

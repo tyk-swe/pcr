@@ -6,12 +6,12 @@ use std::net::Ipv6Addr;
 use super::super::engine::traceroute_identity;
 use super::super::*;
 use super::support::decoded_at;
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 use packetcraftr_protocols::ipv6::SegmentRoutingHeader;
 
 #[test]
 fn ipv6_classifier_accepts_intermediate_response() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local6: Ipv6Addr = "fd00::1".parse().unwrap();
     let remote6: Ipv6Addr = "fd00::9".parse().unwrap();
     let router6: Ipv6Addr = "fd00::fe".parse().unwrap();
@@ -28,7 +28,7 @@ fn ipv6_classifier_accepts_intermediate_response() {
     let intermediate6 = icmpv6_error(router6, local6, 3, 0, ipv6_udp_quote(&udp_probe_packet), 11);
     assert_eq!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Udp,
             &udp_probe_packet,
             &intermediate6,
@@ -41,7 +41,7 @@ fn ipv6_classifier_accepts_intermediate_response() {
 
 #[test]
 fn tunneled_direct_reply_reaches_the_inner_destination() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
     let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
     let inner_source: Ipv6Addr = "2001:db8:1::1".parse().unwrap();
@@ -82,7 +82,7 @@ fn tunneled_direct_reply_reaches_the_inner_destination() {
         });
 
     let classification = classify_traceroute_response(
-        &registry,
+        &catalog,
         TracerouteStrategy::Udp,
         &request,
         &decoded_at(reply, 2, Vec::new()),
@@ -98,7 +98,7 @@ fn tunneled_direct_reply_reaches_the_inner_destination() {
 
 #[test]
 fn srh_direct_reply_reaches_the_final_destination() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let source: Ipv6Addr = "2001:db8::1".parse().unwrap();
     let active: Ipv6Addr = "2001:db8::10".parse().unwrap();
     let final_destination: Ipv6Addr = "2001:db8::20".parse().unwrap();
@@ -132,7 +132,7 @@ fn srh_direct_reply_reaches_the_final_destination() {
         });
 
     let classification = classify_traceroute_response(
-        &registry,
+        &catalog,
         TracerouteStrategy::Udp,
         &request,
         &decoded_at(reply, 2, Vec::new()),
@@ -148,7 +148,7 @@ fn srh_direct_reply_reaches_the_final_destination() {
 
 #[test]
 fn icmp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local6: Ipv6Addr = "fd00::1".parse().unwrap();
     let remote6: Ipv6Addr = "fd00::9".parse().unwrap();
     let mut echo_request = TracerouteProbe {
@@ -176,7 +176,7 @@ fn icmp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
         });
     assert_eq!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Icmp,
             &echo_request,
             &decoded_at(echo_reply, 2, Vec::new()),

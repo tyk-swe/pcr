@@ -18,7 +18,7 @@ use packetcraftr::{
         layer::Raw,
     },
     protocol::{
-        builtin::registry as default_registry,
+        builtin::catalog as default_catalog,
         capture::{BsdNull, ByteOrder as CaptureByteOrder},
         network::Ipv4,
         transport::Udp,
@@ -86,8 +86,8 @@ fn assert_valid_layout(decoded: &packetcraftr::packet::decode::Result) {
 
 #[test]
 fn frame_corpus_decodes_and_rebuilds() {
-    let registry = Arc::new(default_registry().unwrap());
-    let dissector = Dissector::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let dissector = Dissector::new(Arc::clone(&catalog));
     let frames: &[FrameCase] = &[
         (
             "frames/ethernet/ipv4-udp.bin",
@@ -209,7 +209,7 @@ fn frame_corpus_decodes_and_rebuilds() {
             "{relative}"
         );
         if exact {
-            let rebuilt = Builder::new(Arc::clone(&registry))
+            let rebuilt = Builder::new(Arc::clone(&catalog))
                 .build(
                     decoded.packet,
                     BuildContext::default(),
@@ -223,13 +223,13 @@ fn frame_corpus_decodes_and_rebuilds() {
 
 #[test]
 fn bsd_null_corpus_preserves_both_captured_host_byte_orders() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     for (relative, expected_order) in [
         ("frames/null/ipv4-icmp.bin", CaptureByteOrder::Little),
         ("frames/null/ipv6-big-endian.bin", CaptureByteOrder::Big),
     ] {
         let bytes = read_fixture(relative);
-        let decoded = Dissector::new(Arc::clone(&registry))
+        let decoded = Dissector::new(Arc::clone(&catalog))
             .decode(
                 CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::NULL, bytes.clone()).unwrap(),
                 DecodeOptions::default(),
@@ -239,7 +239,7 @@ fn bsd_null_corpus_preserves_both_captured_host_byte_orders() {
             decoded.packet.get::<BsdNull>().unwrap().byte_order,
             expected_order
         );
-        let rebuilt = Builder::new(Arc::clone(&registry))
+        let rebuilt = Builder::new(Arc::clone(&catalog))
             .build(
                 decoded.packet,
                 BuildContext::default(),
@@ -302,8 +302,8 @@ fn every_capture_truncation_is_bounded_and_errors_are_terminal() {
 
 #[test]
 fn frame_truncations_and_corruptions_preserve_layout_and_permissive_bytes() {
-    let registry = Arc::new(default_registry().unwrap());
-    let dissector = Dissector::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let dissector = Dissector::new(Arc::clone(&catalog));
     for (relative, link_type) in [
         ("frames/ethernet/ipv4-udp.bin", LinkType::ETHERNET),
         ("frames/raw/ipv6-udp.bin", LinkType::RAW),
@@ -334,7 +334,7 @@ fn frame_truncations_and_corruptions_preserve_layout_and_permissive_bytes() {
                 .unwrap();
             assert_valid_layout(&decoded);
             if !bytes.is_empty() {
-                let rebuilt = Builder::new(Arc::clone(&registry))
+                let rebuilt = Builder::new(Arc::clone(&catalog))
                     .build(
                         decoded.packet,
                         BuildContext::default(),
@@ -352,7 +352,7 @@ fn frame_truncations_and_corruptions_preserve_layout_and_permissive_bytes() {
 
 #[test]
 fn document_corpus_parses_and_builds() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let documents: &[(&str, DocumentFormat, &[&str])] = &[
         (
             "documents/ipv4-udp.json",
@@ -365,13 +365,13 @@ fn document_corpus_parses_and_builds() {
         let bytes = read_fixture(relative);
         let input = std::str::from_utf8(&bytes).unwrap();
         let document = PacketDocument::parse(input, format, 16 * 1024 * 1024).unwrap();
-        let packet = document.to_packet(&registry, 64).unwrap();
+        let packet = document.to_packet(&catalog, 64).unwrap();
         assert_eq!(
             layer_names(&packet),
             to_owned_strings(expected_layers),
             "{relative}"
         );
-        Builder::new(Arc::clone(&registry))
+        Builder::new(Arc::clone(&catalog))
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap();
     }
@@ -382,7 +382,7 @@ fn expected_decode_fixture_matches_independent_semantic_assertions() {
     let frame = read_fixture("frames/ethernet/ipv4-udp.bin");
     let expected: serde_json::Value =
         serde_json::from_slice(&read_fixture("expected/ethernet-ipv4-udp.json")).unwrap();
-    let decoded = Dissector::new(Arc::new(default_registry().unwrap()))
+    let decoded = Dissector::new(Arc::new(default_catalog().unwrap()))
         .decode(
             CapturedFrame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, frame).unwrap(),
             DecodeOptions::default(),

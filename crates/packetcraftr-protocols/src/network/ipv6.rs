@@ -3,24 +3,23 @@
 
 //! IPv6 base header model and codec.
 
-use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv6Addr};
 
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, expected_discriminator, invalid, make_layer,
-    network_from_addresses, out_of_range, payload_without_padding, protocol, resolve_u8,
-    resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
-    validate_ipv6_routing_child, validate_raw_child_discriminator, wrong_layer, wrong_type,
+    ValueExpectation, expected_discriminator, invalid, make_layer, network_from_addresses,
+    out_of_range, payload_without_padding, protocol, resolve_u8, resolve_u16, strict_or_diagnostic,
+    truncated, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
 use super::encode::{is_ipv6_extension_layer, is_outer_network_layer};
@@ -53,15 +52,15 @@ impl Default for Ipv6 {
 }
 
 reflective_layer! {
-    fn ipv6_schema() => { protocol: protocol("ipv6"), name: "IPv6" }
+    fn ipv6_schema() => { protocol: protocol("ipv6"), name: "IPv6", aliases: ["ip6"] }
     impl Ipv6 {
-        "traffic_class" => { kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", get |layer| Some(reflect_get(&layer.traffic_class)), set |layer, value, name| reflect_set(&mut layer.traffic_class, ipv6_schema(), name, value), layout: (0, 4) },
-        "flow_label" => { kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", get |layer| Some(reflect_get(&layer.flow_label)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.flow_label = u32::try_from(value).ok().filter(|value| *value <= 0x000f_ffff).ok_or_else(|| out_of_range(ipv6_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv6_schema(), name, "unsigned")) }, layout: (0, 4) },
-        "payload_length" => { kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", get |layer| Some(reflect_get(&layer.payload_length)), set |layer, value, name| reflect_set(&mut layer.payload_length, ipv6_schema(), name, value), layout: (4, 6) },
-        "next_header" => { kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, ipv6_schema(), name, value), layout: (6, 7) },
-        "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", get |layer| Some(reflect_get(&layer.hop_limit)), set |layer, value, name| reflect_set(&mut layer.hop_limit, ipv6_schema(), name, value), layout: (7, 8) },
-        "source" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv6_schema(), name, value), layout: (8, 24) },
-        "destination" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv6_schema(), name, value), layout: (24, 40) },
+        "traffic_class" => { id: "traffic_class", kind: Unsigned, derived: false, required: false, description: "IPv6 traffic class", get |layer| Some(reflect_get(&layer.traffic_class)), set |layer, value, name| reflect_set(&mut layer.traffic_class, ipv6_schema(), name, value), layout: (0, 4) },
+        "flow_label" => { id: "flow_label", kind: Unsigned, derived: false, required: false, description: "IPv6 flow label", get |layer| Some(reflect_get(&layer.flow_label)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.flow_label = u32::try_from(value).ok().filter(|value| *value <= 0x000f_ffff).ok_or_else(|| out_of_range(ipv6_schema(), name))?; Ok(()) }, _ => Err(wrong_type(ipv6_schema(), name, "unsigned")) }, layout: (0, 4) },
+        "payload_length" => { id: "payload_length", kind: Unsigned, derived: true, required: false, description: "IPv6 payload length", get |layer| Some(reflect_get(&layer.payload_length)), set |layer, value, name| reflect_set(&mut layer.payload_length, ipv6_schema(), name, value), layout: (4, 6) },
+        "next_header" => { id: "next_header", kind: Unsigned, derived: true, required: false, description: "Next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, ipv6_schema(), name, value), layout: (6, 7) },
+        "hop_limit" => { id: "hop_limit", kind: Unsigned, derived: false, required: true, description: "Hop limit", get |layer| Some(reflect_get(&layer.hop_limit)), set |layer, value, name| reflect_set(&mut layer.hop_limit, ipv6_schema(), name, value), layout: (7, 8) },
+        "source" | "src" => { id: "source", kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv6_schema(), name, value), layout: (8, 24) },
+        "destination" | "dst" => { id: "destination", kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv6_schema(), name, value), layout: (24, 40) },
         normalize |layer| { layer.payload_length.normalize(); layer.next_header.normalize(); }
     }
     layout fn ipv6_layout();
@@ -70,19 +69,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Ipv6Codec;
 
-impl LayerCodec for Ipv6Codec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("ipv6")
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for Ipv6Codec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -210,7 +202,7 @@ impl LayerCodec for Ipv6Codec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < IPV6_LEN {
             return Err(truncated("ipv6", IPV6_LEN, input.len()));
@@ -271,11 +263,8 @@ impl LayerCodec for Ipv6Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Ipv6::default(),
-            &aliased_fields("ipv6", fields, &[("src", "source"), ("dst", "destination")])?,
-        )
+        make_layer(Ipv6::default(), fields)
     }
 }

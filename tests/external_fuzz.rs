@@ -12,10 +12,10 @@ use packetcraftr::{
     packet::{
         Packet,
         build::{Builder, Context, Options},
+        catalog::ProtocolCatalogSnapshot,
         layer::Raw,
-        registry::Registry,
     },
-    protocol::builtin::registry,
+    protocol::builtin::catalog,
     workflow::{
         BoundaryError, Stats,
         clock::Clock as FuzzClock,
@@ -47,7 +47,7 @@ impl FuzzAuthorizer for Authorizer {
 }
 
 struct Executor {
-    registry: Arc<Registry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
     executed: Vec<(u64, Duration)>,
 }
 
@@ -58,7 +58,7 @@ impl FuzzExecutor for Executor {
         timeout: Duration,
     ) -> Result<Execution, BoundaryError> {
         self.executed.push((case.index, timeout));
-        let built = Builder::new(Arc::clone(&self.registry))
+        let built = Builder::new(Arc::clone(&self.catalog))
             .build(case.packet.clone(), Context::default(), Options::default())
             .map_err(|source| {
                 BoundaryError::new(
@@ -101,7 +101,7 @@ impl FuzzClock for Clock {
 
 #[test]
 fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
-    let registry = Arc::new(registry().unwrap());
+    let catalog = Arc::new(catalog().unwrap());
     let mut packet = Packet::new();
     packet.push(Raw::new(vec![0_u8]));
     let request = Request {
@@ -117,7 +117,7 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
 
     // The offline API has no authorizer, executor, resolver, route, or clock
     // parameter and therefore cannot produce network side effects.
-    let offline = run(&request, packet.clone(), Arc::clone(&registry)).unwrap();
+    let offline = run(&request, packet.clone(), Arc::clone(&catalog)).unwrap();
     assert_eq!(offline.cases.len(), 2);
     assert!(
         offline
@@ -128,7 +128,7 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
 
     let mut authorizer = Authorizer { calls: 0 };
     let mut executor = Executor {
-        registry: Arc::clone(&registry),
+        catalog: Arc::clone(&catalog),
         executed: Vec::new(),
     };
     let mut clock = Clock::default();
@@ -141,7 +141,7 @@ fn downstream_code_can_run_offline_or_inject_live_fuzz_boundaries() {
             allow_malformed_live: false,
         },
         packet,
-        registry,
+        catalog,
         &mut authorizer,
         &mut executor,
         &mut clock,

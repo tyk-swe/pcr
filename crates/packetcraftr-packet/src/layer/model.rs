@@ -5,80 +5,91 @@ use std::any::Any;
 use std::fmt;
 
 use bytes::Bytes;
-use packetcraftr_model::ProtocolId;
-use serde::Serialize;
+use packetcraftr_model::{FieldId, ProtocolId};
 use thiserror::Error;
 
 use super::super::field::{FieldKind, FieldValue};
 use super::reflection::{reflect_get, reflect_set, reflective_layer};
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct FieldSchema {
-    /// Stable reflective field name used by documents, expressions, and
-    /// [`Layer::field`].
-    pub name: &'static str,
-    /// Nominal typed value accepted by the field. Derived wire values may also
-    /// expose `"auto"` or raw bytes through [`FieldValue`].
-    pub kind: FieldKind,
-    /// Whether the builder may derive this field from packet context.
-    pub derived: bool,
-    /// Whether [`Layer::field`] must return a value after codec defaults have
-    /// been applied.
-    ///
-    /// This does not require callers to spell the field in an expression or
-    /// document. Codec factories may supply a default, but constructed,
-    /// materialized, and decoded layers must expose every required field.
-    pub required: bool,
-    /// Human-readable field purpose.
-    pub description: &'static str,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct LayerSchema {
-    /// Stable protocol identifier.
-    pub protocol: ProtocolId,
-    /// Human-readable protocol name.
-    pub name: &'static str,
-    /// Ordered reflective fields.
-    pub fields: &'static [FieldSchema],
-}
+use super::schema::LayerSchema;
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FieldError {
     #[error("layer {protocol} has no field named {field}")]
     UnknownField { protocol: ProtocolId, field: String },
+    #[error("layer {protocol} has no field with ID {field}")]
+    UnknownFieldId {
+        protocol: ProtocolId,
+        field: FieldId,
+    },
+    #[error("field {field} on layer {protocol} was supplied more than once")]
+    DuplicateField {
+        protocol: ProtocolId,
+        field: FieldId,
+    },
     #[error("field {field} on layer {protocol} expected {expected}")]
     WrongType {
         protocol: ProtocolId,
         field: String,
         expected: &'static str,
     },
+    #[error("field {field} on layer {protocol} expected {expected:?}, got {actual:?}")]
+    WrongKind {
+        protocol: ProtocolId,
+        field: FieldId,
+        expected: FieldKind,
+        actual: FieldKind,
+    },
     #[error("field {field} on layer {protocol} is outside the allowed range")]
     OutOfRange { protocol: ProtocolId, field: String },
+    #[error("field {field} on layer {protocol} violates its constraints")]
+    Constraint {
+        protocol: ProtocolId,
+        field: FieldId,
+    },
     #[error("field {field} on layer {protocol} cannot be edited reflectively")]
     ReadOnly { protocol: ProtocolId, field: String },
     #[error("required field {field} is absent from layer {protocol} after defaults")]
-    MissingRequired { protocol: ProtocolId, field: String },
+    MissingRequired {
+        protocol: ProtocolId,
+        field: FieldId,
+    },
 }
 
 /// Object-safe packet layer interface used by built-in and external protocols.
 pub trait Layer: Any + Send + Sync + fmt::Debug {
-    fn schema(&self) -> &'static LayerSchema;
+    fn schema(&self) -> &LayerSchema;
     fn clone_box(&self) -> Box<dyn Layer>;
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn field(&self, name: &str) -> Option<FieldValue>;
-    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError>;
+    fn field_by_id(&self, id: &FieldId) -> Option<FieldValue>;
+    fn set_field_by_id(&mut self, id: &FieldId, value: FieldValue) -> Result<(), FieldError>;
+
+    /// Convenience lookup through the schema's normalized name and alias map.
+    fn field(&self, name: &str) -> Option<FieldValue> {
+        let id = self.schema().canonical_field_id(name)?;
+        self.field_by_id(id)
+    }
+
+    /// Convenience update through the schema's normalized name and alias map.
+    fn set_field(&mut self, name: &str, value: FieldValue) -> Result<(), FieldError> {
+        let Some(id) = self.schema().canonical_field_id(name).cloned() else {
+            return Err(FieldError::UnknownField {
+                protocol: self.protocol_id().clone(),
+                field: name.to_owned(),
+            });
+        };
+        self.set_field_by_id(&id, value)
+    }
 
     /// Validates the stable required-field contract after codec defaults,
     /// materialization, or decoding.
     fn validate_required_fields(&self) -> Result<(), FieldError> {
         for field in self.schema().fields.iter().filter(|field| field.required) {
-            if self.field(field.name).is_none() {
+            if self.field_by_id(&field.id).is_none() {
                 return Err(FieldError::MissingRequired {
                     protocol: self.protocol_id().clone(),
-                    field: field.name.to_owned(),
+                    field: field.id.clone(),
                 });
             }
         }
@@ -99,7 +110,7 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     ///
     /// Protocol crates use this to prove that a published support manifest and
     /// a layer's declared layout cannot drift apart.
-    fn declared_layout_fields(&self) -> Vec<&'static str> {
+    fn declared_layout_fields(&self) -> Vec<FieldId> {
         Vec::new()
     }
 }
@@ -124,10 +135,10 @@ impl Raw {
 }
 
 reflective_layer! {
-    fn raw_schema() => { protocol: ProtocolId::new("raw"), name: "Raw" }
+    fn raw_schema() => { protocol: ProtocolId::from_static("raw"), name: "Raw", aliases: ["payload", "bytes"] }
     impl Raw {
         "bytes" => {
-            kind: Bytes, derived: false, required: false,
+            id: "bytes", kind: Bytes, derived: false, required: false,
             description: "Verbatim bytes",
             get |layer| Some(reflect_get(&layer.bytes)),
             set |layer, value, name| reflect_set(&mut layer.bytes, raw_schema(), name, value),
@@ -162,17 +173,17 @@ impl Padding {
 }
 
 reflective_layer! {
-    fn padding_schema() => { protocol: ProtocolId::new("padding"), name: "Padding" }
+    fn padding_schema() => { protocol: ProtocolId::from_static("padding"), name: "Padding", aliases: ["pad"] }
     impl Padding {
         "bytes" => {
-            kind: Bytes, derived: false, required: false,
+            id: "bytes", kind: Bytes, derived: false, required: false,
             description: "Trailing padding bytes",
             get |layer| Some(reflect_get(&layer.bytes)),
             set |layer, value, name| reflect_set(&mut layer.bytes, padding_schema(), name, value),
             layout: (0, length)
         },
         "outside_layer" => {
-            kind: Unsigned, derived: false, required: false,
+            id: "outside_layer", kind: Unsigned, derived: false, required: false,
             description: "First layer index whose declared length excludes the padding",
             get |layer| layer.outside_layer.map(FieldValue::from),
             set |layer, value, name| match value {
@@ -213,26 +224,34 @@ impl MalformedLayer {
 }
 
 reflective_layer! {
-    fn malformed_schema() => { protocol: ProtocolId::new("malformed"), name: "Malformed" }
+    fn malformed_schema() => { protocol: ProtocolId::from_static("malformed"), name: "Malformed" }
     impl MalformedLayer {
         "protocol" => {
-            kind: Text, derived: false, required: false,
+            id: "protocol", kind: Text, derived: false, required: false,
             description: "Intended protocol identifier",
             get |layer| layer.intended_protocol.as_ref().map(|value| FieldValue::Text(value.to_string())),
             set |layer, value, name| match value {
-                FieldValue::Text(value) => { layer.intended_protocol = Some(ProtocolId::new(value)); Ok(()) }
+                FieldValue::Text(value) => {
+                    layer.intended_protocol = Some(ProtocolId::new(value).map_err(|_| {
+                        FieldError::OutOfRange {
+                            protocol: malformed_schema().protocol.clone(),
+                            field: name.to_owned(),
+                        }
+                    })?);
+                    Ok(())
+                }
                 _ => Err(FieldError::WrongType { protocol: malformed_schema().protocol.clone(), field: name.to_owned(), expected: "text" }),
             }
         },
         "bytes" => {
-            kind: Bytes, derived: false, required: false,
+            id: "bytes", kind: Bytes, derived: false, required: false,
             description: "Preserved malformed bytes",
             get |layer| Some(reflect_get(&layer.bytes)),
             set |layer, value, name| reflect_set(&mut layer.bytes, malformed_schema(), name, value),
             layout: (0, length)
         },
         "reason" => {
-            kind: Text, derived: false, required: true,
+            id: "reason", kind: Text, derived: false, required: true,
             description: "Decode or construction finding",
             get |layer| Some(reflect_get(&layer.reason)),
             set |layer, value, name| reflect_set(&mut layer.reason, malformed_schema(), name, value)
@@ -258,17 +277,17 @@ mod tests {
     }
 
     reflective_layer! {
-        fn hooks_schema() => { protocol: ProtocolId::new("reflection_hooks"), name: "Reflection hooks" }
+        fn hooks_schema() => { protocol: ProtocolId::from_static("reflection_hooks"), name: "Reflection hooks" }
         impl ReflectionHooks {
             "value" | "v" => {
-                kind: Unsigned, derived: false, required: true,
+                id: "value", kind: Unsigned, derived: false, required: true,
                 description: "Aliased writable value",
                 get |layer| Some(reflect_get(&layer.value)),
                 set |layer, value, name| reflect_set(&mut layer.value, hooks_schema(), name, value),
                 layout: (0, 1)
             },
             "computed" => {
-                kind: Unsigned, derived: true, required: false,
+                id: "computed", kind: Unsigned, derived: true, required: false,
                 description: "Computed read-only value",
                 get |layer| Some(FieldValue::Unsigned(u64::from(layer.value) * 2)),
                 set |_layer, _value, name| Err(FieldError::ReadOnly {
@@ -295,21 +314,21 @@ mod tests {
             hooks_schema()
                 .fields
                 .iter()
-                .map(|field| field.name)
+                .map(|field| field.name.as_ref())
                 .collect::<Vec<_>>(),
             vec!["value", "computed"]
         );
         assert_eq!(
             hooks_layout()
                 .iter()
-                .map(|field| field.name.as_str())
+                .map(|field| field.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["value"]
         );
     }
 
     #[test]
-    fn protocol_identity_is_borrowed_from_the_static_schema() {
+    fn protocol_identity_is_borrowed_from_the_owned_shared_schema() {
         let layer = ReflectionHooks::default();
         let first = layer.protocol_id();
         let second = layer.protocol_id();
@@ -321,7 +340,7 @@ mod tests {
     #[test]
     fn protocol_id_supports_borrowed_hash_map_lookup() {
         let mut protocols = HashMap::new();
-        protocols.insert(ProtocolId::new("ipv4"), 4);
+        protocols.insert(ProtocolId::from_static("ipv4"), 4);
 
         assert_eq!(protocols.get("ipv4"), Some(&4));
     }
@@ -329,7 +348,7 @@ mod tests {
     #[test]
     fn protocol_id_serialization_remains_transparent() {
         assert_eq!(
-            serde_json::to_string(&ProtocolId::new("example.protocol")).unwrap(),
+            serde_json::to_string(&ProtocolId::from_static("example.protocol")).unwrap(),
             "\"example.protocol\""
         );
     }

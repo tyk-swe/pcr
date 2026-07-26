@@ -15,8 +15,8 @@
 //! - [`error`] provides the shared classified error vocabulary;
 //! - [`net`] defines interfaces, routes, providers, and native I/O boundaries;
 //! - [`output`] defines render-neutral output models and versioned envelopes;
-//! - [`packet`] owns layers, documents, registries, exact building, and bounded
-//!   dissection;
+//! - [`packet`] owns layers, documents, immutable protocol catalogs, exact
+//!   building, and bounded dissection;
 //! - [`policy`] owns the non-bypassable traffic-authorization boundary;
 //! - [`protocol`] supplies the built-in codecs, matchers, capture roots, and
 //!   capability manifest;
@@ -34,10 +34,10 @@
 //! use std::sync::Arc;
 //! use packetcraftr::{packet::{build, layer::Raw, Packet}, protocol};
 //!
-//! let registry = Arc::new(protocol::builtin::registry()?);
+//! let catalog = Arc::new(protocol::builtin::catalog()?);
 //! let mut packet = Packet::new();
 //! packet.push(Raw::new(vec![0xde, 0xad, 0xbe, 0xef]));
-//! let built = build::Builder::new(registry).build(
+//! let built = build::Builder::new(catalog).build(
 //!     packet,
 //!     build::Context::default(),
 //!     build::Options::default(),

@@ -11,7 +11,7 @@ use packetcraftr_packet::{
     document::{Format, Packet as PacketDocument},
     expression::{Options as ExpressionOptions, parse},
 };
-use packetcraftr_protocols::builtin::registry;
+use packetcraftr_protocols::builtin::catalog;
 
 fuzz_target!(|data: &[u8]| {
     let Some((&mode, input)) = data.split_first() else {
@@ -21,11 +21,11 @@ fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(input) else {
         return;
     };
-    let registry = Arc::new(registry().unwrap());
+    let catalog = Arc::new(catalog().unwrap());
     let packet = match mode % 3 {
         0 => parse(
             text,
-            &registry,
+            &catalog,
             ExpressionOptions {
                 max_layers: 64,
                 max_bytes: 64 * 1024,
@@ -35,13 +35,13 @@ fuzz_target!(|data: &[u8]| {
         .ok(),
         1 => PacketDocument::parse(text, Format::Json, 64 * 1024)
             .ok()
-            .and_then(|document| document.to_packet(&registry, 64).ok()),
+            .and_then(|document| document.to_packet(&catalog, 64).ok()),
         _ => PacketDocument::parse(text, Format::Yaml, 64 * 1024)
             .ok()
-            .and_then(|document| document.to_packet(&registry, 64).ok()),
+            .and_then(|document| document.to_packet(&catalog, 64).ok()),
     };
     let Some(packet) = packet else { return };
-    let Ok(built) = Builder::new(Arc::clone(&registry)).build(
+    let Ok(built) = Builder::new(Arc::clone(&catalog)).build(
         packet,
         BuildContext::default(),
         BuildOptions::default(),
@@ -52,8 +52,8 @@ fuzz_target!(|data: &[u8]| {
     let document = PacketDocument::from_packet(&built.packet);
     let json = document.to_json_pretty().unwrap();
     let reparsed = PacketDocument::parse(&json, Format::Json, 16 * 1024 * 1024).unwrap();
-    let packet = reparsed.to_packet(&registry, 64).unwrap();
-    let rebuilt = Builder::new(registry)
+    let packet = reparsed.to_packet(&catalog, 64).unwrap();
+    let rebuilt = Builder::new(catalog)
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
     assert_eq!(rebuilt.bytes, built.bytes);

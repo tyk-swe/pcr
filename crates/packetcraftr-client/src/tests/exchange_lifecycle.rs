@@ -5,14 +5,14 @@ use super::*;
 
 #[test]
 fn exchange_arms_and_awaits_capture_before_send_and_matches_response() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let response_packet = packet(
         Ipv4Addr::new(10, 0, 0, 2),
         Ipv4Addr::new(10, 0, 0, 1),
         9,
         12345,
     );
-    let response_bytes = Builder::new(Arc::clone(&registry))
+    let response_bytes = Builder::new(Arc::clone(&catalog))
         .build(
             response_packet,
             BuildContext::default(),
@@ -32,7 +32,7 @@ fn exchange_arms_and_awaits_capture_before_send_and_matches_response() {
         capture_statistics: CaptureStatistics::default(),
     };
     let client = Client::new(
-        registry,
+        catalog,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         io,
@@ -83,8 +83,8 @@ fn exchange_arms_and_awaits_capture_before_send_and_matches_response() {
 
 #[test]
 fn frame_captured_before_request_send_cannot_satisfy_it() {
-    let registry = Arc::new(default_registry().unwrap());
-    let response_bytes = Builder::new(Arc::clone(&registry))
+    let catalog = Arc::new(default_catalog().unwrap());
+    let response_bytes = Builder::new(Arc::clone(&catalog))
         .build(
             packet(
                 Ipv4Addr::new(10, 0, 0, 2),
@@ -98,7 +98,7 @@ fn frame_captured_before_request_send_cannot_satisfy_it() {
         .unwrap()
         .bytes;
     let client = Client::new(
-        registry,
+        catalog,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         ScriptedExchangeIo {
@@ -146,17 +146,17 @@ fn frame_captured_before_request_send_cannot_satisfy_it() {
 
 #[test]
 fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let source = Ipv4Addr::new(10, 0, 0, 1);
     let destination = Ipv4Addr::new(10, 0, 0, 2);
-    let request = Builder::new(Arc::clone(&registry))
+    let request = Builder::new(Arc::clone(&catalog))
         .build(
             packet(source, destination, 12_345, 9),
             BuildContext::default(),
             BuildOptions::default(),
         )
         .unwrap();
-    let response = Builder::new(Arc::clone(&registry))
+    let response = Builder::new(Arc::clone(&catalog))
         .build(
             packet(destination, source, 9, 12_345),
             BuildContext::default(),
@@ -168,7 +168,7 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
     let received_at = sent_at[0].checked_add(Duration::from_millis(1)).unwrap();
     let deadline = sent_at[0].checked_add(Duration::from_secs(1)).unwrap();
 
-    let dissector = Dissector::new(Arc::clone(&registry));
+    let dissector = Dissector::new(Arc::clone(&catalog));
     let options = ExchangeOptions::default();
     let mut accumulator = ExchangeAccumulator::new(1);
     accumulator.process(
@@ -182,7 +182,7 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
             received_at,
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -204,7 +204,7 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
             Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &sent_at,
@@ -244,7 +244,7 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
             expired_received_at,
         ),
         ExchangeProcessContext {
-            registry: &registry,
+            catalog: &catalog,
             dissector: &dissector,
             prepared: &prepared,
             sent_at: &expired_sent_at,
@@ -266,7 +266,7 @@ fn captured_ingress_time_controls_deadline_eligibility_and_latency() {
 
 #[test]
 fn exchange_retains_complete_frame_when_decode_fails() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let invalid = Frame::new(
         std::time::SystemTime::now(),
         LinkType::IPV4,
@@ -274,7 +274,7 @@ fn exchange_retains_complete_frame_when_decode_fails() {
     )
     .unwrap();
     let client = Client::new(
-        registry,
+        catalog,
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         ScriptedExchangeIo {
@@ -328,7 +328,7 @@ fn exchange_retains_complete_frame_when_decode_fails() {
 fn exchange_surfaces_operation_and_cleanup_failures() {
     let events = Arc::new(Mutex::new(Vec::new()));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         ReadinessAndShutdownFailIo(Arc::clone(&events)),

@@ -5,7 +5,7 @@ use super::*;
 
 #[test]
 fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 2);
     let tcp_request = tcp_packet(local, remote, 50_000, 443, Tcp::SYN);
@@ -15,7 +15,7 @@ fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
         Vec::new(),
     );
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Tcp, &tcp_request, &syn_ack)
+        classify_scan_response(&catalog, ScanTransport::Tcp, &tcp_request, &syn_ack)
             .unwrap()
             .classification,
         ScanClassification::Open
@@ -24,7 +24,7 @@ fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
     bad_ack_packet.get_mut::<Tcp>().unwrap().acknowledgment = 99;
     assert!(
         classify_scan_response(
-            &registry,
+            &catalog,
             ScanTransport::Tcp,
             &tcp_request,
             &decoded(bad_ack_packet, Vec::new()),
@@ -36,14 +36,14 @@ fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
         Vec::new(),
     );
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Tcp, &tcp_request, &reset)
+        classify_scan_response(&catalog, ScanTransport::Tcp, &tcp_request, &reset)
             .unwrap()
             .classification,
         ScanClassification::Closed
     );
     let inconclusive = decoded(tcp_packet(remote, local, 443, 50_000, Tcp::ACK), Vec::new());
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Tcp, &tcp_request, &inconclusive)
+        classify_scan_response(&catalog, ScanTransport::Tcp, &tcp_request, &inconclusive)
             .unwrap()
             .classification,
         ScanClassification::Unknown
@@ -52,12 +52,10 @@ fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
         tcp_packet(remote, local, 443, 50_000, Tcp::SYN | Tcp::ACK),
         vec![Diagnostic::warning("tcp.checksum", "invalid checksum")],
     );
-    assert!(
-        classify_scan_response(&registry, ScanTransport::Tcp, &tcp_request, &corrupt).is_none()
-    );
+    assert!(classify_scan_response(&catalog, ScanTransport::Tcp, &tcp_request, &corrupt).is_none());
     assert!(
         classify_scan_response(
-            &registry,
+            &catalog,
             ScanTransport::Tcp,
             &tcp_request,
             &decoded(
@@ -71,20 +69,20 @@ fn tcp_direct_matcher_classifies_replies_and_rejects_bad_integrity() {
 
 #[test]
 fn udp_direct_matcher_classifies_reply_as_open() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 2);
     let udp_request = udp_packet(local, remote, 53_000, 53);
     let udp_response = decoded(udp_packet(remote, local, 53, 53_000), Vec::new());
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Udp, &udp_request, &udp_response)
+        classify_scan_response(&catalog, ScanTransport::Udp, &udp_request, &udp_response)
             .unwrap()
             .classification,
         ScanClassification::Open
     );
     assert!(
         classify_scan_response(
-            &registry,
+            &catalog,
             ScanTransport::Udp,
             &udp_request,
             &decoded(udp_packet(remote, local, 53, 53_001), Vec::new()),
@@ -95,7 +93,7 @@ fn udp_direct_matcher_classifies_reply_as_open() {
 
 #[test]
 fn icmp_direct_matcher_classifies_matching_echo_reply_as_open() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 2);
     let mut echo_request = Packet::new();
@@ -123,7 +121,7 @@ fn icmp_direct_matcher_classifies_matching_echo_reply_as_open() {
         });
     assert_eq!(
         classify_scan_response(
-            &registry,
+            &catalog,
             ScanTransport::Icmp,
             &echo_request,
             &decoded(echo_reply.clone(), Vec::new()),
@@ -135,7 +133,7 @@ fn icmp_direct_matcher_classifies_matching_echo_reply_as_open() {
     echo_reply.get_mut::<Icmpv4>().unwrap().body = Bytes::from_static(&[0x50, 0x43, 0, 8]);
     assert!(
         classify_scan_response(
-            &registry,
+            &catalog,
             ScanTransport::Icmp,
             &echo_request,
             &decoded(echo_reply, Vec::new()),
@@ -146,7 +144,7 @@ fn icmp_direct_matcher_classifies_matching_echo_reply_as_open() {
 
 #[test]
 fn tunneled_direct_reply_reports_the_inner_responder() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
     let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
     let inner_source: Ipv6Addr = "2001:db8:1::1".parse().unwrap();
@@ -187,7 +185,7 @@ fn tunneled_direct_reply_reports_the_inner_responder() {
         });
 
     let classification = classify_scan_response(
-        &registry,
+        &catalog,
         ScanTransport::Udp,
         &request,
         &decoded(reply, Vec::new()),
@@ -237,7 +235,7 @@ fn icmpv4_error(
 
 #[test]
 fn quoted_icmp_errors_require_the_exact_probe_tuple_and_classify_semantics() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 2);
     let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -255,21 +253,21 @@ fn quoted_icmp_errors_require_the_exact_probe_tuple_and_classify_semantics() {
 
     let closed = icmpv4_error(router, local, 3, 3, ipv4_quote(local, remote, 17, ports));
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Udp, &request, &closed)
+        classify_scan_response(&catalog, ScanTransport::Udp, &request, &closed)
             .unwrap()
             .classification,
         ScanClassification::Closed
     );
     let filtered = icmpv4_error(router, local, 3, 13, ipv4_quote(local, remote, 17, ports));
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Udp, &request, &filtered)
+        classify_scan_response(&catalog, ScanTransport::Udp, &request, &filtered)
             .unwrap()
             .classification,
         ScanClassification::Filtered
     );
     let unreachable = icmpv4_error(router, local, 3, 1, ipv4_quote(local, remote, 17, ports));
     assert_eq!(
-        classify_scan_response(&registry, ScanTransport::Udp, &request, &unreachable)
+        classify_scan_response(&catalog, ScanTransport::Udp, &request, &unreachable)
             .unwrap()
             .classification,
         ScanClassification::Unreachable
@@ -281,7 +279,7 @@ fn quoted_icmp_errors_require_the_exact_probe_tuple_and_classify_semantics() {
         3,
         ipv4_quote(local, Ipv4Addr::new(10, 0, 0, 99), 17, ports),
     );
-    assert!(classify_scan_response(&registry, ScanTransport::Udp, &request, &unrelated).is_none());
+    assert!(classify_scan_response(&catalog, ScanTransport::Udp, &request, &unrelated).is_none());
 }
 
 fn ipv6_quote(source: Ipv6Addr, destination: Ipv6Addr, protocol: u8, payload: [u8; 8]) -> Vec<u8> {
@@ -298,7 +296,7 @@ fn ipv6_quote(source: Ipv6Addr, destination: Ipv6Addr, protocol: u8, payload: [u
 
 #[test]
 fn ipv6_icmp_echo_and_quoted_udp_modes_are_correlated() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local: Ipv6Addr = "fd00::1".parse().unwrap();
     let remote: Ipv6Addr = "fd00::2".parse().unwrap();
     let router: Ipv6Addr = "fd00::fe".parse().unwrap();
@@ -328,7 +326,7 @@ fn ipv6_icmp_echo_and_quoted_udp_modes_are_correlated() {
         });
     assert_eq!(
         classify_scan_response(
-            &registry,
+            &catalog,
             ScanTransport::Icmp,
             &echo_request,
             &decoded(echo_reply, Vec::new()),
@@ -368,7 +366,7 @@ fn ipv6_icmp_echo_and_quoted_udp_modes_are_correlated() {
         });
     assert_eq!(
         classify_scan_response(
-            &registry,
+            &catalog,
             ScanTransport::Udp,
             &udp_request,
             &decoded(error, Vec::new()),

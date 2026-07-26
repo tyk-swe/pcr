@@ -15,7 +15,7 @@ use packetcraftr_packet::{
     layer::Raw,
 };
 use packetcraftr_protocols::{
-    builtin::registry as default_registry,
+    builtin::catalog as default_catalog,
     ipv6::DestinationOptions,
     network::{Ipv4, Ipv6},
     transport::Udp,
@@ -55,9 +55,9 @@ fn deep_ipv6_udp_packet(payload_len: usize) -> Packet {
 }
 
 fn bench_packet_pipeline(criterion: &mut Criterion) {
-    let registry = Arc::new(default_registry().expect("built-in registry should initialize"));
-    let builder = Builder::new(Arc::clone(&registry));
-    let dissector = Dissector::new(registry);
+    let catalog = Arc::new(default_catalog().expect("built-in catalog should initialize"));
+    let builder = Builder::new(Arc::clone(&catalog));
+    let dissector = Dissector::new(catalog);
     let build_context = BuildContext::default();
     let build_options = BuildOptions::default();
     let decode_options = DecodeOptions::default();

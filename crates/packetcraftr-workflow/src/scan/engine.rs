@@ -12,19 +12,19 @@ use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
     EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, IPV4_PROBE_BYTES,
     IPV6_PROBE_BYTES, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6, MatchedResponseEvidence, Packet,
-    ProtocolRegistry, ResponseEvidence, SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch, ScanBatchExecution,
-    ScanClassification, ScanEndpointResult, ScanError, ScanExecutor, ScanLimits,
-    ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult,
-    ScanTransport, Stats, Tcp, Udp, classify_scan_response, format_exchange_evidence_error,
-    nonzero_ipv4_identification, push_diagnostic_once, retain_evidence,
-    validate_shared_exchange_evidence,
+    ProtocolCatalogSnapshot, ResponseEvidence, SCAN_EVIDENCE_DIAGNOSTICS, ScanBatch,
+    ScanBatchExecution, ScanClassification, ScanEndpointResult, ScanError, ScanExecutor,
+    ScanLimits, ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest,
+    ScanResult, ScanTransport, Stats, Tcp, Udp, classify_scan_response,
+    format_exchange_evidence_error, nonzero_ipv4_identification, push_diagnostic_once,
+    retain_evidence, validate_shared_exchange_evidence,
 };
 use packetcraftr_packet::semantics::BuiltinProtocol;
 
 pub fn scan<A, E, C>(
     request: &ScanRequest,
     authorizer: &mut A,
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     executor: &mut E,
     clock: &mut C,
 ) -> Result<ScanResult, ScanError>
@@ -161,7 +161,7 @@ where
             process_batch(
                 batch,
                 exchange,
-                registry,
+                catalog,
                 request.limits,
                 &mut output,
                 deadline,
@@ -465,7 +465,7 @@ struct ScanOutput {
 fn process_batch(
     batch: &ScanBatch,
     exchange: ScanBatchExecution,
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     limits: ScanLimits,
     output: &mut ScanOutput,
     deadline: &Deadline,
@@ -498,7 +498,7 @@ fn process_batch(
             request_index,
             sent_frame.timestamp,
             batch.timeout,
-            |response| classify_scan_response(registry, probe.transport, built, response),
+            |response| classify_scan_response(catalog, probe.transport, built, response),
             |observation| observation.classification.rank(),
             |observation| observation.responder,
             || enforce_deadline(deadline),

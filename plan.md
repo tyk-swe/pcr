@@ -6,7 +6,7 @@
 - Migration policy: breaking internal and public API changes are allowed while the project is in beta.
 - Compatibility policy: do not preserve obsolete architecture through forwarding modules, deprecated aliases, compatibility adapters, or duplicate execution paths.
 - Implementation strategy: seven ordered, independently reviewable phases.
-- Current phase: Phase 1 complete; Phase 2 not started.
+- Current phase: Phases 1 and 2 complete; Phase 3 not started.
 
 Mark a phase complete only after its implementation, tests, documentation, and validation gates are complete. Add a short completion note beneath the phase describing important decisions and any deliberate deviations from this plan.
 
@@ -736,7 +736,7 @@ Intentional public API breaks:
   supported seams for out-of-crate executors, alongside the now-public
   `Client::exchange_for_workflow`.
 
-### [ ] Phase 2 — Extensible packet core and immutable protocol catalog
+### [x] Phase 2 — Extensible packet core and immutable protocol catalog
 
 Deliver:
 
@@ -762,7 +762,20 @@ Acceptance:
 
 Completion notes:
 
-- Not completed.
+- Completed 2026-07-26. Schemas are immutable owned values with explicit stable
+  field IDs, constraints, and canonical hashes; host-owned `DynamicLayer`
+  values occupy validated schema slots.
+- Each `ProtocolCatalogOperation` pins one immutable snapshot and lazily creates
+  at most one short-lived mutable session per provider. Sessions are never
+  shared across operations; the trusted native adapter follows this lifecycle,
+  while the packet crate remains independent of any Wasm runtime.
+- Decode bindings select exactly one child for a parent/discriminator pair.
+  Canonical bidirectional bindings alone create reverse encode mappings;
+  decode-only aliases never do, and fallbacks are explicit. Built-ins win by
+  default, protected identities require an exact-origin host selection to be
+  replaced, conflicts contain no numeric priority, and equivalent canonical
+  registration sets produce the same provenance-aware catalog hash regardless
+  of insertion order.
 
 ### [ ] Phase 3 — WIT, package, runtime, SDK, and common host foundation
 

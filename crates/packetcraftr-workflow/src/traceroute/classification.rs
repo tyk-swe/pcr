@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::{
-    Correlation, DecodedPacket, IpAddr, Packet, ProtocolRegistry, TracerouteResponseKind,
+    Correlation, DecodedPacket, IpAddr, Packet, ProtocolCatalogSnapshot, TracerouteResponseKind,
     TracerouteStrategy, probe,
 };
 use packetcraftr_packet::semantics::{self, BuiltinProtocol};
@@ -17,12 +17,12 @@ pub struct TracerouteResponseClassification {
 /// Pure traceroute classifier. Corrupt, unrelated, pre-probe, and
 /// protocol-inconsistent traffic returns `None` and cannot advance the trace.
 pub fn classify_traceroute_response(
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     strategy: TracerouteStrategy,
     request: &Packet,
     response: &DecodedPacket,
 ) -> Option<TracerouteResponseClassification> {
-    let observation = probe::observe(registry, strategy.probe_transport(), request, response)?;
+    let observation = probe::observe(catalog, strategy.probe_transport(), request, response)?;
     let destination = packet_destination(request, strategy)?;
     let kind = match observation.correlation {
         Correlation::TimeExceeded => TracerouteResponseKind::Intermediate,

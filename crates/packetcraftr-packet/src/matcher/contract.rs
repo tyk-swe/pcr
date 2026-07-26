@@ -31,12 +31,10 @@ impl MatchResult {
     }
 }
 
-pub trait ResponseMatcher: Send + Sync + fmt::Debug {
+/// Trusted in-process Rust response matcher.
+pub trait NativeResponseMatcher: Send + Sync + fmt::Debug {
     fn matches(&self, request: &Packet, response: &Packet) -> MatchResult;
 
-    /// Returns the network-layer source selected for a matched response when
-    /// the matcher can identify one. The default preserves compatibility for
-    /// matchers that do not expose responder metadata.
     fn responder(&self, _request: &Packet, _response: &Packet) -> Option<IpAddr> {
         None
     }

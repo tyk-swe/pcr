@@ -21,7 +21,7 @@ use super::super::rendering::{
     write_stdout_line,
 };
 use super::super::runtime::{
-    DeferredInterface, SystemClient, default_registry_arc, parse_workflow_target, system_client,
+    DeferredInterface, SystemClient, default_catalog_arc, parse_workflow_target, system_client,
     workflow_exchange_options,
 };
 use super::capture::render_diagnostics_text;
@@ -92,7 +92,7 @@ pub(crate) fn run_traceroute(
         )
     })?;
 
-    let registry = default_registry_arc()?;
+    let catalog = default_catalog_arc()?;
     let exchange = workflow_exchange_options(
         client::send::Options {
             destination: None,
@@ -110,7 +110,7 @@ pub(crate) fn run_traceroute(
     )?;
 
     let mut executor = CliTracerouteExecutor {
-        client: system_client(Arc::clone(&registry), policy.clone()),
+        client: system_client(Arc::clone(&catalog), policy.clone()),
         exchange,
         interface: DeferredInterface::new(interface),
     };
@@ -120,7 +120,7 @@ pub(crate) fn run_traceroute(
     let result = workflow::traceroute::run(
         &request,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut clock,
     )

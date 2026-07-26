@@ -5,11 +5,11 @@ use std::net::Ipv4Addr;
 
 use super::super::*;
 use super::support::{decoded_at, icmpv4_error, ipv4_udp_quote};
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 
 #[test]
 fn ipv4_classifier_accepts_intermediate_destination_and_unreachable_responses() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 9);
     let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -28,7 +28,7 @@ fn ipv4_classifier_accepts_intermediate_destination_and_unreachable_responses() 
     let intermediate = icmpv4_error(router, local, 11, 0, quote.clone(), 2, Vec::new());
     assert_eq!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Udp,
             &udp_probe_packet,
             &intermediate,
@@ -40,7 +40,7 @@ fn ipv4_classifier_accepts_intermediate_destination_and_unreachable_responses() 
     let reached = icmpv4_error(remote, local, 3, 3, quote.clone(), 2, Vec::new());
     assert_eq!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Udp,
             &udp_probe_packet,
             &reached,
@@ -52,7 +52,7 @@ fn ipv4_classifier_accepts_intermediate_destination_and_unreachable_responses() 
     let unreachable = icmpv4_error(router, local, 3, 1, quote.clone(), 2, Vec::new());
     assert_eq!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Udp,
             &udp_probe_packet,
             &unreachable,
@@ -65,7 +65,7 @@ fn ipv4_classifier_accepts_intermediate_destination_and_unreachable_responses() 
 
 #[test]
 fn ipv4_classifier_rejects_corrupt_unrelated_and_malformed_evidence() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 9);
     let router = Ipv4Addr::new(10, 0, 0, 254);
@@ -92,7 +92,7 @@ fn ipv4_classifier_rejects_corrupt_unrelated_and_malformed_evidence() {
     );
     assert!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Udp,
             &udp_probe_packet,
             &corrupt,
@@ -105,7 +105,7 @@ fn ipv4_classifier_rejects_corrupt_unrelated_and_malformed_evidence() {
     let unrelated = icmpv4_error(router, local, 11, 0, unrelated_quote, 2, Vec::new());
     assert!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Udp,
             &udp_probe_packet,
             &unrelated,
@@ -115,7 +115,7 @@ fn ipv4_classifier_rejects_corrupt_unrelated_and_malformed_evidence() {
     let malformed = icmpv4_error(router, local, 11, 0, vec![0_u8; 3], 2, Vec::new());
     assert!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Udp,
             &udp_probe_packet,
             &malformed,
@@ -126,7 +126,7 @@ fn ipv4_classifier_rejects_corrupt_unrelated_and_malformed_evidence() {
 
 #[test]
 fn tcp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let local = Ipv4Addr::new(10, 0, 0, 1);
     let remote = Ipv4Addr::new(10, 0, 0, 9);
     let mut tcp_request = TracerouteProbe {
@@ -156,7 +156,7 @@ fn tcp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
         });
     assert_eq!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Tcp,
             &tcp_request,
             &decoded_at(tcp_reply.clone(), 2, Vec::new()),
@@ -168,7 +168,7 @@ fn tcp_strategy_builds_hop_limit_and_accepts_direct_terminal_reply() {
     tcp_reply.get_mut::<Tcp>().unwrap().acknowledgment = 19;
     assert!(
         classify_traceroute_response(
-            &registry,
+            &catalog,
             TracerouteStrategy::Tcp,
             &tcp_request,
             &decoded_at(tcp_reply, 2, Vec::new()),

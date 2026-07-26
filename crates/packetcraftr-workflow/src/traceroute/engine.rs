@@ -11,7 +11,7 @@ use super::super::bounded_probe::{
 use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
     EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
-    MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolRegistry,
+    MAX_TRACEROUTE_PROBE_BYTES, MatchedResponseEvidence, Packet, ProtocolCatalogSnapshot,
     ResponseEvidence, Stats, TRACEROUTE_EVIDENCE_DIAGNOSTICS, TRACEROUTE_SOURCE_PORT, Tcp,
     TracerouteBatch, TracerouteBatchExecution, TracerouteCompletion, TracerouteError,
     TracerouteExecutor, TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse,
@@ -25,7 +25,7 @@ use packetcraftr_packet::semantics::BuiltinProtocol;
 pub fn traceroute<A, E, C>(
     request: &TracerouteRequest,
     authorizer: &mut A,
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     executor: &mut E,
     clock: &mut C,
 ) -> Result<TracerouteResult, TracerouteError>
@@ -118,7 +118,7 @@ where
             process_batch(
                 batch,
                 execution,
-                registry,
+                catalog,
                 request.limits,
                 &mut evidence,
                 deadline,
@@ -448,7 +448,7 @@ struct TracerouteEvidenceState<'a> {
 fn process_batch(
     batch: &TracerouteBatch,
     execution: TracerouteBatchExecution,
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     limits: TracerouteLimits,
     evidence: &mut TracerouteEvidenceState<'_>,
     deadline: &Deadline,
@@ -482,7 +482,7 @@ fn process_batch(
             request_index,
             sent_frame.timestamp,
             batch.timeout,
-            |response| classify_traceroute_response(registry, probe.strategy, built, response),
+            |response| classify_traceroute_response(catalog, probe.strategy, built, response),
             |observation| observation.kind.rank(),
             |observation| observation.responder,
             || enforce_deadline(deadline),

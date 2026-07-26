@@ -10,13 +10,13 @@ use super::{
     DecodeOptions, DecodedPacket, Diagnostic, Dissector, FieldKind, FieldValue, Frame, FuzzCase,
     FuzzCaseFailure, FuzzCaseOutcome, FuzzError, FuzzLimits, FuzzMutation, FuzzReproduction,
     FuzzRequest, FuzzStrategy, FuzzTarget, Ipv4Addr, Ipv6Addr, Kind, LinkType,
-    MAX_FUZZ_TARGET_FIELDS, Packet, ProtocolRegistry, duration_limit,
+    MAX_FUZZ_TARGET_FIELDS, Packet, ProtocolCatalogSnapshot, duration_limit,
 };
 
 pub(super) fn prepare(
     request: &FuzzRequest,
     packet: Packet,
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
     deadline: &mut Deadline,
 ) -> Result<PreparedFuzz, FuzzError> {
     deadline
@@ -42,8 +42,8 @@ pub(super) fn prepare(
         return Err(FuzzError::NoCompatibleTargets);
     }
 
-    let builder = Builder::new(Arc::clone(&registry));
-    let dissector = Dissector::new(registry);
+    let builder = Builder::new(Arc::clone(&catalog));
+    let dissector = Dissector::new(catalog);
     let mut cases = Vec::with_capacity(request.cases);
     let mut built_case_count = 0_u64;
     let mut built_byte_count = 0_u64;
@@ -257,8 +257,8 @@ fn retained_case_value_bytes(
 fn packet_reflected_value_bytes(packet: &Packet, limits: FuzzLimits) -> Result<u64, FuzzError> {
     let mut total = 0_u64;
     for layer in packet.iter() {
-        for field in layer.schema().fields {
-            let Some(value) = layer.field(field.name) else {
+        for field in layer.schema().fields.iter() {
+            let Some(value) = layer.field(field.name.as_ref()) else {
                 continue;
             };
             let remaining = limits.max_total_bytes.saturating_sub(total as usize);
@@ -299,8 +299,8 @@ fn resolve_fields(
     if requested.is_empty() {
         let mut fields = Vec::new();
         for (layer_index, layer) in packet.iter().enumerate() {
-            for field in layer.schema().fields {
-                if layer.field(field.name).is_none() {
+            for field in layer.schema().fields.iter() {
+                if layer.field(field.name.as_ref()).is_none() {
                     continue;
                 }
                 if fields.len() >= MAX_FUZZ_TARGET_FIELDS {
@@ -313,7 +313,7 @@ fn resolve_fields(
                 fields.push(ResolvedField {
                     target: FuzzTarget {
                         layer: layer_index,
-                        field: field.name.to_owned(),
+                        field: field.name.to_string(),
                     },
                     protocol: layer.protocol_id().to_string(),
                     kind: field.kind,
@@ -349,16 +349,15 @@ fn resolve_fields(
                 target: target.clone(),
                 message: format!("layer index is outside packet length {}", packet.len()),
             })?;
-        let schema = layer
-            .schema()
-            .fields
-            .iter()
-            .find(|field| field.name == target.field)
-            .ok_or_else(|| FuzzError::InvalidTarget {
-                target: target.clone(),
-                message: format!("layer {} has no such reflected field", layer.protocol_id()),
-            })?;
-        if layer.field(schema.name).is_none() {
+        let schema =
+            layer
+                .schema()
+                .field_named(&target.field)
+                .ok_or_else(|| FuzzError::InvalidTarget {
+                    target: target.clone(),
+                    message: format!("layer {} has no such reflected field", layer.protocol_id()),
+                })?;
+        if layer.field(schema.name.as_ref()).is_none() {
             return Err(FuzzError::InvalidTarget {
                 target: target.clone(),
                 message: "field is not reflectively readable".to_owned(),

@@ -19,7 +19,7 @@ use super::super::errors::CliError;
 use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_stdout_line,
 };
-use super::super::runtime::{default_registry_arc, validate_interface_selector};
+use super::super::runtime::{default_catalog_arc, validate_interface_selector};
 use super::offline::validate_capture_stream_limits;
 
 #[derive(Clone, Copy, Debug)]
@@ -99,9 +99,9 @@ pub(crate) fn run_replay(
         },
     )
     .map_err(CliError::classified)?;
-    let registry = default_registry_arc()?;
+    let catalog = default_catalog_arc()?;
     let mut authorizer =
-        workflow::replay::SystemAuthorizer::new(policy, registry, arguments.allow_malformed_live);
+        workflow::replay::SystemAuthorizer::new(policy, catalog, arguments.allow_malformed_live);
     let options = workflow::replay::Options {
         interface: requested_interface.clone(),
         link_mode: arguments.link_mode.into(),

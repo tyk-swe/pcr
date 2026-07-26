@@ -5,19 +5,11 @@
 
 use packetcraftr_packet::{
     codec::CodecError,
-    layer::{FieldError, Layer, LayerSchema, MalformedLayer, ProtocolId},
+    layer::{FieldError, Layer, LayerSchema, ProtocolId},
 };
 
 pub(crate) fn protocol(name: &str) -> ProtocolId {
-    ProtocolId::new(name)
-}
-
-pub(crate) fn binding_protocol(layer: &dyn Layer) -> &ProtocolId {
-    layer
-        .as_any()
-        .downcast_ref::<MalformedLayer>()
-        .and_then(|layer| layer.intended_protocol.as_ref())
-        .unwrap_or_else(|| layer.protocol_id())
+    ProtocolId::new(name).expect("trusted native protocol identity must be valid")
 }
 
 pub(crate) fn wrong_layer(expected: &str, actual: &dyn Layer) -> CodecError {
@@ -42,11 +34,7 @@ pub(crate) fn invalid(name: &str, message: impl Into<String>) -> CodecError {
     }
 }
 
-pub(crate) fn wrong_type(
-    schema: &'static LayerSchema,
-    field: &str,
-    expected: &'static str,
-) -> FieldError {
+pub(crate) fn wrong_type(schema: &LayerSchema, field: &str, expected: &'static str) -> FieldError {
     FieldError::WrongType {
         protocol: schema.protocol.clone(),
         field: field.to_owned(),
@@ -54,7 +42,7 @@ pub(crate) fn wrong_type(
     }
 }
 
-pub(crate) fn out_of_range(schema: &'static LayerSchema, field: &str) -> FieldError {
+pub(crate) fn out_of_range(schema: &LayerSchema, field: &str) -> FieldError {
     FieldError::OutOfRange {
         protocol: schema.protocol.clone(),
         field: field.to_owned(),

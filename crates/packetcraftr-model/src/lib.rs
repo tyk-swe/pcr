@@ -12,7 +12,7 @@
 //!   output, and catalog boundaries.
 //!
 //! Nothing here depends on capture formats, packet construction, native
-//! networking, registries, or an async runtime.
+//! networking, packet engines, or an async runtime.
 
 #![forbid(unsafe_code)]
 
@@ -22,4 +22,7 @@ pub mod identity;
 
 pub use error::{Category, Classification, Classified, Kind};
 pub use frame::{DEFAULT_MAX_FRAME_BYTES, Direction, Frame, FrameError, LinkType};
-pub use identity::ProtocolId;
+pub use identity::{
+    CatalogHash, ComponentId, ContentDigest, ExtensionId, FieldId, IdentityError, PackageId,
+    ProtocolId, ProviderId, RegistrationOrigin,
+};

@@ -29,7 +29,7 @@ use packetcraftr_net::route::{
 };
 use packetcraftr_net::transmit::{IoSendReport, PacketIo, TransmissionFrame};
 use packetcraftr_policy::TrafficPolicy;
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 use packetcraftr_protocols::network::Ipv4;
 use packetcraftr_workflow::scan::{
     Batch as ScanBatch, Executor as ScanExecutor, Probe as ScanProbe, Transport as ScanTransport,
@@ -203,14 +203,14 @@ fn lifecycle_exchange_options() -> ExchangeOptions {
 #[test]
 fn client_scan_executor_waits_for_capture_and_always_shuts_it_down() {
     for fail_send in [false, true] {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let events = Arc::new(Mutex::new(Vec::new()));
         let io = LifecycleIo {
             events: Arc::clone(&events),
             fail_send,
         };
         let client = Client::new(
-            Arc::clone(&registry),
+            Arc::clone(&catalog),
             FixedRoute(lifecycle_route()),
             NoNeighbors,
             io,
@@ -239,11 +239,11 @@ fn client_scan_executor_waits_for_capture_and_always_shuts_it_down() {
 
 #[test]
 fn client_scan_executor_reuses_a_route_lookup_for_a_port_batch() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let events = Arc::new(Mutex::new(Vec::new()));
     let route_calls = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::clone(&registry),
+        Arc::clone(&catalog),
         CountingRoute {
             decision: lifecycle_route(),
             calls: Arc::clone(&route_calls),
@@ -293,14 +293,14 @@ fn client_dns_executor_waits_for_capture_and_always_shuts_it_down() {
     };
 
     for fail_send in [false, true] {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let events = Arc::new(Mutex::new(Vec::new()));
         let io = LifecycleIo {
             events: Arc::clone(&events),
             fail_send,
         };
         let client = Client::new(
-            Arc::clone(&registry),
+            Arc::clone(&catalog),
             FixedRoute(lifecycle_route()),
             NoNeighbors,
             io,
@@ -339,14 +339,14 @@ fn client_traceroute_executor_waits_for_capture_and_always_shuts_it_down() {
     };
 
     for fail_send in [false, true] {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let events = Arc::new(Mutex::new(Vec::new()));
         let io = LifecycleIo {
             events: Arc::clone(&events),
             fail_send,
         };
         let client = Client::new(
-            Arc::clone(&registry),
+            Arc::clone(&catalog),
             FixedRoute(lifecycle_route()),
             NoNeighbors,
             io,
@@ -386,10 +386,10 @@ fn client_traceroute_executor_preserves_hop_identity_and_unique_transport_probes
         TracerouteStrategy::Tcp,
         TracerouteStrategy::Icmp,
     ] {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let events = Arc::new(Mutex::new(Vec::new()));
         let client = Client::new(
-            Arc::clone(&registry),
+            Arc::clone(&catalog),
             FixedRoute(lifecycle_route()),
             NoNeighbors,
             LifecycleIo {
@@ -457,10 +457,10 @@ fn client_traceroute_executor_rejects_unsupported_link_capability_before_capture
         Strategy as TracerouteStrategy,
     };
 
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let events = Arc::new(Mutex::new(Vec::new()));
     let client = Client::new(
-        Arc::clone(&registry),
+        Arc::clone(&catalog),
         FixedRoute(lifecycle_route()),
         NoNeighbors,
         LifecycleIo {
@@ -496,10 +496,10 @@ fn client_traceroute_executor_rejects_invalid_strategy_ports_before_capture_or_s
         Strategy as TracerouteStrategy,
     };
 
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let events = Arc::new(Mutex::new(Vec::new()));
     let client = Client::new(
-        Arc::clone(&registry),
+        Arc::clone(&catalog),
         FixedRoute(lifecycle_route()),
         NoNeighbors,
         LifecycleIo {

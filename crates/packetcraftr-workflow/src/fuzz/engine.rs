@@ -10,18 +10,18 @@ use super::mutation::{dissect_built, has_link_root, prepare};
 use super::{
     Arc, Clock, Deadline, Dissector, Duration, EvidenceBudget, FieldKind, FuzzAuthorizer, FuzzCase,
     FuzzCaseOutcome, FuzzError, FuzzExecutionCase, FuzzExecutor, FuzzLiveOptions, FuzzMode,
-    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Packet, ProtocolRegistry,
+    FuzzRequest, FuzzResult, FuzzStats, FuzzTarget, Packet, ProtocolCatalogSnapshot,
     SYNTHESIZED_ETHERNET_BYTES, duration_limit,
 };
 
 pub fn fuzz(
     request: &FuzzRequest,
     packet: Packet,
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
 ) -> Result<FuzzResult, FuzzError> {
     request.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
-    let prepared = prepare(request, packet, registry, &mut deadline)?;
+    let prepared = prepare(request, packet, catalog, &mut deadline)?;
     Ok(FuzzResult {
         mode: FuzzMode::Offline,
         seed: request.seed,
@@ -46,7 +46,7 @@ pub fn fuzz_live<A, E, C>(
     request: &FuzzRequest,
     live: FuzzLiveOptions,
     packet: Packet,
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
     authorizer: &mut A,
     executor: &mut E,
     clock: &mut C,
@@ -58,9 +58,9 @@ where
 {
     let live = live.validate()?;
     let mut deadline = Deadline::new(request.limits.max_duration);
-    let live_dissector = Dissector::new(Arc::clone(&registry));
+    let live_dissector = Dissector::new(Arc::clone(&catalog));
     request.validate()?;
-    let mut prepared = prepare(request, packet, registry, &mut deadline)?;
+    let mut prepared = prepare(request, packet, catalog, &mut deadline)?;
     let built_indices = prepared
         .cases
         .iter()

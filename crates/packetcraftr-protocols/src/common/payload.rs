@@ -4,7 +4,7 @@
 //! Link-padding-aware payload narrowing.
 
 use packetcraftr_packet::{
-    codec::{CodecError, LayerEncodeContext},
+    codec::{CodecError, NativeLayerEncodeContext},
     layer::Padding,
 };
 
@@ -13,7 +13,7 @@ use super::errors::invalid;
 pub(crate) fn payload_without_padding<'a>(
     name: &str,
     payload: &'a [u8],
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
 ) -> Result<&'a [u8], CodecError> {
     let trailing = context
         .packet

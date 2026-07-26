@@ -89,7 +89,7 @@ where
             .client
             .exchange_for_workflow(&template, options, |request_index, sent, response| {
                 batch.probes.get(request_index).is_some_and(|probe| {
-                    classify_scan_response(self.client.registry(), probe.transport, sent, response)
+                    classify_scan_response(self.client.catalog(), probe.transport, sent, response)
                         .is_some()
                 })
             })

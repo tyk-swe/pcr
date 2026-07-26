@@ -57,7 +57,7 @@ where
                 &PacketTemplate::new(exchange.probe.packet()),
                 options,
                 |_request_index, sent, response| {
-                    response_correlates(self.client.registry(), sent, response)
+                    response_correlates(self.client.catalog(), sent, response)
                 },
             )
             .map_err(BoundaryError::from_error)?;

@@ -19,16 +19,16 @@ use super::super::errors::CliError;
 use super::super::rendering::{
     emit_json, write_capture_file, write_plain_line, write_raw, write_stdout_line,
 };
-use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
+use super::super::runtime::{default_catalog_arc, prepare_route_request, system_client};
 use super::capture::cli_build_mode;
 
 pub(crate) fn run_plan(
     arguments: RouteArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
-    let registry = default_registry_arc()?;
-    let request = prepare_route_request(arguments, &registry)?;
-    let client = system_client(Arc::clone(&registry), request.policy);
+    let catalog = default_catalog_arc()?;
+    let request = prepare_route_request(arguments, &catalog)?;
+    let client = system_client(Arc::clone(&catalog), request.policy);
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
@@ -143,9 +143,9 @@ pub(crate) fn run_send(
         mode,
         allow_permissive_live,
     } = arguments;
-    let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, &registry)?;
-    let client = system_client(Arc::clone(&registry), request.policy);
+    let catalog = default_catalog_arc()?;
+    let request = prepare_route_request(route, &catalog)?;
+    let client = system_client(Arc::clone(&catalog), request.policy);
     let report = client
         .send(
             request.packet,

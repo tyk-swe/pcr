@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Discriminator and fallback behavior.
+
 use super::*;
 
 #[test]
 fn raw_child_cannot_claim_a_registered_typed_discriminator_in_strict_mode() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let mut packet = Packet::new();
     packet
         .push(Ethernet {
@@ -71,8 +73,8 @@ fn ipv6_with_raw_next_header(next_header: u8) -> Packet {
 
 #[test]
 fn typed_ip_discriminators_are_derived_and_decode_to_typed_children() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
 
     let mut igmp = Packet::new();
     igmp.push(Ipv4 {
@@ -88,8 +90,12 @@ fn typed_ip_discriminators_are_derived_and_decode_to_typed_children() {
         built.packet.get::<Ipv4>().unwrap().protocol,
         WireValue::Exact(2)
     );
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            built.bytes,
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(decoded.packet.get::<Igmp>().is_some());
 
@@ -116,8 +122,12 @@ fn typed_ip_discriminators_are_derived_and_decode_to_typed_children() {
         built.packet.get::<Ipv4>().unwrap().protocol,
         WireValue::Exact(4)
     );
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            built.bytes,
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert_eq!(
         decoded
@@ -188,8 +198,12 @@ fn typed_ip_discriminators_are_derived_and_decode_to_typed_children() {
         built.packet.layer(2).unwrap().field("next_header"),
         Some(packetcraftr_packet::field::FieldValue::Unsigned(132))
     );
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(built.bytes, "ipv6".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            built.bytes,
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv6"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert_eq!(
         decoded
@@ -203,8 +217,8 @@ fn typed_ip_discriminators_are_derived_and_decode_to_typed_children() {
 
 #[test]
 fn typed_ip_discriminators_reject_raw_or_mismatched_children() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let cases = [
         ("ipv4 igmp", ipv4_with_raw_protocol(2)),
         ("ipv4 in ipv4", ipv4_with_raw_protocol(4)),
@@ -285,8 +299,8 @@ fn typed_ip_discriminators_reject_raw_or_mismatched_children() {
 
 #[test]
 fn missing_ip_typed_child_decodes_as_preserved_malformed_payload() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let mut bytes = vec![0_u8; 20];
     bytes[0] = 0x45;
     bytes[2..4].copy_from_slice(&20_u16.to_be_bytes());
@@ -296,8 +310,12 @@ fn missing_ip_typed_child_decodes_as_preserved_malformed_payload() {
     bytes[12..16].copy_from_slice(&[192, 0, 2, 1]);
     bytes[16..20].copy_from_slice(&[198, 51, 100, 2]);
 
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(bytes.clone(), "ipv4".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            bytes.clone(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(
         decoded
@@ -324,13 +342,13 @@ fn missing_ip_typed_child_decodes_as_preserved_malformed_payload() {
 
 #[test]
 fn auto_discriminator_cannot_invent_wire_intent_for_raw() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ethernet::default())
         .push(Raw::new(Bytes::from_static(b"opaque")));
     assert!(
-        Builder::new(registry)
+        Builder::new(catalog)
             .build(packet, BuildContext::default(), BuildOptions::default())
             .is_err()
     );
@@ -338,8 +356,8 @@ fn auto_discriminator_cannot_invent_wire_intent_for_raw() {
 
 #[test]
 fn known_discriminator_requires_present_typed_child() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let mut packet = Packet::new();
     packet.push(Ethernet {
         ether_type: WireValue::Exact(0x0800),
@@ -353,8 +371,12 @@ fn known_discriminator_requires_present_typed_child() {
 
     let mut bytes = vec![0_u8; 14];
     bytes[12..14].copy_from_slice(&0x0800_u16.to_be_bytes());
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(bytes.clone(), "ethernet".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            bytes.clone(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(
         decoded
@@ -381,7 +403,7 @@ fn known_discriminator_requires_present_typed_child() {
 
 #[test]
 fn no_next_header_bytes_require_malformed_representation() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv6 {
@@ -392,7 +414,7 @@ fn no_next_header_bytes_require_malformed_representation() {
         })
         .push(Raw::new(Bytes::from_static(b"bad")));
     assert!(
-        Builder::new(registry)
+        Builder::new(catalog)
             .build(packet, BuildContext::default(), BuildOptions::default())
             .is_err()
     );
@@ -400,7 +422,7 @@ fn no_next_header_bytes_require_malformed_representation() {
 
 #[test]
 fn fragmented_packets_require_raw_fragment_payloads() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -411,7 +433,7 @@ fn fragmented_packets_require_raw_fragment_payloads() {
         })
         .push(Udp::default());
     assert!(
-        Builder::new(registry)
+        Builder::new(catalog)
             .build(packet, BuildContext::default(), BuildOptions::default())
             .is_err()
     );

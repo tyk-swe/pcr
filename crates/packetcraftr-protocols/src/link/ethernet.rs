@@ -3,20 +3,18 @@
 
 //! Ethernet II frame model and codec.
 
-use std::collections::BTreeMap;
-
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
-    field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    field::WireValue,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    aliased_fields, expected_discriminator, make_layer, protocol, resolve_u16, truncated,
+    expected_discriminator, make_layer, protocol, resolve_u16, truncated,
     validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
 };
 
@@ -40,11 +38,11 @@ impl Default for Ethernet {
 }
 
 reflective_layer! {
-    fn ethernet_schema() => { protocol: protocol("ethernet"), name: "Ethernet II" }
+    fn ethernet_schema() => { protocol: protocol("ethernet"), name: "Ethernet II", aliases: ["eth", "ether", "ethernet2"] }
     impl Ethernet {
-        "destination" => { kind: Mac, derived: false, required: true, description: "Destination MAC address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ethernet_schema(), name, value), layout: (0, 6) },
-        "source" => { kind: Mac, derived: false, required: true, description: "Source MAC address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ethernet_schema(), name, value), layout: (6, 12) },
-        "ether_type" => { kind: Unsigned, derived: true, required: false, description: "EtherType discriminator", get |layer| Some(reflect_get(&layer.ether_type)), set |layer, value, name| reflect_set(&mut layer.ether_type, ethernet_schema(), name, value), layout: (12, 14) },
+        "destination" | "dst" => { id: "destination", kind: Mac, derived: false, required: true, description: "Destination MAC address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ethernet_schema(), name, value), layout: (0, 6) },
+        "source" | "src" => { id: "source", kind: Mac, derived: false, required: true, description: "Source MAC address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ethernet_schema(), name, value), layout: (6, 12) },
+        "ether_type" => { id: "ether_type", kind: Unsigned, derived: true, required: false, description: "EtherType discriminator", get |layer| Some(reflect_get(&layer.ether_type)), set |layer, value, name| reflect_set(&mut layer.ether_type, ethernet_schema(), name, value), layout: (12, 14) },
         normalize |layer| { layer.ether_type.normalize(); }
     }
     layout fn ethernet_layout();
@@ -53,20 +51,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct EthernetCodec;
 
-impl LayerCodec for EthernetCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("ethernet")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for EthernetCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -113,7 +103,7 @@ impl LayerCodec for EthernetCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < ETHERNET_LEN {
             return Err(truncated("ethernet", ETHERNET_LEN, input.len()));
@@ -142,15 +132,8 @@ impl LayerCodec for EthernetCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Ethernet::default(),
-            &aliased_fields(
-                "ethernet",
-                fields,
-                &[("dst", "destination"), ("src", "source")],
-            )?,
-        )
+        make_layer(Ethernet::default(), fields)
     }
 }

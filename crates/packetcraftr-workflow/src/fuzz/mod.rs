@@ -28,10 +28,10 @@ use packetcraftr_packet::diagnostic::push_diagnostic_once;
 use packetcraftr_packet::{
     Packet,
     build::{BuildContext, BuildOptions, Builder, BuiltPacket, DEFAULT_MAX_PACKET_SIZE},
+    catalog::ProtocolCatalogSnapshot,
     decode::{DecodeOptions, DecodedPacket, Dissector},
     diagnostic::Diagnostic,
     field::{FieldKind, FieldValue},
-    registry::ProtocolRegistry,
     semantics::BuiltinProtocol,
     template::DEFAULT_MAX_TEMPLATE_PACKETS,
 };

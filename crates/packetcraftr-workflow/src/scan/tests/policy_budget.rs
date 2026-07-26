@@ -10,7 +10,7 @@ fn hostname_policy_denial_precedes_resolution_and_probe_construction() {
     let mut executor = CountingRejectExecutor {
         calls: Arc::clone(&executor_calls),
     };
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let target = Target::Hostname("lab.example".to_owned());
     let policy = private_scan_policy();
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
@@ -18,7 +18,7 @@ fn hostname_policy_denial_precedes_resolution_and_probe_construction() {
     let error = scan(
         &tcp_scan_request(target),
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut NoopClock,
     )
@@ -39,7 +39,7 @@ fn every_mixed_resolution_answer_is_authorized_before_family_filter_or_probe() {
     let mut executor = CountingRejectExecutor {
         calls: Arc::clone(&executor_calls),
     };
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let mut policy = private_scan_policy();
     policy.allow_hostname_resolution = true;
     let mut operation = tcp_scan_request(Target::Hostname("mixed.example".to_owned()));
@@ -49,7 +49,7 @@ fn every_mixed_resolution_answer_is_authorized_before_family_filter_or_probe() {
     let error = scan(
         &operation,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut NoopClock,
     )
@@ -71,7 +71,7 @@ fn rerunning_scan_reauthorizes_changed_addresses_before_another_probe() {
     let mut executor = CountingRejectExecutor {
         calls: Arc::clone(&executor_calls),
     };
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let mut policy = private_scan_policy();
     policy.allow_hostname_resolution = true;
     let operation = tcp_scan_request(Target::Hostname("changing.example".to_owned()));
@@ -81,7 +81,7 @@ fn rerunning_scan_reauthorizes_changed_addresses_before_another_probe() {
         scan(
             &operation,
             &mut authorizer,
-            &registry,
+            &catalog,
             &mut executor,
             &mut NoopClock,
         ),
@@ -93,7 +93,7 @@ fn rerunning_scan_reauthorizes_changed_addresses_before_another_probe() {
         scan(
             &operation,
             &mut authorizer,
-            &registry,
+            &catalog,
             &mut executor,
             &mut NoopClock,
         ),
@@ -114,7 +114,7 @@ fn aggregate_packet_and_wire_byte_policy_precede_probe_execution() {
         let mut executor = CountingRejectExecutor {
             calls: Arc::clone(&executor_calls),
         };
-        let registry = default_registry().unwrap();
+        let catalog = std::sync::Arc::new(default_catalog().unwrap());
         let mut policy = private_scan_policy();
         policy.max_packets_per_operation = packet_limit;
         policy.max_bytes_per_operation = byte_limit;
@@ -124,7 +124,7 @@ fn aggregate_packet_and_wire_byte_policy_precede_probe_execution() {
         let error = scan(
             &operation,
             &mut authorizer,
-            &registry,
+            &catalog,
             &mut executor,
             &mut NoopClock,
         )
@@ -168,7 +168,7 @@ fn aggregate_duration_precedes_operation_authorization() {
     let error = scan(
         &operation,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut CountingRejectExecutor {
             calls: Arc::new(AtomicUsize::new(0)),
         },
@@ -211,7 +211,7 @@ fn slow_executor_expires_before_the_next_scan_batch() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )
@@ -254,7 +254,7 @@ fn candidate_heavy_batch_expires_before_the_next_scan_execution() {
         &mut AddressListAuthorizer {
             addresses: vec![address],
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut executor,
         &mut NoopClock,
     )

@@ -3,15 +3,12 @@
 
 //! Version-dispatching raw IP capture-root codec.
 
-use std::collections::BTreeMap;
-
 use packetcraftr_packet::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
-    field::FieldValue,
-    layer::{Layer, ProtocolId},
+    layer::Layer,
 };
 
 use super::super::common::{invalid, protocol, truncated};
@@ -21,22 +18,12 @@ use super::{Ipv4Codec, Ipv6Codec};
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RawIpCodec;
 
-impl LayerCodec for RawIpCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("raw_ip")
-    }
-    fn accepts_decoded_protocol(&self, protocol: &ProtocolId) -> bool {
-        matches!(protocol.as_str(), "ipv4" | "ipv6")
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for RawIpCodec {
     fn encode(
         &self,
         _layer: &dyn Layer,
         _payload: &[u8],
-        _context: &LayerEncodeContext<'_>,
+        _context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         Err(CodecError::Unsupported {
             protocol: protocol("raw_ip"),
@@ -47,7 +34,7 @@ impl LayerCodec for RawIpCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         let Some(version) = input.first().map(|byte| byte >> 4) else {
             return Err(truncated("raw_ip", 1, 0));
@@ -64,7 +51,7 @@ impl LayerCodec for RawIpCodec {
 
     fn make_layer(
         &self,
-        _fields: &BTreeMap<String, FieldValue>,
+        _fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         Err(CodecError::Unsupported {
             protocol: protocol("raw_ip"),

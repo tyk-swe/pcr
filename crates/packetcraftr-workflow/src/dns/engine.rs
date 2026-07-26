@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 /// Executes a bounded DNS workflow through the shared policy, retry clock,
-/// protocol registry, and exchange seams. Every retry repeats declared-name
+/// protocol catalog, and exchange seams. Every retry repeats declared-name
 /// authorization, resolution, and authorization of every answer before a new
 /// probe is constructed.
 use super::Clock;
@@ -13,7 +13,7 @@ use super::{
     DnsExchangeExecution, DnsExecutor, DnsLimits, DnsMatchedResponse, DnsOutcome, DnsProbe,
     DnsRequest, DnsResponseClassification, DnsResult, DnsUndecodedEvidence, Duration,
     EvidenceBudget, ExchangeEvidenceError, MAX_DNS_PROBE_OVERHEAD, NetworkEnvelope, Packet,
-    ProtocolRegistry, ResponseCandidate, ResponseEvidence, Stats, SystemTime,
+    ProtocolCatalogSnapshot, ResponseCandidate, ResponseEvidence, Stats, SystemTime,
     classify_dns_response, encode_dns_query, push_diagnostic_once, push_undecoded_limit_diagnostic,
     response_within_deadline, retain_evidence, select_response_candidate,
     validate_aggregate_evidence_limits, validate_capture_statistics_evidence, validate_frame,
@@ -24,7 +24,7 @@ use packetcraftr_packet::semantics::BuiltinProtocol;
 pub fn dns<A, E, C>(
     request: &DnsRequest,
     authorizer: &mut A,
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     executor: &mut E,
     clock: &mut C,
 ) -> Result<DnsResult, DnsError>
@@ -178,7 +178,7 @@ where
         let sent_at = execution.sent_evidence.timestamp;
         let mut best: Option<ResponseCandidate<'_, DnsResponseClassification>> = None;
         let candidate_context = DnsCandidateContext {
-            registry,
+            catalog,
             probe: &probe,
             sent: &execution.sent,
             sent_at,
@@ -369,7 +369,7 @@ where
 }
 
 struct DnsCandidateContext<'a> {
-    registry: &'a ProtocolRegistry,
+    catalog: &'a std::sync::Arc<ProtocolCatalogSnapshot>,
     probe: &'a DnsProbe,
     sent: &'a Packet,
     sent_at: SystemTime,
@@ -391,7 +391,7 @@ fn consider_dns_candidate<'a>(
         context.sent_at,
         context.timeout,
     ) && let Some(classification) = classify_dns_response(
-        context.registry,
+        context.catalog,
         context.probe,
         context.sent,
         decoded,
@@ -611,9 +611,9 @@ fn duration_limit(error: DeadlineExceeded) -> DnsError {
 /// the same UDP/ICMP correlation the engine applies to its own attempts.
 /// Executors use it to filter capture traffic before the engine sees it.
 pub fn response_correlates(
-    registry: &ProtocolRegistry,
+    catalog: &std::sync::Arc<ProtocolCatalogSnapshot>,
     request: &Packet,
     response: &DecodedPacket,
 ) -> bool {
-    crate::probe::observe(registry, crate::probe::Transport::Udp, request, response).is_some()
+    crate::probe::observe(catalog, crate::probe::Transport::Udp, request, response).is_some()
 }

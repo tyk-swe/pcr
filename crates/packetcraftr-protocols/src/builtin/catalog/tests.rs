@@ -1,6 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Built-in catalog integration tests.
+
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
@@ -24,8 +26,13 @@ use packetcraftr_packet::{
     layer::{Padding, Raw},
 };
 
+#[path = "tests/discriminator.rs"]
 mod discriminator;
+#[path = "tests/registration.rs"]
 mod registration;
+#[path = "tests/round_trip.rs"]
 mod round_trip;
+#[path = "tests/strictness_protocol_coverage.rs"]
 mod strictness_protocol_coverage;
+#[path = "tests/wire_contract.rs"]
 mod wire_contract;

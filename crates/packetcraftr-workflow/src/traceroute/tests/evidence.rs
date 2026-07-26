@@ -12,7 +12,7 @@ use super::support::{
     ipv4_udp_quote, udp_traceroute_request,
 };
 use packetcraftr_net::capture::CaptureStatistics;
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 
 #[test]
 fn workflow_preserves_mixed_attempts_and_stops_after_destination_evidence() {
@@ -24,13 +24,13 @@ fn workflow_preserves_mixed_attempts_and_stops_after_destination_evidence() {
         address: destination,
         operations: Vec::new(),
     };
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let mut clock = NoopClock::default();
 
     let result = traceroute(
         &operation,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut MixedHopExecutor,
         &mut clock,
     )
@@ -140,7 +140,7 @@ fn unsorted_matched_groups_preserve_probe_and_fully_tied_evidence_order() {
             address: destination,
             operations: Vec::new(),
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut ReverseTiedResponses,
         &mut NoopClock::default(),
     )
@@ -181,7 +181,7 @@ fn undecodable_evidence_remains_exact_hop_scoped_and_operation_bounded() {
     let result = traceroute(
         &operation,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut UndecodedExecutor,
         &mut NoopClock::default(),
     )

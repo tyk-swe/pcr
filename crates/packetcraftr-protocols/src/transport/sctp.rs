@@ -1,23 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use packetcraftr_packet::{
     build::BuildMode,
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    field::WireValue,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, payload_without_padding, protocol,
-    truncated, validate_dependent, wrong_layer,
+    ValueExpectation, invalid, make_layer, payload_without_padding, protocol, truncated,
+    validate_dependent, wrong_layer,
 };
 
 const SCTP_HEADER_LEN: usize = 12;
@@ -47,26 +45,26 @@ impl Default for Sctp {
 reflective_layer! {
     fn sctp_schema() => { protocol: protocol("sctp"), name: "SCTP" }
     impl Sctp {
-        "source_port" => {
-            kind: Unsigned, derived: false, required: true, description: "SCTP source port",
+        "source_port" | "sport" => {
+            id: "source_port", kind: Unsigned, derived: false, required: true, description: "SCTP source port",
             get |layer| Some(reflect_get(&layer.source_port)),
             set |layer, value, name| reflect_set(&mut layer.source_port, sctp_schema(), name, value),
             layout: (0, 2)
         },
-        "destination_port" => {
-            kind: Unsigned, derived: false, required: true, description: "SCTP destination port",
+        "destination_port" | "dport" => {
+            id: "destination_port", kind: Unsigned, derived: false, required: true, description: "SCTP destination port",
             get |layer| Some(reflect_get(&layer.destination_port)),
             set |layer, value, name| reflect_set(&mut layer.destination_port, sctp_schema(), name, value),
             layout: (2, 4)
         },
-        "verification_tag" => {
-            kind: Unsigned, derived: false, required: true, description: "SCTP verification tag",
+        "verification_tag" | "vtag" => {
+            id: "verification_tag", kind: Unsigned, derived: false, required: true, description: "SCTP verification tag",
             get |layer| Some(reflect_get(&layer.verification_tag)),
             set |layer, value, name| reflect_set(&mut layer.verification_tag, sctp_schema(), name, value),
             layout: (4, 8)
         },
         "checksum" => {
-            kind: Unsigned, derived: true, required: false, description: "SCTP CRC32c checksum",
+            id: "checksum", kind: Unsigned, derived: true, required: false, description: "SCTP CRC32c checksum",
             get |layer| Some(reflect_get(&layer.checksum)),
             set |layer, value, name| reflect_set(&mut layer.checksum, sctp_schema(), name, value),
             layout: (8, 12)
@@ -79,20 +77,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SctpCodec;
 
-impl LayerCodec for SctpCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("sctp")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for SctpCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -144,7 +134,7 @@ impl LayerCodec for SctpCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < SCTP_HEADER_LEN {
             return Err(truncated("sctp", SCTP_HEADER_LEN, input.len()));
@@ -193,27 +183,16 @@ impl LayerCodec for SctpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Sctp::default(),
-            &aliased_fields(
-                "sctp",
-                fields,
-                &[
-                    ("sport", "source_port"),
-                    ("dport", "destination_port"),
-                    ("vtag", "verification_tag"),
-                ],
-            )?,
-        )
+        make_layer(Sctp::default(), fields)
     }
 }
 
 fn validate_port(
     field: &'static str,
     port: u16,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<(), CodecError> {
     if port != 0 {
@@ -404,7 +383,7 @@ mod tests {
     use super::{
         Sctp, checksum_from_wire, checksum_to_wire, crc32c, crc32c_parts, validate_chunks,
     };
-    use crate::builtin::registry as default_registry;
+    use crate::builtin::catalog as default_catalog;
     use packetcraftr_packet::{
         Packet,
         build::{BuildContext, BuildMode, BuildOptions, Builder},
@@ -471,8 +450,8 @@ mod tests {
 
     #[test]
     fn sctp_build_materializes_checksum_layout_and_decode_diagnostics() {
-        let registry = Arc::new(default_registry().unwrap());
-        let built = Builder::new(Arc::clone(&registry))
+        let catalog = Arc::new(default_catalog().unwrap());
+        let built = Builder::new(Arc::clone(&catalog))
             .build(
                 sctp_packet(
                     Sctp {
@@ -499,24 +478,28 @@ mod tests {
             layout
                 .fields
                 .iter()
-                .find(|field| field.name == name)
+                .find(|field| field.id.as_str() == name)
                 .unwrap()
                 .range
         };
         assert_eq!(field_range("source_port"), ByteRange::new(0, 2));
         assert_eq!(field_range("checksum"), ByteRange::new(8, 12));
 
-        let decoded = Dissector::new(Arc::clone(&registry))
-            .decode_with_root(built.bytes.clone(), "sctp".into(), DecodeOptions::default())
+        let decoded = Dissector::new(Arc::clone(&catalog))
+            .decode_with_root(
+                built.bytes.clone(),
+                packetcraftr_packet::layer::ProtocolId::from_static("sctp"),
+                DecodeOptions::default(),
+            )
             .unwrap();
         assert!(decoded.diagnostics.is_empty());
 
         let mut corrupt = built.bytes.to_vec();
         corrupt[8] ^= 0x01;
-        let decoded = Dissector::new(registry)
+        let decoded = Dissector::new(catalog)
             .decode_with_root(
                 Bytes::from(corrupt),
-                "sctp".into(),
+                packetcraftr_packet::layer::ProtocolId::from_static("sctp"),
                 DecodeOptions::default(),
             )
             .unwrap();
@@ -530,7 +513,7 @@ mod tests {
 
     #[test]
     fn sctp_zero_ports_are_strict_errors_permissive_warnings_and_decode_evidence() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let packet = sctp_packet(
             Sctp {
                 source_port: 0,
@@ -540,7 +523,7 @@ mod tests {
             init_chunk(),
         );
         assert!(
-            Builder::new(Arc::clone(&registry))
+            Builder::new(Arc::clone(&catalog))
                 .build(
                     packet.clone(),
                     BuildContext::default(),
@@ -548,7 +531,7 @@ mod tests {
                 )
                 .is_err()
         );
-        let built = Builder::new(Arc::clone(&registry))
+        let built = Builder::new(Arc::clone(&catalog))
             .build(
                 packet,
                 BuildContext::default(),
@@ -566,8 +549,12 @@ mod tests {
                 .count(),
             2
         );
-        let decoded = Dissector::new(registry)
-            .decode_with_root(built.bytes, "sctp".into(), DecodeOptions::default())
+        let decoded = Dissector::new(catalog)
+            .decode_with_root(
+                built.bytes,
+                packetcraftr_packet::layer::ProtocolId::from_static("sctp"),
+                DecodeOptions::default(),
+            )
             .unwrap();
         assert_eq!(
             decoded
@@ -581,11 +568,11 @@ mod tests {
 
     #[test]
     fn sctp_non_zero_chunk_padding_is_preserved_only_permissively() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let payload = Bytes::from_static(&[0, 0, 0, 5, 0xaa, 1, 2, 3]);
         let packet = sctp_packet(Sctp::default(), payload.clone());
         assert!(
-            Builder::new(Arc::clone(&registry))
+            Builder::new(Arc::clone(&catalog))
                 .build(
                     packet.clone(),
                     BuildContext::default(),
@@ -593,7 +580,7 @@ mod tests {
                 )
                 .is_err()
         );
-        let built = Builder::new(Arc::clone(&registry))
+        let built = Builder::new(Arc::clone(&catalog))
             .build(
                 packet,
                 BuildContext::default(),
@@ -611,8 +598,12 @@ mod tests {
         );
         assert_eq!(&built.bytes[12..], payload.as_ref());
 
-        let decoded = Dissector::new(registry)
-            .decode_with_root(built.bytes, "sctp".into(), DecodeOptions::default())
+        let decoded = Dissector::new(catalog)
+            .decode_with_root(
+                built.bytes,
+                packetcraftr_packet::layer::ProtocolId::from_static("sctp"),
+                DecodeOptions::default(),
+            )
             .unwrap();
         assert!(decoded.packet.get::<Raw>().is_some());
         assert!(
@@ -625,7 +616,7 @@ mod tests {
 
     #[test]
     fn sctp_raw_checksum_requires_permissive_mode_and_preserves_wire_bytes() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let packet = sctp_packet(
             Sctp {
                 checksum: WireValue::Raw(Bytes::from_static(&[1, 2, 3, 4])),
@@ -634,7 +625,7 @@ mod tests {
             init_chunk(),
         );
         assert!(
-            Builder::new(Arc::clone(&registry))
+            Builder::new(Arc::clone(&catalog))
                 .build(
                     packet.clone(),
                     BuildContext::default(),
@@ -642,7 +633,7 @@ mod tests {
                 )
                 .is_err()
         );
-        let built = Builder::new(registry)
+        let built = Builder::new(catalog)
             .build(
                 packet,
                 BuildContext::default(),

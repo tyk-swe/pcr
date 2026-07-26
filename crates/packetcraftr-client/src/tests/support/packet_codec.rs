@@ -144,7 +144,7 @@ pub(crate) fn exchange_with_capture_statistics(
         capture_statistics: statistics,
     };
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         io,

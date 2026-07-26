@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added validated owned protocol, field, provider, package, component,
+  extension, digest, and catalog identities; immutable schemas with explicit
+  field IDs, bounded constraints, and deterministic hashes; and host-owned
+  `DynamicLayer` values across build, decode, document, expression, template,
+  output, and fuzz paths.
+- Added runtime-neutral protocol providers and per-operation sessions.
+  Immutable provenance-aware catalog snapshots lazily create one session per
+  provider, retain selected root/binding/fallback origins, and produce
+  insertion-order-independent catalog hashes.
 
 ### Changed
 
@@ -43,6 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING**: `FieldKind`, `FieldValue`, and `workflow::replay::Timing` are no
   longer `#[non_exhaustive]`, so first-party mapping layers in sibling crates
   keep translating them exhaustively.
+- **BREAKING**: Replaced the mutable, priority-based packet protocol registry
+  with `ProtocolRegistrationSet`, `ProtocolCatalogBuilder`,
+  `ProtocolCatalogPolicy`, `ProtocolCatalogSnapshot`, and
+  `ProtocolCatalogOperation`. Trusted Rust implementations now register
+  `NativeLayerCodec` and `NativeResponseMatcher` values through
+  `NativeProtocolModule` and `NativeProtocolProvider`; codecs receive
+  host-resolved child and parent-local binding facts rather than the complete
+  catalog. Exact conflicts require host origin selection, built-ins remain the
+  default, decode-only bindings never create reverse encoding choices, and a
+  provider session is never shared across packet operations.
 - Promoted the seams that out-of-crate workflow executors need to public API:
   `Client::exchange_for_workflow`, `workflow::scan::classify_response`,
   `workflow::traceroute::classify_response`, `workflow::dns::correlates`,
@@ -57,6 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Removed the redundant `net::exchange::Io` marker trait; generic code can use
   the public `net::transmit::Sender + net::capture::Provider` bounds directly.
+- Removed `ProtocolRegistry`, `RegistryBuilder`, `RegistryError`,
+  `ProtocolModule`, `LayerCodec`, `ResponseMatcher`, numeric binding priorities,
+  codec-owned alias metadata, and the borrowed static schema contract without
+  compatibility re-exports.
 
 ## [0.4.0-beta.2] - 2026-07-24
 

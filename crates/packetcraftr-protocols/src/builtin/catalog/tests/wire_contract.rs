@@ -1,12 +1,14 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Built-in wire contracts.
+
 use super::*;
 
 #[test]
 fn unknown_exact_ether_type_with_raw_rebuilds_strictly() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let mut packet = Packet::new();
     packet
         .push(Ethernet {
@@ -17,10 +19,10 @@ fn unknown_exact_ether_type_with_raw_rebuilds_strictly() {
     let built = builder
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    let decoded = Dissector::new(Arc::clone(&registry))
+    let decoded = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built.bytes.clone(),
-            "ethernet".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -36,8 +38,8 @@ fn unknown_exact_ether_type_with_raw_rebuilds_strictly() {
 
 #[test]
 fn strict_fragment_building_enforces_flag_and_alignment_rules() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(registry);
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(catalog);
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -58,7 +60,7 @@ fn strict_fragment_building_enforces_flag_and_alignment_rules() {
 
 #[test]
 fn hop_by_hop_cannot_follow_another_ipv6_extension() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv6 {
@@ -70,7 +72,7 @@ fn hop_by_hop_cannot_follow_another_ipv6_extension() {
         .push(HopByHop::default())
         .push(Udp::default());
     assert!(
-        Builder::new(registry)
+        Builder::new(catalog)
             .build(packet, BuildContext::default(), BuildOptions::default())
             .is_err()
     );
@@ -78,7 +80,7 @@ fn hop_by_hop_cannot_follow_another_ipv6_extension() {
 
 #[test]
 fn strict_srh_requires_outer_destination_to_match_active_segment() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv6 {
@@ -95,7 +97,7 @@ fn strict_srh_requires_outer_destination_to_match_active_segment() {
         })
         .push(Udp::default());
     assert!(
-        Builder::new(registry)
+        Builder::new(catalog)
             .build(packet, BuildContext::default(), BuildOptions::default())
             .is_err()
     );
@@ -103,15 +105,19 @@ fn strict_srh_requires_outer_destination_to_match_active_segment() {
 
 #[test]
 fn no_next_header_with_bytes_is_explicitly_malformed() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut bytes = vec![0_u8; 43];
     bytes[0] = 0x60;
     bytes[5] = 3;
     bytes[6] = 59;
     bytes[7] = 64;
     bytes[40..].copy_from_slice(b"bad");
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(bytes.clone(), "ipv6".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            bytes.clone(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv6"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(
         decoded
@@ -119,7 +125,7 @@ fn no_next_header_with_bytes_is_explicitly_malformed() {
             .get::<packetcraftr_packet::layer::MalformedLayer>()
             .is_some()
     );
-    let rebuilt = Builder::new(registry)
+    let rebuilt = Builder::new(catalog)
         .build(
             decoded.packet,
             BuildContext::default(),
@@ -132,7 +138,7 @@ fn no_next_header_with_bytes_is_explicitly_malformed() {
 
 #[test]
 fn empty_ipv6_ethernet_payload_preserves_link_padding() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ethernet::default())
@@ -142,14 +148,14 @@ fn empty_ipv6_ethernet_payload_preserves_link_padding() {
             ..Ipv6::default()
         })
         .push(Padding::new(Bytes::from_static(&[0; 6])));
-    let builder = Builder::new(Arc::clone(&registry));
+    let builder = Builder::new(Arc::clone(&catalog));
     let built = builder
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    let decoded = Dissector::new(Arc::clone(&registry))
+    let decoded = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built.bytes.clone(),
-            "ethernet".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -170,15 +176,19 @@ fn empty_ipv6_ethernet_payload_preserves_link_padding() {
 
 #[test]
 fn missing_ipv6_child_with_link_padding_is_not_a_jumbogram() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut bytes = vec![0_u8; 14 + 40 + 6];
     bytes[12..14].copy_from_slice(&0x86dd_u16.to_be_bytes());
     bytes[14] = 0x60;
     bytes[20] = 17;
     bytes[21] = 64;
 
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(bytes.clone(), "ethernet".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            bytes.clone(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(decoded.packet.get::<Ipv6>().is_some());
     assert!(
@@ -192,7 +202,7 @@ fn missing_ipv6_child_with_link_padding_is_not_a_jumbogram() {
         Bytes::from_static(&[0; 6])
     );
 
-    let rebuilt = Builder::new(registry)
+    let rebuilt = Builder::new(catalog)
         .build(
             decoded.packet,
             BuildContext::default(),
@@ -204,15 +214,19 @@ fn missing_ipv6_child_with_link_padding_is_not_a_jumbogram() {
 
 #[test]
 fn zero_length_raw_ipv6_trailer_is_not_a_jumbogram_without_hop_by_hop() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut bytes = vec![0_u8; 43];
     bytes[0] = 0x60;
     bytes[6] = 59;
     bytes[7] = 64;
     bytes[40..].copy_from_slice(b"bad");
 
-    let decoded = Dissector::new(Arc::clone(&registry))
-        .decode_with_root(bytes.clone(), "ipv6".into(), DecodeOptions::default())
+    let decoded = Dissector::new(Arc::clone(&catalog))
+        .decode_with_root(
+            bytes.clone(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv6"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(decoded.packet.get::<Ipv6>().is_some());
     assert_eq!(
@@ -226,7 +240,7 @@ fn zero_length_raw_ipv6_trailer_is_not_a_jumbogram_without_hop_by_hop() {
             .any(|diagnostic| diagnostic.code == "decode.trailing_malformed")
     );
 
-    let rebuilt = Builder::new(registry)
+    let rebuilt = Builder::new(catalog)
         .build(
             decoded.packet,
             BuildContext::default(),
@@ -239,7 +253,7 @@ fn zero_length_raw_ipv6_trailer_is_not_a_jumbogram_without_hop_by_hop() {
 
 #[test]
 fn ipv4_known_answer_emits_rfc_checksum_vector() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -252,7 +266,7 @@ fn ipv4_known_answer_emits_rfc_checksum_vector() {
         })
         .push(Raw::new(Bytes::from(vec![0; 95])));
 
-    let built = Builder::new(registry)
+    let built = Builder::new(catalog)
         .build(
             packet,
             BuildContext::default(),
@@ -274,10 +288,10 @@ fn ipv4_known_answer_emits_rfc_checksum_vector() {
 
 #[test]
 fn build_context_materializes_unspecified_ip_addresses_before_checksums() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet.push(Ipv4::default()).push(Udp::default());
-    let built = Builder::new(Arc::clone(&registry))
+    let built = Builder::new(Arc::clone(&catalog))
         .build(
             packet,
             BuildContext {
@@ -295,16 +309,20 @@ fn build_context_materializes_unspecified_ip_addresses_before_checksums() {
     );
     assert_eq!(&built.bytes[12..16], &[192, 0, 2, 1]);
     assert_eq!(&built.bytes[16..20], &[198, 51, 100, 2]);
-    let decoded = Dissector::new(registry)
-        .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+    let decoded = Dissector::new(catalog)
+        .decode_with_root(
+            built.bytes,
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(decoded.diagnostics.is_empty());
 }
 
 #[test]
 fn typed_arp_rejects_non_ethernet_ipv4_address_families() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let mut packet = Packet::new();
     packet.push(Arp {
         hardware_type: 2,
@@ -336,8 +354,12 @@ fn typed_arp_rejects_non_ethernet_ipv4_address_families() {
             .any(|diagnostic| diagnostic.code == "build.arp_address_types")
     );
 
-    let decoded = Dissector::new(registry)
-        .decode_with_root(permissive.bytes, "arp".into(), DecodeOptions::default())
+    let decoded = Dissector::new(catalog)
+        .decode_with_root(
+            permissive.bytes,
+            packetcraftr_packet::layer::ProtocolId::from_static("arp"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(
         decoded

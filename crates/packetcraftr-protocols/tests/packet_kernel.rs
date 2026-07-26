@@ -7,57 +7,94 @@
 
 use std::sync::Arc;
 
-use packetcraftr_model::{Frame, LinkType};
+use packetcraftr_model::{Frame, LinkType, ProviderId, RegistrationOrigin};
+use packetcraftr_packet::catalog::{
+    CatalogError, ProtocolBindingRegistration, ProtocolCatalogBuilder, ProtocolCatalogPolicy,
+    ProtocolRegistrationSet,
+};
+use packetcraftr_packet::codec::Discriminator;
 use packetcraftr_packet::decode::{DecodeOptions, Dissector};
 use packetcraftr_packet::layer::ProtocolId;
-use packetcraftr_packet::registry::{Discriminator, RegistryBuilder, RegistryError};
-use packetcraftr_protocols::builtin::{Module as BuiltinProtocols, registry as default_registry};
+use packetcraftr_protocols::builtin::{Module as BuiltinProtocols, catalog as default_catalog};
 
 #[test]
-fn build_canonicalizes_priority_winners_in_both_directions() {
-    for candidates in [[("arp", 150), ("ipv6", 200)], [("ipv6", 200), ("arp", 150)]] {
-        let mut builder = RegistryBuilder::new();
-        builder.module(&BuiltinProtocols).unwrap();
-        for (child, priority) in candidates {
-            builder.bind("ethernet", 0x0800, child, priority).unwrap();
-        }
+fn builtin_binding_conflicts_require_an_exact_origin_selection() {
+    let provider = ProviderId::from_static("example.native");
+    let origin = RegistrationOrigin::Native {
+        provider: provider.clone(),
+    };
+    let replacement = || {
+        let mut set = ProtocolRegistrationSet::new();
+        set.binding(ProtocolBindingRegistration::decode_only(
+            ProtocolId::from_static("ethernet"),
+            0x0800,
+            ProtocolId::from_static("ipv6"),
+            origin.clone(),
+        ));
+        set
+    };
 
-        let registry = builder.build().unwrap();
+    let mut implicit = ProtocolCatalogBuilder::new();
+    implicit.native_module(&BuiltinProtocols).unwrap();
+    implicit.registration_set(replacement());
+    let implicit = implicit.build().unwrap();
+    assert_eq!(
+        implicit.child_for(&ProtocolId::from_static("ethernet"), Discriminator(0x0800)),
+        Some(&ProtocolId::from_static("ipv4"))
+    );
+    assert_eq!(
+        implicit
+            .binding_registration(&ProtocolId::from_static("ethernet"), Discriminator(0x0800))
+            .unwrap()
+            .origin,
+        RegistrationOrigin::Builtin
+    );
 
-        assert_eq!(
-            registry.child_for("ethernet", Discriminator(0x0800)),
-            Some(&ProtocolId::new("ipv6"))
-        );
-        assert_eq!(
-            registry.discriminator_for("ethernet", "ipv6"),
-            Some(Discriminator(0x0800))
-        );
-        // The shadowed candidate keeps only its own canonical binding: the
-        // losing 0x0800 entry survives in neither direction.
-        assert_eq!(
-            registry.discriminator_for("ethernet", "arp"),
-            Some(Discriminator(0x0806))
-        );
-        assert_eq!(
-            registry.child_for("ethernet", Discriminator(0x0806)),
-            Some(&ProtocolId::new("arp"))
-        );
-        assert_eq!(registry.discriminator_for("ethernet", "ipv4"), None);
-    }
+    let mut policy = ProtocolCatalogPolicy::new();
+    policy.select_decode_binding(ProtocolId::from_static("ethernet"), 0x0800, origin.clone());
+    let mut first = ProtocolCatalogBuilder::new();
+    first.native_module(&BuiltinProtocols).unwrap();
+    first.registration_set(replacement()).policy(policy.clone());
+    let mut second = ProtocolCatalogBuilder::new();
+    second.registration_set(replacement());
+    second.native_module(&BuiltinProtocols).unwrap();
+    second.policy(policy);
+    let first = first.build().unwrap();
+    let second = second.build().unwrap();
+
+    assert_eq!(first.catalog_hash(), second.catalog_hash());
+    assert_eq!(
+        first.child_for(&ProtocolId::from_static("ethernet"), Discriminator(0x0800)),
+        Some(&ProtocolId::from_static("ipv6"))
+    );
+    assert_eq!(
+        first.discriminator_for(
+            &ProtocolId::from_static("ethernet"),
+            &ProtocolId::from_static("ipv6")
+        ),
+        Some(Discriminator(0x86dd))
+    );
 }
 
 #[test]
 fn build_still_rejects_an_unknown_shadowed_child() {
-    let mut builder = RegistryBuilder::new();
-    builder.module(&BuiltinProtocols).unwrap();
-    builder
-        .bind("ethernet", 0x0800, "example.unknown", 0)
-        .unwrap();
+    let mut set = ProtocolRegistrationSet::new();
+    set.binding(ProtocolBindingRegistration::decode_only(
+        ProtocolId::from_static("ethernet"),
+        0x0800,
+        ProtocolId::from_static("example.unknown"),
+        RegistrationOrigin::Native {
+            provider: ProviderId::from_static("example.native"),
+        },
+    ));
+    let mut builder = ProtocolCatalogBuilder::new();
+    builder.native_module(&BuiltinProtocols).unwrap();
+    builder.registration_set(set);
 
     assert!(matches!(
         builder.build(),
-        Err(RegistryError::UnknownProtocol { protocol })
-            if protocol == ProtocolId::new("example.unknown")
+        Err(CatalogError::UnknownProtocol { protocol, .. })
+            if protocol == ProtocolId::from_static("example.unknown")
     ));
 }
 
@@ -78,9 +115,9 @@ fn bytes_outside_udp_length_inside_ip_are_not_link_padding() {
     bytes[udp + 4..udp + 6].copy_from_slice(&8_u16.to_be_bytes());
     bytes[udp + 8..udp + 12].copy_from_slice(&[0xde, 0xad, 0xbe, 0xef]);
 
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let frame = Frame::new(std::time::SystemTime::UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap();
-    let decoded = Dissector::new(registry)
+    let decoded = Dissector::new(catalog)
         .decode(
             frame,
             DecodeOptions {

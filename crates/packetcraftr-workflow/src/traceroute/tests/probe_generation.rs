@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use super::super::engine::{build_batches, sent_traceroute_probe_matches};
 use super::super::*;
 use super::support::{CountingRejectExecutor, FixedAuthorizer, NoopClock, udp_traceroute_request};
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 
 #[test]
 fn udp_destination_port_overflow_is_rejected_before_authorized_probe_construction() {
@@ -23,7 +23,7 @@ fn udp_destination_port_overflow_is_rejected_before_authorized_probe_constructio
     let error = traceroute(
         &operation,
         &mut authorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut CountingRejectExecutor(Arc::clone(&calls)),
         &mut NoopClock::default(),
     )

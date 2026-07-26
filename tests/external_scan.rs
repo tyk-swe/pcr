@@ -7,7 +7,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::{
     capture::{Frame, LinkType},
-    protocol::{builtin::registry, network::Ipv4},
+    protocol::{builtin::catalog, network::Ipv4},
     workflow::{
         AddressFamily, BoundaryError, Stats,
         clock::Clock,
@@ -95,11 +95,11 @@ fn downstream_code_can_inject_scan_authorization_execution_and_timing() {
         probes_per_second: Some(10),
         limits: Limits::default(),
     };
-    let registry = registry().unwrap();
+    let catalog = std::sync::Arc::new(catalog().unwrap());
     let result = run(
         &request,
         &mut LabAuthorizer,
-        &registry,
+        &catalog,
         &mut TimeoutExecutor,
         &mut NoopClock,
     )

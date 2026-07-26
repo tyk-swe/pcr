@@ -15,7 +15,7 @@ use crate::target::Authorized;
 use crate::target_adapter::PolicyAuthorizer;
 use packetcraftr_policy::TrafficPolicy;
 use packetcraftr_policy::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 
 fn private_traceroute_policy() -> TrafficPolicy {
     TrafficPolicy {
@@ -90,7 +90,7 @@ fn duplicate_resolved_addresses_preserve_first_seen_order_after_family_filtering
         &mut AddressListAuthorizer {
             addresses: vec![excluded, first, first, second, first, excluded],
         },
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut UndecodedExecutor,
         &mut NoopClock::default(),
     )
@@ -102,7 +102,7 @@ fn duplicate_resolved_addresses_preserve_first_seen_order_after_family_filtering
 
 #[test]
 fn hostname_policy_precedes_dns_and_every_answer_precedes_probe_execution() {
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let private = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 9));
 
     let resolver = ScriptedResolver::new([vec![private]]);
@@ -113,7 +113,7 @@ fn hostname_policy_precedes_dns_and_every_answer_precedes_probe_execution() {
     let error = traceroute(
         &udp_traceroute_request(Target::Hostname("lab.example".to_owned())),
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut NoopClock::default(),
     )
@@ -131,7 +131,7 @@ fn hostname_policy_precedes_dns_and_every_answer_precedes_probe_execution() {
     let error = traceroute(
         &operation,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut NoopClock::default(),
     )
@@ -148,7 +148,7 @@ fn rerun_reauthorizes_rebound_hostname_before_another_probe() {
         ScriptedResolver::new([vec![private], vec![IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))]]);
     let mut policy = private_traceroute_policy();
     policy.allow_hostname_resolution = true;
-    let registry = default_registry().unwrap();
+    let catalog = std::sync::Arc::new(default_catalog().unwrap());
     let calls = Arc::new(AtomicUsize::new(0));
     let mut executor = CountingRejectExecutor(Arc::clone(&calls));
     let mut authorizer = PolicyAuthorizer::new(&policy, &resolver);
@@ -158,7 +158,7 @@ fn rerun_reauthorizes_rebound_hostname_before_another_probe() {
         traceroute(
             &operation,
             &mut authorizer,
-            &registry,
+            &catalog,
             &mut executor,
             &mut NoopClock::default(),
         ),
@@ -168,7 +168,7 @@ fn rerun_reauthorizes_rebound_hostname_before_another_probe() {
         traceroute(
             &operation,
             &mut authorizer,
-            &registry,
+            &catalog,
             &mut executor,
             &mut NoopClock::default(),
         ),

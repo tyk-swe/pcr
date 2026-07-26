@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use packetcraftr::{
     capture::{Frame, LinkType},
     net::capture::Statistics as CaptureStatistics,
-    protocol::{builtin::registry, network::Ipv4},
+    protocol::{builtin::catalog, network::Ipv4},
     workflow::{
         AddressFamily, BoundaryError, Stats,
         clock::Clock,
@@ -104,7 +104,7 @@ fn downstream_code_can_inject_traceroute_authorization_execution_and_timing() {
     let result = run(
         &request,
         &mut LabAuthorizer,
-        &registry().unwrap(),
+        &std::sync::Arc::new(catalog().unwrap()),
         &mut TimeoutExecutor,
         &mut NoopClock,
     )

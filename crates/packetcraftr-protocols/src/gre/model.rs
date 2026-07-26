@@ -1,17 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
@@ -62,11 +60,11 @@ impl Default for Gre {
 reflective_layer! {
     fn gre_schema() => { protocol: protocol("gre"), name: "GRE" }
     impl Gre {
-        "protocol_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", get |layer| Some(reflect_get(&layer.protocol_type)), set |layer, value, name| reflect_set(&mut layer.protocol_type, gre_schema(), name, value), layout: (2, 4) },
-        "checksum" => { kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
-        "key" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.key = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
-        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.sequence = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
-        "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| reflect_set(&mut layer.reserved_bits, gre_schema(), name, value), layout: (0, 2) },
+        "protocol_type" => { id: "protocol_type", kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType discriminator", get |layer| Some(reflect_get(&layer.protocol_type)), set |layer, value, name| reflect_set(&mut layer.protocol_type, gre_schema(), name, value), layout: (2, 4) },
+        "checksum" => { id: "checksum", kind: Unsigned, derived: true, required: false, description: "Optional checksum over the GRE header and payload", get |layer| layer.checksum.as_ref().map(reflect_get), set |layer, value, name| { let mut checksum = layer.checksum.clone().unwrap_or_default(); reflect_set(&mut checksum, gre_schema(), name, value)?; layer.checksum = Some(checksum); Ok(()) } },
+        "key" => { id: "key", kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.key = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
+        "sequence" => { id: "sequence", kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.sequence = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
+        "reserved_bits" => { id: "reserved_bits", kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| reflect_set(&mut layer.reserved_bits, gre_schema(), name, value), layout: (0, 2) },
         normalize |layer| { layer.protocol_type.normalize(); if let Some(checksum) = &mut layer.checksum { checksum.normalize(); } }
     }
     layout fn gre_static_layout();
@@ -75,20 +73,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct GreCodec;
 
-impl LayerCodec for GreCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("gre")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for GreCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -193,7 +183,7 @@ impl LayerCodec for GreCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < GRE_BASE_LEN {
             return Err(truncated("gre", GRE_BASE_LEN, input.len()));
@@ -305,7 +295,7 @@ impl LayerCodec for GreCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Gre::default(), fields)
     }
@@ -340,7 +330,8 @@ fn gre_dynamic_field(
     end: usize,
 ) -> packetcraftr_packet::layout::FieldLayout {
     packetcraftr_packet::layout::FieldLayout {
-        name: name.to_owned(),
+        id: packetcraftr_packet::layer::FieldId::new(name)
+            .expect("trusted GRE layout field ID must be valid"),
         range: packetcraftr_packet::layout::ByteRange::new(start, end),
     }
 }
@@ -351,15 +342,11 @@ mod tests {
     use packetcraftr_packet::{
         Packet,
         build::{BuildContext, BuildMode},
-        registry::ProtocolRegistry,
+        codec::ParentBindingFacts,
     };
 
-    fn decode_context(
-        registry: &ProtocolRegistry,
-        verify_checksums: bool,
-    ) -> LayerDecodeContext<'_> {
-        LayerDecodeContext {
-            registry,
+    fn decode_context(verify_checksums: bool) -> NativeLayerDecodeContext {
+        NativeLayerDecodeContext {
             layer_index: 0,
             absolute_offset: 0,
             verify_checksums,
@@ -377,11 +364,7 @@ mod tests {
         bytes.extend_from_slice(&payload);
         let checksum_value = checksum(&bytes);
         bytes[4..6].copy_from_slice(&checksum_value.to_be_bytes());
-        let registry = ProtocolRegistry::default();
-
-        let decoded = GreCodec
-            .decode(&bytes, &decode_context(&registry, true))
-            .unwrap();
+        let decoded = GreCodec.decode(&bytes, &decode_context(true)).unwrap();
         let gre = decoded.layer.as_any().downcast_ref::<Gre>().unwrap();
 
         assert_eq!(decoded.consumed, 16);
@@ -396,31 +379,26 @@ mod tests {
 
     #[test]
     fn decode_rejects_routing_versions_reserved_flags_and_reserved1() {
-        let registry = ProtocolRegistry::default();
         for bytes in [
             [0x40, 0x00, 0x08, 0x00],
             [0x00, 0x01, 0x08, 0x00],
             [0x08, 0x00, 0x08, 0x00],
         ] {
             assert!(matches!(
-                GreCodec.decode(&bytes, &decode_context(&registry, false)),
+                GreCodec.decode(&bytes, &decode_context(false)),
                 Err(CodecError::Unsupported { .. })
             ));
         }
         assert!(matches!(
-            GreCodec.decode(
-                &[0x80, 0, 0x08, 0, 0, 0, 0, 1],
-                &decode_context(&registry, false)
-            ),
+            GreCodec.decode(&[0x80, 0, 0x08, 0, 0, 0, 0, 1], &decode_context(false)),
             Err(CodecError::Invalid { .. })
         ));
     }
 
     #[test]
     fn decode_preserves_receiver_ignored_reserved_bits() {
-        let registry = ProtocolRegistry::default();
         let decoded = GreCodec
-            .decode(&[0x03, 0xf8, 0x08, 0x00], &decode_context(&registry, false))
+            .decode(&[0x03, 0xf8, 0x08, 0x00], &decode_context(false))
             .unwrap();
         let gre = decoded.layer.as_any().downcast_ref::<Gre>().unwrap();
 
@@ -438,19 +416,20 @@ mod tests {
         };
         let mut packet = Packet::new();
         packet.push(gre.clone());
-        let registry = ProtocolRegistry::default();
         let build_context = BuildContext::default();
         let encode = |mode| {
             GreCodec.encode(
                 &gre,
                 &[],
-                &LayerEncodeContext {
+                &NativeLayerEncodeContext {
                     packet: &packet,
                     index: 0,
                     build_context: &build_context,
                     mode,
-                    registry: &registry,
                     child: None,
+                    child_protocol: None,
+                    canonical_child_discriminator: None,
+                    parent_bindings: ParentBindingFacts::empty(),
                     remaining_packet_bytes: GRE_BASE_LEN,
                 },
             )
@@ -477,19 +456,20 @@ mod tests {
         let payload = [1, 2, 3, 4, 5];
         let mut packet = Packet::new();
         packet.push(gre.clone());
-        let registry = ProtocolRegistry::default();
         let build_context = BuildContext::default();
         let encoded = GreCodec
             .encode(
                 &gre,
                 &payload,
-                &LayerEncodeContext {
+                &NativeLayerEncodeContext {
                     packet: &packet,
                     index: 0,
                     build_context: &build_context,
                     mode: BuildMode::Strict,
-                    registry: &registry,
                     child: None,
+                    child_protocol: None,
+                    canonical_child_discriminator: None,
+                    parent_bindings: ParentBindingFacts::empty(),
                     remaining_packet_bytes: 16,
                 },
             )
@@ -515,19 +495,20 @@ mod tests {
         };
         let mut packet = Packet::new();
         packet.push(gre.clone());
-        let registry = ProtocolRegistry::default();
         let build_context = BuildContext::default();
         let encode = |mode| {
             GreCodec.encode(
                 &gre,
                 &[1, 2, 3],
-                &LayerEncodeContext {
+                &NativeLayerEncodeContext {
                     packet: &packet,
                     index: 0,
                     build_context: &build_context,
                     mode,
-                    registry: &registry,
                     child: None,
+                    child_protocol: None,
+                    canonical_child_discriminator: None,
+                    parent_bindings: ParentBindingFacts::empty(),
                     remaining_packet_bytes: 8,
                 },
             )
@@ -557,20 +538,21 @@ mod tests {
         };
         let mut packet = Packet::new();
         packet.push(gre.clone());
-        let registry = ProtocolRegistry::default();
         let build_context = BuildContext::default();
 
         assert!(matches!(
             GreCodec.encode(
                 &gre,
                 &[],
-                &LayerEncodeContext {
+                &NativeLayerEncodeContext {
                     packet: &packet,
                     index: 0,
                     build_context: &build_context,
                     mode: BuildMode::Strict,
-                    registry: &registry,
                     child: None,
+                    child_protocol: None,
+                    canonical_child_discriminator: None,
+                    parent_bindings: ParentBindingFacts::empty(),
                     remaining_packet_bytes: 15,
                 }
             ),

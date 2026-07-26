@@ -4,12 +4,13 @@
 //! Private wire correlation shared by probe-based workflows.
 
 use std::net::IpAddr;
+use std::sync::Arc;
 
 use packetcraftr_packet::{
     Packet,
+    catalog::ProtocolCatalogSnapshot,
     decode::DecodedPacket,
     diagnostic::DiagnosticSeverity,
-    registry::ProtocolRegistry,
     semantics::{self, BuiltinProtocol},
 };
 use packetcraftr_protocols::{
@@ -84,7 +85,7 @@ pub(super) fn packet_shape_matches(packet: &Packet, expected: &[BuiltinProtocol]
 /// Correlates one decoded response with a request without assigning an
 /// operation-specific status. Corrupt and unrelated traffic returns `None`.
 pub(super) fn observe(
-    registry: &ProtocolRegistry,
+    catalog: &Arc<ProtocolCatalogSnapshot>,
     transport: Transport,
     request: &Packet,
     response: &DecodedPacket,
@@ -99,18 +100,26 @@ pub(super) fn observe(
     {
         return Some(observation);
     }
-    let direct_match = request
-        .iter()
-        .filter_map(|layer| registry.matcher(layer.protocol_id().as_str()))
-        .filter_map(|matcher| {
-            let result = matcher.matches(request, &response.packet);
-            result.matched.then_some((matcher, result))
-        })
-        .max_by_key(|(_, result)| result.confidence);
-    if let Some((matcher, _)) = direct_match {
-        let responder = matcher
-            .responder(request, &response.packet)
-            .unwrap_or(responder);
+    let mut operation = catalog.operation();
+    let mut direct_match = None;
+    for layer in request.iter() {
+        let Ok(Some(candidate)) =
+            operation.match_response(layer.protocol_id(), request, &response.packet)
+        else {
+            continue;
+        };
+        if candidate.result.matched
+            && direct_match.as_ref().is_none_or(
+                |best: &packetcraftr_packet::provider::ProviderMatch| {
+                    candidate.result.confidence > best.result.confidence
+                },
+            )
+        {
+            direct_match = Some(candidate);
+        }
+    }
+    if let Some(candidate) = direct_match {
+        let responder = candidate.responder.unwrap_or(responder);
         let observation = match transport {
             Transport::Tcp => {
                 let tcp = response

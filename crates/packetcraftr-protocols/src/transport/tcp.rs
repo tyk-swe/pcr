@@ -3,25 +3,22 @@
 
 //! TCP segment model and codec.
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, out_of_range, payload_without_padding,
-    protocol, resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
-    wrong_type,
+    ValueExpectation, invalid, make_layer, out_of_range, payload_without_padding, protocol,
+    resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer, wrong_type,
 };
 use super::super::network::encode_network;
 
@@ -68,31 +65,31 @@ impl Default for Tcp {
 reflective_layer! {
     fn tcp_schema() => { protocol: protocol("tcp"), name: "TCP" }
     impl Tcp {
-        "source_port" => { kind: Unsigned, derived: false, required: true, description: "TCP source port",
+        "source_port" | "sport" => { id: "source_port", kind: Unsigned, derived: false, required: true, description: "TCP source port",
             get |layer| Some(reflect_get(&layer.source_port)), set |layer, value, name| reflect_set(&mut layer.source_port, tcp_schema(), name, value), layout: (0, 2) },
-        "destination_port" => { kind: Unsigned, derived: false, required: true, description: "TCP destination port",
+        "destination_port" | "dport" => { id: "destination_port", kind: Unsigned, derived: false, required: true, description: "TCP destination port",
             get |layer| Some(reflect_get(&layer.destination_port)), set |layer, value, name| reflect_set(&mut layer.destination_port, tcp_schema(), name, value), layout: (2, 4) },
-        "sequence" => { kind: Unsigned, derived: false, required: true, description: "Sequence number",
+        "sequence" => { id: "sequence", kind: Unsigned, derived: false, required: true, description: "Sequence number",
             get |layer| Some(reflect_get(&layer.sequence)), set |layer, value, name| reflect_set(&mut layer.sequence, tcp_schema(), name, value), layout: (4, 8) },
-        "acknowledgment" => { kind: Unsigned, derived: false, required: false, description: "Acknowledgment number",
+        "acknowledgment" => { id: "acknowledgment", kind: Unsigned, derived: false, required: false, description: "Acknowledgment number",
             get |layer| Some(reflect_get(&layer.acknowledgment)), set |layer, value, name| reflect_set(&mut layer.acknowledgment, tcp_schema(), name, value), layout: (8, 12) },
-        "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Three reserved TCP header bits",
+        "reserved_bits" => { id: "reserved_bits", kind: Unsigned, derived: false, required: false, description: "Three reserved TCP header bits",
             get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| match value {
                 FieldValue::Unsigned(value) => { layer.reserved_bits = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range(tcp_schema(), name))?; Ok(()) },
                 _ => Err(wrong_type(tcp_schema(), name, "unsigned")),
             }, layout: (12, 13) },
-        "flags" => { kind: Unsigned, derived: false, required: true, description: "Nine TCP control flags",
+        "flags" => { id: "flags", kind: Unsigned, derived: false, required: true, description: "Nine TCP control flags",
             get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| match value {
                 FieldValue::Unsigned(value) => { layer.flags = u16::try_from(value).ok().filter(|value| *value <= 0x01ff).ok_or_else(|| out_of_range(tcp_schema(), name))?; Ok(()) },
                 _ => Err(wrong_type(tcp_schema(), name, "unsigned")),
             }, layout: (12, 14) },
-        "window" => { kind: Unsigned, derived: false, required: true, description: "Receive window",
+        "window" => { id: "window", kind: Unsigned, derived: false, required: true, description: "Receive window",
             get |layer| Some(reflect_get(&layer.window)), set |layer, value, name| reflect_set(&mut layer.window, tcp_schema(), name, value), layout: (14, 16) },
-        "checksum" => { kind: Unsigned, derived: true, required: false, description: "TCP checksum",
+        "checksum" => { id: "checksum", kind: Unsigned, derived: true, required: false, description: "TCP checksum",
             get |layer| Some(reflect_get(&layer.checksum)), set |layer, value, name| reflect_set(&mut layer.checksum, tcp_schema(), name, value), layout: (16, 18) },
-        "urgent_pointer" => { kind: Unsigned, derived: false, required: false, description: "Urgent pointer",
+        "urgent_pointer" => { id: "urgent_pointer", kind: Unsigned, derived: false, required: false, description: "Urgent pointer",
             get |layer| Some(reflect_get(&layer.urgent_pointer)), set |layer, value, name| reflect_set(&mut layer.urgent_pointer, tcp_schema(), name, value), layout: (18, 20) },
-        "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim standard or unknown TCP options",
+        "options" => { id: "options", kind: Bytes, derived: false, required: false, description: "Verbatim standard or unknown TCP options",
             get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, tcp_schema(), name, value), layout: (20, header_len) },
         normalize |layer| { layer.checksum.normalize(); }
     }
@@ -102,20 +99,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct TcpCodec;
 
-impl LayerCodec for TcpCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("tcp")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for TcpCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -193,7 +182,7 @@ impl LayerCodec for TcpCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < TCP_MIN_LEN {
             return Err(truncated("tcp", TCP_MIN_LEN, input.len()));
@@ -263,15 +252,8 @@ impl LayerCodec for TcpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Tcp::default(),
-            &aliased_fields(
-                "tcp",
-                fields,
-                &[("sport", "source_port"), ("dport", "destination_port")],
-            )?,
-        )
+        make_layer(Tcp::default(), fields)
     }
 }

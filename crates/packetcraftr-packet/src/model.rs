@@ -267,7 +267,7 @@ impl Packet {
             left.schema()
                 .fields
                 .iter()
-                .all(|field| left.field(field.name) == right.field(field.name))
+                .all(|field| left.field_by_id(&field.id) == right.field_by_id(&field.id))
         })
     }
 
@@ -340,19 +340,21 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::layer::{FieldSchema, LayerSchema, Padding, Raw};
+    use crate::layer::{FieldId, LayerSchema, Padding, Raw};
 
     #[derive(Clone, Debug)]
     struct EmptyRaw;
 
     impl Layer for EmptyRaw {
-        fn schema(&self) -> &'static LayerSchema {
+        fn schema(&self) -> &LayerSchema {
             static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-            static FIELDS: &[FieldSchema] = &[];
-            SCHEMA.get_or_init(|| LayerSchema {
-                protocol: ProtocolId::new("raw"),
-                name: "Alternate Raw",
-                fields: FIELDS,
+            SCHEMA.get_or_init(|| {
+                LayerSchema::empty(
+                    ProtocolId::from_static("raw"),
+                    "Alternate Raw",
+                    std::iter::empty::<&str>(),
+                )
+                .unwrap()
             })
         }
 
@@ -368,14 +370,14 @@ mod tests {
             self
         }
 
-        fn field(&self, _name: &str) -> Option<FieldValue> {
+        fn field_by_id(&self, _id: &FieldId) -> Option<FieldValue> {
             None
         }
 
-        fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-            Err(FieldError::UnknownField {
+        fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+            Err(FieldError::UnknownFieldId {
                 protocol: self.protocol_id().clone(),
-                field: name.to_owned(),
+                field: id.clone(),
             })
         }
     }
@@ -395,7 +397,7 @@ mod tests {
             Bytes::from_static(b"b")
         );
 
-        let raw = ProtocolId::new("raw");
+        let raw = ProtocolId::from_static("raw");
         assert_eq!(
             packet
                 .by_protocol(&raw)
@@ -428,7 +430,7 @@ mod tests {
 
         packet
             .edit(
-                &ProtocolId::new("raw"),
+                &ProtocolId::from_static("raw"),
                 "bytes",
                 FieldValue::Bytes(Bytes::from_static(b"new")),
             )

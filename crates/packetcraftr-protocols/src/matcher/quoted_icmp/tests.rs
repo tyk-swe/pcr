@@ -15,7 +15,7 @@ use packetcraftr_packet::{
     Packet,
     build::{BuildContext, BuildMode, BuildOptions, Builder},
     field::WireValue,
-    matcher::ResponseMatcher,
+    matcher::NativeResponseMatcher,
     semantics::BuiltinProtocol,
 };
 
@@ -177,8 +177,8 @@ fn sctp_quoted_icmp_matches_a_permissively_built_raw_checksum() {
     let mut request = sctp_init(source, destination, 0x1122_3344);
     request.get_mut::<Sctp>().unwrap().checksum =
         WireValue::Raw(Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]));
-    let registry = Arc::new(crate::builtin::registry().unwrap());
-    let built = Builder::new(registry)
+    let catalog = Arc::new(crate::builtin::catalog().unwrap());
+    let built = Builder::new(catalog)
         .build(
             request,
             BuildContext::default(),

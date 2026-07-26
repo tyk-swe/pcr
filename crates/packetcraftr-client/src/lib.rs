@@ -39,7 +39,7 @@ use packetcraftr_net::{
 use packetcraftr_packet::{
     Packet,
     build::{Builder, BuiltPacket},
-    registry::ProtocolRegistry,
+    catalog::ProtocolCatalogSnapshot,
     semantics::BuiltinProtocol,
     template::PacketTemplate,
 };
@@ -64,7 +64,7 @@ use self::validation::{validate_mtu, validate_send_report};
 /// explicit neighbor materialization, policy, and packet I/O.
 #[derive(Debug)]
 pub struct Client<R, N, I> {
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
     routes: R,
     neighbors: N,
     io: I,
@@ -168,14 +168,14 @@ where
     I: PacketIo,
 {
     pub fn new(
-        registry: Arc<ProtocolRegistry>,
+        catalog: Arc<ProtocolCatalogSnapshot>,
         routes: R,
         neighbors: N,
         io: I,
         policy: TrafficPolicy,
     ) -> Self {
         Self {
-            registry,
+            catalog,
             routes,
             neighbors,
             io,
@@ -184,8 +184,8 @@ where
         }
     }
 
-    pub fn registry(&self) -> &Arc<ProtocolRegistry> {
-        &self.registry
+    pub fn catalog(&self) -> &Arc<ProtocolCatalogSnapshot> {
+        &self.catalog
     }
 
     /// Resolve and authorize a declared destination before passive route
@@ -260,7 +260,7 @@ where
         let mut packet_to_send = packet;
         materialize_network_fields(&mut packet_to_send, &plan)?;
         materialize_link_structure(&mut packet_to_send, &plan)?;
-        let builder = Builder::new(Arc::clone(&self.registry));
+        let builder = Builder::new(Arc::clone(&self.catalog));
         let context = build_context(&plan);
         // Validate all packet fields before neighbor discovery emits traffic.
         let mut preliminary = builder.build(
@@ -276,7 +276,7 @@ where
         let route = self.planner.materialize(plan, &self.neighbors)?;
         let link_changed = materialize_link_fields(&mut packet_to_send, &route)?;
         let built = if link_changed {
-            let built = if patch_builtin_ethernet(&self.registry, &mut preliminary, &packet_to_send)
+            let built = if patch_builtin_ethernet(&self.catalog, &mut preliminary, &packet_to_send)
             {
                 preliminary
             } else {
@@ -405,7 +405,7 @@ where
                     message: source.to_string(),
                 })?;
         let packet_count = expansion_len as u64;
-        let builder = Builder::new(Arc::clone(&self.registry));
+        let builder = Builder::new(Arc::clone(&self.catalog));
         let routes = ExchangeRouteProvider::new(&self.routes);
         let mut planned_packets: Vec<PlannedExchangePacket> = Vec::with_capacity(expansion_len);
         let mut total_bytes = 0u64;
@@ -476,7 +476,7 @@ where
             ensure_preparation_deadline(deadline)?;
             let link_changed = materialize_link_fields(&mut packet, &route)?;
             let built = if link_changed {
-                if patch_builtin_ethernet(&self.registry, &mut preliminary_build, &packet) {
+                if patch_builtin_ethernet(&self.catalog, &mut preliminary_build, &packet) {
                     preliminary_build
                 } else {
                     ensure_preparation_deadline(deadline)?;
@@ -518,7 +518,7 @@ where
         ensure_preparation_deadline(prepared.deadline)?;
         let capture = self.io.arm_capture(first_route, prepared.capture_limits)?;
         Ok(ExchangeTransaction::new(
-            Arc::clone(&self.registry),
+            Arc::clone(&self.catalog),
             capture,
             prepared,
         ))

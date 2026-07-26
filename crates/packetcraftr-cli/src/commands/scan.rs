@@ -21,7 +21,7 @@ use super::super::rendering::{
     write_stdout_line,
 };
 use super::super::runtime::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
+    DeferredInterface, default_catalog_arc, parse_workflow_target, system_client,
     validate_interface_selector, workflow_exchange_options,
 };
 use super::capture::render_diagnostics_text;
@@ -74,7 +74,7 @@ pub(crate) fn run_scan(
         probes_per_second: rate,
         limits: scan_limits,
     };
-    let registry = default_registry_arc()?;
+    let catalog = default_catalog_arc()?;
     let exchange = workflow_exchange_options(
         client::send::Options {
             destination: None,
@@ -92,7 +92,7 @@ pub(crate) fn run_scan(
     )?;
 
     let mut executor = CliScanExecutor {
-        registry: Arc::clone(&registry),
+        catalog: Arc::clone(&catalog),
         policy: policy.clone(),
         exchange,
         interface: DeferredInterface::new(interface),
@@ -103,7 +103,7 @@ pub(crate) fn run_scan(
     let result = workflow::scan::run(
         &request,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut clock,
     )
@@ -139,7 +139,7 @@ pub(crate) fn validate_live_interface_selector(
 }
 
 struct CliScanExecutor {
-    registry: Arc<packet::registry::Registry>,
+    catalog: Arc<packet::catalog::ProtocolCatalogSnapshot>,
     policy: policy::Policy,
     exchange: client::exchange::Options,
     interface: DeferredInterface,
@@ -153,7 +153,7 @@ impl workflow::scan::Executor for CliScanExecutor {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
-        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
+        let client = system_client(Arc::clone(&self.catalog), self.policy.clone());
         workflow_client::scan::ClientExecutor::new(&client, self.exchange.clone()).execute(batch)
     }
 }

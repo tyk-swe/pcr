@@ -16,6 +16,6 @@ pub(super) use packet_codec::{
 };
 pub(super) use routing::{
     CountingNeighbors, CountingRoutes, CustomRouteLayer, DestinationRoutes, FailingNeighbors,
-    FixedRoutes, InterfaceRoutes, MacSensitiveCodec, MacSensitiveLayer, RecordingHostnameResolver,
-    RejectingPacketIo, SlowMatcher, SlowRoutes,
+    FixedRoutes, InterfaceRoutes, MacSensitiveLayer, RecordingHostnameResolver, RejectingPacketIo,
+    SlowRoutes, catalog_with_mac_sensitive,
 };

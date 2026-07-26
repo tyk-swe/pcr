@@ -23,7 +23,7 @@ use super::super::rendering::{
     write_stdout_line,
 };
 use super::super::runtime::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
+    DeferredInterface, default_catalog_arc, parse_workflow_target, system_client,
     workflow_exchange_options,
 };
 use super::capture::render_diagnostics_text;
@@ -90,7 +90,7 @@ pub(crate) fn run_dns(
     policy.validate().map_err(CliError::classified)?;
     validate_live_interface_selector("dns", interface.as_deref())?;
 
-    let registry = default_registry_arc()?;
+    let catalog = default_catalog_arc()?;
     let exchange = workflow_exchange_options(
         client::send::Options {
             destination: None,
@@ -108,7 +108,7 @@ pub(crate) fn run_dns(
     )?;
 
     let mut executor = CliDnsExecutor {
-        registry: Arc::clone(&registry),
+        catalog: Arc::clone(&catalog),
         policy: policy.clone(),
         exchange,
         interface: DeferredInterface::new(interface),
@@ -119,7 +119,7 @@ pub(crate) fn run_dns(
     let result = workflow::dns::run(
         &request,
         &mut authorizer,
-        &registry,
+        &catalog,
         &mut executor,
         &mut clock,
     )
@@ -170,7 +170,7 @@ fn generated_dns_entropy() -> u64 {
 }
 
 struct CliDnsExecutor {
-    registry: Arc<packet::registry::Registry>,
+    catalog: Arc<packet::catalog::ProtocolCatalogSnapshot>,
     policy: policy::Policy,
     exchange: client::exchange::Options,
     interface: DeferredInterface,
@@ -184,7 +184,7 @@ impl workflow::dns::Executor for CliDnsExecutor {
         self.interface
             .resolve_into(&mut self.exchange.send.plan)
             .map_err(CliError::into_boundary_error)?;
-        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
+        let client = system_client(Arc::clone(&self.catalog), self.policy.clone());
         workflow_client::dns::ClientExecutor::new(&client, self.exchange.clone()).execute(exchange)
     }
 }

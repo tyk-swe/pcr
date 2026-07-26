@@ -1,9 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Response-correlation extension contracts.
+//! Trusted native response-matcher contract and host-owned match results.
 
 mod contract;
 
-pub use contract::{MatchResult as Result, ResponseMatcher as Matcher};
-pub use contract::{MatchResult, ResponseMatcher};
+pub use contract::{MatchResult, NativeResponseMatcher};

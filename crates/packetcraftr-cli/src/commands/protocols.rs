@@ -3,8 +3,6 @@
 
 // Offline built-in protocol discovery.
 
-use std::collections::BTreeMap;
-
 use packetcraftr_model::error::{Classification, Kind};
 use packetcraftr_output as output;
 use packetcraftr_protocols::support;
@@ -12,7 +10,7 @@ use packetcraftr_protocols::support;
 use super::super::arguments::ProtocolsArgs;
 use super::super::errors::CliError;
 use super::super::rendering::{emit_json, write_stdout_line};
-use super::super::runtime::default_registry_arc;
+use super::super::runtime::default_catalog_arc;
 
 pub(crate) fn run_protocols(
     arguments: ProtocolsArgs,
@@ -67,45 +65,31 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
                     .any(|alias| alias.eq_ignore_ascii_case(name))
         })
         .ok_or_else(|| unknown_protocol(name))?;
-    let fields = if support.decode_only {
-        Vec::new()
-    } else {
-        let registry = default_registry_arc()?;
-        let codec = registry.codec(support.protocol).ok_or_else(|| {
-            CliError::new(
-                70,
-                format!(
-                    "built-in registry invariant failed: protocol {} has no codec",
-                    support.protocol
-                ),
-            )
-        })?;
-        let layer = codec.make_layer(&BTreeMap::new()).map_err(|source| {
-            CliError::new(
-                70,
-                format!(
-                    "built-in registry invariant failed: default {} layer: {source}",
-                    support.protocol
-                ),
-            )
-        })?;
-        if layer.protocol_id().as_str() != support.protocol {
-            return Err(CliError::new(
-                70,
-                format!(
-                    "built-in registry invariant failed: {} factory returned {}",
-                    support.protocol,
-                    layer.protocol_id()
-                ),
-            ));
-        }
-        layer
-            .schema()
-            .fields
-            .iter()
-            .map(output::protocols::Field::from)
-            .collect()
-    };
+    let catalog = default_catalog_arc()?;
+    let descriptor = catalog.descriptor_named(support.protocol).ok_or_else(|| {
+        CliError::new(
+            70,
+            format!(
+                "built-in catalog invariant failed: protocol {} is absent",
+                support.protocol
+            ),
+        )
+    })?;
+    if descriptor.protocol.as_str() != support.protocol {
+        return Err(CliError::new(
+            70,
+            format!(
+                "built-in catalog invariant failed: {} resolved to {}",
+                support.protocol, descriptor.protocol
+            ),
+        ));
+    }
+    let fields = descriptor
+        .schema
+        .fields
+        .iter()
+        .map(output::protocols::Field::from)
+        .collect();
     let detail = output::protocols::Detail::new(output::protocols::Summary::from(support), fields);
     match format {
         output::contract::Format::Text => render_detail(&detail),

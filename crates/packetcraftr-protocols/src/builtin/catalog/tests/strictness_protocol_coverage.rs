@@ -1,11 +1,13 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Strict and permissive protocol behavior.
+
 use super::*;
 
 #[test]
 fn stacked_service_and_customer_vlan_round_trip() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ethernet::default())
@@ -27,14 +29,14 @@ fn stacked_service_and_customer_vlan_round_trip() {
             destination_port: 9,
             ..Udp::default()
         });
-    let builder = Builder::new(Arc::clone(&registry));
+    let builder = Builder::new(Arc::clone(&catalog));
     let built = builder
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    let decoded = Dissector::new(Arc::clone(&registry))
+    let decoded = Dissector::new(Arc::clone(&catalog))
         .decode_with_root(
             built.bytes.clone(),
-            "ethernet".into(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ethernet"),
             DecodeOptions::default(),
         )
         .unwrap();
@@ -53,8 +55,8 @@ fn stacked_service_and_customer_vlan_round_trip() {
 
 #[test]
 fn strict_rejects_and_permissive_reports_inconsistent_wire_values() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(registry);
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(catalog);
     let mut packet = Packet::new();
     packet.push(Ipv4 {
         total_length: WireValue::Exact(21),
@@ -93,8 +95,8 @@ fn strict_rejects_and_permissive_reports_inconsistent_wire_values() {
 
 #[test]
 fn strict_rejects_untyped_ipv6_routing_headers() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(registry);
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(catalog);
     let mut packet = Packet::new();
     packet
         .push(Ipv6 {
@@ -135,8 +137,8 @@ fn strict_rejects_untyped_ipv6_routing_headers() {
 
 #[test]
 fn permissive_mode_preserves_ipv4_and_tcp_reserved_bits() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -165,8 +167,12 @@ fn permissive_mode_preserves_ipv4_and_tcp_reserved_bits() {
     let built = builder
         .build(packet, BuildContext::default(), options.clone())
         .unwrap();
-    let decoded = Dissector::new(registry)
-        .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+    let decoded = Dissector::new(catalog)
+        .decode_with_root(
+            built.bytes.clone(),
+            packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+            DecodeOptions::default(),
+        )
         .unwrap();
     assert!(decoded.packet.get::<Ipv4>().unwrap().reserved_flag);
     assert_eq!(decoded.packet.get::<Tcp>().unwrap().reserved_bits, 0b101);
@@ -178,8 +184,8 @@ fn permissive_mode_preserves_ipv4_and_tcp_reserved_bits() {
 
 #[test]
 fn all_ip_in_ip_family_combinations_round_trip() {
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     for (outer_v6, inner_v6) in [(false, false), (false, true), (true, false), (true, true)] {
         let mut packet = Packet::new();
         if outer_v6 {
@@ -214,8 +220,12 @@ fn all_ip_in_ip_family_combinations_round_trip() {
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap();
         let root = if outer_v6 { "ipv6" } else { "ipv4" };
-        let decoded = Dissector::new(Arc::clone(&registry))
-            .decode_with_root(built.bytes.clone(), root.into(), DecodeOptions::default())
+        let decoded = Dissector::new(Arc::clone(&catalog))
+            .decode_with_root(
+                built.bytes.clone(),
+                packetcraftr_packet::layer::ProtocolId::new(root).unwrap(),
+                DecodeOptions::default(),
+            )
             .unwrap();
         let protocols = decoded
             .packet
@@ -245,7 +255,7 @@ fn all_ip_in_ip_family_combinations_round_trip() {
 }
 
 #[test]
-fn gre_sctp_and_igmp_round_trip_through_the_default_registry() {
+fn gre_sctp_and_igmp_round_trip_through_the_default_catalog() {
     let mut gre_packet = Packet::new();
     gre_packet
         .push(Ipv4 {
@@ -291,8 +301,8 @@ fn gre_sctp_and_igmp_round_trip_through_the_default_registry() {
             ..Igmp::default()
         });
 
-    let registry = Arc::new(default_registry().unwrap());
-    let builder = Builder::new(Arc::clone(&registry));
+    let catalog = Arc::new(default_catalog().unwrap());
+    let builder = Builder::new(Arc::clone(&catalog));
     for (packet, expected) in [
         (gre_packet, vec!["ipv4", "gre", "ipv6", "udp"]),
         (sctp_packet, vec!["ipv4", "sctp", "raw"]),
@@ -301,8 +311,12 @@ fn gre_sctp_and_igmp_round_trip_through_the_default_registry() {
         let built = builder
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap();
-        let decoded = Dissector::new(Arc::clone(&registry))
-            .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+        let decoded = Dissector::new(Arc::clone(&catalog))
+            .decode_with_root(
+                built.bytes.clone(),
+                packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+                DecodeOptions::default(),
+            )
             .unwrap();
         assert_eq!(
             decoded

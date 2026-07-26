@@ -6,24 +6,20 @@ use std::sync::Arc;
 
 use super::*;
 use crate::common::network_from_addresses;
-use crate::{builtin::Module as BuiltinProtocols, ipv6::SegmentRoutingHeader, transport::Udp};
+use crate::{ipv6::SegmentRoutingHeader, transport::Udp};
 use packetcraftr_packet::field::WireValue;
 use packetcraftr_packet::{
     Packet,
     build::{BuildContext, BuildOptions, Builder},
-    registry::ProtocolRegistry,
+    catalog::ProtocolCatalogSnapshot,
 };
 
 fn address(value: &str) -> Ipv6Addr {
     value.parse().unwrap()
 }
 
-fn tunnel_registry() -> Arc<ProtocolRegistry> {
-    let mut builder = ProtocolRegistry::builder();
-    builder.module(&BuiltinProtocols).unwrap();
-    builder.bind("ipv6", 41, "ipv6", 100).unwrap();
-    builder.bind("ipv6_srh", 41, "ipv6", 100).unwrap();
-    Arc::new(builder.build().unwrap())
+fn tunnel_catalog() -> Arc<ProtocolCatalogSnapshot> {
+    Arc::new(crate::builtin::catalog().unwrap())
 }
 
 #[test]
@@ -50,7 +46,7 @@ fn outer_srh_does_not_change_inner_ipv6_udp_checksum() {
         })
         .push(Udp::default());
 
-    let built = Builder::new(tunnel_registry())
+    let built = Builder::new(tunnel_catalog())
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
     let udp_offset = 40 + 24 + 40;
@@ -86,7 +82,7 @@ fn inner_srh_does_not_override_outer_ipv6_destination() {
         })
         .push(Udp::default());
 
-    Builder::new(tunnel_registry())
+    Builder::new(tunnel_catalog())
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
 }
@@ -101,7 +97,7 @@ fn build_context_materializes_only_the_outer_network_envelope() {
         .push(Ipv4::default())
         .push(Udp::default());
 
-    let built = Builder::new(Arc::new(crate::builtin::registry().unwrap()))
+    let built = Builder::new(Arc::new(crate::builtin::catalog().unwrap()))
         .build(
             packet,
             BuildContext {

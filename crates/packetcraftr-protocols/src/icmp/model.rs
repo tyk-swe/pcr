@@ -1,18 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use packetcraftr_packet::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    field::WireValue,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
@@ -75,33 +73,33 @@ impl Default for Icmpv6 {
 }
 
 macro_rules! icmp_reflection {
-    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, $layout:ident) => {
+    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, [$($alias:literal),*], $layout:ident) => {
         reflective_layer! {
-            fn $schema() => { protocol: protocol($protocol), name: $name }
+            fn $schema() => { protocol: protocol($protocol), name: $name, aliases: [$($alias),*] }
             impl $ty {
                 "type" => {
-                    kind: Unsigned, derived: false, required: true,
+                    id: "type", kind: Unsigned, derived: false, required: true,
                     description: "ICMP message type",
                     get |layer| Some(reflect_get(&layer.icmp_type)),
                     set |layer, value, name| reflect_set(&mut layer.icmp_type, $schema(), name, value),
                     layout: (0, 1)
                 },
                 "code" => {
-                    kind: Unsigned, derived: false, required: true,
+                    id: "code", kind: Unsigned, derived: false, required: true,
                     description: "ICMP message code",
                     get |layer| Some(reflect_get(&layer.code)),
                     set |layer, value, name| reflect_set(&mut layer.code, $schema(), name, value),
                     layout: (1, 2)
                 },
                 "checksum" => {
-                    kind: Unsigned, derived: true, required: false,
+                    id: "checksum", kind: Unsigned, derived: true, required: false,
                     description: "ICMP checksum",
                     get |layer| Some(reflect_get(&layer.checksum)),
                     set |layer, value, name| reflect_set(&mut layer.checksum, $schema(), name, value),
                     layout: (2, 4)
                 },
                 "body" => {
-                    kind: Bytes, derived: false, required: false,
+                    id: "body", kind: Bytes, derived: false, required: false,
                     description: "Type-specific ICMP body",
                     get |layer| Some(reflect_get(&layer.body)),
                     set |layer, value, name| reflect_set(&mut layer.body, $schema(), name, value),
@@ -114,26 +112,32 @@ macro_rules! icmp_reflection {
     };
 }
 
-icmp_reflection!(Icmpv4, icmpv4_schema, "icmpv4", "ICMPv4", icmpv4_layout);
-icmp_reflection!(Icmpv6, icmpv6_schema, "icmpv6", "ICMPv6", icmpv6_layout);
+icmp_reflection!(
+    Icmpv4,
+    icmpv4_schema,
+    "icmpv4",
+    "ICMPv4",
+    ["icmp", "icmp4"],
+    icmpv4_layout
+);
+icmp_reflection!(
+    Icmpv6,
+    icmpv6_schema,
+    "icmpv6",
+    "ICMPv6",
+    ["icmp6"],
+    icmpv6_layout
+);
 
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Icmpv4Codec;
 
-impl LayerCodec for Icmpv4Codec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("icmpv4")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for Icmpv4Codec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -173,7 +177,7 @@ impl LayerCodec for Icmpv4Codec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < ICMP_MIN_LEN {
             return Err(truncated("icmpv4", ICMP_MIN_LEN, input.len()));
@@ -205,7 +209,7 @@ impl LayerCodec for Icmpv4Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Icmpv4::default(), fields)
     }
@@ -214,20 +218,12 @@ impl LayerCodec for Icmpv4Codec {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Icmpv6Codec;
 
-impl LayerCodec for Icmpv6Codec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("icmpv6")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for Icmpv6Codec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -268,7 +264,7 @@ impl LayerCodec for Icmpv6Codec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < ICMP_MIN_LEN {
             return Err(truncated("icmpv6", ICMP_MIN_LEN, input.len()));
@@ -303,7 +299,7 @@ impl LayerCodec for Icmpv6Codec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Icmpv6::default(), fields)
     }

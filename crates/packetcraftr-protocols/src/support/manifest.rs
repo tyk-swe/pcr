@@ -34,7 +34,7 @@ pub enum CaptureRootByteOrder {
     ProtocolDefined,
 }
 
-/// One numeric DLT/LINKTYPE binding in the default registry.
+/// One numeric DLT/LINKTYPE binding in the default catalog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct CaptureRootSupport {
     pub link_type: u32,
@@ -55,7 +55,7 @@ pub struct WorkflowProtocolSupport {
     pub notes: &'static str,
 }
 
-/// Strict fallback and preservation rules shared by all registry-driven workflows.
+/// Strict fallback and preservation rules shared by all catalog-driven workflows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct ProtocolFallbackSupport {
     pub unknown_link_type_as_raw: bool,
@@ -72,12 +72,6 @@ pub struct ProtocolSupportManifest {
     pub capture_roots: &'static [CaptureRootSupport],
     pub workflows: &'static [WorkflowProtocolSupport],
     pub fallback: ProtocolFallbackSupport,
-}
-
-pub(crate) fn aliases(protocol: &str) -> &'static [&'static str] {
-    BuiltinProtocol::from_name(protocol)
-        .map(BuiltinProtocol::aliases)
-        .unwrap_or_else(|| panic!("missing built-in protocol support for {protocol}"))
 }
 
 macro_rules! define_protocol_support {
@@ -392,7 +386,7 @@ pub const STABLE_WORKFLOW_PROTOCOLS: &[WorkflowProtocolSupport] = &[
         matches: PROBE_MATCHERS,
         capture_roots: true,
         packet_independent: false,
-        notes: "IPv4/IPv6 UDP, TCP, and ICMP probes use the shared registry contract",
+        notes: "IPv4/IPv6 UDP, TCP, and ICMP probes use the shared catalog contract",
     },
     WorkflowProtocolSupport {
         workflow: "dns",
@@ -450,13 +444,14 @@ pub const BUILTIN_PROTOCOL_SUPPORT: ProtocolSupportManifest = ProtocolSupportMan
 mod tests {
     use std::collections::{BTreeMap, BTreeSet};
     use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::sync::Arc;
 
     use bytes::Bytes;
 
     use super::*;
     use packetcraftr_packet::{
         field::{FieldKind, FieldValue},
-        layer::FieldError,
+        layer::{FieldError, FieldId},
     };
 
     fn unique(values: &[&str]) -> bool {
@@ -489,18 +484,20 @@ mod tests {
 
     #[test]
     fn every_constructible_builtin_obeys_the_reflective_field_contract() {
-        let registry = crate::builtin::registry().unwrap();
+        let catalog = Arc::new(crate::builtin::catalog().unwrap());
+        let mut operation = catalog.operation();
         for support in BUILTIN_PROTOCOLS.iter().filter(|support| support.build) {
-            let codec = registry.codec_named(support.protocol).unwrap();
-            let layer = codec.make_layer(&BTreeMap::new()).unwrap();
+            let layer = operation
+                .construct_named(support.protocol, std::iter::empty::<(&str, FieldValue)>())
+                .unwrap();
             let schema = layer.schema();
-            let names = schema
+            let ids = schema
                 .fields
                 .iter()
-                .map(|field| field.name)
+                .map(|field| field.id.clone())
                 .collect::<BTreeSet<_>>();
             assert_eq!(
-                names.len(),
+                ids.len(),
                 schema.fields.len(),
                 "{} schema",
                 support.protocol
@@ -508,17 +505,17 @@ mod tests {
 
             for layout_name in layer.declared_layout_fields() {
                 assert!(
-                    names.contains(layout_name),
+                    ids.contains(&layout_name),
                     "{} layout field {layout_name} is absent from its schema",
                     support.protocol
                 );
             }
 
-            for field in schema.fields {
-                let value = representative_value(field.kind, field.name);
+            for field in schema.fields.iter() {
+                let value = representative_value(field.kind, field.name.as_ref());
                 let mut writable = layer.clone_box();
                 writable
-                    .set_field(field.name, value.clone())
+                    .set_field_by_id(&field.id, value.clone())
                     .unwrap_or_else(|error| {
                         panic!(
                             "{}.{} rejected its schema type: {error}",
@@ -526,7 +523,7 @@ mod tests {
                         )
                     });
                 assert_eq!(
-                    writable.field(field.name),
+                    writable.field_by_id(&field.id),
                     Some(value),
                     "{}.{} setter/getter round trip",
                     support.protocol,
@@ -536,7 +533,7 @@ mod tests {
                 let mut wrong = layer.clone_box();
                 assert!(
                     matches!(
-                        wrong.set_field(field.name, definitely_wrong_value(field.kind)),
+                        wrong.set_field_by_id(&field.id, definitely_wrong_value(field.kind)),
                         Err(FieldError::WrongType { .. })
                     ),
                     "{}.{} accepted an incompatible type",
@@ -548,20 +545,19 @@ mod tests {
             assert!(matches!(
                 layer
                     .clone_box()
-                    .set_field("__unknown", FieldValue::Bool(false)),
-                Err(FieldError::UnknownField { .. })
+                    .set_field_by_id(&FieldId::from_static("unknown"), FieldValue::Bool(false)),
+                Err(FieldError::UnknownFieldId { .. })
             ));
         }
     }
 
     #[test]
     fn address_fields_preserve_direct_text_setter_conversions() {
-        let registry = crate::builtin::registry().unwrap();
+        let catalog = Arc::new(crate::builtin::catalog().unwrap());
+        let mut operation = catalog.operation();
 
-        let mut ipv4 = registry
-            .codec_named("ipv4")
-            .unwrap()
-            .make_layer(&BTreeMap::new())
+        let mut ipv4 = operation
+            .construct_named("ipv4", std::iter::empty::<(&str, FieldValue)>())
             .unwrap();
         ipv4.set_field("source", FieldValue::Text("192.0.2.9".to_owned()))
             .unwrap();
@@ -577,10 +573,8 @@ mod tests {
             })
         ));
 
-        let mut ipv6 = registry
-            .codec_named("ipv6")
-            .unwrap()
-            .make_layer(&BTreeMap::new())
+        let mut ipv6 = operation
+            .construct_named("ipv6", std::iter::empty::<(&str, FieldValue)>())
             .unwrap();
         ipv6.set_field("source", FieldValue::Text("2001:db8::9".to_owned()))
             .unwrap();
@@ -589,10 +583,8 @@ mod tests {
             Some(FieldValue::Ipv6("2001:db8::9".parse().unwrap()))
         );
 
-        let mut ethernet = registry
-            .codec_named("ethernet")
-            .unwrap()
-            .make_layer(&BTreeMap::new())
+        let mut ethernet = operation
+            .construct_named("ethernet", std::iter::empty::<(&str, FieldValue)>())
             .unwrap();
         ethernet
             .set_field("source", FieldValue::Text("00-11-22-33-44-55".to_owned()))
@@ -604,15 +596,15 @@ mod tests {
     }
 
     #[test]
-    fn manifest_matches_the_default_registry_exactly() {
-        let registry = crate::builtin::registry().unwrap();
+    fn manifest_matches_the_default_catalog_exactly() {
+        let catalog = Arc::new(crate::builtin::catalog().unwrap());
         let declared = BUILTIN_PROTOCOLS
             .iter()
             .map(|support| (support.protocol, support))
             .collect::<BTreeMap<_, _>>();
-        let actual = registry
+        let actual = catalog
             .protocols()
-            .map(|protocol| protocol.as_str())
+            .map(|(protocol, _)| protocol.as_str())
             .collect::<BTreeSet<_>>();
         assert_eq!(declared.keys().copied().collect::<BTreeSet<_>>(), actual);
         assert_eq!(declared.len(), 25);
@@ -626,16 +618,25 @@ mod tests {
             assert_eq!(identity.has_exact_round_trip(), support.exact_round_trip);
             assert_eq!(identity.has_matcher(), support.matcher);
             assert!(unique(support.aliases), "{} aliases", support.protocol);
-            let codec = registry
-                .codec(support.protocol)
-                .expect("declared protocol must have a codec");
+            let descriptor = catalog
+                .descriptor_named(support.protocol)
+                .expect("declared protocol must have a descriptor");
+            let mut expected_aliases = support.aliases.to_vec();
+            expected_aliases.sort_unstable();
             assert_eq!(
-                codec.aliases(),
-                support.aliases,
+                descriptor
+                    .schema
+                    .aliases
+                    .iter()
+                    .map(AsRef::as_ref)
+                    .collect::<Vec<_>>(),
+                expected_aliases,
                 "{} aliases",
                 support.protocol
             );
-            let constructed = codec.make_layer(&BTreeMap::new());
+            let constructed = catalog
+                .operation()
+                .construct_named(support.protocol, std::iter::empty::<(&str, FieldValue)>());
             assert_eq!(
                 constructed.is_ok(),
                 support.build,
@@ -648,8 +649,7 @@ mod tests {
                     .unwrap_or_else(|error| panic!("{} defaults: {error}", support.protocol));
             }
             assert_eq!(
-                registry.matcher(support.protocol).is_some(),
-                support.matcher,
+                descriptor.matcher, support.matcher,
                 "{} matcher",
                 support.protocol
             );
@@ -663,7 +663,7 @@ mod tests {
             vec!["raw_ip"]
         );
 
-        let roots = registry
+        let roots = catalog
             .link_type_roots()
             .map(|(link_type, protocol)| (link_type, protocol.as_str()))
             .collect::<BTreeMap<_, _>>();
@@ -673,7 +673,7 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
         assert_eq!(declared_roots, roots);
 
-        let matchers = registry
+        let matchers = catalog
             .matcher_protocols()
             .map(|protocol| protocol.as_str())
             .collect::<BTreeSet<_>>();

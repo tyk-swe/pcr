@@ -11,8 +11,8 @@ use packetcraftr_net::route::{MaterializedRoute, PlannedRoute};
 use packetcraftr_packet::{
     Packet,
     build::{BuildContext, BuiltPacket},
+    catalog::ProtocolCatalogSnapshot,
     field::FieldValue,
-    registry::ProtocolRegistry,
     semantics::BuiltinProtocol,
 };
 use packetcraftr_protocols::link::Ethernet;
@@ -191,13 +191,13 @@ pub(super) fn materialize_link_fields(
 /// a crate-provided codec. External codecs may derive arbitrary bytes from the
 /// Ethernet model, so they must use the full rebuild path.
 pub(super) fn patch_builtin_ethernet(
-    registry: &ProtocolRegistry,
+    catalog: &ProtocolCatalogSnapshot,
     preliminary: &mut BuiltPacket,
     packet: &Packet,
 ) -> bool {
     if !packet
         .iter()
-        .all(|layer| registry.is_builtin_codec(layer.protocol_id().as_str()))
+        .all(|layer| catalog.is_builtin_protocol(layer.protocol_id()))
     {
         return false;
     }
@@ -226,7 +226,10 @@ pub(super) fn patch_builtin_ethernet(
         return false;
     }
     let field_range = |name: &str| {
-        let mut fields = layout.fields.iter().filter(|field| field.name == name);
+        let mut fields = layout
+            .fields
+            .iter()
+            .filter(|field| field.id.as_str() == name);
         let range = fields.next()?.range;
         fields.next().is_none().then_some(range)
     };

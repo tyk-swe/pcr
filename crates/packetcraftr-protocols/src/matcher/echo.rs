@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use packetcraftr_packet::{
     Packet,
     field::FieldValue,
-    matcher::{MatchResult, ResponseMatcher},
+    matcher::{MatchResult, NativeResponseMatcher},
     semantics::BuiltinProtocol,
 };
 
@@ -40,7 +40,7 @@ impl EchoMatcher {
     }
 }
 
-impl ResponseMatcher for EchoMatcher {
+impl NativeResponseMatcher for EchoMatcher {
     fn matches(&self, request: &Packet, response: &Packet) -> MatchResult {
         if quoted_icmp_error_kind(request, response, QuotedProbeTransport::Icmp).is_some() {
             return MatchResult::matched(150, "matching quoted ICMP error response");

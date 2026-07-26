@@ -1,18 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use bytes::Bytes;
 
 use packetcraftr_packet::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
-    field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    field::WireValue,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
@@ -46,28 +44,28 @@ reflective_layer! {
     fn igmp_schema() => { protocol: protocol("igmp"), name: "IGMP" }
     impl Igmp {
         "type" => {
-            kind: Unsigned, derived: false, required: true,
+            id: "type", kind: Unsigned, derived: false, required: true,
             description: "IGMP message type",
             get |layer| Some(reflect_get(&layer.igmp_type)),
             set |layer, value, name| reflect_set(&mut layer.igmp_type, igmp_schema(), name, value),
             layout: (0, 1)
         },
         "code" => {
-            kind: Unsigned, derived: false, required: true,
+            id: "code", kind: Unsigned, derived: false, required: true,
             description: "Type-specific IGMP code or reserved octet",
             get |layer| Some(reflect_get(&layer.code)),
             set |layer, value, name| reflect_set(&mut layer.code, igmp_schema(), name, value),
             layout: (1, 2)
         },
         "checksum" => {
-            kind: Unsigned, derived: true, required: false,
+            id: "checksum", kind: Unsigned, derived: true, required: false,
             description: "IGMP checksum",
             get |layer| Some(reflect_get(&layer.checksum)),
             set |layer, value, name| reflect_set(&mut layer.checksum, igmp_schema(), name, value),
             layout: (2, 4)
         },
         "body" => {
-            kind: Bytes, derived: false, required: false,
+            id: "body", kind: Bytes, derived: false, required: false,
             description: "Version- and type-specific IGMP body",
             get |layer| Some(reflect_get(&layer.body)),
             set |layer, value, name| reflect_set(&mut layer.body, igmp_schema(), name, value),
@@ -81,20 +79,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct IgmpCodec;
 
-impl LayerCodec for IgmpCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("igmp")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for IgmpCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -141,7 +131,7 @@ impl LayerCodec for IgmpCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < IGMP_MIN_LEN {
             return Err(truncated("igmp", IGMP_MIN_LEN, input.len()));
@@ -173,7 +163,7 @@ impl LayerCodec for IgmpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Igmp::default(), fields)
     }
@@ -189,36 +179,35 @@ mod tests {
     use packetcraftr_packet::{
         Packet,
         build::{BuildContext, BuildMode, BuildOptions, Builder},
+        codec::ParentBindingFacts,
         decode::{DecodeOptions, Dissector},
         layer::Raw,
-        registry::ProtocolRegistry,
     };
 
     fn encode(layer: &Igmp, mode: BuildMode) -> Result<EncodedLayer, CodecError> {
         let packet = Packet::new();
         let build_context = BuildContext::default();
-        let registry = ProtocolRegistry::default();
         IgmpCodec.encode(
             layer,
             &[],
-            &LayerEncodeContext {
+            &NativeLayerEncodeContext {
                 packet: &packet,
                 index: 0,
                 build_context: &build_context,
                 mode,
-                registry: &registry,
                 child: None,
+                child_protocol: None,
+                canonical_child_discriminator: None,
+                parent_bindings: ParentBindingFacts::empty(),
                 remaining_packet_bytes: usize::MAX,
             },
         )
     }
 
     fn decode(input: &[u8], verify_checksums: bool) -> Result<DecodedLayerValue, CodecError> {
-        let registry = ProtocolRegistry::default();
         IgmpCodec.decode(
             input,
-            &LayerDecodeContext {
-                registry: &registry,
+            &NativeLayerDecodeContext {
                 layer_index: 0,
                 absolute_offset: 0,
                 verify_checksums,
@@ -322,8 +311,8 @@ mod tests {
 
     #[test]
     fn permissive_terminal_payload_is_covered_by_the_checksum() {
-        let registry = Arc::new(crate::builtin::registry().unwrap());
-        let builder = Builder::new(Arc::clone(&registry));
+        let catalog = Arc::new(crate::builtin::catalog().unwrap());
+        let builder = Builder::new(Arc::clone(&catalog));
         let mut packet = Packet::new();
         packet
             .push(Ipv4 {
@@ -354,8 +343,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(checksum(&built.bytes[20..]), 0);
-        let decoded = Dissector::new(registry)
-            .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())
+        let decoded = Dissector::new(catalog)
+            .decode_with_root(
+                built.bytes,
+                packetcraftr_packet::layer::ProtocolId::from_static("ipv4"),
+                DecodeOptions::default(),
+            )
             .unwrap();
 
         assert_eq!(decoded.packet.get::<Igmp>().unwrap().body.len(), 7);

@@ -3,20 +3,19 @@
 
 //! ARP message model and codec.
 
-use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 
 use packetcraftr_packet::{
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
-    field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    field::WireValue,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, make_layer, protocol, resolve_u8, truncated, wrong_layer,
+    ValueExpectation, make_layer, protocol, resolve_u8, truncated, wrong_layer,
 };
 
 const ARP_ETHERNET_IPV4_LEN: usize = 28;
@@ -53,15 +52,15 @@ impl Default for Arp {
 reflective_layer! {
     fn arp_schema() => { protocol: protocol("arp"), name: "ARP" }
     impl Arp {
-        "hardware_type" => { kind: Unsigned, derived: false, required: true, description: "Hardware address family", get |layer| Some(reflect_get(&layer.hardware_type)), set |layer, value, name| reflect_set(&mut layer.hardware_type, arp_schema(), name, value), layout: (0, 2) },
-        "protocol_type" => { kind: Unsigned, derived: false, required: true, description: "Protocol address family", get |layer| Some(reflect_get(&layer.protocol_type)), set |layer, value, name| reflect_set(&mut layer.protocol_type, arp_schema(), name, value), layout: (2, 4) },
-        "hardware_len" => { kind: Unsigned, derived: true, required: false, description: "Hardware address length", get |layer| Some(reflect_get(&layer.hardware_len)), set |layer, value, name| reflect_set(&mut layer.hardware_len, arp_schema(), name, value), layout: (4, 5) },
-        "protocol_len" => { kind: Unsigned, derived: true, required: false, description: "Protocol address length", get |layer| Some(reflect_get(&layer.protocol_len)), set |layer, value, name| reflect_set(&mut layer.protocol_len, arp_schema(), name, value), layout: (5, 6) },
-        "operation" => { kind: Unsigned, derived: false, required: true, description: "ARP operation", get |layer| Some(reflect_get(&layer.operation)), set |layer, value, name| reflect_set(&mut layer.operation, arp_schema(), name, value), layout: (6, 8) },
-        "sender_hardware" => { kind: Mac, derived: false, required: true, description: "Sender hardware address", get |layer| Some(reflect_get(&layer.sender_hardware)), set |layer, value, name| reflect_set(&mut layer.sender_hardware, arp_schema(), name, value), layout: (8, 14) },
-        "sender_protocol" => { kind: Ipv4, derived: false, required: true, description: "Sender IPv4 address", get |layer| Some(reflect_get(&layer.sender_protocol)), set |layer, value, name| reflect_set(&mut layer.sender_protocol, arp_schema(), name, value), layout: (14, 18) },
-        "target_hardware" => { kind: Mac, derived: false, required: true, description: "Target hardware address", get |layer| Some(reflect_get(&layer.target_hardware)), set |layer, value, name| reflect_set(&mut layer.target_hardware, arp_schema(), name, value), layout: (18, 24) },
-        "target_protocol" => { kind: Ipv4, derived: false, required: true, description: "Target IPv4 address", get |layer| Some(reflect_get(&layer.target_protocol)), set |layer, value, name| reflect_set(&mut layer.target_protocol, arp_schema(), name, value), layout: (24, 28) },
+        "hardware_type" => { id: "hardware_type", kind: Unsigned, derived: false, required: true, description: "Hardware address family", get |layer| Some(reflect_get(&layer.hardware_type)), set |layer, value, name| reflect_set(&mut layer.hardware_type, arp_schema(), name, value), layout: (0, 2) },
+        "protocol_type" => { id: "protocol_type", kind: Unsigned, derived: false, required: true, description: "Protocol address family", get |layer| Some(reflect_get(&layer.protocol_type)), set |layer, value, name| reflect_set(&mut layer.protocol_type, arp_schema(), name, value), layout: (2, 4) },
+        "hardware_len" => { id: "hardware_len", kind: Unsigned, derived: true, required: false, description: "Hardware address length", get |layer| Some(reflect_get(&layer.hardware_len)), set |layer, value, name| reflect_set(&mut layer.hardware_len, arp_schema(), name, value), layout: (4, 5) },
+        "protocol_len" => { id: "protocol_len", kind: Unsigned, derived: true, required: false, description: "Protocol address length", get |layer| Some(reflect_get(&layer.protocol_len)), set |layer, value, name| reflect_set(&mut layer.protocol_len, arp_schema(), name, value), layout: (5, 6) },
+        "operation" | "op" => { id: "operation", kind: Unsigned, derived: false, required: true, description: "ARP operation", get |layer| Some(reflect_get(&layer.operation)), set |layer, value, name| reflect_set(&mut layer.operation, arp_schema(), name, value), layout: (6, 8) },
+        "sender_hardware" | "sha" => { id: "sender_hardware", kind: Mac, derived: false, required: true, description: "Sender hardware address", get |layer| Some(reflect_get(&layer.sender_hardware)), set |layer, value, name| reflect_set(&mut layer.sender_hardware, arp_schema(), name, value), layout: (8, 14) },
+        "sender_protocol" | "spa" => { id: "sender_protocol", kind: Ipv4, derived: false, required: true, description: "Sender IPv4 address", get |layer| Some(reflect_get(&layer.sender_protocol)), set |layer, value, name| reflect_set(&mut layer.sender_protocol, arp_schema(), name, value), layout: (14, 18) },
+        "target_hardware" | "tha" => { id: "target_hardware", kind: Mac, derived: false, required: true, description: "Target hardware address", get |layer| Some(reflect_get(&layer.target_hardware)), set |layer, value, name| reflect_set(&mut layer.target_hardware, arp_schema(), name, value), layout: (18, 24) },
+        "target_protocol" | "tpa" => { id: "target_protocol", kind: Ipv4, derived: false, required: true, description: "Target IPv4 address", get |layer| Some(reflect_get(&layer.target_protocol)), set |layer, value, name| reflect_set(&mut layer.target_protocol, arp_schema(), name, value), layout: (24, 28) },
         normalize |layer| { layer.hardware_len.normalize(); layer.protocol_len.normalize(); }
     }
     layout fn arp_layout();
@@ -70,20 +69,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct ArpCodec;
 
-impl LayerCodec for ArpCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("arp")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for ArpCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -150,7 +141,7 @@ impl LayerCodec for ArpCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < 8 {
             return Err(truncated("arp", 8, input.len()));
@@ -200,21 +191,8 @@ impl LayerCodec for ArpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Arp::default(),
-            &aliased_fields(
-                "arp",
-                fields,
-                &[
-                    ("sha", "sender_hardware"),
-                    ("spa", "sender_protocol"),
-                    ("tha", "target_hardware"),
-                    ("tpa", "target_protocol"),
-                    ("op", "operation"),
-                ],
-            )?,
-        )
+        make_layer(Arp::default(), fields)
     }
 }

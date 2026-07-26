@@ -3,24 +3,22 @@
 
 //! UDP datagram model and codec.
 
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    ValueExpectation, aliased_fields, invalid, make_layer, out_of_range, payload_without_padding,
-    protocol, resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
-    wrong_type,
+    ValueExpectation, invalid, make_layer, out_of_range, payload_without_padding, protocol,
+    resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer, wrong_type,
 };
 use super::super::network::encode_network;
 
@@ -48,8 +46,8 @@ impl Default for Udp {
 reflective_layer! {
     fn udp_schema() => { protocol: protocol("udp"), name: "UDP" }
     impl Udp {
-        "source_port" => {
-            kind: Unsigned, derived: false, required: true,
+        "source_port" | "sport" => {
+            id: "source_port", kind: Unsigned, derived: false, required: true,
             description: "UDP source port",
             get |layer| Some(layer.source_port.into()),
             set |layer, value, name| match value {
@@ -62,8 +60,8 @@ reflective_layer! {
             },
             layout: (0, 2)
         },
-        "destination_port" => {
-            kind: Unsigned, derived: false, required: true,
+        "destination_port" | "dport" => {
+            id: "destination_port", kind: Unsigned, derived: false, required: true,
             description: "UDP destination port",
             get |layer| Some(layer.destination_port.into()),
             set |layer, value, name| match value {
@@ -77,14 +75,14 @@ reflective_layer! {
             layout: (2, 4)
         },
         "length" => {
-            kind: Unsigned, derived: true, required: false,
+            id: "length", kind: Unsigned, derived: true, required: false,
             description: "UDP datagram length",
             get |layer| Some(reflect_get(&layer.length)),
             set |layer, value, name| reflect_set(&mut layer.length, udp_schema(), name, value),
             layout: (4, 6)
         },
         "checksum" => {
-            kind: Unsigned, derived: true, required: false,
+            id: "checksum", kind: Unsigned, derived: true, required: false,
             description: "UDP checksum",
             get |layer| Some(reflect_get(&layer.checksum)),
             set |layer, value, name| reflect_set(&mut layer.checksum, udp_schema(), name, value),
@@ -101,20 +99,12 @@ reflective_layer! {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct UdpCodec;
 
-impl LayerCodec for UdpCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("udp")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for UdpCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -174,7 +164,7 @@ impl LayerCodec for UdpCodec {
     fn decode(
         &self,
         input: &[u8],
-        context: &LayerDecodeContext<'_>,
+        context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < UDP_LEN {
             return Err(truncated("udp", UDP_LEN, input.len()));
@@ -236,15 +226,8 @@ impl LayerCodec for UdpCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Udp::default(),
-            &aliased_fields(
-                "udp",
-                fields,
-                &[("sport", "source_port"), ("dport", "destination_port")],
-            )?,
-        )
+        make_layer(Udp::default(), fields)
     }
 }

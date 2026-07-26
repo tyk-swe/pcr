@@ -5,7 +5,7 @@
 
 //! Built-in protocol models, deterministic registration, and capability data.
 //!
-//! The default registry covers capture roots for BSD NULL/LOOP, Linux cooked
+//! The default catalog covers capture roots for BSD NULL/LOOP, Linux cooked
 //! capture, raw IP, Ethernet, IPv4, and IPv6. Its packet families include
 //! Ethernet and VLAN framing, ARP, IPv4 and IPv6 (including nested IPv4/IPv6),
 //! GRE, IGMP, ICMPv4/ICMPv6, selected IPv6 extension headers, TCP, UDP, SCTP,
@@ -14,7 +14,7 @@
 //! Protocol presence does not imply support in every workflow. Use
 //! [`support::BUILTIN_PROTOCOL_SUPPORT`] for the versioned build, dissect,
 //! exact-round-trip, matcher, capture-root, fallback, and workflow matrix, and
-//! [`builtin::registry`] to construct the immutable default registry.
+//! [`builtin::catalog`] to construct the immutable default catalog.
 //!
 //! The built-ins focus on packet headers and bounded framing. SCTP chunks are
 //! validated opaque bytes rather than typed chunk models, DNS messages are

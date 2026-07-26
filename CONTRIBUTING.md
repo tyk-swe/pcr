@@ -134,7 +134,7 @@ Use one or more area labels and one type label.
 | --- | --- |
 | `area/platform` | Native platform backends, interfaces, routes, capture, and transmission. |
 | `area/client` | Client planning, send, policy, and exchange lifecycle. |
-| `area/protocol` | Protocol codecs, registry, matching, catalog, and support manifest. |
+| `area/protocol` | Protocol codecs, provider sessions, matching, catalog, and support manifest. |
 | `area/workflow` | Replay, scan, traceroute, DNS, and fuzz workflows. |
 | `area/cli` | CLI arguments, execution, help, diagnostics, and rendering. |
 | `area/output` | Output models, envelope, schemas, and published documents. |

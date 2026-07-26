@@ -3,14 +3,15 @@
 
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::super::Packet;
+use super::super::catalog::{ProtocolCatalogSnapshot, ProtocolOperationError};
 use super::super::field::FieldValue;
-use super::super::registry::{CodecError, ProtocolRegistry};
 
 pub const PACKET_DOCUMENT_SCHEMA_V1: &str = "packetcraftr.packet/v1";
 pub const DEFAULT_MAX_DOCUMENT_BYTES: usize = 16 * 1024 * 1024;
@@ -75,7 +76,7 @@ pub enum DocumentError {
         layer: usize,
         protocol: String,
         #[source]
-        source: CodecError,
+        source: ProtocolOperationError,
     },
     #[error("could not serialize {format} packet document: {message}")]
     Serialize {
@@ -95,8 +96,8 @@ impl PacketDocument {
                     .iter()
                     .filter_map(|field| {
                         layer
-                            .field(field.name)
-                            .map(|value| (field.name.to_owned(), value))
+                            .field_by_id(&field.id)
+                            .map(|value| (field.name.to_string(), value))
                     })
                     .collect();
                 LayerDocument {
@@ -230,7 +231,7 @@ impl PacketDocument {
 
     pub fn to_packet(
         &self,
-        registry: &ProtocolRegistry,
+        catalog: &Arc<ProtocolCatalogSnapshot>,
         max_layers: usize,
     ) -> Result<Packet, DocumentError> {
         self.validate_schema()?;
@@ -238,26 +239,26 @@ impl PacketDocument {
             return Err(DocumentError::LayerLimit { limit: max_layers });
         }
         let mut packet = Packet::with_capacity(self.layers.len());
+        let mut operation = catalog.operation();
         for (index, layer) in self.layers.iter().enumerate() {
-            let codec = registry.codec_named(&layer.protocol).ok_or_else(|| {
-                DocumentError::UnknownProtocol {
+            if catalog.descriptor_named(&layer.protocol).is_none() {
+                return Err(DocumentError::UnknownProtocol {
                     layer: index,
                     protocol: layer.protocol.clone(),
-                }
-            })?;
-            let value = codec
-                .make_layer(&layer.fields)
+                });
+            }
+            let value = operation
+                .construct_named(
+                    &layer.protocol,
+                    layer
+                        .fields
+                        .iter()
+                        .map(|(name, value)| (name.as_str(), value.clone())),
+                )
                 .map_err(|source| DocumentError::Layer {
                     layer: index,
                     protocol: layer.protocol.clone(),
                     source,
-                })?;
-            value
-                .validate_required_fields()
-                .map_err(|source| DocumentError::Layer {
-                    layer: index,
-                    protocol: layer.protocol.clone(),
-                    source: CodecError::Field(source),
                 })?;
             packet.push_boxed(value);
         }

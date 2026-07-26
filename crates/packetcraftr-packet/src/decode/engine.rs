@@ -10,10 +10,14 @@ use packetcraftr_model::{Frame, FrameError, LinkType};
 
 use super::super::Packet;
 use super::super::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
+use super::super::catalog::{ProtocolCatalogSnapshot, ProtocolOperationError};
+use super::super::codec::NativeLayerDecodeContext;
 use super::super::diagnostic::Diagnostic;
-use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
+use super::super::invariant::{
+    decode_payload_end, layer_count_within_limit, packet_size_within_limit,
+};
+use super::super::layer::{FieldError, FieldId, MalformedLayer, Padding, ProtocolId, Raw};
 use super::super::layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout};
-use super::super::registry::{LayerDecodeContext, ProtocolRegistry};
 use super::super::semantics::BuiltinProtocol;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +50,8 @@ pub enum DecodeError {
     InvalidCodecCursor { protocol: ProtocolId },
     #[error("codec for {protocol} returned an invalid field layout")]
     InvalidCodecLayout { protocol: ProtocolId },
+    #[error("codec for {protocol} returned a network envelope with mixed address families")]
+    InvalidNetworkEnvelope { protocol: ProtocolId },
     #[error("codec for {protocol} returned layer {actual}")]
     CodecLayerMismatch {
         protocol: ProtocolId,
@@ -59,6 +65,12 @@ pub enum DecodeError {
     },
     #[error("invalid capture record: {0}")]
     InvalidCaptureRecord(#[from] FrameError),
+    #[error("protocol provider failed for {protocol}: {source}")]
+    Provider {
+        protocol: ProtocolId,
+        #[source]
+        source: ProtocolOperationError,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -72,16 +84,16 @@ pub struct DecodedPacket {
 
 #[derive(Clone, Debug)]
 pub struct Dissector {
-    registry: Arc<ProtocolRegistry>,
+    catalog: Arc<ProtocolCatalogSnapshot>,
 }
 
 impl Dissector {
-    pub fn new(registry: Arc<ProtocolRegistry>) -> Self {
-        Self { registry }
+    pub fn new(catalog: Arc<ProtocolCatalogSnapshot>) -> Self {
+        Self { catalog }
     }
 
-    pub fn registry(&self) -> &Arc<ProtocolRegistry> {
-        &self.registry
+    pub fn catalog(&self) -> &Arc<ProtocolCatalogSnapshot> {
+        &self.catalog
     }
 
     pub fn decode(
@@ -89,18 +101,18 @@ impl Dissector {
         frame: Frame,
         options: DecodeOptions,
     ) -> Result<DecodedPacket, DecodeError> {
-        if options.max_layers == 0 {
+        if !layer_count_within_limit(1, options.max_layers) {
             return Err(DecodeError::LayerLimit { limit: 0 });
         }
         frame.validate()?;
-        if frame.bytes().len() > options.max_packet_size {
+        if !packet_size_within_limit(frame.bytes().len(), options.max_packet_size) {
             return Err(DecodeError::PacketSizeLimit {
                 actual: frame.bytes().len(),
                 limit: options.max_packet_size,
             });
         }
         let original = frame.bytes().clone();
-        let Some(root) = self.registry.root_for_link_type(frame.link_type.0).cloned() else {
+        let Some(root) = self.catalog.root_for_link_type(frame.link_type.0).cloned() else {
             let link_type = frame.link_type.0;
             return Ok(raw_decoded_frame(
                 frame,
@@ -120,7 +132,7 @@ impl Dissector {
         options: DecodeOptions,
     ) -> Result<DecodedPacket, DecodeError> {
         let bytes = bytes.into();
-        if bytes.len() > options.max_packet_size {
+        if !packet_size_within_limit(bytes.len(), options.max_packet_size) {
             return Err(DecodeError::PacketSizeLimit {
                 actual: bytes.len(),
                 limit: options.max_packet_size,
@@ -131,7 +143,7 @@ impl Dissector {
             LinkType(u32::MAX),
             bytes.clone(),
         )?;
-        if options.max_layers == 0 {
+        if !layer_count_within_limit(1, options.max_layers) {
             return Err(DecodeError::LayerLimit { limit: 0 });
         }
         self.decode_from_root(frame, root, options, bytes)
@@ -162,14 +174,15 @@ impl Dissector {
         let mut absolute_offset = 0usize;
         let mut network = None;
         let mut trailing = Vec::<(usize, Bytes, usize)>::new();
+        let mut operation = self.catalog.operation();
 
         loop {
-            if packet.len() >= options.max_layers {
+            if !layer_count_within_limit(packet.len() + 1, options.max_layers) {
                 return Err(DecodeError::LayerLimit {
                     limit: options.max_layers,
                 });
             }
-            let Some(codec) = self.registry.codec(current_protocol.as_str()) else {
+            let Some(registration) = self.catalog.descriptor(&current_protocol) else {
                 if packet.is_empty() {
                     return Err(DecodeError::MissingRootCodec {
                         protocol: current_protocol,
@@ -192,10 +205,10 @@ impl Dissector {
             // bytes outside a child's declared length are still covered by
             // that IP packet and cannot be link-layer padding.
             let allow_current_link_padding = allow_trailing_padding && network.is_none();
-            let decoded = match codec.decode(
+            let decoded = match operation.decode(
+                &current_protocol,
                 current,
-                &LayerDecodeContext {
-                    registry: &self.registry,
+                &NativeLayerDecodeContext {
                     layer_index: index,
                     absolute_offset,
                     verify_checksums: options.verify_checksums,
@@ -205,7 +218,10 @@ impl Dissector {
             ) {
                 Ok(decoded) => decoded,
                 Err(source) => {
-                    let message = source.to_string();
+                    if !matches!(source, ProtocolOperationError::Codec { .. }) {
+                        return Err(map_operation_error(&current_protocol, source));
+                    }
+                    let message = source_codec_message(source);
                     packet.push_boxed(Box::new(MalformedLayer::new(
                         Some(current_protocol.clone()),
                         slice_original(&original, absolute_offset, current.len()),
@@ -213,7 +229,7 @@ impl Dissector {
                     )));
                     layouts.push(LayerLayout {
                         index,
-                        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
+                        protocol: ProtocolId::from_static(BuiltinProtocol::Malformed.as_str()),
                         range: ByteRange::new(
                             absolute_offset,
                             absolute_offset.saturating_add(current.len()),
@@ -226,35 +242,18 @@ impl Dissector {
                 }
             };
             let actual_protocol = decoded.layer.protocol_id();
-            if !codec.accepts_decoded_protocol(actual_protocol) {
-                return Err(DecodeError::CodecLayerMismatch {
-                    protocol: current_protocol,
-                    actual: actual_protocol.clone(),
-                });
-            }
-            decoded.layer.validate_required_fields().map_err(|source| {
-                DecodeError::InvalidLayer {
-                    protocol: actual_protocol.clone(),
-                    source,
-                }
-            })?;
+            debug_assert!(registration.accepts_decoded_protocol(actual_protocol));
             let binding_parent = actual_protocol;
-            if decoded.consumed > current.len()
-                || decoded.payload_offset > current.len()
-                || decoded.consumed != decoded.payload_offset
-                || (!decoded.stop && decoded.payload_offset == 0)
-            {
-                return Err(DecodeError::InvalidCodecCursor {
-                    protocol: current_protocol,
-                });
-            }
-            let payload_end = decoded
-                .payload_offset
-                .checked_add(decoded.payload_len)
-                .filter(|end| *end <= current.len())
-                .ok_or_else(|| DecodeError::InvalidCodecCursor {
-                    protocol: current_protocol.clone(),
-                })?;
+            let payload_end = decode_payload_end(
+                current.len(),
+                decoded.consumed,
+                decoded.payload_offset,
+                decoded.payload_len,
+                decoded.stop,
+            )
+            .ok_or_else(|| DecodeError::InvalidCodecCursor {
+                protocol: current_protocol.clone(),
+            })?;
             if payload_end < current.len() {
                 let trailing_offset =
                     absolute_offset.checked_add(payload_end).ok_or_else(|| {
@@ -280,13 +279,6 @@ impl Dissector {
             }
 
             let mut fields = decoded.fields;
-            if fields.iter().any(|field| {
-                field.range.start > field.range.end || field.range.end > decoded.consumed
-            }) {
-                return Err(DecodeError::InvalidCodecLayout {
-                    protocol: current_protocol,
-                });
-            }
             for field in &mut fields {
                 if !field.range.checked_shift(absolute_offset) {
                     return Err(DecodeError::InvalidCodecLayout {
@@ -302,7 +294,12 @@ impl Dissector {
             let next_protocol = decoded
                 .next
                 .iter()
-                .find_map(|value| self.registry.child_for(binding_parent.as_str(), *value))
+                .find_map(|value| self.catalog.child_for(binding_parent, *value))
+                .or_else(|| {
+                    (!decoded.next.is_empty())
+                        .then(|| self.catalog.fallback_child_for(binding_parent))
+                        .flatten()
+                })
                 .cloned();
             let missing_required_message = (decoded.payload_len == 0)
                 .then(|| {
@@ -353,7 +350,7 @@ impl Dissector {
                         )
                     )
                 }) {
-                    if packet.len() >= options.max_layers {
+                    if !layer_count_within_limit(packet.len() + 1, options.max_layers) {
                         return Err(DecodeError::LayerLimit {
                             limit: options.max_layers,
                         });
@@ -371,7 +368,7 @@ impl Dissector {
                 break;
             }
             if decoded.stop {
-                if packet.len() >= options.max_layers {
+                if !layer_count_within_limit(packet.len() + 1, options.max_layers) {
                     return Err(DecodeError::LayerLimit {
                         limit: options.max_layers,
                     });
@@ -397,7 +394,7 @@ impl Dissector {
             let payload = &current[decoded.payload_offset..payload_end];
             absolute_offset = layer_end;
             let Some(next_protocol) = next_protocol else {
-                if packet.len() >= options.max_layers {
+                if !layer_count_within_limit(packet.len() + 1, options.max_layers) {
                     return Err(DecodeError::LayerLimit {
                         limit: options.max_layers,
                     });
@@ -421,7 +418,7 @@ impl Dissector {
 
         trailing.sort_by_key(|(offset, _, _)| *offset);
         for (offset, bytes, outside_layer) in trailing {
-            if packet.len() >= options.max_layers {
+            if !layer_count_within_limit(packet.len() + 1, options.max_layers) {
                 return Err(DecodeError::LayerLimit {
                     limit: options.max_layers,
                 });
@@ -440,6 +437,48 @@ impl Dissector {
             layout: PacketLayout { layers: layouts },
             diagnostics,
         })
+    }
+}
+
+fn source_codec_message(source: ProtocolOperationError) -> String {
+    match source {
+        ProtocolOperationError::Codec { source, .. } => source.to_string(),
+        _ => unreachable!("caller checked the operation error variant"),
+    }
+}
+
+fn map_operation_error(protocol: &ProtocolId, source: ProtocolOperationError) -> DecodeError {
+    match source {
+        ProtocolOperationError::AcceptedDecode { actual, .. }
+        | ProtocolOperationError::ProtocolOwnership { actual, .. } => {
+            DecodeError::CodecLayerMismatch {
+                protocol: protocol.clone(),
+                actual,
+            }
+        }
+        ProtocolOperationError::UnknownProtocol { .. }
+        | ProtocolOperationError::UnknownProtocolName { .. } => DecodeError::MissingRootCodec {
+            protocol: protocol.clone(),
+        },
+        ProtocolOperationError::InvalidLayer { source, .. } => DecodeError::InvalidLayer {
+            protocol: protocol.clone(),
+            source,
+        },
+        ProtocolOperationError::InvalidCursor { .. } => DecodeError::InvalidCodecCursor {
+            protocol: protocol.clone(),
+        },
+        ProtocolOperationError::InvalidLayout { .. } => DecodeError::InvalidCodecLayout {
+            protocol: protocol.clone(),
+        },
+        ProtocolOperationError::InvalidNetworkEnvelope { .. } => {
+            DecodeError::InvalidNetworkEnvelope {
+                protocol: protocol.clone(),
+            }
+        }
+        source => DecodeError::Provider {
+            protocol: protocol.clone(),
+            source,
+        },
     }
 }
 
@@ -482,10 +521,10 @@ fn bytes_layer_layout(
     let end = absolute_offset.saturating_add(byte_length);
     LayerLayout {
         index,
-        protocol: ProtocolId::new(protocol.as_str()),
+        protocol: ProtocolId::from_static(protocol.as_str()),
         range: ByteRange::new(absolute_offset, end),
         fields: vec![FieldLayout {
-            name: "bytes".to_owned(),
+            id: FieldId::from_static("bytes"),
             range: ByteRange::new(absolute_offset, end),
         }],
     }
@@ -512,7 +551,7 @@ fn append_missing_required_layer(
     ));
     layouts.push(LayerLayout {
         index,
-        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
+        protocol: ProtocolId::from_static(BuiltinProtocol::Malformed.as_str()),
         range: ByteRange::new(absolute_offset, absolute_offset),
         fields: Vec::new(),
     });
@@ -529,10 +568,10 @@ fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
         layout: PacketLayout {
             layers: vec![LayerLayout {
                 index: 0,
-                protocol: ProtocolId::new(BuiltinProtocol::Raw.as_str()),
+                protocol: ProtocolId::from_static(BuiltinProtocol::Raw.as_str()),
                 range: ByteRange::new(0, original.len()),
                 fields: vec![FieldLayout {
-                    name: "bytes".to_owned(),
+                    id: FieldId::from_static("bytes"),
                     range: ByteRange::new(0, original.len()),
                 }],
             }],
@@ -543,18 +582,17 @@ fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
     use std::sync::{Arc, OnceLock};
 
     use super::*;
     use crate::{
         codec::{
-            CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-            LayerEncodeContext,
+            CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec,
+            NativeLayerDecodeContext, NativeLayerEncodeContext,
         },
         field::FieldValue,
-        layer::{FieldError, Layer, LayerSchema},
-        registry::RegistryBuilder,
+        layer::{FieldError, FieldId, Layer, LayerSchema, ValidatedFieldSet},
+        test_support::native_catalog,
     };
     use packetcraftr_model::LinkType;
 
@@ -563,15 +601,18 @@ mod tests {
 
     fn probe_schema() -> &'static LayerSchema {
         static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-        SCHEMA.get_or_init(|| LayerSchema {
-            protocol: ProtocolId::new("probe"),
-            name: "Probe",
-            fields: &[],
+        SCHEMA.get_or_init(|| {
+            LayerSchema::empty(
+                ProtocolId::from_static("probe"),
+                "Probe",
+                std::iter::empty::<&str>(),
+            )
+            .unwrap()
         })
     }
 
     impl Layer for Probe {
-        fn schema(&self) -> &'static LayerSchema {
+        fn schema(&self) -> &LayerSchema {
             probe_schema()
         }
 
@@ -587,14 +628,14 @@ mod tests {
             self
         }
 
-        fn field(&self, _name: &str) -> Option<FieldValue> {
+        fn field_by_id(&self, _id: &FieldId) -> Option<FieldValue> {
             None
         }
 
-        fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-            Err(FieldError::UnknownField {
-                protocol: ProtocolId::new("probe"),
-                field: name.to_owned(),
+        fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+            Err(FieldError::UnknownFieldId {
+                protocol: ProtocolId::from_static("probe"),
+                field: id.clone(),
             })
         }
     }
@@ -604,6 +645,7 @@ mod tests {
         StopWithPayload,
         CursorGap,
         InvalidLayout,
+        InvalidNetwork,
         Trailing,
         Reject,
     }
@@ -611,16 +653,12 @@ mod tests {
     #[derive(Clone, Copy, Debug)]
     struct ProbeCodec(ProbeMode);
 
-    impl LayerCodec for ProbeCodec {
-        fn protocol_id(&self) -> ProtocolId {
-            ProtocolId::new("probe")
-        }
-
+    impl NativeLayerCodec for ProbeCodec {
         fn encode(
             &self,
             _layer: &dyn Layer,
             _payload: &[u8],
-            _context: &LayerEncodeContext<'_>,
+            _context: &NativeLayerEncodeContext<'_>,
         ) -> Result<EncodedLayer, CodecError> {
             Ok(EncodedLayer::header(vec![0], Box::new(Probe)))
         }
@@ -628,7 +666,7 @@ mod tests {
         fn decode(
             &self,
             input: &[u8],
-            _context: &LayerDecodeContext<'_>,
+            _context: &NativeLayerDecodeContext,
         ) -> Result<DecodedLayerValue, CodecError> {
             let mut value = DecodedLayerValue {
                 layer: Box::new(Probe),
@@ -650,14 +688,21 @@ mod tests {
                 ProbeMode::InvalidLayout => {
                     value.payload_len = 0;
                     value.fields.push(FieldLayout {
-                        name: "outside".to_owned(),
+                        id: FieldId::from_static("outside"),
                         range: ByteRange::new(0, 2),
+                    });
+                }
+                ProbeMode::InvalidNetwork => {
+                    value.payload_len = 0;
+                    value.network = Some(crate::codec::NetworkEnvelope {
+                        source: std::net::Ipv4Addr::LOCALHOST.into(),
+                        destination: std::net::Ipv6Addr::LOCALHOST.into(),
                     });
                 }
                 ProbeMode::Trailing => value.payload_len = 0,
                 ProbeMode::Reject => {
                     return Err(CodecError::Invalid {
-                        protocol: ProtocolId::new("probe"),
+                        protocol: ProtocolId::from_static("probe"),
                         message: "rejected test input".to_owned(),
                     });
                 }
@@ -665,18 +710,16 @@ mod tests {
             Ok(value)
         }
 
-        fn make_layer(
-            &self,
-            _fields: &BTreeMap<String, FieldValue>,
-        ) -> Result<Box<dyn Layer>, CodecError> {
+        fn make_layer(&self, _fields: &ValidatedFieldSet) -> Result<Box<dyn Layer>, CodecError> {
             Ok(Box::new(Probe))
         }
     }
 
     fn dissector(mode: ProbeMode) -> Dissector {
-        let mut builder = RegistryBuilder::new();
-        builder.register_codec(ProbeCodec(mode)).unwrap();
-        Dissector::new(Arc::new(builder.build().unwrap()))
+        Dissector::new(native_catalog(
+            Arc::new(probe_schema().clone()),
+            ProbeCodec(mode),
+        ))
     }
 
     #[test]
@@ -684,7 +727,7 @@ mod tests {
         let decoded = dissector(ProbeMode::StopWithPayload)
             .decode_with_root(
                 Bytes::from_static(&[1, 2, 3]),
-                ProtocolId::new("probe"),
+                ProtocolId::from_static("probe"),
                 DecodeOptions {
                     max_layers: 2,
                     ..DecodeOptions::default()
@@ -703,7 +746,7 @@ mod tests {
         assert!(matches!(
             dissector(ProbeMode::StopWithPayload).decode_with_root(
                 Bytes::from_static(&[1, 2]),
-                ProtocolId::new("probe"),
+                ProtocolId::from_static("probe"),
                 DecodeOptions {
                     max_layers: 1,
                     ..DecodeOptions::default()
@@ -718,7 +761,7 @@ mod tests {
         let malformed = dissector(ProbeMode::Reject)
             .decode_with_root(
                 Bytes::from(vec![1, 2, 3]),
-                ProtocolId::new("probe"),
+                ProtocolId::from_static("probe"),
                 DecodeOptions::default(),
             )
             .unwrap();
@@ -735,7 +778,7 @@ mod tests {
         let trailing = dissector(ProbeMode::Trailing)
             .decode_with_root(
                 Bytes::from(vec![1, 2, 3]),
-                ProtocolId::new("probe"),
+                ProtocolId::from_static("probe"),
                 DecodeOptions::default(),
             )
             .unwrap();
@@ -750,7 +793,7 @@ mod tests {
         assert!(matches!(
             dissector(ProbeMode::CursorGap).decode_with_root(
                 Bytes::from_static(&[1, 2, 3]),
-                ProtocolId::new("probe"),
+                ProtocolId::from_static("probe"),
                 DecodeOptions::default(),
             ),
             Err(DecodeError::InvalidCodecCursor { .. })
@@ -758,10 +801,18 @@ mod tests {
         assert!(matches!(
             dissector(ProbeMode::InvalidLayout).decode_with_root(
                 Bytes::from_static(&[1]),
-                ProtocolId::new("probe"),
+                ProtocolId::from_static("probe"),
                 DecodeOptions::default(),
             ),
             Err(DecodeError::InvalidCodecLayout { .. })
+        ));
+        assert!(matches!(
+            dissector(ProbeMode::InvalidNetwork).decode_with_root(
+                Bytes::from_static(&[1]),
+                ProtocolId::from_static("probe"),
+                DecodeOptions::default(),
+            ),
+            Err(DecodeError::InvalidNetworkEnvelope { .. })
         ));
     }
 

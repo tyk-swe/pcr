@@ -393,7 +393,7 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> 
                         .schema()
                         .fields
                         .iter()
-                        .any(|schema| schema.name == **field)
+                        .any(|schema| schema.name.as_ref() == **field)
                         || layer.field(field).is_some()
                 }) {
                     return Err(SemanticError::new(format!(
@@ -619,25 +619,53 @@ pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, SemanticError
 mod tests {
     use std::any::Any;
     use std::collections::BTreeMap;
-    use std::sync::OnceLock;
+    use std::sync::Arc;
 
     use super::*;
-    use crate::layer::{FieldError, FieldSchema, LayerSchema};
+    use crate::field::FieldKind;
+    use crate::layer::{FieldConstraints, FieldError, FieldId, FieldSchema, LayerSchema};
 
     #[derive(Clone, Debug)]
     struct RuntimeFieldLayer {
         field: &'static str,
+        schema: Arc<LayerSchema>,
+    }
+
+    impl RuntimeFieldLayer {
+        fn new(field: &'static str) -> Self {
+            let kind = match field {
+                SEGMENTS => FieldKind::List,
+                DESTINATION_PORT => FieldKind::Unsigned,
+                _ => FieldKind::Ipv4,
+            };
+            let schema = LayerSchema::new(
+                ProtocolId::from_static("test.runtime_fields"),
+                "Runtime field test layer",
+                std::iter::empty::<&str>(),
+                1,
+                [FieldSchema::new(
+                    FieldId::from_static(field),
+                    field,
+                    std::iter::empty::<&str>(),
+                    kind,
+                    false,
+                    false,
+                    "runtime semantic test field",
+                    FieldConstraints::default(),
+                )
+                .unwrap()],
+            )
+            .unwrap();
+            Self {
+                field,
+                schema: Arc::new(schema),
+            }
+        }
     }
 
     impl Layer for RuntimeFieldLayer {
-        fn schema(&self) -> &'static LayerSchema {
-            static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
-            static FIELDS: &[FieldSchema] = &[];
-            SCHEMA.get_or_init(|| LayerSchema {
-                protocol: ProtocolId::new("test.runtime_fields"),
-                name: "Runtime field test layer",
-                fields: FIELDS,
-            })
+        fn schema(&self) -> &LayerSchema {
+            &self.schema
         }
 
         fn clone_box(&self) -> Box<dyn Layer> {
@@ -652,18 +680,18 @@ mod tests {
             self
         }
 
-        fn field(&self, name: &str) -> Option<FieldValue> {
-            (name == self.field).then(|| match name {
+        fn field_by_id(&self, id: &FieldId) -> Option<FieldValue> {
+            (id.as_str() == self.field).then(|| match id.as_str() {
                 SEGMENTS => FieldValue::List(Vec::new()),
                 DESTINATION_PORT => FieldValue::Unsigned(9),
                 _ => FieldValue::Ipv4(Ipv4Addr::LOCALHOST),
             })
         }
 
-        fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
-            Err(FieldError::UnknownField {
+        fn set_field_by_id(&mut self, id: &FieldId, _value: FieldValue) -> Result<(), FieldError> {
+            Err(FieldError::UnknownFieldId {
                 protocol: self.protocol_id().clone(),
-                field: name.to_owned(),
+                field: id.clone(),
             })
         }
     }
@@ -675,7 +703,7 @@ mod tests {
             let canonical = protocol.as_str();
             assert_eq!(BuiltinProtocol::from_name(canonical), Some(*protocol));
             assert_eq!(
-                BuiltinProtocol::from_id(&ProtocolId::new(canonical)),
+                BuiltinProtocol::from_id(&ProtocolId::from_static(canonical)),
                 Some(*protocol)
             );
             assert_eq!(
@@ -686,7 +714,10 @@ mod tests {
 
             for alias in protocol.aliases() {
                 assert_eq!(BuiltinProtocol::from_name(alias), None);
-                assert_eq!(BuiltinProtocol::from_id(&ProtocolId::new(*alias)), None);
+                assert_eq!(
+                    BuiltinProtocol::from_id(&ProtocolId::from_static(alias)),
+                    None
+                );
                 assert_eq!(BuiltinProtocol::from_name_or_alias(alias), Some(*protocol));
                 assert_eq!(
                     spellings.insert(alias, *protocol),
@@ -697,26 +728,30 @@ mod tests {
         }
         assert_eq!(BuiltinProtocol::ALL.len(), 25);
         assert_eq!(
-            BuiltinProtocol::from_id(&ProtocolId::new("raw_ip")),
+            BuiltinProtocol::from_id(&ProtocolId::from_static("raw_ip")),
             Some(BuiltinProtocol::RawIp)
         );
-        assert_eq!(BuiltinProtocol::from_id(&ProtocolId::new("ip")), None);
-        assert_eq!(BuiltinProtocol::from_id(&ProtocolId::new("srh")), None);
+        assert_eq!(
+            BuiltinProtocol::from_id(&ProtocolId::from_static("ip")),
+            None
+        );
+        assert_eq!(
+            BuiltinProtocol::from_id(&ProtocolId::from_static("srh")),
+            None
+        );
     }
 
     #[test]
     fn unknown_runtime_route_fields_fail_closed_but_destination_port_does_not() {
         for field in ROUTE_FIELDS {
             let mut packet = Packet::new();
-            packet.push(RuntimeFieldLayer { field });
+            packet.push(RuntimeFieldLayer::new(field));
             let error = live_destinations(&packet).unwrap_err();
             assert!(error.to_string().contains(field));
         }
 
         let mut packet = Packet::new();
-        packet.push(RuntimeFieldLayer {
-            field: DESTINATION_PORT,
-        });
+        packet.push(RuntimeFieldLayer::new(DESTINATION_PORT));
         assert_eq!(live_destinations(&packet).unwrap(), Vec::<IpAddr>::new());
     }
 }

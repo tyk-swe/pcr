@@ -4,11 +4,11 @@
 //! Deterministic registration of every codec and capture root declared by the
 //! built-in capability manifest.
 //!
-//! Call [`registry`] for the immutable default registry. For capability
+//! Call [`catalog`] for the immutable default catalog. For capability
 //! discovery, use [`super::support::BUILTIN_PROTOCOL_SUPPORT`] rather than
 //! treating successful registration as proof that a workflow builds, dissects,
 //! or matches a protocol.
 
-mod registry;
+mod catalog;
 
-pub use registry::{BuiltinProtocols as Module, default_registry as registry};
+pub use catalog::{BuiltinProtocols as Module, default_catalog as catalog};

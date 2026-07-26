@@ -37,7 +37,7 @@ Published packet and output examples are in
 
 ## Built-in protocol coverage
 
-The default registry provides exact construction and bounded dissection for
+The default immutable protocol catalog provides exact construction and bounded dissection for
 these protocol families:
 
 - capture and link framing: BSD NULL and LOOP, Linux cooked capture v1 and v2,
@@ -53,6 +53,18 @@ Unknown numeric link types and unknown discriminators remain bounded and are
 preserved as raw bytes. Built-in protocol support is header-focused: SCTP
 chunks are not decoded into typed chunk models, DNS messages remain owned by
 the DNS workflow, and other application payloads are represented as raw bytes.
+
+Packet extensions use owned, versioned schemas with explicit stable field IDs.
+An immutable catalog maps each selected protocol to a runtime-neutral provider
+and provider-local key. A build, decode, construction, or matching transaction
+pins one catalog snapshot and lazily opens at most one short-lived session for
+each provider it invokes. Built-in Rust codecs use the trusted native adapter;
+host-owned `DynamicLayer` values provide the same reflective packet paths
+without requiring Rust downcasting. See
+[Protocol extension architecture](docs/protocol-catalog.md) for the contracts,
+binding rules, and a native registration example. The
+[`dynamic_layer` example](examples/dynamic_layer.rs) constructs and reflects a
+host-owned dynamic layer directly.
 
 ## Output formats and terminal colour
 
@@ -125,8 +137,8 @@ never on the root package:
 | --- | --- |
 | `packetcraftr-model` | Classified errors, frames and link types, stable identities |
 | `packetcraftr-capture` | Classic PCAP and PCAPNG reading, writing, transcoding |
-| `packetcraftr-packet` | Layers, schemas, documents, expressions, building, dissection |
-| `packetcraftr-protocols` | Built-in protocols, codecs, matchers, capture roots |
+| `packetcraftr-packet` | Owned schemas, dynamic layers, providers, immutable catalogs, documents, expressions, building, dissection |
+| `packetcraftr-protocols` | Trusted built-in provider, codecs, matchers, bindings, capture roots |
 | `packetcraftr-session` | Bounded fragment and TCP reassembly |
 | `packetcraftr-net` | Platform-neutral interface, route, capture, transmission contracts |
 | `packetcraftr-net-native` | Operating-system providers behind those contracts |

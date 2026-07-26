@@ -1,23 +1,20 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    binding_protocol, expected_discriminator, invalid, make_layer, out_of_range, protocol,
-    resolve_u16, truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator,
-    wrong_layer, wrong_type,
+    expected_discriminator, invalid, make_layer, out_of_range, protocol, resolve_u16, truncated,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -54,18 +51,18 @@ impl Default for BsdLoop {
 }
 
 reflective_layer! {
-    fn loop_schema() => { protocol: protocol("bsd_loop"), name: "BSD LOOP" }
+    fn loop_schema() => { protocol: protocol("bsd_loop"), name: "BSD LOOP", aliases: ["loop"] }
     impl BsdLoop {
-        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, loop_schema(), name, value), layout: (0, 4) }
+        "family" => { id: "family", kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, loop_schema(), name, value), layout: (0, 4) }
     }
     layout fn loop_layout();
 }
 
 reflective_layer! {
-    fn null_schema() => { protocol: protocol("bsd_null"), name: "BSD NULL" }
+    fn null_schema() => { protocol: protocol("bsd_null"), name: "BSD NULL", aliases: ["null"] }
     impl BsdNull {
-        "family" => { kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, null_schema(), name, value), layout: (0, 4) },
-        "byte_order" => { kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(FieldValue::Text(match layer.byte_order { CaptureByteOrder::Little => "little", CaptureByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { FieldValue::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = CaptureByteOrder::Little; Ok(()) }, FieldValue::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = CaptureByteOrder::Big; Ok(()) }, FieldValue::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
+        "family" => { id: "family", kind: Unsigned, derived: false, required: true, description: "Address-family discriminator", get |layer| Some(reflect_get(&layer.family)), set |layer, value, name| reflect_set(&mut layer.family, null_schema(), name, value), layout: (0, 4) },
+        "byte_order" => { id: "byte_order", kind: Text, derived: false, required: true, description: "Host byte order used by the captured NULL header", get |layer| Some(FieldValue::Text(match layer.byte_order { CaptureByteOrder::Little => "little", CaptureByteOrder::Big => "big" }.to_owned())), set |layer, value, name| match value { FieldValue::Text(value) if value.eq_ignore_ascii_case("little") => { layer.byte_order = CaptureByteOrder::Little; Ok(()) }, FieldValue::Text(value) if value.eq_ignore_ascii_case("big") => { layer.byte_order = CaptureByteOrder::Big; Ok(()) }, FieldValue::Text(_) => Err(out_of_range(null_schema(), name)), _ => Err(wrong_type(null_schema(), name, "text")) }, layout: (0, 4) }
     }
     layout fn null_layout();
 }
@@ -93,7 +90,7 @@ fn family_discriminator(family: u32) -> u64 {
 fn validate_family_binding(
     parent: &str,
     family: u32,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
 ) -> Result<Vec<Diagnostic>, CodecError> {
     let mut diagnostics = Vec::new();
     validate_raw_child_discriminator(
@@ -108,10 +105,7 @@ fn validate_family_binding(
     if child.protocol_id().as_str() == "raw" {
         return Ok(diagnostics);
     }
-    let Some(expected) = context
-        .registry
-        .discriminator_for(parent, binding_protocol(child).as_str())
-    else {
+    let Some(expected) = context.canonical_child_discriminator else {
         return Ok(diagnostics);
     };
     let actual = family_discriminator(family);
@@ -131,20 +125,12 @@ fn validate_family_binding(
     Ok(diagnostics)
 }
 
-impl LayerCodec for BsdNullCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("bsd_null")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for BsdNullCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -163,33 +149,25 @@ impl LayerCodec for BsdNullCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         decode_family(input, FamilyHeader::Null)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(BsdNull::default(), fields)
     }
 }
 
-impl LayerCodec for BsdLoopCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("bsd_loop")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for BsdLoopCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -205,14 +183,14 @@ impl LayerCodec for BsdLoopCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         decode_family(input, FamilyHeader::Loop)
     }
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(BsdLoop::default(), fields)
     }
@@ -301,27 +279,27 @@ impl Default for LinuxSll2 {
 }
 
 reflective_layer! {
-    fn linux_sll_schema() => { protocol: protocol("linux_sll"), name: "Linux cooked capture v1" }
+    fn linux_sll_schema() => { protocol: protocol("linux_sll"), name: "Linux cooked capture v1", aliases: ["sll"] }
     impl LinuxSll {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll_schema(), name, value), layout: (14, 16) },
-        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll_schema(), name, value), layout: (0, 2) },
-        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll_schema(), name, value), layout: (2, 4) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u16::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll_schema(), name, "unsigned")) }, layout: (4, 6) },
-        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll_schema(), name, value), layout: (6, 14) },
+        "protocol" => { id: "protocol", kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll_schema(), name, value), layout: (14, 16) },
+        "packet_type" => { id: "packet_type", kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll_schema(), name, value), layout: (0, 2) },
+        "arp_hardware_type" => { id: "arp_hardware_type", kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll_schema(), name, value), layout: (2, 4) },
+        "address_length" => { id: "address_length", kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u16::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll_schema(), name, "unsigned")) }, layout: (4, 6) },
+        "address" => { id: "address", kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll_schema(), name, value), layout: (6, 14) },
         normalize |layer| { layer.protocol.normalize(); }
     }
     layout fn linux_sll_layout();
 }
 
 reflective_layer! {
-    fn linux_sll2_schema() => { protocol: protocol("linux_sll2"), name: "Linux cooked capture v2" }
+    fn linux_sll2_schema() => { protocol: protocol("linux_sll2"), name: "Linux cooked capture v2", aliases: ["sll2"] }
     impl LinuxSll2 {
-        "protocol" => { kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll2_schema(), name, value), layout: (0, 2) },
-        "packet_type" => { kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll2_schema(), name, value), layout: (10, 11) },
-        "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll2_schema(), name, value), layout: (8, 10) },
-        "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", get |layer| Some(reflect_get(&layer.interface_index)), set |layer, value, name| reflect_set(&mut layer.interface_index, linux_sll2_schema(), name, value), layout: (4, 8) },
-        "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u8::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll2_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll2_schema(), name, "unsigned")) }, layout: (11, 12) },
-        "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll2_schema(), name, value), layout: (12, 20) },
+        "protocol" => { id: "protocol", kind: Unsigned, derived: true, required: false, description: "Protocol discriminator", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, linux_sll2_schema(), name, value), layout: (0, 2) },
+        "packet_type" => { id: "packet_type", kind: Unsigned, derived: false, required: true, description: "Packet direction/type", get |layer| Some(reflect_get(&layer.packet_type)), set |layer, value, name| reflect_set(&mut layer.packet_type, linux_sll2_schema(), name, value), layout: (10, 11) },
+        "arp_hardware_type" => { id: "arp_hardware_type", kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll2_schema(), name, value), layout: (8, 10) },
+        "interface_index" => { id: "interface_index", kind: Unsigned, derived: false, required: false, description: "Interface index", get |layer| Some(reflect_get(&layer.interface_index)), set |layer, value, name| reflect_set(&mut layer.interface_index, linux_sll2_schema(), name, value), layout: (4, 8) },
+        "address_length" => { id: "address_length", kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u8::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll2_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll2_schema(), name, "unsigned")) }, layout: (11, 12) },
+        "address" => { id: "address", kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll2_schema(), name, value), layout: (12, 20) },
         normalize |layer| { layer.protocol.normalize(); }
     }
     layout fn linux_sll2_layout();
@@ -332,18 +310,12 @@ pub(crate) struct LinuxSllCodec;
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct LinuxSll2Codec;
 
-impl LayerCodec for LinuxSllCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("linux_sll")
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
+impl NativeLayerCodec for LinuxSllCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -394,7 +366,7 @@ impl LayerCodec for LinuxSllCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < 16 {
             return Err(truncated("linux_sll", 16, input.len()));
@@ -426,24 +398,18 @@ impl LayerCodec for LinuxSllCodec {
     }
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(LinuxSll::default(), fields)
     }
 }
 
-impl LayerCodec for LinuxSll2Codec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("linux_sll2")
-    }
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
+impl NativeLayerCodec for LinuxSll2Codec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -496,7 +462,7 @@ impl LayerCodec for LinuxSll2Codec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         if input.len() < 20 {
             return Err(truncated("linux_sll2", 20, input.len()));
@@ -531,7 +497,7 @@ impl LayerCodec for LinuxSll2Codec {
     }
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(LinuxSll2::default(), fields)
     }
@@ -544,7 +510,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        builtin::registry as default_registry,
+        builtin::catalog as default_catalog,
         network::{Ipv4, Ipv6},
     };
     use packetcraftr_model::{Frame, LinkType};
@@ -557,14 +523,14 @@ mod tests {
     };
 
     fn ipv4_bytes() -> Vec<u8> {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let mut packet = Packet::new();
         packet.push(Ipv4 {
             source: "192.0.2.1".parse().unwrap(),
             destination: "198.51.100.2".parse().unwrap(),
             ..Ipv4::default()
         });
-        Builder::new(registry)
+        Builder::new(catalog)
             .build(packet, BuildContext::default(), BuildOptions::default())
             .unwrap()
             .bytes
@@ -585,8 +551,8 @@ mod tests {
 
     #[test]
     fn cooked_link_build_rejects_address_length_beyond_wire_slot() {
-        let registry = Arc::new(default_registry().unwrap());
-        let builder = Builder::new(registry);
+        let catalog = Arc::new(default_catalog().unwrap());
+        let builder = Builder::new(catalog);
 
         let mut sll = Packet::new();
         sll.push(LinuxSll {
@@ -613,7 +579,7 @@ mod tests {
 
     #[test]
     fn null_and_loop_endianness_decode_to_ipv4() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         for (link_type, family) in [
             (LinkType::NULL, 2u32.to_le_bytes()),
             (LinkType::NULL, 2u32.to_be_bytes()),
@@ -621,7 +587,7 @@ mod tests {
         ] {
             let mut frame = family.to_vec();
             frame.extend_from_slice(&ipv4_bytes());
-            let decoded = Dissector::new(Arc::clone(&registry))
+            let decoded = Dissector::new(Arc::clone(&catalog))
                 .decode(
                     Frame::new(SystemTime::UNIX_EPOCH, link_type, frame).unwrap(),
                     DecodeOptions::default(),
@@ -633,7 +599,7 @@ mod tests {
 
     #[test]
     fn sll_and_sll2_use_their_protocol_offsets() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let ip = ipv4_bytes();
         let mut sll = vec![0, 0, 0, 1, 0, 6, 0, 1, 2, 3, 4, 5, 0, 0, 0x08, 0x00];
         sll.extend_from_slice(&ip);
@@ -642,13 +608,13 @@ mod tests {
         ];
         sll2.extend_from_slice(&ip);
 
-        let first = Dissector::new(Arc::clone(&registry))
+        let first = Dissector::new(Arc::clone(&catalog))
             .decode(
                 Frame::new(SystemTime::UNIX_EPOCH, LinkType::LINUX_SLL, sll).unwrap(),
                 DecodeOptions::default(),
             )
             .unwrap();
-        let second = Dissector::new(registry)
+        let second = Dissector::new(catalog)
             .decode(
                 Frame::new(SystemTime::UNIX_EPOCH, LinkType::LINUX_SLL2, sll2).unwrap(),
                 DecodeOptions::default(),
@@ -662,8 +628,8 @@ mod tests {
 
     #[test]
     fn unknown_sll_protocols_rebuild_exactly_as_raw() {
-        let registry = Arc::new(default_registry().unwrap());
-        let builder = Builder::new(Arc::clone(&registry));
+        let catalog = Arc::new(default_catalog().unwrap());
+        let builder = Builder::new(Arc::clone(&catalog));
         for (root, mut frame) in [
             (
                 "linux_sll",
@@ -677,12 +643,16 @@ mod tests {
             ),
         ] {
             frame.extend_from_slice(&[0xaa, 0xbb]);
-            let decoded = Dissector::new(Arc::clone(&registry))
-                .decode_with_root(frame.clone(), root.into(), DecodeOptions::default())
+            let decoded = Dissector::new(Arc::clone(&catalog))
+                .decode_with_root(
+                    frame.clone(),
+                    packetcraftr_packet::layer::ProtocolId::new(root).unwrap(),
+                    DecodeOptions::default(),
+                )
                 .unwrap();
             assert!(decoded.packet.get::<Raw>().is_some());
             let document = PacketDocument::from_packet(&decoded.packet);
-            let reloaded = document.to_packet(&registry, 64).unwrap();
+            let reloaded = document.to_packet(&catalog, 64).unwrap();
             let rebuilt = builder
                 .build(reloaded, BuildContext::default(), BuildOptions::default())
                 .unwrap();
@@ -692,7 +662,7 @@ mod tests {
 
     #[test]
     fn strict_capture_family_must_match_typed_child() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let mut packet = Packet::new();
         packet.push(BsdLoop { family: 2 }).push(Ipv6 {
             source: "2001:db8::1".parse().unwrap(),
@@ -701,7 +671,7 @@ mod tests {
         });
 
         assert!(
-            Builder::new(registry)
+            Builder::new(catalog)
                 .build(packet, BuildContext::default(), BuildOptions::default())
                 .is_err()
         );
@@ -709,10 +679,10 @@ mod tests {
 
     #[test]
     fn big_endian_null_byte_order_survives_packet_documents() {
-        let registry = Arc::new(default_registry().unwrap());
+        let catalog = Arc::new(default_catalog().unwrap());
         let mut bytes = 2_u32.to_be_bytes().to_vec();
         bytes.extend_from_slice(&ipv4_bytes());
-        let decoded = Dissector::new(Arc::clone(&registry))
+        let decoded = Dissector::new(Arc::clone(&catalog))
             .decode_with_root(
                 bytes.clone(),
                 protocol("bsd_null"),
@@ -725,8 +695,8 @@ mod tests {
         );
 
         let document = PacketDocument::from_packet(&decoded.packet);
-        let reloaded = document.to_packet(&registry, 64).unwrap();
-        let rebuilt = Builder::new(registry)
+        let reloaded = document.to_packet(&catalog, 64).unwrap();
+        let rebuilt = Builder::new(catalog)
             .build(reloaded, BuildContext::default(), BuildOptions::default())
             .unwrap();
         assert_eq!(rebuilt.bytes.as_ref(), bytes);

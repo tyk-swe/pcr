@@ -6,7 +6,7 @@ use super::*;
 fn exchange_reuses_route_lookup_for_transport_only_template_variants() {
     let route_calls = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),
@@ -58,7 +58,7 @@ fn exchange_reuses_route_lookup_for_transport_only_template_variants() {
 fn exchange_uses_one_route_lookup_per_distinct_lookup_destination() {
     let route_calls = Arc::new(AtomicUsize::new(0));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),
@@ -112,7 +112,7 @@ fn heterogeneous_exchange_routes_fail_before_capture_or_transmission() {
     let route_calls = Arc::new(AtomicUsize::new(0));
     let events = Arc::new(Mutex::new(Vec::new()));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         DestinationRoutes {
             calls: Arc::clone(&route_calls),
         },
@@ -166,7 +166,7 @@ fn exchange_policy_checks_are_not_bypassed_by_cached_route_decisions() {
     let route_calls = Arc::new(AtomicUsize::new(0));
     let events = Arc::new(Mutex::new(Vec::new()));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         CountingRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),
@@ -222,7 +222,7 @@ fn expired_preparation_does_not_start_a_second_route_lookup() {
     let route_calls = Arc::new(AtomicUsize::new(0));
     let events = Arc::new(Mutex::new(Vec::new()));
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         SlowRoutes {
             decision: route(LinkCapability::Layer3),
             calls: Arc::clone(&route_calls),
@@ -354,7 +354,7 @@ fn invalid_capture_statistics_fail_closed() {
 fn raw_layer3_backend_never_receives_canonical_link_layer_bytes() {
     let io = RecordingIo::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(route(LinkCapability::Layer3)),
         CountingNeighbors::default(),
         io.clone(),
@@ -388,7 +388,7 @@ fn raw_layer3_backend_never_receives_canonical_link_layer_bytes() {
 fn neighbor_failure_cannot_fall_back_from_explicit_layer2() {
     let io = RecordingIo::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(RouteDecision {
             capability: LinkCapability::Layer2And3,
             link_type: LinkType::ETHERNET,
@@ -428,7 +428,7 @@ fn neighbor_failure_cannot_fall_back_from_explicit_layer2() {
 fn dry_plan_keeps_spoofed_packet_and_neighbor_sources_distinct() {
     let neighbors = CountingNeighbors::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         FixedRoutes(RouteDecision {
             next_hop: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 254))),
             capability: LinkCapability::Layer2And3,
@@ -485,7 +485,7 @@ fn send_complete_custom_ethernet_without_ip_destination() {
     let neighbors = CountingNeighbors::default();
     let io = RecordingIo::default();
     let client = Client::new(
-        Arc::new(default_registry().unwrap()),
+        Arc::new(default_catalog().unwrap()),
         routes,
         neighbors.clone(),
         io.clone(),

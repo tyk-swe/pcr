@@ -154,7 +154,7 @@ fn workflow_outcomes_distinguish_valid_truncated_unrelated_and_decode_failure() 
         let result = dns(
             &single_attempt_request(),
             &mut LocalAuthorizer,
-            &default_registry().unwrap(),
+            &std::sync::Arc::new(default_catalog().unwrap()),
             &mut PayloadExecutor { payload },
             &mut NoopClock,
         )
@@ -204,7 +204,7 @@ fn unsolicited_dns_response_after_the_deadline_remains_a_timeout() {
     let result = dns(
         &single_attempt_request(),
         &mut LocalAuthorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut LateUnsolicitedExecutor {
             payload: Bytes::from(payload),
         },
@@ -256,7 +256,7 @@ fn matched_response_deadline_uses_monotonic_latency_despite_wall_clock_skew() {
     let result = dns(
         &single_attempt_request(),
         &mut LocalAuthorizer,
-        &default_registry().unwrap(),
+        &std::sync::Arc::new(default_catalog().unwrap()),
         &mut PreSendMatchedExecutor {
             payload: Bytes::from(payload),
         },
@@ -349,7 +349,7 @@ fn canonical_dns_selection_is_independent_of_matched_and_unsolicited_source_orde
         let result = dns(
             &single_attempt_request(),
             &mut LocalAuthorizer,
-            &default_registry().unwrap(),
+            &std::sync::Arc::new(default_catalog().unwrap()),
             &mut CompetingExecutor {
                 preferred_is_matched,
                 preferred: preferred.clone(),

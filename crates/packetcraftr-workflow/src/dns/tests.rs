@@ -19,7 +19,7 @@ use packetcraftr_policy::TrafficPolicy;
 use packetcraftr_policy::target::{
     Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
 };
-use packetcraftr_protocols::builtin::registry as default_registry;
+use packetcraftr_protocols::builtin::catalog as default_catalog;
 use packetcraftr_protocols::icmp::{Icmpv4, Icmpv6};
 use std::result::Result;
 

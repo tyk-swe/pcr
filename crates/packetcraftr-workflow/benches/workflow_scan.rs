@@ -12,9 +12,7 @@ use packetcraftr_model::{Frame, LinkType};
 use packetcraftr_packet::{
     Packet, decode::Result as DecodedPacket, layout::Packet as PacketLayout,
 };
-use packetcraftr_protocols::{
-    builtin::registry as default_registry, network::Ipv4, transport::Tcp,
-};
+use packetcraftr_protocols::{builtin::catalog as default_catalog, network::Ipv4, transport::Tcp};
 use packetcraftr_workflow::{
     AddressFamily, BoundaryError, Stats,
     clock::Clock,
@@ -172,7 +170,8 @@ fn execution(request: &Request, matched: bool) -> Execution {
 }
 
 fn bench_scan(criterion: &mut Criterion) {
-    let registry = default_registry().expect("built-in registry should initialize");
+    let catalog =
+        std::sync::Arc::new(default_catalog().expect("built-in catalog should initialize"));
     let mut group = criterion.benchmark_group("workflow_scan");
     group.sample_size(10);
     for &probe_count in PROBE_COUNTS {
@@ -195,7 +194,7 @@ fn bench_scan(criterion: &mut Criterion) {
                                 run(
                                     black_box(&request),
                                     &mut authorizer,
-                                    black_box(&registry),
+                                    black_box(&catalog),
                                     &mut executor,
                                     &mut clock,
                                 )

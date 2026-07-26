@@ -3,22 +3,19 @@
 
 //! IEEE 802.1Q and 802.1ad VLAN tag models and codecs.
 
-use std::collections::BTreeMap;
-
 use packetcraftr_packet::{
+    codec::Discriminator,
     codec::{
-        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
-        LayerEncodeContext,
+        CodecError, DecodedLayerValue, EncodedLayer, NativeLayerCodec, NativeLayerDecodeContext,
+        NativeLayerEncodeContext,
     },
     field::{FieldValue, WireValue},
-    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
+    layer::{Layer, reflect_get, reflect_set, reflective_layer},
 };
 
 use super::super::common::{
-    aliased_fields, expected_discriminator, invalid, make_layer, out_of_range, protocol,
-    resolve_u16, truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator,
-    wrong_layer, wrong_type,
+    expected_discriminator, invalid, make_layer, out_of_range, protocol, resolve_u16, truncated,
+    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
 const VLAN_LEN: usize = 4;
@@ -62,14 +59,14 @@ impl Default for Vlan8021ad {
 }
 
 macro_rules! declare_vlan_layer {
-    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, $layout:ident) => {
+    ($ty:ty, $schema:ident, $protocol:literal, $name:literal, [$($alias:literal),*], $layout:ident) => {
         reflective_layer! {
-            fn $schema() => { protocol: protocol($protocol), name: $name }
+            fn $schema() => { protocol: protocol($protocol), name: $name, aliases: [$($alias),*] }
             impl $ty {
-                "priority" => { kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", get |layer| Some(reflect_get(&layer.priority)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.priority = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
-                "drop_eligible" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", get |layer| Some(reflect_get(&layer.drop_eligible)), set |layer, value, name| reflect_set(&mut layer.drop_eligible, $schema(), name, value), layout: (0, 2) },
-                "vlan_id" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", get |layer| Some(reflect_get(&layer.vlan_id)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vlan_id = u16::try_from(value).ok().filter(|value| *value <= 4095).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
-                "ether_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", get |layer| Some(reflect_get(&layer.ether_type)), set |layer, value, name| reflect_set(&mut layer.ether_type, $schema(), name, value), layout: (2, 4) },
+                "priority" | "pcp" => { id: "priority", kind: Unsigned, derived: false, required: false, description: "IEEE 802.1 priority code point", get |layer| Some(reflect_get(&layer.priority)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.priority = u8::try_from(value).ok().filter(|value| *value <= 7).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
+                "drop_eligible" | "dei" => { id: "drop_eligible", kind: Bool, derived: false, required: false, description: "Drop eligible indicator", get |layer| Some(reflect_get(&layer.drop_eligible)), set |layer, value, name| reflect_set(&mut layer.drop_eligible, $schema(), name, value), layout: (0, 2) },
+                "vlan_id" | "vid" => { id: "vlan_id", kind: Unsigned, derived: false, required: true, description: "VLAN identifier", get |layer| Some(reflect_get(&layer.vlan_id)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vlan_id = u16::try_from(value).ok().filter(|value| *value <= 4095).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
+                "ether_type" => { id: "ether_type", kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", get |layer| Some(reflect_get(&layer.ether_type)), set |layer, value, name| reflect_set(&mut layer.ether_type, $schema(), name, value), layout: (2, 4) },
                 normalize |layer| { layer.ether_type.normalize(); }
             }
             layout fn $layout();
@@ -77,12 +74,20 @@ macro_rules! declare_vlan_layer {
     };
 }
 
-declare_vlan_layer!(Vlan, vlan_schema, "vlan", "IEEE 802.1Q VLAN", vlan_layout);
+declare_vlan_layer!(
+    Vlan,
+    vlan_schema,
+    "vlan",
+    "IEEE 802.1Q VLAN",
+    ["dot1q", "8021q"],
+    vlan_layout
+);
 declare_vlan_layer!(
     Vlan8021ad,
     vlan_ad_schema,
     "vlan8021ad",
     "IEEE 802.1ad Service VLAN",
+    ["dot1ad", "8021ad", "qinq"],
     vlan_ad_layout
 );
 
@@ -102,7 +107,7 @@ struct VlanEncodeFields<'a> {
 fn encode_vlan<L>(
     name: &str,
     fields: VlanEncodeFields<'_>,
-    context: &LayerEncodeContext<'_>,
+    context: &NativeLayerEncodeContext<'_>,
     layout: fn() -> Vec<packetcraftr_packet::layout::FieldLayout>,
     materialize: impl FnOnce(WireValue<u16>) -> L,
 ) -> Result<EncodedLayer, CodecError>
@@ -177,20 +182,12 @@ fn decode_vlan(
     })
 }
 
-impl LayerCodec for VlanCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("vlan")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for VlanCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -216,7 +213,7 @@ impl LayerCodec for VlanCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         decode_vlan(
             "vlan",
@@ -235,37 +232,18 @@ impl LayerCodec for VlanCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Vlan::default(),
-            &aliased_fields(
-                "vlan",
-                fields,
-                &[
-                    ("vid", "vlan_id"),
-                    ("pcp", "priority"),
-                    ("dei", "drop_eligible"),
-                ],
-            )?,
-        )
+        make_layer(Vlan::default(), fields)
     }
 }
 
-impl LayerCodec for Vlan8021adCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("vlan8021ad")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
+impl NativeLayerCodec for Vlan8021adCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
         _payload: &[u8],
-        context: &LayerEncodeContext<'_>,
+        context: &NativeLayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
@@ -291,7 +269,7 @@ impl LayerCodec for Vlan8021adCodec {
     fn decode(
         &self,
         input: &[u8],
-        _context: &LayerDecodeContext<'_>,
+        _context: &NativeLayerDecodeContext,
     ) -> Result<DecodedLayerValue, CodecError> {
         decode_vlan(
             "vlan8021ad",
@@ -310,19 +288,8 @@ impl LayerCodec for Vlan8021adCodec {
 
     fn make_layer(
         &self,
-        fields: &BTreeMap<String, FieldValue>,
+        fields: &packetcraftr_packet::layer::ValidatedFieldSet,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(
-            Vlan8021ad::default(),
-            &aliased_fields(
-                "vlan8021ad",
-                fields,
-                &[
-                    ("vid", "vlan_id"),
-                    ("pcp", "priority"),
-                    ("dei", "drop_eligible"),
-                ],
-            )?,
-        )
+        make_layer(Vlan8021ad::default(), fields)
     }
 }

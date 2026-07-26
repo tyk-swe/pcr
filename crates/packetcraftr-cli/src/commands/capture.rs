@@ -23,7 +23,7 @@ use super::super::rendering::{
     capture_file_format, capture_file_frame, emit_json, emit_json_compact, emit_stderr_message,
     emit_stream_record, spaced_hex, write_capture_file, write_plain_line, write_stdout_line,
 };
-use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
+use super::super::runtime::{default_catalog_arc, prepare_route_request, system_client};
 
 pub(crate) fn cli_build_mode(mode: CliBuildMode) -> packet::build::Mode {
     match mode {
@@ -68,10 +68,10 @@ pub(crate) fn run_capture(
         .into_limits()
         .validate()
         .map_err(CliError::classified)?;
-    let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, &registry)?;
+    let catalog = default_catalog_arc()?;
+    let request = prepare_route_request(route, &catalog)?;
     let budget = CaptureBudget::from(&request.policy);
-    let client = system_client(Arc::clone(&registry), request.policy);
+    let client = system_client(Arc::clone(&catalog), request.policy);
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
@@ -422,8 +422,8 @@ pub(crate) fn run_exchange(
     // Validate before packet parsing can trigger hostname/interface work.
     options.validate().map_err(CliError::classified)?;
 
-    let registry = default_registry_arc()?;
-    let request = prepare_route_request(route, &registry)?;
+    let catalog = default_catalog_arc()?;
+    let request = prepare_route_request(route, &catalog)?;
     options.send = client::send::Options {
         destination: request.destination,
         plan: request.options,
@@ -433,7 +433,7 @@ pub(crate) fn run_exchange(
         },
         allow_permissive_live,
     };
-    let client = system_client(Arc::clone(&registry), request.policy);
+    let client = system_client(Arc::clone(&catalog), request.policy);
     let result = client
         .exchange(&packet::template::Template::new(request.packet), options)
         .map_err(CliError::classified)?;

@@ -100,10 +100,10 @@ fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
         replay_wire_destinations(&frame).unwrap().addresses,
         [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
     );
-    let registry = Arc::new(packetcraftr_protocols::builtin::registry().unwrap());
+    let catalog = Arc::new(packetcraftr_protocols::builtin::catalog().unwrap());
     let authorizer = SystemAuthorizer::new(
         packetcraftr_policy::TrafficPolicy::default(),
-        Arc::clone(&registry),
+        Arc::clone(&catalog),
         true,
     );
     let error = authorizer
@@ -113,7 +113,7 @@ fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
 }
 
 fn authorized_raw_frame() -> Frame {
-    let registry = Arc::new(packetcraftr_protocols::builtin::registry().unwrap());
+    let catalog = Arc::new(packetcraftr_protocols::builtin::catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
@@ -127,7 +127,7 @@ fn authorized_raw_frame() -> Frame {
             ..Udp::default()
         })
         .push(Raw::new(Bytes::from_static(b"replay")));
-    let built = Builder::new(registry)
+    let built = Builder::new(catalog)
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
     Frame::new(UNIX_EPOCH, LinkType::RAW, built.bytes).unwrap()
@@ -136,14 +136,14 @@ fn authorized_raw_frame() -> Frame {
 #[test]
 fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
     let frame = authorized_raw_frame();
-    let registry = Arc::new(packetcraftr_protocols::builtin::registry().unwrap());
+    let catalog = Arc::new(packetcraftr_protocols::builtin::catalog().unwrap());
     let mut packet_policy = packetcraftr_policy::TrafficPolicy {
         max_packets_per_operation: 1,
         allow_permissive_packets: true,
         ..packetcraftr_policy::TrafficPolicy::default()
     };
     packet_policy.max_bytes_per_operation = u64::MAX;
-    let mut authorizer = SystemAuthorizer::new(packet_policy, Arc::clone(&registry), true);
+    let mut authorizer = SystemAuthorizer::new(packet_policy, Arc::clone(&catalog), true);
     let error = authorizer
         .authorize_operation(
             ReplayAuthorizationContext {
@@ -163,7 +163,7 @@ fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
         ..packetcraftr_policy::TrafficPolicy::default()
     };
     byte_policy.allow_public_destinations = false;
-    let mut authorizer = SystemAuthorizer::new(byte_policy, registry, true);
+    let mut authorizer = SystemAuthorizer::new(byte_policy, catalog, true);
     let error = authorizer
         .authorize_operation(
             ReplayAuthorizationContext {
@@ -181,14 +181,14 @@ fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
 fn system_authorizer_uses_engine_budget_for_each_replay_operation() {
     let frame = authorized_raw_frame();
     let bytes = frame.bytes().clone();
-    let registry = Arc::new(packetcraftr_protocols::builtin::registry().unwrap());
+    let catalog = Arc::new(packetcraftr_protocols::builtin::catalog().unwrap());
     let policy = packetcraftr_policy::TrafficPolicy {
         max_packets_per_operation: 1,
         max_bytes_per_operation: u64::MAX,
         allow_permissive_packets: true,
         ..packetcraftr_policy::TrafficPolicy::default()
     };
-    let mut authorizer = SystemAuthorizer::new(policy, registry, true);
+    let mut authorizer = SystemAuthorizer::new(policy, catalog, true);
     let mut options = replay_options(ReplayTiming::Immediate);
     options.link_mode = LinkMode::Layer3;
     let mut first_reader = capture_reader(
@@ -234,7 +234,7 @@ fn system_authorizer_uses_engine_budget_for_each_replay_operation() {
 
 #[test]
 fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
-    let registry = Arc::new(packetcraftr_protocols::builtin::registry().unwrap());
+    let catalog = Arc::new(packetcraftr_protocols::builtin::catalog().unwrap());
     for mut unsupported in [vec![0_u8; 48], vec![0_u8; 40]] {
         unsupported[0] = 0x60;
         unsupported[6] = 43;
@@ -251,7 +251,7 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
         );
         let authorizer = SystemAuthorizer::new(
             packetcraftr_policy::TrafficPolicy::default(),
-            Arc::clone(&registry),
+            Arc::clone(&catalog),
             true,
         );
         let error = authorizer
@@ -301,7 +301,7 @@ fn replay_srh_validation_requires_the_header_to_name_the_active_segment() {
 
 #[test]
 fn raw_ip_link_types_must_match_the_packet_version() {
-    let registry = Arc::new(packetcraftr_protocols::builtin::registry().unwrap());
+    let catalog = Arc::new(packetcraftr_protocols::builtin::catalog().unwrap());
     for (link_type, bytes, declared) in [
         (LinkType::IPV4, vec![0x60], "IPv4"),
         (LinkType::IPV6, vec![0x45], "IPv6"),
@@ -312,7 +312,7 @@ fn raw_ip_link_types_must_match_the_packet_version() {
 
         let authorizer = SystemAuthorizer::new(
             packetcraftr_policy::TrafficPolicy::default(),
-            Arc::clone(&registry),
+            Arc::clone(&catalog),
             true,
         );
         let error = authorizer

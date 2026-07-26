@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::layer::ProtocolId;
+use super::super::layer::{FieldId, ProtocolId};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ByteRange {
@@ -38,7 +38,10 @@ impl ByteRange {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FieldLayout {
-    pub name: String,
+    /// Stable schema field identity. It remains serialized as `name` in the
+    /// versioned output contract so existing output documents do not change.
+    #[serde(rename = "name")]
+    pub id: FieldId,
     pub range: ByteRange,
 }
 

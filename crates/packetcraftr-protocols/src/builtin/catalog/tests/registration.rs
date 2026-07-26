@@ -1,22 +1,25 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Catalog registration behavior.
+
 use super::*;
 
 #[test]
 fn builtin_registration_is_deterministic_and_has_portable_roots() {
-    let first = default_registry().unwrap();
-    let second = default_registry().unwrap();
+    let first = default_catalog().unwrap();
+    let second = default_catalog().unwrap();
     let first_ids = first
         .protocols()
-        .map(ToString::to_string)
+        .map(|(protocol, _)| protocol.to_string())
         .collect::<Vec<_>>();
     let second_ids = second
         .protocols()
-        .map(ToString::to_string)
+        .map(|(protocol, _)| protocol.to_string())
         .collect::<Vec<_>>();
 
     assert_eq!(first_ids, second_ids);
+    assert_eq!(first.catalog_hash(), second.catalog_hash());
     assert_eq!(
         first
             .root_for_link_type(packetcraftr_model::LinkType::ETHERNET.0)
@@ -36,14 +39,14 @@ fn builtin_registration_is_deterministic_and_has_portable_roots() {
 
 #[test]
 fn generic_raw_link_root_selects_the_ip_version() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet.push(Ipv4 {
         source: Ipv4Addr::new(192, 0, 2, 1),
         destination: Ipv4Addr::new(198, 51, 100, 2),
         ..Ipv4::default()
     });
-    let bytes = Builder::new(Arc::clone(&registry))
+    let bytes = Builder::new(Arc::clone(&catalog))
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap()
         .bytes;
@@ -53,7 +56,7 @@ fn generic_raw_link_root_selects_the_ip_version() {
         bytes,
     )
     .unwrap();
-    let decoded = Dissector::new(registry)
+    let decoded = Dissector::new(catalog)
         .decode(frame, DecodeOptions::default())
         .unwrap();
     assert!(decoded.packet.get::<Ipv4>().is_some());
@@ -61,7 +64,7 @@ fn generic_raw_link_root_selects_the_ip_version() {
 
 #[test]
 fn generic_raw_ipv6_root_continues_through_extensions() {
-    let registry = Arc::new(default_registry().unwrap());
+    let catalog = Arc::new(default_catalog().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv6 {
@@ -71,7 +74,7 @@ fn generic_raw_ipv6_root_continues_through_extensions() {
         })
         .push(HopByHop::default())
         .push(Udp::default());
-    let bytes = Builder::new(Arc::clone(&registry))
+    let bytes = Builder::new(Arc::clone(&catalog))
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap()
         .bytes;
@@ -81,7 +84,7 @@ fn generic_raw_ipv6_root_continues_through_extensions() {
         bytes,
     )
     .unwrap();
-    let decoded = Dissector::new(registry)
+    let decoded = Dissector::new(catalog)
         .decode(frame, DecodeOptions::default())
         .unwrap();
     assert!(decoded.packet.get::<Ipv6>().is_some());
@@ -91,10 +94,10 @@ fn generic_raw_ipv6_root_continues_through_extensions() {
 
 #[test]
 fn expression_factories_accept_roadmap_aliases() {
-    let registry = default_registry().unwrap();
+    let catalog = Arc::new(default_catalog().unwrap());
     let packet = parse_packet_expression(
         "eth(src=00:11:22:33:44:55,dst=66:77:88:99:aa:bb)/vlan(vid=42,pcp=3,dei=true)/ipv4(src=192.0.2.1,dst=198.51.100.2)/tcp(sport=12345,dport=443)/raw(hex=\"deadbeef\")",
-        &registry,
+        &catalog,
         ExpressionOptions::default(),
     )
     .unwrap();
@@ -108,7 +111,7 @@ fn expression_factories_accept_roadmap_aliases() {
 
     let text = parse_packet_expression(
         "raw(text=\"hello\")",
-        &registry,
+        &catalog,
         ExpressionOptions::default(),
     )
     .unwrap();

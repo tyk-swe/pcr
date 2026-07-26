@@ -1,0 +1,37 @@
+[package]
+name = "packetcraftr-cli"
+description = "Command-line interface for building, dissecting, capturing, and testing network packets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["native-interfaces"]
+native-interfaces = ["packetcraftr/native-interfaces"]
+native-route = ["packetcraftr/native-route"]
+native-layer2 = ["packetcraftr/native-layer2"]
+native-layer3 = ["packetcraftr/native-layer3"]
+
+[dependencies]
+anstream.workspace = true
+anstyle.workspace = true
+clap.workspace = true
+packetcraftr.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+jsonschema.workspace = true
+
+[[bin]]
+name = "packetcraftr"
+path = "src/main.rs"
+# The binary intentionally shares its name with the facade library, so exclude
+# it from `cargo doc` to avoid a colliding output path.
+doc = false

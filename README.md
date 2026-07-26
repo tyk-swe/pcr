@@ -109,18 +109,30 @@ cargo build --locked --release
 ```
 
 Select a different feature set with one of the commands in the next section.
-When `cli` is enabled, the resulting executable is
-`target/release/packetcraftr` on Unix-like systems or
-`target\release\packetcraftr.exe` on Windows.
+The resulting executable is `target/release/packetcraftr` on Unix-like systems
+or `target\release\packetcraftr.exe` on Windows.
+
+## Workspace layout
+
+PacketcraftR is a Cargo workspace. Each library domain is its own crate under
+`crates/`, the `packetcraftr` crate re-exports all of them under their domain
+names so `packetcraftr::packet::…` continues to work, and `packetcraftr-cli`
+builds the `packetcraftr` binary. Depend on `packetcraftr` for the whole
+library, or on individual crates such as `packetcraftr-capture` to compile only
+what you use. `AGENTS.md` lists every crate and the layering between them.
 
 ## Cargo features and tested profiles
 
-`Cargo.toml` defines `cli`, `native-interfaces`, `native-route`,
-`native-layer2`, and `native-layer3`. The `cli` feature enables the
-`packetcraftr` binary and its Clap and terminal-rendering dependencies.
-`native-interfaces` enables interface enumeration. Every other native feature
-enables `native-interfaces`, and the default feature set contains `cli` and
-`native-interfaces`, preserving the standard CLI experience.
+`packetcraftr-net` defines `native-interfaces`, `native-route`,
+`native-layer2`, and `native-layer3`; the `packetcraftr` and `packetcraftr-cli`
+crates forward them. `native-interfaces` enables interface enumeration, every
+other native feature also enables it, and it is the default for both forwarding
+crates. There is no longer a `cli` feature: the command-line interface is the
+`packetcraftr-cli` crate, so it is selected by building that package rather
+than by enabling a feature.
+
+Cargo features are package-scoped, so a `--features` invocation must name the
+package with `--package`.
 
 The profile names below are repository, CI, or release labels, not additional
 Cargo feature names. In particular, there is no `portable` or `pcap-free`
@@ -128,20 +140,20 @@ feature.
 
 | Profile label | Cargo invocation | Enabled features | Available native behavior |
 | --- | --- | --- | --- |
-| Library-only portable | `--no-default-features --lib` | None | Offline library APIs without the CLI dependency graph. Native interface, route, capture, and send providers are unavailable. |
-| Portable CLI | `--no-default-features --features cli` | `cli` | Offline build, dissection, capture-file reading/transcoding, and offline fuzzing. Native providers fail closed with capability errors. |
-| Default | no feature arguments | `cli`, `native-interfaces` | Portable CLI behavior plus interface enumeration. It does not enable native route selection, capture, Layer 2 injection, or raw Layer 3 transmission. |
-| Pcap-free release variant | `--no-default-features --features cli,native-route,native-layer3` | `cli`, `native-interfaces`, `native-route`, `native-layer3` | Interface enumeration, passive native routes, and raw Layer 3 send/replay on Linux, macOS, and Windows. No Layer 2 capture/injection; capture-based workflows are unavailable. |
+| Library-only portable | `--package packetcraftr --no-default-features` | None | Offline library APIs without the CLI dependency graph. Native interface, route, capture, and send providers are unavailable. |
+| Portable CLI | `--package packetcraftr-cli --no-default-features` | None | Offline build, dissection, capture-file reading/transcoding, and offline fuzzing. Native providers fail closed with capability errors. |
+| Default | `--package packetcraftr-cli` | `native-interfaces` | Portable CLI behavior plus interface enumeration. It does not enable native route selection, capture, Layer 2 injection, or raw Layer 3 transmission. |
+| Pcap-free release variant | `--package packetcraftr-cli --no-default-features --features native-route,native-layer3` | `native-interfaces`, `native-route`, `native-layer3` | Interface enumeration, passive native routes, and raw Layer 3 send/replay on Linux, macOS, and Windows. No Layer 2 capture/injection; capture-based workflows are unavailable. |
 | Complete / all-features | `--all-features` | All features | Native routes, raw Layer 3 transmission, and Layer 2 capture/injection on supported Linux, macOS, and Windows targets. |
 
 Build each profile with:
 
 ```console
-cargo build --locked --release --no-default-features --lib
-cargo build --locked --release --no-default-features --features cli
-cargo build --locked --release
-cargo build --locked --release \
-  --no-default-features --features cli,native-route,native-layer3
+cargo build --locked --release --package packetcraftr --no-default-features
+cargo build --locked --release --package packetcraftr-cli --no-default-features
+cargo build --locked --release --package packetcraftr-cli
+cargo build --locked --release --package packetcraftr-cli \
+  --no-default-features --features native-route,native-layer3
 cargo build --locked --release --all-features
 ```
 

@@ -1,0 +1,21 @@
+[package]
+name = "packetcraftr-capture"
+description = "Bounded classic PCAP and PCAPNG capture-file reading and writing"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+packetcraftr-error.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

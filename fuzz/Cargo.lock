@@ -133,11 +133,46 @@ dependencies = [
 name = "packetcraftr"
 version = "0.4.0-beta.2"
 dependencies = [
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-output",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "packetcraftr-session",
+ "packetcraftr-workflow",
+]
+
+[[package]]
+name = "packetcraftr-capture"
+version = "0.4.0-beta.2"
+dependencies = [
  "bytes",
- "noyalib",
+ "packetcraftr-error",
  "serde",
- "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-client"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-error"
+version = "0.4.0-beta.2"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
@@ -146,6 +181,79 @@ version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
  "packetcraftr",
+]
+
+[[package]]
+name = "packetcraftr-net"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-error",
+ "packetcraftr-packet",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-output"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "packetcraftr-workflow",
+ "serde",
+]
+
+[[package]]
+name = "packetcraftr-packet"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "noyalib",
+ "packetcraftr-capture",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-protocol"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-packet",
+ "serde",
+]
+
+[[package]]
+name = "packetcraftr-session"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
+name = "packetcraftr-workflow"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "serde",
+ "thiserror",
 ]
 
 [[package]]

@@ -1,0 +1,48 @@
+[package]
+name = "packetcraftr"
+description = "Rust library for building, dissecting, capturing, and testing network packets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["native-interfaces"]
+native-interfaces = ["packetcraftr-net/native-interfaces"]
+native-route = ["packetcraftr-net/native-route"]
+native-layer2 = ["packetcraftr-net/native-layer2"]
+native-layer3 = ["packetcraftr-net/native-layer3"]
+
+[dependencies]
+packetcraftr-capture.workspace = true
+packetcraftr-client.workspace = true
+packetcraftr-error.workspace = true
+packetcraftr-net.workspace = true
+packetcraftr-output.workspace = true
+packetcraftr-packet.workspace = true
+packetcraftr-protocol.workspace = true
+packetcraftr-session.workspace = true
+packetcraftr-workflow.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+criterion.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[[bench]]
+name = "packet_pipeline"
+harness = false
+
+[[bench]]
+name = "reassembly"
+harness = false
+
+[[bench]]
+name = "workflow_scan"
+harness = false

@@ -37,21 +37,21 @@ jobs:
           import sys
 
           metadata = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-          root_manifest = pathlib.Path(metadata["workspace_root"]) / "Cargo.toml"
-          root_packages = [
+          # The workspace root is virtual; the released artifact is the CLI.
+          released = [
               package
               for package in metadata["packages"]
-              if pathlib.Path(package["manifest_path"]) == root_manifest
+              if package["name"] == "packetcraftr-cli"
           ]
-          if len(root_packages) != 1:
-              raise SystemExit("could not identify exactly one root Cargo package")
-          print(root_packages[0]["version"])
+          if len(released) != 1:
+              raise SystemExit("could not identify exactly one packetcraftr-cli package")
+          print(released[0]["version"])
           PY
           )"
 
           expected_tag="v${version}"
           if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
-            echo "tag '$GITHUB_REF_NAME' does not match root package version '$expected_tag'" >&2
+            echo "tag '$GITHUB_REF_NAME' does not match packetcraftr-cli version '$expected_tag'" >&2
             exit 1
           fi
 
@@ -129,7 +129,7 @@ jobs:
           - name: all-features
             cargo_args: --all-features
           - name: pcap-free
-            cargo_args: --no-default-features --features cli,native-route,native-layer3
+            cargo_args: --no-default-features --features native-route,native-layer3
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
     env:
@@ -155,8 +155,8 @@ jobs:
         run: rustup target add ${{ matrix.target.triple }}
       - name: Build release binary
         run: >-
-          cargo build --locked --release --target ${{ matrix.target.triple }}
-          ${{ matrix.variant.cargo_args }}
+          cargo build --locked --release --package packetcraftr-cli
+          --target ${{ matrix.target.triple }} ${{ matrix.variant.cargo_args }}
       - if: runner.os != 'Windows'
         name: Package Unix archive
         shell: bash

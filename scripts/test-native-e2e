@@ -46,6 +46,7 @@ fi
 cargo_command=(
     cargo build
     --locked
+    --package packetcraftr-cli
     --all-features
     --bin packetcraftr
     --target-dir "$target_dir"

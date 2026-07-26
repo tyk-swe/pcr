@@ -24,10 +24,10 @@ RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
 cargo deny check
 ```
 
-The no-default test profile is intentionally library-only: Cargo skips the
-`packetcraftr` binary, its unit tests, and `tests/cli.rs` unless the `cli`
-feature is enabled. Default and all-feature profiles include `cli` and run the
-complete CLI test suite.
+The no-default test profile builds every crate with its native features turned
+off, so the CLI and its tests still run but every native provider fails closed
+with a capability error. Default and all-feature profiles add interface
+enumeration and the remaining native providers.
 
 The complete enforced matrix, tool versions, thresholds, release checks, and
 artifacts are recorded in the [CI baseline](docs/ci-baseline.md).
@@ -81,10 +81,12 @@ Every pull request must have one primary responsibility.
   serialized or CLI contract changes.
 
 The canonical library domains are `capture`, `client`, `error`, `net`,
-`output`, `packet`, `protocol`, `session`, and `workflow`. Prefer specific
-module names that describe their responsibility. Unsafe code is confined to
-`src/net/platform/`, and every unsafe block needs a specific `SAFETY`
-explanation.
+`output`, `packet`, `protocol`, `session`, and `workflow`, each a crate under
+`crates/` named `packetcraftr-<domain>`. Prefer specific module names that
+describe their responsibility, and keep the inter-crate dependency graph
+acyclic. Unsafe code is confined to
+`crates/packetcraftr-net/src/platform/`, and every unsafe block needs a
+specific `SAFETY` explanation.
 
 ## Code review
 

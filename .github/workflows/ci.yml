@@ -83,8 +83,8 @@ jobs:
         run: cargo test --locked --all-features
       - name: Check release pcap-free profile
         run: >-
-          cargo check --locked --release --no-default-features
-          --features cli,native-route,native-layer3
+          cargo check --locked --release --package packetcraftr-cli
+          --no-default-features --features native-route,native-layer3
       - name: Clippy complete profile
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
@@ -156,7 +156,7 @@ jobs:
       - name: Check portable interface-enumeration profile
         run: >-
           cargo check --locked --target ${{ matrix.target }}
-          --no-default-features --features native-interfaces
+          --package packetcraftr --no-default-features --features native-interfaces
       - name: Check complete portable profile
         run: cargo check --locked --target ${{ matrix.target }} --all-features --all-targets
 

@@ -1008,25 +1008,151 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 name = "packetcraftr"
 version = "0.4.0-beta.2"
 dependencies = [
+ "bytes",
+ "criterion",
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-output",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "packetcraftr-session",
+ "packetcraftr-workflow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-capture"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-error",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-cli"
+version = "0.4.0-beta.2"
+dependencies = [
  "anstream",
  "anstyle",
- "bytes",
  "clap",
- "criterion",
- "futures-util",
  "jsonschema",
+ "packetcraftr",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-client"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-error"
+version = "0.4.0-beta.2"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "packetcraftr-net"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "futures-util",
  "libc",
  "libloading 0.9.0",
- "noyalib",
+ "packetcraftr-capture",
+ "packetcraftr-error",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
  "pcap",
  "pnet_datalink",
  "rtnetlink",
  "serde",
- "serde_json",
  "socket2",
  "thiserror 2.0.19",
  "tokio",
  "windows",
+]
+
+[[package]]
+name = "packetcraftr-output"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "packetcraftr-workflow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-packet"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "noyalib",
+ "packetcraftr-capture",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-protocol"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-packet",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "packetcraftr-session"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "serde",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "packetcraftr-workflow"
+version = "0.4.0-beta.2"
+dependencies = [
+ "bytes",
+ "packetcraftr-capture",
+ "packetcraftr-client",
+ "packetcraftr-error",
+ "packetcraftr-net",
+ "packetcraftr-packet",
+ "packetcraftr-protocol",
+ "serde",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

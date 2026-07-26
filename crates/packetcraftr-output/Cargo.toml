@@ -1,0 +1,26 @@
+[package]
+name = "packetcraftr-output"
+description = "Render-neutral PacketcraftR output models and versioned envelopes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+packetcraftr-capture.workspace = true
+packetcraftr-client.workspace = true
+packetcraftr-error.workspace = true
+packetcraftr-net.workspace = true
+packetcraftr-packet.workspace = true
+packetcraftr-protocol.workspace = true
+packetcraftr-workflow.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

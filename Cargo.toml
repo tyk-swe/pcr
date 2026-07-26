@@ -1,70 +1,56 @@
-[package]
-name = "packetcraftr"
-version = "0.4.0-beta.2"
-description = "Rust library and CLI for building, dissecting, capturing, and testing network packets"
-edition = "2024"
+[workspace]
+members = ["crates/*"]
 resolver = "2"
+
+[workspace.package]
+version = "0.4.0-beta.2"
+edition = "2024"
 rust-version = "1.96"
 license = "AGPL-3.0-only"
 repository = "https://github.com/tyk-swe/pcr"
 publish = false
 
-[lints.rust]
+[workspace.lints.rust]
 unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
+unreachable_pub = "warn"
 
-[lints.clippy]
+[workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
 
-[profile.release]
-# Packet offsets, lengths, and accounting must fail closed in optimized builds
-# just as they do in development and CI profiles.
-overflow-checks = true
+[workspace.dependencies]
+# `deny.toml` rejects wildcard dependencies, so each internal path dependency
+# pins the shared workspace version. Bump these with `workspace.package.version`.
+packetcraftr = { path = "crates/packetcraftr", version = "0.4.0-beta.2", default-features = false }
+packetcraftr-capture = { path = "crates/packetcraftr-capture", version = "0.4.0-beta.2" }
+packetcraftr-client = { path = "crates/packetcraftr-client", version = "0.4.0-beta.2" }
+packetcraftr-error = { path = "crates/packetcraftr-error", version = "0.4.0-beta.2" }
+packetcraftr-net = { path = "crates/packetcraftr-net", version = "0.4.0-beta.2" }
+packetcraftr-output = { path = "crates/packetcraftr-output", version = "0.4.0-beta.2" }
+packetcraftr-packet = { path = "crates/packetcraftr-packet", version = "0.4.0-beta.2" }
+packetcraftr-protocol = { path = "crates/packetcraftr-protocol", version = "0.4.0-beta.2" }
+packetcraftr-session = { path = "crates/packetcraftr-session", version = "0.4.0-beta.2" }
+packetcraftr-workflow = { path = "crates/packetcraftr-workflow", version = "0.4.0-beta.2" }
 
-[features]
-default = ["cli", "native-interfaces"]
-cli = ["dep:anstream", "dep:anstyle", "dep:clap"]
-native-interfaces = ["dep:pnet_datalink", "dep:windows"]
-native-route = [
-    "native-interfaces",
-    "dep:futures-util",
-    "dep:libc",
-    "dep:rtnetlink",
-    "dep:socket2",
-    "dep:tokio",
-    "dep:windows",
-]
-native-layer2 = ["native-interfaces", "dep:libloading", "dep:pcap"]
-native-layer3 = ["native-interfaces", "dep:socket2"]
-
-[dependencies]
-anstream = { version = "1", optional = true }
-anstyle = { version = "1", optional = true }
+anstream = "1"
+anstyle = "1"
 bytes = { version = "1", features = ["serde"] }
-clap = { version = "4", features = ["derive"], optional = true }
+clap = { version = "4", features = ["derive"] }
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+jsonschema = { version = "0.48", default-features = false }
 noyalib = { version = "0.0.15", default-features = false, features = ["std", "fast-int", "fast-float"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
 thiserror = "2"
 
-[target.'cfg(not(windows))'.dependencies]
-pnet_datalink = { version = "0.35", default-features = false, features = ["std"], optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-futures-util = { version = "0.3", default-features = false, optional = true }
-pcap = { version = "2.4", default-features = false, optional = true }
-rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"], optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
-tokio = { version = "1", default-features = false, features = ["net", "rt"], optional = true }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-libc = { version = "0.2", default-features = false, optional = true }
-pcap = { version = "2.4", default-features = false, optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
-
-[target.'cfg(windows)'.dependencies]
-libloading = { version = "0.9", default-features = false, features = ["std"], optional = true }
-socket2 = { version = "0.6", default-features = false, features = ["all"], optional = true }
+futures-util = { version = "0.3", default-features = false }
+libc = { version = "0.2", default-features = false }
+libloading = { version = "0.9", default-features = false, features = ["std"] }
+pcap = { version = "2.4", default-features = false }
+pnet_datalink = { version = "0.35", default-features = false, features = ["std"] }
+rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"] }
+socket2 = { version = "0.6", default-features = false, features = ["all"] }
+tokio = { version = "1", default-features = false, features = ["net", "rt"] }
 windows = { version = "0.62", default-features = false, features = [
     "std",
     "Win32_Foundation",
@@ -72,30 +58,9 @@ windows = { version = "0.62", default-features = false, features = [
     "Win32_NetworkManagement_Ndis",
     "Win32_Networking_WinSock",
     "Win32_System_SystemInformation",
-], optional = true }
+] }
 
-[dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
-jsonschema = { version = "0.48", default-features = false }
-
-[[bin]]
-name = "packetcraftr"
-path = "src/main.rs"
-required-features = ["cli"]
-
-[[test]]
-name = "cli"
-path = "tests/cli.rs"
-required-features = ["cli"]
-
-[[bench]]
-name = "packet_pipeline"
-harness = false
-
-[[bench]]
-name = "reassembly"
-harness = false
-
-[[bench]]
-name = "workflow_scan"
-harness = false
+[profile.release]
+# Packet offsets, lengths, and accounting must fail closed in optimized builds
+# just as they do in development and CI profiles.
+overflow-checks = true

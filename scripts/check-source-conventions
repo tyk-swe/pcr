@@ -26,7 +26,7 @@ report() {
 }
 
 files() {
-    find src tests benches fuzz/fuzz_targets -name '*.rs' -type f 2>/dev/null | sort
+    find crates fuzz/fuzz_targets -name '*.rs' -type f 2>/dev/null | sort
 }
 
 # --- 1. license headers -----------------------------------------------------
@@ -41,9 +41,10 @@ done < <(files)
 # --- 2. import placement ----------------------------------------------------
 
 # `mod.rs` module roots legitimately declare the module tree and its `pub use`
-# re-exports before importing, so they are exempt from the ordering rule.
+# re-exports before importing, so they are exempt from the ordering rule. Each
+# crate root plays the same role.
 while IFS= read -r file; do
-    case "$file" in */mod.rs | src/lib.rs | src/main.rs) continue ;; esac
+    case "$file" in */mod.rs | */src/lib.rs | */src/main.rs) continue ;; esac
 
     offender=$(
         awk '

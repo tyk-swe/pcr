@@ -9,14 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added an explicit default-enabled `cli` feature so library-only builds can
-  omit Clap and terminal-rendering dependencies.
+- Published each library domain as its own crate — `packetcraftr-error`,
+  `packetcraftr-capture`, `packetcraftr-session`, `packetcraftr-packet`,
+  `packetcraftr-protocol`, `packetcraftr-net`, `packetcraftr-client`,
+  `packetcraftr-workflow`, and `packetcraftr-output` — so consumers can compile
+  only the parts they use.
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
 
 ### Changed
 
+- Restructured the repository into a Cargo workspace of per-domain crates under
+  `crates/`, with a virtual root manifest owning shared dependency versions,
+  lints, and the release profile. Cargo now enforces the domain layering that
+  was previously convention. The `packetcraftr` crate re-exports every domain
+  under its existing name, so `packetcraftr::packet::…` and the rest of the
+  public API are unchanged.
+- Moved the `native-*` features to `packetcraftr-net`, forwarded by
+  `packetcraftr` and `packetcraftr-cli`. Feature selection now requires
+  `--package`, as in `cargo build --package packetcraftr-cli --features
+  native-route`.
+- Made `Layer::declared_layout_fields` available in all builds rather than only
+  under `cfg(test)`, so conformance tests outside the defining crate can reach
+  it. It keeps its default empty implementation.
+- Made `client::Stats::checked_add` a public method on the type instead of a
+  workflow-private extension.
 - Renamed the canonical interface-enumeration feature to
   `native-interfaces`; native route, Layer 2, and Layer 3 capabilities now
   enable it explicitly.
@@ -28,6 +46,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Removed the unreleased `cli` feature. The command-line interface is now the
+  `packetcraftr-cli` crate, so it is selected by building that package rather
+  than by enabling a feature, and library-only builds simply depend on the
+  library crates.
 - Removed the redundant `net::exchange::Io` marker trait; generic code can use
   the public `net::transmit::Sender + net::capture::Provider` bounds directly.
 

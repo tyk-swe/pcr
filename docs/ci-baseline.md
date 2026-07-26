@@ -45,7 +45,8 @@ ethtool, iproute2, libpcap development files, Python jsonschema, and shellcheck.
 ## Rust versions
 
 - `rust-toolchain.toml` pins Rust `1.97.0` with clippy and rustfmt.
-- `Cargo.toml` declares `rust-version = "1.96"`.
+- The root `Cargo.toml` declares `rust-version = "1.96"` in
+  `[workspace.package]`, inherited by every member.
 - Linux quality installs `1.96.0` and checks both the no-default-feature and
   all-feature profiles with all Cargo targets. This is an MSRV compile
   contract, not a second full test matrix.
@@ -53,18 +54,23 @@ ethtool, iproute2, libpcap development files, Python jsonschema, and shellcheck.
 
 ## Features and build profiles
 
-The declared features are:
+`packetcraftr-net` declares the native features; `packetcraftr` and
+`packetcraftr-cli` forward them and default to `native-interfaces`. No other
+member declares features, so the declared set is:
 
-- `default = ["cli", "native-interfaces"]`;
-- `cli`, for the binary and its argument and terminal dependencies;
+- `default = ["native-interfaces"]` on `packetcraftr` and `packetcraftr-cli`;
 - `native-interfaces`, for portable interface enumeration;
 - `native-route`, which also enables `native-interfaces`;
 - `native-layer2`, which also enables `native-interfaces`;
 - `native-layer3`, which also enables `native-interfaces`.
 
-The cross-platform test matrix runs the library tests without default features,
-then all Cargo-discovered unit, binary, integration, and documentation tests in
-the default and complete profiles:
+There is no `cli` feature: the binary is the `packetcraftr-cli` crate, selected
+with `--package`. Because features are package-scoped, every `--features`
+invocation below names its package.
+
+The cross-platform test matrix runs the whole workspace without default
+features, then all Cargo-discovered unit, binary, integration, and
+documentation tests in the default and complete profiles:
 
 ```console
 cargo test --locked --no-default-features
@@ -75,8 +81,8 @@ cargo test --locked --all-features
 It also checks the release-mode pcap-free profile:
 
 ```console
-cargo check --locked --release --no-default-features \
-  --features cli,native-route,native-layer3
+cargo check --locked --release --package packetcraftr-cli \
+  --no-default-features --features native-route,native-layer3
 ```
 
 Linux quality adds the depth-two pairwise feature powerset and a complete
@@ -87,8 +93,9 @@ cargo hack check --locked --feature-powerset --depth 2 --all-targets
 cargo check --locked --all-targets --all-features
 ```
 
-FreeBSD portability checks `native-interfaces` without defaults and then the
-complete all-feature/all-target profile.
+FreeBSD portability checks the `packetcraftr` package with
+`native-interfaces` and no defaults, then the complete all-feature/all-target
+workspace profile.
 
 ## Formatting, linting, and documentation
 
@@ -98,20 +105,21 @@ complete all-feature/all-target profile.
 - `RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps`
   rejects documentation warnings on Linux.
 - `scripts/check-source-conventions` is enforced on Linux. It checks the two
-  conventions rustfmt and clippy cannot express: every Rust file under `src/`,
-  `tests/`, `benches/`, and `fuzz/fuzz_targets/` opens with the copyright and
-  SPDX header pair, and top-level `use` declarations precede the first item
-  (`mod.rs` module roots exempted). The script needs no toolchain beyond bash
-  and awk, so it adds no measurable time to the quality job.
+  conventions rustfmt and clippy cannot express: every Rust file under
+  `crates/` and `fuzz/fuzz_targets/` opens with the copyright and SPDX header
+  pair, and top-level `use` declarations precede the first item (`mod.rs` files
+  and crate roots exempted). The script needs no toolchain beyond bash and awk,
+  so it adds no measurable time to the quality job.
 - The normal Cargo test profiles execute the behavior, schema, CLI, and
   downstream extension integration contracts.
 
 ## Benchmark compilation
 
-The Criterion targets `packet_pipeline`, `reassembly`, and `workflow_scan` are
-included in the all-target clippy and cargo-hack compilations. These commands
-compile-check and lint the benchmark targets without executing their harnesses.
-CI does not impose a benchmark performance threshold.
+The Criterion targets `packet_pipeline`, `reassembly`, and `workflow_scan`
+belong to the `packetcraftr` crate and are included in the all-target clippy
+and cargo-hack compilations. These commands compile-check and lint the
+benchmark targets without executing their harnesses. CI does not impose a
+benchmark performance threshold.
 
 ## Coverage
 
@@ -195,8 +203,10 @@ reviewed `runs-on` label. Until then the strict prerequisite probe will fail.
 
 ## Release archive contract
 
-The release preflight requires the `v*` tag to equal the root package version
-and requires exactly one non-empty, dated changelog section for that version.
+The release preflight requires the `v*` tag to equal the `packetcraftr-cli`
+package version, resolved by name from `cargo metadata` because the workspace
+root is virtual, and requires exactly one non-empty, dated changelog section
+for that version.
 It classifies versions containing `-` as prereleases.
 
 The build matrix creates eight archives: all-feature and pcap-free variants for
@@ -210,7 +220,8 @@ one day.
 Before publishing, the workflow requires exactly the eight expected archive
 names, creates `SHA256SUMS`, and verifies every checksum. Only after preflight
 and every matrix build succeeds does the write-scoped job create the GitHub
-release. The package remains `publish = false`; no crates.io publication is
+release. Every workspace member remains `publish = false`; no crates.io
+publication is
 performed.
 
 ## Local reproduction

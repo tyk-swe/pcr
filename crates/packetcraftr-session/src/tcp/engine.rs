@@ -128,6 +128,14 @@ impl Reassembler {
         self.remove_flows(keys)
     }
 
+    pub fn limits(&self) -> &ReassemblyLimits {
+        &self.limits
+    }
+
+    pub fn flow_count(&self) -> usize {
+        self.flows.len()
+    }
+
     pub fn aggregate_bytes(&self) -> usize {
         // Includes both out-of-order bytes and the bounded emitted-byte
         // history retained for contradictory retransmission detection.

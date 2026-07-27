@@ -76,6 +76,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every command the filter is compiled before any input is read or any live
   work is planned, and a filter that names an unknown field or needs a
   conversation index is refused up front.
+- Added `packetcraftr stats <PATH>`, computing aggregate statistics over a
+  capture file entirely offline: `--table conversations` (per-conversation
+  frames, bytes, and duration split by direction, keyed by the same stream
+  indices display filters use), `endpoints` (per-address transmit and
+  receive tallies), `protocols` (per-protocol frame counts, shares, and
+  bytes), `ports` (per-transport-port tallies), and `io` (a time series
+  bucketed by `--interval-ms`). `--filter` narrows every table, and because
+  stats assigns conversation indices, stream-aware filters such as
+  `tcp.stream == 7` work here. Text and aggregate JSON output are supported,
+  with the JSON contract published in the v1 schema and examples.
 - Added the bounded offline analysis pipeline in `workflow::analysis`: a
   shared read → dissect → index → filter → dispatch loop over capture files,
   with first-seen conversation indexing (`StreamIndex`, `CanonicalFlow`) and

@@ -1,0 +1,14 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "error",
+  "error": {
+    "code": "cli.filter",
+    "kind": "cli",
+    "message": "unknown display filter field nope at byte 0",
+    "causes": [],
+    "remediation": "run `packetcraftr protocols <PROTOCOL>` to list the fields a protocol exposes"
+  },
+  "diagnostics": []
+}

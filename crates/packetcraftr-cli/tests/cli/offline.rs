@@ -592,3 +592,83 @@ fn dissect_rejects_a_filter_it_cannot_evaluate() {
         );
     }
 }
+
+#[test]
+fn stats_reports_conversations_protocols_and_io_over_a_capture() {
+    let capture = filterable_capture();
+    let stats = |arguments: &[&str]| -> String {
+        let mut command = binary();
+        command.arg("stats").arg(&capture).args(arguments);
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "{arguments:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    let conversations = stats(&["--table", "conversations"]);
+    assert!(conversations.starts_with("matched 2 of 2 frame(s)"));
+    assert!(conversations.contains("udp stream 0: 10.0.0.1:1000 <-> 10.0.0.2:53"));
+    assert!(conversations.contains("tcp stream 0: 192.168.0.1:1000 <-> 192.168.0.2:443"));
+
+    let protocols = stats(&["--table", "protocols"]);
+    assert!(protocols.contains("ethernet: frames 2 (100.0%)"));
+    assert!(protocols.contains("udp: frames 1 (50.0%)"));
+
+    // Filtering narrows the tables while frame numbering stays capture-global.
+    let filtered = stats(&["--table", "endpoints", "--filter", "tcp"]);
+    assert!(filtered.starts_with("matched 1 of 2 frame(s)"));
+    assert!(filtered.contains("192.168.0.1: tx 1 frame(s)"));
+    assert!(!filtered.contains("10.0.0.1"));
+
+    // Stream-aware filters are supported here, unlike frame-at-a-time
+    // commands, because stats assigns conversation indices.
+    let stream = stats(&["--table", "conversations", "--filter", "udp.stream == 0"]);
+    assert!(stream.contains("udp stream 0"));
+    assert!(!stream.contains("tcp stream"));
+
+    let io = stats(&["--table", "io", "--interval-ms", "500"]);
+    assert!(io.contains("+0ns: frames 1"));
+}
+
+#[test]
+fn stats_rejects_unsupported_formats_and_invalid_limits_up_front() {
+    let unsupported = binary()
+        .args(["--output", "hex", "stats", "missing.pcap"])
+        .output()
+        .unwrap();
+    assert_eq!(unsupported.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&unsupported.stderr).contains("does not support hex"),
+        "{}",
+        String::from_utf8_lossy(&unsupported.stderr)
+    );
+
+    let interval = binary()
+        .args(["stats", "missing.pcap", "--interval-ms", "0"])
+        .output()
+        .unwrap();
+    assert_eq!(interval.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&interval.stderr).contains("interval"),
+        "{}",
+        String::from_utf8_lossy(&interval.stderr)
+    );
+}
+
+#[test]
+fn stats_rejects_invalid_analysis_limits_before_opening_the_capture() {
+    // The file does not exist; the limit error must still win.
+    let output = binary()
+        .args(["stats", "definitely-missing.pcap", "--max-flows", "0"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("max_flows"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

@@ -192,6 +192,43 @@ fn assert_igmp_example(value: &serde_json::Value) {
 }
 
 #[test]
+fn published_stats_outputs_match_the_cli() {
+    // The success golden replays the committed conversation fixture; the
+    // error golden is the deterministic filter refusal, which fires before
+    // any input file is opened.
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/captures/pcap/tcp-udp-conversations.pcap");
+    let success = binary()
+        .args(["--output", "json", "stats"])
+        .arg(&fixture)
+        .args(["--table", "conversations"])
+        .output()
+        .unwrap();
+    assert!(
+        success.status.success(),
+        "{}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    let actual: serde_json::Value = serde_json::from_slice(&success.stdout).unwrap();
+    assert_eq!(actual, json_file("output-stats-success.json"));
+
+    let error = binary()
+        .args([
+            "--output",
+            "json",
+            "stats",
+            "definitely-missing.pcap",
+            "--filter",
+            "nope == 1",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(error.status.code(), Some(2));
+    let actual: serde_json::Value = serde_json::from_slice(&error.stdout).unwrap();
+    assert_eq!(actual, json_file("output-stats-error.json"));
+}
+
+#[test]
 fn every_command_has_published_success_and_error_goldens() {
     for contract in COMMAND_OUTPUT_CONTRACTS {
         let command = contract.command.as_str();

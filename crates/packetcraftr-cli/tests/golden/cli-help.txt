@@ -15,6 +15,7 @@ Commands:
   capture     Stream live captured frames
   replay      Replay a PCAP/PCAPNG stream
   scan        Run a structured network scan
+  stats       Compute aggregate statistics over a capture file
   traceroute  Run bounded, policy-gated traceroute probes
   dns         Run a structured DNS operation
   fuzz        Run bounded field-aware packet fuzzing
@@ -911,6 +912,89 @@ Global options:
 Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp
+
+===== packetcraftr stats --help =====
+Compute aggregate statistics over a capture file
+
+Usage: packetcraftr stats [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Classic PCAP or PCAPNG input path
+
+Options:
+      --table <TABLE>
+          Statistics table to compute and report
+
+          [default: conversations]
+          [possible values: conversations, endpoints, protocols, ports, io]
+
+      --filter <EXPR>
+          Keep only frames matching a display filter; stream indices stay capture-global
+
+      --interval-ms <INTERVAL_MS>
+          Bucket width of the io table in milliseconds
+
+          [default: 1000]
+
+      --max-frames <MAX_FRAMES>
+          Maximum frames read from the capture stream
+
+          [default: 10000]
+
+      --max-bytes <MAX_BYTES>
+          Maximum aggregate captured payload bytes read
+
+          [default: 268435456]
+
+      --max-frame-bytes <MAX_FRAME_BYTES>
+          Maximum bytes accepted from any one captured frame or PCAPNG block
+
+          [default: 16777216]
+
+      --max-interfaces <MAX_INTERFACES>
+          Maximum PCAPNG interfaces accepted from the input
+
+          [default: 4096]
+
+      --max-flows <MAX_FLOWS>
+          Maximum distinct conversations tracked per transport
+
+          [default: 8192]
+
+      --max-duration-ms <MAX_DURATION_MS>
+          Maximum analysis run time in milliseconds
+
+          [default: 3600000]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Statistics are computed offline over dissected frames; no live capture or transmission is involved.
+
+Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
+
+Examples:
+  packetcraftr stats capture.pcapng --table conversations
+  packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
+  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100
 
 ===== packetcraftr traceroute --help =====
 Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.

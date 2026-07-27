@@ -177,6 +177,7 @@ pub(super) fn command_from_env() -> Option<output::contract::Command> {
         ("read", output::contract::Command::Read),
         ("replay", output::contract::Command::Replay),
         ("scan", output::contract::Command::Scan),
+        ("stats", output::contract::Command::Stats),
         ("traceroute", output::contract::Command::Traceroute),
         ("dns", output::contract::Command::Dns),
         ("fuzz", output::contract::Command::Fuzz),

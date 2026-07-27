@@ -1,0 +1,71 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "table": "conversations",
+    "frames_read": 3,
+    "frames_matched": 3,
+    "bytes_matched": 162,
+    "first_timestamp": {
+      "unix_seconds": 0,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 2,
+      "nanoseconds": 0
+    },
+    "conversations": [
+      {
+        "transport": "tcp",
+        "stream": 0,
+        "address_a": "10.0.0.1",
+        "port_a": 1000,
+        "address_b": "10.0.0.2",
+        "port_b": 443,
+        "frames_a_to_b": 1,
+        "bytes_a_to_b": 59,
+        "frames_b_to_a": 1,
+        "bytes_b_to_a": 60,
+        "first_timestamp": {
+          "unix_seconds": 0,
+          "nanoseconds": 0
+        },
+        "last_timestamp": {
+          "unix_seconds": 1,
+          "nanoseconds": 0
+        },
+        "duration": {
+          "secs": 1,
+          "nanos": 0
+        }
+      },
+      {
+        "transport": "udp",
+        "stream": 0,
+        "address_a": "10.0.0.3",
+        "port_a": 5353,
+        "address_b": "10.0.0.9",
+        "port_b": 53,
+        "frames_a_to_b": 1,
+        "bytes_a_to_b": 43,
+        "frames_b_to_a": 0,
+        "bytes_b_to_a": 0,
+        "first_timestamp": {
+          "unix_seconds": 2,
+          "nanoseconds": 0
+        },
+        "last_timestamp": {
+          "unix_seconds": 2,
+          "nanoseconds": 0
+        },
+        "duration": {
+          "secs": 0,
+          "nanos": 0
+        }
+      }
+    ]
+  },
+  "diagnostics": []
+}

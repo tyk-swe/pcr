@@ -12,6 +12,7 @@ mod offline;
 mod protocols;
 mod replay;
 mod scan;
+mod stats;
 mod traceroute;
 
 pub(super) use capture::{run_capture, run_exchange};
@@ -23,6 +24,7 @@ pub(super) use offline::{run_build, run_dissect, run_read};
 pub(super) use protocols::run_protocols;
 pub(super) use replay::run_replay;
 pub(super) use scan::run_scan;
+pub(super) use stats::run_stats;
 pub(super) use traceroute::run_traceroute;
 
 #[cfg(test)]

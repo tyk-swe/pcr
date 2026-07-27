@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::capture;
+use packetcraftr::{capture, workflow};
 
 #[derive(Debug, Args)]
 pub(crate) struct RecipeArgs {
@@ -55,6 +55,49 @@ pub(crate) struct ProtocolsArgs {
     /// Built-in protocol name or alias to describe.
     #[arg(value_name = "PROTOCOL")]
     pub(crate) protocol: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum CliStatsTable {
+    Conversations,
+    Endpoints,
+    Protocols,
+    Ports,
+    Io,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct StatsArgs {
+    /// Classic PCAP or PCAPNG input path.
+    pub(crate) path: PathBuf,
+    /// Statistics table to compute and report.
+    #[arg(long, value_enum, default_value_t = CliStatsTable::Conversations)]
+    pub(crate) table: CliStatsTable,
+    /// Keep only frames matching a display filter; stream indices stay
+    /// capture-global.
+    #[arg(long, value_name = "EXPR")]
+    pub(crate) filter: Option<String>,
+    /// Bucket width of the io table in milliseconds.
+    #[arg(long, default_value_t = 1_000)]
+    pub(crate) interval_ms: u64,
+    /// Maximum frames read from the capture stream.
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_FRAMES)]
+    pub(crate) max_frames: u64,
+    /// Maximum aggregate captured payload bytes read.
+    #[arg(long, default_value_t = capture::DEFAULT_STREAM_BYTES)]
+    pub(crate) max_bytes: u64,
+    /// Maximum bytes accepted from any one captured frame or PCAPNG block.
+    #[arg(long, default_value_t = capture::DEFAULT_SIZE_LIMIT)]
+    pub(crate) max_frame_bytes: usize,
+    /// Maximum PCAPNG interfaces accepted from the input.
+    #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
+    pub(crate) max_interfaces: usize,
+    /// Maximum distinct conversations tracked per transport.
+    #[arg(long, default_value_t = workflow::analysis::Limits::default().max_flows)]
+    pub(crate) max_flows: usize,
+    /// Maximum analysis run time in milliseconds.
+    #[arg(long, default_value_t = 3_600_000)]
+    pub(crate) max_duration_ms: u64,
 }
 
 #[derive(Debug, Args)]

@@ -59,7 +59,7 @@ fn command_matrix_is_complete_and_has_no_duplicate_formats() {
         OutputFormat::Pcap,
         OutputFormat::Pcapng,
     ];
-    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 15);
+    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 16);
     for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
         assert!(!contract.formats.is_empty());
         assert_eq!(contract.formats, contract.command.formats());

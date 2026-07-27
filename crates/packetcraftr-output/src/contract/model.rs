@@ -23,6 +23,7 @@ pub enum CommandName {
     Read,
     Replay,
     Scan,
+    Stats,
     Traceroute,
     Dns,
     Fuzz,
@@ -44,6 +45,7 @@ impl CommandName {
             Self::Read => "read",
             Self::Replay => "replay",
             Self::Scan => "scan",
+            Self::Stats => "stats",
             Self::Traceroute => "traceroute",
             Self::Dns => "dns",
             Self::Fuzz => "fuzz",
@@ -56,7 +58,9 @@ impl CommandName {
     pub const fn formats(self) -> &'static [OutputFormat] {
         match self {
             Self::Build | Self::Dissect => BUILD_FORMATS,
-            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes => AGGREGATE_FORMATS,
+            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
+                AGGREGATE_FORMATS
+            }
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
             Self::Capture => CAPTURE_FORMATS,
@@ -230,6 +234,10 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract {
         command: CommandName::Scan,
         formats: TOOL_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Stats,
+        formats: AGGREGATE_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Traceroute,

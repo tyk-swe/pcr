@@ -8,7 +8,7 @@ use packetcraftr::output;
 
 use super::{
     BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs, ProtocolsArgs, ReadArgs,
-    ReplayArgs, RouteArgs, ScanArgs, SendArgs, TracerouteArgs,
+    ReplayArgs, RouteArgs, ScanArgs, SendArgs, StatsArgs, TracerouteArgs,
 };
 
 const ROOT_AFTER_HELP: &str = r#"Output formats:
@@ -81,6 +81,14 @@ Examples:
 const SCAN_AFTER_HELP: &str = r#"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp"#;
+const STATS_AFTER_HELP: &str = r#"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
+
+Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
+
+Examples:
+  packetcraftr stats capture.pcapng --table conversations
+  packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
+  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
 const TRACEROUTE_AFTER_HELP: &str = r#"Examples:
   packetcraftr traceroute 192.0.2.1 --strategy icmp
   packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution"#;
@@ -228,6 +236,9 @@ pub(crate) enum Command {
     /// Run a structured network scan.
     #[command(after_long_help = SCAN_AFTER_HELP)]
     Scan(ScanArgs),
+    /// Compute aggregate statistics over a capture file.
+    #[command(after_long_help = STATS_AFTER_HELP)]
+    Stats(StatsArgs),
     /// Run bounded, policy-gated traceroute probes.
     #[command(
         long_about = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.",

@@ -22,6 +22,7 @@ pub mod network;
 pub mod protocols;
 pub mod replay;
 pub mod scan;
+pub mod stats;
 pub mod traceroute;
 
 #[cfg(test)]

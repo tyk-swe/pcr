@@ -35,6 +35,12 @@ impl Capabilities {
             stream_index: false,
         }
     }
+
+    /// A command that runs the analysis pipeline and assigns conversation
+    /// indices, so `tcp.stream` and `udp.stream` resolve.
+    pub(crate) const fn stream_capable() -> Self {
+        Self { stream_index: true }
+    }
 }
 
 /// Compiles a display filter for a command, or reports why it cannot run there.

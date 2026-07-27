@@ -84,6 +84,25 @@ pub(super) struct FieldRef {
     pub(super) path: String,
 }
 
+impl FieldRef {
+    /// Whether this path names a single flag rather than a whole field.
+    ///
+    /// A bit selection and a boolean field both carry their meaning in the
+    /// value, not in whether a value exists, so their bare form reads the flag
+    /// itself. Every other path keeps presence semantics: `ipv4.options` asks
+    /// whether the packet carries options at all.
+    pub(super) fn is_flag(&self) -> bool {
+        if let FieldSource::Layer {
+            access: FieldAccess::Bits { .. },
+            ..
+        } = &self.source
+        {
+            return true;
+        }
+        !self.kinds.is_empty() && self.kinds.iter().all(|spec| spec.kind == FieldKind::Bool)
+    }
+}
+
 /// What a bare word resolved to.
 #[derive(Clone, Debug)]
 pub(super) enum Resolved {

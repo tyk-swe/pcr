@@ -68,7 +68,9 @@ fn test(predicate: &Predicate, context: &Context<'_>) -> bool {
         } => layers(context, protocol.as_str(), *occurrence)
             .next()
             .is_some(),
-        Predicate::FieldPresent(field) => any_value(context, field, |_| true),
+        Predicate::Bare { field, flag } => {
+            any_value(context, field, |value| !flag || is_set(value))
+        }
         Predicate::Compare {
             field,
             operator,
@@ -155,6 +157,18 @@ fn access_fields(access: &FieldAccess) -> &[&'static str] {
         FieldAccess::Direct(field) => std::slice::from_ref(field),
         FieldAccess::Bits { field, .. } => std::slice::from_ref(field),
         FieldAccess::Either(fields) => fields,
+    }
+}
+
+/// Whether a flag value counts as set.
+fn is_set(value: &FieldValue) -> bool {
+    match value {
+        FieldValue::Bool(value) => *value,
+        FieldValue::Unsigned(value) => *value != 0,
+        FieldValue::Signed(value) => *value != 0,
+        // Only flags reach this path, so any other shape is treated as set
+        // simply by existing.
+        _ => true,
     }
 }
 

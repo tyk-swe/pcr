@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nesting, term count, and set size, and both the parser and the evaluator use
   explicit stacks rather than recursion. A `filter_expression` fuzz target
   covers compilation, and CI smoke-tests it alongside the existing targets.
+- Registered the conventional display-filter spellings for every built-in
+  protocol, so `ip.src`, `eth.dst`, `tcp.port`, `udp.dstport`, `vlan.id`,
+  `arp.opcode`, and the nine `tcp.flags.*` bits work alongside the canonical
+  field names. A bare flag path reads the flag, so `!tcp.flags.ack` means the
+  ACK bit is clear.
 - Added `registry::Registry::schema`, which publishes each registered
   protocol's reflective schema. Schemas are captured once when the registry is
   built, so field metadata no longer requires constructing a throwaway layer

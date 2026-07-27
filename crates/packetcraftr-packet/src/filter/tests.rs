@@ -852,3 +852,21 @@ fn a_stream_path_matches_only_when_the_caller_supplies_an_index() {
         stream: Some(3),
     }));
 }
+
+#[test]
+fn a_bare_flag_path_reads_the_flag_rather_than_its_presence() {
+    // `outside_layer` is 5, so its low nibble is set.
+    let set = sample();
+    assert!(matches("pad.layer.low", &set));
+    assert!(!matches("!pad.layer.low", &set));
+
+    // With the low nibble clear, the same bare path is false even though the
+    // underlying field is still present. A presence test would be true here,
+    // which is exactly the trap this rule avoids for `!tcp.flags.ack`.
+    let mut packet = Packet::new();
+    packet.push(Padding::after_layer(vec![0xaa], 0x10));
+    let clear = decoded(packet, &[0xaa]);
+    assert!(matches("padding.outside_layer", &clear));
+    assert!(!matches("pad.layer.low", &clear));
+    assert!(matches("!pad.layer.low", &clear));
+}

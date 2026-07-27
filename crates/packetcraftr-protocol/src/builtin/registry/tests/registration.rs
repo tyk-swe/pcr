@@ -100,13 +100,13 @@ fn a_filter_alias_may_not_shadow_a_canonical_schema_path() {
         Err(RegistryError::DuplicateFilterField { .. })
     ));
 
-    // A conventional spelling that is not itself a schema field is fine, and
-    // so is a nested flag path whose prefix is not an alias.
+    // A spelling the built-in catalog does not already claim is fine, as is a
+    // nested flag path whose prefix is not an alias.
     let mut builder = ProtocolRegistry::builder();
     builder.module(&BuiltinProtocols).unwrap();
     builder
         .bind_filter_field(
-            "ip.src",
+            "ip.origin",
             FilterFieldBinding::Direct {
                 protocol: packetcraftr_packet::layer::Id::new("ipv4"),
                 field: "source",
@@ -115,7 +115,7 @@ fn a_filter_alias_may_not_shadow_a_canonical_schema_path() {
         .unwrap();
     builder
         .bind_filter_field(
-            "tcp.flags.syn",
+            "tcp.flags.reserved0",
             FilterFieldBinding::Bits {
                 protocol: packetcraftr_packet::layer::Id::new("tcp"),
                 field: "flags",
@@ -125,6 +125,21 @@ fn a_filter_alias_may_not_shadow_a_canonical_schema_path() {
         )
         .unwrap();
     builder.build().unwrap();
+
+    // Re-registering a spelling the built-in catalog already owns is a
+    // duplicate, so a downstream module cannot quietly redefine `ip.src`.
+    let mut builder = ProtocolRegistry::builder();
+    builder.module(&BuiltinProtocols).unwrap();
+    assert!(matches!(
+        builder.bind_filter_field(
+            "ip.src",
+            FilterFieldBinding::Direct {
+                protocol: packetcraftr_packet::layer::Id::new("ipv6"),
+                field: "source",
+            },
+        ),
+        Err(RegistryError::DuplicateFilterField { .. })
+    ));
 }
 
 #[test]
@@ -209,4 +224,104 @@ fn expression_factories_accept_roadmap_aliases() {
         text.get::<Raw>().unwrap().bytes,
         Bytes::from_static(b"hello")
     );
+}
+
+#[test]
+fn conventional_filter_spellings_read_real_packets() {
+    use packetcraftr_packet::filter::{Context, Filter, Options};
+
+    let registry = Arc::new(default_registry().unwrap());
+    let packet = parse_packet_expression(
+        "ethernet(source=00:1b:21:aa:bb:cc,destination=00:1b:21:dd:ee:ff)\
+         /ipv4(source=10.1.2.3,destination=192.168.1.5,ttl=64)\
+         /tcp(source_port=51000,destination_port=443,flags=2)",
+        &registry,
+        ExpressionOptions::default(),
+    )
+    .expect("fixture expression parses");
+    let built = Builder::new(Arc::clone(&registry))
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .expect("fixture packet builds");
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(
+            built.bytes,
+            packetcraftr_packet::layer::Id::new("ethernet"),
+            DecodeOptions::default(),
+        )
+        .expect("fixture packet dissects");
+
+    let matches = |source: &str| {
+        Filter::compile(source, &registry, Options::default())
+            .unwrap_or_else(|error| panic!("{source} should compile, got {error:?}"))
+            .matches(&Context {
+                decoded: &decoded,
+                number: 1,
+                stream: None,
+            })
+    };
+
+    // Conventional spellings resolve to the same values as canonical ones.
+    assert!(matches("ip.src == 10.1.2.3"));
+    assert!(matches("ipv4.source == 10.1.2.3"));
+    assert!(matches("ip.dst == 192.168.1.5"));
+    assert!(matches("ip.src in 10.0.0.0/8"));
+    assert!(matches("ip.addr == 192.168.1.5"));
+    assert!(matches("eth.src == 00:1b:21:aa:bb:cc"));
+    assert!(matches("eth.dst == 00:1b:21:dd:ee:ff"));
+    assert!(matches("eth.addr == 00:1b:21:aa:bb:cc"));
+    assert!(matches("tcp.srcport == 51000"));
+    assert!(matches("tcp.dstport == 443"));
+    assert!(matches("tcp.port == 443"));
+    assert!(matches("tcp.port == 51000"));
+    assert!(!matches("tcp.port == 80"));
+
+    // Individual TCP flags read as 0 or 1 out of the packed field.
+    assert!(matches("tcp.flags.syn == 1"));
+    assert!(matches("tcp.flags.ack == 0"));
+    assert!(matches("tcp.flags.fin == 0"));
+    assert!(matches("tcp.flags.syn == 1 && !tcp.flags.ack"));
+    // Every one of the nine control flags resolves under its conventional
+    // name, including both spellings of the accurate-ECN bit.
+    for flag in [
+        "fin", "syn", "reset", "push", "ack", "urg", "ece", "cwr", "ae", "ns",
+    ] {
+        let path = format!("tcp.flags.{flag}");
+        assert!(
+            matches(&format!("{path} == 0 || {path} == 1")),
+            "{path} must resolve to a single bit"
+        );
+    }
+
+    // Canonical paths that need no binding still work through the alias.
+    assert!(matches("ip.ttl == 64"));
+    assert!(matches("ipv4.ttl == 64"));
+
+    // Layer presence and negation.
+    assert!(matches("tcp && ip && eth.src"));
+    assert!(!matches("udp"));
+    assert!(!matches("ipv6"));
+
+    // A byte slice of the source MAC selects its OUI.
+    assert!(matches("eth.src[0:3] == 00:1b:21"));
+}
+
+#[test]
+fn every_registered_filter_spelling_resolves() {
+    use packetcraftr_packet::filter::{Filter, Options};
+
+    // A catalog entry that no longer resolves would silently stop matching,
+    // so compile each registered path on its own.
+    let registry = default_registry().unwrap();
+    let paths: Vec<String> = registry
+        .filter_fields()
+        .map(|(path, _)| path.to_owned())
+        .collect();
+    assert!(
+        !paths.is_empty(),
+        "the built-in catalog registers spellings"
+    );
+    for path in paths {
+        Filter::compile(&path, &registry, Options::default())
+            .unwrap_or_else(|error| panic!("registered path {path} must compile, got {error:?}"));
+    }
 }

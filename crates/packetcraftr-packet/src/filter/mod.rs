@@ -27,8 +27,12 @@
 //! they come straight from the protocol's reflective schema — every name
 //! listed by `packetcraftr protocols <NAME>` is filterable.
 //!
-//! A bare protocol name tests whether such a layer is present, and a bare
-//! field path tests whether the packet exposes a value for it.
+//! A bare protocol name tests whether such a layer is present. A bare field
+//! path tests whether the packet exposes a value for it — except for a flag,
+//! meaning a single-bit selection or a boolean field, where it reads the flag
+//! itself. That is what makes `!tcp.flags.ack` mean "the ACK bit is clear"
+//! rather than "the packet has no ACK bit", which would be true of every TCP
+//! segment ever captured.
 //!
 //! Where a protocol repeats, as in a tunnelled stack, an unqualified path
 //! matches **any** occurrence; `ipv4#1` and `ipv4#2` select the outer and

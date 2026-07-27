@@ -14,8 +14,12 @@ pub(super) enum Predicate {
         protocol: ProtocolId,
         occurrence: Option<usize>,
     },
-    /// A bare field path: does the packet expose a value for it?
-    FieldPresent(FieldRef),
+    /// A bare field path. For a flag this reads the flag's value; for every
+    /// other field it asks whether the packet exposes a value at all.
+    Bare {
+        field: FieldRef,
+        flag: bool,
+    },
     Compare {
         field: FieldRef,
         operator: CompareOperator,

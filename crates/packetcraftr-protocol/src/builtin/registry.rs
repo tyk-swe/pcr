@@ -107,6 +107,10 @@ impl ProtocolModule for BuiltinProtocols {
             BuiltinProtocol::Padding,
             0,
         )?;
+
+        // Conventional display-filter spellings are registered last, so they
+        // are validated against the codecs and schemas above.
+        super::filter::register_filter_fields(builder)?;
         Ok(())
     }
 }

@@ -340,7 +340,10 @@ fn parse_predicate(
             token: Token::In,
             offset: operator_offset,
         }) => parse_membership(tokens, index + 1, field, options, *operator_offset),
-        _ => Ok((Predicate::FieldPresent(field), index)),
+        _ => {
+            let flag = field.is_flag();
+            Ok((Predicate::Bare { field, flag }, index))
+        }
     }
 }
 

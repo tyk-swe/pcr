@@ -51,6 +51,7 @@ use super::deadline::Deadline;
 
 mod error;
 pub mod expert;
+pub mod follow;
 mod pipeline;
 mod session_index;
 pub mod stats;

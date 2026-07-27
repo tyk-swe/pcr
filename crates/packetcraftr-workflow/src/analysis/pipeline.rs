@@ -8,10 +8,10 @@ use std::time::{Duration, Instant, SystemTime};
 
 use super::session_index::{StreamIndex, ip_fragment, tcp_segment, transports, udp_flow};
 use super::{
-    AnalysisError, Arc, CaptureError, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES,
+    AnalysisError, Arc, Bytes, CaptureError, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES,
     DEFAULT_STREAM_FRAMES, Deadline, DecodeOptions, DecodedPacket, Decoder, Filter, FilterContext,
     FlowKey, FragmentEvent, FragmentReassembler, OverlapPolicy, ProtocolRegistry, Read, Reader,
-    ReassemblyLimits, SessionTcpError, Tcp, TcpEvent, TcpReassembler,
+    ReassemblyLimits, Segment, SessionTcpError, Tcp, TcpEvent, TcpReassembler,
 };
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
@@ -366,20 +366,32 @@ where
                         if reverse_verdict != Some(true) {
                             tcp_events.extend(reassembler.evict_flow(&reverse));
                         }
-                        // The push below re-bases this direction itself
-                        // except when the implied base coincides with the
-                        // tracked one, so that stale state is retired here.
-                        if own_base == Some(first) {
+                        // The push below would replace this direction's
+                        // tracked generation silently, discarding whatever
+                        // it still buffered; evicting explicitly surfaces
+                        // those pending bytes as evidence instead.
+                        if own_base.is_some() {
                             tcp_events.extend(reassembler.evict_flow(&segment.flow));
                         }
                     }
                 }
-                // A reset ends the conversation in both directions; the push
-                // below retires the sender's flow, and whatever the reverse
-                // still buffered belongs to the connection the reset killed.
-                if segment.rst {
+                // A reset ends the conversation in both directions, and what
+                // either side still buffered belongs to the connection the
+                // reset killed. Both flows are evicted explicitly so those
+                // pending bytes surface as evidence — the push below would
+                // retire the sender's flow silently.
+                // A reset's payload is explanatory diagnostic text, not
+                // stream data, so it is never offered for reassembly.
+                let segment = if segment.rst {
                     tcp_events.extend(reassembler.evict_flow(&segment.flow.reverse()));
-                }
+                    tcp_events.extend(reassembler.evict_flow(&segment.flow));
+                    Segment {
+                        payload: Bytes::new(),
+                        ..segment
+                    }
+                } else {
+                    segment
+                };
                 match reassembler.push(segment.clone(), now) {
                     Ok(events) => tcp_events.extend(events),
                     // A segment the flow's bounded window cannot absorb — a

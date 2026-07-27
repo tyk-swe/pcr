@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use packetcraftr_packet::diagnostic::DiagnosticSeverity;
 
-use super::session_index::{tcp_payload, transports};
+use super::session_index::{transport_payload, transports};
 use super::{FlowKey, FrameRecord, Tcp, TcpEvent};
 
 /// The transport namespace a conversation index belongs to.
@@ -223,9 +223,9 @@ impl ExpertCollector {
         }
 
         let frame_tcp = frame_transports.tcp;
-        let frame_payload_len = frame_tcp
-            .as_ref()
-            .map_or(0, |(index, _, _)| tcp_payload(record.decoded, *index).len());
+        let frame_payload_len = frame_tcp.as_ref().map_or(0, |(index, _, _)| {
+            transport_payload(record.decoded, *index).len()
+        });
         // A keep-alive probe deliberately re-sends one byte below the
         // cursor, so the reassembler reports it as overlap — conflicting,
         // even, since the probe byte may be garbage. It is not a

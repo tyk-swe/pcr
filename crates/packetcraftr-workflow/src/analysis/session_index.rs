@@ -183,7 +183,7 @@ fn payload_after(packet: &Packet, index: usize) -> Bytes {
         .unwrap_or_default()
 }
 
-/// The exact wire bytes of the TCP payload at `tcp_index`.
+/// The exact wire bytes of the TCP payload at `transport_index`.
 ///
 /// The payload is reconstructed from the decode layout rather than from a
 /// trailing raw layer, so it stays exact when a registry decodes the payload
@@ -191,17 +191,17 @@ fn payload_after(packet: &Packet, index: usize) -> Bytes {
 /// excluded — link padding beyond the IP total length — is not stream data
 /// and is left out; padding first excluded by a layer inside the payload is
 /// stream data the inner protocol merely declined, and stays in.
-pub(super) fn tcp_payload(decoded: &DecodedPacket, tcp_index: usize) -> Bytes {
-    let Some(tcp_layout) = decoded.layout.layer(tcp_index) else {
+pub(super) fn transport_payload(decoded: &DecodedPacket, transport_index: usize) -> Bytes {
+    let Some(tcp_layout) = decoded.layout.layer(transport_index) else {
         return Bytes::new();
     };
     let start = tcp_layout.range.end;
     let mut end = start;
-    for (index, layer) in decoded.packet.iter().enumerate().skip(tcp_index + 1) {
+    for (index, layer) in decoded.packet.iter().enumerate().skip(transport_index + 1) {
         if let Some(padding) = layer.as_any().downcast_ref::<Padding>()
             && padding
                 .outside_layer
-                .is_none_or(|outside| outside <= tcp_index)
+                .is_none_or(|outside| outside <= transport_index)
         {
             continue;
         }
@@ -227,7 +227,7 @@ pub fn tcp_segment(decoded: &DecodedPacket) -> Option<Segment> {
     Some(Segment {
         flow,
         sequence: tcp.sequence,
-        payload: tcp_payload(decoded, index),
+        payload: transport_payload(decoded, index),
         syn: tcp.flags & Tcp::SYN != 0,
         fin: tcp.flags & Tcp::FIN != 0,
         rst: tcp.flags & Tcp::RST != 0,

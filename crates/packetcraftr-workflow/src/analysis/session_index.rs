@@ -117,16 +117,21 @@ impl StreamIndex {
 /// inner endpoints are the conversation's endpoints. The kinds are tracked
 /// separately because an encapsulated frame legitimately belongs to both a
 /// UDP conversation (the tunnel) and a TCP conversation (the payload).
-struct Transports<'a> {
-    tcp: Option<(usize, FlowKey, &'a Tcp)>,
-    udp: Option<FlowKey>,
+pub(super) struct Transports<'a> {
+    pub(super) tcp: Option<(usize, FlowKey, &'a Tcp)>,
+    pub(super) udp: Option<(usize, FlowKey)>,
+    /// Index of the outermost transport layer of either kind. In a
+    /// same-transport tunnel this differs from the retained innermost
+    /// occurrence, marking headers whose conversation carries no index.
+    pub(super) outermost: Option<usize>,
 }
 
-fn transports(packet: &Packet) -> Transports<'_> {
+pub(super) fn transports(packet: &Packet) -> Transports<'_> {
     let mut network: Option<(IpAddr, IpAddr)> = None;
     let mut found = Transports {
         tcp: None,
         udp: None,
+        outermost: None,
     };
     for (index, layer) in packet.iter().enumerate() {
         if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
@@ -135,6 +140,7 @@ fn transports(packet: &Packet) -> Transports<'_> {
             network = Some((ipv6.source.into(), ipv6.destination.into()));
         } else if let Some(tcp) = layer.as_any().downcast_ref::<Tcp>() {
             if let Some((source, destination)) = network {
+                found.outermost.get_or_insert(index);
                 found.tcp = Some((
                     index,
                     FlowKey {
@@ -149,12 +155,16 @@ fn transports(packet: &Packet) -> Transports<'_> {
         } else if let Some(udp) = layer.as_any().downcast_ref::<Udp>()
             && let Some((source, destination)) = network
         {
-            found.udp = Some(FlowKey {
-                source,
-                source_port: udp.source_port,
-                destination,
-                destination_port: udp.destination_port,
-            });
+            found.outermost.get_or_insert(index);
+            found.udp = Some((
+                index,
+                FlowKey {
+                    source,
+                    source_port: udp.source_port,
+                    destination,
+                    destination_port: udp.destination_port,
+                },
+            ));
         }
     }
     found
@@ -181,7 +191,7 @@ fn payload_after(packet: &Packet, index: usize) -> Bytes {
 /// excluded — link padding beyond the IP total length — is not stream data
 /// and is left out; padding first excluded by a layer inside the payload is
 /// stream data the inner protocol merely declined, and stays in.
-fn tcp_payload(decoded: &DecodedPacket, tcp_index: usize) -> Bytes {
+pub(super) fn tcp_payload(decoded: &DecodedPacket, tcp_index: usize) -> Bytes {
     let Some(tcp_layout) = decoded.layout.layer(tcp_index) else {
         return Bytes::new();
     };
@@ -226,7 +236,7 @@ pub fn tcp_segment(decoded: &DecodedPacket) -> Option<Segment> {
 
 /// Maps a decoded stack onto the innermost UDP flow, when there is one.
 pub fn udp_flow(decoded: &DecodedPacket) -> Option<FlowKey> {
-    transports(&decoded.packet).udp
+    transports(&decoded.packet).udp.map(|(_, flow)| flow)
 }
 
 /// Maps a decoded stack onto an IP fragment awaiting reassembly.

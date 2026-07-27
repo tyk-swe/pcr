@@ -44,12 +44,13 @@ use packetcraftr_session::fragment::{
     Reassembler as FragmentReassembler,
 };
 use packetcraftr_session::tcp::{
-    Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
+    Error as SessionTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
 };
 
 use super::deadline::Deadline;
 
 mod error;
+pub mod expert;
 mod pipeline;
 mod session_index;
 pub mod stats;

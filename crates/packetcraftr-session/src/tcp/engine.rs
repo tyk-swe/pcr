@@ -128,12 +128,51 @@ impl Reassembler {
         self.remove_flows(keys)
     }
 
+    /// Removes one flow immediately, returning its eviction evidence.
+    ///
+    /// This is how a caller that knows a connection is over — for example
+    /// because a new SYN reuses the four-tuple — retires state that would
+    /// otherwise misinterpret the next generation's segments against the old
+    /// sequence base. Evicting an unknown flow is a no-op.
+    pub fn evict_flow(&mut self, flow: &FlowKey) -> Vec<Event> {
+        if !self.flows.contains_key(flow) {
+            return Vec::new();
+        }
+        self.remove_flows(vec![flow.clone()])
+    }
+
     pub fn limits(&self) -> &ReassemblyLimits {
         &self.limits
     }
 
     pub fn flow_count(&self) -> usize {
         self.flows.len()
+    }
+
+    /// The sequence anchoring a tracked flow's current generation, when the
+    /// flow is tracked at all. A caller compares this against a SYN's
+    /// implied base to tell a retransmitted handshake from four-tuple reuse.
+    pub fn flow_base_sequence(&self, flow: &FlowKey) -> Option<u32> {
+        self.flows.get(flow).map(|state| state.base_sequence)
+    }
+
+    /// The sequence one past a tracked flow's contiguously delivered bytes,
+    /// when the flow is tracked at all. Together with the base this brackets
+    /// the acknowledgment a current-generation SYN-ACK may carry — a Fast
+    /// Open SYN's payload moves it past the base.
+    pub fn flow_next_sequence(&self, flow: &FlowKey) -> Option<u32> {
+        self.flows
+            .get(flow)
+            .map(|state| state.base_sequence.wrapping_add(state.next_offset as u32))
+    }
+
+    /// Whether a tracked flow has carried any payload or a FIN — as opposed
+    /// to a bare opening SYN. A caller uses this to tell an in-progress
+    /// handshake's half-open state from a previous connection's remains.
+    pub fn flow_observed_payload(&self, flow: &FlowKey) -> bool {
+        self.flows.get(flow).is_some_and(|state| {
+            state.next_offset > 0 || !state.pending.is_empty() || state.fin_offset.is_some()
+        })
     }
 
     pub fn aggregate_bytes(&self) -> usize {

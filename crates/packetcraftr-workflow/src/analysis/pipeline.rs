@@ -3,14 +3,15 @@
 
 /// The bounded read → dissect → index → filter → dispatch loop shared by the
 /// offline analysis commands.
+use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
-use super::session_index::{StreamIndex, ip_fragment, tcp_segment, udp_flow};
+use super::session_index::{StreamIndex, ip_fragment, tcp_segment, transports, udp_flow};
 use super::{
     AnalysisError, Arc, CaptureError, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES,
     DEFAULT_STREAM_FRAMES, Deadline, DecodeOptions, DecodedPacket, Decoder, Filter, FilterContext,
-    FragmentEvent, FragmentReassembler, OverlapPolicy, ProtocolRegistry, Read, Reader,
-    ReassemblyLimits, TcpEvent, TcpReassembler,
+    FlowKey, FragmentEvent, FragmentReassembler, OverlapPolicy, ProtocolRegistry, Read, Reader,
+    ReassemblyLimits, SessionTcpError, Tcp, TcpEvent, TcpReassembler,
 };
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
@@ -163,6 +164,11 @@ where
             ..ReassemblyLimits::default()
         })
     });
+    // Directional flows whose latest pushed segment was a bare opening SYN.
+    // The reassembler cannot tell a pure SYN from a SYN-ACK — its segments
+    // carry no acknowledgment — and only a peer's own bare opening SYN may
+    // survive a new pure SYN on the same tuple, as in a simultaneous open.
+    let mut half_open_pure_syns: HashSet<FlowKey> = HashSet::new();
     let mut fragments = FragmentReassembler::new(
         ReassemblyLimits {
             max_flows: limits.max_flows,
@@ -270,11 +276,138 @@ where
                 tcp_events.extend(reassembler.expire(now));
             }
             if pushable && let Some(segment) = segment {
-                tcp_events.extend(
-                    reassembler
-                        .push(segment, now)
-                        .map_err(|source| AnalysisError::Reassembly { number, source })?,
-                );
+                let acknowledged = transports(&decoded.packet)
+                    .tcp
+                    .is_some_and(|(_, _, tcp)| tcp.flags & Tcp::ACK != 0);
+                if segment.syn && !acknowledged && segment.payload.is_empty() {
+                    // Bounded like the flow table itself; past the cap a
+                    // flow simply loses simultaneous-open protection.
+                    if half_open_pure_syns.len() < limits.max_flows.saturating_mul(2) {
+                        half_open_pure_syns.insert(segment.flow.clone());
+                    }
+                } else {
+                    half_open_pure_syns.remove(&segment.flow);
+                }
+                // A SYN — client SYN or SYN-ACK — that replaces this
+                // direction's tracked generation reuses the four-tuple for a
+                // new connection, so whatever the reverse direction retained
+                // belongs to the finished one; interpreting the next reverse
+                // segment against that stale base would fabricate evidence.
+                // A retransmitted handshake SYN renews the same base and
+                // evicts nothing. When this direction has no tracked state
+                // at all, the reverse is judged on its own terms: a SYN-ACK
+                // vouches only for the opening SYN it acknowledges, and a
+                // pure SYN can coexist only with a payload-free reverse —
+                // this same handshake's opening SYN, as in a simultaneous
+                // open.
+                if segment.syn {
+                    let first = segment.sequence.wrapping_add(1);
+                    let acknowledgment = acknowledged
+                        .then(|| {
+                            transports(&decoded.packet)
+                                .tcp
+                                .map(|(_, _, tcp)| tcp.acknowledgment)
+                        })
+                        .flatten();
+                    let reverse = segment.flow.reverse();
+                    // A SYN-ACK acknowledging something outside the tracked
+                    // reverse range names a SYN this capture did not see:
+                    // the tracked state is a previous connection's, even
+                    // when the sender reuses its old sequence base. The
+                    // range runs from the reverse base to its delivered
+                    // cursor, since a Fast Open SYN's payload is
+                    // acknowledged along with the SYN itself. The verdict is
+                    // three-way — confirmed, contradicted, or nothing
+                    // tracked that can say either way.
+                    let reverse_verdict = acknowledgment.and_then(|acknowledgment| {
+                        match (
+                            reassembler.flow_base_sequence(&reverse),
+                            reassembler.flow_next_sequence(&reverse),
+                        ) {
+                            (Some(base), Some(next)) => Some(
+                                acknowledgment.wrapping_sub(base) < 0x8000_0000
+                                    && next.wrapping_sub(acknowledgment) < 0x8000_0000,
+                            ),
+                            _ => None,
+                        }
+                    });
+                    let acknowledgment_disagrees = reverse_verdict == Some(false);
+                    let own_base = reassembler.flow_base_sequence(&segment.flow);
+                    // A handshake SYN only retransmits while the connection
+                    // is half-open, so a payload-free pure SYN arriving
+                    // after this direction already carried payload or a FIN
+                    // is a new connection even when it lands on the same
+                    // base. A SYN carrying payload is a Fast Open open or
+                    // its retransmission, which the same-base rule keeps.
+                    let reuse = match own_base {
+                        Some(base) => {
+                            base != first
+                                || acknowledgment_disagrees
+                                || (acknowledgment.is_none()
+                                    && segment.payload.is_empty()
+                                    && reassembler.flow_observed_payload(&segment.flow))
+                        }
+                        None => {
+                            if acknowledgment.is_some() {
+                                acknowledgment_disagrees
+                            } else {
+                                // Only the peer's own bare opening SYN may
+                                // coexist with this pure SYN; a SYN-ACK's or
+                                // an established generation's state belongs
+                                // to a connection this handshake is not.
+                                !half_open_pure_syns.contains(&reverse)
+                            }
+                        }
+                    };
+                    if reuse {
+                        // A reverse the acknowledgment positively confirms
+                        // is the new connection's own opening SYN — only
+                        // this direction's stale generation is replaced.
+                        if reverse_verdict != Some(true) {
+                            tcp_events.extend(reassembler.evict_flow(&reverse));
+                        }
+                        // The push below re-bases this direction itself
+                        // except when the implied base coincides with the
+                        // tracked one, so that stale state is retired here.
+                        if own_base == Some(first) {
+                            tcp_events.extend(reassembler.evict_flow(&segment.flow));
+                        }
+                    }
+                }
+                // A reset ends the conversation in both directions; the push
+                // below retires the sender's flow, and whatever the reverse
+                // still buffered belongs to the connection the reset killed.
+                if segment.rst {
+                    tcp_events.extend(reassembler.evict_flow(&segment.flow.reverse()));
+                }
+                match reassembler.push(segment.clone(), now) {
+                    Ok(events) => tcp_events.extend(events),
+                    // A segment the flow's bounded window cannot absorb — a
+                    // sparse or filtered capture routinely jumps further
+                    // than the reassembly window — must not end the
+                    // analysis. The flow is evicted, surfacing whatever it
+                    // still buffered, and the segment re-anchors a fresh
+                    // generation; the header-level gap evidence survives in
+                    // the collector's own cursors. A second failure is a
+                    // real resource limit and still fails closed, as do
+                    // malformed sequences that conflict with a delivered
+                    // FIN.
+                    Err(
+                        SessionTcpError::FlowByteLimit { .. }
+                        | SessionTcpError::SegmentLimit { .. }
+                        | SessionTcpError::AggregateByteLimit { .. },
+                    ) => {
+                        tcp_events.extend(reassembler.evict_flow(&segment.flow));
+                        tcp_events.extend(
+                            reassembler
+                                .push(segment, now)
+                                .map_err(|source| AnalysisError::Reassembly { number, source })?,
+                        );
+                    }
+                    Err(source) => {
+                        return Err(AnalysisError::Reassembly { number, source });
+                    }
+                }
             }
         }
         let fragment = ip_fragment(&decoded);

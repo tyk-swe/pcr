@@ -8,7 +8,7 @@ mod core;
 #[doc(hidden)]
 pub use super::codec::{CodecError, LayerDecodeContext, LayerEncodeContext};
 pub use core::{
-    Discriminator, ProtocolModule as Module, ProtocolRegistry as Registry,
+    Discriminator, FilterFieldBinding, ProtocolModule as Module, ProtocolRegistry as Registry,
     RegistryBuilder as Builder, RegistryError as Error,
 };
 #[doc(hidden)]

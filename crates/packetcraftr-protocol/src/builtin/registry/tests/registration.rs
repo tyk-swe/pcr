@@ -35,6 +35,99 @@ fn builtin_registration_is_deterministic_and_has_portable_roots() {
 }
 
 #[test]
+fn every_constructible_builtin_publishes_its_schema_through_the_registry() {
+    let registry = default_registry().unwrap();
+    let defaults = std::collections::BTreeMap::new();
+    for protocol in registry.protocols() {
+        let schema = registry.schema(protocol);
+        let codec = registry.codec(protocol).expect("registered codec");
+        let constructible = codec.make_layer(&defaults).is_ok();
+        assert_eq!(
+            schema.is_some(),
+            constructible,
+            "{protocol} schema availability must track constructibility"
+        );
+        if let Some(schema) = schema {
+            assert_eq!(&schema.protocol, protocol);
+        }
+    }
+    // `raw_ip` is the one decode-only built-in, so it anchors the negative case
+    // and keeps this test honest if the catalog ever loses its only such entry.
+    assert!(registry.schema("raw_ip").is_none());
+    assert_eq!(
+        registry.schema("ipv4").expect("ipv4 schema").protocol,
+        packetcraftr_packet::layer::Id::new("ipv4")
+    );
+}
+
+#[test]
+fn a_filter_alias_may_not_shadow_a_canonical_schema_path() {
+    use packetcraftr_packet::registry::FilterFieldBinding;
+
+    // `ipv4.source` already resolves through the cached schema, so rebinding
+    // that exact spelling would give one path two meanings.
+    let mut builder = ProtocolRegistry::builder();
+    builder.module(&BuiltinProtocols).unwrap();
+    builder
+        .bind_filter_field(
+            "ipv4.source",
+            FilterFieldBinding::Direct {
+                protocol: packetcraftr_packet::layer::Id::new("ipv4"),
+                field: "destination",
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        builder.build(),
+        Err(RegistryError::DuplicateFilterField { .. })
+    ));
+
+    // The same holds through a registered protocol alias, since `ip` and
+    // `ipv4` name the same schema.
+    let mut builder = ProtocolRegistry::builder();
+    builder.module(&BuiltinProtocols).unwrap();
+    builder
+        .bind_filter_field(
+            "ip.ttl",
+            FilterFieldBinding::Direct {
+                protocol: packetcraftr_packet::layer::Id::new("ipv4"),
+                field: "ttl",
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        builder.build(),
+        Err(RegistryError::DuplicateFilterField { .. })
+    ));
+
+    // A conventional spelling that is not itself a schema field is fine, and
+    // so is a nested flag path whose prefix is not an alias.
+    let mut builder = ProtocolRegistry::builder();
+    builder.module(&BuiltinProtocols).unwrap();
+    builder
+        .bind_filter_field(
+            "ip.src",
+            FilterFieldBinding::Direct {
+                protocol: packetcraftr_packet::layer::Id::new("ipv4"),
+                field: "source",
+            },
+        )
+        .unwrap();
+    builder
+        .bind_filter_field(
+            "tcp.flags.syn",
+            FilterFieldBinding::Bits {
+                protocol: packetcraftr_packet::layer::Id::new("tcp"),
+                field: "flags",
+                mask: 0x02,
+                shift: 1,
+            },
+        )
+        .unwrap();
+    builder.build().unwrap();
+}
+
+#[test]
 fn generic_raw_link_root_selects_the_ip_version() {
     let registry = Arc::new(default_registry().unwrap());
     let mut packet = Packet::new();

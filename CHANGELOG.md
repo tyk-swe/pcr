@@ -17,6 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added `registry::Registry::schema`, which publishes each registered
+  protocol's reflective schema. Schemas are captured once when the registry is
+  built, so field metadata no longer requires constructing a throwaway layer
+  per lookup. A decode-only codec cannot produce a default layer and reports
+  no schema.
+- Added `registry::FilterFieldBinding` and `registry::Builder::bind_filter_field`
+  so a protocol module can publish additional display-filter spellings for its
+  reflective fields, including single-flag bit selections and paths that read
+  either of two fields. Canonical `<protocol>.<field>` paths need no binding.
+  Building the registry rejects a binding that names an unregistered protocol
+  or an absent field, selects no bits, shifts every selected bit away, or
+  shadows a canonical path.
 
 ### Changed
 

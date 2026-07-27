@@ -62,6 +62,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Building the registry rejects a binding that names an unregistered protocol
   or an absent field, selects no bits, shifts every selected bit away, or
   shadows a canonical path.
+- Added `workflow::replay::run_with_selector` and the `replay::Selector` seam,
+  which decides per frame whether replay proceeds, after the stream budgets
+  and before any authorization, delay, or transmission work. A skipped frame
+  still consumes frame budget — selection can never extend how much input one
+  operation reads — but is never authorized or transmitted, contributes no
+  bytes, and leaves the timing reference untouched, so the frames actually
+  transmitted keep their original wire spacing. A selector failure stops the
+  operation as the new `replay::Error::Selection` variant.
 
 ### Changed
 

@@ -75,6 +75,12 @@ pub enum ReplayError {
         link_type: u32,
         requested: LinkMode,
     },
+    #[error("replay frame selection failed at source frame {sequence}: {source}")]
+    Selection {
+        sequence: u64,
+        #[source]
+        source: crate::BoundaryError,
+    },
     #[error("replay policy denied source frame {sequence}: {source}")]
     Authorization {
         sequence: u64,
@@ -113,6 +119,7 @@ impl ReplayError {
             | Self::UnsupportedLinkType { sequence, .. }
             | Self::LinkModeMismatch { sequence, .. }
             | Self::Timing { sequence, .. }
+            | Self::Selection { sequence, .. }
             | Self::Authorization { sequence, .. }
             | Self::Transmission { sequence, .. }
             | Self::InvalidEvidence { sequence, .. }
@@ -166,7 +173,9 @@ impl Classified for ReplayError {
                     ),
                 )
             }
-            Self::Authorization { source, .. } => source.classification(),
+            Self::Selection { source, .. } | Self::Authorization { source, .. } => {
+                source.classification()
+            }
             Self::Transmission { source, .. } => source.classification(),
             Self::InvalidEvidence { .. } => Classification::new(
                 "internal.replay_evidence",
@@ -187,7 +196,7 @@ impl Classified for ReplayError {
 
     fn causes(&self) -> Vec<String> {
         match self {
-            Self::Authorization { source, .. } => source.causes(),
+            Self::Selection { source, .. } | Self::Authorization { source, .. } => source.causes(),
             Self::Transmission { source, .. } => source.causes(),
             Self::Capture { source, .. } => vec![source.to_string()],
             Self::InvalidTiming { mode, value } | Self::Timing { mode, value, .. } => {

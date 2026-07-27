@@ -52,6 +52,7 @@ use super::deadline::Deadline;
 mod error;
 mod pipeline;
 mod session_index;
+pub mod stats;
 #[cfg(test)]
 mod tests;
 

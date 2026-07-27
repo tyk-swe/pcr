@@ -734,6 +734,92 @@ fn frame_and_flow_budgets_fail_closed_with_frame_attribution() {
 }
 
 #[test]
+fn stats_collector_tallies_every_table_with_stable_orders() {
+    let mut collector = stats::StatsCollector::new(Duration::from_secs(1)).unwrap();
+    let summary = run(
+        &mut two_conversation_capture(),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let report = collector.finish();
+
+    assert_eq!(report.frames, summary.frames_matched);
+    assert_eq!(report.bytes, summary.bytes_read);
+
+    // Conversations: one TCP, one UDP, keyed by their assigned indices.
+    // Both directions of the TCP conversation fold into one row under
+    // canonical endpoint order.
+    assert_eq!(report.conversations.len(), 2);
+    let tcp = &report.conversations[0];
+    assert_eq!(tcp.transport, stats::TransportKind::Tcp);
+    assert_eq!(tcp.stream, 0);
+    assert_eq!(
+        tcp.address_a,
+        "10.0.0.1".parse::<std::net::IpAddr>().unwrap()
+    );
+    assert_eq!((tcp.port_a, tcp.port_b), (1000, 2000));
+    assert_eq!((tcp.frames_a_to_b, tcp.frames_b_to_a), (1, 1));
+    assert_eq!(tcp.duration(), Duration::from_secs(2));
+    let udp = &report.conversations[1];
+    assert_eq!(udp.transport, stats::TransportKind::Udp);
+    assert_eq!((udp.frames_a_to_b + udp.frames_b_to_a), 2);
+
+    // Protocols: every frame is ipv4, so it leads; both transports follow.
+    assert_eq!(report.protocols[0].protocol, "ipv4");
+    assert_eq!(report.protocols[0].frames, 4);
+    assert!(
+        report
+            .protocols
+            .iter()
+            .any(|row| row.protocol == "tcp" && row.frames == 2)
+    );
+
+    // Endpoints: four distinct addresses, sorted; 10.0.0.1 sent one frame
+    // and received one.
+    assert_eq!(report.endpoints.len(), 4);
+    let first = &report.endpoints[0];
+    assert_eq!(
+        first.address,
+        "10.0.0.1".parse::<std::net::IpAddr>().unwrap()
+    );
+    assert_eq!((first.tx_frames, first.rx_frames), (1, 1));
+
+    // Ports: tcp 1000, tcp 2000, and udp 53 once even though it is both
+    // source and destination.
+    assert_eq!(
+        report
+            .ports
+            .iter()
+            .map(|row| (row.transport, row.port, row.frames))
+            .collect::<Vec<_>>(),
+        [
+            (stats::TransportKind::Tcp, 1000, 2),
+            (stats::TransportKind::Tcp, 2000, 2),
+            (stats::TransportKind::Udp, 53, 2),
+        ]
+    );
+
+    // I/O: the four frames sit in four one-second buckets.
+    assert_eq!(report.io.len(), 4);
+    assert_eq!(report.io[0].offset, Duration::ZERO);
+    assert_eq!(report.io[3].offset, Duration::from_secs(3));
+    assert!(report.io.iter().all(|bucket| bucket.frames == 1));
+
+    assert!(matches!(
+        stats::StatsCollector::new(Duration::ZERO),
+        Err(Error::InvalidLimit {
+            field: "interval",
+            ..
+        })
+    ));
+}
+
+#[test]
 fn sink_failures_carry_their_frame_number_and_classification() {
     let error = run(
         &mut two_conversation_capture(),

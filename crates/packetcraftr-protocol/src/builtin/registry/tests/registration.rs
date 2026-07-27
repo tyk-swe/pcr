@@ -256,7 +256,8 @@ fn conventional_filter_spellings_read_real_packets() {
             .matches(&Context {
                 decoded: &decoded,
                 number: 1,
-                stream: None,
+                tcp_stream: None,
+                udp_stream: None,
             })
     };
 

@@ -33,6 +33,17 @@ pub(super) enum FieldAccess {
     Either(&'static [&'static str]),
 }
 
+/// Which transport's conversation index a stream path reads.
+///
+/// The slots are separate so `udp.stream` can never observe a TCP index: in
+/// an encapsulated stack one frame legitimately belongs to both a UDP and a
+/// TCP conversation, and each path must read its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum StreamTransport {
+    Tcp,
+    Udp,
+}
+
 #[derive(Clone, Debug)]
 pub(super) enum FieldSource {
     Layer {
@@ -42,7 +53,7 @@ pub(super) enum FieldSource {
     },
     Frame(FrameField),
     /// The conversation index assigned by a session-aware caller.
-    Stream,
+    Stream(StreamTransport),
 }
 
 /// What a path knows in advance about one field it may read.
@@ -256,8 +267,13 @@ pub(super) fn resolve(
         // transport rather than resolved through the registry.
         if tail == "stream" && matches!(head, "tcp" | "udp") {
             reject_occurrence(&stripped)?;
+            let transport = if head == "tcp" {
+                StreamTransport::Tcp
+            } else {
+                StreamTransport::Udp
+            };
             return Ok(Resolved::Field(FieldRef {
-                source: FieldSource::Stream,
+                source: FieldSource::Stream(transport),
                 slice: None,
                 kinds: vec![FieldSpec::synthetic(FieldKind::Unsigned)],
                 path: path.to_owned(),
@@ -365,7 +381,7 @@ pub(super) fn attach_slice(
         offset,
         path: field.path.clone(),
     };
-    if matches!(field.source, FieldSource::Frame(_) | FieldSource::Stream) {
+    if matches!(field.source, FieldSource::Frame(_) | FieldSource::Stream(_)) {
         return Err(unsliceable());
     }
     // A numeric or boolean field has no byte projection, so slicing it would

@@ -113,7 +113,8 @@ pub(crate) fn run_dissect(
         Some(filter) => filter.matches(&packet::filter::Context {
             decoded: &decoded,
             number: 1,
-            stream: None,
+            tcp_stream: None,
+            udp_stream: None,
         }),
         None => true,
     };
@@ -314,7 +315,8 @@ pub(crate) fn run_read(
                     && !compiled.matches(&packet::filter::Context {
                         decoded: &decoded,
                         number: frames,
-                        stream: None,
+                        tcp_stream: None,
+                        udp_stream: None,
                     })
                 {
                     continue;
@@ -468,7 +470,8 @@ fn write_filtered_capture(
         if !filter.matches(&packet::filter::Context {
             decoded: &decoded,
             number: frames,
-            stream: None,
+            tcp_stream: None,
+            udp_stream: None,
         }) {
             continue;
         }

@@ -245,7 +245,8 @@ fn matches(source: &str, decoded: &DecodedPacket) -> bool {
     compile_fixture(source).matches(&Context {
         decoded,
         number: 7,
-        stream: None,
+        tcp_stream: None,
+        udp_stream: None,
     })
 }
 
@@ -839,17 +840,42 @@ fn a_stream_path_matches_only_when_the_caller_supplies_an_index() {
     assert!(!filter.matches(&Context {
         decoded: &packet,
         number: 1,
-        stream: None,
+        tcp_stream: None,
+        udp_stream: None,
     }));
     assert!(filter.matches(&Context {
         decoded: &packet,
         number: 1,
-        stream: Some(2),
+        tcp_stream: Some(2),
+        udp_stream: None,
     }));
     assert!(!filter.matches(&Context {
         decoded: &packet,
         number: 1,
-        stream: Some(3),
+        tcp_stream: Some(3),
+        udp_stream: None,
+    }));
+    // Each transport reads its own slot: a UDP conversation index can never
+    // satisfy a `tcp.stream` comparison, even on a frame that has both.
+    assert!(!filter.matches(&Context {
+        decoded: &packet,
+        number: 1,
+        tcp_stream: None,
+        udp_stream: Some(2),
+    }));
+    let udp_filter = Filter::compile("udp.stream == 2", &fixture_registry(), Options::default())
+        .expect("stream paths compile");
+    assert!(udp_filter.matches(&Context {
+        decoded: &packet,
+        number: 1,
+        tcp_stream: None,
+        udp_stream: Some(2),
+    }));
+    assert!(!udp_filter.matches(&Context {
+        decoded: &packet,
+        number: 1,
+        tcp_stream: Some(2),
+        udp_stream: None,
     }));
 }
 

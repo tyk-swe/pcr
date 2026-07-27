@@ -297,7 +297,7 @@ fn parse_predicate(
         path::attach_slice(&mut field, contents, *slice_offset)?;
         index += 1;
     }
-    if matches!(field.source, FieldSource::Stream) {
+    if matches!(field.source, FieldSource::Stream(_)) {
         requirements.stream_index = true;
     }
 

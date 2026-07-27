@@ -11,7 +11,7 @@ use super::super::layer::Layer;
 use super::ast::{Op, Predicate};
 use super::lexer::CompareOperator;
 use super::literal;
-use super::path::{ByteSlice, FieldAccess, FieldRef, FieldSource, FrameField};
+use super::path::{ByteSlice, FieldAccess, FieldRef, FieldSource, FrameField, StreamTransport};
 
 /// Everything a compiled filter may read about one packet.
 ///
@@ -23,10 +23,15 @@ pub struct Context<'a> {
     pub decoded: &'a DecodedPacket,
     /// Position of this frame in the stream, counted from 1.
     pub number: u64,
-    /// Conversation index, when the caller maintains one. A filter that reads
+    /// Conversation index of the frame's innermost TCP flow, when the caller
+    /// maintains an index and the frame has one. A filter that reads
     /// `tcp.stream` while this is [`None`] simply does not match; callers
     /// check [`super::Requirements`] up front so that never happens silently.
-    pub stream: Option<u64>,
+    pub tcp_stream: Option<u64>,
+    /// Conversation index of the frame's innermost UDP flow, kept separate so
+    /// `udp.stream` never observes a TCP index on an encapsulated frame that
+    /// belongs to both kinds of conversation.
+    pub udp_stream: Option<u64>,
 }
 
 /// Runs a compiled program over one packet.
@@ -125,10 +130,16 @@ where
             Some(value) => predicate(&value),
             None => false,
         },
-        FieldSource::Stream => match context.stream {
-            Some(index) => predicate(&FieldValue::Unsigned(index)),
-            None => false,
-        },
+        FieldSource::Stream(transport) => {
+            let stream = match transport {
+                StreamTransport::Tcp => context.tcp_stream,
+                StreamTransport::Udp => context.udp_stream,
+            };
+            match stream {
+                Some(index) => predicate(&FieldValue::Unsigned(index)),
+                None => false,
+            }
+        }
         FieldSource::Layer {
             protocol,
             occurrence,

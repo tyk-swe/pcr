@@ -99,7 +99,8 @@ impl FrameSelector {
         Ok(self.filter.matches(&Context {
             decoded: &decoded,
             number,
-            stream: None,
+            tcp_stream: None,
+            udp_stream: None,
         }))
     }
 }

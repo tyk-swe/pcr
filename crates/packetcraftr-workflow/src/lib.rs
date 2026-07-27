@@ -6,6 +6,7 @@
 //! Bounded, policy-gated network workflows.
 
 mod address_family;
+pub mod analysis;
 mod boundary_error;
 mod bounded_probe;
 pub mod clock;

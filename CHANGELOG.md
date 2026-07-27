@@ -76,6 +76,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every command the filter is compiled before any input is read or any live
   work is planned, and a filter that names an unknown field or needs a
   conversation index is refused up front.
+- Added the bounded offline analysis pipeline in `workflow::analysis`: a
+  shared read → dissect → index → filter → dispatch loop over capture files,
+  with first-seen conversation indexing (`StreamIndex`, `CanonicalFlow`) and
+  adapters (`tcp_segment`, `udp_flow`, `ip_fragment`) that map decoded layers
+  onto the session crate's reassembly inputs, making bounded TCP stream and
+  IP fragment reassembly reachable for the first time. Conversation indices
+  are assigned over the whole capture before any display filter runs, so an
+  index one run reports is the index another run extracts, while reassembly
+  consumes only the frames the filter keeps. `tcp.stream` and `udp.stream`
+  filters evaluate against separate per-transport slots, so a UDP
+  conversation index can never satisfy a `tcp.stream` comparison on an
+  encapsulated frame that belongs to both. Every run is bounded in frames,
+  bytes, per-frame size, conversations, and duration, and reassembly expiry
+  follows the capture's own clock rather than the wall clock.
+- Exposed `session::tcp::Reassembler::limits` and `flow_count`, matching the
+  accessors the fragment reassembler already had.
 - Added `workflow::replay::run_with_selector` and the `replay::Selector` seam,
   which decides per frame whether replay proceeds, after the stream budgets
   and before any authorization, delay, or transmission work. A skipped frame

@@ -1,0 +1,16 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "expert",
+  "mode": "stream",
+  "sequence": 0,
+  "status": "success",
+  "result": {
+    "severity": "warning",
+    "code": "tcp.retransmission",
+    "frame": 2,
+    "transport": "tcp",
+    "stream": 0,
+    "message": "4 byte(s) at sequence 100 retransmit previously seen data"
+  },
+  "diagnostics": []
+}

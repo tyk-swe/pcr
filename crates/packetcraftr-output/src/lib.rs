@@ -16,6 +16,7 @@ pub mod contract;
 pub mod dissect;
 pub mod dns;
 pub mod envelope;
+pub mod expert;
 pub mod frame;
 pub mod fuzz;
 pub mod network;

@@ -76,6 +76,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every command the filter is compiled before any input is read or any live
   work is planned, and a filter that names an unknown field or needs a
   conversation index is refused up front.
+- Added `packetcraftr expert <PATH>`, reporting cross-frame protocol health
+  findings over a capture file entirely offline. Retransmissions — including
+  retransmissions whose bytes conflict with the data first seen — come from
+  the bounded TCP reassembler, so they are byte-exact rather than heuristic;
+  retransmissions of data a mid-stream capture never observed are not
+  claimed, and a segment repeating a cleanly closed conversation's delivered
+  bytes is still reported after the reassembler has let the flow go.
+  Duplicate acknowledgments — reported only while they leave peer data
+  outstanding — zero windows and their probes, filled and exceeded receive
+  windows, keep-alives, resets,
+  and uncaptured earlier segments, including gaps a bare FIN carries, come
+  from cross-frame header tracking, with per-flow state restarting when a
+  new SYN reuses a four-tuple. Window fullness honours the handshake's
+  negotiated window scale and is reported only when both SYNs were captured,
+  since the scale is unknowable otherwise. Per-frame dissection diagnostics
+  such as checksum mismatches surface as findings under their own codes.
+  Data still buffered behind a missing segment when the capture ends is
+  reported against the final frame; a conversation that is merely still open
+  then — the normal state of any live conversation — is not a finding. Each
+  finding carries its severity, code, frame number, and conversation index,
+  and the summary tallies findings by severity and code. `--filter` narrows
+  the frames analysed while frame and stream numbering stay capture-global,
+  and stream-aware filters such as `tcp.stream == 7` are supported. Text,
+  aggregate JSON, and streaming NDJSON output are supported, with the JSON
+  contracts published in the v1 schema and examples.
+- Added `workflow::analysis::expert`, the engine behind the CLI command: an
+  `ExpertCollector` observing the shared analysis pipeline's per-frame
+  records and TCP reassembly events, producing `Finding` values and an
+  `ExpertSummary` with per-severity and per-code tallies.
 - Added `packetcraftr stats <PATH>`, computing aggregate statistics over a
   capture file entirely offline: `--table conversations` (per-conversation
   frames, bytes, and duration split by direction, keyed by the same stream
@@ -99,9 +128,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   conversation index can never satisfy a `tcp.stream` comparison on an
   encapsulated frame that belongs to both. Every run is bounded in frames,
   bytes, per-frame size, conversations, and duration, and reassembly expiry
-  follows the capture's own clock rather than the wall clock.
+  follows the capture's own clock rather than the wall clock. A segment a
+  flow's bounded reassembly window cannot absorb — sparse and filtered
+  captures routinely jump further than it — evicts that flow's state,
+  surfacing whatever it still buffered, and re-anchors a fresh generation
+  rather than failing the run.
 - Exposed `session::tcp::Reassembler::limits` and `flow_count`, matching the
   accessors the fragment reassembler already had.
+- Added `session::tcp::Reassembler::evict_flow`, `flow_base_sequence`,
+  `flow_next_sequence`, and `flow_observed_payload`, so a caller that knows
+  a connection is over can retire its state immediately and tell a
+  retransmitted handshake from four-tuple reuse. The analysis pipeline uses
+  them to evict stale directions when a SYN starts a new connection over a
+  reused four-tuple — judged by base continuity and by whether a SYN-ACK's
+  acknowledgment falls inside the reverse direction's tracked range — so the
+  new generation's segments are never measured against the finished
+  connection's sequence base, while simultaneous opens, retransmitted
+  handshakes, and Fast Open SYNs keep their state.
 - Added `workflow::replay::run_with_selector` and the `replay::Selector` seam,
   which decides per frame whether replay proceeds, after the stream budgets
   and before any authorization, delay, or transmission work. A skipped frame

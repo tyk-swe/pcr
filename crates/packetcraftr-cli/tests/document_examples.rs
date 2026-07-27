@@ -229,6 +229,53 @@ fn published_stats_outputs_match_the_cli() {
 }
 
 #[test]
+fn published_expert_outputs_match_the_cli() {
+    // The success golden replays the committed anomaly fixture, the event
+    // golden is the first ndjson finding from the same run, and the error
+    // golden is the deterministic filter refusal, which fires before any
+    // input file is opened.
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/captures/pcap/tcp-anomalies.pcap");
+    let success = binary()
+        .args(["--output", "json", "expert"])
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(
+        success.status.success(),
+        "{}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    let actual: serde_json::Value = serde_json::from_slice(&success.stdout).unwrap();
+    assert_eq!(actual, json_file("output-expert-success.json"));
+
+    let stream = binary()
+        .args(["--output", "ndjson", "expert"])
+        .arg(&fixture)
+        .output()
+        .unwrap();
+    assert!(stream.status.success());
+    let first = stream.stdout.split(|byte| *byte == b'\n').next().unwrap();
+    let actual: serde_json::Value = serde_json::from_slice(first).unwrap();
+    assert_eq!(actual, json_file("output-expert-event.json"));
+
+    let error = binary()
+        .args([
+            "--output",
+            "json",
+            "expert",
+            "definitely-missing.pcap",
+            "--filter",
+            "nope == 1",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(error.status.code(), Some(2));
+    let actual: serde_json::Value = serde_json::from_slice(&error.stdout).unwrap();
+    assert_eq!(actual, json_file("output-expert-error.json"));
+}
+
+#[test]
 fn every_command_has_published_success_and_error_goldens() {
     for contract in COMMAND_OUTPUT_CONTRACTS {
         let command = contract.command.as_str();

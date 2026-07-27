@@ -7,8 +7,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use packetcraftr::output;
 
 use super::{
-    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs, ProtocolsArgs, ReadArgs,
-    ReplayArgs, RouteArgs, ScanArgs, SendArgs, StatsArgs, TracerouteArgs,
+    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, ExpertArgs, FuzzArgs,
+    ProtocolsArgs, ReadArgs, ReplayArgs, RouteArgs, ScanArgs, SendArgs, StatsArgs, TracerouteArgs,
 };
 
 const ROOT_AFTER_HELP: &str = r#"Output formats:
@@ -81,6 +81,14 @@ Examples:
 const SCAN_AFTER_HELP: &str = r#"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp"#;
+const EXPERT_AFTER_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
+
+Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. Stream-aware filters such as 'tcp.stream == 7' are supported.
+
+Examples:
+  packetcraftr expert capture.pcapng
+  packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
+  packetcraftr --output ndjson expert capture.pcapng"#;
 const STATS_AFTER_HELP: &str = r#"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
 
 Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
@@ -230,6 +238,9 @@ pub(crate) enum Command {
     /// Stream live captured frames.
     #[command(after_long_help = CAPTURE_AFTER_HELP)]
     Capture(CaptureArgs),
+    /// Report protocol health findings over a capture file.
+    #[command(after_long_help = EXPERT_AFTER_HELP)]
+    Expert(ExpertArgs),
     /// Replay a PCAP/PCAPNG stream.
     #[command(after_long_help = REPLAY_AFTER_HELP)]
     Replay(ReplayArgs),

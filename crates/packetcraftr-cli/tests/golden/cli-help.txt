@@ -13,6 +13,7 @@ Commands:
   send        Transmit a packet under traffic policy
   exchange    Capture-ready request/response exchange
   capture     Stream live captured frames
+  expert      Report protocol health findings over a capture file
   replay      Replay a PCAP/PCAPNG stream
   scan        Run a structured network scan
   stats       Compute aggregate statistics over a capture file
@@ -671,6 +672,78 @@ Live capture may require native features, dependencies, and privileges.
 Examples:
   packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
   packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --filter 'udp.srcport == 53'
+
+===== packetcraftr expert --help =====
+Report protocol health findings over a capture file
+
+Usage: packetcraftr expert [OPTIONS] <PATH>
+
+Arguments:
+  <PATH>
+          Classic PCAP or PCAPNG input path
+
+Options:
+      --filter <EXPR>
+          Keep only frames matching a display filter; stream indices stay capture-global
+
+      --max-frames <MAX_FRAMES>
+          Maximum frames read from the capture stream
+
+          [default: 10000]
+
+      --max-bytes <MAX_BYTES>
+          Maximum aggregate captured payload bytes read
+
+          [default: 268435456]
+
+      --max-frame-bytes <MAX_FRAME_BYTES>
+          Maximum bytes accepted from any one captured frame or PCAPNG block
+
+          [default: 16777216]
+
+      --max-interfaces <MAX_INTERFACES>
+          Maximum PCAPNG interfaces accepted from the input
+
+          [default: 4096]
+
+      --max-flows <MAX_FLOWS>
+          Maximum distinct conversations tracked per transport
+
+          [default: 8192]
+
+      --max-duration-ms <MAX_DURATION_MS>
+          Maximum analysis run time in milliseconds
+
+          [default: 3600000]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
+
+Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. Stream-aware filters such as 'tcp.stream == 7' are supported.
+
+Examples:
+  packetcraftr expert capture.pcapng
+  packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
+  packetcraftr --output ndjson expert capture.pcapng
 
 ===== packetcraftr replay --help =====
 Replay a PCAP/PCAPNG stream

@@ -46,6 +46,7 @@
             "send",
             "exchange",
             "capture",
+            "expert",
             "read",
             "replay",
             "scan",
@@ -148,6 +149,9 @@
               "$ref": "#/$defs/exchangeSuccess"
             },
             {
+              "$ref": "#/$defs/expertSuccess"
+            },
+            {
               "$ref": "#/$defs/replaySuccess"
             },
             {
@@ -211,6 +215,9 @@
             },
             {
               "$ref": "#/$defs/captureSuccess"
+            },
+            {
+              "$ref": "#/$defs/expertStreamSuccess"
             },
             {
               "$ref": "#/$defs/exchangeStreamSuccess"
@@ -867,6 +874,152 @@
           "$ref": "#/$defs/uint64"
         },
         "bytes": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "expertSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "expert"
+        },
+        "result": {
+          "$ref": "#/$defs/expertResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "expertStreamSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "expert"
+        },
+        "result": {
+          "$ref": "#/$defs/expertStreamResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "expertStreamResult": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/expertFinding"
+        },
+        {
+          "$ref": "#/$defs/expertResult"
+        }
+      ]
+    },
+    "expertResult": {
+      "type": "object",
+      "required": [
+        "frames_read",
+        "frames_matched",
+        "errors",
+        "warnings",
+        "notes",
+        "codes",
+        "findings"
+      ],
+      "properties": {
+        "frames_read": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames_matched": {
+          "$ref": "#/$defs/uint64"
+        },
+        "errors": {
+          "$ref": "#/$defs/uint64"
+        },
+        "warnings": {
+          "$ref": "#/$defs/uint64"
+        },
+        "notes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "codes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expertCodeCount"
+          }
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/expertFinding"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "expertFinding": {
+      "type": "object",
+      "required": [
+        "severity",
+        "code",
+        "frame",
+        "message"
+      ],
+      "properties": {
+        "severity": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "error"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "frame": {
+          "$ref": "#/$defs/uint64"
+        },
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "dependentRequired": {
+        "transport": [
+          "stream"
+        ],
+        "stream": [
+          "transport"
+        ]
+      },
+      "additionalProperties": false
+    },
+    "expertCodeCount": {
+      "type": "object",
+      "required": [
+        "code",
+        "findings"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "findings": {
           "$ref": "#/$defs/uint64"
         }
       },

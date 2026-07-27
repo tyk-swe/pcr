@@ -20,6 +20,7 @@ pub enum CommandName {
     Send,
     Exchange,
     Capture,
+    Expert,
     Read,
     Replay,
     Scan,
@@ -42,6 +43,7 @@ impl CommandName {
             Self::Send => "send",
             Self::Exchange => "exchange",
             Self::Capture => "capture",
+            Self::Expert => "expert",
             Self::Read => "read",
             Self::Replay => "replay",
             Self::Scan => "scan",
@@ -66,7 +68,7 @@ impl CommandName {
             Self::Capture => CAPTURE_FORMATS,
             Self::Read => READ_FORMATS,
             Self::Replay => REPLAY_FORMATS,
-            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz => TOOL_FORMATS,
+            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert => TOOL_FORMATS,
         }
     }
 
@@ -238,6 +240,10 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract {
         command: CommandName::Stats,
         formats: AGGREGATE_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Expert,
+        formats: TOOL_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Traceroute,

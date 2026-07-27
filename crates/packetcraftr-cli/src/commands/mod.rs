@@ -5,6 +5,7 @@
 
 mod capture;
 mod dns;
+mod expert;
 mod fuzz;
 mod interfaces;
 mod network;
@@ -17,6 +18,7 @@ mod traceroute;
 
 pub(super) use capture::{run_capture, run_exchange};
 pub(super) use dns::run_dns;
+pub(super) use expert::run_expert;
 pub(super) use fuzz::run_fuzz;
 pub(super) use interfaces::run_interfaces;
 pub(super) use network::{run_plan, run_routes, run_send};

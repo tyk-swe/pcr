@@ -76,6 +76,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every command the filter is compiled before any input is read or any live
   work is planned, and a filter that names an unknown field or needs a
   conversation index is refused up front.
+- Added `packetcraftr follow <PATH> --stream <tcp|udp>:<INDEX>`, extracting
+  one conversation's payload from a capture file entirely offline. The index
+  is the same first-seen conversation numbering `stats` reports and stream
+  filters match, so the conversation one command names is the conversation
+  another extracts. TCP payload is delivered through bounded reassembly in
+  stream order per direction — with bytes stranded behind missing segments
+  reported rather than silently dropped — and UDP emits one chunk per
+  datagram. `--direction` narrows output to the client (the conversation's
+  first captured sender) or the server, `text` and `hex` interleave both
+  directions with markers in delivery order, `raw` emits one direction's
+  exact bytes for piping and rejects `--direction both` as
+  indistinguishable, and aggregate JSON carries the chunks with endpoints
+  and per-direction totals under a contract published in the v1 schema and
+  examples. Extraction stays exactly-once across connection lifecycle
+  seams — closing-segment retransmissions, four-tuple reuse with or
+  without the same initial sequence number, and resets, whose diagnostic
+  payload is never emitted as stream data. IP-fragmented datagrams carry
+  no conversation index and are not followed.
+- Added `workflow::analysis::follow`, the engine behind the CLI command: a
+  `FollowCollector` selecting one conversation from the shared analysis
+  pipeline and yielding its payload `Chunk`s in delivery order with a
+  per-direction `FollowSummary`.
 - Added `packetcraftr expert <PATH>`, reporting cross-frame protocol health
   findings over a capture file entirely offline. Retransmissions — including
   retransmissions whose bytes conflict with the data first seen — come from

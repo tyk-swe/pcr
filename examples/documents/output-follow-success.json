@@ -1,0 +1,40 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "follow",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "transport": "tcp",
+    "stream": 0,
+    "client": {
+      "address": "10.0.0.1",
+      "port": 1000
+    },
+    "server": {
+      "address": "10.0.0.2",
+      "port": 443
+    },
+    "frames": 3,
+    "client_bytes": 10,
+    "server_bytes": 5,
+    "undelivered_bytes": 0,
+    "chunks": [
+      {
+        "direction": "client",
+        "frame": 1,
+        "bytes_hex": "70696e6721"
+      },
+      {
+        "direction": "server",
+        "frame": 2,
+        "bytes_hex": "706f6e6721"
+      },
+      {
+        "direction": "client",
+        "frame": 3,
+        "bytes_hex": "6d6f726521"
+      }
+    ]
+  },
+  "diagnostics": []
+}

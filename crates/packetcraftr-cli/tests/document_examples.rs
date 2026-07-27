@@ -276,6 +276,43 @@ fn published_expert_outputs_match_the_cli() {
 }
 
 #[test]
+fn published_follow_outputs_match_the_cli() {
+    // The success golden replays the committed conversation fixture; the
+    // error golden is the deterministic stream-spec refusal, which fires
+    // before any input file is opened.
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/captures/pcap/tcp-follow.pcap");
+    let success = binary()
+        .args(["--output", "json", "follow"])
+        .arg(&fixture)
+        .args(["--stream", "tcp:0"])
+        .output()
+        .unwrap();
+    assert!(
+        success.status.success(),
+        "{}",
+        String::from_utf8_lossy(&success.stderr)
+    );
+    let actual: serde_json::Value = serde_json::from_slice(&success.stdout).unwrap();
+    assert_eq!(actual, json_file("output-follow-success.json"));
+
+    let error = binary()
+        .args([
+            "--output",
+            "json",
+            "follow",
+            "definitely-missing.pcap",
+            "--stream",
+            "bogus:0",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(error.status.code(), Some(2));
+    let actual: serde_json::Value = serde_json::from_slice(&error.stdout).unwrap();
+    assert_eq!(actual, json_file("output-follow-error.json"));
+}
+
+#[test]
 fn every_command_has_published_success_and_error_goldens() {
     for contract in COMMAND_OUTPUT_CONTRACTS {
         let command = contract.command.as_str();

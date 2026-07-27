@@ -14,6 +14,7 @@ Commands:
   exchange    Capture-ready request/response exchange
   capture     Stream live captured frames
   expert      Report protocol health findings over a capture file
+  follow      Extract one conversation's payload from a capture file
   replay      Replay a PCAP/PCAPNG stream
   scan        Run a structured network scan
   stats       Compute aggregate statistics over a capture file
@@ -744,6 +745,88 @@ Examples:
   packetcraftr expert capture.pcapng
   packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
   packetcraftr --output ndjson expert capture.pcapng
+
+===== packetcraftr follow --help =====
+Extract one conversation's payload from a capture file
+
+Usage: packetcraftr follow [OPTIONS] --stream <TRANSPORT:INDEX> <PATH>
+
+Arguments:
+  <PATH>
+          Classic PCAP or PCAPNG input path
+
+Options:
+      --stream <TRANSPORT:INDEX>
+          Conversation to follow, as `tcp:INDEX` or `udp:INDEX`, using the same indices stats reports and stream filters match
+
+      --direction <DIRECTION>
+          Which sender's bytes to emit
+
+          Possible values:
+          - both:   Both directions, interleaved in delivery order
+          - client: Only bytes the client — the conversation's first captured sender — sent
+          - server: Only bytes the server sent
+
+          [default: both]
+
+      --max-frames <MAX_FRAMES>
+          Maximum frames read from the capture stream
+
+          [default: 10000]
+
+      --max-bytes <MAX_BYTES>
+          Maximum aggregate captured payload bytes read
+
+          [default: 268435456]
+
+      --max-frame-bytes <MAX_FRAME_BYTES>
+          Maximum bytes accepted from any one captured frame or PCAPNG block
+
+          [default: 16777216]
+
+      --max-interfaces <MAX_INTERFACES>
+          Maximum PCAPNG interfaces accepted from the input
+
+          [default: 4096]
+
+      --max-flows <MAX_FLOWS>
+          Maximum distinct conversations tracked per transport
+
+          [default: 8192]
+
+      --max-duration-ms <MAX_DURATION_MS>
+          Maximum analysis run time in milliseconds
+
+          [default: 3600000]
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+Global options:
+      --output <FORMAT>
+          Select the output encoding; supported formats are command-specific
+
+          [default: text]
+          [possible values: text, json, ndjson, hex, raw, pcap, pcapng]
+
+      --color <WHEN>
+          Control terminal colours in human-facing output
+
+          Possible values:
+          - auto:   Use colour only when the destination supports it
+          - always: Always emit colour for human-facing output
+          - never:  Never emit colour
+
+          [default: auto]
+
+Following is computed offline over dissected frames; no live capture or transmission is involved.
+
+The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. IP-fragmented datagrams carry no conversation index and are not followed. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
+
+Examples:
+  packetcraftr follow capture.pcapng --stream tcp:0
+  packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
+  packetcraftr --output json follow capture.pcapng --stream udp:2
 
 ===== packetcraftr replay --help =====
 Replay a PCAP/PCAPNG stream

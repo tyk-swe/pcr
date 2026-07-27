@@ -21,6 +21,7 @@ pub enum CommandName {
     Exchange,
     Capture,
     Expert,
+    Follow,
     Read,
     Replay,
     Scan,
@@ -44,6 +45,7 @@ impl CommandName {
             Self::Exchange => "exchange",
             Self::Capture => "capture",
             Self::Expert => "expert",
+            Self::Follow => "follow",
             Self::Read => "read",
             Self::Replay => "replay",
             Self::Scan => "scan",
@@ -68,6 +70,7 @@ impl CommandName {
             Self::Capture => CAPTURE_FORMATS,
             Self::Read => READ_FORMATS,
             Self::Replay => REPLAY_FORMATS,
+            Self::Follow => FOLLOW_FORMATS,
             Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert => TOOL_FORMATS,
         }
     }
@@ -194,6 +197,12 @@ const REPLAY_FORMATS: &[OutputFormat] = &[
 ];
 const TOOL_FORMATS: &[OutputFormat] =
     &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson];
+const FOLLOW_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Hex,
+    OutputFormat::Raw,
+];
 
 /// Complete v1 command/format matrix. Extending a command requires changing this table.
 pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
@@ -244,6 +253,10 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract {
         command: CommandName::Expert,
         formats: TOOL_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Follow,
+        formats: FOLLOW_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Traceroute,

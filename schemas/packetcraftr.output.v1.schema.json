@@ -47,6 +47,7 @@
             "exchange",
             "capture",
             "expert",
+            "follow",
             "read",
             "replay",
             "scan",
@@ -150,6 +151,9 @@
             },
             {
               "$ref": "#/$defs/expertSuccess"
+            },
+            {
+              "$ref": "#/$defs/followSuccess"
             },
             {
               "$ref": "#/$defs/replaySuccess"
@@ -1021,6 +1025,119 @@
         },
         "findings": {
           "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "followSuccess": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "const": "follow"
+        },
+        "result": {
+          "$ref": "#/$defs/followResult"
+        }
+      },
+      "required": [
+        "command",
+        "result"
+      ]
+    },
+    "followResult": {
+      "type": "object",
+      "required": [
+        "transport",
+        "stream",
+        "frames",
+        "client_bytes",
+        "server_bytes",
+        "undelivered_bytes",
+        "chunks"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "stream": {
+          "$ref": "#/$defs/uint64"
+        },
+        "client": {
+          "$ref": "#/$defs/followEndpoint"
+        },
+        "server": {
+          "$ref": "#/$defs/followEndpoint"
+        },
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "client_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "server_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "undelivered_bytes": {
+          "$ref": "#/$defs/uint64"
+        },
+        "chunks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/followChunk"
+          }
+        }
+      },
+      "dependentRequired": {
+        "client": [
+          "server"
+        ],
+        "server": [
+          "client"
+        ]
+      },
+      "additionalProperties": false
+    },
+    "followEndpoint": {
+      "type": "object",
+      "required": [
+        "address",
+        "port"
+      ],
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        }
+      },
+      "additionalProperties": false
+    },
+    "followChunk": {
+      "type": "object",
+      "required": [
+        "direction",
+        "frame",
+        "bytes_hex"
+      ],
+      "properties": {
+        "direction": {
+          "enum": [
+            "client",
+            "server"
+          ]
+        },
+        "frame": {
+          "$ref": "#/$defs/uint64"
+        },
+        "bytes_hex": {
+          "$ref": "#/$defs/hexBytes"
         }
       },
       "additionalProperties": false

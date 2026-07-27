@@ -19,6 +19,7 @@ fn cli_help_parse_error_and_version_match_the_committed_goldens() {
         "exchange",
         "capture",
         "expert",
+        "follow",
         "replay",
         "scan",
         "stats",

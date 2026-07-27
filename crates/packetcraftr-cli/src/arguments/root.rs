@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use packetcraftr::output;
 
 use super::{
-    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, ExpertArgs, FuzzArgs,
+    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, ExpertArgs, FollowArgs, FuzzArgs,
     ProtocolsArgs, ReadArgs, ReplayArgs, RouteArgs, ScanArgs, SendArgs, StatsArgs, TracerouteArgs,
 };
 
@@ -81,6 +81,14 @@ Examples:
 const SCAN_AFTER_HELP: &str = r#"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp"#;
+const FOLLOW_AFTER_HELP: &str = r#"Following is computed offline over dissected frames; no live capture or transmission is involved.
+
+The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. IP-fragmented datagrams carry no conversation index and are not followed. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
+
+Examples:
+  packetcraftr follow capture.pcapng --stream tcp:0
+  packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
+  packetcraftr --output json follow capture.pcapng --stream udp:2"#;
 const EXPERT_AFTER_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
 
 Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. Stream-aware filters such as 'tcp.stream == 7' are supported.
@@ -241,6 +249,9 @@ pub(crate) enum Command {
     /// Report protocol health findings over a capture file.
     #[command(after_long_help = EXPERT_AFTER_HELP)]
     Expert(ExpertArgs),
+    /// Extract one conversation's payload from a capture file.
+    #[command(after_long_help = FOLLOW_AFTER_HELP)]
+    Follow(FollowArgs),
     /// Replay a PCAP/PCAPNG stream.
     #[command(after_long_help = REPLAY_AFTER_HELP)]
     Replay(ReplayArgs),

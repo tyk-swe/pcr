@@ -175,6 +175,7 @@ pub(super) fn command_from_env() -> Option<output::contract::Command> {
         ("exchange", output::contract::Command::Exchange),
         ("capture", output::contract::Command::Capture),
         ("expert", output::contract::Command::Expert),
+        ("follow", output::contract::Command::Follow),
         ("read", output::contract::Command::Read),
         ("replay", output::contract::Command::Replay),
         ("scan", output::contract::Command::Scan),

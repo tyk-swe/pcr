@@ -19,7 +19,7 @@ use packetcraftr::{
 
 use super::arguments::{Cli, Command, RouteArgs};
 use super::commands::{
-    run_build, run_capture, run_dissect, run_dns, run_exchange, run_expert, run_fuzz,
+    run_build, run_capture, run_dissect, run_dns, run_exchange, run_expert, run_follow, run_fuzz,
     run_interfaces, run_plan, run_protocols, run_read, run_replay, run_routes, run_scan, run_send,
     run_stats, run_traceroute,
 };
@@ -158,6 +158,7 @@ impl Command {
             Self::Exchange(_) => output::contract::Command::Exchange,
             Self::Capture(_) => output::contract::Command::Capture,
             Self::Expert(_) => output::contract::Command::Expert,
+            Self::Follow(_) => output::contract::Command::Follow,
             Self::Replay(_) => output::contract::Command::Replay,
             Self::Scan(_) => output::contract::Command::Scan,
             Self::Stats(_) => output::contract::Command::Stats,
@@ -185,6 +186,7 @@ pub(super) fn run(cli: Cli) -> Result<(), CliError> {
         Command::Send(arguments) => run_send(arguments, output),
         Command::Capture(arguments) => run_capture(arguments, output),
         Command::Expert(arguments) => run_expert(arguments, output),
+        Command::Follow(arguments) => run_follow(arguments, output),
         Command::Exchange(arguments) => run_exchange(arguments, output),
         Command::Replay(arguments) => run_replay(arguments, output),
         Command::Scan(arguments) => run_scan(arguments, output),

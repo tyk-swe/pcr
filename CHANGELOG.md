@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
+- Added a bounded display-filter language in `packet::filter`, evaluated
+  against dissected packets — for example
+  `ipv4.source in 10.0.0.0/8 && udp.destination_port == 53`. Paths resolve from
+  reserved synthetic
+  names (`frame.*`, `tcp.stream`, `udp.stream`), then registered spellings,
+  then canonical `<protocol-or-alias>.<field>` names taken straight from each
+  protocol's reflective schema, so every field listed by
+  `packetcraftr protocols <NAME>` is filterable without further registration.
+  The grammar covers boolean operators, ordered comparisons, prefix and set
+  membership, `contains`, byte slices, layer-presence tests, and explicit
+  occurrence selection (`ipv4#2.source`) for tunnelled stacks. There is no
+  regular-expression operator. Compilation is bounded in source length,
+  nesting, term count, and set size, and both the parser and the evaluator use
+  explicit stacks rather than recursion.
 - Added `registry::Registry::schema`, which publishes each registered
   protocol's reflective schema. Schemas are captured once when the registry is
   built, so field metadata no longer requires constructing a throwaway layer

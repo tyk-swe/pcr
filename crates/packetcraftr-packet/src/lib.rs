@@ -12,6 +12,7 @@ pub mod diagnostic;
 pub mod document;
 pub mod expression;
 pub mod field;
+pub mod filter;
 pub mod layer;
 pub mod layout;
 pub mod matcher;

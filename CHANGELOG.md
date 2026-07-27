@@ -30,7 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   occurrence selection (`ipv4#2.source`) for tunnelled stacks. There is no
   regular-expression operator. Compilation is bounded in source length,
   nesting, term count, and set size, and both the parser and the evaluator use
-  explicit stacks rather than recursion.
+  explicit stacks rather than recursion. A `filter_expression` fuzz target
+  covers compilation, and CI smoke-tests it alongside the existing targets.
 - Added `registry::Registry::schema`, which publishes each registered
   protocol's reflective schema. Schemas are captured once when the registry is
   built, so field metadata no longer requires constructing a throwaway layer

@@ -213,6 +213,12 @@ Options:
 
           [default: 4096]
 
+      --filter <EXPR>
+          Keep only frames matching a display filter; implies dissection
+
+      --dissect
+          Include each frame's dissected layer stack in the output
+
   -h, --help
           Print help (see a summary with '-h')
 

@@ -177,6 +177,7 @@ fn aggregate_and_stream_envelopes_freeze_mode_and_sequence() {
                 Frame::new(UNIX_EPOCH, packetcraftr_capture::LinkType::RAW, vec![0_u8]).unwrap(),
             )
             .unwrap(),
+            decoded: None,
         },
         Vec::new(),
     );

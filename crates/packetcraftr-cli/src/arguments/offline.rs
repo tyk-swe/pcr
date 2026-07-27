@@ -70,4 +70,10 @@ pub(crate) struct ReadArgs {
     /// Maximum PCAPNG interfaces accepted from the input.
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
+    /// Keep only frames matching a display filter; implies dissection.
+    #[arg(long, value_name = "EXPR")]
+    pub(crate) filter: Option<String>,
+    /// Include each frame's dissected layer stack in the output.
+    #[arg(long)]
+    pub(crate) dissect: bool,
 }

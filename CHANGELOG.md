@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   nesting, term count, and set size, and both the parser and the evaluator use
   explicit stacks rather than recursion. A `filter_expression` fuzz target
   covers compilation, and CI smoke-tests it alongside the existing targets.
+- Added `--filter <EXPR>` and `--dissect` to `packetcraftr read`. Filtering
+  keeps only the frames a display filter accepts and implies dissection;
+  without either flag `read` is byte-for-byte unchanged and pays no new cost.
+  `--dissect` names the layer chain in text output and carries the full
+  dissected stack in NDJSON. A filtered read can also write `--output pcap` or
+  `--output pcapng`, so extracting a subset of a capture into a new file no
+  longer needs a separate tool; frames stream out as they match, interface
+  descriptions and the frame, byte, and per-frame bounds are carried through,
+  and a filter that accepts nothing still writes a readable empty capture.
+  Writing classic PCAP from a PCAPNG source stays refused whether or not a
+  filter is present, since classic PCAP cannot represent per-interface
+  metadata. A filter that names an unknown field, or that reads a conversation
+  index this command does not maintain, is rejected before any input is read.
 - Registered the conventional display-filter spellings for every built-in
   protocol, so `ip.src`, `eth.dst`, `tcp.port`, `udp.dstport`, `vlan.id`,
   `arp.opcode`, and the nine `tcp.flags.*` bits work alongside the canonical

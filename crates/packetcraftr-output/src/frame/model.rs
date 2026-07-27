@@ -154,6 +154,32 @@ impl FrameOutput {
     }
 }
 
+/// The dissected layer stack of a frame, without repeating the frame itself.
+///
+/// `read --dissect` already emits the capture record, so embedding a whole
+/// [`DecodedFrameOutput`] there would serialize the frame twice.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DecodedStackOutput {
+    pub packet: PacketDocument,
+    pub layout: PacketLayout,
+    pub diagnostics: Vec<DiagnosticOutput>,
+}
+
+impl DecodedStackOutput {
+    pub fn from_decoded(decoded: &DecodedPacket) -> Self {
+        Self {
+            packet: PacketDocument::from_packet(&decoded.packet),
+            layout: decoded.layout.clone(),
+            diagnostics: decoded
+                .diagnostics
+                .iter()
+                .cloned()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
 /// A decoded frame retained by exchange-like tools.
 #[derive(Clone, Debug, Serialize)]
 pub struct DecodedFrameOutput {

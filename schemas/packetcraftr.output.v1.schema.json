@@ -842,6 +842,9 @@
       "properties": {
         "frame": {
           "$ref": "#/$defs/frame"
+        },
+        "decoded": {
+          "$ref": "#/$defs/decodedStack"
         }
       },
       "additionalProperties": false
@@ -2539,6 +2542,29 @@
         "frame": {
           "$ref": "#/$defs/frame"
         },
+        "packet": {
+          "$ref": "#/$defs/packetDocument"
+        },
+        "layout": {
+          "$ref": "#/$defs/packetLayout"
+        },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/diagnostic"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "decodedStack": {
+      "type": "object",
+      "required": [
+        "packet",
+        "layout",
+        "diagnostics"
+      ],
+      "properties": {
         "packet": {
           "$ref": "#/$defs/packetDocument"
         },

@@ -1,12 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Compilation and classification of command-line display filters.
+// Compilation, classification, and per-frame evaluation of display filters.
+
+use std::sync::Arc;
 
 use packetcraftr::{
+    capture::Frame,
     error::{Classification, Kind},
     packet::{
-        filter::{Error as FilterError, Filter, Options as FilterOptions},
+        self,
+        filter::{Context, Error as FilterError, Filter, Options as FilterOptions},
         registry::Registry,
     },
 };
@@ -56,6 +60,48 @@ pub(crate) fn compile(
         ));
     }
     Ok(filter)
+}
+
+/// Evaluates a compiled filter against whole frames for streaming commands.
+///
+/// Commands that handle complete frames — live capture and replay — dissect
+/// each frame under the same per-frame bound the command reads with, then
+/// apply the filter to the decoded stack. A frame that cannot be dissected is
+/// an error rather than a silent mismatch, so a frame the filter could not
+/// observe is never quietly dropped or kept.
+pub(crate) struct FrameSelector {
+    decoder: packet::decode::Decoder,
+    filter: Filter,
+    max_frame_bytes: usize,
+}
+
+impl FrameSelector {
+    pub(crate) fn new(registry: Arc<Registry>, filter: Filter, max_frame_bytes: usize) -> Self {
+        Self {
+            decoder: packet::decode::Decoder::new(registry),
+            filter,
+            max_frame_bytes,
+        }
+    }
+
+    /// Decides whether the frame numbered `number` (1-based) is kept.
+    pub(crate) fn keep(&self, number: u64, frame: &Frame) -> Result<bool, CliError> {
+        let decoded = self
+            .decoder
+            .decode(
+                frame.clone(),
+                packet::decode::Options {
+                    max_packet_size: self.max_frame_bytes,
+                    ..packet::decode::Options::default()
+                },
+            )
+            .map_err(|source| CliError::new(3, source.to_string()))?;
+        Ok(self.filter.matches(&Context {
+            decoded: &decoded,
+            number,
+            stream: None,
+        }))
+    }
 }
 
 /// Maps a filter compilation failure onto the CLI error taxonomy.

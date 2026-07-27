@@ -33,16 +33,21 @@ const BUILD_AFTER_HELP: &str = r#"Examples:
   packetcraftr --output raw build --packet-file packet.json"#;
 const DISSECT_AFTER_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
+With --filter, the dissection is emitted only when the frame matches; a frame that does not match emits nothing and the command still succeeds.
+
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
-  packetcraftr --output json dissect --file frame.bin --link-type 1"#;
+  packetcraftr --output json dissect --file frame.bin --link-type 1
+  packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'"#;
 const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
   packetcraftr protocols
   packetcraftr protocols ipv4
   packetcraftr --output json protocols IP4"#;
 const READ_AFTER_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
-  packetcraftr --output ndjson read capture.pcap"#;
+  packetcraftr --output ndjson read capture.pcap
+  packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
+  packetcraftr --output pcapng read capture.pcapng --filter 'ip.src in 10.0.0.0/8' > subset.pcapng"#;
 const INTERFACES_AFTER_HELP: &str = r#"Examples:
   packetcraftr interfaces
   packetcraftr --output json interfaces"#;
@@ -60,13 +65,19 @@ Example:
   packetcraftr exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000"#;
 const CAPTURE_AFTER_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
 
-Example:
-  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000"#;
+--filter is a display filter evaluated on each frame after it is received; it selects what is reported, and does not install a kernel capture filter or narrow what the backend captures. Frames the filter rejects still count against the operation's frame and byte budgets.
+
+Examples:
+  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
+  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --filter 'udp.srcport == 53'"#;
 const REPLAY_AFTER_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
+
+Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. Transmitted frames keep their original spacing: the delay before a kept frame spans any skipped frames in between.
 
 Examples:
   packetcraftr replay capture.pcapng --interface eth0 --timing immediate
-  packetcraftr replay capture.pcap --interface 2 --rate 100"#;
+  packetcraftr replay capture.pcap --interface 2 --rate 100
+  packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'"#;
 const SCAN_AFTER_HELP: &str = r#"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp"#;

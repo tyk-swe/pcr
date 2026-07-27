@@ -45,6 +45,9 @@ pub(crate) struct DissectArgs {
     /// Open numeric DLT/link type (defaults to Ethernet/DLT 1).
     #[arg(long, default_value_t = 1)]
     pub(crate) link_type: u32,
+    /// Emit the dissection only when the frame matches a display filter.
+    #[arg(long, value_name = "EXPR")]
+    pub(crate) filter: Option<String>,
 }
 
 #[derive(Debug, Args)]

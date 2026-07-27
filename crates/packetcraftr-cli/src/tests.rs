@@ -21,13 +21,15 @@ use super::commands::{
     send_capture_link_type, traceroute_cli_error, write_replay_capture_evidence,
 };
 use super::errors::CliError;
+use super::filtering::{self, Capabilities, FrameSelector};
 use super::input::read_bounded_allow_empty;
 use super::rendering::{
     encode_capture_file, output_timestamp_text, terminal_document, terminal_safe,
     terminal_safe_document,
 };
 use super::runtime::{
-    parse_workflow_target, run, validate_interface_selector, workflow_exchange_options,
+    default_registry_arc, parse_workflow_target, run, validate_interface_selector,
+    workflow_exchange_options,
 };
 
 struct ScriptedCapture {
@@ -527,6 +529,7 @@ fn capture_driver_streams_bounded_frames_and_reports_statistics() {
         Duration::from_millis(10),
         net::capture::Limits::default(),
         test_capture_budget(),
+        None,
         |frame, sequence| {
             rendered.push((sequence, frame.bytes().to_vec()));
             Ok(())
@@ -557,6 +560,7 @@ fn zero_capture_window_is_a_clean_empty_timeout() {
         Duration::ZERO,
         net::capture::Limits::default(),
         test_capture_budget(),
+        None,
         |_, _| unreachable!(),
     )
     .unwrap();
@@ -580,6 +584,7 @@ fn readiness_and_cleanup_failures_remain_structured() {
         Duration::from_millis(10),
         net::capture::Limits::default(),
         test_capture_budget(),
+        None,
         |_, _| Ok(()),
     )
     .unwrap_err();
@@ -613,6 +618,7 @@ fn capture_byte_budget_fails_before_emitting_the_excess_frame() {
             max_frames: 1,
             max_bytes: 2,
         },
+        None,
         |_, _| {
             emitted = true;
             Ok(())
@@ -623,6 +629,98 @@ fn capture_byte_budget_fails_before_emitting_the_excess_frame() {
     assert!(!emitted);
     assert_eq!(error.exit_code, 6);
     assert_eq!(error.classification.code, "policy.byte_limit");
+    assert_eq!(error.sequence, Some(0));
+}
+
+fn frame_selector(source: &str, max_frame_bytes: usize) -> FrameSelector {
+    let registry = default_registry_arc().unwrap();
+    let filter = filtering::compile(source, &registry, Capabilities::frames_only()).unwrap();
+    FrameSelector::new(registry, filter, max_frame_bytes)
+}
+
+fn scripted_frames(frames: &[Frame]) -> ScriptedCapture {
+    ScriptedCapture {
+        ready: Some(Ok(())),
+        frames: frames
+            .iter()
+            .map(|frame| Ok(Some(frame.clone())))
+            .chain([Ok(None)])
+            .collect(),
+        shutdown: Some(Ok(())),
+        statistics: net::capture::Statistics::default(),
+    }
+}
+
+#[test]
+fn capture_driver_applies_the_display_filter_and_renumbers_matches() {
+    let frames = (1..=3_u8)
+        .map(|index| Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![index; 3]).unwrap())
+        .collect::<Vec<_>>();
+    let selector = frame_selector("frame.number == 2", 1024);
+    let mut rendered = Vec::new();
+    let outcome = drive_capture(
+        scripted_frames(&frames),
+        Duration::from_millis(10),
+        net::capture::Limits::default(),
+        test_capture_budget(),
+        Some(&selector),
+        |frame, sequence| {
+            rendered.push((sequence, frame.bytes().to_vec()));
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    // The single match is renumbered as record 0 of the emitted stream.
+    assert_eq!(rendered, vec![(0, vec![2, 2, 2])]);
+    assert_eq!(outcome.stats.packets_attempted, 3);
+    assert_eq!(outcome.stats.packets_completed, 1);
+    assert_eq!(outcome.stats.bytes, 9);
+}
+
+#[test]
+fn capture_byte_budget_counts_frames_the_filter_rejects() {
+    let frames = (1..=2_u8)
+        .map(|index| Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![index; 3]).unwrap())
+        .collect::<Vec<_>>();
+    let selector = frame_selector("frame.number == 99", 1024);
+    let error = drive_capture(
+        scripted_frames(&frames),
+        Duration::from_millis(10),
+        net::capture::Limits::default(),
+        CaptureBudget {
+            max_frames: 10,
+            max_bytes: 5,
+        },
+        Some(&selector),
+        |_, _| unreachable!("no frame matches the filter"),
+    )
+    .unwrap_err();
+
+    // Filtering selects what is reported, not how much may be received: the
+    // second frame exhausts the byte budget even though nothing was emitted.
+    assert_eq!(error.exit_code, 6);
+    assert_eq!(error.classification.code, "policy.byte_limit");
+    assert_eq!(error.sequence, Some(0));
+}
+
+#[test]
+fn capture_filter_that_cannot_dissect_a_frame_is_an_error() {
+    let frames = [Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0x45, 0, 0, 0]).unwrap()];
+    // The selector's per-frame bound is smaller than the frame, so the filter
+    // cannot observe the frame; keeping or dropping it would both be guesses.
+    let selector = frame_selector("frame.number == 1", 2);
+    let error = drive_capture(
+        scripted_frames(&frames),
+        Duration::from_millis(10),
+        net::capture::Limits::default(),
+        test_capture_budget(),
+        Some(&selector),
+        |_, _| unreachable!("the frame never dissected"),
+    )
+    .unwrap_err();
+
+    assert_eq!(error.exit_code, 3);
     assert_eq!(error.sequence, Some(0));
 }
 

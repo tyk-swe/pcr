@@ -62,6 +62,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Building the registry rejects a binding that names an unregistered protocol
   or an absent field, selects no bits, shifts every selected bit away, or
   shadows a canonical path.
+- Added `--filter <EXPR>` to `packetcraftr dissect`, `capture`, and `replay`,
+  completing display-filter coverage of every command that produces frames.
+  `dissect` emits the dissection only when the frame matches; a frame that
+  does not match emits nothing and the command still succeeds. `capture`
+  keeps only received frames the filter accepts — a display filter evaluated
+  after receipt, not a kernel filter, so it selects what is reported without
+  narrowing what the backend captures, and rejected frames still count
+  against the operation's frame and byte budgets. `replay` skips
+  non-matching frames before authorization, so they are never policy-checked
+  or transmitted while still counting against the frame budget, and the
+  transmitted frames keep their original wire spacing across the gaps. In
+  every command the filter is compiled before any input is read or any live
+  work is planned, and a filter that names an unknown field or needs a
+  conversation index is refused up front.
 - Added `workflow::replay::run_with_selector` and the `replay::Selector` seam,
   which decides per frame whether replay proceeds, after the stream budgets
   and before any authorization, delay, or transmission work. A skipped frame

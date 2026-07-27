@@ -15,6 +15,7 @@ use packetcraftr::{
 
 use super::super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs};
 use super::super::errors::CliError;
+use super::super::filtering::{self, Capabilities, FrameSelector};
 use super::super::rendering::{
     capture_file_format, capture_file_frame, emit_json, emit_json_compact, emit_stderr_message,
     emit_stream_record, spaced_hex, write_capture_file, write_plain_line, write_stdout_line,
@@ -56,6 +57,7 @@ pub(crate) fn run_capture(
     let CaptureArgs {
         route,
         timeout_ms,
+        filter,
         limits,
     } = arguments;
     let timeout = Duration::from_millis(timeout_ms);
@@ -65,6 +67,22 @@ pub(crate) fn run_capture(
         .validate()
         .map_err(CliError::classified)?;
     let registry = default_registry_arc()?;
+    // The filter compiles before any route, resolution, or capture work, so a
+    // mistyped expression is refused without live side effects. Received
+    // frames are dissected under the same snapshot bound the capture reads
+    // with; this selects what is reported, it does not narrow what the
+    // backend captures.
+    let selector = match filter.as_deref() {
+        Some(source) => {
+            let filter = filtering::compile(source, &registry, Capabilities::frames_only())?;
+            Some(FrameSelector::new(
+                Arc::clone(&registry),
+                filter,
+                limits.snap_length,
+            ))
+        }
+        None => None,
+    };
     let request = prepare_route_request(route, &registry)?;
     let budget = CaptureBudget::from(&request.policy);
     let client = system_client(Arc::clone(&registry), request.policy);
@@ -77,49 +95,78 @@ pub(crate) fn run_capture(
             let capture = net::capture::SystemProvider
                 .arm_capture(&route, limits)
                 .map_err(CliError::classified)?;
-            let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
-                let frame =
-                    output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-                write_stdout_line(format_args!(
-                    "{sequence}: dlt={} caplen={} wirelen={} {}",
-                    frame.link_type,
-                    frame.captured_length,
-                    frame.original_length,
-                    spaced_hex(frame.bytes())
-                ))
-            })?;
-            write_stdout_line(format_args!(
-                "captured {} frame(s), {} byte(s)",
-                outcome.stats.packets_completed, outcome.stats.bytes
-            ))?;
+            let outcome = drive_capture(
+                capture,
+                timeout,
+                limits,
+                budget,
+                selector.as_ref(),
+                |frame, sequence| {
+                    let frame = output::frame::Captured::try_from_frame(frame)
+                        .map_err(CliError::classified)?;
+                    write_stdout_line(format_args!(
+                        "{sequence}: dlt={} caplen={} wirelen={} {}",
+                        frame.link_type,
+                        frame.captured_length,
+                        frame.original_length,
+                        spaced_hex(frame.bytes())
+                    ))
+                },
+            )?;
+            match &selector {
+                None => write_stdout_line(format_args!(
+                    "captured {} frame(s), {} byte(s)",
+                    outcome.stats.packets_completed, outcome.stats.bytes
+                ))?,
+                Some(_) => write_stdout_line(format_args!(
+                    "matched {} of {} captured frame(s), {} byte(s)",
+                    outcome.stats.packets_completed,
+                    outcome.stats.packets_attempted,
+                    outcome.stats.bytes
+                ))?,
+            }
             render_diagnostics_text(&outcome.diagnostics)
         }
         output::contract::Format::Hex => {
             let capture = net::capture::SystemProvider
                 .arm_capture(&route, limits)
                 .map_err(CliError::classified)?;
-            let outcome = drive_capture(capture, timeout, limits, budget, |frame, _| {
-                let frame =
-                    output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-                write_plain_line(format_args!("{}", frame.bytes_hex))
-            })?;
+            let outcome = drive_capture(
+                capture,
+                timeout,
+                limits,
+                budget,
+                selector.as_ref(),
+                |frame, _| {
+                    let frame = output::frame::Captured::try_from_frame(frame)
+                        .map_err(CliError::classified)?;
+                    write_plain_line(format_args!("{}", frame.bytes_hex))
+                },
+            )?;
             render_diagnostics_stderr(&outcome.diagnostics)
         }
         output::contract::Format::Ndjson => {
             let capture = net::capture::SystemProvider
                 .arm_capture(&route, limits)
                 .map_err(CliError::classified)?;
-            let outcome = drive_capture(capture, timeout, limits, budget, |frame, sequence| {
-                let frame =
-                    output::frame::Captured::try_from_frame(frame).map_err(CliError::classified)?;
-                emit_json_compact(&output::envelope::Stream::success(
-                    output::contract::Command::Capture,
-                    sequence,
-                    output::capture::Event::Frame { frame },
-                    Vec::new(),
-                ))
-                .map_err(|error| error.at_sequence(sequence))
-            })?;
+            let outcome = drive_capture(
+                capture,
+                timeout,
+                limits,
+                budget,
+                selector.as_ref(),
+                |frame, sequence| {
+                    let frame = output::frame::Captured::try_from_frame(frame)
+                        .map_err(CliError::classified)?;
+                    emit_json_compact(&output::envelope::Stream::success(
+                        output::contract::Command::Capture,
+                        sequence,
+                        output::capture::Event::Frame { frame },
+                        Vec::new(),
+                    ))
+                    .map_err(|error| error.at_sequence(sequence))
+                },
+            )?;
             let sequence = outcome.stats.packets_completed;
             emit_json_compact(
                 &output::envelope::Stream::success(
@@ -189,13 +236,20 @@ pub(crate) fn run_capture(
                 let error = CliError::classified(source);
                 return Err(shutdown_after_error(&mut capture, error));
             }
-            let outcome = drive_capture(capture, timeout, limits, budget, |frame, _| {
-                writer
-                    .write_frame(&capture_file_frame(frame, format))
-                    .map_err(|source| {
-                        CliError::new(5, format!("write capture output failed: {source}"))
-                    })
-            })?;
+            let outcome = drive_capture(
+                capture,
+                timeout,
+                limits,
+                budget,
+                selector.as_ref(),
+                |frame, _| {
+                    writer
+                        .write_frame(&capture_file_frame(frame, format))
+                        .map_err(|source| {
+                            CliError::new(5, format!("write capture output failed: {source}"))
+                        })
+                },
+            )?;
             let mut stdout = writer.into_inner();
             stdout
                 .flush()
@@ -226,6 +280,7 @@ pub(crate) fn drive_capture<C, F>(
     timeout: Duration,
     limits: net::capture::Limits,
     budget: CaptureBudget,
+    selector: Option<&FrameSelector>,
     mut emit: F,
 ) -> Result<CaptureOutcome, CliError>
 where
@@ -245,7 +300,13 @@ where
             return Err(shutdown_after_error(&mut capture, error));
         }
     }
+    // Two counters, because they answer different questions: `frames` counts
+    // every frame the backend delivered, which is what the policy budgets
+    // account for whether or not a filter keeps the frame, while `matched`
+    // numbers the records actually emitted so a filtered stream stays
+    // contiguous. Without a filter the two never diverge.
     let mut frames = 0_u64;
+    let mut matched = 0_u64;
     let mut bytes = 0_u64;
     while frames < budget.max_frames {
         let now = Instant::now();
@@ -259,7 +320,7 @@ where
             Ok(Some(captured)) => captured.frame,
             Ok(None) => break,
             Err(source) => {
-                let error = CliError::classified(source).at_sequence(frames);
+                let error = CliError::classified(source).at_sequence(matched);
                 return Err(shutdown_after_error(&mut capture, error));
             }
         };
@@ -270,13 +331,13 @@ where
                     70,
                     "captured frame length exceeds the byte-accounting domain",
                 )
-                .at_sequence(frames),
+                .at_sequence(matched),
             )
         })?;
         let next_bytes = bytes.checked_add(frame_bytes).ok_or_else(|| {
             shutdown_after_error(
                 &mut capture,
-                CliError::new(70, "capture output byte accounting overflowed").at_sequence(frames),
+                CliError::new(70, "capture output byte accounting overflowed").at_sequence(matched),
             )
         })?;
         if next_bytes > budget.max_bytes {
@@ -284,32 +345,56 @@ where
                 actual: next_bytes,
                 limit: budget.max_bytes,
             })
-            .at_sequence(frames);
+            .at_sequence(matched);
             return Err(shutdown_after_error(&mut capture, error));
         }
         bytes = next_bytes;
-        if let Err(error) = emit(frame, frames) {
-            return Err(shutdown_after_error(
-                &mut capture,
-                error.at_sequence_if_absent(frames),
-            ));
-        }
-        frames = frames.checked_add(1).ok_or_else(|| {
+        let number = frames.checked_add(1).ok_or_else(|| {
             shutdown_after_error(
                 &mut capture,
-                CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(frames),
+                CliError::classified(output::contract::Error::SequenceOverflow)
+                    .at_sequence(matched),
             )
         })?;
+        if let Some(selector) = selector {
+            match selector.keep(number, &frame) {
+                Ok(true) => {}
+                Ok(false) => {
+                    frames = number;
+                    continue;
+                }
+                Err(error) => {
+                    return Err(shutdown_after_error(
+                        &mut capture,
+                        error.at_sequence_if_absent(matched),
+                    ));
+                }
+            }
+        }
+        if let Err(error) = emit(frame, matched) {
+            return Err(shutdown_after_error(
+                &mut capture,
+                error.at_sequence_if_absent(matched),
+            ));
+        }
+        matched = matched.checked_add(1).ok_or_else(|| {
+            shutdown_after_error(
+                &mut capture,
+                CliError::classified(output::contract::Error::SequenceOverflow)
+                    .at_sequence(matched),
+            )
+        })?;
+        frames = number;
     }
     capture
         .shutdown()
         .map_err(CliError::classified)
-        .map_err(|error| error.at_sequence(frames))?;
+        .map_err(|error| error.at_sequence(matched))?;
     let statistics = capture
         .statistics()
         .validate()
         .map_err(CliError::classified)
-        .map_err(|error| error.at_sequence(frames))?;
+        .map_err(|error| error.at_sequence(matched))?;
     let mut diagnostics = Vec::new();
     if statistics.has_loss() {
         if limits.overflow_policy == net::capture::OverflowPolicy::Fail {
@@ -318,7 +403,7 @@ where
                     .evidence_loss_error()
                     .expect("lossy capture statistics must produce a typed error"),
             )
-            .at_sequence(frames));
+            .at_sequence(matched));
         }
         diagnostics.push(packet::diagnostic::Diagnostic::warning(
             "capture.evidence_incomplete",
@@ -336,7 +421,7 @@ where
         diagnostics,
         stats: output::envelope::Stats {
             packets_attempted: frames,
-            packets_completed: frames,
+            packets_completed: matched,
             bytes,
             elapsed: started.elapsed(),
             capture: statistics.into(),

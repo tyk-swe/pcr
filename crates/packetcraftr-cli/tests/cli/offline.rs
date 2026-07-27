@@ -511,3 +511,84 @@ fn read_rejects_a_filter_it_cannot_evaluate() {
         String::from_utf8_lossy(&stream.stderr)
     );
 }
+
+#[test]
+fn dissect_filter_selects_emission_without_changing_the_match_output() {
+    let frame = built_frame(
+        "ipv4(source=192.0.2.1,destination=198.51.100.2)\
+         /udp(source_port=12345,destination_port=9)/raw(text=hi)",
+    );
+    let hex = frame
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let dissect = |arguments: &[&str]| {
+        let mut command = binary();
+        command
+            .args(["--output", "json", "dissect", "--link-type", "101"])
+            .args(["--hex", &hex])
+            .args(arguments);
+        command.output().unwrap()
+    };
+
+    // A matching filter emits exactly what an unfiltered dissect emits.
+    let unfiltered = dissect(&[]);
+    let matched = dissect(&["--filter", "udp.dstport == 9 && ip.src == 192.0.2.1"]);
+    assert!(
+        matched.status.success(),
+        "{}",
+        String::from_utf8_lossy(&matched.stderr)
+    );
+    assert_eq!(matched.stdout, unfiltered.stdout);
+    let value: serde_json::Value = serde_json::from_slice(&matched.stdout).unwrap();
+    assert_eq!(value["status"], "success");
+    assert_eq!(value["result"]["packet"]["layers"][0]["protocol"], "ipv4");
+
+    // A frame the filter rejects emits nothing, and the command succeeds.
+    for format in ["json", "text", "hex", "raw"] {
+        let mut command = binary();
+        command
+            .args(["--output", format, "dissect", "--link-type", "101"])
+            .args(["--hex", &hex])
+            .args(["--filter", "udp.dstport == 10"]);
+        let unmatched = command.output().unwrap();
+        assert!(
+            unmatched.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&unmatched.stderr)
+        );
+        assert!(unmatched.stdout.is_empty(), "{format}");
+        assert!(unmatched.stderr.is_empty(), "{format}");
+    }
+
+    // An unsupported output format is refused whether or not the frame
+    // matches, so filtering never hides a contract error.
+    let unsupported = binary()
+        .args(["--output", "pcap", "dissect", "--link-type", "101"])
+        .args(["--hex", &hex])
+        .args(["--filter", "udp.dstport == 10"])
+        .output()
+        .unwrap();
+    assert_eq!(unsupported.status.code(), Some(2));
+}
+
+#[test]
+fn dissect_rejects_a_filter_it_cannot_evaluate() {
+    // The unknown field is refused before any frame bytes are read, and a
+    // conversation-index filter is refused because dissect never assigns one.
+    for (filter, needle) in [
+        ("nope.missing == 1", "nope.missing"),
+        ("tcp.stream == 0", "conversation index"),
+    ] {
+        let output = binary()
+            .args(["dissect", "--hex", "45", "--filter", filter])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(2), "{filter}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains(needle),
+            "{filter}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}

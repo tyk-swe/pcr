@@ -397,3 +397,115 @@ fn replay_rejects_unsupported_roots_and_public_targets_before_interface_io() {
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["error"]["code"], "policy.public_destination");
 }
+
+#[test]
+fn replay_filter_decides_frames_before_the_policy_layer() {
+    // The capture's only frame targets a public address, which live replay
+    // refuses. A filter that rejects the frame skips it before authorization,
+    // so the operation succeeds without any policy involvement; a filter that
+    // keeps it reaches exactly the refusal an unfiltered replay reaches.
+    let public = write_public_raw_capture();
+    let skipped = binary()
+        .args([
+            "--output",
+            "json",
+            "replay",
+            public.to_str().unwrap(),
+            "--interface",
+            "definitely-missing-interface",
+            "--timing",
+            "immediate",
+            "--filter",
+            "ip.dst == 203.0.113.9",
+        ])
+        .output()
+        .unwrap();
+    let kept = binary()
+        .args([
+            "--output",
+            "json",
+            "replay",
+            public.to_str().unwrap(),
+            "--interface",
+            "definitely-missing-interface",
+            "--timing",
+            "immediate",
+            "--filter",
+            "ip.dst == 8.8.8.8",
+        ])
+        .output()
+        .unwrap();
+    std::fs::remove_file(&public).unwrap();
+
+    assert!(
+        skipped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&skipped.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&skipped.stdout).unwrap();
+    assert_eq!(value["status"], "success");
+    assert_eq!(value["result"]["frames_attempted"], 1);
+    assert_eq!(value["result"]["frames_completed"], 0);
+    assert_eq!(value["result"]["frames"], serde_json::json!([]));
+
+    assert_eq!(kept.status.code(), Some(6));
+    let value: serde_json::Value = serde_json::from_slice(&kept.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "policy.public_destination");
+}
+
+#[test]
+fn live_commands_refuse_a_bad_filter_before_any_input_or_route_work() {
+    // The replay input does not exist; the filter is still refused first, so
+    // a mistyped expression never opens files or plans live operations.
+    let replay = binary()
+        .args([
+            "--output",
+            "json",
+            "replay",
+            "definitely-missing-capture.pcap",
+            "--interface",
+            "definitely-missing-interface",
+            "--filter",
+            "nope.nope == 1",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(replay.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&replay.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "cli.filter");
+
+    // The capture target is public and would be refused by policy; the
+    // filter error proves compilation precedes any route or policy work.
+    let capture = binary()
+        .args([
+            "--output",
+            "ndjson",
+            "capture",
+            "--packet",
+            "ipv4(dst=8.8.8.8)/udp(dport=9)",
+            "--filter",
+            "nope.nope == 1",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(capture.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&capture.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "cli.filter");
+
+    // Neither command maintains a conversation index.
+    let stream = binary()
+        .args([
+            "--output",
+            "ndjson",
+            "capture",
+            "--packet",
+            "ipv4(dst=8.8.8.8)/udp(dport=9)",
+            "--filter",
+            "tcp.stream == 0",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(stream.status.code(), Some(2));
+    let value: serde_json::Value = serde_json::from_slice(&stream.stdout).unwrap();
+    assert_eq!(value["error"]["code"], "cli.filter_unsupported_field");
+}

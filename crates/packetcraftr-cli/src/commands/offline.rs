@@ -78,6 +78,17 @@ pub(crate) fn run_dissect(
     arguments: DissectArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
+    let registry = default_registry_arc()?;
+    // A bad filter fails before any input is read, so it cannot leave the
+    // command waiting on standard input for frame bytes it would never use.
+    let filter = match arguments.filter.as_deref() {
+        Some(source) => Some(filtering::compile(
+            source,
+            &registry,
+            Capabilities::frames_only(),
+        )?),
+        None => None,
+    };
     let bytes = match (arguments.hex, arguments.file) {
         (Some(value), None) => packet::expression::decode_hex(&value)
             .map_err(|source| CliError::new(2, source.to_string()))?
@@ -88,7 +99,6 @@ pub(crate) fn run_dissect(
         (None, None) => read_stdin_bounded(packet::document::DEFAULT_MAX_DOCUMENT_BYTES)?,
         (Some(_), Some(_)) => unreachable!("clap enforces conflicts"),
     };
-    let registry = default_registry_arc()?;
     let decoded = packet::decode::Decoder::new(registry)
         .decode(
             Frame::new(SystemTime::now(), LinkType(arguments.link_type), bytes)
@@ -96,9 +106,23 @@ pub(crate) fn run_dissect(
             packet::decode::Options::default(),
         )
         .map_err(|source| CliError::new(3, source.to_string()))?;
+    // The filter selects emission, not validity: a frame it rejects emits
+    // nothing and the command still succeeds, while an unsupported output
+    // format is refused whether or not the frame matched.
+    let kept = match &filter {
+        Some(filter) => filter.matches(&packet::filter::Context {
+            decoded: &decoded,
+            number: 1,
+            stream: None,
+        }),
+        None => true,
+    };
     let (result, diagnostics) = output::dissect::Result::from_decoded(decoded);
     match output {
         output::contract::Format::Text => {
+            if !kept {
+                return Ok(());
+            }
             write_stdout_line(format_args!(
                 "decoded {} bytes into {} layer(s)",
                 result.length,
@@ -115,13 +139,28 @@ pub(crate) fn run_dissect(
             }
             Ok(())
         }
-        output::contract::Format::Hex => write_plain_line(format_args!("{}", result.bytes_hex)),
-        output::contract::Format::Raw => write_raw(result.bytes()),
-        output::contract::Format::Json => emit_json(&output::envelope::Aggregate::success(
-            output::contract::Command::Dissect,
-            result,
-            diagnostics,
-        )),
+        output::contract::Format::Hex => {
+            if !kept {
+                return Ok(());
+            }
+            write_plain_line(format_args!("{}", result.bytes_hex))
+        }
+        output::contract::Format::Raw => {
+            if !kept {
+                return Ok(());
+            }
+            write_raw(result.bytes())
+        }
+        output::contract::Format::Json => {
+            if !kept {
+                return Ok(());
+            }
+            emit_json(&output::envelope::Aggregate::success(
+                output::contract::Command::Dissect,
+                result,
+                diagnostics,
+            ))
+        }
         _ => Err(CliError::classified(
             output::contract::Error::UnsupportedFormat {
                 command: output::contract::Command::Dissect,

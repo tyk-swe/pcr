@@ -5,20 +5,39 @@
 
 use std::fs::File;
 use std::io::{self, Write};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use packetcraftr::{
-    capture::{self, Format, Limits, Reader, ReaderOptions, Writer},
+    capture::{self, Format, Frame, Limits, Reader, ReaderOptions, Writer},
     net, output, workflow,
 };
 
 use super::super::arguments::{CliReplayTiming, ReplayArgs};
 use super::super::errors::CliError;
+use super::super::filtering::{self, Capabilities, FrameSelector};
 use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, validate_interface_selector};
 use super::offline::validate_capture_stream_limits;
+
+/// Bridges the CLI display filter onto the replay engine's selection seam.
+///
+/// A frame the filter rejects is skipped before the engine authorizes,
+/// delays, or transmits it, and a frame the filter cannot dissect stops the
+/// operation instead of being quietly replayed or dropped.
+struct DisplayFilterSelector<'a> {
+    selector: &'a FrameSelector,
+}
+
+impl workflow::replay::Selector for DisplayFilterSelector<'_> {
+    fn select(&mut self, number: u64, frame: &Frame) -> Result<bool, workflow::BoundaryError> {
+        self.selector
+            .keep(number, frame)
+            .map_err(CliError::into_boundary_error)
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ReplayInterfaceMapping {
@@ -71,6 +90,20 @@ pub(crate) fn run_replay(
         arguments.max_interfaces,
     )?;
     let timing = replay_timing(&arguments)?;
+    let registry = default_registry_arc()?;
+    // The filter compiles with the other argument validation, before the
+    // capture is opened and long before any authorization or transmission.
+    let frame_filter = match arguments.filter.as_deref() {
+        Some(source) => {
+            let filter = filtering::compile(source, &registry, Capabilities::frames_only())?;
+            Some(FrameSelector::new(
+                Arc::clone(&registry),
+                filter,
+                arguments.max_frame_bytes,
+            ))
+        }
+        None => None,
+    };
     let requested_interface = requested_replay_interface(&arguments.interface)?;
     let policy = arguments.policy.clone().into_policy();
     policy.validate().map_err(CliError::classified)?;
@@ -97,7 +130,6 @@ pub(crate) fn run_replay(
         },
     )
     .map_err(CliError::classified)?;
-    let registry = default_registry_arc()?;
     let mut authorizer =
         workflow::replay::SystemAuthorizer::new(policy, registry, arguments.allow_malformed_live);
     let options = workflow::replay::Options {
@@ -106,6 +138,12 @@ pub(crate) fn run_replay(
         timing,
         limits,
     };
+    let mut adapter = frame_filter
+        .as_ref()
+        .map(|selector| DisplayFilterSelector { selector });
+    let selector = adapter
+        .as_mut()
+        .map(|adapter| adapter as &mut dyn workflow::replay::Selector);
     let mut transmitter = workflow::replay::SystemTransmitter::new();
     let mut clock = workflow::clock::SystemClock;
     let started = Instant::now();
@@ -115,21 +153,32 @@ pub(crate) fn run_replay(
             let summary = execute_replay(
                 &mut reader,
                 &options,
+                selector,
                 &mut authorizer,
                 &mut transmitter,
                 &mut clock,
                 write_replay_text_evidence,
             )?;
-            write_stdout_line(format_args!(
-                "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
-                summary.frames_completed, summary.bytes_completed, summary.scheduled_duration
-            ))
+            match &frame_filter {
+                None => write_stdout_line(format_args!(
+                    "replayed {} frame(s), {} byte(s), scheduled delay {:?}",
+                    summary.frames_completed, summary.bytes_completed, summary.scheduled_duration
+                )),
+                Some(_) => write_stdout_line(format_args!(
+                    "replayed {} of {} frame(s), {} byte(s), scheduled delay {:?}",
+                    summary.frames_completed,
+                    summary.frames_attempted,
+                    summary.bytes_completed,
+                    summary.scheduled_duration
+                )),
+            }
         }
         output::contract::Format::Json => {
             let mut frames = Vec::new();
             let summary = execute_replay(
                 &mut reader,
                 &options,
+                selector,
                 &mut authorizer,
                 &mut transmitter,
                 &mut clock,
@@ -158,6 +207,7 @@ pub(crate) fn run_replay(
             let summary = execute_replay(
                 &mut reader,
                 &options,
+                selector,
                 &mut authorizer,
                 &mut transmitter,
                 &mut clock,
@@ -196,6 +246,7 @@ pub(crate) fn run_replay(
             execute_replay(
                 &mut reader,
                 &options,
+                selector,
                 &mut authorizer,
                 &mut transmitter,
                 &mut clock,
@@ -217,6 +268,7 @@ pub(crate) fn run_replay(
 fn execute_replay<F>(
     reader: &mut Reader<File>,
     options: &workflow::replay::Options,
+    selector: Option<&mut dyn workflow::replay::Selector>,
     authorizer: &mut workflow::replay::SystemAuthorizer,
     transmitter: &mut workflow::replay::SystemTransmitter,
     clock: &mut workflow::clock::SystemClock,
@@ -225,8 +277,16 @@ fn execute_replay<F>(
 where
     F: FnMut(workflow::replay::FrameEvidence) -> Result<(), workflow::replay::Error>,
 {
-    workflow::replay::run(reader, options, authorizer, transmitter, clock, sink)
-        .map_err(replay_cli_error)
+    workflow::replay::run_with_selector(
+        reader,
+        options,
+        selector,
+        authorizer,
+        transmitter,
+        clock,
+        sink,
+    )
+    .map_err(replay_cli_error)
 }
 
 fn replay_output_frame(

@@ -10,17 +10,121 @@ use packetcraftr_packet::{
         CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
         LayerEncodeContext,
     },
+    diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
 };
 
 use super::super::common::{
-    aliased_fields, expected_discriminator_for_value, make_layer, protocol, resolve_u16, truncated,
+    ValueExpectation, aliased_fields, binding_protocol, expected_discriminator_for_value, invalid,
+    make_layer, payload_without_padding, protocol, resolve_u16, strict_or_diagnostic, truncated,
     validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
 };
+use super::llc::{LLC_FRAME_DISCRIMINATOR, MAX_FRAME_LENGTH};
 
 const ETHERNET_LEN: usize = 14;
+const LINK_RAW_FALLBACK_DISCRIMINATOR: u16 = MAX_FRAME_LENGTH + 1;
+
+/// The 802.3 length-versus-EtherType split shared by Ethernet II and the
+/// VLAN tags: a value at or below 1500 is a payload length framing an LLC
+/// header, 1536 and above is an EtherType, and the undefined band between
+/// them falls through to the raw payload.
+pub(super) fn link_payload_selection(
+    name: &str,
+    ether_type: u16,
+    available: usize,
+    header_len: usize,
+) -> Result<(usize, Vec<Discriminator>), CodecError> {
+    if ether_type >= 0x0600 {
+        return Ok((available, vec![Discriminator(u64::from(ether_type))]));
+    }
+    if ether_type <= MAX_FRAME_LENGTH {
+        let length = usize::from(ether_type);
+        if length > available {
+            return Err(truncated(name, header_len + length, header_len + available));
+        }
+        // A zero-length frame is complete: there is no LLC header to select.
+        let next = if length == 0 {
+            Vec::new()
+        } else {
+            vec![Discriminator(LLC_FRAME_DISCRIMINATOR)]
+        };
+        return Ok((length, next));
+    }
+    // 1501–1535: neither a length nor an EtherType; the unknown
+    // discriminator preserves the payload as raw with a warning.
+    Ok((available, vec![Discriminator(u64::from(ether_type))]))
+}
+
+/// Resolves the `ether_type` expectation for a link header: the encoded
+/// payload length when an LLC frame follows — including a malformed layer
+/// preserving broken LLC bytes from a length-framed capture — and the
+/// registered discriminator otherwise.
+pub(super) fn link_type_expectation(
+    name: &str,
+    context: &LayerEncodeContext<'_>,
+    value: &WireValue<u16>,
+    covered_payload_len: usize,
+) -> Result<ValueExpectation<u16>, CodecError> {
+    if context
+        .child
+        .is_some_and(|child| binding_protocol(child).as_str() == "llc")
+    {
+        let length = u16::try_from(covered_payload_len)
+            .ok()
+            .filter(|length| *length <= MAX_FRAME_LENGTH)
+            .ok_or_else(|| {
+                invalid(
+                    name,
+                    format!("an 802.3 frame length exceeds {MAX_FRAME_LENGTH} bytes"),
+                )
+            })?;
+        return Ok(ValueExpectation::Required(length));
+    }
+    if matches!(value, WireValue::Auto)
+        && context
+            .child
+            .is_some_and(|child| child.protocol_id().as_str() == "raw")
+    {
+        return Ok(ValueExpectation::Suggested(LINK_RAW_FALLBACK_DISCRIMINATOR));
+    }
+    Ok(expected_discriminator_for_value(
+        name, context, 0_u16, value,
+    ))
+}
+
+/// Rejects a length-form `ether_type` over anything other than LLC framing:
+/// dissection treats every value at or below 1500 as an 802.3 payload
+/// length and selects an LLC header, so any other child would come back as
+/// a different layer stack. The zero-length empty frame is the one
+/// length-form value with no payload to misframe.
+pub(super) fn validate_link_length_form(
+    name: &str,
+    ether_type: u16,
+    covered_payload_len: usize,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), CodecError> {
+    if ether_type > MAX_FRAME_LENGTH
+        || (ether_type == 0 && covered_payload_len == 0)
+        || context
+            .child
+            .is_some_and(|child| binding_protocol(child).as_str() == "llc")
+    {
+        return Ok(());
+    }
+    strict_or_diagnostic(
+        name,
+        "build.link_length_form",
+        "ether_type",
+        format!(
+            "ether_type {ether_type} is an 802.3 payload length and dissects as LLC framing; only an llc child can follow it"
+        ),
+        context,
+        diagnostics,
+    )
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ethernet {
@@ -65,15 +169,20 @@ impl LayerCodec for EthernetCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
-        _payload: &[u8],
+        payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
             .as_any()
             .downcast_ref::<Ethernet>()
             .ok_or_else(|| wrong_layer("ethernet", layer))?;
-        let expectation =
-            expected_discriminator_for_value("ethernet", context, 0_u16, &layer.ether_type);
+        let covered_payload = payload_without_padding("ethernet", payload, context)?;
+        let expectation = link_type_expectation(
+            "ethernet",
+            context,
+            &layer.ether_type,
+            covered_payload.len(),
+        )?;
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
             "ethernet",
@@ -88,6 +197,13 @@ impl LayerCodec for EthernetCodec {
             &layer.ether_type,
             expectation,
             context.mode,
+            &mut diagnostics,
+        )?;
+        validate_link_length_form(
+            "ethernet",
+            ether_type,
+            covered_payload.len(),
+            context,
             &mut diagnostics,
         )?;
         validate_raw_child_discriminator(
@@ -124,6 +240,12 @@ impl LayerCodec for EthernetCodec {
         let mut source = [0; 6];
         source.copy_from_slice(&input[6..12]);
         let ether_type = u16::from_be_bytes([input[12], input[13]]);
+        let (payload_len, next) = link_payload_selection(
+            "ethernet",
+            ether_type,
+            input.len() - ETHERNET_LEN,
+            ETHERNET_LEN,
+        )?;
         Ok(DecodedLayerValue {
             layer: Box::new(Ethernet {
                 destination,
@@ -132,11 +254,11 @@ impl LayerCodec for EthernetCodec {
             }),
             consumed: ETHERNET_LEN,
             payload_offset: ETHERNET_LEN,
-            payload_len: input.len() - ETHERNET_LEN,
-            next: vec![Discriminator(u64::from(ether_type))],
+            payload_len,
+            next,
             fields: ethernet_layout(),
             diagnostics: Vec::new(),
-            stop: input.len() == ETHERNET_LEN,
+            stop: payload_len == 0,
             network: None,
         })
     }

@@ -109,6 +109,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present, and non-zero reserved bits are decode diagnostics and
   permissive-mode territory on build. Only version 0 is dissected —
   other versions are preserved as malformed bytes rather than guessed at.
+- Added IEEE 802.2 LLC and SNAP as constructible, dissectible layers
+  with exact round-trip. LLC reads its one- or two-byte control format
+  from the wire, chains SNAP on the 0xAA SAP pair, and preserves
+  unregistered SAP payloads as typed raw bytes; SNAP's zero-OUI space is
+  the plain EtherType repertoire, so `llc/snap/ipv4` dissects and builds
+  like an Ethernet II stack, while vendor OUIs keep their own protocol
+  numbering. An Auto link `ether_type` above an LLC frame resolves to
+  the encoded 802.3 payload length, and minimum-frame padding beyond
+  that length reads as link padding exactly as it does for IP.
 - Added the L2TPv3 session header over IP (RFC 3931, protocol 115),
   reachable from both address families. The 32-bit session identifier —
   zero addressing the control connection — dissects and filters as
@@ -250,6 +259,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** an Ethernet or VLAN `ether_type` at or below 1500 now
+  dissects as an IEEE 802.3 payload length framing an LLC header, with
+  bytes beyond the declared length treated as link padding; such frames
+  previously fell through to a raw payload with an unknown-binding
+  warning. Values 1501-1535 remain undefined and still decode as raw.
+  The Linux cooked-capture headers are unaffected.
 - Restructured the repository into a Cargo workspace of per-domain crates under
   `crates/`, with a virtual root manifest owning shared dependency versions,
   lints, and the release profile. Cargo now enforces the domain layering that
@@ -330,6 +345,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Auto Ethernet and VLAN raw payload builds now choose an undefined non-length
+  discriminator instead of the 802.3 zero-length value, so permissive raw link
+  payloads decode and rebuild as raw bytes rather than padding.
 - Native E2E command timeouts and interruptions now terminate the complete
   privileged process group, treat zombie descendants as exited during survival
   checks, and drain remaining namespace PIDs before teardown.

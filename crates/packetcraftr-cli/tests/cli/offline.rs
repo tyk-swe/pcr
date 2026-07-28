@@ -147,10 +147,12 @@ fn protocols_text_lists_manifest_order_and_describes_ordered_fields() {
     assert!(lines[7].starts_with("geneve aliases=[] build=true"));
     assert!(lines[12].starts_with("ipv4 aliases=[ip, ip4] build=true"));
     assert!(lines[18].starts_with("l2tpv3 aliases=[] build=true"));
-    assert!(lines[22].starts_with("mpls aliases=[] build=true"));
-    assert!(lines[25].starts_with("pppoe aliases=[] build=true"));
-    assert!(lines[27].starts_with("raw_ip aliases=[rawip] build=false"));
-    assert!(lines[32].starts_with("vlan8021ad aliases=[dot1ad, 8021ad, qinq]"));
+    assert!(lines[21].starts_with("llc aliases=[] build=true"));
+    assert!(lines[23].starts_with("mpls aliases=[] build=true"));
+    assert!(lines[26].starts_with("pppoe aliases=[] build=true"));
+    assert!(lines[28].starts_with("raw_ip aliases=[rawip] build=false"));
+    assert!(lines[30].starts_with("snap aliases=[] build=true"));
+    assert!(lines[34].starts_with("vlan8021ad aliases=[dot1ad, 8021ad, qinq]"));
 
     let detail = binary().args(["protocols", "IP4"]).output().unwrap();
     assert!(detail.status.success());

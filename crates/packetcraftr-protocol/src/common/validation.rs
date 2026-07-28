@@ -98,6 +98,47 @@ pub(crate) fn validate_raw_child_discriminator(
     Ok(())
 }
 
+/// The dual of [`validate_raw_child_discriminator`]: a typed child must be
+/// selected by its discriminator on dissection. When the discriminator is
+/// unregistered — or registered only to the raw fallback — the emitted bytes
+/// would dissect back as opaque raw bytes, not as the declared layer.
+/// Registered typed selections are left to `validate_raw_child_discriminator`,
+/// which already rejects a mismatch there.
+pub(crate) fn validate_typed_child_discriminator(
+    parent: &str,
+    discriminator: u64,
+    context: &LayerEncodeContext<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Result<(), CodecError> {
+    let Some(child) = context.child else {
+        return Ok(());
+    };
+    if matches!(
+        child.protocol_id().as_str(),
+        "raw" | "padding" | "malformed"
+    ) {
+        return Ok(());
+    }
+    if context
+        .registry
+        .child_for(parent, Discriminator(discriminator))
+        .is_some_and(|bound| bound.as_str() != "raw")
+    {
+        return Ok(());
+    }
+    strict_or_diagnostic(
+        parent,
+        "build.discriminator_child_mismatch",
+        "discriminator",
+        format!(
+            "discriminator {discriminator} does not select {}; dissection would fall back to raw bytes",
+            binding_protocol(child)
+        ),
+        context,
+        diagnostics,
+    )
+}
+
 pub(crate) fn validate_auto_raw_discriminator<T>(
     name: &str,
     field: &'static str,

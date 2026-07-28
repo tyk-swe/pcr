@@ -36,6 +36,7 @@ macro_rules! builtin_protocol_catalog {
             L2tpv3 { canonical: "l2tpv3", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: L2tpv3Codec }
             LinuxSll { canonical: "linux_sll", aliases: ["sll"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: LinuxSllCodec }
             LinuxSll2 { canonical: "linux_sll2", aliases: ["sll2"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: LinuxSll2Codec }
+            Llc { canonical: "llc", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: LlcCodec }
             Malformed { canonical: "malformed", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: MalformedCodec }
             Mpls { canonical: "mpls", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: MplsCodec }
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: PaddingCodec }
@@ -44,6 +45,7 @@ macro_rules! builtin_protocol_catalog {
             Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: RawCodec }
             RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, dissect: true, exact_round_trip: true, matcher: none, codec: RawIpCodec }
             Sctp { canonical: "sctp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: reverse_flow, codec: SctpCodec }
+            Snap { canonical: "snap", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: SnapCodec }
             Tcp { canonical: "tcp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: reverse_flow, codec: TcpCodec }
             Udp { canonical: "udp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: reverse_flow, codec: UdpCodec }
             Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: VlanCodec }

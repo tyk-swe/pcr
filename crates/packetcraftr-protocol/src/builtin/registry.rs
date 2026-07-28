@@ -17,7 +17,10 @@ use ip::{IgmpCodec, Ipv4Codec, Ipv6Codec, RawIpCodec};
 use ipv6_ext::{
     DestinationOptionsCodec, HopByHopCodec, Ipv6FragmentCodec, SegmentRoutingHeaderCodec,
 };
-use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
+use link::{
+    ArpCodec, EthernetCodec, LLC_FRAME_DISCRIMINATOR, LlcCodec, SnapCodec, Vlan8021adCodec,
+    VlanCodec,
+};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
@@ -47,6 +50,34 @@ impl ProtocolModule for BuiltinProtocols {
         bind_link_children(builder, BuiltinProtocol::Ethernet)?;
         bind_link_children(builder, BuiltinProtocol::Vlan)?;
         bind_link_children(builder, BuiltinProtocol::Vlan8021ad)?;
+        // An EtherType at or below 1500 is an 802.3 payload length, and the
+        // sentinel above the 16-bit EtherType space selects LLC framing.
+        // The cooked-capture headers never carry 802.3 lengths.
+        for parent in [
+            BuiltinProtocol::Ethernet,
+            BuiltinProtocol::Vlan,
+            BuiltinProtocol::Vlan8021ad,
+        ] {
+            bind(
+                builder,
+                parent,
+                LLC_FRAME_DISCRIMINATOR,
+                BuiltinProtocol::Llc,
+                100,
+            )?;
+        }
+        // LLC chains on its SAP pair; the zero-OUI SNAP space is the plain
+        // EtherType repertoire, so SNAP selects the same children a link
+        // header would.
+        bind(
+            builder,
+            BuiltinProtocol::Llc,
+            0xaaaa,
+            BuiltinProtocol::Snap,
+            100,
+        )?;
+        bind(builder, BuiltinProtocol::Llc, 0, BuiltinProtocol::Raw, -100)?;
+        bind_link_children(builder, BuiltinProtocol::Snap)?;
         for parent in [BuiltinProtocol::LinuxSll, BuiltinProtocol::LinuxSll2] {
             bind_link_children(builder, parent)?;
         }

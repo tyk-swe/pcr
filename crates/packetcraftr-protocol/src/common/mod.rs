@@ -26,4 +26,5 @@ pub(crate) use payload::payload_without_padding;
 pub(crate) use validation::{
     ensure_encode_budget, strict_or_diagnostic, validate_auto_raw_discriminator,
     validate_ipv6_routing_child, validate_raw_child_discriminator,
+    validate_typed_child_discriminator,
 };

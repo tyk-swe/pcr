@@ -458,6 +458,8 @@ fn link_scope_allows_padding(root: Option<BuiltinProtocol>) -> bool {
         root,
         Some(
             BuiltinProtocol::Ethernet
+                | BuiltinProtocol::Vlan
+                | BuiltinProtocol::Vlan8021ad
                 | BuiltinProtocol::BsdNull
                 | BuiltinProtocol::BsdLoop
                 | BuiltinProtocol::LinuxSll

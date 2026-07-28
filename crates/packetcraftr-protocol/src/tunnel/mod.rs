@@ -5,11 +5,14 @@
 
 mod geneve;
 mod mpls;
+mod pppoe;
 mod vxlan;
 
 pub use geneve::Geneve;
 pub(crate) use geneve::GeneveCodec;
 pub use mpls::Mpls;
 pub(crate) use mpls::{MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, MplsCodec};
+pub(crate) use pppoe::{PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec};
+pub use pppoe::{Ppp, Pppoe};
 pub use vxlan::Vxlan;
 pub(crate) use vxlan::VxlanCodec;

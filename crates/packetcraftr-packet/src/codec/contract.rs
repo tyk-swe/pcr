@@ -87,6 +87,11 @@ pub struct LayerDecodeContext<'a> {
     pub allow_trailing_padding: bool,
     /// Network pseudo-header context established by an enclosing IP codec.
     pub network: Option<NetworkEnvelope>,
+    /// Discriminator through which the parent binding selected this layer;
+    /// `None` at the capture root. Codecs whose parent registers them under
+    /// more than one discriminator — PPPoE's two stage EtherTypes — read it
+    /// to interpret ambiguous headers the way the enclosing frame declared.
+    pub discriminator: Option<Discriminator>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

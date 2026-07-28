@@ -201,6 +201,7 @@ mod tests {
             verify_checksums: false,
             allow_trailing_padding: false,
             network: None,
+            discriminator: None,
         }
     }
 

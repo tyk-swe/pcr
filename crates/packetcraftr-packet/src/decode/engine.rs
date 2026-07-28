@@ -152,6 +152,7 @@ impl Dissector {
         let mut current = original.as_ref();
         let mut absolute_offset = 0usize;
         let mut network = None;
+        let mut current_discriminator = None;
         let mut trailing = Vec::<(usize, Bytes, usize)>::new();
 
         loop {
@@ -192,6 +193,7 @@ impl Dissector {
                     verify_checksums: options.verify_checksums,
                     allow_trailing_padding: allow_current_link_padding,
                     network,
+                    discriminator: current_discriminator,
                 },
             ) {
                 Ok(decoded) => decoded,
@@ -290,11 +292,13 @@ impl Dissector {
                 .ok_or_else(|| DecodeError::InvalidCodecCursor {
                     protocol: current_protocol.clone(),
                 })?;
-            let next_protocol = decoded
-                .next
-                .iter()
-                .find_map(|value| self.registry.child_for(binding_parent.as_str(), *value))
-                .cloned();
+            let next_selection = decoded.next.iter().find_map(|value| {
+                self.registry
+                    .child_for(binding_parent.as_str(), *value)
+                    .map(|protocol| (*value, protocol.clone()))
+            });
+            let next_discriminator = next_selection.as_ref().map(|(value, _)| *value);
+            let next_protocol = next_selection.map(|(_, protocol)| protocol);
             let missing_required_message = (decoded.payload_len == 0)
                 .then(|| {
                     next_protocol.as_ref().filter(|protocol| {
@@ -418,6 +422,7 @@ impl Dissector {
                 break;
             };
             current_protocol = next_protocol;
+            current_discriminator = next_discriminator;
             current = payload;
         }
 

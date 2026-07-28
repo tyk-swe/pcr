@@ -25,6 +25,8 @@
       {"protocol": "malformed", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "mpls", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "padding", "aliases": ["pad"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "ppp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "pppoe", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "raw", "aliases": ["payload", "bytes"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "raw_ip", "aliases": ["rawip"], "build": false, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": true},
       {"protocol": "sctp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},

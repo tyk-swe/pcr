@@ -424,7 +424,12 @@ impl Builder {
                 .is_some_and(|outside| {
                     matches!(
                         BuiltinProtocol::of(outside),
-                        Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6 | BuiltinProtocol::Udp)
+                        Some(
+                            BuiltinProtocol::Ipv4
+                                | BuiltinProtocol::Ipv6
+                                | BuiltinProtocol::Udp
+                                | BuiltinProtocol::Pppoe
+                        )
                     )
                 })
         });
@@ -476,6 +481,7 @@ impl Builder {
                             | BuiltinProtocol::Ipv6
                             | BuiltinProtocol::Udp
                             | BuiltinProtocol::Arp
+                            | BuiltinProtocol::Pppoe
                     )
                 );
                 if !has_declared_boundary {
@@ -497,7 +503,12 @@ impl Builder {
                 }
                 if matches!(
                     outside_builtin,
-                    Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6 | BuiltinProtocol::Udp)
+                    Some(
+                        BuiltinProtocol::Ipv4
+                            | BuiltinProtocol::Ipv6
+                            | BuiltinProtocol::Udp
+                            | BuiltinProtocol::Pppoe
+                    )
                 ) {
                     diagnostics.push(
                         Diagnostic::warning(

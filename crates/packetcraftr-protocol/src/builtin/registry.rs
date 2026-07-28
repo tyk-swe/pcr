@@ -22,7 +22,8 @@ use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
-    GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, MplsCodec, VxlanCodec,
+    GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, MplsCodec,
+    PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec, VxlanCodec,
 };
 
 use packetcraftr_packet::{
@@ -145,6 +146,39 @@ impl ProtocolModule for BuiltinProtocols {
             BuiltinProtocol::Raw,
             -100,
         )?;
+
+        // PPPoE session data carries a PPP frame; discovery packets carry
+        // opaque tag bytes. The session EtherType outranks discovery so an
+        // Auto ether_type resolves to the data plane.
+        bind(
+            builder,
+            BuiltinProtocol::Pppoe,
+            PPPOE_SESSION,
+            BuiltinProtocol::Ppp,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Pppoe,
+            PPPOE_DISCOVERY,
+            BuiltinProtocol::Raw,
+            0,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Ppp,
+            0x0021,
+            BuiltinProtocol::Ipv4,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Ppp,
+            0x0057,
+            BuiltinProtocol::Ipv6,
+            100,
+        )?;
+        bind(builder, BuiltinProtocol::Ppp, 0, BuiltinProtocol::Raw, -100)?;
 
         // The label stack chains itself until the S bit; the bottom payload
         // has no protocol field, so the decoder offers a version-sniffed
@@ -302,9 +336,13 @@ fn bind_link_children(
     bind(builder, parent, 0x0800, BuiltinProtocol::Ipv4, 100)?;
     bind(builder, parent, 0x0806, BuiltinProtocol::Arp, 100)?;
     bind(builder, parent, 0x8100, BuiltinProtocol::Vlan, 100)?;
-    // MPLS unicast and multicast label stacks share one codec.
+    // MPLS unicast and multicast label stacks share one codec, as do the
+    // PPPoE stages; the aliased EtherType round-trips because link-layer
+    // discriminator resolution accepts any value selecting the same child.
     bind(builder, parent, 0x8847, BuiltinProtocol::Mpls, 100)?;
     bind(builder, parent, 0x8848, BuiltinProtocol::Mpls, 90)?;
+    bind(builder, parent, 0x8864, BuiltinProtocol::Pppoe, 100)?;
+    bind(builder, parent, 0x8863, BuiltinProtocol::Pppoe, 90)?;
     bind(builder, parent, 0x88a8, BuiltinProtocol::Vlan8021ad, 100)?;
     bind(builder, parent, 0x86dd, BuiltinProtocol::Ipv6, 100)?;
     // A fallback reverse binding lets an exactly decoded unknown EtherType rebuild with Raw.

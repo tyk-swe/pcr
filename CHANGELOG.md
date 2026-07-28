@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present, and non-zero reserved bits are decode diagnostics and
   permissive-mode territory on build. Only version 0 is dissected —
   other versions are preserved as malformed bytes rather than guessed at.
+- Added PPPoE (RFC 2516) and the PPP protocol field it carries. Session
+  frames on EtherType 0x8864 decode the six-byte header and then the PPP
+  protocol number, which selects IPv4 or IPv6 and keeps LCP, IPCP, and
+  other control frames as typed opaque payloads that round-trip exactly;
+  discovery frames on 0x8863 preserve their tag list verbatim. The stage
+  code and the payload must agree on a strict build, `session_id` and
+  `code` filter under their canonical names, and an Auto EtherType
+  resolves to the session stage.
 - Added MPLS label stacks (RFC 3032) on EtherTypes 0x8847 and 0x8848 from
   every link parent, including VLAN-tagged frames. Entries chain until
   the S bit; the bottom-of-stack payload has no protocol field, so the

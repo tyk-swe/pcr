@@ -35,6 +35,8 @@ macro_rules! builtin_protocol_catalog {
             Malformed { canonical: "malformed", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: MalformedCodec }
             Mpls { canonical: "mpls", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: MplsCodec }
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: PaddingCodec }
+            Ppp { canonical: "ppp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: PppCodec }
+            Pppoe { canonical: "pppoe", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: PppoeCodec }
             Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: RawCodec }
             RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, dissect: true, exact_round_trip: true, matcher: none, codec: RawIpCodec }
             Sctp { canonical: "sctp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: reverse_flow, codec: SctpCodec }

@@ -270,6 +270,13 @@ impl Builder {
         &self.registry
     }
 
+    /// Encodes a packet into exact wire bytes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a layer index validated earlier in the same call is no longer
+    /// present, which would mean this builder had corrupted its own state.
+    /// Malformed input is reported through [`BuildError`] instead.
     pub fn build(
         &self,
         packet: Packet,

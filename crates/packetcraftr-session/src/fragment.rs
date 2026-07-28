@@ -131,6 +131,16 @@ impl Reassembler {
         self.aggregate_memory_charge
     }
 
+    /// Admits one fragment, returning an event once a datagram completes.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a flow validated earlier in the same call has since
+    /// disappeared, or if a completed datagram is missing the segment the
+    /// merge plan just placed in it. Both would mean this reassembler had
+    /// corrupted its own state; every input-driven rejection, including
+    /// conflicting overlaps and exhausted budgets, is reported through
+    /// [`enum@Error`].
     pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Option<Event>, Error> {
         let Fragment {
             key,

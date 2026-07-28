@@ -22,6 +22,14 @@ use super::{
 };
 use packetcraftr_packet::semantics::BuiltinProtocol;
 
+/// Runs a bounded traceroute, authorizing the destination before any probe.
+///
+/// # Panics
+///
+/// Panics if a UDP or TCP strategy reaches probe construction without the
+/// destination port its request was validated to carry. Every input-driven
+/// rejection, including an out-of-range probe port, is reported through
+/// [`TracerouteError`].
 pub fn traceroute<A, E, C>(
     request: &TracerouteRequest,
     authorizer: &mut A,

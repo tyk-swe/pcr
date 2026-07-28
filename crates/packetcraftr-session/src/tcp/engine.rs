@@ -52,6 +52,15 @@ impl Reassembler {
         Ok(())
     }
 
+    /// Admits one segment, returning the events its arrival resolved.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a flow whose generation is unchanged is not established,
+    /// which would mean the plan and commit halves of this reassembler had
+    /// disagreed. Every input-driven rejection, including exhausted budgets,
+    /// is reported through [`enum@Error`], and a rejected segment leaves the flow
+    /// table untouched.
     pub fn push(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
         self.validate_limits()?;
         let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));

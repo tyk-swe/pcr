@@ -42,6 +42,12 @@ pub fn fuzz(
 
 /// Generate and validate every case offline, authorize the complete campaign,
 /// then execute built cases through the shared live boundary.
+///
+/// # Panics
+///
+/// Panics if the executor selects a case that was never built, which would
+/// mean the boundary had returned evidence for a case outside the authorized
+/// campaign.
 pub fn fuzz_live<A, E, C>(
     request: &FuzzRequest,
     live: FuzzLiveOptions,

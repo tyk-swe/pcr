@@ -28,6 +28,13 @@ where
     replay_capture_with_selector(reader, options, None, authorizer, transmitter, clock, emit)
 }
 
+/// Replays a capture, transmitting only the frames the selector keeps.
+///
+/// # Panics
+///
+/// Panics if completed frames exceed the attempted frames validated for the
+/// same run, which would mean the transmitter had reported more work than the
+/// budget authorized.
 pub fn replay_capture_with_selector<R, A, T, C, F>(
     reader: &mut Reader<R>,
     options: &ReplayOptions,

@@ -435,6 +435,13 @@ impl RegistryBuilder {
         Ok(self)
     }
 
+    /// Finalizes the registry, resolving every binding it was given.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a binding table is empty, which the builder never produces:
+    /// an entry exists only once something has been bound into it. Unresolved
+    /// or conflicting registrations are reported through [`RegistryError`].
     pub fn build(mut self) -> Result<ProtocolRegistry, RegistryError> {
         for protocol in self.roots.values() {
             if !self.codecs.contains_key(protocol) {

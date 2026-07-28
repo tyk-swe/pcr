@@ -16,7 +16,7 @@ use packetcraftr_packet::{
 };
 
 use super::super::common::{
-    aliased_fields, expected_discriminator, invalid, make_layer, out_of_range, protocol,
+    aliased_fields, expected_discriminator_for_value, invalid, make_layer, out_of_range, protocol,
     resolve_u16, truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator,
     wrong_layer, wrong_type,
 };
@@ -115,7 +115,7 @@ where
             "VLAN priority or identifier is outside its wire range",
         ));
     }
-    let expectation = expected_discriminator(name, context, 0_u16);
+    let expectation = expected_discriminator_for_value(name, context, 0_u16, fields.ether_type);
     let mut diagnostics = Vec::new();
     validate_auto_raw_discriminator(
         name,

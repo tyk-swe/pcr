@@ -19,8 +19,8 @@ pub(crate) use errors::{
     binding_protocol, invalid, out_of_range, protocol, truncated, wrong_layer, wrong_type,
 };
 pub(crate) use fields::{
-    ValueExpectation, aliased_fields, expected_discriminator, make_layer, resolve_u8, resolve_u16,
-    validate_dependent,
+    ValueExpectation, aliased_fields, expected_discriminator, expected_discriminator_for_value,
+    make_layer, resolve_u8, resolve_u16, validate_dependent,
 };
 pub(crate) use payload::payload_without_padding;
 pub(crate) use validation::{

@@ -33,6 +33,7 @@ macro_rules! builtin_protocol_catalog {
             LinuxSll { canonical: "linux_sll", aliases: ["sll"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: LinuxSllCodec }
             LinuxSll2 { canonical: "linux_sll2", aliases: ["sll2"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: LinuxSll2Codec }
             Malformed { canonical: "malformed", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: MalformedCodec }
+            Mpls { canonical: "mpls", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: MplsCodec }
             Padding { canonical: "padding", aliases: ["pad"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: PaddingCodec }
             Raw { canonical: "raw", aliases: ["payload", "bytes"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: RawCodec }
             RawIp { canonical: "raw_ip", aliases: ["rawip"], constructible: false, dissect: true, exact_round_trip: true, matcher: none, codec: RawIpCodec }

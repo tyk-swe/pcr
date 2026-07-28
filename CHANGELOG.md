@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present, and non-zero reserved bits are decode diagnostics and
   permissive-mode territory on build. Only version 0 is dissected —
   other versions are preserved as malformed bytes rather than guessed at.
+- Added MPLS label stacks (RFC 3032) on EtherTypes 0x8847 and 0x8848 from
+  every link parent, including VLAN-tagged frames. Entries chain until
+  the S bit; the bottom-of-stack payload has no protocol field, so the
+  dissector sniffs its leading version nibble for IPv4 or IPv6 and keeps
+  anything else — pseudowire control words included — as opaque bytes
+  that still rebuild exactly. A strict build requires the S bit to agree
+  with what actually follows the entry, and `mpls.exp` and `mpls.bottom`
+  filter the traffic-class and S bits under their conventional names.
 - Added `packetcraftr follow <PATH> --stream <tcp|udp>:<INDEX>`, extracting
   one conversation's payload from a capture file entirely offline. The index
   is the same first-seen conversation numbering `stats` reports and stream

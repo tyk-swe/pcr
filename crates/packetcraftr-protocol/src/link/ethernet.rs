@@ -16,7 +16,7 @@ use packetcraftr_packet::{
 };
 
 use super::super::common::{
-    aliased_fields, expected_discriminator, make_layer, protocol, resolve_u16, truncated,
+    aliased_fields, expected_discriminator_for_value, make_layer, protocol, resolve_u16, truncated,
     validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
 };
 
@@ -72,7 +72,8 @@ impl LayerCodec for EthernetCodec {
             .as_any()
             .downcast_ref::<Ethernet>()
             .ok_or_else(|| wrong_layer("ethernet", layer))?;
-        let expectation = expected_discriminator("ethernet", context, 0_u16);
+        let expectation =
+            expected_discriminator_for_value("ethernet", context, 0_u16, &layer.ether_type);
         let mut diagnostics = Vec::new();
         validate_auto_raw_discriminator(
             "ethernet",

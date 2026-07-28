@@ -21,7 +21,9 @@ use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
-use tunnel::{GeneveCodec, VxlanCodec};
+use tunnel::{
+    GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, MplsCodec, VxlanCodec,
+};
 
 use packetcraftr_packet::{
     registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
@@ -140,6 +142,38 @@ impl ProtocolModule for BuiltinProtocols {
             builder,
             BuiltinProtocol::Geneve,
             0,
+            BuiltinProtocol::Raw,
+            -100,
+        )?;
+
+        // The label stack chains itself until the S bit; the bottom payload
+        // has no protocol field, so the decoder offers a version-sniffed
+        // discriminator with an opaque fallback for pseudowire payloads.
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_NEXT_LABEL,
+            BuiltinProtocol::Mpls,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_BOTTOM_VERSION_BASE + 4,
+            BuiltinProtocol::Ipv4,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_BOTTOM_VERSION_BASE + 6,
+            BuiltinProtocol::Ipv6,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_BOTTOM_RAW,
             BuiltinProtocol::Raw,
             -100,
         )?;
@@ -268,6 +302,9 @@ fn bind_link_children(
     bind(builder, parent, 0x0800, BuiltinProtocol::Ipv4, 100)?;
     bind(builder, parent, 0x0806, BuiltinProtocol::Arp, 100)?;
     bind(builder, parent, 0x8100, BuiltinProtocol::Vlan, 100)?;
+    // MPLS unicast and multicast label stacks share one codec.
+    bind(builder, parent, 0x8847, BuiltinProtocol::Mpls, 100)?;
+    bind(builder, parent, 0x8848, BuiltinProtocol::Mpls, 90)?;
     bind(builder, parent, 0x88a8, BuiltinProtocol::Vlan8021ad, 100)?;
     bind(builder, parent, 0x86dd, BuiltinProtocol::Ipv6, 100)?;
     // A fallback reverse binding lets an exactly decoded unknown EtherType rebuild with Raw.

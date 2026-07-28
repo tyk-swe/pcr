@@ -12,6 +12,7 @@ use packetcraftr_packet::{
     diagnostic::Diagnostic,
     field::{FieldValue, WireValue},
     layer::Layer,
+    registry::Discriminator,
 };
 
 use super::errors::{binding_protocol, invalid};
@@ -134,6 +135,33 @@ where
     diagnostics
         .push(Diagnostic::warning("build.inconsistent_dependent_field", message).at_field(field));
     Ok(())
+}
+
+/// Like [`expected_discriminator`], but honours an exact value that already
+/// selects the child on dissection. Some children are registered under more
+/// than one discriminator — MPLS under both its unicast and multicast
+/// EtherTypes — and any alias that forward-resolves to the same child is
+/// consistent, not a mismatch with the reverse lookup's preferred one.
+pub(crate) fn expected_discriminator_for_value<T>(
+    parent: &str,
+    context: &LayerEncodeContext<'_>,
+    fallback: T,
+    value: &WireValue<T>,
+) -> ValueExpectation<T>
+where
+    T: Copy + TryFrom<u64> + Into<u64>,
+{
+    if let WireValue::Exact(exact) = value
+        && let Some(child) = context.child
+        && child.protocol_id().as_str() != "raw"
+        && context
+            .registry
+            .child_for(parent, Discriminator((*exact).into()))
+            .is_some_and(|selected| selected == binding_protocol(child))
+    {
+        return ValueExpectation::Required(*exact);
+    }
+    expected_discriminator(parent, context, fallback)
 }
 
 pub(crate) fn expected_discriminator<T>(

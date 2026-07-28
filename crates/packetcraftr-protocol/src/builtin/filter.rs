@@ -276,8 +276,21 @@ const DIRECT: &[Direct] = &[
         protocol: "gre",
         field: "protocol_type",
     },
-    // VXLAN's conventional spellings (vxlan.vni, vxlan.flags) are its
-    // canonical field names, which resolve without registration.
+    // The traffic-class bits were named EXP for two decades, and the S bit
+    // is conventionally filtered as "bottom".
+    Direct {
+        path: "mpls.exp",
+        protocol: "mpls",
+        field: "traffic_class",
+    },
+    Direct {
+        path: "mpls.bottom",
+        protocol: "mpls",
+        field: "bottom_of_stack",
+    },
+    // VXLAN's and GENEVE's conventional spellings (vxlan.vni, geneve.vni,
+    // …) are their canonical field names, which resolve without
+    // registration.
 ];
 
 /// The nine TCP control flags, in their wire bit order.

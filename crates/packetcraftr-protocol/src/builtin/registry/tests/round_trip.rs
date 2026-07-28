@@ -537,6 +537,187 @@ fn geneve_tunnels_round_trip_bridged_ethernet_and_bare_ip_frames() {
 }
 
 #[test]
+fn mpls_label_stacks_round_trip_to_ip_and_opaque_bottoms() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+
+    // A two-entry stack over Ethernet whose bottom carries IPv4.
+    let mut stacked = Packet::new();
+    stacked
+        .push(Ethernet::default())
+        .push(Mpls {
+            label: 100,
+            bottom_of_stack: false,
+            ..Mpls::default()
+        })
+        .push(Mpls {
+            label: 200,
+            traffic_class: 5,
+            ..Mpls::default()
+        })
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Icmpv4::default());
+    let built = builder
+        .build(stacked, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    assert_eq!(&built.bytes[12..14], &[0x88, 0x47]);
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(
+            built.bytes.clone(),
+            "ethernet".into(),
+            DecodeOptions::default(),
+        )
+        .unwrap();
+    let labels = decoded.packet.get_all::<Mpls>().collect::<Vec<_>>();
+    assert_eq!(labels.len(), 2);
+    assert_eq!(labels[0].label, 100);
+    assert!(!labels[0].bottom_of_stack);
+    assert_eq!(labels[1].label, 200);
+    assert_eq!(labels[1].traffic_class, 5);
+    assert!(labels[1].bottom_of_stack);
+    assert!(decoded.packet.get::<Ipv4>().is_some());
+    assert!(decoded.diagnostics.is_empty());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+
+    // A pseudowire payload with no protocol field stays opaque; its leading
+    // control-word nibble must not be mistaken for another label entry.
+    let mut pseudowire = Packet::new();
+    pseudowire
+        .push(Ethernet::default())
+        .push(Mpls::default())
+        .push(Raw::new(Bytes::from_static(&[0x00, 0x01, 0x02, 0x03])));
+    let built = builder
+        .build(pseudowire, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(
+            built.bytes.clone(),
+            "ethernet".into(),
+            DecodeOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(decoded.packet.get_all::<Mpls>().count(), 1);
+    assert_eq!(
+        decoded.packet.get::<Raw>().unwrap().bytes.as_ref(),
+        &[0x00, 0x01, 0x02, 0x03]
+    );
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+
+    // The S bit must agree with what actually follows.
+    let mut lying = Packet::new();
+    lying
+        .push(Ethernet::default())
+        .push(Mpls {
+            bottom_of_stack: true,
+            ..Mpls::default()
+        })
+        .push(Mpls::default())
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Icmpv4::default());
+    let error = builder
+        .build(lying, BuildContext::default(), BuildOptions::default())
+        .unwrap_err();
+    assert!(error.to_string().contains("S bit"));
+
+    // A terminal entry with the S bit clear is a truncated stack.
+    let mut truncated = Packet::new();
+    truncated.push(Ethernet::default()).push(Mpls {
+        bottom_of_stack: false,
+        ..Mpls::default()
+    });
+    let error = builder
+        .build(truncated, BuildContext::default(), BuildOptions::default())
+        .unwrap_err();
+    assert!(error.to_string().contains("S bit"));
+}
+
+#[test]
+fn multicast_mpls_frames_round_trip_their_exact_ethertype() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet {
+            ether_type: WireValue::Exact(0x8848),
+            ..Ethernet::default()
+        })
+        .push(Mpls::default())
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(224, 0, 0, 5),
+            ..Ipv4::default()
+        })
+        .push(Icmpv4::default());
+    let built = builder
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    assert!(built.diagnostics.is_empty());
+    assert_eq!(&built.bytes[12..14], &[0x88, 0x48]);
+
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(
+            built.bytes.clone(),
+            "ethernet".into(),
+            DecodeOptions::default(),
+        )
+        .unwrap();
+    assert!(decoded.packet.get::<Mpls>().is_some());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
+fn a_stack_truncated_before_its_bottom_dissects_as_missing_a_label() {
+    // An Ethernet frame that ends right after a non-bottom label entry.
+    let mut bytes = Vec::<u8>::new();
+    bytes.extend_from_slice(&[0; 12]);
+    bytes.extend_from_slice(&[0x88, 0x47]);
+    bytes.extend_from_slice(&[0x00, 0x01, 0x44, 0x40]);
+    let decoded = Dissector::new(Arc::new(default_registry().unwrap()))
+        .decode_with_root(
+            Bytes::from(bytes),
+            "ethernet".into(),
+            DecodeOptions::default(),
+        )
+        .unwrap();
+
+    assert!(
+        decoded
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "decode.missing_required_child")
+    );
+}
+
+#[test]
 fn strict_build_requires_the_encapsulated_frame_after_vxlan() {
     let registry = Arc::new(default_registry().unwrap());
     let builder = Builder::new(Arc::clone(&registry));

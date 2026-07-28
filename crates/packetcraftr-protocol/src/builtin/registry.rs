@@ -22,8 +22,9 @@ use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
-    AhCodec, ErspanCodec, EspCodec, GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE,
-    MPLS_NEXT_LABEL, MplsCodec, PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec, VxlanCodec,
+    AhCodec, ErspanCodec, EspCodec, GeneveCodec, L2tpv3Codec, MPLS_BOTTOM_RAW,
+    MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, MplsCodec, PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec,
+    PppoeCodec, VxlanCodec,
 };
 
 use packetcraftr_packet::{
@@ -96,6 +97,7 @@ impl ProtocolModule for BuiltinProtocols {
         )?;
         bind_ipv6_extensions(builder, BuiltinProtocol::Ah)?;
         bind(builder, BuiltinProtocol::Esp, 0, BuiltinProtocol::Raw, 0)?;
+        bind(builder, BuiltinProtocol::L2tpv3, 0, BuiltinProtocol::Raw, 0)?;
 
         bind(
             builder,
@@ -341,6 +343,7 @@ fn bind_common_ip_children(
     bind(builder, parent, 47, BuiltinProtocol::Gre, 100)?;
     bind(builder, parent, 50, BuiltinProtocol::Esp, 100)?;
     bind(builder, parent, 51, BuiltinProtocol::Ah, 100)?;
+    bind(builder, parent, 115, BuiltinProtocol::L2tpv3, 100)?;
     bind(builder, parent, 132, BuiltinProtocol::Sctp, 100)?;
     bind(builder, parent, 255, BuiltinProtocol::Raw, -100)?;
     Ok(())

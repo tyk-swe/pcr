@@ -23,6 +23,7 @@
       {"protocol": "ipv6_fragment", "aliases": ["fragment6", "frag6"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "ipv6_hop_by_hop", "aliases": ["hop", "hopopts", "hbh"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "ipv6_srh", "aliases": ["srh", "segment_routing"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "l2tpv3", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "linux_sll", "aliases": ["sll"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "linux_sll2", "aliases": ["sll2"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "malformed", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},

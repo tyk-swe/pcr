@@ -33,6 +33,7 @@ macro_rules! builtin_protocol_catalog {
             Ipv6Fragment { canonical: "ipv6_fragment", aliases: ["fragment6", "frag6"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: Ipv6FragmentCodec }
             Ipv6HopByHop { canonical: "ipv6_hop_by_hop", aliases: ["hop", "hopopts", "hbh"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: HopByHopCodec }
             Ipv6Srh { canonical: "ipv6_srh", aliases: ["srh", "segment_routing"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: SegmentRoutingHeaderCodec }
+            L2tpv3 { canonical: "l2tpv3", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: L2tpv3Codec }
             LinuxSll { canonical: "linux_sll", aliases: ["sll"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: LinuxSllCodec }
             LinuxSll2 { canonical: "linux_sll2", aliases: ["sll2"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: LinuxSll2Codec }
             Malformed { canonical: "malformed", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: MalformedCodec }

@@ -109,6 +109,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present, and non-zero reserved bits are decode diagnostics and
   permissive-mode territory on build. Only version 0 is dissected —
   other versions are preserved as malformed bytes rather than guessed at.
+- Added the L2TPv3 session header over IP (RFC 3931, protocol 115),
+  reachable from both address families. The 32-bit session identifier —
+  zero addressing the control connection — dissects and filters as
+  `l2tpv3.session_id`, while everything after it stays opaque: the
+  negotiated cookie has no on-wire length, so recovering the tunneled
+  frame would be guesswork, and a strict build likewise refuses typed
+  children behind the header. L2TP over UDP port 1701 is deliberately
+  not bound — that port mixes v2 and v3, control and data, and binding
+  it to one interpretation would mis-dissect the others.
 - Added ERSPAN mirrored-frame headers: Type II on GRE protocol type
   0x88BE and Type III on 0x22EB, both ending in the mirrored Ethernet
   frame with the same tunnel-boundary treatment as VXLAN. The version

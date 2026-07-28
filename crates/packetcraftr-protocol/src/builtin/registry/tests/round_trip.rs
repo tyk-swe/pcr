@@ -654,6 +654,71 @@ fn mpls_label_stacks_round_trip_to_ip_and_opaque_bottoms() {
 }
 
 #[test]
+fn l2tpv3_session_headers_round_trip_with_an_opaque_cookie_payload() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(L2tpv3 { session_id: 0x5eed })
+        .push(Raw::new(Bytes::from_static(&[1, 2, 3, 4, 0x45, 0, 0, 20])));
+    let built = builder
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    assert!(built.diagnostics.is_empty());
+    assert_eq!(built.bytes[9], 115);
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+        .unwrap();
+    assert_eq!(decoded.packet.get::<L2tpv3>().unwrap().session_id, 0x5eed);
+    // The cookie and tunneled frame stay opaque even when the bytes after
+    // the cookie imitate an IPv4 header.
+    assert_eq!(decoded.packet.get_all::<Ipv4>().count(), 1);
+    assert!(decoded.packet.get::<Raw>().is_some());
+    assert!(decoded.diagnostics.is_empty());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+
+    // A typed child would serialize structure the dissector never
+    // recovers from behind the cookie.
+    let mut typed = Packet::new();
+    typed
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(L2tpv3::default())
+        .push(Icmpv4::default());
+    let permissive = builder
+        .build(
+            typed,
+            BuildContext::default(),
+            BuildOptions {
+                mode: BuildMode::Permissive,
+                ..BuildOptions::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        permissive
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "build.l2tpv3_cookie")
+    );
+}
+
+#[test]
 fn erspan_mirrored_frames_round_trip_both_header_types() {
     let registry = Arc::new(default_registry().unwrap());
     let builder = Builder::new(Arc::clone(&registry));

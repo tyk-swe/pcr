@@ -720,7 +720,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(BuiltinProtocol::ALL.len(), 33);
+        assert_eq!(BuiltinProtocol::ALL.len(), 34);
         assert_eq!(
             BuiltinProtocol::from_id(&ProtocolId::new("raw_ip")),
             Some(BuiltinProtocol::RawIp)

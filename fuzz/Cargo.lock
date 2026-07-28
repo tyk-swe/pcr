@@ -273,7 +273,6 @@ dependencies = [
  "packetcraftr-net",
  "packetcraftr-packet",
  "packetcraftr-protocol",
- "packetcraftr-session",
  "serde",
  "thiserror",
 ]

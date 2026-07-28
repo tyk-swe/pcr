@@ -27,6 +27,20 @@ updates:
       time: "06:30"
       timezone: "Etc/UTC"
     open-pull-requests-limit: 2
+    # This package path-depends on `crates/packetcraftr`, so parts of the root
+    # workspace reach its lockfile. Bumping those is only safe here when the
+    # root requirement already covers the new version and just the lockfile
+    # moves; `bytes`, `libc`, `serde`, `serde_json`, and `thiserror` all use
+    # ranges wide enough for that. Ignore any dependency whose requirement
+    # itself has to change, because rewriting the root manifest from this
+    # ecosystem leaves the root lockfile stale.
+    ignore:
+      # Reaches this package through `packetcraftr-packet`, but its version is
+      # owned by the root `[workspace.dependencies]` table and pinned at
+      # `0.0.x`, where every release is semver-incompatible — so no bump can
+      # be lockfile-only. The root ecosystem owns these; refresh
+      # `fuzz/Cargo.lock` in that same commit.
+      - dependency-name: "noyalib"
     groups:
       fuzz-minor-and-patch:
         update-types:

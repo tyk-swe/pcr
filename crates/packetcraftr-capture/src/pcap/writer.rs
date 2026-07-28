@@ -4,18 +4,17 @@
 use std::io::{self, Write};
 use std::time::UNIX_EPOCH;
 
-use crate::{Direction, Frame, LinkType};
+use crate::{Frame, LinkType};
 
+use super::classic::{write_pcap_header, write_pcap_record};
 use super::models::{
     DEFAULT_INTERFACE_LIMIT, Endianness, Error, Format, Interface, Limits, PcapNgOptions,
     PcapOptions, TimestampPrecision, TimestampResolution,
 };
+use super::pcapng::{write_enhanced_packet, write_interface_description, write_section_header};
 use super::wire::{
-    PCAPNG_BYTE_ORDER_MAGIC, PCAPNG_ENHANCED_PACKET_BLOCK, PCAPNG_INTERFACE_DESCRIPTION_BLOCK,
-    PCAPNG_OPTION_END, PCAPNG_OPTION_EPB_FLAGS, PCAPNG_OPTION_IF_TSOFFSET,
-    PCAPNG_OPTION_IF_TSRESOL, PCAPNG_SECTION_HEADER_BLOCK, WRITER_TIMESTAMP_RESOLUTION,
-    align_to_u32, timestamp_to_ticks, usize_to_u32_limit, validate_frame_lengths,
-    validate_timestamp_resolution, write_i64, write_padding, write_u16, write_u32,
+    WRITER_TIMESTAMP_RESOLUTION, align_to_u32, timestamp_to_ticks, usize_to_u32_limit,
+    validate_frame_lengths, validate_timestamp_resolution,
 };
 
 pub(super) enum WriterState {
@@ -450,14 +449,7 @@ impl<W: Write> Writer<W> {
             TimestampPrecision::Nanoseconds => elapsed.subsec_nanos(),
         };
 
-        self.write_output(|inner| {
-            write_u32(inner, endianness, seconds)?;
-            write_u32(inner, endianness, fraction)?;
-            write_u32(inner, endianness, frame.captured_length())?;
-            write_u32(inner, endianness, frame.original_length())?;
-            inner.write_all(frame.bytes())?;
-            Ok(())
-        })
+        self.write_output(|inner| write_pcap_record(inner, endianness, seconds, fraction, frame))
     }
 
     fn write_pcapng_frame(&mut self, frame: &Frame) -> Result<(), Error> {
@@ -499,36 +491,14 @@ impl<W: Write> Writer<W> {
         }
 
         self.write_output(|inner| {
-            write_u32(inner, endianness, PCAPNG_ENHANCED_PACKET_BLOCK)?;
-            write_u32(inner, endianness, block_length)?;
-            write_u32(inner, endianness, interface_id)?;
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "the PCAPNG enhanced packet block stores its 64-bit timestamp as two \
-                          32-bit halves, so discarding the upper bits of each half is the format"
-            )]
-            let (timestamp_high, timestamp_low) = ((timestamp >> 32) as u32, timestamp as u32);
-            write_u32(inner, endianness, timestamp_high)?;
-            write_u32(inner, endianness, timestamp_low)?;
-            write_u32(inner, endianness, frame.captured_length())?;
-            write_u32(inner, endianness, frame.original_length())?;
-            inner.write_all(frame.bytes())?;
-            write_padding(inner, frame.captured_length())?;
-
-            if let Some(direction) = frame.direction {
-                write_u16(inner, endianness, PCAPNG_OPTION_EPB_FLAGS)?;
-                write_u16(inner, endianness, 4)?;
-                let flags = match direction {
-                    Direction::Unknown => 0,
-                    Direction::Inbound => 1,
-                    Direction::Outbound => 2,
-                };
-                write_u32(inner, endianness, flags)?;
-                write_u16(inner, endianness, PCAPNG_OPTION_END)?;
-                write_u16(inner, endianness, 0)?;
-            }
-            write_u32(inner, endianness, block_length)?;
-            Ok(())
+            write_enhanced_packet(
+                inner,
+                endianness,
+                interface_id,
+                timestamp,
+                block_length,
+                frame,
+            )
         })
     }
 
@@ -644,91 +614,4 @@ impl<W: Write> Writer<W> {
     pub fn into_inner(self) -> W {
         self.inner
     }
-}
-
-/// Copies one capture stream into a bounded writer without retaining packet
-/// payloads between records.
-///
-/// PCAPNG output normalizes multiple source sections into one section while
-/// preserving the open link type, snap length, timestamp resolution/offset,
-/// globalized interface identity, direction, captured length, original wire
-/// length, and complete captured bytes. Classic PCAP can only be copied from
-/// classic PCAP because its container cannot represent PCAPNG interfaces or
-/// packet directions.
-fn write_pcap_header<W: Write>(
-    writer: &mut W,
-    endianness: Endianness,
-    precision: TimestampPrecision,
-    snap_len: u32,
-    link_type: LinkType,
-) -> Result<(), Error> {
-    let magic = match (endianness, precision) {
-        (Endianness::Little, TimestampPrecision::Microseconds) => [0xd4, 0xc3, 0xb2, 0xa1],
-        (Endianness::Big, TimestampPrecision::Microseconds) => [0xa1, 0xb2, 0xc3, 0xd4],
-        (Endianness::Little, TimestampPrecision::Nanoseconds) => [0x4d, 0x3c, 0xb2, 0xa1],
-        (Endianness::Big, TimestampPrecision::Nanoseconds) => [0xa1, 0xb2, 0x3c, 0x4d],
-    };
-    writer.write_all(&magic)?;
-    write_u16(writer, endianness, 2)?;
-    write_u16(writer, endianness, 4)?;
-    write_u32(writer, endianness, 0)?;
-    write_u32(writer, endianness, 0)?;
-    write_u32(writer, endianness, snap_len)?;
-    write_u32(writer, endianness, link_type.0)?;
-    Ok(())
-}
-
-fn write_section_header<W: Write>(writer: &mut W, endianness: Endianness) -> Result<(), Error> {
-    write_u32(writer, endianness, PCAPNG_SECTION_HEADER_BLOCK)?;
-    write_u32(writer, endianness, 28)?;
-    write_u32(writer, endianness, PCAPNG_BYTE_ORDER_MAGIC)?;
-    write_u16(writer, endianness, 1)?;
-    write_u16(writer, endianness, 0)?;
-    write_i64(writer, endianness, -1)?;
-    write_u32(writer, endianness, 28)?;
-    Ok(())
-}
-
-fn write_interface_description<W: Write>(
-    writer: &mut W,
-    endianness: Endianness,
-    link_type: LinkType,
-    snap_len: u32,
-    timestamp_resolution: TimestampResolution,
-    timestamp_offset: i64,
-) -> Result<(), Error> {
-    let block_length = if timestamp_offset == 0 { 32 } else { 44 };
-    write_u32(writer, endianness, PCAPNG_INTERFACE_DESCRIPTION_BLOCK)?;
-    write_u32(writer, endianness, block_length)?;
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "validate_new_interface rejects a link type above u16::MAX with \
-                  Error::LinkTypeOutOfRange before any interface description is written"
-    )]
-    let link_type_field = link_type.0 as u16;
-    write_u16(writer, endianness, link_type_field)?;
-    write_u16(writer, endianness, 0)?;
-    write_u32(writer, endianness, snap_len)?;
-    write_u16(writer, endianness, PCAPNG_OPTION_IF_TSRESOL)?;
-    write_u16(writer, endianness, 1)?;
-    let resolution = match timestamp_resolution {
-        TimestampResolution::Decimal(exponent) if exponent <= 0x7f => exponent,
-        TimestampResolution::Binary(exponent) if exponent <= 0x7f => exponent | 0x80,
-        TimestampResolution::Decimal(exponent) => {
-            return Err(Error::InvalidTimestampResolution { base: 10, exponent });
-        }
-        TimestampResolution::Binary(exponent) => {
-            return Err(Error::InvalidTimestampResolution { base: 2, exponent });
-        }
-    };
-    writer.write_all(&[resolution, 0, 0, 0])?;
-    if timestamp_offset != 0 {
-        write_u16(writer, endianness, PCAPNG_OPTION_IF_TSOFFSET)?;
-        write_u16(writer, endianness, 8)?;
-        write_i64(writer, endianness, timestamp_offset)?;
-    }
-    write_u16(writer, endianness, PCAPNG_OPTION_END)?;
-    write_u16(writer, endianness, 0)?;
-    write_u32(writer, endianness, block_length)?;
-    Ok(())
 }

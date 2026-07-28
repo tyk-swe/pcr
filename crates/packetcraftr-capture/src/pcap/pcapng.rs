@@ -9,8 +9,10 @@ pub(super) use section::{
     SectionHeader, read_pcapng_block_header, read_section_header_after_type,
     read_section_header_with_length, validate_pcapng_block_length,
 };
+pub(super) use writer::{write_enhanced_packet, write_interface_description, write_section_header};
 
 mod interface;
 mod options;
 mod packet;
 mod section;
+mod writer;

@@ -3,22 +3,17 @@
 
 // Offline capture-statistics command.
 
-use std::fs::File;
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use packetcraftr::{
-    analysis,
-    capture::{Reader, ReaderOptions},
-    output,
-};
+use packetcraftr::{analysis, output};
 
 use super::super::arguments::{CliStatsTable, StatsArgs};
 use super::super::errors::{CliError, analysis_cli_error};
-use super::super::filtering::{self, Capabilities};
 use super::super::rendering::{emit_json, write_stdout_line};
-use super::super::runtime::default_registry_arc;
-use super::offline::validate_capture_stream_limits;
+use super::offline_analysis::{
+    PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
+};
 
 pub(crate) fn run_stats(
     arguments: StatsArgs,
@@ -29,52 +24,18 @@ pub(crate) fn run_stats(
     output::contract::Command::Stats
         .require_format(output)
         .map_err(CliError::classified)?;
-    validate_capture_stream_limits(
-        arguments.max_frames,
-        arguments.max_bytes,
-        arguments.max_frame_bytes,
-        arguments.max_interfaces,
-    )?;
-    let registry = default_registry_arc()?;
     // Stats assigns conversation indices, so stream-aware filters like
     // `tcp.stream == 7` are supported here.
-    let filter = match arguments.filter.as_deref() {
-        Some(source) => Some(filtering::compile(
-            source,
-            &registry,
-            Capabilities::stream_capable(),
-        )?),
-        None => None,
-    };
-    let limits = analysis::Limits {
-        max_frames: arguments.max_frames,
-        max_bytes: arguments.max_bytes,
-        max_frame_bytes: arguments.max_frame_bytes,
-        max_flows: arguments.max_flows,
-        max_duration: Duration::from_millis(arguments.max_duration_ms),
-    };
-    // Every limit is refused before the capture is opened, so an invalid
-    // invocation never reports an unrelated I/O or header error instead.
-    limits.validate().map_err(analysis_cli_error)?;
+    let PreparedOfflineAnalysis {
+        registry,
+        filter,
+        limits,
+    } = prepare_offline_analysis(arguments.limits, arguments.filter.as_deref())?;
     let mut collector =
         analysis::stats::StatsCollector::new(Duration::from_millis(arguments.interval_ms))
             .map_err(analysis_cli_error)?;
 
-    let file = File::open(&arguments.path).map_err(|source| {
-        CliError::new(
-            5,
-            format!("open {} failed: {source}", arguments.path.display()),
-        )
-    })?;
-    let mut reader = Reader::with_options(
-        file,
-        ReaderOptions {
-            max_size: arguments.max_frame_bytes,
-            max_interfaces_per_section: arguments.max_interfaces,
-            ..ReaderOptions::default()
-        },
-    )
-    .map_err(CliError::classified)?;
+    let mut reader = open_offline_reader(&arguments.path, arguments.limits.capture)?;
 
     let options = analysis::Options {
         filter: filter.as_ref(),

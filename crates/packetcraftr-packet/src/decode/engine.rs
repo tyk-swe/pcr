@@ -11,10 +11,18 @@ use packetcraftr_capture::{Error as CaptureError, Frame, LinkType};
 use super::super::Packet;
 use super::super::build::{DEFAULT_MAX_LAYERS, DEFAULT_MAX_PACKET_SIZE};
 use super::super::diagnostic::Diagnostic;
-use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
-use super::super::layout::{ByteRange, FieldLayout, LayerLayout, PacketLayout};
+use super::super::layer::{FieldError, MalformedLayer, ProtocolId};
+use super::super::layout::{ByteRange, LayerLayout, PacketLayout};
 use super::super::registry::{LayerDecodeContext, ProtocolRegistry};
 use super::super::semantics::BuiltinProtocol;
+
+use fallback::{
+    append_missing_required_layer, append_padding, append_raw, raw_decoded_frame, slice_original,
+};
+use traversal::TraversalScope;
+
+mod fallback;
+mod traversal;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DecodeOptions {
@@ -144,14 +152,13 @@ impl Dissector {
         options: DecodeOptions,
         original: Bytes,
     ) -> Result<DecodedPacket, DecodeError> {
-        let mut allow_trailing_padding = link_scope_allows_padding(BuiltinProtocol::from_id(&root));
+        let mut traversal = TraversalScope::new(&root);
         let mut packet = Packet::new();
         let mut layouts = Vec::new();
         let mut diagnostics = Vec::new();
         let mut current_protocol = root;
         let mut current = original.as_ref();
         let mut absolute_offset = 0usize;
-        let mut network = None;
         let mut current_discriminator = None;
         let mut trailing = Vec::<(usize, Bytes, usize)>::new();
 
@@ -183,7 +190,7 @@ impl Dissector {
             // Once an enclosing IP layer has established a network envelope,
             // bytes outside a child's declared length are still covered by
             // that IP packet and cannot be link-layer padding.
-            let allow_current_link_padding = allow_trailing_padding && network.is_none();
+            let allow_current_link_padding = traversal.allows_current_link_padding();
             let decoded = match codec.decode(
                 current,
                 &LayerDecodeContext {
@@ -192,7 +199,7 @@ impl Dissector {
                     absolute_offset,
                     verify_checksums: options.verify_checksums,
                     allow_trailing_padding: allow_current_link_padding,
-                    network,
+                    network: traversal.network(),
                     discriminator: current_discriminator,
                 },
             ) {
@@ -327,21 +334,9 @@ impl Dissector {
                 range: ByteRange::new(absolute_offset, layer_end),
                 fields,
             });
-            let starts_encapsulated_frame = BuiltinProtocol::from_id(binding_parent)
-                .is_some_and(BuiltinProtocol::is_encapsulation_boundary);
+            traversal.accept_network(decoded.network);
+            traversal.enter_child(binding_parent, next_protocol.as_ref());
             packet.push_boxed(decoded.layer);
-            if let Some(envelope) = decoded.network {
-                network = Some(envelope);
-            }
-            if starts_encapsulated_frame {
-                // The payload is a complete encapsulated frame: the enclosing
-                // network envelope ends here, and the inner stack opens its
-                // own link-padding scope rooted at the selected child.
-                network = None;
-                allow_trailing_padding = link_scope_allows_padding(
-                    next_protocol.as_ref().and_then(BuiltinProtocol::from_id),
-                );
-            }
             diagnostics.extend(decoded.diagnostics.into_iter().map(|mut diagnostic| {
                 if diagnostic.layer.is_none() {
                     diagnostic.layer = Some(index);
@@ -450,122 +445,6 @@ impl Dissector {
     }
 }
 
-/// Whether a stack rooted at this protocol may carry link-layer padding after
-/// a declared network length. Applies to the capture root and, equally, to the
-/// root of an encapsulated frame behind a tunnel boundary.
-fn link_scope_allows_padding(root: Option<BuiltinProtocol>) -> bool {
-    matches!(
-        root,
-        Some(
-            BuiltinProtocol::Ethernet
-                | BuiltinProtocol::Vlan
-                | BuiltinProtocol::Vlan8021ad
-                | BuiltinProtocol::BsdNull
-                | BuiltinProtocol::BsdLoop
-                | BuiltinProtocol::LinuxSll
-                | BuiltinProtocol::LinuxSll2
-        )
-    )
-}
-
-fn append_padding(
-    packet: &mut Packet,
-    layouts: &mut Vec<LayerLayout>,
-    bytes: Bytes,
-    absolute_offset: usize,
-    outside_layer: usize,
-) {
-    let index = packet.len();
-    let layout = bytes_layer_layout(
-        index,
-        BuiltinProtocol::Padding,
-        absolute_offset,
-        bytes.len(),
-    );
-    packet.push(Padding::after_layer(bytes, outside_layer));
-    layouts.push(layout);
-}
-
-fn append_raw(
-    packet: &mut Packet,
-    layouts: &mut Vec<LayerLayout>,
-    bytes: Bytes,
-    absolute_offset: usize,
-) {
-    let index = packet.len();
-    let layout = bytes_layer_layout(index, BuiltinProtocol::Raw, absolute_offset, bytes.len());
-    packet.push(Raw::new(bytes));
-    layouts.push(layout);
-}
-
-fn bytes_layer_layout(
-    index: usize,
-    protocol: BuiltinProtocol,
-    absolute_offset: usize,
-    byte_length: usize,
-) -> LayerLayout {
-    let end = absolute_offset.saturating_add(byte_length);
-    LayerLayout {
-        index,
-        protocol: ProtocolId::new(protocol.as_str()),
-        range: ByteRange::new(absolute_offset, end),
-        fields: vec![FieldLayout {
-            name: "bytes".to_owned(),
-            range: ByteRange::new(absolute_offset, end),
-        }],
-    }
-}
-
-fn slice_original(original: &Bytes, offset: usize, length: usize) -> Bytes {
-    let end = offset
-        .checked_add(length)
-        .expect("decoder cursor ranges were validated before preserving bytes");
-    original.slice(offset..end)
-}
-
-fn append_missing_required_layer(
-    packet: &mut Packet,
-    layouts: &mut Vec<LayerLayout>,
-    intended: ProtocolId,
-    absolute_offset: usize,
-) {
-    let index = packet.len();
-    packet.push(MalformedLayer::new(
-        Some(intended),
-        Bytes::new(),
-        "required child header is absent",
-    ));
-    layouts.push(LayerLayout {
-        index,
-        protocol: ProtocolId::new(BuiltinProtocol::Malformed.as_str()),
-        range: ByteRange::new(absolute_offset, absolute_offset),
-        fields: Vec::new(),
-    });
-}
-
-fn raw_decoded_frame(frame: Frame, diagnostic: Diagnostic) -> DecodedPacket {
-    let original = frame.bytes().clone();
-    let mut packet = Packet::new();
-    packet.push(Raw::new(original.clone()));
-    DecodedPacket {
-        packet,
-        original: original.clone(),
-        frame,
-        layout: PacketLayout {
-            layers: vec![LayerLayout {
-                index: 0,
-                protocol: ProtocolId::new(BuiltinProtocol::Raw.as_str()),
-                range: ByteRange::new(0, original.len()),
-                fields: vec![FieldLayout {
-                    name: "bytes".to_owned(),
-                    range: ByteRange::new(0, original.len()),
-                }],
-            }],
-        },
-        diagnostics: vec![diagnostic],
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
@@ -578,7 +457,8 @@ mod tests {
             LayerEncodeContext,
         },
         field::FieldValue,
-        layer::{FieldError, Layer, LayerSchema},
+        layer::{FieldError, Layer, LayerSchema, Padding, Raw},
+        layout::FieldLayout,
         registry::RegistryBuilder,
     };
     use packetcraftr_capture::LinkType;

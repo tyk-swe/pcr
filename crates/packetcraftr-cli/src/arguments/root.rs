@@ -217,6 +217,75 @@ impl CliColorChoice {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{Cli, CliColorChoice, Command};
+
+    #[test]
+    fn packet_sources_are_mutually_exclusive() {
+        let result = Cli::try_parse_from([
+            "packetcraftr",
+            "build",
+            "--packet",
+            "raw()",
+            "--packet-file",
+            "packet.json",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn protocols_cli_parses_an_optional_protocol_name() {
+        let list = Cli::try_parse_from(["packetcraftr", "protocols"]).unwrap();
+        let Command::Protocols(arguments) = list.command else {
+            panic!("expected protocols command");
+        };
+        assert_eq!(arguments.protocol, None);
+
+        let detail = Cli::try_parse_from(["packetcraftr", "protocols", "IP4"]).unwrap();
+        let Command::Protocols(arguments) = detail.command else {
+            panic!("expected protocols command");
+        };
+        assert_eq!(arguments.protocol.as_deref(), Some("IP4"));
+    }
+
+    #[test]
+    fn global_colour_choice_parses_before_or_after_the_subcommand() {
+        for arguments in [
+            [
+                "packetcraftr",
+                "--color",
+                "always",
+                "build",
+                "--packet",
+                "raw()",
+            ],
+            [
+                "packetcraftr",
+                "build",
+                "--packet",
+                "raw()",
+                "--color",
+                "always",
+            ],
+        ] {
+            let cli = Cli::try_parse_from(arguments).unwrap();
+            assert!(matches!(cli.color, CliColorChoice::Always));
+        }
+    }
+
+    #[test]
+    fn help_uses_the_frozen_cross_platform_binary_name() {
+        let error = Cli::try_parse_from(["packetcraftr.exe", "build", "--help"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::DisplayHelp);
+        let help = error.to_string();
+        assert!(help.contains("Usage: packetcraftr build [OPTIONS]"));
+        assert!(!help.contains("packetcraftr.exe"));
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum Command {
     /// Build exact packet bytes from an expression or document.

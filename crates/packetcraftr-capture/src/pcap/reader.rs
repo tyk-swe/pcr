@@ -20,6 +20,10 @@ use super::wire::{
     read_exact_vec,
 };
 
+use state::PcapNgState;
+
+mod state;
+
 pub(super) enum ReaderState {
     Pcap {
         endianness: Endianness,
@@ -27,12 +31,7 @@ pub(super) enum ReaderState {
         snap_len: u32,
         link_type: LinkType,
     },
-    PcapNg {
-        endianness: Endianness,
-        interfaces: Vec<Interface>,
-        interface_base: u32,
-        remaining_in_section: Option<u64>,
-    },
+    PcapNg(PcapNgState),
 }
 
 /// A streaming capture reader over any [`Read`] implementation.
@@ -93,12 +92,7 @@ impl<R: Read> Reader<R> {
             }
             PCAPNG_SECTION_HEADER => {
                 let header = read_section_header_after_type(&mut inner, max_size, &mut scratch)?;
-                ReaderState::PcapNg {
-                    endianness: header.endianness,
-                    interfaces: Vec::new(),
-                    interface_base: 0,
-                    remaining_in_section: header.length,
-                }
+                ReaderState::PcapNg(PcapNgState::new(header))
             }
             unknown_magic => {
                 return Err(Error::UnrecognizedFormat {
@@ -122,7 +116,7 @@ impl<R: Read> Reader<R> {
                 },
                 timestamp_offset: 0,
             }],
-            ReaderState::PcapNg { .. } => Vec::new(),
+            ReaderState::PcapNg(_) => Vec::new(),
         };
         if interfaces.len() > max_total_interfaces {
             return Err(Error::TotalInterfaceLimit {
@@ -147,16 +141,15 @@ impl<R: Read> Reader<R> {
     pub fn format(&self) -> Format {
         match self.state {
             ReaderState::Pcap { .. } => Format::Pcap,
-            ReaderState::PcapNg { .. } => Format::PcapNg,
+            ReaderState::PcapNg(_) => Format::PcapNg,
         }
     }
 
     /// Returns the capture byte order.
     pub fn endianness(&self) -> Endianness {
         match self.state {
-            ReaderState::Pcap { endianness, .. } | ReaderState::PcapNg { endianness, .. } => {
-                endianness
-            }
+            ReaderState::Pcap { endianness, .. } => endianness,
+            ReaderState::PcapNg(ref state) => state.endianness(),
         }
     }
 
@@ -194,7 +187,7 @@ impl<R: Read> Reader<R> {
                 *link_type,
                 self.max_size,
             ),
-            ReaderState::PcapNg { .. } => self.next_pcapng_frame(),
+            ReaderState::PcapNg(_) => self.next_pcapng_frame(),
         };
 
         match result {
@@ -216,12 +209,11 @@ impl<R: Read> Reader<R> {
         loop {
             let (section_endianness, section_interface_base, remaining_in_section) =
                 match &self.state {
-                    ReaderState::PcapNg {
-                        endianness,
-                        interface_base,
-                        remaining_in_section,
-                        ..
-                    } => (*endianness, *interface_base, *remaining_in_section),
+                    ReaderState::PcapNg(state) => (
+                        state.endianness(),
+                        state.interface_base(),
+                        state.remaining_in_section(),
+                    ),
                     ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                 };
 
@@ -255,24 +247,9 @@ impl<R: Read> Reader<R> {
                     &mut self.scratch,
                 )?;
                 match &mut self.state {
-                    ReaderState::PcapNg {
-                        endianness,
-                        interfaces,
-                        interface_base,
-                        remaining_in_section,
-                    } => {
-                        *interface_base = interface_base
-                            .checked_add(u32::try_from(interfaces.len()).map_err(|_| {
-                                Error::InterfaceLimit {
-                                    limit: self.max_interfaces,
-                                }
-                            })?)
-                            .ok_or(Error::InterfaceLimit {
-                                limit: self.max_interfaces,
-                            })?;
-                        *endianness = header.endianness;
-                        interfaces.clear();
-                        *remaining_in_section = header.length;
+                    ReaderState::PcapNg(state) => {
+                        let transition = state.plan_section(header, self.max_interfaces)?;
+                        state.apply_section(transition);
                     }
                     ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                 }
@@ -311,12 +288,8 @@ impl<R: Read> Reader<R> {
             }
             let body = &self.scratch[..body_length];
 
-            if let ReaderState::PcapNg {
-                remaining_in_section: Some(remaining),
-                ..
-            } = &mut self.state
-            {
-                *remaining -= u64::from(block_length);
+            if let ReaderState::PcapNg(state) = &mut self.state {
+                state.commit_block(block_length);
             }
 
             if !matches!(
@@ -335,26 +308,21 @@ impl<R: Read> Reader<R> {
                 PCAPNG_INTERFACE_DESCRIPTION_BLOCK => {
                     let description = parse_interface_description(body, section_endianness)?;
                     match &mut self.state {
-                        ReaderState::PcapNg { interfaces, .. } => {
-                            if interfaces.len() >= self.max_interfaces {
-                                return Err(Error::InterfaceLimit {
-                                    limit: self.max_interfaces,
-                                });
-                            }
-                            if self.interfaces.len() >= self.max_total_interfaces {
-                                return Err(Error::TotalInterfaceLimit {
-                                    limit: self.max_total_interfaces,
-                                });
-                            }
-                            interfaces.push(description);
-                            self.interfaces.push(description);
+                        ReaderState::PcapNg(state) => {
+                            let transition = state.plan_interface(
+                                description,
+                                self.interfaces.len(),
+                                self.max_interfaces,
+                                self.max_total_interfaces,
+                            )?;
+                            state.apply_interface(&mut self.interfaces, transition);
                         }
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     }
                 }
                 PCAPNG_ENHANCED_PACKET_BLOCK => {
                     let interfaces = match &self.state {
-                        ReaderState::PcapNg { interfaces, .. } => interfaces,
+                        ReaderState::PcapNg(state) => state.interfaces(),
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     };
                     return parse_enhanced_packet(
@@ -368,7 +336,7 @@ impl<R: Read> Reader<R> {
                 }
                 PCAPNG_PACKET_BLOCK => {
                     let interfaces = match &self.state {
-                        ReaderState::PcapNg { interfaces, .. } => interfaces,
+                        ReaderState::PcapNg(state) => state.interfaces(),
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     };
                     return parse_obsolete_packet(
@@ -382,7 +350,7 @@ impl<R: Read> Reader<R> {
                 }
                 PCAPNG_SIMPLE_PACKET_BLOCK => {
                     let interfaces = match &self.state {
-                        ReaderState::PcapNg { interfaces, .. } => interfaces,
+                        ReaderState::PcapNg(state) => state.interfaces(),
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     };
                     return parse_simple_packet(

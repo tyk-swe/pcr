@@ -321,6 +321,123 @@ impl From<CliTracerouteStrategy> for workflow::traceroute::Strategy {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::{CliAddressFamily, CliDnsQueryType, CliScanTransport, CliTracerouteStrategy};
+    use crate::arguments::{Cli, Command};
+
+    #[test]
+    fn scan_cli_parses_typed_transport_ports_and_finite_limits() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "scan",
+            "192.168.56.10",
+            "--transport",
+            "udp",
+            "--ports",
+            "53,161",
+            "--attempts",
+            "2",
+            "--batch-size",
+            "2",
+            "--rate",
+            "10",
+        ])
+        .unwrap();
+        let Command::Scan(arguments) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert!(matches!(arguments.transport, CliScanTransport::Udp));
+        assert_eq!(arguments.ports, [53, 161]);
+        assert_eq!(arguments.attempts, 2);
+        assert_eq!(arguments.batch_size, 2);
+        assert_eq!(arguments.rate, Some(10));
+    }
+
+    #[test]
+    fn dns_cli_parses_query_policy_route_and_finite_bounds() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "dns",
+            "10.0.0.53",
+            "_service._tcp.example.test",
+            "--type",
+            "srv",
+            "--family",
+            "ipv4",
+            "--port",
+            "5353",
+            "--transaction-id",
+            "7",
+            "--source-port",
+            "50000",
+            "--attempts",
+            "3",
+            "--rate",
+            "10",
+            "--interface",
+            "test0",
+            "--source",
+            "10.0.0.2",
+            "--link-mode",
+            "layer3",
+        ])
+        .unwrap();
+        let Command::Dns(arguments) = cli.command else {
+            panic!("expected DNS command");
+        };
+        assert!(matches!(arguments.query_type, CliDnsQueryType::Srv));
+        assert!(matches!(arguments.family, CliAddressFamily::Ipv4));
+        assert_eq!(arguments.port, 5353);
+        assert_eq!(arguments.transaction_id, Some(7));
+        assert_eq!(arguments.source_port, Some(50_000));
+        assert_eq!(arguments.attempts, 3);
+        assert_eq!(arguments.rate, Some(10));
+        assert_eq!(arguments.interface.as_deref(), Some("test0"));
+        assert_eq!(arguments.source, Some("10.0.0.2".parse().unwrap()));
+        assert!(matches!(
+            arguments.link_mode,
+            crate::arguments::network::CliLinkMode::Layer3
+        ));
+    }
+
+    #[test]
+    fn traceroute_cli_parses_strategy_family_hops_attempts_and_rate() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "traceroute",
+            "192.168.56.10",
+            "--strategy",
+            "tcp",
+            "--family",
+            "ipv4",
+            "--port",
+            "443",
+            "--first-hop",
+            "2",
+            "--max-hops",
+            "12",
+            "--attempts",
+            "4",
+            "--rate",
+            "20",
+        ])
+        .unwrap();
+        let Command::Traceroute(arguments) = cli.command else {
+            panic!("expected traceroute command");
+        };
+        assert!(matches!(arguments.strategy, CliTracerouteStrategy::Tcp));
+        assert!(matches!(arguments.family, CliAddressFamily::Ipv4));
+        assert_eq!(arguments.port, Some(443));
+        assert_eq!(arguments.first_hop, 2);
+        assert_eq!(arguments.max_hops, 12);
+        assert_eq!(arguments.attempts, 4);
+        assert_eq!(arguments.rate, Some(20));
+    }
+}
+
 #[derive(Debug, Args)]
 pub(crate) struct TracerouteArgs {
     /// Explicit IP address or hostname to trace.

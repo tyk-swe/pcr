@@ -5,8 +5,8 @@
 /// probe, applies operation-wide packet/byte/duration limits, schedules
 /// homogeneous batches, and classifies only checksum-valid correlated facts.
 use super::super::bounded_probe::{
-    ProbeBatch, ProbeExecution, ResponseSelector, approve_operation, resolve_selected,
-    retain_undecoded_frames, run_batches,
+    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, ResponseSelector,
+    approve_operation, resolve_selected, retain_undecoded_frames, run_batches,
 };
 use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
@@ -148,36 +148,18 @@ where
         undecoded: Vec::new(),
         diagnostics: Vec::new(),
     };
-    let run = run_batches(
-        &batches,
-        request.probes_per_second,
-        request.limits.max_duration,
-        total_probes.saturating_sub(1) as u64,
-        &mut deadline,
-        clock,
-        |batch| executor.execute(batch),
-        |batch, exchange| validate_exchange_evidence(batch, exchange, request.limits),
-        |batch, exchange, deadline| {
-            process_batch(
-                batch,
-                exchange,
-                registry,
-                request.limits,
-                &mut output,
-                deadline,
-            )
-        },
-        |()| false,
-        scan_duration_error,
-        |rate| ScanError::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate.unwrap_or_default()),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        },
-        |sequence, message| ScanError::Clock { sequence, message },
-        |sequence, source| ScanError::Execution { sequence, source },
-        |sequence| ScanError::StatisticsOverflow { sequence },
-    )?;
+    let config = ProbeRunConfig {
+        probes_per_second: request.probes_per_second,
+        duration_limit: request.limits.max_duration,
+        final_statistics_sequence: total_probes.saturating_sub(1) as u64,
+    };
+    let mut lifecycle = ScanProbeLifecycle {
+        executor,
+        registry,
+        limits: request.limits,
+        output: &mut output,
+    };
+    let run = run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)?;
 
     Ok(ScanResult {
         target: resolved.declared,
@@ -476,6 +458,75 @@ struct ScanOutput {
     endpoint_indices: HashMap<(IpAddr, Option<u16>), usize>,
     undecoded: Vec<Frame>,
     diagnostics: Vec<Diagnostic>,
+}
+
+struct ScanProbeLifecycle<'a, E> {
+    executor: &'a mut E,
+    registry: &'a ProtocolRegistry,
+    limits: ScanLimits,
+    output: &'a mut ScanOutput,
+}
+
+impl<E: ScanExecutor> ProbeLifecycle<ScanBatch> for ScanProbeLifecycle<'_, E> {
+    type Execution = ScanBatchExecution;
+    type Output = ();
+    type Error = ScanError;
+
+    fn execute(&mut self, batch: &ScanBatch) -> Result<Self::Execution, super::BoundaryError> {
+        self.executor.execute(batch)
+    }
+
+    fn validate(
+        &mut self,
+        batch: &ScanBatch,
+        execution: &Self::Execution,
+    ) -> Result<(), Self::Error> {
+        validate_exchange_evidence(batch, execution, self.limits)
+    }
+
+    fn process(
+        &mut self,
+        batch: &ScanBatch,
+        execution: Self::Execution,
+        deadline: &Deadline,
+    ) -> Result<Self::Output, Self::Error> {
+        process_batch(
+            batch,
+            execution,
+            self.registry,
+            self.limits,
+            self.output,
+            deadline,
+        )
+    }
+
+    fn should_stop((): &Self::Output) -> bool {
+        false
+    }
+
+    fn duration_error(actual: Duration, limit: Duration) -> Self::Error {
+        scan_duration_error(actual, limit)
+    }
+
+    fn rate_error(rate: Option<u32>) -> Self::Error {
+        ScanError::InvalidLimit {
+            field: "probes_per_second",
+            value: u64::from(rate.unwrap_or_default()),
+            reason: "rate-delay arithmetic overflowed".to_owned(),
+        }
+    }
+
+    fn clock_error(sequence: u64, message: String) -> Self::Error {
+        ScanError::Clock { sequence, message }
+    }
+
+    fn execution_error(sequence: u64, source: super::BoundaryError) -> Self::Error {
+        ScanError::Execution { sequence, source }
+    }
+
+    fn statistics_error(sequence: u64) -> Self::Error {
+        ScanError::StatisticsOverflow { sequence }
+    }
 }
 
 fn process_batch(

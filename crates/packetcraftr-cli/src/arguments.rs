@@ -8,17 +8,11 @@ pub(super) use network::{
 };
 pub(super) use offline::{
     BuildArgs, CliBuildMode, CliFollowDirection, CliStatsTable, DissectArgs, ExpertArgs,
-    FollowArgs, ProtocolsArgs, ReadArgs, RecipeArgs, StatsArgs,
+    FollowArgs, OfflineAnalysisLimits, OfflineCaptureLimits, ProtocolsArgs, ReadArgs, RecipeArgs,
+    StatsArgs,
 };
 pub(super) use root::{Cli, CliColorChoice, Command};
 pub(super) use workflow::{DnsArgs, FuzzArgs, ScanArgs, TracerouteArgs};
-
-#[cfg(test)]
-pub(super) use network::CliLinkMode;
-#[cfg(test)]
-pub(super) use workflow::{
-    CliAddressFamily, CliDnsQueryType, CliScanTransport, CliTracerouteStrategy,
-};
 
 mod capture_limits;
 mod network;

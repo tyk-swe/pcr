@@ -96,6 +96,35 @@ pub(super) struct BatchRun<O> {
     pub(super) stats: Stats,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ProbeRunConfig {
+    pub(super) probes_per_second: Option<u32>,
+    pub(super) duration_limit: Duration,
+    pub(super) final_statistics_sequence: u64,
+}
+
+/// Workflow-owned operations and error taxonomy for the shared probe runner.
+pub(super) trait ProbeLifecycle<B> {
+    type Execution: ProbeExecution;
+    type Output;
+    type Error;
+
+    fn execute(&mut self, batch: &B) -> Result<Self::Execution, BoundaryError>;
+    fn validate(&mut self, batch: &B, execution: &Self::Execution) -> Result<(), Self::Error>;
+    fn process(
+        &mut self,
+        batch: &B,
+        execution: Self::Execution,
+        deadline: &Deadline,
+    ) -> Result<Self::Output, Self::Error>;
+    fn should_stop(output: &Self::Output) -> bool;
+    fn duration_error(actual: Duration, limit: Duration) -> Self::Error;
+    fn rate_error(rate: Option<u32>) -> Self::Error;
+    fn clock_error(sequence: u64, message: String) -> Self::Error;
+    fn execution_error(sequence: u64, source: BoundaryError) -> Self::Error;
+    fn statistics_error(sequence: u64) -> Self::Error;
+}
+
 /// Stable, linear-time response grouping shared by every bounded probe batch.
 /// Sorting is stable so equal request indices preserve executor evidence order.
 pub(super) struct ResponseSelector<'a, M> {
@@ -218,31 +247,16 @@ pub(super) fn retain_undecoded_frames<T, E>(
 
 /// Runs already-approved homogeneous batches with shared deadline, pacing,
 /// executor-boundary, evidence-validation, and checked-statistics policy.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the batch loop threads every budget that bounds a live run alongside the caller's \
-              callbacks; a parameter struct would only rename the same fields"
-)]
-pub(super) fn run_batches<B, X, O, E, C>(
+pub(super) fn run_batches<B, L, C>(
     batches: &[B],
-    probes_per_second: Option<u32>,
-    duration_limit: Duration,
-    final_statistics_sequence: u64,
+    config: ProbeRunConfig,
     deadline: &mut Deadline,
     clock: &mut C,
-    mut execute: impl FnMut(&B) -> Result<X, BoundaryError>,
-    mut validate: impl FnMut(&B, &X) -> Result<(), E>,
-    mut process: impl FnMut(&B, X, &Deadline) -> Result<O, E>,
-    mut should_stop: impl FnMut(&O) -> bool,
-    mut duration_error: impl FnMut(Duration, Duration) -> E,
-    mut rate_error: impl FnMut(Option<u32>) -> E,
-    mut clock_error: impl FnMut(u64, String) -> E,
-    mut execution_error: impl FnMut(u64, BoundaryError) -> E,
-    mut statistics_error: impl FnMut(u64) -> E,
-) -> Result<BatchRun<O>, E>
+    lifecycle: &mut L,
+) -> Result<BatchRun<L::Output>, L::Error>
 where
     B: ProbeBatch,
-    X: ProbeExecution,
+    L: ProbeLifecycle<B>,
     C: Clock,
 {
     let mut outputs = Vec::with_capacity(batches.len());
@@ -250,54 +264,57 @@ where
     let mut scheduled_delay = Duration::ZERO;
 
     for (batch_index, batch) in batches.iter().enumerate() {
-        check_deadline(deadline, &mut duration_error)?;
+        check_deadline(deadline, L::duration_error)?;
         let sequence = batch.sequence();
         if batch_index != 0 {
-            let delay = rate_delay(batches[batch_index - 1].probe_count(), probes_per_second)
-                .ok_or_else(|| rate_error(probes_per_second))?;
-            check_deadline(deadline, &mut duration_error)?;
+            let delay = rate_delay(
+                batches[batch_index - 1].probe_count(),
+                config.probes_per_second,
+            )
+            .ok_or_else(|| L::rate_error(config.probes_per_second))?;
+            check_deadline(deadline, L::duration_error)?;
             deadline
                 .start_accounting(delay)
-                .map_err(|error| duration_error(error.actual, error.limit))?;
+                .map_err(|error| L::duration_error(error.actual, error.limit))?;
             clock
                 .sleep(delay)
-                .map_err(|source| clock_error(sequence, source.to_string()))?;
+                .map_err(|source| L::clock_error(sequence, source.to_string()))?;
             deadline
                 .account(delay)
-                .map_err(|error| duration_error(error.actual, error.limit))?;
+                .map_err(|error| L::duration_error(error.actual, error.limit))?;
             scheduled_delay = scheduled_delay
                 .checked_add(delay)
-                .ok_or_else(|| duration_error(Duration::MAX, duration_limit))?;
+                .ok_or_else(|| L::duration_error(Duration::MAX, config.duration_limit))?;
         }
 
-        check_deadline(deadline, &mut duration_error)?;
+        check_deadline(deadline, L::duration_error)?;
         deadline
             .start_accounting(Duration::ZERO)
-            .map_err(|error| duration_error(error.actual, error.limit))?;
-        let execution = execute(batch);
-        check_deadline(deadline, &mut duration_error)?;
-        let execution = execution.map_err(|source| execution_error(sequence, source))?;
+            .map_err(|error| L::duration_error(error.actual, error.limit))?;
+        let execution = lifecycle.execute(batch);
+        check_deadline(deadline, L::duration_error)?;
+        let execution = execution.map_err(|source| L::execution_error(sequence, source))?;
         deadline
             .account(execution.stats().elapsed)
-            .map_err(|error| duration_error(error.actual, error.limit))?;
-        validate(batch, &execution)?;
-        check_deadline(deadline, &mut duration_error)?;
+            .map_err(|error| L::duration_error(error.actual, error.limit))?;
+        lifecycle.validate(batch, &execution)?;
+        check_deadline(deadline, L::duration_error)?;
         stats
             .checked_add(execution.stats())
-            .ok_or_else(|| statistics_error(sequence))?;
-        let output = process(batch, execution, deadline)?;
-        let stop = should_stop(&output);
+            .ok_or_else(|| L::statistics_error(sequence))?;
+        let output = lifecycle.process(batch, execution, deadline)?;
+        let stop = L::should_stop(&output);
         outputs.push(output);
         if stop {
             break;
         }
     }
 
-    check_deadline(deadline, &mut duration_error)?;
+    check_deadline(deadline, L::duration_error)?;
     stats.elapsed = stats
         .elapsed
         .checked_add(scheduled_delay)
-        .ok_or_else(|| statistics_error(final_statistics_sequence))?;
+        .ok_or_else(|| L::statistics_error(config.final_statistics_sequence))?;
     Ok(BatchRun { outputs, stats })
 }
 

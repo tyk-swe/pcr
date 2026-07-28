@@ -12,15 +12,13 @@
 #![forbid(unsafe_code)]
 
 mod arguments;
+mod capture_output;
 mod commands;
 mod errors;
 mod filtering;
 mod input;
 mod rendering;
 mod runtime;
-
-#[cfg(test)]
-mod tests;
 
 fn main() -> std::process::ExitCode {
     runtime::run_entrypoint()

@@ -17,6 +17,7 @@ use packetcraftr::{
 };
 
 use super::super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
+use super::super::capture_output::CaptureOutput;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
@@ -435,8 +436,7 @@ fn write_filtered_capture(
         ));
     }
     let stdout = io::stdout().lock();
-    let mut writer: Option<Writer<io::StdoutLock<'_>>> = None;
-    let mut described = 0_usize;
+    let mut writer: Option<CaptureOutput<io::StdoutLock<'_>>> = None;
     let mut frames = 0_u64;
     let mut captured_bytes = 0_u64;
 
@@ -481,7 +481,7 @@ fn write_filtered_capture(
         // frames from only one of them.
         let writer = match &mut writer {
             Some(writer) => writer,
-            slot => slot.insert(new_capture_writer(
+            slot => slot.insert(new_capture_output(
                 stdout_handle(&stdout),
                 format,
                 Some(frame.link_type),
@@ -493,9 +493,17 @@ fn write_filtered_capture(
         // PCAPNG interface descriptions are parsed before the frames that
         // reference them, so copying whatever has appeared so far keeps the
         // indices frames carry valid without buffering the capture.
-        described = describe_interfaces(writer, reader.interfaces(), described)?;
         writer
-            .write_frame(&capture_output_frame(frame, format))
+            .synchronize_source_interfaces(reader.interfaces())
+            .map_err(|source| {
+                CliError::new(5, format!("initialize capture interface failed: {source}"))
+            })?;
+        let mut frame = frame;
+        if format == CaptureFormat::Pcap {
+            frame.direction = None;
+        }
+        writer
+            .write_synchronized_frame(frame)
             .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))?;
     }
 
@@ -504,7 +512,7 @@ fn write_filtered_capture(
         // Accepting nothing is a legitimate result, so an empty subset still
         // writes a readable capture. Every interface is known by now.
         None => {
-            let mut writer = new_capture_writer(
+            let mut writer = new_capture_output(
                 stdout_handle(&stdout),
                 format,
                 reader
@@ -515,7 +523,11 @@ fn write_filtered_capture(
                 max_frame_bytes,
                 max_interfaces,
             )?;
-            describe_interfaces(&mut writer, reader.interfaces(), 0)?;
+            writer
+                .synchronize_source_interfaces(reader.interfaces())
+                .map_err(|source| {
+                    CliError::new(5, format!("initialize capture interface failed: {source}"))
+                })?;
             writer
         }
     };
@@ -532,41 +544,19 @@ fn stdout_handle<'a>(_lock: &'a io::StdoutLock<'a>) -> io::StdoutLock<'a> {
     io::stdout().lock()
 }
 
-/// Copies interface descriptions that have appeared since the last call.
-///
-/// Returns how many are now described, so each is replicated exactly once and
-/// the indices frames carry keep pointing at the same interface.
-fn describe_interfaces<W: io::Write>(
-    writer: &mut Writer<W>,
-    interfaces: &[capture::Interface],
-    described: usize,
-) -> Result<usize, CliError> {
-    if writer.format() != CaptureFormat::PcapNg {
-        return Ok(described);
-    }
-    for interface in &interfaces[described..] {
-        writer
-            .add_interface_description(*interface)
-            .map_err(|source| {
-                CliError::new(5, format!("initialize capture interface failed: {source}"))
-            })?;
-    }
-    Ok(interfaces.len())
-}
-
 /// Builds a capture writer bounded by the same limits the read side was given.
-fn new_capture_writer<W: io::Write>(
+fn new_capture_output<W: io::Write>(
     sink: W,
     format: CaptureFormat,
     link_type: Option<LinkType>,
     limits: Limits,
     max_frame_bytes: usize,
     max_interfaces: usize,
-) -> Result<Writer<W>, CliError> {
+) -> Result<CaptureOutput<W>, CliError> {
     let initialize = |source: capture::Error| {
         CliError::new(5, format!("initialize capture output failed: {source}"))
     };
-    let mut writer = if format == CaptureFormat::Pcap {
+    let writer = if format == CaptureFormat::Pcap {
         // Only classic PCAP declares a link type up front. PCAPNG carries one
         // per interface, so an empty section needs none at all.
         let link_type = link_type.ok_or_else(|| {
@@ -602,22 +592,11 @@ fn new_capture_writer<W: io::Write>(
         )
         .map_err(initialize)?
     };
-    writer
+    let mut output = CaptureOutput::source_preserving(writer);
+    output
         .set_stream_limits(limits)
         .map_err(|source| CliError::new(2, format!("capture output limits rejected: {source}")))?;
-    Ok(writer)
-}
-
-/// Strips metadata a classic PCAP record cannot represent.
-///
-/// Per-frame size is already bounded by the reader, which refuses an oversized
-/// record before it is ever allocated, so nothing further is checked here.
-fn capture_output_frame(mut frame: Frame, format: CaptureFormat) -> Frame {
-    if format == CaptureFormat::Pcap {
-        frame.interface = None;
-        frame.direction = None;
-    }
-    frame
+    Ok(output)
 }
 
 pub(crate) fn validate_capture_stream_limits(

@@ -1,0 +1,182 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+//! Npcap capture source and interrupt lifecycle.
+
+#![allow(unsafe_code)]
+
+use std::{
+    ptr::NonNull,
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
+
+use bytes::Bytes;
+use packetcraftr_capture::LinkType;
+
+use super::{
+    abi::{PCAP_ERROR, PCAP_ERROR_BREAK, PcapStatistics},
+    handles::{NpcapHandle, PromiscuousMode, open_handle},
+};
+use crate::{
+    Error as LiveIoError,
+    capture::CaptureQueueLimits,
+    platform::live_capture::{
+        CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
+        NativeCaptureStatistics, NativeCapturedPacket, monotonic_packet_time, system_time,
+    },
+    route::InterfaceId,
+};
+
+pub(super) fn open_capture(
+    interface: &InterfaceId,
+    limits: CaptureQueueLimits,
+) -> Result<NativeCaptureParts, LiveIoError> {
+    let snap_length =
+        i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
+            field: "snap_length",
+            value: limits.snap_length,
+            reason: "Npcap snap length exceeds i32",
+        })?;
+    let handle = open_handle(interface, snap_length, PromiscuousMode::Enabled)?;
+    // SAFETY: handle is activated and live; pcap_datalink only reads its
+    // negotiated link-layer type.
+    let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
+    if datalink < 0 {
+        return Err(LiveIoError::Capture {
+            message: format!(
+                "Npcap could not report the data-link type for {}: {}",
+                interface.name,
+                handle.error_message()
+            ),
+        });
+    }
+    let link_type = LinkType(datalink as u32);
+    let interrupt = Arc::new(NpcapInterrupt(Arc::clone(&handle)));
+    Ok(NativeCaptureParts {
+        source: Box::new(NpcapCaptureSource {
+            handle,
+            snap_length: limits.snap_length,
+        }),
+        interrupt,
+        interface: interface.clone(),
+        link_type,
+    })
+}
+
+struct NpcapCaptureSource {
+    handle: Arc<NpcapHandle>,
+    snap_length: usize,
+}
+
+impl NativeCaptureSource for NpcapCaptureSource {
+    fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+        let mut header = std::ptr::null_mut();
+        let mut data = std::ptr::null();
+        // SAFETY: header/data are writable out-pointers and the worker is the
+        // sole reader of this live handle.
+        let result = unsafe {
+            (self.handle.api.pcap_next_ex)(self.handle.raw.as_ptr(), &mut header, &mut data)
+        };
+        // Monotonic first makes the paired-clock sampling skew conservative.
+        let observed_at = Instant::now();
+        let observed_wall = SystemTime::now();
+        match result {
+            1 => {
+                let header = NonNull::new(header).ok_or_else(|| LiveIoError::Capture {
+                    message: "Npcap returned a packet without a header".to_owned(),
+                })?;
+                // SAFETY: a successful pcap_next_ex result guarantees the
+                // header remains valid until the next handle operation; we copy
+                // the fixed-size value immediately.
+                let header = unsafe { *header.as_ptr() };
+                let timestamp = system_time(
+                    header.timestamp.tv_sec as i64,
+                    header.timestamp.tv_usec as i64,
+                )?;
+                let received_at = monotonic_packet_time(timestamp, observed_wall, observed_at);
+                let captured_length = header.captured_length as usize;
+                if captured_length > self.snap_length {
+                    return Err(LiveIoError::Capture {
+                        message: format!(
+                            "Npcap returned {captured_length} bytes beyond configured snap length {}",
+                            self.snap_length
+                        ),
+                    });
+                }
+                if header.original_length < header.captured_length {
+                    return Err(LiveIoError::Capture {
+                        message: format!(
+                            "Npcap returned captured length {} above original length {}",
+                            header.captured_length, header.original_length
+                        ),
+                    });
+                }
+                let bytes = if captured_length == 0 {
+                    Bytes::new()
+                } else {
+                    if data.is_null() {
+                        return Err(LiveIoError::Capture {
+                            message: "Npcap returned packet bytes through a null pointer"
+                                .to_owned(),
+                        });
+                    }
+                    // SAFETY: pcap_next_ex guarantees caplen readable bytes
+                    // until the next handle call; Bytes copies them now.
+                    Bytes::copy_from_slice(unsafe {
+                        std::slice::from_raw_parts(data, captured_length)
+                    })
+                };
+                Ok(NativeCaptureEvent::Packet(NativeCapturedPacket {
+                    timestamp,
+                    received_at,
+                    captured_length: header.captured_length,
+                    original_length: header.original_length,
+                    bytes,
+                }))
+            }
+            0 => Ok(NativeCaptureEvent::Timeout),
+            PCAP_ERROR_BREAK => Ok(NativeCaptureEvent::Closed),
+            PCAP_ERROR => Err(LiveIoError::Capture {
+                message: format!("Npcap receive failed: {}", self.handle.error_message()),
+            }),
+            status => Err(LiveIoError::Capture {
+                message: format!(
+                    "Npcap receive returned unexpected status {status}: {}",
+                    self.handle.error_message()
+                ),
+            }),
+        }
+    }
+
+    fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+        let mut statistics = PcapStatistics::default();
+        // SAFETY: the SDK-sized output structure is writable and the worker
+        // exclusively operates this live capture handle.
+        let result =
+            unsafe { (self.handle.api.pcap_stats)(self.handle.raw.as_ptr(), &mut statistics) };
+        if result != 0 {
+            return Err(LiveIoError::Capture {
+                message: format!(
+                    "Npcap statistics failed with status {result}: {}",
+                    self.handle.error_message()
+                ),
+            });
+        }
+        Ok(NativeCaptureStatistics {
+            capture_dropped_frames: statistics.dropped,
+            network_dropped_frames: statistics.network_dropped,
+            interface_dropped_frames: statistics.interface_dropped,
+        })
+    }
+}
+
+struct NpcapInterrupt(Arc<NpcapHandle>);
+
+impl CaptureInterrupt for NpcapInterrupt {
+    fn interrupt(&self) {
+        // SAFETY: libpcap documents pcap_breakloop as callable from a different
+        // thread; the Arc keeps the handle live for this call.
+        unsafe { (self.0.api.pcap_breakloop)(self.0.raw.as_ptr()) };
+    }
+}

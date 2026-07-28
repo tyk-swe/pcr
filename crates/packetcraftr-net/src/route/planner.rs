@@ -15,11 +15,6 @@ use packetcraftr_packet::{
     semantics::{self, BuiltinProtocol},
 };
 
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-use super::models::DestinationScope;
 use super::models::{
     LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborRequest, NeighborResolution,
     NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute, RouteProvider,
@@ -438,29 +433,6 @@ impl RoutePlanner {
             plan,
             neighbor_resolution,
         })
-    }
-}
-
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos", windows)
-))]
-pub(crate) fn classify_destination(address: IpAddr) -> DestinationScope {
-    if address.is_unspecified() {
-        return DestinationScope::Unspecified;
-    }
-    if address.is_multicast() {
-        return DestinationScope::Multicast;
-    }
-    if address.is_loopback() {
-        return DestinationScope::Host;
-    }
-    match address {
-        IpAddr::V4(address) if address.is_link_local() => DestinationScope::Link,
-        IpAddr::V6(address) if address.is_unicast_link_local() => DestinationScope::Link,
-        IpAddr::V4(address) if address.is_private() => DestinationScope::Private,
-        IpAddr::V6(address) if address.is_unique_local() => DestinationScope::Private,
-        _ => DestinationScope::Global,
     }
 }
 

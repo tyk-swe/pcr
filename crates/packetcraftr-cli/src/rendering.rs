@@ -7,18 +7,13 @@ use std::io::{self, Write};
 
 use anstyle::{AnsiColor, Style};
 use packetcraftr::{
-    capture::{Format, Frame, LinkType, Writer},
+    capture::{Format, Frame, Writer},
     output,
 };
 use serde::Serialize;
 
+use super::capture_output::CaptureOutput;
 use super::errors::CliError;
-
-#[derive(Clone, Copy, Debug)]
-struct CaptureInterfaceMapping {
-    link_type: LinkType,
-    output_id: u32,
-}
 
 pub(super) fn capture_file_format(output: output::contract::Format) -> Result<Format, CliError> {
     match output {
@@ -29,14 +24,6 @@ pub(super) fn capture_file_format(output: output::contract::Format) -> Result<Fo
             "capture-file renderer received a non-capture format",
         )),
     }
-}
-
-pub(super) fn capture_file_frame(mut frame: Frame, format: Format) -> Frame {
-    match format {
-        Format::Pcap => frame.interface = None,
-        Format::PcapNg => frame.interface = Some(0),
-    }
-    frame
 }
 
 pub(super) fn write_capture_file(
@@ -58,50 +45,26 @@ pub(super) fn encode_capture_file(
             "capture-file output requires at least one captured or transmitted frame",
         )
     })?;
-    if format == Format::Pcap {
-        let mut writer = Writer::new(Vec::new(), format, first.link_type).map_err(|source| {
-            CliError::new(5, format!("initialize capture output failed: {source}"))
-        })?;
-        writer
-            .write_frame(&capture_file_frame(first, format))
-            .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))?;
-        for frame in frames {
-            writer
-                .write_frame(&capture_file_frame(frame, format))
-                .map_err(|source| {
-                    CliError::new(5, format!("write capture output failed: {source}"))
-                })?;
-        }
-        return Ok(writer.into_inner());
+    let writer = match format {
+        Format::Pcap => Writer::new(Vec::new(), format, first.link_type),
+        Format::PcapNg => Writer::pcapng(Vec::new()),
     }
-
-    let mut writer = Writer::pcapng(Vec::new()).map_err(|source| {
-        CliError::new(5, format!("initialize capture output failed: {source}"))
-    })?;
-    let mut interfaces = Vec::<CaptureInterfaceMapping>::new();
+    .map_err(|source| CliError::new(5, format!("initialize capture output failed: {source}")))?;
+    let mut output = CaptureOutput::link_mapped(writer);
     for mut frame in std::iter::once(first).chain(frames) {
-        let interface = match interfaces
-            .iter()
-            .find(|mapping| mapping.link_type == frame.link_type)
-        {
-            Some(mapping) => mapping.output_id,
-            None => {
-                let interface = writer.add_interface(frame.link_type).map_err(|source| {
-                    CliError::new(5, format!("initialize capture interface failed: {source}"))
-                })?;
-                interfaces.push(CaptureInterfaceMapping {
-                    link_type: frame.link_type,
-                    output_id: interface,
-                });
-                interface
-            }
-        };
-        frame.interface = Some(interface);
-        writer
-            .write_frame(&frame)
+        output.add_link_type(frame.link_type).map_err(|source| {
+            CliError::new(5, format!("initialize capture interface failed: {source}"))
+        })?;
+        // Classic PCAP cannot carry an interface ID; PCAPNG uses the
+        // lifecycle's stable per-link-type mapping.
+        if format == Format::Pcap {
+            frame.interface = None;
+        }
+        output
+            .write_link_mapped(frame)
             .map_err(|source| CliError::new(5, format!("write capture output failed: {source}")))?;
     }
-    Ok(writer.into_inner())
+    Ok(output.into_inner())
 }
 
 pub(super) fn spaced_hex(bytes: &[u8]) -> String {
@@ -417,4 +380,98 @@ pub(super) fn write_raw(bytes: &[u8]) -> Result<(), CliError> {
         .write_all(bytes)
         .and_then(|()| stdout.flush())
         .map_err(|source| CliError::new(5, format!("write stdout failed: {source}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use packetcraftr::{
+        capture::{Frame, LinkType, Reader},
+        output,
+    };
+
+    use super::{
+        encode_capture_file, output_timestamp_text, terminal_document, terminal_safe,
+        terminal_safe_document,
+    };
+
+    #[test]
+    fn whole_frame_hex_is_not_truncated() {
+        let bytes = (0u8..=255).collect::<Vec<_>>();
+        assert_eq!(output::frame::Wire::new(bytes).bytes_hex.len(), 512);
+    }
+
+    #[test]
+    fn terminal_text_escapes_controls_and_directional_overrides() {
+        let safe = terminal_safe("line\n\u{1b}[31m\u{2028}next\u{2029}\u{202e}tail");
+        assert_eq!(
+            safe,
+            "line\\n\\u{1b}[31m\\u{2028}next\\u{2029}\\u{202e}tail"
+        );
+        assert!(!safe.chars().any(char::is_control));
+        assert!(!safe.contains(['\u{2028}', '\u{2029}']));
+    }
+
+    #[test]
+    fn terminal_documents_preserve_layout_but_escape_terminal_controls() {
+        let safe = terminal_safe_document("first\r\nsecond\n\t\u{1b}[31m\u{202e}tail");
+        assert_eq!(safe, "first\nsecond\n\\t\\u{1b}[31m\\u{202e}tail");
+        assert_eq!(safe.lines().count(), 3);
+        assert!(!safe.contains('\u{1b}'));
+        assert!(!safe.contains('\u{202e}'));
+
+        let cleaned = terminal_document("\u{1b}[31merror:\u{1b}[0m bad\nnext");
+        assert_eq!(cleaned, "error: bad\nnext");
+    }
+
+    #[test]
+    fn pre_epoch_timestamp_text_uses_conventional_signed_decimal_notation() {
+        assert_eq!(
+            output_timestamp_text(output::frame::Timestamp {
+                unix_seconds: -3,
+                nanoseconds: 750_000_000,
+            }),
+            "-2.250000000"
+        );
+        assert_eq!(
+            output_timestamp_text(output::frame::Timestamp {
+                unix_seconds: -1,
+                nanoseconds: 500_000_000,
+            }),
+            "-0.500000000"
+        );
+    }
+
+    #[test]
+    fn pcapng_exchange_evidence_preserves_multiple_link_types() {
+        let raw = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0x45, 0, 0, 0]).unwrap();
+        let ethernet = Frame::new(
+            SystemTime::UNIX_EPOCH + Duration::from_nanos(1),
+            LinkType::ETHERNET,
+            vec![0; 14],
+        )
+        .unwrap();
+        let bytes = encode_capture_file(
+            output::contract::Format::Pcapng,
+            [raw.clone(), ethernet.clone()],
+        )
+        .unwrap();
+        let mut reader = Reader::new(std::io::Cursor::new(bytes)).unwrap();
+        let decoded_raw = reader.next_frame().unwrap().unwrap();
+        let decoded_ethernet = reader.next_frame().unwrap().unwrap();
+
+        assert_eq!(decoded_raw.link_type, raw.link_type);
+        assert_eq!(decoded_raw.bytes(), raw.bytes());
+        assert_eq!(decoded_raw.interface, Some(0));
+        assert_eq!(decoded_ethernet.link_type, ethernet.link_type);
+        assert_eq!(decoded_ethernet.bytes(), ethernet.bytes());
+        assert_eq!(decoded_ethernet.interface, Some(1));
+        assert!(reader.next_frame().unwrap().is_none());
+
+        let error =
+            encode_capture_file(output::contract::Format::Pcap, [raw, ethernet]).unwrap_err();
+        assert_eq!(error.exit_code, 5);
+        assert!(error.message.contains("link type"));
+    }
 }

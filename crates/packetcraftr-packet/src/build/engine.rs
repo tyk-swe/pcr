@@ -11,11 +11,15 @@ use thiserror::Error;
 
 use super::super::Packet;
 use super::super::diagnostic::Diagnostic;
-use super::super::field::FieldValue;
-use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
+use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId};
 use super::super::layout::{ByteRange, LayerLayout, PacketLayout};
 use super::super::registry::{CodecError, LayerEncodeContext, ProtocolRegistry};
 use super::super::semantics::BuiltinProtocol;
+
+use buffer::PacketBuffer;
+
+mod buffer;
+mod validation;
 
 pub const DEFAULT_MAX_PACKET_SIZE: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_LAYERS: usize = 64;
@@ -116,146 +120,6 @@ impl BuiltPacket {
     }
 }
 
-/// A contiguous payload accumulator for the reverse encoder walk.
-///
-/// Codecs still receive one contiguous child slice, but outer headers grow
-/// into front slack instead of rebuilding that child slice for every layer.
-#[derive(Debug, Default)]
-struct PacketBuffer {
-    storage: Vec<u8>,
-    start: usize,
-    end: usize,
-}
-
-impl PacketBuffer {
-    const MINIMUM_CAPACITY: usize = 64;
-
-    fn len(&self) -> usize {
-        self.end.saturating_sub(self.start)
-    }
-
-    fn as_slice(&self) -> &[u8] {
-        &self.storage[self.start..self.end]
-    }
-
-    fn wrap(&mut self, prefix: &[u8], suffix: &[u8], maximum: usize) -> Result<(), BuildError> {
-        let total = prefix
-            .len()
-            .checked_add(self.len())
-            .and_then(|value| value.checked_add(suffix.len()))
-            .ok_or(BuildError::LengthOverflow)?;
-        if total > maximum {
-            return Err(BuildError::PacketSizeLimit {
-                actual: total,
-                limit: maximum,
-            });
-        }
-        if self.start < prefix.len() || self.storage.len().saturating_sub(self.end) < suffix.len() {
-            let additional = prefix
-                .len()
-                .checked_add(suffix.len())
-                .ok_or(BuildError::LengthOverflow)?;
-            if self.storage.len().saturating_sub(self.len()) >= additional {
-                self.recenter_and_wrap(prefix, suffix, total)?;
-            } else {
-                self.grow_and_wrap(prefix, suffix, total, maximum)?;
-            }
-            return Ok(());
-        }
-
-        let start = self.start - prefix.len();
-        self.storage[start..self.start].copy_from_slice(prefix);
-        self.storage[self.end..self.end + suffix.len()].copy_from_slice(suffix);
-        self.start = start;
-        self.end += suffix.len();
-        Ok(())
-    }
-
-    fn recenter_and_wrap(
-        &mut self,
-        prefix: &[u8],
-        suffix: &[u8],
-        total: usize,
-    ) -> Result<(), BuildError> {
-        let spare = self
-            .storage
-            .len()
-            .checked_sub(total)
-            .ok_or(BuildError::LengthOverflow)?;
-        let start = spare / 2;
-        let prefix_end = start
-            .checked_add(prefix.len())
-            .ok_or(BuildError::LengthOverflow)?;
-        let payload_end = prefix_end
-            .checked_add(self.len())
-            .ok_or(BuildError::LengthOverflow)?;
-        let end = payload_end
-            .checked_add(suffix.len())
-            .ok_or(BuildError::LengthOverflow)?;
-        self.storage.copy_within(self.start..self.end, prefix_end);
-        self.storage[start..prefix_end].copy_from_slice(prefix);
-        self.storage[payload_end..end].copy_from_slice(suffix);
-        self.start = start;
-        self.end = end;
-        Ok(())
-    }
-
-    fn grow_and_wrap(
-        &mut self,
-        prefix: &[u8],
-        suffix: &[u8],
-        total: usize,
-        maximum: usize,
-    ) -> Result<(), BuildError> {
-        let minimum = Self::MINIMUM_CAPACITY.min(maximum);
-        let doubled = self.storage.len().checked_mul(2).unwrap_or(maximum);
-        let capacity = doubled.max(minimum).max(total).min(maximum);
-        if capacity < total {
-            return Err(BuildError::PacketSizeLimit {
-                actual: total,
-                limit: maximum,
-            });
-        }
-
-        let mut storage = vec![0_u8; capacity];
-        let spare = capacity - total;
-        // The reverse encoder walk normally adds headers, but custom codecs
-        // may add suffixes. Reserve the unused space on the active side for
-        // one-sided codecs and split it for codecs that add both.
-        let start = match (prefix.is_empty(), suffix.is_empty()) {
-            (false, true) => spare,
-            (true, false) => 0,
-            _ => spare / 2,
-        };
-        let prefix_end = start
-            .checked_add(prefix.len())
-            .ok_or(BuildError::LengthOverflow)?;
-        let payload_end = prefix_end
-            .checked_add(self.len())
-            .ok_or(BuildError::LengthOverflow)?;
-        let end = payload_end
-            .checked_add(suffix.len())
-            .ok_or(BuildError::LengthOverflow)?;
-        storage[start..prefix_end].copy_from_slice(prefix);
-        storage[prefix_end..payload_end].copy_from_slice(self.as_slice());
-        storage[payload_end..end].copy_from_slice(suffix);
-        self.storage = storage;
-        self.start = start;
-        self.end = end;
-        Ok(())
-    }
-
-    fn into_bytes(self) -> Bytes {
-        if self.start == 0 && self.end == self.storage.len() {
-            return Bytes::from(self.storage);
-        }
-        // Do not retain a geometric-growth allocation behind a small packet.
-        // This bounded final flattening also returns exact-sized bytes when
-        // the active packet is offset within the assembly buffer.
-        Bytes::copy_from_slice(&self.storage[self.start..self.end])
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Builder {
     registry: Arc<ProtocolRegistry>,
@@ -296,7 +160,7 @@ impl Builder {
         // duplicate the buffers. An arbitrary external byte-valued reflective
         // field is not necessarily emitted on the wire, so it cannot safely be
         // included in this lower bound.
-        let pass_through_bytes = pass_through_byte_length(&packet)?;
+        let pass_through_bytes = validation::pass_through_byte_length(&packet)?;
         if pass_through_bytes > options.max_packet_size {
             return Err(BuildError::PacketSizeLimit {
                 actual: pass_through_bytes,
@@ -318,7 +182,13 @@ impl Builder {
             .iter()
             .map(|layer| layer.protocol_id().clone())
             .collect();
-        self.validate_bindings(&packet, &protocols, options.mode, &mut diagnostics)?;
+        validation::validate_bindings(
+            &self.registry,
+            &packet,
+            &protocols,
+            options.mode,
+            &mut diagnostics,
+        )?;
 
         // The reverse walk keeps the source packet intact for every codec and
         // accumulates each materialized result once before restoring source order.
@@ -451,202 +321,6 @@ impl Builder {
                 || contains_network_trailer,
         })
     }
-
-    fn validate_bindings(
-        &self,
-        packet: &Packet,
-        protocols: &[ProtocolId],
-        mode: BuildMode,
-        diagnostics: &mut Vec<Diagnostic>,
-    ) -> Result<(), BuildError> {
-        debug_assert_eq!(protocols.len(), packet.len());
-        for (index, layer) in packet.iter().enumerate() {
-            let Some(padding) = layer.as_any().downcast_ref::<Padding>() else {
-                continue;
-            };
-            if let Some(outside_layer) = padding.outside_layer {
-                let Some(outside) = packet
-                    .layer(outside_layer)
-                    .filter(|_| outside_layer < index)
-                else {
-                    return Err(BuildError::InvalidPaddingBoundary {
-                        index,
-                        outside_layer,
-                    });
-                };
-                if outside.as_any().is::<Padding>() || outside.as_any().is::<MalformedLayer>() {
-                    return Err(BuildError::InvalidPaddingBoundary {
-                        index,
-                        outside_layer,
-                    });
-                }
-                let outside_protocol = &protocols[outside_layer];
-                let outside_builtin = BuiltinProtocol::from_id(outside_protocol);
-                let child_protocol = packet
-                    .layer(outside_layer + 1)
-                    .and_then(|child| child.as_any().downcast_ref::<MalformedLayer>())
-                    .and_then(|child| child.intended_protocol.as_ref())
-                    .unwrap_or(&protocols[outside_layer + 1]);
-                // A link header qualifies only when its EtherType slot
-                // actually declares an 802.3 payload length: an exact or raw
-                // value at or below 1500, or an Auto value that resolves to
-                // LLC framing or to the zero-length empty frame. An
-                // EtherType-form value leaves no boundary, so trailing
-                // padding would fold back into the payload on dissection.
-                let link_declares_length = || match outside.field("ether_type") {
-                    Some(FieldValue::Unsigned(value)) => value <= 1500,
-                    Some(FieldValue::Bytes(value)) if value.len() == 2 => {
-                        u16::from_be_bytes([value[0], value[1]]) <= 1500
-                    }
-                    _ => matches!(
-                        BuiltinProtocol::from_id(child_protocol),
-                        Some(BuiltinProtocol::Llc | BuiltinProtocol::Padding)
-                    ),
-                };
-                let has_declared_boundary = match outside_builtin {
-                    Some(
-                        BuiltinProtocol::Ipv4
-                        | BuiltinProtocol::Ipv6
-                        | BuiltinProtocol::Udp
-                        | BuiltinProtocol::Arp
-                        | BuiltinProtocol::Pppoe,
-                    ) => true,
-                    Some(
-                        BuiltinProtocol::Ethernet
-                        | BuiltinProtocol::Vlan
-                        | BuiltinProtocol::Vlan8021ad,
-                    ) => link_declares_length(),
-                    _ => false,
-                };
-                if !has_declared_boundary {
-                    if mode == BuildMode::Strict {
-                        return Err(BuildError::InvalidPaddingBoundary {
-                            index,
-                            outside_layer,
-                        });
-                    }
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            "build.unsupported_padding_boundary",
-                            format!(
-                                "layer {outside_protocol} has no independent wire-length boundary"
-                            ),
-                        )
-                        .at_layer(index),
-                    );
-                }
-                if matches!(
-                    outside_builtin,
-                    Some(
-                        BuiltinProtocol::Ipv4
-                            | BuiltinProtocol::Ipv6
-                            | BuiltinProtocol::Udp
-                            | BuiltinProtocol::Pppoe
-                    )
-                ) {
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            "build.padding_outside_network_length",
-                            "preserving bytes outside a declared network or datagram length",
-                        )
-                        .at_layer(index),
-                    );
-                }
-                continue;
-            }
-            let enclosed_by_link = protocols.iter().take(index).any(|protocol| {
-                matches!(
-                    BuiltinProtocol::from_id(protocol),
-                    Some(
-                        BuiltinProtocol::Ethernet
-                            | BuiltinProtocol::BsdNull
-                            | BuiltinProtocol::BsdLoop
-                            | BuiltinProtocol::LinuxSll
-                            | BuiltinProtocol::LinuxSll2
-                    )
-                )
-            });
-            if enclosed_by_link {
-                continue;
-            }
-            if mode == BuildMode::Strict {
-                return Err(BuildError::PaddingWithoutLinkLayer { index });
-            }
-            diagnostics.push(
-                Diagnostic::warning(
-                    "build.padding_without_link_layer",
-                    "bytes outside all declared protocol lengths require a link-layer envelope",
-                )
-                .at_layer(index),
-            );
-        }
-
-        let mut previous_binding = None;
-        for index in 0..packet.len().saturating_sub(1) {
-            let parent = &protocols[index];
-            let child = &protocols[index + 1];
-            let discriminator = match previous_binding {
-                Some((previous_parent, previous_child, discriminator))
-                    if previous_parent == parent && previous_child == child =>
-                {
-                    discriminator
-                }
-                _ => {
-                    let discriminator = self
-                        .registry
-                        .discriminator_for(parent.as_str(), child.as_str());
-                    previous_binding = Some((parent, child, discriminator));
-                    discriminator
-                }
-            };
-            if discriminator.is_some()
-                || BuiltinProtocol::from_id(parent) == Some(BuiltinProtocol::Raw)
-                || matches!(
-                    BuiltinProtocol::from_id(child),
-                    Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
-                )
-            {
-                continue;
-            }
-            if mode == BuildMode::Strict {
-                return Err(BuildError::UnboundLayers {
-                    parent: parent.clone(),
-                    child: child.clone(),
-                });
-            }
-            diagnostics.push(
-                Diagnostic::warning(
-                    "build.unbound_layers",
-                    format!("no registered binding from {parent} to {child}"),
-                )
-                .at_layer(index),
-            );
-        }
-        Ok(())
-    }
-}
-
-fn pass_through_byte_length(packet: &Packet) -> Result<usize, BuildError> {
-    packet.iter().try_fold(0_usize, |total, layer| {
-        let length = layer
-            .as_any()
-            .downcast_ref::<Raw>()
-            .map(|layer| layer.bytes.len())
-            .or_else(|| {
-                layer
-                    .as_any()
-                    .downcast_ref::<Padding>()
-                    .map(|layer| layer.bytes.len())
-            })
-            .or_else(|| {
-                layer
-                    .as_any()
-                    .downcast_ref::<MalformedLayer>()
-                    .map(|layer| layer.bytes.len())
-            })
-            .unwrap_or(0);
-        total.checked_add(length).ok_or(BuildError::LengthOverflow)
-    })
 }
 
 #[cfg(test)]

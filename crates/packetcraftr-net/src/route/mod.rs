@@ -4,6 +4,11 @@
 #![forbid(unsafe_code)]
 
 pub(crate) mod models;
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+mod native_policy;
 pub(crate) mod planner;
 mod provider;
 #[cfg(test)]
@@ -29,6 +34,14 @@ pub use provider::{NativeRouteError, SystemRouteProvider};
 pub(crate) use models::MAX_NEIGHBOR_VLAN_TAGS;
 #[cfg(all(
     feature = "native-route",
+    any(target_os = "linux", target_os = "macos")
+))]
+pub(crate) use native_policy::find_interface;
+#[cfg(all(
+    feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-pub(super) use planner::classify_destination;
+pub(crate) use native_policy::{
+    NativeRouteSnapshot, finish_route, interface_decision, validate_native_interface,
+    validate_preferred_source_family,
+};

@@ -6,12 +6,12 @@ use std::ops::Range;
 
 use bytes::Bytes;
 
-use super::state::{
-    TcpFlowState, emitted_history_conflicts, flow_memory_charge, pending_memory_charge,
-    planned_history_allocation, retained_bytes,
-};
+use super::state::{TcpFlowState, emitted_history_conflicts, flow_memory_charge, retained_bytes};
 use super::{Error, ReassemblyLimits, Segment};
 
+use accounting::{PushAccountingInput, plan_push_accounting};
+
+mod accounting;
 pub(super) mod commit;
 
 #[expect(
@@ -156,60 +156,19 @@ pub(super) fn plan_push(
             final_offset: fin_offset,
         });
     }
-    let initial_history_capacity = limits.max_bytes_per_flow.saturating_sub(pending_bytes);
-    let final_pending_bytes = pending_bytes.saturating_sub(merge.emitted_segment_bytes);
-    let final_pending_segments = merge
-        .segment_count
-        .saturating_sub(usize::from(merge.emitted_segment_bytes != 0));
-    if final_pending_segments > limits.max_tcp_segments_per_flow {
-        return Err(Error::SegmentLimit {
-            limit: limits.max_tcp_segments_per_flow,
-        });
-    }
-    let final_history_capacity = limits
-        .max_bytes_per_flow
-        .saturating_sub(final_pending_bytes);
-    let prospective_history = state
-        .emitted_history
-        .len()
-        .min(initial_history_capacity)
-        .saturating_add(merge.emitted_segment_bytes)
-        .min(final_history_capacity);
-    let history_allocation = planned_history_allocation(
-        state.emitted_history.capacity(),
-        prospective_history,
-        final_history_capacity,
-    );
-    let prospective_retained =
-        final_pending_bytes
-            .checked_add(prospective_history)
-            .ok_or(Error::AggregateByteLimit {
-                limit: limits.max_aggregate_bytes,
-            })?;
-    let prospective_memory = pending_memory_charge(final_pending_bytes, final_pending_segments)
-        .and_then(|charge| charge.checked_add(history_allocation))
-        .ok_or(Error::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        })?;
-    let prospective_aggregate_bytes = aggregate_base_bytes
-        .checked_sub(old_retained_bytes)
-        .and_then(|bytes| bytes.checked_add(prospective_retained))
-        .ok_or(Error::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        })?;
-    let prospective_aggregate_memory = aggregate_base_memory_charge
-        .checked_sub(old_memory_charge)
-        .and_then(|charge| charge.checked_add(prospective_memory))
-        .ok_or(Error::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        })?;
-    if prospective_aggregate_bytes > limits.max_aggregate_bytes
-        || prospective_aggregate_memory > limits.max_aggregate_bytes
-    {
-        return Err(Error::AggregateByteLimit {
-            limit: limits.max_aggregate_bytes,
-        });
-    }
+    let accounting = plan_push_accounting(PushAccountingInput {
+        limits,
+        state,
+        pending_bytes,
+        emitted_segment_bytes: merge.emitted_segment_bytes,
+        segment_count: merge.segment_count,
+        old_retained_bytes,
+        old_memory_charge,
+        aggregate_base_bytes,
+        aggregate_base_memory_charge,
+    })?;
+    let initial_history_capacity = accounting.initial_history_capacity;
+    let history_allocation = accounting.history_allocation;
 
     materialize_pending_merge(&state.pending, offset, payload, &mut merge).ok_or(
         Error::FlowByteLimit {
@@ -236,22 +195,8 @@ pub(super) fn plan_push(
     let final_fin_offset = state.fin_offset.or(incoming_fin_offset);
     let closed =
         segment.rst || final_fin_offset.is_some_and(|fin_offset| final_next_offset >= fin_offset);
-    let (aggregate_bytes, aggregate_memory_charge) = if closed {
-        (
-            aggregate_base_bytes.checked_sub(old_retained_bytes).ok_or(
-                Error::AggregateByteLimit {
-                    limit: limits.max_aggregate_bytes,
-                },
-            )?,
-            aggregate_base_memory_charge
-                .checked_sub(old_memory_charge)
-                .ok_or(Error::AggregateByteLimit {
-                    limit: limits.max_aggregate_bytes,
-                })?,
-        )
-    } else {
-        (prospective_aggregate_bytes, prospective_aggregate_memory)
-    };
+    let (aggregate_bytes, aggregate_memory_charge) =
+        accounting.final_aggregates(closed, limits.max_aggregate_bytes)?;
     Ok(PushPlan {
         payload_sequence,
         incoming_fin_offset,

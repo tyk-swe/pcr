@@ -14,6 +14,7 @@ use packetcraftr::{
 };
 
 use super::super::arguments::{CliReplayTiming, ReplayArgs};
+use super::super::capture_output::CaptureOutput;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities, FrameSelector};
 use super::super::rendering::{
@@ -37,12 +38,6 @@ impl workflow::replay::Selector for DisplayFilterSelector<'_> {
             .keep(number, frame)
             .map_err(CliError::into_boundary_error)
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ReplayInterfaceMapping {
-    source_id: Option<u32>,
-    output_id: u32,
 }
 
 fn replay_timing(arguments: &ReplayArgs) -> Result<workflow::replay::Timing, CliError> {
@@ -235,14 +230,13 @@ pub(crate) fn run_replay(
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let format = capture_file_format(output)?;
             let stdout = io::stdout();
-            let mut writer = replay_capture_writer(
+            let mut writer = replay_capture_output(
                 &reader,
                 stdout.lock(),
                 format,
                 limits,
                 arguments.max_interfaces,
             )?;
-            let mut interfaces = Vec::<ReplayInterfaceMapping>::new();
             execute_replay(
                 &mut reader,
                 &options,
@@ -250,9 +244,7 @@ pub(crate) fn run_replay(
                 &mut authorizer,
                 &mut transmitter,
                 &mut clock,
-                |evidence| {
-                    write_replay_capture_evidence(&mut writer, format, &mut interfaces, evidence)
-                },
+                |evidence| write_replay_capture_evidence(&mut writer, evidence),
             )?;
             writer.flush().map_err(CliError::classified)
         }
@@ -328,14 +320,14 @@ fn emit_replay_ndjson_evidence(
     .map_err(|source| workflow::replay::Error::output(sequence, source.message))
 }
 
-fn replay_capture_writer<W: Write>(
+fn replay_capture_output<W: Write>(
     reader: &Reader<File>,
     output: W,
     format: Format,
     limits: workflow::replay::Limits,
     max_interfaces: usize,
-) -> Result<Writer<W>, CliError> {
-    let mut writer = match format {
+) -> Result<CaptureOutput<W>, CliError> {
+    let writer = match format {
         Format::Pcap => {
             if reader.format() != Format::Pcap {
                 return Err(CliError::classified(
@@ -370,49 +362,27 @@ fn replay_capture_writer<W: Write>(
         ),
     }
     .map_err(CliError::classified)?;
-    writer
+    let mut output = CaptureOutput::source_preserving(writer);
+    output
         .set_stream_limits(Limits {
             max_frames: limits.max_frames,
             max_bytes: limits.max_bytes,
         })
         .map_err(CliError::classified)?;
-    Ok(writer)
+    Ok(output)
 }
 
 pub(crate) fn write_replay_capture_evidence<W: Write>(
-    writer: &mut Writer<W>,
-    format: Format,
-    interfaces: &mut Vec<ReplayInterfaceMapping>,
+    writer: &mut CaptureOutput<W>,
     evidence: workflow::replay::FrameEvidence,
 ) -> Result<(), workflow::replay::Error> {
     let sequence = evidence.source_sequence;
-    let mut frame = evidence.frame;
-    frame.interface = match format {
-        Format::Pcap => None,
-        Format::PcapNg => {
-            let interface = match interfaces
-                .iter()
-                .find(|mapping| mapping.source_id == evidence.source_interface_id)
-            {
-                Some(mapping) => mapping.output_id,
-                None => {
-                    let interface = writer
-                        .add_interface_description(evidence.capture_interface)
-                        .map_err(|source| {
-                            workflow::replay::Error::output(sequence, source.to_string())
-                        })?;
-                    interfaces.push(ReplayInterfaceMapping {
-                        source_id: evidence.source_interface_id,
-                        output_id: interface,
-                    });
-                    interface
-                }
-            };
-            Some(interface)
-        }
-    };
     writer
-        .write_frame(&frame)
+        .write_source_frame(
+            evidence.source_interface_id,
+            evidence.capture_interface,
+            evidence.frame,
+        )
         .map_err(|source| workflow::replay::Error::output(sequence, source.to_string()))
 }
 
@@ -429,4 +399,61 @@ fn replay_stats(summary: &workflow::replay::Summary, elapsed: Duration) -> outpu
 pub(crate) fn replay_cli_error(error: workflow::replay::Error) -> CliError {
     let sequence = error.sequence();
     CliError::classified_at_optional_sequence(error, sequence)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use packetcraftr::{
+        capture::{self, Frame, LinkType, Reader, Writer},
+        net, workflow,
+    };
+
+    use super::write_replay_capture_evidence;
+    use crate::capture_output::CaptureOutput;
+
+    #[test]
+    fn replay_pcapng_evidence_preserves_source_timestamp_metadata() {
+        let timestamp = SystemTime::UNIX_EPOCH
+            .checked_sub(Duration::from_millis(500))
+            .unwrap();
+        let mut frame = Frame::new(timestamp, LinkType::RAW, vec![0x60; 40]).unwrap();
+        frame.interface = Some(7);
+        let evidence = workflow::replay::FrameEvidence {
+            source_sequence: 0,
+            source_interface_id: Some(7),
+            capture_interface: capture::Interface {
+                link_type: LinkType::RAW,
+                snap_len: 128,
+                timestamp_resolution: capture::TimestampResolution::Binary(10),
+                timestamp_offset: -1,
+            },
+            interface: net::interface::Id {
+                name: "test0".to_owned(),
+                index: 1,
+            },
+            link_mode: net::link::Mode::Layer3,
+            scheduled_delay: Duration::ZERO,
+            bytes_sent: 40,
+            frame: frame.clone(),
+        };
+        let writer = Writer::pcapng(Vec::new()).unwrap();
+        let mut writer = CaptureOutput::source_preserving(writer);
+        write_replay_capture_evidence(&mut writer, evidence).unwrap();
+
+        let mut reader = Reader::new(std::io::Cursor::new(writer.into_inner())).unwrap();
+        let decoded = reader.next_frame().unwrap().unwrap();
+        frame.interface = Some(0);
+        assert_eq!(decoded, frame);
+        assert_eq!(
+            reader.interfaces()[0],
+            capture::Interface {
+                link_type: LinkType::RAW,
+                snap_len: 128,
+                timestamp_resolution: capture::TimestampResolution::Binary(10),
+                timestamp_offset: -1,
+            }
+        );
+    }
 }

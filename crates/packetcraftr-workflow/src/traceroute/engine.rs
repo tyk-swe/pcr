@@ -5,8 +5,8 @@
 /// probe, approves the complete packet/byte/time budget, and preserves every
 /// attempt until checksum-valid evidence reaches a terminal outcome.
 use super::super::bounded_probe::{
-    ProbeBatch, ProbeExecution, ResponseSelector, approve_operation, resolve_selected,
-    retain_undecoded_frames, run_batches,
+    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, ResponseSelector,
+    approve_operation, resolve_selected, retain_undecoded_frames, run_batches,
 };
 use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
@@ -108,41 +108,20 @@ where
     let mut undecoded = Vec::new();
     let mut diagnostics = Vec::new();
     let mut evidence_budget = EvidenceBudget::default();
-    let run = run_batches(
-        &batches,
-        request.probes_per_second,
-        request.limits.max_duration,
-        total_probes.saturating_sub(1) as u64,
-        &mut deadline,
-        clock,
-        |batch| executor.execute(batch),
-        |batch, execution| validate_execution(batch, execution, request.limits),
-        |batch, execution, deadline| {
-            let mut evidence = TracerouteEvidenceState {
-                budget: &mut evidence_budget,
-                undecoded: &mut undecoded,
-                diagnostics: &mut diagnostics,
-            };
-            process_batch(
-                batch,
-                execution,
-                registry,
-                request.limits,
-                &mut evidence,
-                deadline,
-            )
-        },
-        terminal_hop,
-        traceroute_duration_error,
-        |rate| TracerouteError::InvalidLimit {
-            field: "probes_per_second",
-            value: u64::from(rate.unwrap_or_default()),
-            reason: "rate-delay arithmetic overflowed".to_owned(),
-        },
-        |sequence, message| TracerouteError::Clock { sequence, message },
-        |sequence, source| TracerouteError::Execution { sequence, source },
-        |sequence| TracerouteError::StatisticsOverflow { sequence },
-    )?;
+    let config = ProbeRunConfig {
+        probes_per_second: request.probes_per_second,
+        duration_limit: request.limits.max_duration,
+        final_statistics_sequence: total_probes.saturating_sub(1) as u64,
+    };
+    let mut lifecycle = TracerouteProbeLifecycle {
+        executor,
+        registry,
+        limits: request.limits,
+        evidence_budget: &mut evidence_budget,
+        undecoded: &mut undecoded,
+        diagnostics: &mut diagnostics,
+    };
+    let run = run_batches(&batches, config, &mut deadline, clock, &mut lifecycle)?;
     let any_response = run.outputs.iter().any(|hop| {
         hop.probes
             .iter()
@@ -477,6 +456,85 @@ struct TracerouteEvidenceState<'a> {
     budget: &'a mut EvidenceBudget,
     undecoded: &'a mut Vec<TracerouteUndecodedEvidence>,
     diagnostics: &'a mut Vec<Diagnostic>,
+}
+
+struct TracerouteProbeLifecycle<'a, E> {
+    executor: &'a mut E,
+    registry: &'a ProtocolRegistry,
+    limits: TracerouteLimits,
+    evidence_budget: &'a mut EvidenceBudget,
+    undecoded: &'a mut Vec<TracerouteUndecodedEvidence>,
+    diagnostics: &'a mut Vec<Diagnostic>,
+}
+
+impl<E: TracerouteExecutor> ProbeLifecycle<TracerouteBatch> for TracerouteProbeLifecycle<'_, E> {
+    type Execution = TracerouteBatchExecution;
+    type Output = TracerouteHopResult;
+    type Error = TracerouteError;
+
+    fn execute(
+        &mut self,
+        batch: &TracerouteBatch,
+    ) -> Result<Self::Execution, super::BoundaryError> {
+        self.executor.execute(batch)
+    }
+
+    fn validate(
+        &mut self,
+        batch: &TracerouteBatch,
+        execution: &Self::Execution,
+    ) -> Result<(), Self::Error> {
+        validate_execution(batch, execution, self.limits)
+    }
+
+    fn process(
+        &mut self,
+        batch: &TracerouteBatch,
+        execution: Self::Execution,
+        deadline: &Deadline,
+    ) -> Result<Self::Output, Self::Error> {
+        let mut evidence = TracerouteEvidenceState {
+            budget: self.evidence_budget,
+            undecoded: self.undecoded,
+            diagnostics: self.diagnostics,
+        };
+        process_batch(
+            batch,
+            execution,
+            self.registry,
+            self.limits,
+            &mut evidence,
+            deadline,
+        )
+    }
+
+    fn should_stop(output: &Self::Output) -> bool {
+        terminal_hop(output)
+    }
+
+    fn duration_error(actual: Duration, limit: Duration) -> Self::Error {
+        traceroute_duration_error(actual, limit)
+    }
+
+    fn rate_error(rate: Option<u32>) -> Self::Error {
+        TracerouteError::InvalidLimit {
+            field: "probes_per_second",
+            value: u64::from(rate.unwrap_or_default()),
+            reason: "rate-delay arithmetic overflowed".to_owned(),
+        }
+    }
+
+    fn clock_error(sequence: u64, message: String) -> Self::Error {
+        TracerouteError::Clock { sequence, message }
+    }
+
+    fn execution_error(sequence: u64, source: super::BoundaryError) -> Self::Error {
+        TracerouteError::Execution { sequence, source }
+    }
+
+    fn statistics_error(sequence: u64) -> Self::Error {
+        TracerouteError::StatisticsOverflow { sequence }
+    }
 }
 
 fn process_batch(

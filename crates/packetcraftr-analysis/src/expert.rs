@@ -10,6 +10,13 @@ use packetcraftr_packet::diagnostic::DiagnosticSeverity;
 use super::session_index::{transport_payload, transports};
 use super::{FlowKey, FrameRecord, Tcp, TcpEvent};
 
+use finding::new as new_finding;
+use observation::TcpObservation;
+
+mod finding;
+mod generation;
+mod observation;
+
 /// The transport namespace a conversation index belongs to.
 ///
 /// TCP and UDP indices are allocated independently, so a bare number cannot
@@ -212,13 +219,13 @@ impl ExpertCollector {
                     }
                 }
             };
-            findings.push(Finding {
-                severity: diagnostic.severity,
-                code: diagnostic.code.clone(),
-                number: record.number,
+            findings.push(new_finding(
+                diagnostic.severity,
+                diagnostic.code.clone(),
+                record.number,
                 stream,
-                message: diagnostic.message.clone(),
-            });
+                diagnostic.message.clone(),
+            ));
         }
 
         let frame_tcp = frame_transports.tcp;
@@ -312,20 +319,20 @@ impl ExpertCollector {
                 } else {
                     "within the segment at sequence"
                 };
-                findings.push(Finding {
-                    severity: if *conflicting {
+                findings.push(new_finding(
+                    if *conflicting {
                         DiagnosticSeverity::Error
                     } else {
                         DiagnosticSeverity::Warning
                     },
-                    code: if *conflicting {
-                        "tcp.retransmission_conflicting".to_owned()
+                    if *conflicting {
+                        "tcp.retransmission_conflicting"
                     } else {
-                        "tcp.retransmission".to_owned()
+                        "tcp.retransmission"
                     },
-                    number: record.number,
-                    stream: record.tcp_stream.map(tcp_stream_ref),
-                    message: format!(
+                    record.number,
+                    record.tcp_stream.map(tcp_stream_ref),
+                    format!(
                         "{observed} byte(s) {placement} {start} retransmit previously seen data{}",
                         if *conflicting {
                             " with different content"
@@ -333,7 +340,7 @@ impl ExpertCollector {
                             ""
                         }
                     ),
-                });
+                ));
             }
         }
 
@@ -378,22 +385,21 @@ impl ExpertCollector {
             } = event
                 && *pending_bytes > 0
             {
-                findings.push(Finding {
-                    severity: DiagnosticSeverity::Info,
-                    code: "tcp.incomplete_at_end".to_owned(),
-                    number: end_number,
-                    stream: self
-                        .streams
+                findings.push(new_finding(
+                    DiagnosticSeverity::Info,
+                    "tcp.incomplete_at_end",
+                    end_number,
+                    self.streams
                         .get(flow)
                         .or_else(|| self.streams.get(&flow.reverse()))
                         .copied()
                         .map(tcp_stream_ref),
-                    message: format!(
+                    format!(
                         "{} byte(s) from {}:{} were still awaiting missing earlier data \
                          when the capture ended",
                         pending_bytes, flow.source, flow.source_port
                     ),
-                });
+                ));
             }
         }
         for finding in &findings {
@@ -410,20 +416,20 @@ impl ExpertCollector {
         payload_len: usize,
         findings: &mut Vec<Finding>,
     ) {
-        let number = record.number;
-        let stream = record.tcp_stream.map(tcp_stream_ref);
-        let syn = tcp.flags & Tcp::SYN != 0;
-        let fin = tcp.flags & Tcp::FIN != 0;
-        let rst = tcp.flags & Tcp::RST != 0;
-        let ack = tcp.flags & Tcp::ACK != 0;
+        let observation = TcpObservation::new(record, flow, tcp, payload_len);
+        let TcpObservation {
+            number,
+            stream,
+            flow,
+            tcp,
+            payload_len,
+            syn,
+            fin,
+            rst,
+            ack,
+        } = observation;
         let mut push = |severity, code: &str, message: String| {
-            findings.push(Finding {
-                severity,
-                code: code.to_owned(),
-                number,
-                stream,
-                message,
-            });
+            findings.push(new_finding(severity, code, number, stream, message));
         };
 
         if rst {
@@ -448,91 +454,10 @@ impl ExpertCollector {
             self.streams.entry(flow.clone()).or_insert(stream);
         }
 
-        let reverse = flow.reverse();
-        // A SYN that does not continue this direction's current generation
-        // starts a new connection over the same endpoints, so every cursor
-        // learned about the old one is stale. A client SYN replaces the whole
-        // conversation; a SYN-ACK joins the generation its peer opened and
-        // renews only its own direction.
-        let mut syn_renews = false;
-        if syn {
-            let first = tcp.sequence.wrapping_add(1);
-            // The acknowledgment of a current-generation SYN-ACK falls
-            // inside the reverse direction's tracked range: a Fast Open
-            // SYN's payload is acknowledged along with the SYN itself, so
-            // the range runs from the base to the sequence cursor. The
-            // verdict is three-way — confirmed, contradicted, or nothing
-            // tracked that can say either way.
-            let reverse_range_verdict = self.flows.get(&reverse).and_then(|peer| {
-                match (peer.reassembly_base, peer.next_sequence) {
-                    (Some(base), Some(next)) => Some(
-                        tcp.acknowledgment.wrapping_sub(base) < 0x8000_0000
-                            && next.wrapping_sub(tcp.acknowledgment) < 0x8000_0000,
-                    ),
-                    _ => None,
-                }
-            });
-            // Renewal needs only the absence of contradiction; an evicted
-            // or untracked reverse proves nothing about a retransmitted
-            // handshake.
-            let peer_acknowledged = !ack || reverse_range_verdict != Some(false);
-            let sent = self.flows.entry(flow.clone()).or_default();
-            // A SYN renewing this direction's tracked generation is a
-            // retransmitted handshake segment: it proves nothing new about
-            // either direction, so both sides' state stands. A direction
-            // that already closed cleanly or carried payload cannot be
-            // renewed by a payload-free pure SYN — handshake SYNs only
-            // retransmit while half-open — so such a SYN is a new
-            // connection even if its sequence coincides. A SYN carrying
-            // payload is a Fast Open open or its retransmission.
-            let renews = sent.reassembly_base == Some(first)
-                && !sent.closed
-                && peer_acknowledged
-                && (ack || payload_len > 0 || sent.payload_next.is_none());
-            syn_renews = renews;
-            if !renews {
-                *sent = DirectionState::default();
-            }
-            sent.syn_seen = true;
-            // The original handshake fixed the negotiated scale; a delayed
-            // duplicate must not replace it.
-            if !renews {
-                sent.window_shift = window_scale(tcp.options.as_ref());
-            }
-            sent.reassembly_base = Some(first);
-            if !renews {
-                // Any reverse state this new generation does not account
-                // for belongs to an earlier connection over the same
-                // endpoints. Keeping it takes positive confirmation: a
-                // SYN-ACK's acknowledgment inside the reverse's tracked
-                // range, or — for a pure SYN — a reverse that is its own
-                // bare opening SYN, as in a simultaneous open. Residual
-                // state that cannot be confirmed goes.
-                let peer_is_current = if ack {
-                    reverse_range_verdict == Some(true)
-                } else {
-                    // The peer's own opening SYN acknowledges nothing; a
-                    // recorded acknowledgment marks a SYN-ACK or later
-                    // segment, which cannot precede this pure SYN's
-                    // handshake.
-                    self.flows.get(&reverse).is_none_or(|peer| {
-                        peer.syn_seen
-                            && peer.next_sequence == peer.reassembly_base
-                            && peer.acknowledgment.is_none()
-                    })
-                };
-                if !peer_is_current {
-                    self.flows.remove(&reverse);
-                }
-            }
-        }
-
-        let sent = self.flows.entry(flow.clone()).or_default();
-        // Mid-stream captures start observing at the first segment, which is
-        // where the reassembler anchors its base.
-        if !syn && sent.reassembly_base.is_none() && (payload_len > 0 || fin || rst) {
-            sent.reassembly_base = Some(tcp.sequence);
-        }
+        let generation::GenerationTransition {
+            reverse,
+            syn_renews,
+        } = generation::apply(&mut self.flows, &observation);
         // Keep-alive: one byte or less, sequenced exactly one before what
         // this direction already sent, with no state-changing flag.
         // Against a peer's closed window the same one-byte shape is the
@@ -768,57 +693,57 @@ impl ExpertCollector {
                 if peer_window == 0 {
                     if in_flight > 0 {
                         if payload_len == 1 && !fin && in_flight == 1 {
-                            findings.push(Finding {
-                                severity: DiagnosticSeverity::Info,
-                                code: "tcp.zero_window_probe".to_owned(),
+                            findings.push(new_finding(
+                                DiagnosticSeverity::Info,
+                                "tcp.zero_window_probe",
                                 number,
                                 stream,
-                                message: format!(
+                                format!(
                                     "{}:{} probes the peer's zero receive window",
                                     flow.source, flow.source_port
                                 ),
-                            });
+                            ));
                         } else {
-                            findings.push(Finding {
-                                severity: DiagnosticSeverity::Warning,
-                                code: "tcp.window_exceeded".to_owned(),
+                            findings.push(new_finding(
+                                DiagnosticSeverity::Warning,
+                                "tcp.window_exceeded",
                                 number,
                                 stream,
-                                message: format!(
+                                format!(
                                     "{}:{} has sent {} byte(s) beyond the peer's zero \
                                      receive window",
                                     flow.source,
                                     flow.source_port,
                                     u64::from(in_flight)
                                 ),
-                            });
+                            ));
                         }
                     }
                 } else if handshake_seen && u64::from(in_flight) == advertised {
-                    findings.push(Finding {
-                        severity: DiagnosticSeverity::Warning,
-                        code: "tcp.window_full".to_owned(),
+                    findings.push(new_finding(
+                        DiagnosticSeverity::Warning,
+                        "tcp.window_full",
                         number,
                         stream,
-                        message: format!(
+                        format!(
                             "{}:{} has filled the peer's {advertised}-byte receive window",
                             flow.source, flow.source_port
                         ),
-                    });
+                    ));
                 } else if handshake_seen && u64::from(in_flight) > advertised {
-                    findings.push(Finding {
-                        severity: DiagnosticSeverity::Warning,
-                        code: "tcp.window_exceeded".to_owned(),
+                    findings.push(new_finding(
+                        DiagnosticSeverity::Warning,
+                        "tcp.window_exceeded",
                         number,
                         stream,
-                        message: format!(
+                        format!(
                             "{}:{} has sent {} byte(s) beyond the peer's {advertised}-byte \
                              receive window",
                             flow.source,
                             flow.source_port,
                             u64::from(in_flight) - advertised
                         ),
-                    });
+                    ));
                 }
             }
         }
@@ -826,10 +751,7 @@ impl ExpertCollector {
         // A reset ends the conversation in both directions, so nothing
         // learned about either direction survives it; a later connection
         // over the same endpoints starts from nothing.
-        if rst {
-            self.flows.remove(flow);
-            self.flows.remove(&reverse);
-        }
+        generation::retire_reset(&mut self.flows, &observation, &reverse);
     }
 }
 

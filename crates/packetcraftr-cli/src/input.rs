@@ -142,3 +142,16 @@ pub(super) fn read_bounded_allow_empty(
     }
     Ok(bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::read_bounded_allow_empty;
+
+    #[test]
+    fn bounded_input_rejects_an_unrepresentable_sentinel_limit() {
+        let error = read_bounded_allow_empty(std::io::Cursor::new(Vec::<u8>::new()), usize::MAX)
+            .unwrap_err();
+        assert_eq!(error.exit_code, 70);
+        assert!(error.message.contains("cannot be represented"));
+    }
+}

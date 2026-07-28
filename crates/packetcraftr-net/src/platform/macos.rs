@@ -10,13 +10,14 @@
 use std::collections::BTreeMap;
 use std::ffi::CStr;
 use std::mem::{MaybeUninit, size_of};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::ptr;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
 
 use socket2::{Domain, Socket, Type};
 
+use self::parser::{parse_route_addresses, roundup, sockaddr_ip};
 use super::{
     NativeRouteSnapshot, find_interface, finish_route, interface_decision,
     validate_preferred_source_family,
@@ -27,6 +28,8 @@ use crate::{
     route::{InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason},
 };
 use packetcraftr_capture::LinkType;
+
+mod parser;
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
 
@@ -228,27 +231,6 @@ fn link_mtu(family: libc::sa_family_t, data: *const libc::c_void) -> Option<u32>
     // family gate above is the audited conversion boundary.
     let data = unsafe { ptr::read_unaligned(data.cast::<libc::if_data>()) };
     (data.ifi_mtu != 0).then_some(data.ifi_mtu)
-}
-
-fn sockaddr_ip(bytes: &[u8]) -> Option<IpAddr> {
-    // Darwin sockaddr starts with sa_len then sa_family. Never inspect the
-    // family until both bytes are present.
-    let family = *bytes.get(1)? as libc::sa_family_t;
-    match i32::from(family) {
-        libc::AF_INET if bytes.len() >= size_of::<libc::sockaddr_in>() => {
-            // SAFETY: family and length establish a complete sockaddr_in.
-            let value = unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<libc::sockaddr_in>()) };
-            Some(IpAddr::V4(Ipv4Addr::from(
-                value.sin_addr.s_addr.to_ne_bytes(),
-            )))
-        }
-        libc::AF_INET6 if bytes.len() >= size_of::<libc::sockaddr_in6>() => {
-            // SAFETY: family and length establish a complete sockaddr_in6.
-            let value = unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<libc::sockaddr_in6>()) };
-            Some(IpAddr::V6(Ipv6Addr::from(value.sin6_addr.s6_addr)))
-        }
-        _ => None,
-    }
 }
 
 fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) -> Option<u8> {
@@ -467,81 +449,6 @@ fn structure_bytes<T>(value: &T) -> Vec<u8> {
     unsafe { std::slice::from_raw_parts((value as *const T).cast::<u8>(), size_of::<T>()).to_vec() }
 }
 
-fn parse_route_addresses(
-    bytes: &[u8],
-    mask: libc::c_int,
-) -> Result<[Option<IpAddr>; libc::RTAX_MAX as usize], NativeRouteError> {
-    let mut output = [None; libc::RTAX_MAX as usize];
-    let address_slots = output.len();
-    let mut offset = 0;
-    for (index, slot) in output.iter_mut().enumerate() {
-        if mask & (1 << index) == 0 {
-            continue;
-        }
-        let Some(&length_byte) = bytes.get(offset) else {
-            return Err(NativeRouteError::InvalidResponse {
-                message: "macOS route response truncated its sockaddr list".to_owned(),
-            });
-        };
-        let length = usize::from(length_byte);
-        if length < 2 {
-            return Err(NativeRouteError::InvalidResponse {
-                message: format!(
-                    "macOS route response sockaddr index {index} is too short for sa_family: length={length}"
-                ),
-            });
-        }
-        let stride = roundup(length);
-        let Some(address_end) = offset.checked_add(length) else {
-            return Err(NativeRouteError::InvalidResponse {
-                message: "macOS route response sockaddr length overflowed".to_owned(),
-            });
-        };
-        if address_end > bytes.len() {
-            return Err(NativeRouteError::InvalidResponse {
-                message: format!(
-                    "macOS route response truncated sockaddr index {index}: offset={offset} length={length} bytes={}",
-                    bytes.len()
-                ),
-            });
-        }
-        let padded_end = offset.checked_add(stride);
-        let has_later_address = ((index + 1)..address_slots).any(|later| mask & (1 << later) != 0);
-        let next_offset = match padded_end {
-            Some(end) if end <= bytes.len() => end,
-            // Darwin may omit only the otherwise-unused alignment trailer
-            // after the final compact sockaddr. Its declared bytes remain
-            // complete and there is no later address whose alignment could
-            // become ambiguous.
-            _ if !has_later_address && address_end == bytes.len() => address_end,
-            _ => {
-                return Err(NativeRouteError::InvalidResponse {
-                    message: format!(
-                        "macOS route response contained an invalid sockaddr at index {index}: offset={offset} length={length} stride={stride} bytes={}",
-                        bytes.len()
-                    ),
-                });
-            }
-        };
-        *slot = sockaddr_ip(&bytes[offset..address_end]);
-        offset = next_offset;
-    }
-    Ok(output)
-}
-
-fn roundup(length: usize) -> usize {
-    // Darwin's routing socket uses ROUNDUP32 for sockaddr records on both
-    // x86_64 and arm64. This is deliberately independent of pointer/long
-    // width; using c_long here skips four bytes after values such as the
-    // 20-byte sockaddr_dl emitted for a directly connected route.
-    let alignment = size_of::<u32>();
-    if length == 0 {
-        alignment
-    } else {
-        (length + alignment - 1) & !(alignment - 1)
-    }
-}
-
 fn last_os_error(operation: &'static str) -> NativeRouteError {
     os_error(operation, std::io::Error::last_os_error())
 }
@@ -555,6 +462,8 @@ fn os_error(operation: &'static str, error: impl std::fmt::Display) -> NativeRou
 
 #[cfg(test)]
 mod tests {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+
     use super::*;
     use crate::route::Provider as RouteProvider;
 

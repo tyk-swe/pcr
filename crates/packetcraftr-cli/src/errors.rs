@@ -203,3 +203,67 @@ pub(super) fn command_from_env() -> Option<output::contract::Command> {
                 .find_map(|(name, command)| (*name == argument).then_some(*command))
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr::{client, net, output};
+
+    use super::CliError;
+
+    #[test]
+    fn cli_errors_preserve_classification_when_crossing_a_workflow_boundary() {
+        let classification = packetcraftr::error::Classification::new(
+            "io.test_boundary",
+            packetcraftr::error::Kind::Io,
+            None,
+        );
+        let boundary = CliError::from_classification(
+            classification,
+            "boundary failed",
+            vec!["underlying failure".to_owned()],
+        )
+        .into_boundary_error();
+
+        assert_eq!(boundary.to_string(), "boundary failed");
+        assert_eq!(
+            packetcraftr::error::Classified::classification(&boundary),
+            classification
+        );
+        assert_eq!(
+            packetcraftr::error::Classified::causes(&boundary),
+            ["underlying failure"]
+        );
+    }
+
+    #[test]
+    fn classified_live_errors_use_the_frozen_cli_exit_contract() {
+        let capability = CliError::classified(net::Error::Privilege {
+            message: "permission denied".to_owned(),
+        });
+        assert_eq!(capability.exit_code, 4);
+        assert_eq!(capability.classification.code, "capability.privilege");
+
+        let runtime = CliError::classified(net::Error::PartialSend {
+            expected: 10,
+            actual: 9,
+        });
+        assert_eq!(runtime.exit_code, 5);
+        assert_eq!(runtime.classification.code, "io.partial_send");
+
+        let dual = CliError::classified(client::Error::OperationAndCaptureShutdown {
+            operation: net::Error::Send {
+                message: "send failed".to_owned(),
+            },
+            shutdown: net::Error::Capture {
+                message: "join failed".to_owned(),
+            },
+        });
+        assert_eq!(dual.causes.len(), 2);
+        let envelope = output::envelope::AggregateError::error(
+            Some(output::contract::Command::Exchange),
+            dual.output_error(),
+        );
+        let envelope = serde_json::to_value(envelope).unwrap();
+        assert_eq!(envelope["error"]["causes"].as_array().unwrap().len(), 2);
+    }
+}

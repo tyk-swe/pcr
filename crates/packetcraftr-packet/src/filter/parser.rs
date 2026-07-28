@@ -96,13 +96,15 @@ pub(super) fn compile(
         });
     }
     if options.max_terms > MAX_FILTER_TERMS {
-        return Err(FilterError::TermLimit {
-            limit: MAX_FILTER_TERMS,
+        return Err(FilterError::InvalidTermLimit {
+            value: options.max_terms,
+            maximum: MAX_FILTER_TERMS,
         });
     }
     if options.max_set_members > MAX_FILTER_SET_MEMBERS {
-        return Err(FilterError::SetMemberLimit {
-            limit: MAX_FILTER_SET_MEMBERS,
+        return Err(FilterError::InvalidSetMemberLimit {
+            value: options.max_set_members,
+            maximum: MAX_FILTER_SET_MEMBERS,
         });
     }
 
@@ -396,8 +398,9 @@ fn parse_membership(
             }
             index += 1;
         }
+        let member_offset = tokens.get(index).map_or(offset, |token| token.offset);
         let (value, next) = parse_literal(tokens, index, offset)?;
-        check_literal(&field, &value, offset)?;
+        check_literal(&field, &value, member_offset)?;
         values.push(value);
         if values.len() > options.max_set_members {
             return Err(FilterError::SetMemberLimit {

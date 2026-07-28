@@ -6,6 +6,9 @@
 use libfuzzer_sys::fuzz_target;
 use packetcraftr::packet::filter::{Filter, Options};
 use packetcraftr::protocol::builtin::registry;
+use std::sync::OnceLock;
+
+static REGISTRY: OnceLock<packetcraftr::packet::registry::ProtocolRegistry> = OnceLock::new();
 
 // Compiles arbitrary display-filter text against the built-in registry.
 //
@@ -20,14 +23,14 @@ fuzz_target!(|data: &[u8]| {
     let Ok(text) = std::str::from_utf8(input) else {
         return;
     };
-    let registry = registry().unwrap();
+    let registry = REGISTRY.get_or_init(|| registry().unwrap());
     let options = Options::default();
-    let Ok(filter) = Filter::compile(text, &registry, options.clone()) else {
+    let Ok(filter) = Filter::compile(text, registry, options.clone()) else {
         return;
     };
     // A filter that compiled once must compile identically again: resolution
     // reads only the registry and the source, so it cannot depend on order.
-    let again = Filter::compile(text, &registry, options)
+    let again = Filter::compile(text, registry, options)
         .expect("a filter that compiled once compiles again");
     assert_eq!(filter.requirements(), again.requirements());
 });

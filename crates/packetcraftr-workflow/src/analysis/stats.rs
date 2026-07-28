@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Aggregate capture statistics computed over the analysis pipeline.
+//! Aggregate capture statistics computed over the analysis pipeline.
+
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
@@ -200,6 +201,7 @@ impl StatsCollector {
         self.frames += 1;
         self.bytes += bytes;
         let origin = *self.first_timestamp.get_or_insert(timestamp);
+        self.first_timestamp = Some(origin.min(timestamp));
         self.last_timestamp = Some(match self.last_timestamp {
             Some(last) => last.max(timestamp),
             None => timestamp,

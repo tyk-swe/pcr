@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Conversation payload extraction over the analysis pipeline.
+//! Conversation payload extraction over the analysis pipeline.
+
 use bytes::Bytes;
 
 use super::expert::StreamTransport;

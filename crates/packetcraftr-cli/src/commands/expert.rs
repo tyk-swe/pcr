@@ -14,11 +14,11 @@ use packetcraftr::{
 
 use super::super::arguments::ExpertArgs;
 use super::super::errors::CliError;
+use super::super::errors::analysis_cli_error;
 use super::super::filtering::{self, Capabilities};
 use super::super::rendering::{emit_json, emit_json_compact, write_stdout_line};
 use super::super::runtime::default_registry_arc;
 use super::offline::validate_capture_stream_limits;
-use super::stats::analysis_cli_error;
 
 pub(crate) fn run_expert(
     arguments: ExpertArgs,

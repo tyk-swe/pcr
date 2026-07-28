@@ -322,6 +322,27 @@ fn a_set_larger_than_the_limit_is_rejected() {
 }
 
 #[test]
+fn limits_above_the_stable_maxima_are_rejected_as_invalid_options() {
+    let terms = Options {
+        max_terms: MAX_FILTER_TERMS + 1,
+        ..Options::default()
+    };
+    assert!(matches!(
+        Filter::compile("frame.len", &empty_registry(), terms),
+        Err(Error::InvalidTermLimit { .. })
+    ));
+
+    let members = Options {
+        max_set_members: MAX_FILTER_SET_MEMBERS + 1,
+        ..Options::default()
+    };
+    assert!(matches!(
+        Filter::compile("frame.len", &empty_registry(), members),
+        Err(Error::InvalidSetMemberLimit { .. })
+    ));
+}
+
+#[test]
 fn unbalanced_parentheses_are_reported_with_an_offset() {
     assert!(matches!(compile("(frame.len"), Err(Error::Syntax { .. })));
     assert!(matches!(compile("frame.len)"), Err(Error::Syntax { .. })));
@@ -498,9 +519,10 @@ fn a_set_member_limit_above_the_stable_maximum_is_rejected() {
     let error = Filter::compile("frame.len in {1}", &empty_registry(), options).unwrap_err();
     assert!(matches!(
         error,
-        Error::SetMemberLimit {
-            limit: MAX_FILTER_SET_MEMBERS
-        }
+        Error::InvalidSetMemberLimit {
+            value,
+            maximum: MAX_FILTER_SET_MEMBERS
+        } if value == MAX_FILTER_SET_MEMBERS + 1
     ));
 }
 
@@ -513,9 +535,10 @@ fn a_term_limit_above_the_stable_maximum_is_rejected() {
     let error = Filter::compile("frame.len", &empty_registry(), options).unwrap_err();
     assert!(matches!(
         error,
-        Error::TermLimit {
-            limit: MAX_FILTER_TERMS
-        }
+        Error::InvalidTermLimit {
+            value,
+            maximum: MAX_FILTER_TERMS
+        } if value == MAX_FILTER_TERMS + 1
     ));
 }
 
@@ -620,10 +643,13 @@ fn a_numeric_field_cannot_be_sliced() {
 
 #[test]
 fn a_reversed_byte_slice_is_rejected() {
-    assert!(matches!(
-        compile("frame.len[4:2]"),
-        Err(Error::UnsliceableField { .. }) | Err(Error::Syntax { .. })
-    ));
+    let error = Filter::compile(
+        "padding.bytes[4:2] == aa",
+        &fixture_registry(),
+        Options::default(),
+    )
+    .expect_err("a reversed slice has no meaning");
+    assert!(matches!(error, Error::Syntax { .. }), "{error:?}");
 }
 
 #[test]

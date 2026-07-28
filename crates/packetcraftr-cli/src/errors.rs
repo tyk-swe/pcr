@@ -6,6 +6,7 @@
 use packetcraftr::{
     error::{Classification, Classified, Kind},
     net, output,
+    workflow::analysis,
 };
 
 use super::arguments::CliColorChoice;
@@ -17,6 +18,13 @@ pub(super) struct CliError {
     pub(super) classification: Classification,
     pub(super) causes: Vec<String>,
     pub(super) sequence: Option<u64>,
+}
+
+/// Maps an analysis failure onto the CLI error taxonomy, attributing it to
+/// the capture frame that caused it when one did.
+pub(super) fn analysis_cli_error(error: analysis::Error) -> CliError {
+    let number = error.number();
+    CliError::classified_at_optional_sequence(error, number)
 }
 
 impl CliError {

@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Cross-frame protocol health findings computed over the analysis pipeline.
+//! Cross-frame protocol health findings computed over the analysis pipeline.
+
 use std::collections::{BTreeMap, HashMap};
 
 use packetcraftr_packet::diagnostic::DiagnosticSeverity;
@@ -172,10 +173,8 @@ impl ExpertCollector {
             }
         };
         for diagnostic in &record.decoded.diagnostics {
-            let unindexed_outer_header = indexed_boundary.is_some()
-                && diagnostic
-                    .layer
-                    .is_none_or(|layer| layer <= indexed_boundary.unwrap_or(usize::MAX));
+            let unindexed_outer_header = indexed_boundary
+                .is_some_and(|boundary| diagnostic.layer.is_none_or(|layer| layer <= boundary));
             let stream = if unindexed_outer_header {
                 None
             } else {

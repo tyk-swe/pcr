@@ -14,7 +14,7 @@ use packetcraftr::{
 };
 
 use super::super::arguments::{CliStatsTable, StatsArgs};
-use super::super::errors::CliError;
+use super::super::errors::{CliError, analysis_cli_error};
 use super::super::filtering::{self, Capabilities};
 use super::super::rendering::{emit_json, write_stdout_line};
 use super::super::runtime::default_registry_arc;
@@ -105,13 +105,6 @@ pub(crate) fn run_stats(
         }
         _ => unreachable!("the format contract admits only text and json"),
     }
-}
-
-/// Maps an analysis failure onto the CLI error taxonomy, attributing it to
-/// the capture frame that caused it when one did.
-pub(crate) fn analysis_cli_error(error: analysis::Error) -> CliError {
-    let number = error.number();
-    CliError::classified_at_optional_sequence(error, number)
 }
 
 pub(crate) fn stats_table(table: CliStatsTable) -> output::stats::Table {

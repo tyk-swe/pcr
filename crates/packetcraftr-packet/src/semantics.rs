@@ -127,6 +127,13 @@ pub fn outer_scope_len(packet: &Packet) -> usize {
         .map_or(packet.len(), |boundary| boundary + 1)
 }
 
+/// Layers that express intent for the packet transmitted directly on the
+/// wire. Layers behind an encapsulation boundary describe a tunneled packet
+/// and must not supply outer link-layer or routing intent.
+pub fn outer_layers(packet: &Packet) -> impl Iterator<Item = &dyn Layer> {
+    packet.iter().take(outer_scope_len(packet))
+}
+
 pub fn outer_ip_path(packet: &Packet) -> Result<Option<IpPath>, SemanticError> {
     let scope = outer_scope_len(packet);
     let Some((index, protocol)) =

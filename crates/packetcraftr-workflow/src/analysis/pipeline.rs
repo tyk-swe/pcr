@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// The bounded read → dissect → index → filter → dispatch loop shared by the
-/// offline analysis commands.
+//! The bounded read → dissect → index → filter → dispatch loop shared by the
+//! offline analysis commands.
+
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 

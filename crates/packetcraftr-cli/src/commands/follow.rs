@@ -14,11 +14,11 @@ use packetcraftr::{
 
 use super::super::arguments::{CliFollowDirection, FollowArgs};
 use super::super::errors::CliError;
+use super::super::errors::analysis_cli_error;
 use super::super::filtering::{self, Capabilities};
 use super::super::rendering::{emit_json, emit_stderr_message, write_raw, write_stdout_line};
 use super::super::runtime::default_registry_arc;
 use super::offline::validate_capture_stream_limits;
-use super::stats::analysis_cli_error;
 
 use analysis::expert::StreamTransport;
 use analysis::follow::{Chunk, FollowCollector, Selector};
@@ -159,15 +159,12 @@ fn emit_chunk(
     retained: &mut Vec<output::follow::Chunk>,
 ) -> Result<(), CliError> {
     match output {
-        output::contract::Format::Text => {
-            let rendered = output::follow::Chunk::from(chunk.clone());
-            write_stdout_line(format_args!(
-                "{} #{} {}",
-                direction_marker(&chunk),
-                rendered.frame,
-                chunk.bytes.escape_ascii()
-            ))
-        }
+        output::contract::Format::Text => write_stdout_line(format_args!(
+            "{} #{} {}",
+            direction_marker(&chunk),
+            chunk.number,
+            chunk.bytes.escape_ascii()
+        )),
         output::contract::Format::Hex => {
             let rendered = output::follow::Chunk::from(chunk.clone());
             write_stdout_line(format_args!(

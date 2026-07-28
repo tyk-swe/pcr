@@ -345,6 +345,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Empty PPPoE session frames now continue into PPP dissection so the missing
+  protocol header is diagnosed, and capture statistics retain true timestamp
+  minima for out-of-order frames.
 - Auto Ethernet and VLAN raw payload builds now choose an undefined non-length
   discriminator instead of the 802.3 zero-length value, so permissive raw link
   payloads decode and rebuild as raw bytes rather than padding.

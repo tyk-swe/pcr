@@ -1,8 +1,9 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Conversation indexing and adapters from decoded layers to the session
-/// crate's reassembly inputs.
+//! Conversation indexing and adapters from decoded layers to the session
+//! crate's reassembly inputs.
+
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 

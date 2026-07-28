@@ -1,7 +1,8 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Failure from a bounded offline analysis run.
+//! Failure from a bounded offline analysis run.
+
 use super::{CaptureError, Classification, Classified, DecodeError, Duration, Error, Kind};
 use packetcraftr_session::fragment::Error as FragmentError;
 use packetcraftr_session::tcp::Error as TcpError;

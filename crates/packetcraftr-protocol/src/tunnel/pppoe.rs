@@ -269,7 +269,7 @@ impl LayerCodec for PppoeCodec {
                 vec![Discriminator(PPPOE_DISCOVERY)]
             },
             diagnostics,
-            stop: length == 0,
+            stop: discovery && length == 0,
             network: None,
         })
     }
@@ -436,6 +436,15 @@ mod tests {
         assert_eq!(pppoe.session_id, 0x1234);
         assert_eq!(session.next, vec![Discriminator(PPPOE_SESSION)]);
         assert!(session.diagnostics.is_empty());
+
+        let empty_session = PppoeCodec
+            .decode(
+                &[0x11, 0x00, 0x12, 0x34, 0x00, 0x00],
+                &decode_context(&registry),
+            )
+            .unwrap();
+        assert_eq!(empty_session.next, vec![Discriminator(PPPOE_SESSION)]);
+        assert!(!empty_session.stop);
 
         let discovery = PppoeCodec
             .decode(

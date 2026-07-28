@@ -140,19 +140,35 @@ fn protocols_text_lists_manifest_order_and_describes_ordered_fields() {
         lines.len(),
         packetcraftr::protocol::support::BUILTIN_PROTOCOLS.len()
     );
-    assert!(lines[0].starts_with("ah aliases=[] build=true"));
-    assert!(lines[1].starts_with("arp aliases=[] build=true"));
-    assert!(lines[4].starts_with("erspan aliases=[] build=true"));
-    assert!(lines[5].starts_with("esp aliases=[] build=true"));
-    assert!(lines[7].starts_with("geneve aliases=[] build=true"));
-    assert!(lines[12].starts_with("ipv4 aliases=[ip, ip4] build=true"));
-    assert!(lines[18].starts_with("l2tpv3 aliases=[] build=true"));
-    assert!(lines[21].starts_with("llc aliases=[] build=true"));
-    assert!(lines[23].starts_with("mpls aliases=[] build=true"));
-    assert!(lines[26].starts_with("pppoe aliases=[] build=true"));
-    assert!(lines[28].starts_with("raw_ip aliases=[rawip] build=false"));
-    assert!(lines[30].starts_with("snap aliases=[] build=true"));
-    assert!(lines[34].starts_with("vlan8021ad aliases=[dot1ad, 8021ad, qinq]"));
+    let line = |protocol: &str| {
+        lines
+            .iter()
+            .find(|line| line.starts_with(&format!("{protocol} ")))
+            .unwrap_or_else(|| panic!("{protocol} is not listed"))
+    };
+    for expected in [
+        "ah aliases=[] build=true",
+        "arp aliases=[] build=true",
+        "erspan aliases=[] build=true",
+        "esp aliases=[] build=true",
+        "geneve aliases=[] build=true",
+        "ipv4 aliases=[ip, ip4] build=true",
+        "l2tpv3 aliases=[] build=true",
+        "llc aliases=[] build=true",
+        "mpls aliases=[] build=true",
+        "pppoe aliases=[] build=true",
+        "raw_ip aliases=[rawip] build=false",
+        "snap aliases=[] build=true",
+        "vlan8021ad aliases=[dot1ad, 8021ad, qinq]",
+    ] {
+        let protocol = expected.split_once(' ').unwrap().0;
+        assert!(line(protocol).starts_with(expected));
+    }
+    let names = lines
+        .iter()
+        .map(|line| line.split_once(' ').unwrap().0)
+        .collect::<Vec<_>>();
+    assert!(names.windows(2).all(|pair| pair[0] <= pair[1]));
 
     let detail = binary().args(["protocols", "IP4"]).output().unwrap();
     assert!(detail.status.success());
@@ -742,8 +758,15 @@ fn expert_reports_tcp_anomalies_over_a_capture() {
     // contiguous sequence numbers.
     let stream = expert(&["--output", "ndjson"]);
     assert_eq!(stream.lines().count(), 4);
-    assert!(stream.contains("\"sequence\":0"));
-    assert!(stream.contains("\"sequence\":3"));
+    let sequences = stream
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line).unwrap()["sequence"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(sequences, vec![0, 1, 2, 3]);
     assert!(stream.contains("\"frames_read\":5"));
 
     // Stream-aware filters are supported because expert assigns conversation

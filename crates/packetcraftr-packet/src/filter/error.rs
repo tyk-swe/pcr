@@ -20,10 +20,14 @@ pub enum FilterError {
     NestingLimit { limit: usize },
     #[error("display filter nesting limit {value} exceeds stable maximum {maximum}")]
     InvalidNestingLimit { value: usize, maximum: usize },
+    #[error("display filter term limit {value} exceeds stable maximum {maximum}")]
+    InvalidTermLimit { value: usize, maximum: usize },
     #[error("display filter has more than {limit} terms")]
     TermLimit { limit: usize },
     #[error("display filter set has more than {limit} members")]
     SetMemberLimit { limit: usize },
+    #[error("display filter set-member limit {value} exceeds stable maximum {maximum}")]
+    InvalidSetMemberLimit { value: usize, maximum: usize },
     #[error("display filter syntax error at byte {offset}: {message}")]
     Syntax { offset: usize, message: String },
     #[error("unknown display filter field {path} at byte {offset}")]

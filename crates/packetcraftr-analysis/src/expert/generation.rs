@@ -5,7 +5,8 @@
 
 use std::collections::HashMap;
 
-use super::{DirectionState, FlowKey, observation::TcpObservation, window_scale};
+use super::tcp::{DirectionState, window_scale};
+use super::{FlowKey, observation::TcpObservation};
 
 pub(super) struct GenerationTransition {
     pub(super) reverse: FlowKey,

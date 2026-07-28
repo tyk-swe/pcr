@@ -9,6 +9,21 @@ intentional analysis/budget crate split and stricter lint policy. The rebased
 refactor's integration baseline is therefore `d957a5e`; its existing results
 are authoritative and must not be rebaselined by this refactor.
 
+## Follow-up baseline
+
+The follow-up modernization begins at
+`6489e644f8f6b7bbe200e7a1970f15f0a5f55598`
+(`6489e64`). Its generated public-API listings under portable, default, and
+all-feature profiles, normalized workspace dependency metadata, and root,
+version, and all-command CLI help are retained outside version control under
+`target/refactor-followup/baseline/`.
+
+Those artifacts remain the behavior oracle for the follow-up passes. The only
+permitted dependency-graph delta is removal of the unused
+`packetcraftr-workflow` dependency on `packetcraftr-session`. Public Rust APIs,
+CLI contracts, schemas, feature declarations, wire formats, safety gates, and
+the offline/live dependency boundary remain unchanged.
+
 ## Contract boundary
 
 The workspace consists of the following independently consumable crates:

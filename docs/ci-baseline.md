@@ -123,12 +123,12 @@ benchmark performance threshold.
 
 ## Coverage
 
-Linux coverage installs cargo-llvm-cov `0.8.7` and enforces at least 75 percent
+Linux coverage installs cargo-llvm-cov `0.8.7` and enforces at least 78 percent
 line coverage:
 
 ```console
 cargo llvm-cov --locked --all-features --workspace \
-  --lcov --output-path lcov.info --fail-under-lines 75
+  --lcov --output-path lcov.info --fail-under-lines 78
 ```
 
 The `linux-lcov` artifact contains `lcov.info` and is retained for three days.

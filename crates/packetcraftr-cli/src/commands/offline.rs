@@ -16,11 +16,13 @@ use packetcraftr::{
     output, packet,
 };
 
-use super::super::arguments::{BuildArgs, CliBuildMode, DissectArgs, ReadArgs};
+use super::super::arguments::{BuildArgs, DissectArgs, ReadArgs};
 use super::super::capture_output::CaptureOutput;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
-use super::super::input::{read_bounded_file, read_recipe, read_stdin_bounded};
+use super::super::input::{
+    read_bounded_file, read_recipe, read_stdin_bounded, validate_capture_stream_limits,
+};
 use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_plain_line, write_raw,
     write_stdout_line,
@@ -38,10 +40,7 @@ pub(crate) fn run_build(
             packet,
             packet::build::Context::default(),
             packet::build::Options {
-                mode: match arguments.mode {
-                    CliBuildMode::Strict => packet::build::Mode::Strict,
-                    CliBuildMode::Permissive => packet::build::Mode::Permissive,
-                },
+                mode: arguments.mode.into(),
                 ..packet::build::Options::default()
             },
         )
@@ -597,35 +596,4 @@ fn new_capture_output<W: io::Write>(
         .set_stream_limits(limits)
         .map_err(|source| CliError::new(2, format!("capture output limits rejected: {source}")))?;
     Ok(output)
-}
-
-pub(crate) fn validate_capture_stream_limits(
-    max_frames: u64,
-    max_bytes: u64,
-    max_frame_bytes: usize,
-    max_interfaces: usize,
-) -> Result<(), CliError> {
-    if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_limit",
-                Kind::Cli,
-                Some("use finite non-zero capture frame, byte, packet, and interface limits"),
-            ),
-            "capture stream limits must be non-zero",
-            Vec::new(),
-        ));
-    }
-    if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
-        return Err(CliError::from_classification(
-            Classification::new(
-                "cli.capture_limit",
-                Kind::Cli,
-                Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
-            ),
-            format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
-            Vec::new(),
-        ));
-    }
-    Ok(())
 }

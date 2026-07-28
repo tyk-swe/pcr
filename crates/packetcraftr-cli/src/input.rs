@@ -7,7 +7,10 @@ use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::Path;
 
-use packetcraftr::packet::{self, Packet};
+use packetcraftr::{
+    error::{Classification, Kind},
+    packet::{self, Packet},
+};
 
 use super::arguments::RecipeArgs;
 use super::errors::CliError;
@@ -141,6 +144,37 @@ pub(super) fn read_bounded_allow_empty(
         ));
     }
     Ok(bytes)
+}
+
+pub(super) fn validate_capture_stream_limits(
+    max_frames: u64,
+    max_bytes: u64,
+    max_frame_bytes: usize,
+    max_interfaces: usize,
+) -> Result<(), CliError> {
+    if max_frames == 0 || max_bytes == 0 || max_frame_bytes == 0 || max_interfaces == 0 {
+        return Err(CliError::from_classification(
+            Classification::new(
+                "cli.capture_limit",
+                Kind::Cli,
+                Some("use finite non-zero capture frame, byte, packet, and interface limits"),
+            ),
+            "capture stream limits must be non-zero",
+            Vec::new(),
+        ));
+    }
+    if u64::try_from(max_frame_bytes).unwrap_or(u64::MAX) > max_bytes {
+        return Err(CliError::from_classification(
+            Classification::new(
+                "cli.capture_limit",
+                Kind::Cli,
+                Some("set max-frame-bytes no higher than the aggregate max-bytes budget"),
+            ),
+            format!("max-frame-bytes {max_frame_bytes} exceeds max-bytes {max_bytes}"),
+            Vec::new(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

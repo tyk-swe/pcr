@@ -11,14 +11,13 @@ use packetcraftr::{client, net, output, packet, workflow};
 use super::super::arguments::TracerouteArgs;
 use super::super::errors::CliError;
 use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stream_record, output_timestamp_text, spaced_hex,
-    write_stdout_line,
+    emit_json, emit_json_compact, emit_stream_record, output_timestamp_text,
+    render_diagnostics_text, spaced_hex, write_stdout_line,
 };
 use super::super::runtime::{
     DeferredInterface, SystemClient, default_registry_arc, parse_workflow_target, system_client,
     workflow_exchange_options,
 };
-use super::capture::render_diagnostics_text;
 use super::scan::validate_live_interface_selector;
 
 pub(crate) fn run_traceroute(

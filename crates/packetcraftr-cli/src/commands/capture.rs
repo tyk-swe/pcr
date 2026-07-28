@@ -13,22 +13,15 @@ use packetcraftr::{
     client, net, output, packet,
 };
 
-use super::super::arguments::{CaptureArgs, CliBuildMode, ExchangeArgs, SendArgs};
+use super::super::arguments::{CaptureArgs, ExchangeArgs, SendArgs};
 use super::super::capture_output::CaptureOutput;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities, FrameSelector};
 use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, emit_stderr_message, emit_stream_record,
-    spaced_hex, write_capture_file, write_plain_line, write_stdout_line,
+    render_diagnostics_text, spaced_hex, write_capture_file, write_plain_line, write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
-
-pub(crate) fn cli_build_mode(mode: CliBuildMode) -> packet::build::Mode {
-    match mode {
-        CliBuildMode::Strict => packet::build::Mode::Strict,
-        CliBuildMode::Permissive => packet::build::Mode::Permissive,
-    }
-}
 
 #[derive(Debug)]
 pub(crate) struct CaptureOutcome {
@@ -443,30 +436,6 @@ fn shutdown_after_error<C: net::capture::Session>(capture: &mut C, error: CliErr
     }
 }
 
-pub(crate) fn render_diagnostics_text(
-    diagnostics: &[packet::diagnostic::Diagnostic],
-) -> Result<(), CliError> {
-    for diagnostic in diagnostics {
-        write_stdout_line(format_args!(
-            "{:?} {}: {}",
-            diagnostic.severity, diagnostic.code, diagnostic.message
-        ))?;
-    }
-    Ok(())
-}
-
-pub(crate) fn render_output_diagnostics_text(
-    diagnostics: &[output::envelope::Diagnostic],
-) -> Result<(), CliError> {
-    for diagnostic in diagnostics {
-        write_stdout_line(format_args!(
-            "{:?} {}: {}",
-            diagnostic.severity, diagnostic.code, diagnostic.message
-        ))?;
-    }
-    Ok(())
-}
-
 fn render_diagnostics_stderr(
     diagnostics: &[packet::diagnostic::Diagnostic],
 ) -> Result<(), CliError> {
@@ -516,7 +485,7 @@ pub(crate) fn run_exchange(
         destination: request.destination,
         plan: request.options,
         build: packet::build::Options {
-            mode: cli_build_mode(mode),
+            mode: mode.into(),
             ..packet::build::Options::default()
         },
         allow_permissive_live,

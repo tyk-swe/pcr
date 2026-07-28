@@ -7,9 +7,8 @@ pub(super) use network::{
     CaptureArgs, CliReplayTiming, ExchangeArgs, ReplayArgs, RouteArgs, SendArgs,
 };
 pub(super) use offline::{
-    BuildArgs, CliBuildMode, CliFollowDirection, CliStatsTable, DissectArgs, ExpertArgs,
-    FollowArgs, OfflineAnalysisLimits, OfflineCaptureLimits, ProtocolsArgs, ReadArgs, RecipeArgs,
-    StatsArgs,
+    BuildArgs, CliFollowDirection, CliStatsTable, DissectArgs, ExpertArgs, FollowArgs,
+    OfflineAnalysisLimits, OfflineCaptureLimits, ProtocolsArgs, ReadArgs, RecipeArgs, StatsArgs,
 };
 pub(super) use root::{Cli, CliColorChoice, Command};
 pub(super) use workflow::{DnsArgs, FuzzArgs, ScanArgs, TracerouteArgs};

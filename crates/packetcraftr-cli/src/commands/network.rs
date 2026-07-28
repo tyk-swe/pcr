@@ -18,7 +18,6 @@ use super::super::rendering::{
     emit_json, write_capture_file, write_plain_line, write_raw, write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
-use super::capture::cli_build_mode;
 
 pub(crate) fn run_plan(
     arguments: RouteArgs,
@@ -151,7 +150,7 @@ pub(crate) fn run_send(
                 destination: request.destination,
                 plan: request.options,
                 build: packet::build::Options {
-                    mode: cli_build_mode(mode),
+                    mode: mode.into(),
                     ..packet::build::Options::default()
                 },
                 allow_permissive_live,

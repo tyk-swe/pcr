@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::{analysis, capture};
+use packetcraftr::{analysis, capture, packet};
 
 #[derive(Debug, Args)]
 pub(crate) struct RecipeArgs {
@@ -32,6 +32,15 @@ pub(crate) enum CliBuildMode {
     #[default]
     Strict,
     Permissive,
+}
+
+impl From<CliBuildMode> for packet::build::Mode {
+    fn from(value: CliBuildMode) -> Self {
+        match value {
+            CliBuildMode::Strict => Self::Strict,
+            CliBuildMode::Permissive => Self::Permissive,
+        }
+    }
 }
 
 #[derive(Debug, Args)]

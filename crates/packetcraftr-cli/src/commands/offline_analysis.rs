@@ -17,8 +17,8 @@ use packetcraftr::{
 use super::super::arguments::{OfflineAnalysisLimits, OfflineCaptureLimits};
 use super::super::errors::{CliError, analysis_cli_error};
 use super::super::filtering::{self, Capabilities};
+use super::super::input::validate_capture_stream_limits;
 use super::super::runtime::default_registry_arc;
-use super::offline::validate_capture_stream_limits;
 
 /// Validated, I/O-free analysis state.
 pub(super) struct PreparedOfflineAnalysis {

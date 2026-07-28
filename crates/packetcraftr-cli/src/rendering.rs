@@ -8,7 +8,7 @@ use std::io::{self, Write};
 use anstyle::{AnsiColor, Style};
 use packetcraftr::{
     capture::{Format, Frame, Writer},
-    output,
+    output, packet,
 };
 use serde::Serialize;
 
@@ -119,6 +119,30 @@ pub(super) fn emit_stream_record<T: Serialize>(
     *sequence = sequence.checked_add(1).ok_or_else(|| {
         CliError::classified(output::contract::Error::SequenceOverflow).at_sequence(*sequence)
     })?;
+    Ok(())
+}
+
+pub(super) fn render_diagnostics_text(
+    diagnostics: &[packet::diagnostic::Diagnostic],
+) -> Result<(), CliError> {
+    for diagnostic in diagnostics {
+        write_stdout_line(format_args!(
+            "{:?} {}: {}",
+            diagnostic.severity, diagnostic.code, diagnostic.message
+        ))?;
+    }
+    Ok(())
+}
+
+pub(super) fn render_output_diagnostics_text(
+    diagnostics: &[output::envelope::Diagnostic],
+) -> Result<(), CliError> {
+    for diagnostic in diagnostics {
+        write_stdout_line(format_args!(
+            "{:?} {}: {}",
+            diagnostic.severity, diagnostic.code, diagnostic.message
+        ))?;
+    }
     Ok(())
 }
 

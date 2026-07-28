@@ -8,16 +8,16 @@ use std::time::Duration;
 
 use packetcraftr::{client, net, output, packet, workflow};
 
-use super::super::arguments::{CliBuildMode, FuzzArgs};
+use super::super::arguments::FuzzArgs;
 use super::super::errors::CliError;
 use super::super::input::read_recipe;
 use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stream_record, spaced_hex, write_stdout_line,
+    emit_json, emit_json_compact, emit_stream_record, render_diagnostics_text,
+    render_output_diagnostics_text, spaced_hex, write_stdout_line,
 };
 use super::super::runtime::{
     DeferredInterface, default_registry_arc, system_client, workflow_exchange_options,
 };
-use super::capture::{render_diagnostics_text, render_output_diagnostics_text};
 use super::scan::validate_live_interface_selector;
 
 pub(crate) fn run_fuzz(
@@ -60,10 +60,6 @@ pub(crate) fn run_fuzz(
         })
         .collect::<Result<Vec<_>, _>>()?;
     let queue_limits = limits.into_limits();
-    let build_mode = match mode {
-        CliBuildMode::Strict => packet::build::Mode::Strict,
-        CliBuildMode::Permissive => packet::build::Mode::Permissive,
-    };
     let request = workflow::fuzz::Request {
         seed,
         first_case,
@@ -71,7 +67,7 @@ pub(crate) fn run_fuzz(
         strategies: strategies.into_iter().map(Into::into).collect(),
         targets,
         build: packet::build::Options {
-            mode: build_mode,
+            mode: mode.into(),
             max_packet_size: queue_limits.snap_length,
             ..packet::build::Options::default()
         },

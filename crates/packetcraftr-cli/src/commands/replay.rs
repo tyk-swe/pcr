@@ -17,11 +17,11 @@ use super::super::arguments::{CliReplayTiming, ReplayArgs};
 use super::super::capture_output::CaptureOutput;
 use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities, FrameSelector};
+use super::super::input::validate_capture_stream_limits;
 use super::super::rendering::{
     capture_file_format, emit_json, emit_json_compact, spaced_hex, write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, validate_interface_selector};
-use super::offline::validate_capture_stream_limits;
 
 /// Bridges the CLI display filter onto the replay engine's selection seam.
 ///

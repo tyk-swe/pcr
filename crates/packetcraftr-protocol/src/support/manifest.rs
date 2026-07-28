@@ -74,6 +74,15 @@ pub struct ProtocolSupportManifest {
     pub fallback: ProtocolFallbackSupport,
 }
 
+/// The alias list a built-in codec advertises for its own protocol.
+///
+/// Every caller passes the `protocol_id` of the codec it is implementing, so
+/// an unknown name means this manifest has drifted from [`BuiltinProtocol`].
+/// Panicking is deliberate: returning an empty slice would silently drop the
+/// aliases the registry resolves names through, and the drift would surface
+/// later as a name that no longer parses.
+/// `manifest_matches_the_default_registry_exactly` below asserts the same
+/// correspondence at test time.
 pub(crate) fn aliases(protocol: &str) -> &'static [&'static str] {
     BuiltinProtocol::from_name(protocol)
         .map(BuiltinProtocol::aliases)

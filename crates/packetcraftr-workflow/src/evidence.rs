@@ -517,17 +517,17 @@ mod tests {
 
     impl ResponseEvidence for NoMatchedResponses {
         fn response(&self) -> &DecodedPacket {
-            unreachable!()
+            unreachable!("fixture matches no responses, so none is ever inspected")
         }
 
         fn latency(&self) -> Duration {
-            unreachable!()
+            unreachable!("fixture matches no responses, so none is ever timed")
         }
     }
 
     impl MatchedResponseEvidence for NoMatchedResponses {
         fn request_index(&self) -> usize {
-            unreachable!()
+            unreachable!("fixture matches no responses, so none is ever attributed")
         }
     }
 

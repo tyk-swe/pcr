@@ -198,8 +198,11 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup component add llvm-tools-preview
       - run: cargo install cargo-llvm-cov --locked --version 0.8.7
-      - name: Enforce 75% line coverage
-        run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info --fail-under-lines 75
+      # Measured 80.6% lines on 2026-07-28. The floor sits just under that so it
+      # catches a real regression rather than ratifying one: raise it when the
+      # measurement moves, do not lower it to make a change fit.
+      - name: Enforce 78% line coverage
+        run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info --fail-under-lines 78
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-lcov

@@ -12,8 +12,9 @@ use packetcraftr_packet::{
     Packet,
     build::{BuildContext, BuiltPacket},
     field::FieldValue,
+    layer::Layer,
     registry::ProtocolRegistry,
-    semantics::BuiltinProtocol,
+    semantics::{self, BuiltinProtocol},
 };
 use packetcraftr_protocol::link::Ethernet;
 
@@ -30,13 +31,19 @@ pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
     }
 }
 
+/// Layers of the packet transmitted directly on the wire. An encapsulated
+/// frame behind a tunnel boundary carries its own link and network layers,
+/// which must never satisfy or receive outer link materialization.
+fn outer_layers(packet: &Packet) -> impl Iterator<Item = &dyn Layer> {
+    packet.iter().take(semantics::outer_scope_len(packet))
+}
+
 pub(super) fn materialize_link_structure(
     packet: &mut Packet,
     plan: &PlannedRoute,
 ) -> Result<(), ClientError> {
     if !plan.synthesized_ethernet
-        || packet
-            .iter()
+        || outer_layers(packet)
             .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet))
     {
         return Ok(());
@@ -55,7 +62,7 @@ pub(super) fn materialize_network_fields(
     packet: &mut Packet,
     plan: &PlannedRoute,
 ) -> Result<(), ClientError> {
-    let Some((index, protocol)) = packet.iter().enumerate().find_map(|(index, layer)| {
+    let Some((index, protocol)) = outer_layers(packet).enumerate().find_map(|(index, layer)| {
         let protocol = BuiltinProtocol::of(layer)?;
         protocol.is_ip().then_some((index, protocol))
     }) else {
@@ -130,8 +137,7 @@ pub(super) fn materialize_link_fields(
     if route.plan.mode != packetcraftr_net::link::LinkMode::Layer2 {
         return Ok(false);
     }
-    let Some(index) = packet
-        .iter()
+    let Some(index) = outer_layers(packet)
         .position(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet))
     else {
         return Ok(false);

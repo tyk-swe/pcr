@@ -5,10 +5,14 @@
   "status": "success",
   "result": {
     "protocols": [
+      {"protocol": "ah", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "arp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "bsd_loop", "aliases": ["loop"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "bsd_null", "aliases": ["null"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "erspan", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "esp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "ethernet", "aliases": ["eth", "ether", "ethernet2"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "geneve", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "gre", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "icmpv4", "aliases": ["icmp", "icmp4"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
       {"protocol": "icmpv6", "aliases": ["icmp6"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
@@ -19,17 +23,24 @@
       {"protocol": "ipv6_fragment", "aliases": ["fragment6", "frag6"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "ipv6_hop_by_hop", "aliases": ["hop", "hopopts", "hbh"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "ipv6_srh", "aliases": ["srh", "segment_routing"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "l2tpv3", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "linux_sll", "aliases": ["sll"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "linux_sll2", "aliases": ["sll2"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "llc", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "malformed", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "mpls", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "padding", "aliases": ["pad"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "ppp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "pppoe", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "raw", "aliases": ["payload", "bytes"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "raw_ip", "aliases": ["rawip"], "build": false, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": true},
       {"protocol": "sctp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
+      {"protocol": "snap", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "tcp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
       {"protocol": "udp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
       {"protocol": "vlan", "aliases": ["dot1q", "8021q"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
-      {"protocol": "vlan8021ad", "aliases": ["dot1ad", "8021ad", "qinq"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false}
+      {"protocol": "vlan8021ad", "aliases": ["dot1ad", "8021ad", "qinq"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "vxlan", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false}
     ]
   },
   "diagnostics": []

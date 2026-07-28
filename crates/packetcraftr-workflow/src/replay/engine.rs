@@ -6,13 +6,32 @@
 use super::wire::{replay_link_mode, validate_transmission_evidence};
 use super::{
     Deadline, DeadlineExceeded, Duration, Format, Read, Reader, ReplayAuthorizationContext,
-    ReplayAuthorizer, ReplayError, ReplayFrameEvidence, ReplayOptions, ReplaySummary,
-    ReplayTransmitter, WorkflowClock,
+    ReplayAuthorizer, ReplayError, ReplayFrameEvidence, ReplayOptions, ReplaySelector,
+    ReplaySummary, ReplayTransmitter, WorkflowClock,
 };
 
 pub fn replay_capture<R, A, T, C, F>(
     reader: &mut Reader<R>,
     options: &ReplayOptions,
+    authorizer: &mut A,
+    transmitter: &mut T,
+    clock: &mut C,
+    emit: F,
+) -> Result<ReplaySummary, ReplayError>
+where
+    R: Read,
+    A: ReplayAuthorizer,
+    T: ReplayTransmitter,
+    C: WorkflowClock,
+    F: FnMut(ReplayFrameEvidence) -> Result<(), ReplayError>,
+{
+    replay_capture_with_selector(reader, options, None, authorizer, transmitter, clock, emit)
+}
+
+pub fn replay_capture_with_selector<R, A, T, C, F>(
+    reader: &mut Reader<R>,
+    options: &ReplayOptions,
+    mut selector: Option<&mut dyn ReplaySelector>,
     authorizer: &mut A,
     transmitter: &mut T,
     clock: &mut C,
@@ -79,6 +98,23 @@ where
                 limit: limits.max_frame_bytes,
             });
         }
+        frames_attempted = next_frames;
+
+        // Selection happens after the read-side budgets, so a skipped frame
+        // still consumes one unit of the frame budget, and before the byte
+        // budget, timing, and authorization, so it contributes no bytes, no
+        // delay, and never reaches policy or the wire.
+        if let Some(selector) = selector.as_deref_mut() {
+            enforce_deadline(&deadline, sequence)?;
+            let selected = selector
+                .select(next_frames, &frame)
+                .map_err(|source| ReplayError::Selection { sequence, source })?;
+            enforce_deadline(&deadline, sequence)?;
+            if !selected {
+                continue;
+            }
+        }
+
         let next_bytes = bytes_completed
             .checked_add(u64::from(frame.captured_length()))
             .ok_or(ReplayError::ByteLimit {
@@ -93,7 +129,6 @@ where
                 limit: limits.max_bytes,
             });
         }
-        frames_attempted = next_frames;
 
         let mode = replay_link_mode(sequence, frame.link_type, options.link_mode)?;
         let delay = match previous_timestamp {
@@ -128,10 +163,16 @@ where
         deadline
             .check_additional(delay)
             .map_err(|error| duration_limit(sequence, error))?;
+        // The policy budgets govern live transmission, so the prospective
+        // totals count only frames that reach the wire: skipped frames are
+        // charged to the read-side frame budget above, never to the policy.
+        let next_completed = frames_completed
+            .checked_add(1)
+            .expect("completed frames cannot exceed validated attempted frames");
         enforce_deadline(&deadline, sequence)?;
         let authorization = authorizer.authorize_operation(
             ReplayAuthorizationContext {
-                packets: next_frames,
+                packets: next_completed,
                 wire_bytes: next_bytes,
             },
             &frame,
@@ -176,9 +217,7 @@ where
         }
         validate_transmission_evidence(sequence, &frame, &transmission.report)?;
 
-        frames_completed = frames_completed
-            .checked_add(1)
-            .expect("completed frames cannot exceed validated attempted frames");
+        frames_completed = next_completed;
         bytes_completed = next_bytes;
         scheduled_duration = next_duration;
         previous_timestamp = Some(frame.timestamp);

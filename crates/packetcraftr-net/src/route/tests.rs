@@ -21,8 +21,10 @@ use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_packet::{Packet, field::WireValue, layer::Raw};
 use packetcraftr_protocol::{
     ipv6::SegmentRoutingHeader,
-    link::{Ethernet, Vlan, Vlan8021ad},
+    link::{Arp, Ethernet, Vlan, Vlan8021ad},
     network::{Ipv4, Ipv6},
+    transport::Udp,
+    tunnel::Vxlan,
 };
 
 struct FixedRoute(RouteDecision);
@@ -233,6 +235,127 @@ fn explicit_layer3_rejects_every_canonical_link_intent_before_route_lookup() {
             "{case}"
         );
     }
+}
+
+fn vxlan_tunneled_frame_packet() -> Packet {
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 10),
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 49152,
+            destination_port: 4789,
+            ..Udp::default()
+        })
+        .push(Vxlan::default())
+        .push(Ethernet {
+            destination: [9; 6],
+            source: [8; 6],
+            ether_type: WireValue::Auto,
+        })
+        .push(Vlan {
+            vlan_id: 300,
+            ..Vlan::default()
+        })
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 168, 1, 1),
+            destination: Ipv4Addr::new(192, 168, 1, 5),
+            ..Ipv4::default()
+        });
+    packet
+}
+
+#[test]
+fn a_tunneled_ethernet_frame_carries_no_outer_link_intent() {
+    let packet = vxlan_tunneled_frame_packet();
+    let provider = FixedRoute(route(None));
+
+    let explicit = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer3,
+                interface: None,
+                preferred_source: None,
+            },
+            &provider,
+        )
+        .unwrap();
+    assert_eq!(explicit.mode, LinkMode::Layer3);
+
+    let auto = RoutePlanner
+        .plan(&packet, None, &PlanOptions::default(), &provider)
+        .unwrap();
+    assert_eq!(auto.mode, LinkMode::Layer3);
+}
+
+#[test]
+fn layer2_planning_ignores_addresses_inside_the_tunneled_frame() {
+    let packet = vxlan_tunneled_frame_packet();
+    let plan = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer2,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(route(None)),
+        )
+        .unwrap();
+
+    // The tunneled frame's MACs and VLAN tag describe the encapsulated
+    // network: the outer link still needs synthesis, neighbor resolution,
+    // and an untagged neighbor probe.
+    assert!(plan.synthesized_ethernet);
+    assert!(plan.destination_mac.is_none());
+    assert_eq!(plan.source_mac, Some(MacAddress([2, 0, 0, 0, 0, 1])));
+    assert!(plan.neighbor_vlan_tags.is_empty());
+    assert!(plan.neighbor_target.is_some());
+}
+
+#[test]
+fn a_tunneled_arp_payload_lends_no_macs_to_the_outer_link() {
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 10),
+            destination: Ipv4Addr::new(198, 51, 100, 1),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 49152,
+            destination_port: 4789,
+            ..Udp::default()
+        })
+        .push(Vxlan::default())
+        .push(Ethernet::default())
+        .push(Arp {
+            operation: 2,
+            sender_hardware: [7; 6],
+            target_hardware: [6; 6],
+            ..Arp::default()
+        });
+    let plan = RoutePlanner
+        .plan(
+            &packet,
+            None,
+            &PlanOptions {
+                link_mode: LinkMode::Layer2,
+                interface: None,
+                preferred_source: None,
+            },
+            &FixedRoute(route(None)),
+        )
+        .unwrap();
+
+    assert!(plan.destination_mac.is_none());
+    assert_eq!(plan.source_mac, Some(MacAddress([2, 0, 0, 0, 0, 1])));
 }
 
 #[test]

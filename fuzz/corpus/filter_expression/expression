@@ -1,0 +1,1 @@
+ipv4.source in 10.0.0.0/8 && (udp.destination_port == 53 || tcp.flags == 2) && ethernet.source[0:3] == 00:1b:21 && !ipv6

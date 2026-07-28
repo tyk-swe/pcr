@@ -144,16 +144,7 @@ impl Dissector {
         options: DecodeOptions,
         original: Bytes,
     ) -> Result<DecodedPacket, DecodeError> {
-        let allow_trailing_padding = matches!(
-            BuiltinProtocol::from_id(&root),
-            Some(
-                BuiltinProtocol::Ethernet
-                    | BuiltinProtocol::BsdNull
-                    | BuiltinProtocol::BsdLoop
-                    | BuiltinProtocol::LinuxSll
-                    | BuiltinProtocol::LinuxSll2
-            )
-        );
+        let mut allow_trailing_padding = link_scope_allows_padding(BuiltinProtocol::from_id(&root));
         let mut packet = Packet::new();
         let mut layouts = Vec::new();
         let mut diagnostics = Vec::new();
@@ -161,6 +152,7 @@ impl Dissector {
         let mut current = original.as_ref();
         let mut absolute_offset = 0usize;
         let mut network = None;
+        let mut current_discriminator = None;
         let mut trailing = Vec::<(usize, Bytes, usize)>::new();
 
         loop {
@@ -201,6 +193,7 @@ impl Dissector {
                     verify_checksums: options.verify_checksums,
                     allow_trailing_padding: allow_current_link_padding,
                     network,
+                    discriminator: current_discriminator,
                 },
             ) {
                 Ok(decoded) => decoded,
@@ -299,11 +292,13 @@ impl Dissector {
                 .ok_or_else(|| DecodeError::InvalidCodecCursor {
                     protocol: current_protocol.clone(),
                 })?;
-            let next_protocol = decoded
-                .next
-                .iter()
-                .find_map(|value| self.registry.child_for(binding_parent.as_str(), *value))
-                .cloned();
+            let next_selection = decoded.next.iter().find_map(|value| {
+                self.registry
+                    .child_for(binding_parent.as_str(), *value)
+                    .map(|protocol| (*value, protocol.clone()))
+            });
+            let next_discriminator = next_selection.as_ref().map(|(value, _)| *value);
+            let next_protocol = next_selection.map(|(_, protocol)| protocol);
             let missing_required_message = (decoded.payload_len == 0)
                 .then(|| {
                     next_protocol.as_ref().filter(|protocol| {
@@ -332,9 +327,20 @@ impl Dissector {
                 range: ByteRange::new(absolute_offset, layer_end),
                 fields,
             });
+            let starts_encapsulated_frame = BuiltinProtocol::from_id(binding_parent)
+                .is_some_and(BuiltinProtocol::is_encapsulation_boundary);
             packet.push_boxed(decoded.layer);
             if let Some(envelope) = decoded.network {
                 network = Some(envelope);
+            }
+            if starts_encapsulated_frame {
+                // The payload is a complete encapsulated frame: the enclosing
+                // network envelope ends here, and the inner stack opens its
+                // own link-padding scope rooted at the selected child.
+                network = None;
+                allow_trailing_padding = link_scope_allows_padding(
+                    next_protocol.as_ref().and_then(BuiltinProtocol::from_id),
+                );
             }
             diagnostics.extend(decoded.diagnostics.into_iter().map(|mut diagnostic| {
                 if diagnostic.layer.is_none() {
@@ -416,6 +422,7 @@ impl Dissector {
                 break;
             };
             current_protocol = next_protocol;
+            current_discriminator = next_discriminator;
             current = payload;
         }
 
@@ -441,6 +448,24 @@ impl Dissector {
             diagnostics,
         })
     }
+}
+
+/// Whether a stack rooted at this protocol may carry link-layer padding after
+/// a declared network length. Applies to the capture root and, equally, to the
+/// root of an encapsulated frame behind a tunnel boundary.
+fn link_scope_allows_padding(root: Option<BuiltinProtocol>) -> bool {
+    matches!(
+        root,
+        Some(
+            BuiltinProtocol::Ethernet
+                | BuiltinProtocol::Vlan
+                | BuiltinProtocol::Vlan8021ad
+                | BuiltinProtocol::BsdNull
+                | BuiltinProtocol::BsdLoop
+                | BuiltinProtocol::LinuxSll
+                | BuiltinProtocol::LinuxSll2
+        )
+    )
 }
 
 fn append_padding(

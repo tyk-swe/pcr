@@ -49,3 +49,10 @@ path = "fuzz_targets/reassembly_state.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "filter_expression"
+path = "fuzz_targets/filter_expression.rs"
+test = false
+doc = false
+bench = false

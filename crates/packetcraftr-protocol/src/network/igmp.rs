@@ -224,6 +224,7 @@ mod tests {
                 verify_checksums,
                 allow_trailing_padding: false,
                 network: None,
+                discriminator: None,
             },
         )
     }

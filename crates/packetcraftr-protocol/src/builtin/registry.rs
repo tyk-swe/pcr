@@ -7,7 +7,7 @@
 
 use super::super::{
     capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher, network as ip, raw,
-    support, transport,
+    support, transport, tunnel,
 };
 
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
@@ -17,10 +17,18 @@ use ip::{IgmpCodec, Ipv4Codec, Ipv6Codec, RawIpCodec};
 use ipv6_ext::{
     DestinationOptionsCodec, HopByHopCodec, Ipv6FragmentCodec, SegmentRoutingHeaderCodec,
 };
-use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
+use link::{
+    ArpCodec, EthernetCodec, LLC_FRAME_DISCRIMINATOR, LlcCodec, SnapCodec, Vlan8021adCodec,
+    VlanCodec,
+};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
+use tunnel::{
+    AhCodec, ErspanCodec, EspCodec, GeneveCodec, L2tpv3Codec, MPLS_BOTTOM_RAW,
+    MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, MplsCodec, PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec,
+    PppoeCodec, VxlanCodec,
+};
 
 use packetcraftr_packet::{
     registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
@@ -42,6 +50,34 @@ impl ProtocolModule for BuiltinProtocols {
         bind_link_children(builder, BuiltinProtocol::Ethernet)?;
         bind_link_children(builder, BuiltinProtocol::Vlan)?;
         bind_link_children(builder, BuiltinProtocol::Vlan8021ad)?;
+        // An EtherType at or below 1500 is an 802.3 payload length, and the
+        // sentinel above the 16-bit EtherType space selects LLC framing.
+        // The cooked-capture headers never carry 802.3 lengths.
+        for parent in [
+            BuiltinProtocol::Ethernet,
+            BuiltinProtocol::Vlan,
+            BuiltinProtocol::Vlan8021ad,
+        ] {
+            bind(
+                builder,
+                parent,
+                LLC_FRAME_DISCRIMINATOR,
+                BuiltinProtocol::Llc,
+                100,
+            )?;
+        }
+        // LLC chains on its SAP pair; the zero-OUI SNAP space is the plain
+        // EtherType repertoire, so SNAP selects the same children a link
+        // header would.
+        bind(
+            builder,
+            BuiltinProtocol::Llc,
+            0xaaaa,
+            BuiltinProtocol::Snap,
+            100,
+        )?;
+        bind(builder, BuiltinProtocol::Llc, 0, BuiltinProtocol::Raw, -100)?;
+        bind_link_children(builder, BuiltinProtocol::Snap)?;
         for parent in [BuiltinProtocol::LinuxSll, BuiltinProtocol::LinuxSll2] {
             bind_link_children(builder, parent)?;
         }
@@ -72,6 +108,28 @@ impl ProtocolModule for BuiltinProtocols {
             100,
         )?;
 
+        // AH authenticates rather than encrypts, so the protocol chain
+        // continues through it in both address families; ESP's ciphertext
+        // is always the opaque child.
+        bind_ip_children(builder, BuiltinProtocol::Ah, 1)?;
+        bind(
+            builder,
+            BuiltinProtocol::Ah,
+            58,
+            BuiltinProtocol::Icmpv6,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Ah,
+            59,
+            BuiltinProtocol::Malformed,
+            100,
+        )?;
+        bind_ipv6_extensions(builder, BuiltinProtocol::Ah)?;
+        bind(builder, BuiltinProtocol::Esp, 0, BuiltinProtocol::Raw, 0)?;
+        bind(builder, BuiltinProtocol::L2tpv3, 0, BuiltinProtocol::Raw, 0)?;
+
         bind(
             builder,
             BuiltinProtocol::Gre,
@@ -87,6 +145,150 @@ impl ProtocolModule for BuiltinProtocols {
             100,
         )?;
         bind(builder, BuiltinProtocol::Gre, 0, BuiltinProtocol::Raw, -100)?;
+
+        // Both ERSPAN header types ride GRE protocol types of their own and
+        // always carry the mirrored Ethernet frame.
+        bind(
+            builder,
+            BuiltinProtocol::Gre,
+            0x88be,
+            BuiltinProtocol::Erspan,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Gre,
+            0x22eb,
+            BuiltinProtocol::Erspan,
+            90,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Erspan,
+            0,
+            BuiltinProtocol::Ethernet,
+            100,
+        )?;
+
+        // Overlay encapsulations hang off their registered transport
+        // ports; VXLAN always carries an inner Ethernet frame, while
+        // GENEVE's protocol_type EtherType selects Transparent Ethernet
+        // Bridging, IPv4, or IPv6 — with the usual raw fallback so an
+        // exactly decoded unknown EtherType rebuilds.
+        bind(
+            builder,
+            BuiltinProtocol::Udp,
+            4789,
+            BuiltinProtocol::Vxlan,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Vxlan,
+            0,
+            BuiltinProtocol::Ethernet,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Udp,
+            6081,
+            BuiltinProtocol::Geneve,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0x6558,
+            BuiltinProtocol::Ethernet,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0x0800,
+            BuiltinProtocol::Ipv4,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0x86dd,
+            BuiltinProtocol::Ipv6,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0,
+            BuiltinProtocol::Raw,
+            -100,
+        )?;
+
+        // PPPoE session data carries a PPP frame; discovery packets carry
+        // opaque tag bytes. The session EtherType outranks discovery so an
+        // Auto ether_type resolves to the data plane.
+        bind(
+            builder,
+            BuiltinProtocol::Pppoe,
+            PPPOE_SESSION,
+            BuiltinProtocol::Ppp,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Pppoe,
+            PPPOE_DISCOVERY,
+            BuiltinProtocol::Raw,
+            0,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Ppp,
+            0x0021,
+            BuiltinProtocol::Ipv4,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Ppp,
+            0x0057,
+            BuiltinProtocol::Ipv6,
+            100,
+        )?;
+        bind(builder, BuiltinProtocol::Ppp, 0, BuiltinProtocol::Raw, -100)?;
+
+        // The label stack chains itself until the S bit; the bottom payload
+        // has no protocol field, so the decoder offers a version-sniffed
+        // discriminator with an opaque fallback for pseudowire payloads.
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_NEXT_LABEL,
+            BuiltinProtocol::Mpls,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_BOTTOM_VERSION_BASE + 4,
+            BuiltinProtocol::Ipv4,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_BOTTOM_VERSION_BASE + 6,
+            BuiltinProtocol::Ipv6,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Mpls,
+            MPLS_BOTTOM_RAW,
+            BuiltinProtocol::Raw,
+            -100,
+        )?;
 
         // Payload-bearing transports use discriminator zero as their typed raw child.
         for parent in [
@@ -107,6 +309,10 @@ impl ProtocolModule for BuiltinProtocols {
             BuiltinProtocol::Padding,
             0,
         )?;
+
+        // Conventional display-filter spellings are registered last, so they
+        // are validated against the codecs and schemas above.
+        super::filter::register_filter_fields(builder)?;
         Ok(())
     }
 }
@@ -166,6 +372,9 @@ fn bind_common_ip_children(
     bind(builder, parent, 17, BuiltinProtocol::Udp, 100)?;
     bind(builder, parent, 41, BuiltinProtocol::Ipv6, 100)?;
     bind(builder, parent, 47, BuiltinProtocol::Gre, 100)?;
+    bind(builder, parent, 50, BuiltinProtocol::Esp, 100)?;
+    bind(builder, parent, 51, BuiltinProtocol::Ah, 100)?;
+    bind(builder, parent, 115, BuiltinProtocol::L2tpv3, 100)?;
     bind(builder, parent, 132, BuiltinProtocol::Sctp, 100)?;
     bind(builder, parent, 255, BuiltinProtocol::Raw, -100)?;
     Ok(())
@@ -208,6 +417,13 @@ fn bind_link_children(
     bind(builder, parent, 0x0800, BuiltinProtocol::Ipv4, 100)?;
     bind(builder, parent, 0x0806, BuiltinProtocol::Arp, 100)?;
     bind(builder, parent, 0x8100, BuiltinProtocol::Vlan, 100)?;
+    // MPLS unicast and multicast label stacks share one codec, as do the
+    // PPPoE stages; the aliased EtherType round-trips because link-layer
+    // discriminator resolution accepts any value selecting the same child.
+    bind(builder, parent, 0x8847, BuiltinProtocol::Mpls, 100)?;
+    bind(builder, parent, 0x8848, BuiltinProtocol::Mpls, 90)?;
+    bind(builder, parent, 0x8864, BuiltinProtocol::Pppoe, 100)?;
+    bind(builder, parent, 0x8863, BuiltinProtocol::Pppoe, 90)?;
     bind(builder, parent, 0x88a8, BuiltinProtocol::Vlan8021ad, 100)?;
     bind(builder, parent, 0x86dd, BuiltinProtocol::Ipv6, 100)?;
     // A fallback reverse binding lets an exactly decoded unknown EtherType rebuild with Raw.

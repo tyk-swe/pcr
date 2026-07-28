@@ -11,6 +11,7 @@ use thiserror::Error;
 
 use super::super::Packet;
 use super::super::diagnostic::Diagnostic;
+use super::super::field::FieldValue;
 use super::super::layer::{FieldError, MalformedLayer, Padding, ProtocolId, Raw};
 use super::super::layout::{ByteRange, LayerLayout, PacketLayout};
 use super::super::registry::{CodecError, LayerEncodeContext, ProtocolRegistry};
@@ -424,7 +425,12 @@ impl Builder {
                 .is_some_and(|outside| {
                     matches!(
                         BuiltinProtocol::of(outside),
-                        Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6 | BuiltinProtocol::Udp)
+                        Some(
+                            BuiltinProtocol::Ipv4
+                                | BuiltinProtocol::Ipv6
+                                | BuiltinProtocol::Udp
+                                | BuiltinProtocol::Pppoe
+                        )
                     )
                 })
         });
@@ -469,15 +475,42 @@ impl Builder {
                 }
                 let outside_protocol = &protocols[outside_layer];
                 let outside_builtin = BuiltinProtocol::from_id(outside_protocol);
-                let has_declared_boundary = matches!(
-                    outside_builtin,
+                let child_protocol = packet
+                    .layer(outside_layer + 1)
+                    .and_then(|child| child.as_any().downcast_ref::<MalformedLayer>())
+                    .and_then(|child| child.intended_protocol.as_ref())
+                    .unwrap_or(&protocols[outside_layer + 1]);
+                // A link header qualifies only when its EtherType slot
+                // actually declares an 802.3 payload length: an exact or raw
+                // value at or below 1500, or an Auto value that resolves to
+                // LLC framing or to the zero-length empty frame. An
+                // EtherType-form value leaves no boundary, so trailing
+                // padding would fold back into the payload on dissection.
+                let link_declares_length = || match outside.field("ether_type") {
+                    Some(FieldValue::Unsigned(value)) => value <= 1500,
+                    Some(FieldValue::Bytes(value)) if value.len() == 2 => {
+                        u16::from_be_bytes([value[0], value[1]]) <= 1500
+                    }
+                    _ => matches!(
+                        BuiltinProtocol::from_id(child_protocol),
+                        Some(BuiltinProtocol::Llc | BuiltinProtocol::Padding)
+                    ),
+                };
+                let has_declared_boundary = match outside_builtin {
                     Some(
                         BuiltinProtocol::Ipv4
-                            | BuiltinProtocol::Ipv6
-                            | BuiltinProtocol::Udp
-                            | BuiltinProtocol::Arp
-                    )
-                );
+                        | BuiltinProtocol::Ipv6
+                        | BuiltinProtocol::Udp
+                        | BuiltinProtocol::Arp
+                        | BuiltinProtocol::Pppoe,
+                    ) => true,
+                    Some(
+                        BuiltinProtocol::Ethernet
+                        | BuiltinProtocol::Vlan
+                        | BuiltinProtocol::Vlan8021ad,
+                    ) => link_declares_length(),
+                    _ => false,
+                };
                 if !has_declared_boundary {
                     if mode == BuildMode::Strict {
                         return Err(BuildError::InvalidPaddingBoundary {
@@ -497,7 +530,12 @@ impl Builder {
                 }
                 if matches!(
                     outside_builtin,
-                    Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6 | BuiltinProtocol::Udp)
+                    Some(
+                        BuiltinProtocol::Ipv4
+                            | BuiltinProtocol::Ipv6
+                            | BuiltinProtocol::Udp
+                            | BuiltinProtocol::Pppoe
+                    )
                 ) {
                     diagnostics.push(
                         Diagnostic::warning(

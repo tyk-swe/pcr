@@ -20,9 +20,12 @@ pub enum CommandName {
     Send,
     Exchange,
     Capture,
+    Expert,
+    Follow,
     Read,
     Replay,
     Scan,
+    Stats,
     Traceroute,
     Dns,
     Fuzz,
@@ -41,9 +44,12 @@ impl CommandName {
             Self::Send => "send",
             Self::Exchange => "exchange",
             Self::Capture => "capture",
+            Self::Expert => "expert",
+            Self::Follow => "follow",
             Self::Read => "read",
             Self::Replay => "replay",
             Self::Scan => "scan",
+            Self::Stats => "stats",
             Self::Traceroute => "traceroute",
             Self::Dns => "dns",
             Self::Fuzz => "fuzz",
@@ -56,13 +62,16 @@ impl CommandName {
     pub const fn formats(self) -> &'static [OutputFormat] {
         match self {
             Self::Build | Self::Dissect => BUILD_FORMATS,
-            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes => AGGREGATE_FORMATS,
+            Self::Protocols | Self::Plan | Self::Interfaces | Self::Routes | Self::Stats => {
+                AGGREGATE_FORMATS
+            }
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
             Self::Capture => CAPTURE_FORMATS,
             Self::Read => READ_FORMATS,
             Self::Replay => REPLAY_FORMATS,
-            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz => TOOL_FORMATS,
+            Self::Follow => FOLLOW_FORMATS,
+            Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert => TOOL_FORMATS,
         }
     }
 
@@ -188,6 +197,12 @@ const REPLAY_FORMATS: &[OutputFormat] = &[
 ];
 const TOOL_FORMATS: &[OutputFormat] =
     &[OutputFormat::Text, OutputFormat::Json, OutputFormat::Ndjson];
+const FOLLOW_FORMATS: &[OutputFormat] = &[
+    OutputFormat::Text,
+    OutputFormat::Json,
+    OutputFormat::Hex,
+    OutputFormat::Raw,
+];
 
 /// Complete v1 command/format matrix. Extending a command requires changing this table.
 pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
@@ -230,6 +245,18 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     CommandOutputContract {
         command: CommandName::Scan,
         formats: TOOL_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Stats,
+        formats: AGGREGATE_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Expert,
+        formats: TOOL_FORMATS,
+    },
+    CommandOutputContract {
+        command: CommandName::Follow,
+        formats: FOLLOW_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Traceroute,

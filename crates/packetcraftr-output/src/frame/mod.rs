@@ -6,7 +6,9 @@
 mod model;
 
 pub use model::{
-    DecodedFrameOutput as Decoded, FrameDirection as Direction, FrameOutput as Captured,
-    OutputTimestamp as Timestamp, WireFrameOutput as Wire,
+    DecodedFrameOutput as Decoded, DecodedStackOutput as Stack, FrameDirection as Direction,
+    FrameOutput as Captured, OutputTimestamp as Timestamp, WireFrameOutput as Wire,
 };
-pub(crate) use model::{DecodedFrameOutput, FrameOutput, OutputTimestamp, WireFrameOutput};
+pub(crate) use model::{
+    DecodedFrameOutput, DecodedStackOutput, FrameOutput, OutputTimestamp, WireFrameOutput,
+};

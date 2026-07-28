@@ -106,3 +106,36 @@ fn a_new_syn_replaces_an_incompatible_tuple_generation() {
             .any(|event| matches!(event, Event::Retransmission { .. }))
     );
 }
+
+#[test]
+fn evicting_a_flow_surfaces_its_pending_bytes_and_ignores_unknown_flows() {
+    let now = Instant::now();
+    let mut reassembler = Reassembler::new(ReassemblyLimits::default());
+    assert!(reassembler.evict_flow(&flow()).is_empty());
+    assert_eq!(reassembler.flow_base_sequence(&flow()), None);
+
+    reassembler.push(segment(100, b"abc"), now).unwrap();
+    // Sequence 104 leaves a one-byte hole, so eviction reports it pending.
+    reassembler.push(segment(104, b"d"), now).unwrap();
+    assert_eq!(reassembler.flow_base_sequence(&flow()), Some(100));
+
+    let events = reassembler.evict_flow(&flow());
+    assert_eq!(events.len(), 2, "{events:?}");
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Gap {
+            expected_sequence: 103,
+            next_sequence: 104,
+            ..
+        }
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        Event::Evicted {
+            pending_bytes: 1,
+            ..
+        }
+    )));
+    assert_eq!(reassembler.flow_count(), 0);
+    assert_eq!(reassembler.aggregate_bytes(), 0);
+}

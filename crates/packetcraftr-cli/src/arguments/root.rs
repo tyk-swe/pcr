@@ -7,8 +7,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use packetcraftr::output;
 
 use super::{
-    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, FuzzArgs, ProtocolsArgs, ReadArgs,
-    ReplayArgs, RouteArgs, ScanArgs, SendArgs, TracerouteArgs,
+    BuildArgs, CaptureArgs, DissectArgs, DnsArgs, ExchangeArgs, ExpertArgs, FollowArgs, FuzzArgs,
+    ProtocolsArgs, ReadArgs, ReplayArgs, RouteArgs, ScanArgs, SendArgs, StatsArgs, TracerouteArgs,
 };
 
 const ROOT_AFTER_HELP: &str = r#"Output formats:
@@ -33,16 +33,21 @@ const BUILD_AFTER_HELP: &str = r#"Examples:
   packetcraftr --output raw build --packet-file packet.json"#;
 const DISSECT_AFTER_HELP: &str = r#"When neither --hex nor --file is supplied, raw frame bytes are read from standard input.
 
+With --filter, the dissection is emitted only when the frame matches; a frame that does not match emits nothing and the command still succeeds.
+
 Examples:
   packetcraftr dissect --hex '45000014000000004001f6e7c0000201c6336402'
-  packetcraftr --output json dissect --file frame.bin --link-type 1"#;
+  packetcraftr --output json dissect --file frame.bin --link-type 1
+  packetcraftr dissect --file frame.bin --filter 'icmpv4 && ip.dst == 198.51.100.2'"#;
 const PROTOCOLS_AFTER_HELP: &str = r#"Examples:
   packetcraftr protocols
   packetcraftr protocols ipv4
   packetcraftr --output json protocols IP4"#;
 const READ_AFTER_HELP: &str = r#"Examples:
   packetcraftr read capture.pcapng --max-frames 100
-  packetcraftr --output ndjson read capture.pcap"#;
+  packetcraftr --output ndjson read capture.pcap
+  packetcraftr read capture.pcapng --filter 'tcp.flags.syn == 1 && !tcp.flags.ack' --dissect
+  packetcraftr --output pcapng read capture.pcapng --filter 'ip.src in 10.0.0.0/8' > subset.pcapng"#;
 const INTERFACES_AFTER_HELP: &str = r#"Examples:
   packetcraftr interfaces
   packetcraftr --output json interfaces"#;
@@ -60,16 +65,46 @@ Example:
   packetcraftr exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000"#;
 const CAPTURE_AFTER_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
 
-Example:
-  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000"#;
+--filter is a display filter evaluated on each frame after it is received; it selects what is reported, and does not install a kernel capture filter or narrow what the backend captures. Frames the filter rejects still count against the operation's frame and byte budgets.
+
+Examples:
+  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
+  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --filter 'udp.srcport == 53'"#;
 const REPLAY_AFTER_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
+
+Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. Transmitted frames keep their original spacing: the delay before a kept frame spans any skipped frames in between.
 
 Examples:
   packetcraftr replay capture.pcapng --interface eth0 --timing immediate
-  packetcraftr replay capture.pcap --interface 2 --rate 100"#;
+  packetcraftr replay capture.pcap --interface 2 --rate 100
+  packetcraftr replay capture.pcap --interface eth0 --filter 'udp && ip.dst == 10.0.0.2'"#;
 const SCAN_AFTER_HELP: &str = r#"Examples:
   packetcraftr scan 192.0.2.10 --transport tcp --ports 22,80,443
   packetcraftr --output ndjson scan 198.51.100.10 --transport icmp"#;
+const FOLLOW_AFTER_HELP: &str = r#"Following is computed offline over dissected frames; no live capture or transmission is involved.
+
+The conversation index comes from the same first-seen numbering stats reports and stream filters match, so 'follow --stream tcp:7' extracts the conversation 'tcp.stream == 7' selects. The client is the endpoint that sent the conversation's first captured frame. TCP payload is reassembled in stream order per direction; UDP emits one chunk per datagram. IP-fragmented datagrams carry no conversation index and are not followed. Raw output needs a single direction, since interleaved raw bytes would be indistinguishable.
+
+Examples:
+  packetcraftr follow capture.pcapng --stream tcp:0
+  packetcraftr follow capture.pcapng --stream tcp:0 --direction client --output raw > client.bin
+  packetcraftr --output json follow capture.pcapng --stream udp:2"#;
+const EXPERT_AFTER_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
+
+Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. Stream-aware filters such as 'tcp.stream == 7' are supported.
+
+Examples:
+  packetcraftr expert capture.pcapng
+  packetcraftr expert capture.pcapng --filter 'tcp.stream == 3'
+  packetcraftr --output ndjson expert capture.pcapng"#;
+const STATS_AFTER_HELP: &str = r#"Statistics are computed offline over dissected frames; no live capture or transmission is involved.
+
+Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
+
+Examples:
+  packetcraftr stats capture.pcapng --table conversations
+  packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
+  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
 const TRACEROUTE_AFTER_HELP: &str = r#"Examples:
   packetcraftr traceroute 192.0.2.1 --strategy icmp
   packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution"#;
@@ -211,12 +246,21 @@ pub(crate) enum Command {
     /// Stream live captured frames.
     #[command(after_long_help = CAPTURE_AFTER_HELP)]
     Capture(CaptureArgs),
+    /// Report protocol health findings over a capture file.
+    #[command(after_long_help = EXPERT_AFTER_HELP)]
+    Expert(ExpertArgs),
+    /// Extract one conversation's payload from a capture file.
+    #[command(after_long_help = FOLLOW_AFTER_HELP)]
+    Follow(FollowArgs),
     /// Replay a PCAP/PCAPNG stream.
     #[command(after_long_help = REPLAY_AFTER_HELP)]
     Replay(ReplayArgs),
     /// Run a structured network scan.
     #[command(after_long_help = SCAN_AFTER_HELP)]
     Scan(ScanArgs),
+    /// Compute aggregate statistics over a capture file.
+    #[command(after_long_help = STATS_AFTER_HELP)]
+    Stats(StatsArgs),
     /// Run bounded, policy-gated traceroute probes.
     #[command(
         long_about = "Run bounded, policy-gated traceroute probes. UDP starts at --port and increments the destination port for every probe; TCP keeps --port fixed. Each hop sends its attempts as one burst and shares one --timeout-ms response window. Traceroute supports text, JSON, and NDJSON output. Public destinations and hostname resolution require their respective explicit policy options.",

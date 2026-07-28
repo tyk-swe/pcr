@@ -59,7 +59,7 @@ fn command_matrix_is_complete_and_has_no_duplicate_formats() {
         OutputFormat::Pcap,
         OutputFormat::Pcapng,
     ];
-    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 15);
+    assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 18);
     for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
         assert!(!contract.formats.is_empty());
         assert_eq!(contract.formats, contract.command.formats());
@@ -177,6 +177,7 @@ fn aggregate_and_stream_envelopes_freeze_mode_and_sequence() {
                 Frame::new(UNIX_EPOCH, packetcraftr_capture::LinkType::RAW, vec![0_u8]).unwrap(),
             )
             .unwrap(),
+            decoded: None,
         },
         Vec::new(),
     );

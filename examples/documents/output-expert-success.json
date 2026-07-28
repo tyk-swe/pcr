@@ -1,0 +1,54 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "expert",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "frames_read": 5,
+    "frames_matched": 5,
+    "errors": 0,
+    "warnings": 3,
+    "notes": 0,
+    "codes": [
+      {
+        "code": "tcp.duplicate_ack",
+        "findings": 1
+      },
+      {
+        "code": "tcp.reset",
+        "findings": 1
+      },
+      {
+        "code": "tcp.retransmission",
+        "findings": 1
+      }
+    ],
+    "findings": [
+      {
+        "severity": "warning",
+        "code": "tcp.retransmission",
+        "frame": 2,
+        "transport": "tcp",
+        "stream": 0,
+        "message": "4 byte(s) at sequence 100 retransmit previously seen data"
+      },
+      {
+        "severity": "warning",
+        "code": "tcp.duplicate_ack",
+        "frame": 4,
+        "transport": "tcp",
+        "stream": 0,
+        "message": "10.0.0.2:443 repeats acknowledgment 100 (duplicate #1)"
+      },
+      {
+        "severity": "warning",
+        "code": "tcp.reset",
+        "frame": 5,
+        "transport": "tcp",
+        "stream": 0,
+        "message": "connection reset by 10.0.0.2:443"
+      }
+    ]
+  },
+  "diagnostics": []
+}

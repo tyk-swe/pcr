@@ -63,6 +63,7 @@ use packetcraftr_protocol::{
     link::{Arp, Ethernet, Vlan, Vlan8021ad},
     network::{Ipv4, Ipv6},
     transport::Udp,
+    tunnel::Vxlan,
 };
 
 use support::{

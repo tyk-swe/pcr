@@ -12,14 +12,14 @@ use packetcraftr_packet::{
     },
     field::{FieldValue, WireValue},
     layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
-    registry::Discriminator,
 };
 
 use super::super::common::{
-    aliased_fields, expected_discriminator, invalid, make_layer, out_of_range, protocol,
+    aliased_fields, invalid, make_layer, out_of_range, payload_without_padding, protocol,
     resolve_u16, truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator,
     wrong_layer, wrong_type,
 };
+use super::ethernet::{link_payload_selection, link_type_expectation, validate_link_length_form};
 
 const VLAN_LEN: usize = 4;
 
@@ -102,6 +102,7 @@ struct VlanEncodeFields<'a> {
 fn encode_vlan<L>(
     name: &str,
     fields: VlanEncodeFields<'_>,
+    payload: &[u8],
     context: &LayerEncodeContext<'_>,
     layout: fn() -> Vec<packetcraftr_packet::layout::FieldLayout>,
     materialize: impl FnOnce(WireValue<u16>) -> L,
@@ -115,7 +116,9 @@ where
             "VLAN priority or identifier is outside its wire range",
         ));
     }
-    let expectation = expected_discriminator(name, context, 0_u16);
+    let covered_payload = payload_without_padding(name, payload, context)?;
+    let expectation =
+        link_type_expectation(name, context, fields.ether_type, covered_payload.len())?;
     let mut diagnostics = Vec::new();
     validate_auto_raw_discriminator(
         name,
@@ -130,6 +133,13 @@ where
         fields.ether_type,
         expectation,
         context.mode,
+        &mut diagnostics,
+    )?;
+    validate_link_length_form(
+        name,
+        ether_type,
+        covered_payload.len(),
+        context,
         &mut diagnostics,
     )?;
     validate_raw_child_discriminator(name, u64::from(ether_type), context, &mut diagnostics)?;
@@ -159,6 +169,8 @@ fn decode_vlan(
     }
     let tci = u16::from_be_bytes([input[0], input[1]]);
     let ether_type = u16::from_be_bytes([input[2], input[3]]);
+    let (payload_len, next) =
+        link_payload_selection(name, ether_type, input.len() - VLAN_LEN, VLAN_LEN)?;
     Ok(DecodedLayerValue {
         layer: layer(
             ((tci >> 13) & 7) as u8,
@@ -168,11 +180,11 @@ fn decode_vlan(
         ),
         consumed: VLAN_LEN,
         payload_offset: VLAN_LEN,
-        payload_len: input.len() - VLAN_LEN,
-        next: vec![Discriminator(u64::from(ether_type))],
+        payload_len,
+        next,
         fields: layout(),
         diagnostics: Vec::new(),
-        stop: input.len() == VLAN_LEN,
+        stop: payload_len == 0,
         network: None,
     })
 }
@@ -189,7 +201,7 @@ impl LayerCodec for VlanCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
-        _payload: &[u8],
+        payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
@@ -204,6 +216,7 @@ impl LayerCodec for VlanCodec {
                 vlan_id: layer.vlan_id,
                 ether_type: &layer.ether_type,
             },
+            payload,
             context,
             vlan_layout,
             |ether_type| Vlan {
@@ -264,7 +277,7 @@ impl LayerCodec for Vlan8021adCodec {
     fn encode(
         &self,
         layer: &dyn Layer,
-        _payload: &[u8],
+        payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
         let layer = layer
@@ -279,6 +292,7 @@ impl LayerCodec for Vlan8021adCodec {
                 vlan_id: layer.vlan_id,
                 ether_type: &layer.ether_type,
             },
+            payload,
             context,
             vlan_ad_layout,
             |ether_type| Vlan8021ad {

@@ -14,6 +14,7 @@
 mod arguments;
 mod commands;
 mod errors;
+mod filtering;
 mod input;
 mod rendering;
 mod runtime;

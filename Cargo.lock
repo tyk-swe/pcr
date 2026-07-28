@@ -1151,6 +1151,7 @@ dependencies = [
  "packetcraftr-net",
  "packetcraftr-packet",
  "packetcraftr-protocol",
+ "packetcraftr-session",
  "serde",
  "thiserror 2.0.19",
 ]

@@ -11,9 +11,10 @@ use crate::{
     gre::Gre,
     icmp::{Icmpv4, Icmpv6},
     ipv6::{DestinationOptions, HopByHop, SegmentRoutingHeader},
-    link::{Arp, Ethernet, Vlan, Vlan8021ad},
+    link::{Arp, Ethernet, Llc, Snap, Vlan, Vlan8021ad},
     network::{Igmp, Ipv4, Ipv6},
     transport::{Sctp, Tcp, Udp},
+    tunnel::{Ah, Erspan, ErspanType3, Esp, Geneve, L2tpv3, Mpls, Ppp, Pppoe, Vxlan},
 };
 use packetcraftr_packet::{
     Packet,
@@ -21,7 +22,7 @@ use packetcraftr_packet::{
     decode::{DecodeOptions, Dissector},
     expression::{Options as ExpressionOptions, parse as parse_packet_expression},
     field::WireValue,
-    layer::{Padding, Raw},
+    layer::{MalformedLayer, Padding, Raw},
 };
 
 mod discriminator;

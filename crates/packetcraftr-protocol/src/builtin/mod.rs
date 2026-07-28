@@ -9,6 +9,7 @@
 //! treating successful registration as proof that a workflow builds, dissects,
 //! or matches a protocol.
 
+mod filter;
 mod registry;
 
 pub use registry::{BuiltinProtocols as Module, default_registry as registry};

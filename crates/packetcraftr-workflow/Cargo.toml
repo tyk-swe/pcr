@@ -1,6 +1,6 @@
 [package]
 name = "packetcraftr-workflow"
-description = "Bounded PacketcraftR replay, scan, traceroute, DNS, and fuzz workflows"
+description = "Bounded PacketcraftR analysis, replay, scan, traceroute, DNS, and fuzz workflows"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -19,5 +19,6 @@ packetcraftr-error.workspace = true
 packetcraftr-net.workspace = true
 packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true
+packetcraftr-session.workspace = true
 serde.workspace = true
 thiserror.workspace = true

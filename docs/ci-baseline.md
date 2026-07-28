@@ -162,7 +162,8 @@ dictionary. The targets are:
 - `decode_roundtrip`;
 - `packet_inputs`;
 - `dns_wire`;
-- `reassembly_state`.
+- `reassembly_state`;
+- `filter_expression`.
 
 The nightly workflow runs each target for ten minutes with the same timeout,
 memory limit, maximum input length, corpus, and dictionary. Evolving corpora

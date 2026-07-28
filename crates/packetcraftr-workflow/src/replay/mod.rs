@@ -52,21 +52,21 @@ mod tests;
 mod wire;
 
 pub use adapter::{SystemAuthorizer, SystemTransmitter};
-pub use engine::replay_capture as run;
+pub use engine::{replay_capture as run, replay_capture_with_selector as run_with_selector};
 pub use error::ReplayError as Error;
 pub use model::{
     MAX_REPLAY_DURATION, ReplayAuthorizationContext as AuthorizationContext,
     ReplayAuthorizer as Authorizer, ReplayFrameEvidence as FrameEvidence, ReplayLimits as Limits,
-    ReplayOptions as Options, ReplaySummary as Summary, ReplayTiming as Timing,
-    ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
+    ReplayOptions as Options, ReplaySelector as Selector, ReplaySummary as Summary,
+    ReplayTiming as Timing, ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
 };
 
 #[cfg(test)]
-use engine::replay_capture;
+use engine::{replay_capture, replay_capture_with_selector};
 use error::ReplayError;
 use model::{
     ReplayAuthorizationContext, ReplayAuthorizer, ReplayFrameEvidence, ReplayOptions,
-    ReplaySummary, ReplayTransmission, ReplayTransmitter,
+    ReplaySelector, ReplaySummary, ReplayTransmission, ReplayTransmitter,
 };
 #[cfg(test)]
 use model::{ReplayLimits, ReplayTiming};

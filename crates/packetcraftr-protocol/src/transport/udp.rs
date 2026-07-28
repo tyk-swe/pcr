@@ -15,16 +15,31 @@ use packetcraftr_packet::{
     field::{FieldValue, WireValue},
     layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
+    semantics::BuiltinProtocol,
 };
 
 use super::super::common::{
     ValueExpectation, aliased_fields, invalid, make_layer, out_of_range, payload_without_padding,
-    protocol, resolve_u16, transport_checksum, transport_checksum_parts, truncated, wrong_layer,
-    wrong_type,
+    protocol, resolve_u16, strict_or_diagnostic, transport_checksum, transport_checksum_parts,
+    truncated, wrong_layer, wrong_type,
 };
 use super::super::network::encode_network;
 
 const UDP_LEN: usize = 8;
+
+/// Child discriminators in dissection order: the destination port, then the
+/// source port, then the raw fallback. A zero port is not a service port and
+/// must never shadow the fallback slot, so it is skipped rather than offered.
+fn child_discriminators(source_port: u16, destination_port: u16) -> Vec<Discriminator> {
+    let mut next = Vec::with_capacity(3);
+    for port in [destination_port, source_port] {
+        if port != 0 {
+            next.push(Discriminator(u64::from(port)));
+        }
+    }
+    next.push(Discriminator(0));
+    next
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Udp {
@@ -126,6 +141,47 @@ impl LayerCodec for UdpCodec {
             .and_then(|value| u16::try_from(value).ok())
             .ok_or_else(|| invalid("udp", "datagram exceeds UDP length range"))?;
         let mut diagnostics = Vec::new();
+        // Dissection selects the child from the destination port, then the
+        // source port, then the raw fallback. When that selection disagrees
+        // with the declared child — an encapsulation away from its registered
+        // port, or an opaque payload sitting on one — the built bytes would
+        // not round-trip into the same layers. Padding and malformed children
+        // are byte-preserving pseudo-layers outside the selection, so
+        // dissected captures always rebuild.
+        if let Some(child) = context.child
+            && !matches!(
+                BuiltinProtocol::from_id(child.protocol_id()),
+                Some(BuiltinProtocol::Padding | BuiltinProtocol::Malformed)
+            )
+            && let Some(selected) = child_discriminators(layer.source_port, layer.destination_port)
+                .into_iter()
+                .find_map(|discriminator| context.registry.child_for("udp", discriminator))
+            && *selected != *child.protocol_id()
+        {
+            let message = match context
+                .registry
+                .discriminator_for("udp", child.protocol_id().as_str())
+                .filter(|discriminator| discriminator.0 != 0)
+            {
+                Some(registered) => format!(
+                    "{} dissects only from UDP port {}; set that port on one endpoint",
+                    child.protocol_id(),
+                    registered.0
+                ),
+                None => format!(
+                    "these UDP ports dissect the payload as {selected}, not {}; move it off the registered port",
+                    child.protocol_id()
+                ),
+            };
+            strict_or_diagnostic(
+                "udp",
+                "build.udp_encapsulation_port",
+                "destination_port",
+                message,
+                context,
+                &mut diagnostics,
+            )?;
+        }
         let (length, materialized_length) = resolve_u16(
             "udp",
             "length",
@@ -212,20 +268,25 @@ impl LayerCodec for UdpCodec {
             }
         }
         let payload_len = length - UDP_LEN;
+        let source_port = u16::from_be_bytes([input[0], input[1]]);
+        let destination_port = u16::from_be_bytes([input[2], input[3]]);
         Ok(DecodedLayerValue {
             layer: Box::new(Udp {
-                source_port: u16::from_be_bytes([input[0], input[1]]),
-                destination_port: u16::from_be_bytes([input[2], input[3]]),
+                source_port,
+                destination_port,
                 length: WireValue::Exact(length as u16),
                 checksum: WireValue::Exact(checksum_value),
             }),
             consumed: UDP_LEN,
             payload_offset: UDP_LEN,
             payload_len,
+            // Encapsulations register on their well-known ports, so both
+            // ports are offered as discriminators before the raw fallback:
+            // either endpoint of a tunnel may own the registered port.
             next: if payload_len == 0 {
                 Vec::new()
             } else {
-                vec![Discriminator(0)]
+                child_discriminators(source_port, destination_port)
             },
             fields: udp_layout(),
             diagnostics,

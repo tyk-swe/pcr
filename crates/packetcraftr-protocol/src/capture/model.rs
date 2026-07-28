@@ -15,9 +15,9 @@ use packetcraftr_packet::{
 };
 
 use super::super::common::{
-    binding_protocol, expected_discriminator, invalid, make_layer, out_of_range, protocol,
-    resolve_u16, truncated, validate_auto_raw_discriminator, validate_raw_child_discriminator,
-    wrong_layer, wrong_type,
+    binding_protocol, expected_discriminator_for_value, invalid, make_layer, out_of_range,
+    protocol, resolve_u16, truncated, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -353,7 +353,8 @@ impl LayerCodec for LinuxSllCodec {
             return Err(invalid("linux_sll", "address length exceeds slot"));
         }
         let mut diagnostics = Vec::new();
-        let expectation = expected_discriminator("linux_sll", context, 0_u16);
+        let expectation =
+            expected_discriminator_for_value("linux_sll", context, 0_u16, &layer.protocol);
         validate_auto_raw_discriminator(
             "linux_sll",
             "protocol",
@@ -453,7 +454,8 @@ impl LayerCodec for LinuxSll2Codec {
             return Err(invalid("linux_sll2", "address length exceeds slot"));
         }
         let mut diagnostics = Vec::new();
-        let expectation = expected_discriminator("linux_sll2", context, 0_u16);
+        let expectation =
+            expected_discriminator_for_value("linux_sll2", context, 0_u16, &layer.protocol);
         validate_auto_raw_discriminator(
             "linux_sll2",
             "protocol",

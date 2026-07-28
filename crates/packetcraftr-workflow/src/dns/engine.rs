@@ -363,7 +363,7 @@ where
             .elapsed
             .checked_add(scheduled_delay)
             .ok_or(DnsError::StatisticsOverflow {
-                attempt: result.attempts.len() as u32,
+                attempt: u32::try_from(result.attempts.len()).unwrap_or(u32::MAX),
             })?;
     Ok(result)
 }
@@ -557,6 +557,11 @@ fn dns_udp_ports(packet: &Packet) -> Option<UdpPorts> {
     })
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "range_start plus a remainder modulo width stays inside the u16 ephemeral port \
+              range the caller supplied"
+)]
 pub(super) fn dns_source_port(base: u16, attempt: u32) -> u16 {
     let (range_start, width) = if base >= DNS_EPHEMERAL_SOURCE_PORT_BASE {
         (

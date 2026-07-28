@@ -235,7 +235,8 @@ impl LayerCodec for UdpCodec {
         if input.len() < UDP_LEN {
             return Err(truncated("udp", UDP_LEN, input.len()));
         }
-        let length = usize::from(u16::from_be_bytes([input[4], input[5]]));
+        let length_field = u16::from_be_bytes([input[4], input[5]]);
+        let length = usize::from(length_field);
         if length < UDP_LEN {
             return Err(invalid(
                 "udp",
@@ -274,7 +275,7 @@ impl LayerCodec for UdpCodec {
             layer: Box::new(Udp {
                 source_port,
                 destination_port,
-                length: WireValue::Exact(length as u16),
+                length: WireValue::Exact(length_field),
                 checksum: WireValue::Exact(checksum_value),
             }),
             consumed: UDP_LEN,

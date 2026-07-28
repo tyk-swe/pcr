@@ -310,7 +310,7 @@ fn neighbor_advertisement(request: &NeighborRequest, target_mac: MacAddress) -> 
         ETHERTYPE_IPV6,
     );
     frame.extend_from_slice(&[0x60, 0, 0, 0]);
-    frame.extend_from_slice(&(icmp.len() as u16).to_be_bytes());
+    frame.extend_from_slice(&u16::try_from(icmp.len()).unwrap().to_be_bytes());
     frame.extend_from_slice(&[IPV6_NEXT_HEADER_ICMP, 255]);
     frame.extend_from_slice(&target.octets());
     frame.extend_from_slice(&interface_source.octets());
@@ -671,7 +671,7 @@ fn low_mtu_rejects_ndp_before_native_side_effects() {
 #[test]
 fn low_mtu_rejects_arp_before_native_side_effects() {
     let mut request = neighbor_request("192.0.2.7", "192.0.2.1");
-    request.mtu = (ARP_PAYLOAD_LENGTH - 1) as u32;
+    request.mtu = u32::try_from(ARP_PAYLOAD_LENGTH - 1).unwrap();
     let shared = Arc::new(CoordinatedResolutionIo::default());
     let resolver = scripted_resolver(
         Arc::clone(&shared),

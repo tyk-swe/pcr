@@ -475,13 +475,19 @@ fn plan_fragment_merge(
                 if existing_overlap != fragment_overlap {
                     plan.has_conflicting_overlap = true;
                     if policy == OverlapPolicy::RejectConflicting {
+                        #[expect(
+                            clippy::cast_possible_truncation,
+                            reason = "mismatch indexes within length, itself the difference of \
+                                      the u32 offsets overlap_end and overlap_start, so the \
+                                      conversion back to a wire offset is lossless"
+                        )]
                         let mismatch = existing_overlap
                             .iter()
                             .zip(fragment_overlap)
                             .position(|(left, right)| left != right)
-                            .unwrap_or(0);
+                            .unwrap_or(0) as u32;
                         return Err(Error::ConflictingOverlap {
-                            offset: overlap_start + mismatch as u32,
+                            offset: overlap_start + mismatch,
                         });
                     }
                 }

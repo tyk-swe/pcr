@@ -24,6 +24,10 @@ pub mod traceroute;
 
 /// Maps an operation-local sequence to an IPv4 identification that native
 /// raw-socket adapters can preserve exactly. Zero is deliberately excluded.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the remainder is strictly below u16::MAX, so the increment still fits u16"
+)]
 const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
     ((sequence % u16::MAX as u64) + 1) as u16
 }

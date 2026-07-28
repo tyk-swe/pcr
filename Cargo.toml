@@ -17,6 +17,14 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
+# `overflow-checks` cannot see through an `as` conversion, so packet offsets,
+# lengths, and accounting only fail closed if every narrowing cast is either
+# replaced by a checked conversion or carries an `#[expect]` naming the
+# invariant that makes it lossless.
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+cast_precision_loss = "deny"
 
 [workspace.dependencies]
 # `deny.toml` rejects wildcard dependencies, so each internal path dependency

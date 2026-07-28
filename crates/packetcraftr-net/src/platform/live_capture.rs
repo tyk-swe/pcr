@@ -589,6 +589,11 @@ fn increment(counter: &mut u64, value: u64, label: &str) -> Result<(), LiveIoErr
     Ok(())
 }
 
+#[expect(
+    clippy::cast_sign_loss,
+    reason = "the guard below rejects microseconds outside 0..1_000_000 and the branch below \
+              only converts seconds once it is known to be non-negative"
+)]
 pub(super) fn system_time(seconds: i64, microseconds: i64) -> Result<SystemTime, LiveIoError> {
     if !(0..1_000_000).contains(&microseconds) {
         return Err(LiveIoError::Capture {
@@ -715,8 +720,8 @@ mod tests {
         NativeCaptureEvent::Packet(NativeCapturedPacket {
             timestamp: UNIX_EPOCH,
             received_at: Some(Instant::now()),
-            captured_length: length as u32,
-            original_length: length as u32,
+            captured_length: u32::try_from(length).unwrap(),
+            original_length: u32::try_from(length).unwrap(),
             bytes: Bytes::from(vec![byte; length]),
         })
     }

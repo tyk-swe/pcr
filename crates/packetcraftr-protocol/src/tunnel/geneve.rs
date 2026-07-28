@@ -230,7 +230,13 @@ impl LayerCodec for GeneveCodec {
         )?;
 
         let mut prefix = Vec::with_capacity(header_len);
-        prefix.push((layer.version << 6) | (layer.options.len() / 4) as u8);
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the guard above rejects options longer than GENEVE_MAX_OPTIONS_LEN, so the \
+                      word count fits the 6-bit option-length field"
+        )]
+        let option_words = (layer.options.len() / 4) as u8;
+        prefix.push((layer.version << 6) | option_words);
         prefix.push(
             (u8::from(layer.control) << 7) | (u8::from(layer.critical) << 6) | layer.reserved1,
         );

@@ -111,7 +111,7 @@ fn unsorted_matched_groups_preserve_endpoint_attempt_and_fully_tied_evidence_ord
                     .packet
                     .get_mut::<Tcp>()
                     .expect("response has TCP")
-                    .acknowledgment = (probe.sequence as u32).wrapping_add(1);
+                    .acknowledgment = u32::try_from(probe.sequence).unwrap().wrapping_add(1);
                 first.frame.timestamp =
                     execution.sent_evidence[request_index].timestamp + Duration::from_millis(1);
                 first.frame.interface = Some(1);

@@ -100,7 +100,7 @@ fn decoded_response(probe: &Probe, timestamp: Duration) -> DecodedPacket {
         .push(Tcp {
             source_port: probe.port.expect("benchmark TCP probe has a port"),
             destination_port: 50_000,
-            acknowledgment: (probe.sequence as u32).wrapping_add(1),
+            acknowledgment: u32::try_from(probe.sequence).unwrap().wrapping_add(1),
             flags: Tcp::SYN | Tcp::ACK,
             ..Tcp::default()
         });

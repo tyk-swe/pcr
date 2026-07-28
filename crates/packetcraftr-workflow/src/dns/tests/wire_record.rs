@@ -140,7 +140,10 @@ fn truncation_never_presents_partial_records_and_tcp_length_is_exact() {
     assert!(response.truncated);
     assert!(response.answers.is_empty());
 
-    let mut frame = (truncated.len() as u16).to_be_bytes().to_vec();
+    let mut frame = u16::try_from(truncated.len())
+        .unwrap()
+        .to_be_bytes()
+        .to_vec();
     frame.extend_from_slice(&truncated);
     assert!(
         decode_dns_tcp_frame(

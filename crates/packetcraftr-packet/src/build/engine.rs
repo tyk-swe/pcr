@@ -1009,7 +1009,7 @@ mod tests {
     fn alternating_one_sided_extensions_recenter_before_growing() {
         let mut buffer = PacketBuffer::default();
         for index in 0..64 {
-            let byte = [index as u8];
+            let byte = [u8::try_from(index).unwrap()];
             if index % 2 == 0 {
                 buffer.wrap(&byte, &[], 1_024).unwrap();
             } else {

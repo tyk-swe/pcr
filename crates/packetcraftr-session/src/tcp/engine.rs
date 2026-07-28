@@ -160,6 +160,11 @@ impl Reassembler {
     /// when the flow is tracked at all. Together with the base this brackets
     /// the acknowledgment a current-generation SYN-ACK may carry — a Fast
     /// Open SYN's payload moves it past the base.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), \
+                  so next_offset never reaches 2^32 and the narrowing is lossless"
+    )]
     pub fn flow_next_sequence(&self, flow: &FlowKey) -> Option<u32> {
         self.flows
             .get(flow)
@@ -194,6 +199,11 @@ impl Reassembler {
         Ok(())
     }
 
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
+                  neither next_offset nor a pending offset reaches 2^32"
+    )]
     fn remove_flows(&mut self, mut keys: Vec<FlowKey>) -> Vec<Event> {
         keys.sort_by_key(|key| {
             (

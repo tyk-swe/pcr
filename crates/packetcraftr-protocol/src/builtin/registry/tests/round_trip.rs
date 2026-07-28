@@ -1732,7 +1732,7 @@ fn ah_keeps_the_other_address_familys_children_out() {
     inner.extend_from_slice(&[8, 0, 0, 0]);
     let mut bytes = Vec::<u8>::new();
     bytes.extend_from_slice(&[0x60, 0, 0, 0]);
-    bytes.extend_from_slice(&(inner.len() as u16).to_be_bytes());
+    bytes.extend_from_slice(&u16::try_from(inner.len()).unwrap().to_be_bytes());
     bytes.push(51);
     bytes.push(64);
     bytes.extend_from_slice(

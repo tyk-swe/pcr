@@ -22,6 +22,8 @@ Rust 1.97 is pinned; 1.96 is the MSRV. All-feature Linux builds require `libpcap
 
 Use rustfmt defaults and four-space indentation. Name modules, functions, and tests in `snake_case`, types and traits in `UpperCamelCase`, and constants in `SCREAMING_SNAKE_CASE`. Every Rust source file under `crates/` and `fuzz/fuzz_targets/` needs the copyright and SPDX header. Keep `unsafe` code inside `crates/packetcraftr-net/src/platform/`, with a specific `SAFETY` explanation.
 
+`overflow-checks` cannot see through an `as` conversion, so narrowing casts are denied. Prefer `From`, `TryFrom`, or keeping the wire-width value alongside its widened form. Where a cast is genuinely lossless, attach `#[expect(clippy::cast_possible_truncation, reason = "…")]` to the tightest enclosing item and name the guard or invariant that bounds it, the same way an `unsafe` block names its `SAFETY` argument. Use `#[expect]` rather than `#[allow]` so an annotation that stops applying fails the build.
+
 `fuzz/` is a separate workspace and cannot inherit `[workspace.lints]`, so `fuzz/Cargo.toml` mirrors the root lint table by hand. Root `Cargo.toml` is the source of truth; change both together.
 
 ## Testing Guidelines

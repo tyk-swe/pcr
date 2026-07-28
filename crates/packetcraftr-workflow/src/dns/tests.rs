@@ -63,7 +63,7 @@ impl FixtureRecord {
         output.extend_from_slice(&self.type_code.to_be_bytes());
         output.extend_from_slice(&self.class.to_be_bytes());
         output.extend_from_slice(&self.ttl.to_be_bytes());
-        output.extend_from_slice(&(self.rdata.len() as u16).to_be_bytes());
+        output.extend_from_slice(&u16::try_from(self.rdata.len()).unwrap().to_be_bytes());
         output.extend_from_slice(&self.rdata);
     }
 }
@@ -81,9 +81,9 @@ fn fixture_response(
     output.extend_from_slice(&transaction_id.to_be_bytes());
     output.extend_from_slice(&(DNS_FLAG_RESPONSE | flags).to_be_bytes());
     output.extend_from_slice(&1u16.to_be_bytes());
-    output.extend_from_slice(&(answers.len() as u16).to_be_bytes());
-    output.extend_from_slice(&(authorities.len() as u16).to_be_bytes());
-    output.extend_from_slice(&(additionals.len() as u16).to_be_bytes());
+    output.extend_from_slice(&u16::try_from(answers.len()).unwrap().to_be_bytes());
+    output.extend_from_slice(&u16::try_from(authorities.len()).unwrap().to_be_bytes());
+    output.extend_from_slice(&u16::try_from(additionals.len()).unwrap().to_be_bytes());
     output.extend_from_slice(&wire_name(query_name));
     output.extend_from_slice(&query_type.code().to_be_bytes());
     output.extend_from_slice(&DNS_CLASS_IN.to_be_bytes());

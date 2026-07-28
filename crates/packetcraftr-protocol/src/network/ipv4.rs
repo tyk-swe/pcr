@@ -304,7 +304,8 @@ impl LayerCodec for Ipv4Codec {
         if input.len() < header_len {
             return Err(truncated("ipv4", header_len, input.len()));
         }
-        let total_length = usize::from(u16::from_be_bytes([input[2], input[3]]));
+        let total_length_field = u16::from_be_bytes([input[2], input[3]]);
+        let total_length = usize::from(total_length_field);
         if total_length < header_len {
             return Err(invalid(
                 "ipv4",
@@ -339,7 +340,7 @@ impl LayerCodec for Ipv4Codec {
         Ok(DecodedLayerValue {
             layer: Box::new(Ipv4 {
                 dscp_ecn: input[1],
-                total_length: WireValue::Exact(total_length as u16),
+                total_length: WireValue::Exact(total_length_field),
                 identification: u16::from_be_bytes([input[4], input[5]]),
                 reserved_flag: (flags_offset & 0x8000) != 0,
                 dont_fragment: (flags_offset & 0x4000) != 0,

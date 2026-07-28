@@ -582,6 +582,11 @@ fn decode_edns(class: u16, ttl: u32, rdata: &[u8]) -> Result<DnsEdns, DnsWireErr
     if version != 0 {
         return Err(DnsWireError::UnsupportedEdnsVersion { version });
     }
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "an OPT record packs the extended rcode and version in the high half of the TTL \
+                  field; the low 16 bits are the flags this reads"
+    )]
     let flags = ttl as u16;
     let mut options = Vec::new();
     let mut cursor = 0usize;

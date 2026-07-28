@@ -98,8 +98,13 @@ pub(super) fn timestamp_from_ticks(
                     field: "sub-nanosecond timestamp",
                 });
             }
-            let nanoseconds = scaled / exact_ticks_per_second;
-            (whole_seconds, nanoseconds as u32)
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "scaled is a sub-second remainder scaled by one billion, so the quotient \
+                          is below one billion and fits u32"
+            )]
+            let nanoseconds = (scaled / exact_ticks_per_second) as u32;
+            (whole_seconds, nanoseconds)
         }
         None => {
             // Any denominator too large for u128 is also much larger than a

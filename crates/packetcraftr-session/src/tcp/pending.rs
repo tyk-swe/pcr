@@ -14,6 +14,16 @@ use super::{Error, ReassemblyLimits, Segment};
 
 pub(super) mod commit;
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
+              next_offset never reaches 2^32"
+)]
+#[expect(
+    clippy::cast_possible_wrap,
+    reason = "reinterpreting the wrapped 32-bit difference as i32 is the sequence-unwrapping \
+              step described below, not an accident"
+)]
 pub(super) fn plan_push(
     limits: &ReassemblyLimits,
     state: &TcpFlowState,

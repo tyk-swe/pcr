@@ -519,6 +519,11 @@ async fn query_interfaces(handle: &Handle) -> Result<Vec<InterfaceInfo>, NativeR
     Ok(interfaces.into_values().collect())
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "u32::BITS and u128::BITS are 32 and 128, so each host-route prefix length fits the \
+              8-bit field rtnetlink expects"
+)]
 fn route_request(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,

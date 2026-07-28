@@ -54,6 +54,10 @@ impl ChecksumAccumulator {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
+)]
 fn fold_checksum(mut sum: u64) -> u16 {
     while (sum >> 16) != 0 {
         sum = (sum & 0xffff) + (sum >> 16);

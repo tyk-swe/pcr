@@ -99,6 +99,11 @@ fn deterministic_fragment_command_stream_is_atomic_and_bounded() {
 }
 
 #[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the payload filler takes an arbitrary byte from the deterministic word, so \
+              narrowing to u8 is the generator's purpose"
+)]
 fn deterministic_tcp_command_stream_rolls_back_rejections_and_flushes() {
     let limits = limits();
     let start = Instant::now();

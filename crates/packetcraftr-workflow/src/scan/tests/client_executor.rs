@@ -349,12 +349,12 @@ fn client_traceroute_executor_preserves_hop_identity_and_unique_transport_probes
                     address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
                     strategy,
                     destination_port: match strategy {
-                        TracerouteStrategy::Udp => Some(33_434 + sequence as u16),
+                        TracerouteStrategy::Udp => Some(33_434 + u16::try_from(sequence).unwrap()),
                         TracerouteStrategy::Tcp => Some(443),
                         TracerouteStrategy::Icmp => None,
                     },
                     hop_limit: 4,
-                    attempt: sequence as u32 + 1,
+                    attempt: u32::try_from(sequence).unwrap() + 1,
                 })
                 .collect(),
             timeout: Duration::from_secs(1),
@@ -479,7 +479,7 @@ fn client_traceroute_executor_rejects_invalid_strategy_ports_before_capture_or_s
                 strategy: TracerouteStrategy::Tcp,
                 destination_port: Some(destination_port),
                 hop_limit: 1,
-                attempt: index as u32 + 1,
+                attempt: u32::try_from(index).unwrap() + 1,
             })
             .collect(),
         timeout: Duration::from_millis(1),

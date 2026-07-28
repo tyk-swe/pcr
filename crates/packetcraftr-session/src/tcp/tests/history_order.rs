@@ -8,7 +8,9 @@ fn emitted_history_wraparound_preserves_byte_order() {
     let mut state = TcpFlowState::new(100, Instant::now());
     state.emitted_history.reserve_exact(4);
     let capacity = state.emitted_history.capacity();
-    let initial = (0..capacity).map(|value| value as u8).collect::<Vec<_>>();
+    let initial = (0..capacity)
+        .map(|value| u8::try_from(value).unwrap())
+        .collect::<Vec<_>>();
 
     append_emitted_history(&mut state, 0, &initial, capacity);
     append_emitted_history(&mut state, capacity as u64, &[0xfe, 0xff], capacity);

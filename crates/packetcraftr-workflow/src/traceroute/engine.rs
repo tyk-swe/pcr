@@ -172,6 +172,11 @@ where
     })
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the sequence is reduced to a 16-bit port offset; the checked_add below rejects any \
+              value that would leave the validated UDP probe port range"
+)]
 pub(super) fn build_batches(
     request: &TracerouteRequest,
     destination: IpAddr,
@@ -217,6 +222,11 @@ pub(super) fn build_batches(
 }
 
 fn worst_case_duration(request: &TracerouteRequest) -> Result<Duration, TracerouteError> {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "hop_count is usize::from(max_hops - first_hop) + 1 with both bounds u8, so it \
+                  never exceeds 256"
+    )]
     let hops = request.hop_count() as u32;
     let exchange = request
         .timeout
@@ -247,6 +257,12 @@ fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, TracerouteEr
     })
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the operation-local sequence is reduced to the 32-bit wire field the probe carries; \
+              sent_traceroute_probe_matches applies the same reduction when comparing, so even a \
+              wrapped counter still matches"
+)]
 pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
@@ -308,6 +324,11 @@ pub(super) fn probe_packet(probe: &TracerouteProbe) -> Packet {
     packet
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the identity tag is a deliberate 16-bit reduction of the sequence, split across \
+              the two payload bytes below"
+)]
 pub(super) fn traceroute_identity(sequence: u64) -> Bytes {
     let sequence = sequence as u16;
     Bytes::copy_from_slice(&[0x50, 0x54, (sequence >> 8) as u8, sequence as u8])
@@ -368,6 +389,11 @@ fn map_traceroute_evidence_error(
     TracerouteError::InvalidEvidence { sequence, message }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the observed packet is compared against the same reduction probe_packet applied, \
+              so the narrowing is symmetric on both sides of the comparison"
+)]
 pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4

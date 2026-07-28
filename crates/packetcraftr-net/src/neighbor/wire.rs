@@ -116,7 +116,12 @@ fn build_neighbor_solicitation(
     icmp[2..4].copy_from_slice(&checksum.to_be_bytes());
 
     frame.extend_from_slice(&[0x60, 0, 0, 0]);
-    frame.extend_from_slice(&(NEIGHBOR_SOLICITATION_LENGTH as u16).to_be_bytes());
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "NEIGHBOR_SOLICITATION_LENGTH is a fixed ICMPv6 message length far below u16::MAX"
+    )]
+    let solicitation_length = NEIGHBOR_SOLICITATION_LENGTH as u16;
+    frame.extend_from_slice(&solicitation_length.to_be_bytes());
     frame.extend_from_slice(&[IPV6_NEXT_HEADER_ICMP, 255]);
     frame.extend_from_slice(&source.octets());
     frame.extend_from_slice(&destination.octets());
@@ -371,6 +376,10 @@ pub(super) fn icmpv6_checksum(source: Ipv6Addr, destination: Ipv6Addr, message: 
     ])
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the fold loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
+)]
 pub(super) fn checksum(parts: &[&[u8]]) -> u16 {
     let mut sum = 0_u64;
     let mut pending = None;

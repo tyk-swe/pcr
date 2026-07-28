@@ -355,6 +355,10 @@ const fn crc32c_table() -> [u32; 256] {
     let mut table = [0_u32; 256];
     let mut index = 0_usize;
     while index < table.len() {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the loop condition bounds index by table.len(), which is 256"
+        )]
         let mut remainder = index as u32;
         let mut bit = 0;
         while bit < 8 {

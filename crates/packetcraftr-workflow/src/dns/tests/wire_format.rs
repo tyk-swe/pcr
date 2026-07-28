@@ -77,7 +77,7 @@ fn valid_response_accepts_only_question_relevant_records() {
     assert_eq!(response.rejected_records[0].section, DnsSection::Answer);
     assert!(response.recursion_available);
 
-    let mut tcp_frame = (message.len() as u16).to_be_bytes().to_vec();
+    let mut tcp_frame = u16::try_from(message.len()).unwrap().to_be_bytes().to_vec();
     tcp_frame.extend_from_slice(&message);
     let tcp_response = decode_dns_tcp_frame(
         &tcp_frame,
@@ -141,7 +141,7 @@ fn compressed_owner_and_dnssec_header_bits_are_validated_without_rejection() {
 #[test]
 fn txt_bytes_remain_exact_even_when_they_contain_terminal_controls() {
     let bytes = vec![b'a', 0x1b, b'[', b'3', b'1'];
-    let mut txt = vec![bytes.len() as u8];
+    let mut txt = vec![u8::try_from(bytes.len()).unwrap()];
     txt.extend_from_slice(&bytes);
     let message = fixture_response(
         9,
@@ -188,7 +188,7 @@ fn wire_names_preserve_arbitrary_label_octets_and_escape_only_for_display() {
         (b"\\", "\\092."),
     ];
     for (label, displayed) in cases {
-        let mut target = vec![label.len() as u8];
+        let mut target = vec![u8::try_from(label.len()).unwrap()];
         target.extend_from_slice(label);
         target.push(0);
         let message = fixture_response(

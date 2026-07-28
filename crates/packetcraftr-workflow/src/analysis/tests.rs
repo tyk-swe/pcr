@@ -819,7 +819,11 @@ fn stats_collector_tallies_every_table_with_stable_orders() {
     ));
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the fixture spells out a full TCP five-tuple plus flags so each test reads as the \
+              packet it builds"
+)]
 fn tcp_flags_packet(
     source: [u8; 4],
     source_port: u16,
@@ -922,7 +926,11 @@ fn expert_detects_retransmission_duplicate_ack_zero_window_keep_alive_and_reset(
 }
 
 /// A SYN or SYN-ACK, optionally advertising a window-scale shift.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the fixture spells out a full TCP five-tuple plus flags so each test reads as the \
+              packet it builds"
+)]
 fn tcp_syn_packet(
     source: [u8; 4],
     source_port: u16,
@@ -3150,7 +3158,7 @@ fn expert_surfaces_decode_diagnostics_as_findings() {
         while sum > 0xffff {
             sum = (sum & 0xffff) + (sum >> 16);
         }
-        !(sum as u16)
+        !u16::try_from(sum).unwrap()
     };
     bytes[10..12].copy_from_slice(&checksum.to_be_bytes());
     writer

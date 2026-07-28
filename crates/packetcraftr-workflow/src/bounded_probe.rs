@@ -112,7 +112,11 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the selection seam threads request identity, timing, and the caller's fallible \
+                  callbacks; a parameter struct would only rename the same fields"
+    )]
     pub(super) fn select<O, K: Ord, E>(
         &mut self,
         request_index: usize,
@@ -174,7 +178,11 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
 
 /// Applies the operation-wide evidence budget and undecoded retention cap in
 /// one place while allowing workflows to retain their own typed wrapper.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the retention seam threads the frame batch, its output sink, and every bound that \
+              caps it; a parameter struct would only rename the same fields"
+)]
 pub(super) fn retain_undecoded_frames<T, E>(
     frames: Vec<Frame>,
     output: &mut Vec<T>,
@@ -210,7 +218,11 @@ pub(super) fn retain_undecoded_frames<T, E>(
 
 /// Runs already-approved homogeneous batches with shared deadline, pacing,
 /// executor-boundary, evidence-validation, and checked-statistics policy.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the batch loop threads every budget that bounds a live run alongside the caller's \
+              callbacks; a parameter struct would only rename the same fields"
+)]
 pub(super) fn run_batches<B, X, O, E, C>(
     batches: &[B],
     probes_per_second: Option<u32>,

@@ -221,7 +221,8 @@ impl LayerCodec for Ipv6Codec {
                 format!("version is {}, not 6", input[0] >> 4),
             ));
         }
-        let payload_length = usize::from(u16::from_be_bytes([input[4], input[5]]));
+        let payload_length_field = u16::from_be_bytes([input[4], input[5]]);
+        let payload_length = usize::from(payload_length_field);
         // A jumbogram must start with a Hop-by-Hop header carrying the Jumbo
         // Payload option. With any other next header, the declared IPv6
         // payload is empty and any remaining capture bytes are outside it;
@@ -252,7 +253,7 @@ impl LayerCodec for Ipv6Codec {
             layer: Box::new(Ipv6 {
                 traffic_class: ((first >> 20) & 0xff) as u8,
                 flow_label: first & 0x000f_ffff,
-                payload_length: WireValue::Exact(payload_length as u16),
+                payload_length: WireValue::Exact(payload_length_field),
                 next_header: WireValue::Exact(next),
                 hop_limit: input[7],
                 source,

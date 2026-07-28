@@ -437,6 +437,10 @@ fn upper_protocol(bytes: &[u8]) -> Result<u8, LiveIoError> {
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the fold loop only exits once sum >> 16 is zero, so sum is at most 0xffff"
+)]
 fn checksum(bytes: &[u8]) -> u16 {
     let mut sum = 0_u64;
     let mut chunks = bytes.chunks_exact(2);

@@ -55,7 +55,7 @@ pub(super) fn prepare(
             .checked_add(offset as u64)
             .ok_or(FuzzError::CaseIndexOverflow)?;
         let seed = case_seed(request.seed, index);
-        let pair_index = (index % pairs.len() as u64) as usize;
+        let pair_index = index_from(index, pairs.len());
         let round = index / pairs.len() as u64;
         let (strategy, field_index) = pairs[pair_index];
         let field = &fields[field_index];
@@ -234,7 +234,9 @@ fn retained_case_value_bytes(
         .chain(std::iter::once(&mutation.value))
         .chain(shrink_values)
     {
-        let remaining = limits.max_total_bytes.saturating_sub(total as usize);
+        let remaining = limits
+            .max_total_bytes
+            .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
         let size = bounded_value_size(value, remaining, limits.max_list_items, 0).ok_or(
             FuzzError::ByteLimit {
                 actual: limits.max_total_bytes as u64 + 1,
@@ -261,7 +263,9 @@ fn packet_reflected_value_bytes(packet: &Packet, limits: FuzzLimits) -> Result<u
             let Some(value) = layer.field(field.name) else {
                 continue;
             };
-            let remaining = limits.max_total_bytes.saturating_sub(total as usize);
+            let remaining = limits
+                .max_total_bytes
+                .saturating_sub(usize::try_from(total).unwrap_or(usize::MAX));
             let size = bounded_value_size(&value, remaining, limits.max_list_items, 0).ok_or(
                 FuzzError::ByteLimit {
                     actual: limits.max_total_bytes as u64 + 1,
@@ -420,11 +424,11 @@ fn boundary_value(
                 u32::MAX as u64,
                 u64::MAX,
             ];
-            FieldValue::Unsigned(VALUES[(selector % VALUES.len() as u64) as usize])
+            FieldValue::Unsigned(VALUES[index_from(selector, VALUES.len())])
         }
         FieldKind::Signed => {
             const VALUES: &[i64] = &[0, 1, -1, i8::MIN as i64, i8::MAX as i64, i64::MIN, i64::MAX];
-            FieldValue::Signed(VALUES[(selector % VALUES.len() as u64) as usize])
+            FieldValue::Signed(VALUES[index_from(selector, VALUES.len())])
         }
         FieldKind::Text => {
             let values = [
@@ -433,11 +437,11 @@ fn boundary_value(
                 "\u{1b}[31mcontrol\u{1b}[0m".to_owned(),
                 "x".repeat(limits.max_field_bytes.min(256)),
             ];
-            FieldValue::Text(values[(selector % values.len() as u64) as usize].clone())
+            FieldValue::Text(values[index_from(selector, values.len())].clone())
         }
         FieldKind::Bytes => {
             let lengths = [0, 1, limits.max_field_bytes.min(64), limits.max_field_bytes];
-            let length = lengths[(selector % lengths.len() as u64) as usize];
+            let length = lengths[index_from(selector, lengths.len())];
             FieldValue::Bytes(Bytes::from(vec![
                 if selector & 1 == 0 { 0 } else { 0xff };
                 length
@@ -450,7 +454,7 @@ fn boundary_value(
                 Ipv4Addr::BROADCAST,
                 Ipv4Addr::new(192, 0, 2, 1),
             ];
-            FieldValue::Ipv4(VALUES[(selector % VALUES.len() as u64) as usize])
+            FieldValue::Ipv4(VALUES[index_from(selector, VALUES.len())])
         }
         FieldKind::Ipv6 => {
             let values = [
@@ -459,11 +463,11 @@ fn boundary_value(
                 "2001:db8::1".parse().expect("constant IPv6 address"),
                 Ipv6Addr::from(u128::MAX),
             ];
-            FieldValue::Ipv6(values[(selector % values.len() as u64) as usize])
+            FieldValue::Ipv6(values[index_from(selector, values.len())])
         }
         FieldKind::Mac => {
             let values = [[0; 6], [0xff; 6], [0x02, 0, 0, 0, 0, 1]];
-            FieldValue::Mac(values[(selector % values.len() as u64) as usize])
+            FieldValue::Mac(values[index_from(selector, values.len())])
         }
         FieldKind::List => match original {
             FieldValue::List(values) if selector & 1 == 1 => {
@@ -482,6 +486,12 @@ fn boundary_value(
     }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "each arm reinterprets or narrows uniformly random bits to fill the requested field \
+              width, so discarding the surplus bits is the generator's purpose"
+)]
 pub(super) fn random_value(
     kind: FieldKind,
     original: &FieldValue,
@@ -648,9 +658,22 @@ fn bounded_length(random: &mut SplitMix64, maximum: usize) -> usize {
     }
 }
 
-fn index_below(random: &mut SplitMix64, exclusive_maximum: usize) -> usize {
+/// Reduce an arbitrary 64-bit word into `0..exclusive_maximum`.
+///
+/// Every selector in this module indexes a slice this way, so the one narrowing
+/// conversion the reduction needs lives here rather than at each call site.
+fn index_from(word: u64, exclusive_maximum: usize) -> usize {
     debug_assert!(exclusive_maximum != 0);
-    (random.next_u64() % exclusive_maximum as u64) as usize
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the remainder is below exclusive_maximum, which is already a usize"
+    )]
+    let index = (word % exclusive_maximum as u64) as usize;
+    index
+}
+
+fn index_below(random: &mut SplitMix64, exclusive_maximum: usize) -> usize {
+    index_from(random.next_u64(), exclusive_maximum)
 }
 
 fn shrink_values(value: &FieldValue, maximum: usize) -> Vec<FieldValue> {

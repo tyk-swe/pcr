@@ -502,8 +502,14 @@ impl<W: Write> Writer<W> {
             write_u32(inner, endianness, PCAPNG_ENHANCED_PACKET_BLOCK)?;
             write_u32(inner, endianness, block_length)?;
             write_u32(inner, endianness, interface_id)?;
-            write_u32(inner, endianness, (timestamp >> 32) as u32)?;
-            write_u32(inner, endianness, timestamp as u32)?;
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the PCAPNG enhanced packet block stores its 64-bit timestamp as two \
+                          32-bit halves, so discarding the upper bits of each half is the format"
+            )]
+            let (timestamp_high, timestamp_low) = ((timestamp >> 32) as u32, timestamp as u32);
+            write_u32(inner, endianness, timestamp_high)?;
+            write_u32(inner, endianness, timestamp_low)?;
             write_u32(inner, endianness, frame.captured_length())?;
             write_u32(inner, endianness, frame.original_length())?;
             inner.write_all(frame.bytes())?;
@@ -553,11 +559,18 @@ impl<W: Write> Writer<W> {
             });
         }
 
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "validate_new_interface refuses an interface whose index exceeds u32, so \
+                      every enumerated index already fits the 32-bit PCAPNG interface id"
+        )]
         let matching_interfaces = match &self.state {
             WriterState::PcapNg { interfaces, .. } => interfaces
                 .iter()
                 .enumerate()
                 .filter(|(_, interface)| interface.link_type == frame.link_type)
+                // validate_new_interface refuses an interface whose index exceeds u32, so every
+                // enumerated index here already fits the 32-bit PCAPNG interface id.
                 .map(|(index, _)| index as u32)
                 .collect::<Vec<_>>(),
             WriterState::Pcap { .. } => unreachable!("format checked by caller"),
@@ -687,7 +700,13 @@ fn write_interface_description<W: Write>(
     let block_length = if timestamp_offset == 0 { 32 } else { 44 };
     write_u32(writer, endianness, PCAPNG_INTERFACE_DESCRIPTION_BLOCK)?;
     write_u32(writer, endianness, block_length)?;
-    write_u16(writer, endianness, link_type.0 as u16)?;
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "validate_new_interface rejects a link type above u16::MAX with \
+                  Error::LinkTypeOutOfRange before any interface description is written"
+    )]
+    let link_type_field = link_type.0 as u16;
+    write_u16(writer, endianness, link_type_field)?;
     write_u16(writer, endianness, 0)?;
     write_u32(writer, endianness, snap_len)?;
     write_u16(writer, endianness, PCAPNG_OPTION_IF_TSRESOL)?;

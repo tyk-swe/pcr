@@ -187,6 +187,11 @@ fn render_text(
     Ok(())
 }
 
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "counter magnitudes that exceed the f64 mantissa are far beyond any capture this \
+              renders, and the result is a display percentage"
+)]
 fn percent(part: u64, whole: u64) -> f64 {
     if whole == 0 {
         0.0

@@ -579,7 +579,7 @@ fn pcapng_round_trip_preserves_pre_epoch_timestamps() {
         let interface = writer
             .add_interface_description(Interface {
                 link_type: LinkType::ETHERNET,
-                snap_len: DEFAULT_SIZE_LIMIT as u32,
+                snap_len: u32::try_from(DEFAULT_SIZE_LIMIT).unwrap(),
                 timestamp_resolution: TimestampResolution::Decimal(9),
                 timestamp_offset: -3,
             })
@@ -604,7 +604,7 @@ fn pcapng_writer_rejects_a_timestamp_before_its_interface_offset() {
     let interface = writer
         .add_interface_description(Interface {
             link_type: LinkType::ETHERNET,
-            snap_len: DEFAULT_SIZE_LIMIT as u32,
+            snap_len: u32::try_from(DEFAULT_SIZE_LIMIT).unwrap(),
             timestamp_resolution: TimestampResolution::Decimal(9),
             timestamp_offset: -1,
         })

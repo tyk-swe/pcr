@@ -162,7 +162,13 @@ impl LayerCodec for TcpCodec {
         prefix[8..12].copy_from_slice(&layer.acknowledgment.to_be_bytes());
         prefix[12] =
             (data_offset << 4) | ((layer.reserved_bits & 7) << 1) | ((layer.flags >> 8) as u8 & 1);
-        prefix[13] = layer.flags as u8;
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the 9-bit flags field is split deliberately: bit 8 goes into prefix[12] \
+                      above and the low 8 bits are this byte"
+        )]
+        let flags_low = layer.flags as u8;
+        prefix[13] = flags_low;
         prefix[14..16].copy_from_slice(&layer.window.to_be_bytes());
         prefix[18..20].copy_from_slice(&layer.urgent_pointer.to_be_bytes());
         prefix[20..].copy_from_slice(&options);

@@ -284,6 +284,12 @@ fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, ScanError> {
     })
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the \
+              probe carries; sent_scan_probe_matches applies the same reduction when comparing, \
+              so even a wrapped counter still matches"
+)]
 pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
     let mut packet = Packet::new();
     match probe.address {
@@ -335,6 +341,11 @@ pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
     packet
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the identity tag is a deliberate 16-bit reduction of the sequence, split across \
+              the two payload bytes below"
+)]
 fn icmp_identity(sequence: u64) -> Bytes {
     let sequence = sequence as u16;
     Bytes::copy_from_slice(&[0x50, 0x43, (sequence >> 8) as u8, sequence as u8])
@@ -392,6 +403,11 @@ fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> S
     ScanError::InvalidEvidence { sequence, message }
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the observed packet is compared against the same reduction probe_packet applied, \
+              so the narrowing is symmetric on both sides of the comparison"
+)]
 pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool {
     let network_protocol = if probe.address.is_ipv4() {
         BuiltinProtocol::Ipv4

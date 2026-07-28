@@ -62,7 +62,13 @@ impl OutputTimestamp {
             let unix_seconds = if seconds == i64::MAX as u64 {
                 i64::MIN
             } else {
-                -(seconds as i64 + 1)
+                #[expect(
+                    clippy::cast_possible_wrap,
+                    reason = "the guard above returns TimestampOutOfRange for seconds greater \
+                              than i64::MAX, so this conversion stays positive"
+                )]
+                let signed_seconds = seconds as i64;
+                -(signed_seconds + 1)
             };
             Ok(Self {
                 unix_seconds,

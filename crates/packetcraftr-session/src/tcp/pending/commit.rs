@@ -143,6 +143,11 @@ fn commit_flow_push(
     events
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "validate_limits rejects max_bytes_per_flow >= TCP_SERIAL_HALF_SPACE (2^31), so \
+              next_offset never reaches 2^32 and the narrowing to a wire sequence is lossless"
+)]
 fn emit_data(
     state: &mut TcpFlowState,
     flow: &FlowKey,

@@ -555,7 +555,6 @@ fn describe_interfaces<W: io::Write>(
 }
 
 /// Builds a capture writer bounded by the same limits the read side was given.
-#[allow(clippy::too_many_arguments)]
 fn new_capture_writer<W: io::Write>(
     sink: W,
     format: CaptureFormat,

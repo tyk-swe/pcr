@@ -527,6 +527,11 @@ impl LayerCodec for SegmentRoutingHeaderCodec {
         if layer.flags != 0 {
             return Err(invalid("ipv6_srh", "unsupported SRH flags must be zero"));
         }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the guard above rejects an empty segment list and any list longer than \
+                      127, so the decremented length is at most 126"
+        )]
         let expected_last = (layer.segments.len() - 1) as u8;
         let mut diagnostics = Vec::new();
         let expectation = expected_discriminator("ipv6_srh", context, 59_u8);

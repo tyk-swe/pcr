@@ -236,6 +236,11 @@ fn icmpv4_error(
 }
 
 #[test]
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "the fixture splits a known port into its two big-endian bytes by hand, so \
+              discarding the high half is the point"
+)]
 fn quoted_icmp_errors_require_the_exact_probe_tuple_and_classify_semantics() {
     let registry = default_registry().unwrap();
     let local = Ipv4Addr::new(10, 0, 0, 1);

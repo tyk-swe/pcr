@@ -211,7 +211,8 @@ impl LayerCodec for PppoeCodec {
         let kind = input[0] & 0x0f;
         let code = input[1];
         let session_id = u16::from_be_bytes([input[2], input[3]]);
-        let length = usize::from(u16::from_be_bytes([input[4], input[5]]));
+        let length_field = u16::from_be_bytes([input[4], input[5]]);
+        let length = usize::from(length_field);
         if input.len() - PPPOE_LEN < length {
             return Err(truncated("pppoe", PPPOE_LEN + length, input.len()));
         }
@@ -249,7 +250,7 @@ impl LayerCodec for PppoeCodec {
             kind,
             code,
             session_id,
-            length: WireValue::Exact(length as u16),
+            length: WireValue::Exact(length_field),
         };
         Ok(DecodedLayerValue {
             fields: pppoe_layout(),

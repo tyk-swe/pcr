@@ -348,7 +348,7 @@ fn dns_evidence_diagnostics_preserve_casing_deduplication_and_response_priority(
                 Frame::new(
                     execution.sent_evidence.timestamp,
                     LinkType::RAW,
-                    vec![exchange.probe.attempt as u8],
+                    vec![u8::try_from(exchange.probe.attempt).unwrap()],
                 )
                 .unwrap(),
             );

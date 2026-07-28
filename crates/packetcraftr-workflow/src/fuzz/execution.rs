@@ -13,13 +13,13 @@ pub(super) fn worst_case_duration(
 ) -> Result<Duration, FuzzError> {
     let exchange = live
         .timeout
-        .checked_mul(cases as u32)
+        .checked_mul(u32::try_from(cases).unwrap_or(u32::MAX))
         .ok_or(FuzzError::DurationLimit {
             actual: Duration::MAX,
             limit: MAX_FUZZ_DURATION,
         })?;
     let delay = rate_delay(live.cases_per_second)?
-        .checked_mul(cases.saturating_sub(1) as u32)
+        .checked_mul(u32::try_from(cases.saturating_sub(1)).unwrap_or(u32::MAX))
         .ok_or(FuzzError::DurationLimit {
             actual: Duration::MAX,
             limit: MAX_FUZZ_DURATION,

@@ -15,9 +15,11 @@ use super::super::common::{invalid, network_from_addresses};
 use super::{Ipv4, Ipv6};
 
 pub(super) fn is_ipv6_extension_layer(layer: &dyn Layer) -> bool {
+    // AH participates in the IPv6 extension chain (RFC 8200), so the
+    // pseudo-header scan for the final destination walks through it.
     matches!(
         layer.protocol_id().as_str(),
-        "ipv6_hop_by_hop" | "ipv6_destination_options" | "ipv6_fragment" | "ipv6_srh"
+        "ah" | "ipv6_hop_by_hop" | "ipv6_destination_options" | "ipv6_fragment" | "ipv6_srh"
     )
 }
 

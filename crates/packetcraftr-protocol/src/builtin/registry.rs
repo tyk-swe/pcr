@@ -22,8 +22,8 @@ use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
-    GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, MplsCodec,
-    PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec, VxlanCodec,
+    AhCodec, EspCodec, GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL,
+    MplsCodec, PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec, VxlanCodec,
 };
 
 use packetcraftr_packet::{
@@ -75,6 +75,27 @@ impl ProtocolModule for BuiltinProtocols {
             BuiltinProtocol::Icmpv6,
             100,
         )?;
+
+        // AH authenticates rather than encrypts, so the protocol chain
+        // continues through it in both address families; ESP's ciphertext
+        // is always the opaque child.
+        bind_ip_children(builder, BuiltinProtocol::Ah, 1)?;
+        bind(
+            builder,
+            BuiltinProtocol::Ah,
+            58,
+            BuiltinProtocol::Icmpv6,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Ah,
+            59,
+            BuiltinProtocol::Malformed,
+            100,
+        )?;
+        bind_ipv6_extensions(builder, BuiltinProtocol::Ah)?;
+        bind(builder, BuiltinProtocol::Esp, 0, BuiltinProtocol::Raw, 0)?;
 
         bind(
             builder,
@@ -294,6 +315,8 @@ fn bind_common_ip_children(
     bind(builder, parent, 17, BuiltinProtocol::Udp, 100)?;
     bind(builder, parent, 41, BuiltinProtocol::Ipv6, 100)?;
     bind(builder, parent, 47, BuiltinProtocol::Gre, 100)?;
+    bind(builder, parent, 50, BuiltinProtocol::Esp, 100)?;
+    bind(builder, parent, 51, BuiltinProtocol::Ah, 100)?;
     bind(builder, parent, 132, BuiltinProtocol::Sctp, 100)?;
     bind(builder, parent, 255, BuiltinProtocol::Raw, -100)?;
     Ok(())

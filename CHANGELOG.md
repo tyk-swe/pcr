@@ -109,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present, and non-zero reserved bits are decode diagnostics and
   permissive-mode territory on build. Only version 0 is dissected —
   other versions are preserved as malformed bytes rather than guessed at.
+- Added the IPsec headers: ESP (RFC 4303, IP protocol 50) and AH
+  (RFC 4302, protocol 51), reachable from IPv4, IPv6, and every
+  extension header in both address families. ESP decodes its SPI and
+  sequence number and deliberately keeps everything after them opaque —
+  ciphertext that happens to imitate an inner packet is never dissected.
+  AH authenticates rather than encrypts, so the protocol chain continues
+  through it: its ICV is sized by the length field, `next_header`
+  resolves from the child on build, and both headers round-trip exactly.
 - Added PPPoE (RFC 2516) and the PPP protocol field it carries. Session
   frames on EtherType 0x8864 decode the six-byte header and then the PPP
   protocol number, which selects IPv4 or IPv6 and keeps LCP, IPCP, and

@@ -15,9 +15,11 @@ use super::layer::{Layer, ProtocolId};
 macro_rules! builtin_protocol_catalog {
     ($consumer:ident) => {
         $consumer! {
+            Ah { canonical: "ah", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: AhCodec }
             Arp { canonical: "arp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: ArpCodec }
             BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdLoopCodec }
             BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdNullCodec }
+            Esp { canonical: "esp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: EspCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: EthernetCodec }
             Geneve { canonical: "geneve", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: GeneveCodec }
             Gre { canonical: "gre", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: GreCodec }
@@ -130,7 +132,8 @@ macro_rules! define_builtin_protocol {
             pub const fn is_ipv6_extension(self) -> bool {
                 matches!(
                     self,
-                    Self::Ipv6DestinationOptions
+                    Self::Ah
+                        | Self::Ipv6DestinationOptions
                         | Self::Ipv6Fragment
                         | Self::Ipv6HopByHop
                         | Self::Ipv6Srh

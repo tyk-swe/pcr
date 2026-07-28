@@ -654,6 +654,309 @@ fn mpls_label_stacks_round_trip_to_ip_and_opaque_bottoms() {
 }
 
 #[test]
+fn ipsec_esp_and_ah_round_trip_with_the_chain_continuing_through_ah() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+
+    // AH authenticates a TCP-free ICMP payload: the chain continues.
+    let mut authenticated = Packet::new();
+    authenticated
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Ah {
+            spi: 0x100,
+            sequence: 5,
+            ..Ah::default()
+        })
+        .push(Icmpv4::default());
+    let built = builder
+        .build(
+            authenticated,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert!(built.diagnostics.is_empty());
+    assert_eq!(built.bytes[9], 51);
+    assert_eq!(built.bytes[20], 1);
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+        .unwrap();
+    let ah = decoded.packet.get::<Ah>().unwrap();
+    assert_eq!(ah.spi, 0x100);
+    assert_eq!(ah.icv.len(), 12);
+    assert!(decoded.packet.get::<Icmpv4>().is_some());
+    assert!(decoded.diagnostics.is_empty());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+
+    // ESP ciphertext stays opaque.
+    let mut encrypted = Packet::new();
+    encrypted
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Esp {
+            spi: 0x200,
+            sequence: 9,
+        })
+        .push(Raw::new(Bytes::from_static(&[0x45, 0x00, 0x00, 0x14])));
+    let built = builder
+        .build(encrypted, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    assert_eq!(built.bytes[9], 50);
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+        .unwrap();
+    assert_eq!(decoded.packet.get::<Esp>().unwrap().spi, 0x200);
+    // The ciphertext imitating an IPv4 header is not dissected.
+    assert!(decoded.packet.get_all::<Ipv4>().count() == 1);
+    assert!(decoded.packet.get::<Raw>().is_some());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
+fn ah_keeps_the_other_address_familys_children_out() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+
+    // Building ICMPv4 behind an IPv6 AH does not pass strictly.
+    let mut cross = Packet::new();
+    cross
+        .push(Ipv6 {
+            source: "2001:db8::1".parse().unwrap(),
+            destination: "2001:db8::2".parse().unwrap(),
+            ..Ipv6::default()
+        })
+        .push(Ah::default())
+        .push(Icmpv4::default());
+    let error = builder
+        .build(cross, BuildContext::default(), BuildOptions::default())
+        .unwrap_err();
+    assert!(error.to_string().contains("address family"));
+
+    // Dissecting IPv6/AH with next_header 1 keeps the payload opaque
+    // instead of inventing an ICMPv4 layer.
+    let mut inner = Vec::<u8>::new();
+    inner.push(1);
+    inner.push(4);
+    inner.extend_from_slice(&[0, 0, 0, 0, 0, 9, 0, 0, 0, 1]);
+    inner.extend_from_slice(&[0; 12]);
+    inner.extend_from_slice(&[8, 0, 0, 0]);
+    let mut bytes = Vec::<u8>::new();
+    bytes.extend_from_slice(&[0x60, 0, 0, 0]);
+    bytes.extend_from_slice(&(inner.len() as u16).to_be_bytes());
+    bytes.push(51);
+    bytes.push(64);
+    bytes.extend_from_slice(
+        &"2001:db8::1"
+            .parse::<std::net::Ipv6Addr>()
+            .unwrap()
+            .octets(),
+    );
+    bytes.extend_from_slice(
+        &"2001:db8::2"
+            .parse::<std::net::Ipv6Addr>()
+            .unwrap()
+            .octets(),
+    );
+    bytes.extend_from_slice(&inner);
+    let decoded = Dissector::new(registry)
+        .decode_with_root(Bytes::from(bytes), "ipv6".into(), DecodeOptions::default())
+        .unwrap();
+
+    assert!(decoded.packet.get::<Icmpv4>().is_none());
+    assert!(
+        decoded
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "decode.ah_family")
+    );
+
+    // The preserved cross-family capture still rebuilds byte-for-byte: the
+    // discriminator selects nothing in this family, so its opaque payload
+    // is the faithful child.
+    let original = decoded.original.clone();
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, original);
+}
+
+#[test]
+fn esp_builds_refuse_typed_plaintext_children() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let plaintext = || {
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(10, 0, 0, 1),
+                destination: Ipv4Addr::new(10, 0, 0, 2),
+                ..Ipv4::default()
+            })
+            .push(Esp::default())
+            .push(Icmpv4::default());
+        packet
+    };
+
+    // Strict construction fails on the missing binding before the codec
+    // even runs; permissive still flags the ciphertext violation.
+    assert!(
+        builder
+            .build(
+                plaintext(),
+                BuildContext::default(),
+                BuildOptions::default()
+            )
+            .is_err()
+    );
+    let permissive = builder
+        .build(
+            plaintext(),
+            BuildContext::default(),
+            BuildOptions {
+                mode: BuildMode::Permissive,
+                ..BuildOptions::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        permissive
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "build.esp_ciphertext")
+    );
+}
+
+#[test]
+fn transport_checksums_reach_the_srh_final_destination_through_ah() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv6 {
+            source: "2001:db8::1".parse().unwrap(),
+            // The header names the active segment; the transport checksum
+            // must still be computed against the final one.
+            destination: "2001:db8::10".parse().unwrap(),
+            ..Ipv6::default()
+        })
+        .push(Ah::default())
+        .push(SegmentRoutingHeader {
+            segments: vec![
+                "2001:db8::10".parse().unwrap(),
+                "2001:db8::20".parse().unwrap(),
+            ],
+            ..SegmentRoutingHeader::default()
+        })
+        .push(Tcp::default())
+        .push(Raw::new(Bytes::from_static(b"data")));
+    let built = builder
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(
+            built.bytes.clone(),
+            "ipv6".into(),
+            DecodeOptions {
+                verify_checksums: true,
+                ..DecodeOptions::default()
+            },
+        )
+        .unwrap();
+    // A checksum built against the header destination instead of the SRH
+    // final segment would be flagged here.
+    assert!(decoded.diagnostics.is_empty(), "{:?}", decoded.diagnostics);
+    assert!(decoded.packet.get::<Tcp>().is_some());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
+fn an_ipv6_ah_header_must_align_to_eight_octets() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let ipv6_ah = |icv: &'static [u8]| {
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv6 {
+                source: "2001:db8::1".parse().unwrap(),
+                destination: "2001:db8::2".parse().unwrap(),
+                ..Ipv6::default()
+            })
+            .push(Ah {
+                icv: Bytes::from_static(icv),
+                ..Ah::default()
+            })
+            .push(Icmpv6::default());
+        packet
+    };
+
+    // A 20-byte header breaks the 8-octet extension unit under IPv6.
+    let error = builder
+        .build(
+            ipv6_ah(&[0; 8]),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("8 octets"));
+
+    // The default 96-bit ICV yields an aligned 24-byte header.
+    let built = builder
+        .build(
+            ipv6_ah(&[0; 12]),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert!(built.diagnostics.is_empty());
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes.clone(), "ipv6".into(), DecodeOptions::default())
+        .unwrap();
+    assert!(decoded.packet.get::<Icmpv6>().is_some());
+    assert!(decoded.diagnostics.is_empty());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
 fn pppoe_session_and_discovery_round_trip_their_stages() {
     let registry = Arc::new(default_registry().unwrap());
     let builder = Builder::new(Arc::clone(&registry));

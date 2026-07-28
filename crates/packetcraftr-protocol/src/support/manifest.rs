@@ -230,14 +230,16 @@ const fn supported_protocols<const N: usize>(capability: Capability) -> [&'stati
     protocols
 }
 
-const ALL_BUILD_VALUES: [&str; 29] = supported_protocols(Capability::Build);
-const ALL_DISSECT_VALUES: [&str; 30] = supported_protocols(Capability::Dissect);
+const ALL_BUILD_VALUES: [&str; 31] = supported_protocols(Capability::Build);
+const ALL_DISSECT_VALUES: [&str; 32] = supported_protocols(Capability::Dissect);
 const MATCHER_VALUES: [&str; 5] = supported_protocols(Capability::Matcher);
 const ALL_BUILD: &[&str] = &ALL_BUILD_VALUES;
 const ALL_DISSECT: &[&str] = &ALL_DISSECT_VALUES;
 const MATCHERS: &[&str] = &MATCHER_VALUES;
-const LIVE_BUILD_VALUES: [&str; 25] = protocol_names([
+const LIVE_BUILD_VALUES: [&str; 27] = protocol_names([
+    BuiltinProtocol::Ah,
     BuiltinProtocol::Arp,
+    BuiltinProtocol::Esp,
     BuiltinProtocol::Ethernet,
     BuiltinProtocol::Geneve,
     BuiltinProtocol::Gre,
@@ -621,7 +623,7 @@ mod tests {
             .map(|protocol| protocol.as_str())
             .collect::<BTreeSet<_>>();
         assert_eq!(declared.keys().copied().collect::<BTreeSet<_>>(), actual);
-        assert_eq!(declared.len(), 30);
+        assert_eq!(declared.len(), 32);
 
         for support in BUILTIN_PROTOCOLS {
             let identity = BuiltinProtocol::from_name(support.protocol)
@@ -793,7 +795,7 @@ mod tests {
     fn manifest_serialization_is_versioned_and_complete() {
         let value = serde_json::to_value(BUILTIN_PROTOCOL_SUPPORT).unwrap();
         assert_eq!(value["schema"], PROTOCOL_SUPPORT_SCHEMA_V1);
-        assert_eq!(value["protocols"].as_array().unwrap().len(), 30);
+        assert_eq!(value["protocols"].as_array().unwrap().len(), 32);
         assert_eq!(value["capture_roots"].as_array().unwrap().len(), 9);
         assert_eq!(value["workflows"].as_array().unwrap().len(), 15);
     }
@@ -802,7 +804,7 @@ mod tests {
     fn catalog_membership_is_independent_of_live_backend_features() {
         // Backends are feature-gated, but the portable built-in codec catalog
         // is not. This assertion runs in every CI feature profile.
-        assert_eq!(BuiltinProtocol::ALL.len(), 30);
+        assert_eq!(BuiltinProtocol::ALL.len(), 32);
         assert_eq!(BUILTIN_PROTOCOLS.len(), BuiltinProtocol::ALL.len());
         assert!(BuiltinProtocol::ALL.contains(&BuiltinProtocol::RawIp));
     }

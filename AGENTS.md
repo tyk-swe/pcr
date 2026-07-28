@@ -14,12 +14,15 @@ Place unit tests beside their modules. Integration tests live in `crates/packetc
 - `cargo fmt --all -- --check`: verify formatting.
 - `scripts/check-source-conventions`: enforce repository source layout.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: apply the CI lint gate.
+- `cargo fmt --manifest-path fuzz/Cargo.toml -- --check` and `cargo clippy --manifest-path fuzz/Cargo.toml --locked --all-targets -- -D warnings`: apply the same gates to the fuzz workspace, which the root `--all` flags do not reach.
 
 Rust 1.97 is pinned; 1.96 is the MSRV. All-feature Linux builds require `libpcap-dev`.
 
 ## Coding Style & Naming Conventions
 
 Use rustfmt defaults and four-space indentation. Name modules, functions, and tests in `snake_case`, types and traits in `UpperCamelCase`, and constants in `SCREAMING_SNAKE_CASE`. Every Rust source file under `crates/` and `fuzz/fuzz_targets/` needs the copyright and SPDX header. Keep `unsafe` code inside `crates/packetcraftr-net/src/platform/`, with a specific `SAFETY` explanation.
+
+`fuzz/` is a separate workspace and cannot inherit `[workspace.lints]`, so `fuzz/Cargo.toml` mirrors the root lint table by hand. Root `Cargo.toml` is the source of truth; change both together.
 
 ## Testing Guidelines
 

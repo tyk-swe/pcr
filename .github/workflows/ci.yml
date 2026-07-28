@@ -110,11 +110,12 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target
-          key: cargo-quality-linux-v3-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock') }}
-          restore-keys: cargo-quality-linux-v3-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-
+            fuzz/target
+          key: cargo-quality-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+          restore-keys: cargo-quality-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-
       - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
       - run: rustup toolchain install 1.96.0 --profile minimal
-      - run: rustup component add rustfmt
+      - run: rustup component add clippy rustfmt
       - run: cargo install cargo-hack --locked --version 0.6.45
       - name: Minimum supported Rust 1.96 portable profile
         run: cargo +1.96.0 check --locked --all-targets --no-default-features
@@ -124,6 +125,12 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Source conventions
         run: scripts/check-source-conventions
+      # The fuzz targets are a separate workspace, so the root `cargo fmt --all`
+      # and the `test` job's clippy gate never reach them. Apply both here.
+      - name: Fuzz target formatting
+        run: cargo fmt --manifest-path fuzz/Cargo.toml -- --check
+      - name: Fuzz target lints
+        run: cargo clippy --manifest-path fuzz/Cargo.toml --locked --all-targets -- -D warnings
       - name: Warning-free documentation
         env:
           RUSTDOCFLAGS: -D warnings

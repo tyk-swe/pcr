@@ -11,6 +11,17 @@ cargo-fuzz = true
 [workspace]
 members = ["."]
 
+# Fuzz targets are a separate workspace, so they cannot inherit the root
+# `[workspace.lints]` through `workspace = true`. Mirror it here and keep the
+# two in sync: the root `Cargo.toml` remains the source of truth.
+[lints.rust]
+unsafe_code = "deny"
+unsafe_op_in_unsafe_fn = "deny"
+unreachable_pub = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+
 [dependencies]
 libfuzzer-sys = "=0.4.13"
 packetcraftr = { path = "../crates/packetcraftr", version = "0.4.0-beta.2", default-features = false }

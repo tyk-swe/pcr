@@ -49,8 +49,7 @@ fuzz_target!(|data: &[u8]| {
                         },
                         offset: ((word >> 24) as u32 % 512) & !7,
                         more_fragments: word & (1 << 8) != 0,
-                        bytes: vec![(word >> 56) as u8; ((word >> 40) as usize % 32) + 1]
-                            .into(),
+                        bytes: vec![(word >> 56) as u8; ((word >> 40) as usize % 32) + 1].into(),
                     },
                     timestamp,
                 );
@@ -76,8 +75,7 @@ fuzz_target!(|data: &[u8]| {
                             destination_port: 443,
                         },
                         sequence: (word >> 16) as u32,
-                        payload: vec![(word >> 56) as u8; ((word >> 48) as usize % 32) + 1]
-                            .into(),
+                        payload: vec![(word >> 56) as u8; ((word >> 48) as usize % 32) + 1].into(),
                         syn: word & (1 << 8) != 0,
                         fin: word & (1 << 9) != 0,
                         rst: word & (1 << 10) != 0,

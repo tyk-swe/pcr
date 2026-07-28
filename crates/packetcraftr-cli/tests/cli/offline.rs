@@ -142,13 +142,14 @@ fn protocols_text_lists_manifest_order_and_describes_ordered_fields() {
     );
     assert!(lines[0].starts_with("ah aliases=[] build=true"));
     assert!(lines[1].starts_with("arp aliases=[] build=true"));
-    assert!(lines[4].starts_with("esp aliases=[] build=true"));
-    assert!(lines[6].starts_with("geneve aliases=[] build=true"));
-    assert!(lines[11].starts_with("ipv4 aliases=[ip, ip4] build=true"));
-    assert!(lines[20].starts_with("mpls aliases=[] build=true"));
-    assert!(lines[23].starts_with("pppoe aliases=[] build=true"));
-    assert!(lines[25].starts_with("raw_ip aliases=[rawip] build=false"));
-    assert!(lines[30].starts_with("vlan8021ad aliases=[dot1ad, 8021ad, qinq]"));
+    assert!(lines[4].starts_with("erspan aliases=[] build=true"));
+    assert!(lines[5].starts_with("esp aliases=[] build=true"));
+    assert!(lines[7].starts_with("geneve aliases=[] build=true"));
+    assert!(lines[12].starts_with("ipv4 aliases=[ip, ip4] build=true"));
+    assert!(lines[21].starts_with("mpls aliases=[] build=true"));
+    assert!(lines[24].starts_with("pppoe aliases=[] build=true"));
+    assert!(lines[26].starts_with("raw_ip aliases=[rawip] build=false"));
+    assert!(lines[31].starts_with("vlan8021ad aliases=[dot1ad, 8021ad, qinq]"));
 
     let detail = binary().args(["protocols", "IP4"]).output().unwrap();
     assert!(detail.status.success());

@@ -19,6 +19,7 @@ macro_rules! builtin_protocol_catalog {
             Arp { canonical: "arp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: ArpCodec }
             BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdLoopCodec }
             BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdNullCodec }
+            Erspan { canonical: "erspan", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: ErspanCodec }
             Esp { canonical: "esp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: EspCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: EthernetCodec }
             Geneve { canonical: "geneve", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: GeneveCodec }
@@ -145,7 +146,7 @@ macro_rules! define_builtin_protocol {
             /// end the enclosing network envelope and carry no link-layer or
             /// routing intent for the packet that is transmitted directly.
             pub const fn is_encapsulation_boundary(self) -> bool {
-                matches!(self, Self::Geneve | Self::Vxlan)
+                matches!(self, Self::Erspan | Self::Geneve | Self::Vxlan)
             }
         }
     };

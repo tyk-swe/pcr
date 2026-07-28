@@ -9,6 +9,7 @@
       {"protocol": "arp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "bsd_loop", "aliases": ["loop"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "bsd_null", "aliases": ["null"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "erspan", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "esp", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "ethernet", "aliases": ["eth", "ether", "ethernet2"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "geneve", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},

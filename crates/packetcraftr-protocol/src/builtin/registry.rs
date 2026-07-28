@@ -22,8 +22,8 @@ use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
 use tunnel::{
-    AhCodec, EspCodec, GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL,
-    MplsCodec, PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec, VxlanCodec,
+    AhCodec, ErspanCodec, EspCodec, GeneveCodec, MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE,
+    MPLS_NEXT_LABEL, MplsCodec, PPPOE_DISCOVERY, PPPOE_SESSION, PppCodec, PppoeCodec, VxlanCodec,
 };
 
 use packetcraftr_packet::{
@@ -112,6 +112,30 @@ impl ProtocolModule for BuiltinProtocols {
             100,
         )?;
         bind(builder, BuiltinProtocol::Gre, 0, BuiltinProtocol::Raw, -100)?;
+
+        // Both ERSPAN header types ride GRE protocol types of their own and
+        // always carry the mirrored Ethernet frame.
+        bind(
+            builder,
+            BuiltinProtocol::Gre,
+            0x88be,
+            BuiltinProtocol::Erspan,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Gre,
+            0x22eb,
+            BuiltinProtocol::Erspan,
+            90,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Erspan,
+            0,
+            BuiltinProtocol::Ethernet,
+            100,
+        )?;
 
         // Overlay encapsulations hang off their registered transport
         // ports; VXLAN always carries an inner Ethernet frame, while

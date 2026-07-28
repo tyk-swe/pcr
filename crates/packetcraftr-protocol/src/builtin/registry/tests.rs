@@ -14,7 +14,7 @@ use crate::{
     link::{Arp, Ethernet, Vlan, Vlan8021ad},
     network::{Igmp, Ipv4, Ipv6},
     transport::{Sctp, Tcp, Udp},
-    tunnel::{Ah, Esp, Geneve, Mpls, Ppp, Pppoe, Vxlan},
+    tunnel::{Ah, Erspan, ErspanType3, Esp, Geneve, Mpls, Ppp, Pppoe, Vxlan},
 };
 use packetcraftr_packet::{
     Packet,

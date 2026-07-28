@@ -15,9 +15,9 @@ use packetcraftr_packet::{
 };
 
 use super::super::common::{
-    ValueExpectation, checksum, checksum_parts, ensure_encode_budget, expected_discriminator,
-    invalid, make_layer, out_of_range, payload_without_padding, protocol, resolve_u16,
-    strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    ValueExpectation, checksum, checksum_parts, ensure_encode_budget,
+    expected_discriminator_for_value, invalid, make_layer, out_of_range, payload_without_padding,
+    protocol, resolve_u16, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
     validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
@@ -127,7 +127,7 @@ impl LayerCodec for GreCodec {
             "gre",
             "protocol_type",
             &layer.protocol_type,
-            expected_discriminator("gre", context, 0_u16),
+            expected_discriminator_for_value("gre", context, 0_u16, &layer.protocol_type),
             context.mode,
             &mut diagnostics,
         )?;

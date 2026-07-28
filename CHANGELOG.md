@@ -109,6 +109,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   present, and non-zero reserved bits are decode diagnostics and
   permissive-mode territory on build. Only version 0 is dissected —
   other versions are preserved as malformed bytes rather than guessed at.
+- Added ERSPAN mirrored-frame headers: Type II on GRE protocol type
+  0x88BE and Type III on 0x22EB, both ending in the mirrored Ethernet
+  frame with the same tunnel-boundary treatment as VXLAN. The version
+  field and the enclosing GRE protocol type must agree — dissection
+  flags a disagreement and strict builds refuse it — and the Type III
+  timestamp, security group tag, and flag word round-trip exactly.
 - Added the IPsec headers: ESP (RFC 4303, IP protocol 50) and AH
   (RFC 4302, protocol 51), reachable from IPv4, IPv6, and every
   extension header in both address families. ESP decodes its SPI and

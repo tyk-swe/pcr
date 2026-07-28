@@ -3,12 +3,15 @@
 
 //! Tunnel and overlay encapsulation layers.
 
+mod erspan;
 mod geneve;
 mod ipsec;
 mod mpls;
 mod pppoe;
 mod vxlan;
 
+pub(crate) use erspan::ErspanCodec;
+pub use erspan::{Erspan, ErspanType3};
 pub use geneve::Geneve;
 pub(crate) use geneve::GeneveCodec;
 pub use ipsec::{Ah, Esp};

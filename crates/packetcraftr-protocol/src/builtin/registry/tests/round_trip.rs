@@ -654,6 +654,159 @@ fn mpls_label_stacks_round_trip_to_ip_and_opaque_bottoms() {
 }
 
 #[test]
+fn erspan_mirrored_frames_round_trip_both_header_types() {
+    let registry = Arc::new(default_registry().unwrap());
+    let builder = Builder::new(Arc::clone(&registry));
+    let mirrored = |erspan: Erspan, gre: Gre| {
+        let mut packet = Packet::new();
+        packet
+            .push(Ipv4 {
+                source: Ipv4Addr::new(10, 0, 0, 1),
+                destination: Ipv4Addr::new(10, 0, 0, 2),
+                ..Ipv4::default()
+            })
+            .push(gre)
+            .push(erspan)
+            .push(Ethernet::default())
+            .push(Ipv4 {
+                source: Ipv4Addr::new(192, 168, 1, 1),
+                destination: Ipv4Addr::new(192, 168, 1, 5),
+                ..Ipv4::default()
+            })
+            .push(Icmpv4::default());
+        packet
+    };
+
+    // Type II with a GRE sequence number, as the ERSPAN drafts prescribe.
+    let built = builder
+        .build(
+            mirrored(
+                Erspan {
+                    vlan: 100,
+                    session_id: 42,
+                    index_word: 0x102,
+                    ..Erspan::default()
+                },
+                Gre {
+                    sequence: Some(7),
+                    ..Gre::default()
+                },
+            ),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert!(built.diagnostics.is_empty());
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+        .unwrap();
+    let erspan = decoded.packet.get::<Erspan>().unwrap();
+    assert_eq!(erspan.session_id, 42);
+    assert_eq!(erspan.index_word, 0x102);
+    assert_eq!(decoded.packet.get_all::<Ipv4>().count(), 2);
+    assert!(decoded.diagnostics.is_empty());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+
+    // Type III on its own GRE protocol type.
+    let built = builder
+        .build(
+            mirrored(
+                Erspan {
+                    version: 2,
+                    session_id: 9,
+                    type3: Some(ErspanType3 {
+                        timestamp: 0x1122_3344,
+                        sgt: 7,
+                        flags: 0x8001,
+                        subheader: Some(Bytes::from_static(&[9, 8, 7, 6, 5, 4, 3, 2])),
+                    }),
+                    ..Erspan::default()
+                },
+                Gre {
+                    protocol_type: WireValue::Exact(0x22eb),
+                    ..Gre::default()
+                },
+            ),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert!(built.diagnostics.is_empty());
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+        .unwrap();
+    let erspan = decoded.packet.get::<Erspan>().unwrap();
+    assert_eq!(erspan.version, 2);
+    let type3 = erspan.type3.as_ref().unwrap();
+    assert_eq!(type3.timestamp, 0x1122_3344);
+    assert_eq!(
+        type3.subheader.as_deref(),
+        Some(&[9, 8, 7, 6, 5, 4, 3, 2][..])
+    );
+    assert!(decoded.diagnostics.is_empty());
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+
+    // A version that disagrees with the GRE protocol type does not build
+    // strictly.
+    let error = builder
+        .build(
+            mirrored(
+                Erspan::default(),
+                Gre {
+                    protocol_type: WireValue::Exact(0x22eb),
+                    ..Gre::default()
+                },
+            ),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("0x88be"));
+
+    // Type II requires the GRE sequence number.
+    let error = builder
+        .build(
+            mirrored(Erspan::default(), Gre::default()),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("sequence"));
+
+    // An Auto GRE protocol type materializes the Type II value, so a
+    // Type III header requires an explicit 0x22eb.
+    let error = builder
+        .build(
+            mirrored(
+                Erspan {
+                    version: 2,
+                    type3: Some(ErspanType3::default()),
+                    ..Erspan::default()
+                },
+                Gre::default(),
+            ),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("0x22eb"));
+}
+
+#[test]
 fn ipsec_esp_and_ah_round_trip_with_the_chain_continuing_through_ah() {
     let registry = Arc::new(default_registry().unwrap());
     let builder = Builder::new(Arc::clone(&registry));

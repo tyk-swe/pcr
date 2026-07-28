@@ -19,6 +19,7 @@ macro_rules! builtin_protocol_catalog {
             BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdLoopCodec }
             BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdNullCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: EthernetCodec }
+            Geneve { canonical: "geneve", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: GeneveCodec }
             Gre { canonical: "gre", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: GreCodec }
             Icmpv4 { canonical: "icmpv4", aliases: ["icmp", "icmp4"], constructible: true, dissect: true, exact_round_trip: true, matcher: echo_v4, codec: Icmpv4Codec }
             Icmpv6 { canonical: "icmpv6", aliases: ["icmp6"], constructible: true, dissect: true, exact_round_trip: true, matcher: echo_v6, codec: Icmpv6Codec }
@@ -138,7 +139,7 @@ macro_rules! define_builtin_protocol {
             /// end the enclosing network envelope and carry no link-layer or
             /// routing intent for the packet that is transmitted directly.
             pub const fn is_encapsulation_boundary(self) -> bool {
-                matches!(self, Self::Vxlan)
+                matches!(self, Self::Geneve | Self::Vxlan)
             }
         }
     };

@@ -12,12 +12,11 @@ use packetcraftr_packet::{
     field::FieldValue,
     layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
     registry::Discriminator,
-    semantics::BuiltinProtocol,
 };
 
 use super::super::common::{
     ensure_encode_budget, invalid, make_layer, out_of_range, protocol, strict_or_diagnostic,
-    truncated, wrong_layer, wrong_type,
+    truncated, validate_raw_child_discriminator, wrong_layer, wrong_type,
 };
 
 const VXLAN_LEN: usize = 8;
@@ -93,25 +92,10 @@ impl LayerCodec for VxlanCodec {
 
         let mut diagnostics = Vec::new();
         // The header is only ever followed by its encapsulated frame; without
-        // one the bytes dissect into a missing-required-child error. A
-        // malformed child is a byte-preserving pseudo-layer from dissection
-        // of a truncated inner frame, so those captures always rebuild.
-        if let Some(selected) = context.registry.child_for("vxlan", Discriminator(0))
-            && !context.child.is_some_and(|child| {
-                *child.protocol_id() == *selected
-                    || BuiltinProtocol::from_id(child.protocol_id())
-                        == Some(BuiltinProtocol::Malformed)
-            })
-        {
-            strict_or_diagnostic(
-                "vxlan",
-                "build.vxlan_inner_frame",
-                "vni",
-                format!("the VXLAN payload must be its encapsulated {selected} frame"),
-                context,
-                &mut diagnostics,
-            )?;
-        }
+        // one the bytes dissect into a missing-required-child error. The
+        // shared discriminator validation accepts a malformed child, so
+        // dissected captures of truncated inner frames always rebuild.
+        validate_raw_child_discriminator("vxlan", 0, context, &mut diagnostics)?;
         if layer.flags != VNI_VALID_FLAG {
             strict_or_diagnostic(
                 "vxlan",

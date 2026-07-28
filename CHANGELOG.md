@@ -99,6 +99,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a registered port — because either way the bytes would not dissect
   back into the same layers (permissive builds keep a
   `build.udp_encapsulation_port` warning instead).
+- Added the GENEVE overlay encapsulation (RFC 8926) with the same
+  end-to-end tunnel-boundary treatment as VXLAN. UDP traffic on port 6081
+  decodes the header, and the `protocol_type` EtherType selects the inner
+  frame: Transparent Ethernet Bridging (0x6558), IPv4, or IPv6, with
+  `protocol_type` resolving automatically from the child on build.
+  Variable option TLVs are carried verbatim for exact round-trip; a chain
+  that does not parse exactly, a C bit that disagrees with the options
+  present, and non-zero reserved bits are decode diagnostics and
+  permissive-mode territory on build. Only version 0 is dissected —
+  other versions are preserved as malformed bytes rather than guessed at.
 - Added `packetcraftr follow <PATH> --stream <tcp|udp>:<INDEX>`, extracting
   one conversation's payload from a capture file entirely offline. The index
   is the same first-seen conversation numbering `stats` reports and stream

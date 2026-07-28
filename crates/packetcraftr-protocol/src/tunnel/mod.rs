@@ -3,7 +3,10 @@
 
 //! Tunnel and overlay encapsulation layers.
 
+mod geneve;
 mod vxlan;
 
+pub use geneve::Geneve;
+pub(crate) use geneve::GeneveCodec;
 pub use vxlan::Vxlan;
 pub(crate) use vxlan::VxlanCodec;

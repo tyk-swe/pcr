@@ -21,7 +21,7 @@ use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
-use tunnel::VxlanCodec;
+use tunnel::{GeneveCodec, VxlanCodec};
 
 use packetcraftr_packet::{
     registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
@@ -90,7 +90,10 @@ impl ProtocolModule for BuiltinProtocols {
         bind(builder, BuiltinProtocol::Gre, 0, BuiltinProtocol::Raw, -100)?;
 
         // Overlay encapsulations hang off their registered transport
-        // ports; VXLAN always carries an inner Ethernet frame.
+        // ports; VXLAN always carries an inner Ethernet frame, while
+        // GENEVE's protocol_type EtherType selects Transparent Ethernet
+        // Bridging, IPv4, or IPv6 — with the usual raw fallback so an
+        // exactly decoded unknown EtherType rebuilds.
         bind(
             builder,
             BuiltinProtocol::Udp,
@@ -104,6 +107,41 @@ impl ProtocolModule for BuiltinProtocols {
             0,
             BuiltinProtocol::Ethernet,
             100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Udp,
+            6081,
+            BuiltinProtocol::Geneve,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0x6558,
+            BuiltinProtocol::Ethernet,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0x0800,
+            BuiltinProtocol::Ipv4,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0x86dd,
+            BuiltinProtocol::Ipv6,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Geneve,
+            0,
+            BuiltinProtocol::Raw,
+            -100,
         )?;
 
         // Payload-bearing transports use discriminator zero as their typed raw child.

@@ -9,6 +9,7 @@
       {"protocol": "bsd_loop", "aliases": ["loop"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "bsd_null", "aliases": ["null"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "ethernet", "aliases": ["eth", "ether", "ethernet2"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
+      {"protocol": "geneve", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "gre", "aliases": [], "build": true, "dissect": true, "exact_round_trip": true, "matcher": false, "decode_only": false},
       {"protocol": "icmpv4", "aliases": ["icmp", "icmp4"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},
       {"protocol": "icmpv6", "aliases": ["icmp6"], "build": true, "dissect": true, "exact_round_trip": true, "matcher": true, "decode_only": false},

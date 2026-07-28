@@ -3,17 +3,22 @@
 
 //! Multi-packet capture-ready exchange contracts.
 
+mod accumulator;
 mod contract;
+mod guard;
 mod options;
 mod transaction;
 
-pub(crate) use contract::{
-    CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
-    ExchangeProcessOutcome, ExchangeResult, PlannedExchangePacket, PreparedExchangePacket,
-    WorkflowPromotionContext, WorkflowResponseMatcher, drain_available,
+pub(crate) use accumulator::{
+    ExchangeAccumulator, ExchangeProcessContext, ExchangeProcessOutcome, WorkflowPromotionContext,
+    WorkflowResponseMatcher,
 };
 pub use contract::{
     DEFAULT_MAX_UNSOLICITED_FRAMES, ExchangeOptions as Options, ExchangeResult as Result,
     MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response,
 };
-pub(crate) use transaction::{ExchangeTransaction, PreparedExchange};
+pub(crate) use contract::{ExchangeOptions, ExchangeResult};
+pub(crate) use guard::CaptureGuard;
+pub(crate) use transaction::{
+    ExchangeTransaction, PlannedExchangePacket, PreparedExchange, PreparedExchangePacket,
+};

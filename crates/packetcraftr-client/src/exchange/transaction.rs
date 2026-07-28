@@ -4,17 +4,22 @@
 //! Armed exchange transaction and capture lifecycle phases.
 
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics},
     link::LinkMode,
+    route::{MaterializedRoute, PlannedRoute},
     transmit::{PacketIo, TransmissionFrame},
 };
 use packetcraftr_packet::{
-    decode::Dissector, diagnostic::push_diagnostic_once, registry::ProtocolRegistry,
+    Packet,
+    build::{BuildContext, BuiltPacket},
+    decode::Dissector,
+    diagnostic::push_diagnostic_once,
+    registry::ProtocolRegistry,
 };
 
 use super::super::Stats;
@@ -22,9 +27,20 @@ use super::super::send::ClientError;
 use super::super::validation::validate_send_report;
 use super::{
     CaptureGuard, ExchangeAccumulator, ExchangeOptions, ExchangeProcessContext,
-    ExchangeProcessOutcome, ExchangeResult, PreparedExchangePacket, WorkflowPromotionContext,
-    WorkflowResponseMatcher, drain_available,
+    ExchangeProcessOutcome, ExchangeResult, WorkflowPromotionContext, WorkflowResponseMatcher,
 };
+
+pub(crate) struct PlannedExchangePacket {
+    pub(crate) packet: Packet,
+    pub(crate) plan: PlannedRoute,
+    pub(crate) build_context: BuildContext,
+    pub(crate) preliminary_build: BuiltPacket,
+}
+
+pub(crate) struct PreparedExchangePacket {
+    pub(crate) built: BuiltPacket,
+    pub(crate) route: MaterializedRoute,
+}
 
 pub(crate) struct PreparedExchange {
     pub(crate) started: Instant,
@@ -34,6 +50,43 @@ pub(crate) struct PreparedExchange {
     pub(crate) packets: Vec<PreparedExchangePacket>,
     pub(crate) packet_count: u64,
     pub(crate) total_bytes: u64,
+}
+
+fn drain_available<C: CaptureSession>(
+    capture: &mut CaptureGuard<C>,
+    enforced_deadline: Option<Instant>,
+    frame_limit: usize,
+    captured: &mut ExchangeAccumulator,
+    context: ExchangeProcessContext<'_>,
+) -> Result<(), LiveIoError> {
+    for _ in 0..frame_limit {
+        if enforced_deadline
+            .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none())
+        {
+            return Err(LiveIoError::DeadlineExceeded {
+                operation: "draining capture before all requests were sent",
+            });
+        }
+        let Some(frame) = capture.inner.next_captured_frame(Duration::ZERO)? else {
+            return Ok(());
+        };
+        if captured.process(frame, context) == ExchangeProcessOutcome::CorrelationDeadlineExpired {
+            if enforced_deadline.is_some() {
+                return Err(LiveIoError::DeadlineExceeded {
+                    operation: "draining capture before all requests were sent",
+                });
+            }
+            return Ok(());
+        }
+    }
+    push_diagnostic_once(
+        &mut captured.diagnostics,
+        packetcraftr_packet::diagnostic::Diagnostic::warning(
+            "exchange.drain_limit",
+            format!("zero-time capture drain stopped after the bounded {frame_limit} frame(s)"),
+        ),
+    );
+    Ok(())
 }
 
 /// State that exists only after capture has been armed. Owning the guard here

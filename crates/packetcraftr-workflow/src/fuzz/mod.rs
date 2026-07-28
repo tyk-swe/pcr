@@ -17,8 +17,8 @@ use serde::Serialize;
 use thiserror::Error;
 
 use super::clock::Clock;
-use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::EvidenceBudget;
+use packetcraftr_budget::{Deadline, DeadlineExceeded};
 use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_error::{Classification, Classified, Kind};
 use packetcraftr_net::{

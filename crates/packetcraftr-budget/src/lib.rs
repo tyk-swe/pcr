@@ -1,19 +1,30 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
+//! Finite time budgets shared by every bounded PacketcraftR workflow.
+//!
+//! This crate sits at the bottom of the dependency graph beside
+//! `packetcraftr-error` and depends on nothing but `std`, so both the offline
+//! analysis pipeline and the live probing workflows can bound themselves
+//! without either one having to depend on the other.
+
+#![forbid(unsafe_code)]
+
 use std::time::{Duration, Instant};
 
 /// Cooperative operation deadline combining wall time with deterministic
 /// elapsed-time accounting. A blocked provider cannot be interrupted; callers
 /// must check immediately before and after each provider boundary.
-pub(super) struct Deadline {
+pub struct Deadline {
     baseline: Instant,
     accounted: Duration,
     limit: Duration,
 }
 
 impl Deadline {
-    pub(super) fn new(limit: Duration) -> Self {
+    /// Starts a deadline that expires once `limit` of accounted time elapses.
+    #[must_use]
+    pub fn new(limit: Duration) -> Self {
         Self {
             baseline: Instant::now(),
             accounted: Duration::ZERO,
@@ -21,12 +32,22 @@ impl Deadline {
         }
     }
 
-    pub(super) fn check(&self) -> Result<(), DeadlineExceeded> {
+    /// Reports whether the budget has already been spent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineExceeded`] once accounted time passes the limit.
+    pub fn check(&self) -> Result<(), DeadlineExceeded> {
         self.check_elapsed(self.elapsed_at(Instant::now()))
     }
 
     /// Checks prospective deterministic time without committing it.
-    pub(super) fn check_additional(&self, additional: Duration) -> Result<(), DeadlineExceeded> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineExceeded`] when the prospective time would pass the
+    /// limit, leaving the accounted total untouched.
+    pub fn check_additional(&self, additional: Duration) -> Result<(), DeadlineExceeded> {
         let actual = self
             .elapsed_at(Instant::now())
             .checked_add(additional)
@@ -36,10 +57,11 @@ impl Deadline {
 
     /// Commits wall time from prior work and begins a phase whose reported
     /// elapsed time may overlap its wall time.
-    pub(super) fn start_accounting(
-        &mut self,
-        prospective: Duration,
-    ) -> Result<(), DeadlineExceeded> {
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineExceeded`] when the committed time passes the limit.
+    pub fn start_accounting(&mut self, prospective: Duration) -> Result<(), DeadlineExceeded> {
         let now = Instant::now();
         let elapsed = self.elapsed_at(now);
         let actual = elapsed.checked_add(prospective).unwrap_or(Duration::MAX);
@@ -65,7 +87,13 @@ impl Deadline {
         Ok(())
     }
 
-    pub(super) fn account(&mut self, elapsed: Duration) -> Result<(), DeadlineExceeded> {
+    /// Commits a completed phase, charging whichever of wall time or reported
+    /// elapsed time is larger.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineExceeded`] when the committed total passes the limit.
+    pub fn account(&mut self, elapsed: Duration) -> Result<(), DeadlineExceeded> {
         let now = Instant::now();
         let phase_elapsed = now.duration_since(self.baseline).max(elapsed);
         self.accounted = self
@@ -80,9 +108,10 @@ impl Deadline {
     }
 }
 
-pub(super) struct DeadlineExceeded {
-    pub(super) actual: Duration,
-    pub(super) limit: Duration,
+/// Reports the accounted time that passed a [`Deadline`] and the limit it broke.
+pub struct DeadlineExceeded {
+    pub actual: Duration,
+    pub limit: Duration,
 }
 
 #[cfg(test)]

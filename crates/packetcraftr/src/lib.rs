@@ -15,12 +15,14 @@
 //! # Domain map
 //!
 //! Each domain is an independently compiled crate in the `packetcraftr`
-//! workspace; this crate re-exports all nine under their canonical names, so
+//! workspace; this crate re-exports all ten under their canonical names, so
 //! `packetcraftr::packet` and `packetcraftr_packet` name the same items.
 //! Depend on the individual crates instead to compile only part of the stack.
 //!
-//! The nine canonical domains are:
+//! The ten canonical domains are:
 //!
+//! - [`analysis`] runs bounded offline capture analysis, expert diagnostics,
+//!   and stream reassembly;
 //! - [`capture`] reads and writes bounded classic PCAP and PCAPNG streams;
 //! - [`client`] plans and executes policy-gated send and exchange operations;
 //! - [`error`] provides the shared classified error vocabulary;
@@ -32,6 +34,11 @@
 //!   capability manifest;
 //! - [`session`] provides bounded fragment and transport reassembly state; and
 //! - [`workflow`] implements replay, scan, traceroute, DNS, and fuzz workflows.
+//!
+//! [`analysis`] and [`workflow`] are separate crates because the offline and
+//! live halves of the toolkit must not blur: [`analysis`] depends on neither
+//! [`client`] nor [`net`], so it cannot acquire a resolver, route, capture, or
+//! transmission seam without that dependency edge appearing first.
 //!
 //! The packet and protocol domains are runtime-neutral. Native availability is
 //! selected separately through Cargo features and the providers in [`net`].
@@ -58,6 +65,7 @@
 
 #![forbid(unsafe_code)]
 
+pub use packetcraftr_analysis as analysis;
 pub use packetcraftr_capture as capture;
 pub use packetcraftr_client as client;
 pub use packetcraftr_error as error;

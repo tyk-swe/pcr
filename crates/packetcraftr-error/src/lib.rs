@@ -7,6 +7,10 @@
 
 use serde::Serialize;
 
+mod boundary;
+
+pub use boundary::BoundaryError;
+
 /// Top-level failure classes shared by API boundaries.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]

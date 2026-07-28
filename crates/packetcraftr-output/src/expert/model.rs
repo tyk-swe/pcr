@@ -3,8 +3,8 @@
 
 use serde::Serialize;
 
+use packetcraftr_analysis::expert::{ExpertSummary, Finding, StreamTransport};
 use packetcraftr_packet::diagnostic::DiagnosticSeverity;
-use packetcraftr_workflow::analysis::expert::{ExpertSummary, Finding, StreamTransport};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

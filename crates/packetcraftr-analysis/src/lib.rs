@@ -3,17 +3,23 @@
 
 //! Bounded offline capture analysis over dissected frames.
 //!
-//! This module owns the read → dissect → index → filter → dispatch loop the
+//! This crate owns the read → dissect → index → filter → dispatch loop the
 //! offline analysis commands share, and the adapters that map decoded layers
 //! onto the session crate's reassembly inputs. Everything here is offline by
 //! design: there is no resolver, route, capture, or transmission seam, so
 //! analysis needs no authorization gates and runs in every build profile.
+//!
+//! That separation is why this is a crate rather than a module: it depends on
+//! neither `packetcraftr-client` nor `packetcraftr-net`, so a live seam added
+//! here fails to build instead of quietly bypassing an authorization gate.
 //!
 //! Conversation indices are assigned in first-seen order over the whole
 //! capture, before any display filter runs, so an index one command reports
 //! is the index another command extracts. Reassembly, by contrast, consumes
 //! only the frames the filter keeps, so a run narrowed to one conversation
 //! buffers only that conversation.
+
+#![forbid(unsafe_code)]
 
 use std::io::Read;
 use std::sync::Arc;
@@ -22,10 +28,11 @@ use std::time::Duration;
 use bytes::Bytes;
 use thiserror::Error;
 
+use packetcraftr_budget::Deadline;
 use packetcraftr_capture::{
     DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Reader,
 };
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_packet::decode::{
     DecodedPacket, Decoder, Error as DecodeError, Options as DecodeOptions,
 };
@@ -46,8 +53,6 @@ use packetcraftr_session::fragment::{
 use packetcraftr_session::tcp::{
     Error as SessionTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
 };
-
-use super::deadline::Deadline;
 
 mod error;
 pub mod expert;

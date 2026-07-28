@@ -37,7 +37,6 @@ use packetcraftr_protocol::{
 };
 
 use super::clock::Clock;
-use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
     MatchedResponseEvidence, ResponseEvidence, format_exchange_evidence_error, retain_evidence,
@@ -48,6 +47,7 @@ use super::probe::{self, Correlation, Transport as ProbeTransport};
 use super::scan::{MAX_SCAN_PROBES, MAX_SCAN_RATE};
 use super::target::{Authorizer, Target};
 use super::{AddressFamily, BoundaryError, Stats};
+use packetcraftr_budget::{Deadline, DeadlineExceeded};
 
 pub const DEFAULT_TRACEROUTE_FIRST_HOP: u8 = 1;
 pub const DEFAULT_TRACEROUTE_MAX_HOPS: u8 = 30;

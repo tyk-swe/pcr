@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fmt;
 use std::sync::Arc;
 
-use packetcraftr_error::{Classification, Classified, Kind};
+use crate::{Classification, Classified, Kind};
 
 /// Classified failure propagated across a workflow authorization or execution seam.
 #[derive(Clone)]
@@ -17,6 +17,8 @@ pub struct BoundaryError {
 }
 
 impl BoundaryError {
+    /// Builds a boundary error from a message and its classification.
+    #[must_use]
     pub fn new(
         message: impl Into<String>,
         classification: Classification,
@@ -30,11 +32,14 @@ impl BoundaryError {
         }
     }
 
+    /// Borrows a classified error, copying its message, classification, and causes.
+    #[must_use]
     pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
         Self::new(error.to_string(), error.classification(), error.causes())
     }
 
-    pub(crate) fn from_error<E>(error: E) -> Self
+    /// Erases an owned classified error, retaining it in the source chain.
+    pub fn from_error<E>(error: E) -> Self
     where
         E: Classified + Error + Send + Sync + 'static,
     {
@@ -44,7 +49,9 @@ impl BoundaryError {
         Self::with_source(message, classification, causes, error)
     }
 
-    pub(crate) fn with_source<E>(
+    /// Builds a boundary error that reports its own message while retaining
+    /// an unrelated source error.
+    pub fn with_source<E>(
         message: impl Into<String>,
         classification: Classification,
         causes: Vec<String>,
@@ -61,7 +68,9 @@ impl BoundaryError {
         }
     }
 
-    pub(super) fn internal_execution(
+    /// Reports a broken executor contract as an internal invariant failure.
+    #[must_use]
+    pub fn internal_execution(
         message: impl Into<String>,
         code: &'static str,
         remediation: &'static str,
@@ -69,7 +78,9 @@ impl BoundaryError {
         Self::execution_error(message, code, Kind::Internal, remediation)
     }
 
-    pub(super) fn execution_validation(
+    /// Reports invalid executor input as a caller validation failure.
+    #[must_use]
+    pub fn execution_validation(
         message: impl Into<String>,
         code: &'static str,
         remediation: &'static str,
@@ -139,7 +150,7 @@ impl Classified for BoundaryError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use packetcraftr_error::Category;
+    use crate::Category;
 
     #[derive(Debug)]
     struct TestError;

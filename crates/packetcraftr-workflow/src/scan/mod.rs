@@ -40,7 +40,6 @@ use packetcraftr_protocol::{
 };
 
 use super::clock::Clock;
-use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidence, ExchangeEvidenceError,
     MatchedResponseEvidence, ResponseEvidence, format_exchange_evidence_error, retain_evidence,
@@ -50,6 +49,7 @@ use super::nonzero_ipv4_identification;
 use super::probe::Correlation;
 use super::target::{Authorizer, Target};
 use super::{AddressFamily, BoundaryError, Stats};
+use packetcraftr_budget::{Deadline, DeadlineExceeded};
 
 pub const DEFAULT_SCAN_BATCH_SIZE: usize = 64;
 pub const DEFAULT_MAX_SCAN_PORTS: usize = 1_024;

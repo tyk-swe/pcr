@@ -18,13 +18,13 @@ use packetcraftr_packet::{decode::Result as DecodedPacket, diagnostic::Diagnosti
 
 use super::address_family::AddressFamily;
 use super::clock::{Clock, rate_delay};
-use super::deadline::Deadline;
 use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, MatchedResponseEvidence, ResponseCandidate,
     push_undecoded_limit_diagnostic, retain_evidence, select_response_candidate,
 };
 use super::target::{Authorizer, Target};
 use super::{BoundaryError, Stats};
+use packetcraftr_budget::Deadline;
 
 pub(super) struct SelectedTargets {
     pub(super) declared: String,

@@ -4,9 +4,9 @@
 // CLI error classification and exit-code mapping.
 
 use packetcraftr::{
+    analysis,
     error::{Classification, Classified, Kind},
     net, output,
-    workflow::analysis,
 };
 
 use super::arguments::CliColorChoice;

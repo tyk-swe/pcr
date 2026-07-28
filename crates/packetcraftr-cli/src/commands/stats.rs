@@ -8,9 +8,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use packetcraftr::{
+    analysis,
     capture::{Reader, ReaderOptions},
     output,
-    workflow::analysis,
 };
 
 use super::super::arguments::{CliStatsTable, StatsArgs};

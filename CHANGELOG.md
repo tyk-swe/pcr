@@ -10,10 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Published each library domain as its own crate — `packetcraftr-error`,
-  `packetcraftr-capture`, `packetcraftr-session`, `packetcraftr-packet`,
-  `packetcraftr-protocol`, `packetcraftr-net`, `packetcraftr-client`,
-  `packetcraftr-workflow`, and `packetcraftr-output` — so consumers can compile
-  only the parts they use.
+  `packetcraftr-budget`, `packetcraftr-capture`, `packetcraftr-session`,
+  `packetcraftr-packet`, `packetcraftr-protocol`, `packetcraftr-net`,
+  `packetcraftr-client`, `packetcraftr-analysis`, `packetcraftr-workflow`, and
+  `packetcraftr-output` — so consumers can compile only the parts they use.
+- Added `packetcraftr-budget`, holding the cooperative `Deadline` accounting
+  that bounds every offline and live operation. It depends on nothing but
+  `std`, so it sits at the bottom of the graph beside `packetcraftr-error` and
+  both halves of the toolkit can bound themselves without depending on each
+  other.
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
@@ -259,6 +264,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** offline capture analysis moved out of `packetcraftr-workflow`
+  into its own `packetcraftr-analysis` crate, re-exported as
+  `packetcraftr::analysis`. Replace `packetcraftr::workflow::analysis` with
+  `packetcraftr::analysis`; the items themselves are unchanged. The split makes
+  the offline/live separation a dependency edge rather than a convention:
+  `packetcraftr-analysis` depends on neither `packetcraftr-client` nor
+  `packetcraftr-net`, so it cannot grow a resolver, route, capture, or
+  transmission seam without that dependency appearing first.
+- **Breaking:** `BoundaryError` moved from `packetcraftr-workflow` to
+  `packetcraftr-error`, which is where the rest of the classified error
+  vocabulary lives and is now the only crate both the offline and live halves
+  need in order to report across a seam. `packetcraftr::workflow::BoundaryError`
+  still resolves through a re-export; `packetcraftr::error::BoundaryError` is
+  the canonical path. Its `from_error`, `with_source`, `internal_execution`,
+  and `execution_validation` constructors are now public.
 - **Breaking:** an Ethernet or VLAN `ether_type` at or below 1500 now
   dissects as an IEEE 802.3 payload length framing an LLC header, with
   bytes beyond the declared length treated as link padding; such frames

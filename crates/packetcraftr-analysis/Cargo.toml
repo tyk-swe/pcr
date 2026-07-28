@@ -1,6 +1,6 @@
 [package]
-name = "packetcraftr-workflow"
-description = "Bounded PacketcraftR analysis, replay, scan, traceroute, DNS, and fuzz workflows"
+name = "packetcraftr-analysis"
+description = "Bounded offline capture analysis, expert diagnostics, and stream reassembly for PacketcraftR"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,15 +11,16 @@ publish.workspace = true
 [lints]
 workspace = true
 
+# Offline by construction: this crate must not depend on `packetcraftr-client`
+# or `packetcraftr-net`. Analysis runs without authorization gates because it
+# has no resolver, route, capture, or transmission seam, and the absence of
+# those dependencies is what keeps that true.
 [dependencies]
 bytes.workspace = true
 packetcraftr-budget.workspace = true
 packetcraftr-capture.workspace = true
-packetcraftr-client.workspace = true
 packetcraftr-error.workspace = true
-packetcraftr-net.workspace = true
 packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true
 packetcraftr-session.workspace = true
-serde.workspace = true
 thiserror.workspace = true

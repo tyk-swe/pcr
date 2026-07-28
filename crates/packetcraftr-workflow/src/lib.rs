@@ -6,11 +6,8 @@
 //! Bounded, policy-gated network workflows.
 
 mod address_family;
-pub mod analysis;
-mod boundary_error;
 mod bounded_probe;
 pub mod clock;
-mod deadline;
 pub mod dns;
 mod evidence;
 pub mod fuzz;
@@ -33,7 +30,7 @@ const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
 }
 
 pub use address_family::AddressFamily;
-pub use boundary_error::BoundaryError;
+pub use packetcraftr_error::BoundaryError;
 pub use stats::Stats;
 
 #[cfg(test)]

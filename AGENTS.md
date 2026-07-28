@@ -2,7 +2,9 @@
 
 ## Project Structure & Module Organization
 
-PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Domain crates live under `crates/`; dependencies flow upward from shared errors and capture/session types through packet, protocol, network, client, workflow, and output layers to the `packetcraftr` facade and `packetcraftr-cli`. Keep this graph acyclic.
+PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Domain crates live under `crates/`; dependencies flow upward from shared errors, budgets, and capture/session types through packet, protocol, network, client, analysis, workflow, and output layers to the `packetcraftr` facade and `packetcraftr-cli`. Keep this graph acyclic.
+
+The offline/live split is a dependency edge, not a convention. `packetcraftr-analysis` holds the offline capture pipeline and must never depend on `packetcraftr-client` or `packetcraftr-net`; that absence is what guarantees it has no resolver, route, capture, or transmission seam to gate. Live probing lives in `packetcraftr-workflow`. Both bound themselves with `packetcraftr-budget`, which sits at the bottom of the graph beside `packetcraftr-error`.
 
 Place unit tests beside their modules. Integration tests live in `crates/packetcraftr/tests/`, CLI tests and goldens in `crates/packetcraftr-cli/tests/`, fixtures in `tests/fixtures/`, schemas in `schemas/`, published examples in `examples/documents/`, benchmarks in `crates/packetcraftr/benches/`, and fuzz targets in `fuzz/`.
 

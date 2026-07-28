@@ -34,7 +34,6 @@ use packetcraftr_protocol::{
 };
 
 use super::clock::Clock;
-use super::deadline::{Deadline, DeadlineExceeded};
 use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate,
     ResponseEvidence, push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,
@@ -47,6 +46,7 @@ use super::probe::{self, Transport as ProbeTransport};
 use super::scan::MAX_SCAN_RATE;
 use super::target::{Authorizer, Target};
 use super::{AddressFamily, BoundaryError, Stats};
+use packetcraftr_budget::{Deadline, DeadlineExceeded};
 
 pub const DNS_HEADER_BYTES: usize = 12;
 pub const DEFAULT_DNS_SERVER_PORT: u16 = 53;

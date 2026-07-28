@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, ValueEnum};
-use packetcraftr::{capture, workflow};
+use packetcraftr::{analysis, capture};
 
 #[derive(Debug, Args)]
 pub(crate) struct RecipeArgs {
@@ -93,7 +93,7 @@ pub(crate) struct StatsArgs {
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
     /// Maximum distinct conversations tracked per transport.
-    #[arg(long, default_value_t = workflow::analysis::Limits::default().max_flows)]
+    #[arg(long, default_value_t = analysis::Limits::default().max_flows)]
     pub(crate) max_flows: usize,
     /// Maximum analysis run time in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
@@ -121,7 +121,7 @@ pub(crate) struct ExpertArgs {
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
     /// Maximum distinct conversations tracked per transport.
-    #[arg(long, default_value_t = workflow::analysis::Limits::default().max_flows)]
+    #[arg(long, default_value_t = analysis::Limits::default().max_flows)]
     pub(crate) max_flows: usize,
     /// Maximum analysis run time in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]
@@ -164,7 +164,7 @@ pub(crate) struct FollowArgs {
     #[arg(long, default_value_t = capture::DEFAULT_INTERFACE_LIMIT)]
     pub(crate) max_interfaces: usize,
     /// Maximum distinct conversations tracked per transport.
-    #[arg(long, default_value_t = workflow::analysis::Limits::default().max_flows)]
+    #[arg(long, default_value_t = analysis::Limits::default().max_flows)]
     pub(crate) max_flows: usize,
     /// Maximum analysis run time in milliseconds.
     #[arg(long, default_value_t = 3_600_000)]

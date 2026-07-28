@@ -19,7 +19,7 @@ use serde::Serialize;
 use thiserror::Error;
 
 use super::clock::Clock as WorkflowClock;
-use super::deadline::{Deadline, DeadlineExceeded};
+use packetcraftr_budget::{Deadline, DeadlineExceeded};
 use packetcraftr_capture::{
     DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Format,
     Frame, Interface, LinkType, Reader,

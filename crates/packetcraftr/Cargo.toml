@@ -19,6 +19,7 @@ native-layer2 = ["packetcraftr-net/native-layer2"]
 native-layer3 = ["packetcraftr-net/native-layer3"]
 
 [dependencies]
+packetcraftr-analysis.workspace = true
 packetcraftr-capture.workspace = true
 packetcraftr-client.workspace = true
 packetcraftr-error.workspace = true

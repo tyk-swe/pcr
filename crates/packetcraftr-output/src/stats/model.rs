@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde::Serialize;
 
-use packetcraftr_workflow::analysis::stats::{
+use packetcraftr_analysis::stats::{
     ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
     TransportKind,
 };

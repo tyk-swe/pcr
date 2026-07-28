@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use serde::Serialize;
 
-use packetcraftr_workflow::analysis::follow::{Chunk, Direction, FollowSummary};
+use packetcraftr_analysis::follow::{Chunk, Direction, FollowSummary};
 
 use super::super::common::compact_hex;
 use super::super::expert::StreamTransport;

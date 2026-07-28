@@ -114,14 +114,34 @@ pub fn validate_segment_route(
     })
 }
 
+/// Number of leading layers that belong to the packet transmitted directly on
+/// the wire. Layers after an encapsulation boundary describe a tunneled frame,
+/// so they carry no link-layer or routing intent of their own; the boundary
+/// layer itself is still part of the outer packet.
+pub fn outer_scope_len(packet: &Packet) -> usize {
+    packet
+        .iter()
+        .position(|layer| {
+            BuiltinProtocol::of(layer).is_some_and(BuiltinProtocol::is_encapsulation_boundary)
+        })
+        .map_or(packet.len(), |boundary| boundary + 1)
+}
+
 pub fn outer_ip_path(packet: &Packet) -> Result<Option<IpPath>, SemanticError> {
-    let Some((index, protocol)) = packet.iter().enumerate().find_map(|(index, layer)| {
-        let protocol = BuiltinProtocol::of(layer)?;
-        protocol.is_ip().then_some((index, protocol))
-    }) else {
+    let scope = outer_scope_len(packet);
+    let Some((index, protocol)) =
+        packet
+            .iter()
+            .take(scope)
+            .enumerate()
+            .find_map(|(index, layer)| {
+                let protocol = BuiltinProtocol::of(layer)?;
+                protocol.is_ip().then_some((index, protocol))
+            })
+    else {
         return Ok(None);
     };
-    ip_path_at(packet, index, packet.len(), protocol).map(Some)
+    ip_path_at(packet, index, scope, protocol).map(Some)
 }
 
 /// Returns the nearest enclosing IP path. A malformed nearest header is an
@@ -550,9 +570,13 @@ pub struct VlanMetadata {
     pub vlan_id: u16,
 }
 
+/// VLAN tags on the directly transmitted packet, outermost first. Tags inside
+/// an encapsulated frame belong to the tunneled network, not to the link this
+/// packet leaves on.
 pub fn vlan_metadata(packet: &Packet) -> Result<Vec<VlanMetadata>, SemanticError> {
     packet
         .iter()
+        .take(outer_scope_len(packet))
         .filter_map(|layer| match BuiltinProtocol::of(layer) {
             Some(BuiltinProtocol::Vlan) => Some((layer, VlanKind::Ieee8021Q)),
             Some(BuiltinProtocol::Vlan8021ad) => Some((layer, VlanKind::Ieee8021Ad)),
@@ -696,13 +720,122 @@ mod tests {
                 );
             }
         }
-        assert_eq!(BuiltinProtocol::ALL.len(), 25);
+        assert_eq!(BuiltinProtocol::ALL.len(), 26);
         assert_eq!(
             BuiltinProtocol::from_id(&ProtocolId::new("raw_ip")),
             Some(BuiltinProtocol::RawIp)
         );
         assert_eq!(BuiltinProtocol::from_id(&ProtocolId::new("ip")), None);
         assert_eq!(BuiltinProtocol::from_id(&ProtocolId::new("srh")), None);
+    }
+
+    #[derive(Clone, Debug)]
+    struct StackLayer {
+        schema: &'static LayerSchema,
+        source: Option<Ipv4Addr>,
+        destination: Option<Ipv4Addr>,
+    }
+
+    fn stack_layer(protocol: &'static str) -> StackLayer {
+        StackLayer {
+            // Leaking one tiny schema per pushed layer keeps this test free
+            // of protocol-crate codecs while satisfying the 'static schema
+            // contract.
+            schema: Box::leak(Box::new(LayerSchema {
+                protocol: ProtocolId::new(protocol),
+                name: "Semantics stack test layer",
+                fields: &[],
+            })),
+            source: None,
+            destination: None,
+        }
+    }
+
+    fn stack_ip_layer(source: Ipv4Addr, destination: Ipv4Addr) -> StackLayer {
+        StackLayer {
+            source: Some(source),
+            destination: Some(destination),
+            ..stack_layer("ipv4")
+        }
+    }
+
+    impl Layer for StackLayer {
+        fn schema(&self) -> &'static LayerSchema {
+            self.schema
+        }
+
+        fn clone_box(&self) -> Box<dyn Layer> {
+            Box::new(self.clone())
+        }
+
+        fn as_any(&self) -> &dyn Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn Any {
+            self
+        }
+
+        fn field(&self, name: &str) -> Option<FieldValue> {
+            match name {
+                SOURCE => self.source.map(FieldValue::Ipv4),
+                DESTINATION => self.destination.map(FieldValue::Ipv4),
+                IPV4_OPTIONS => None,
+                _ => None,
+            }
+        }
+
+        fn set_field(&mut self, name: &str, _value: FieldValue) -> Result<(), FieldError> {
+            Err(FieldError::UnknownField {
+                protocol: self.protocol_id().clone(),
+                field: name.to_owned(),
+            })
+        }
+    }
+
+    #[test]
+    fn the_outer_scope_ends_at_the_first_encapsulation_boundary() {
+        let outer_destination = Ipv4Addr::new(10, 0, 0, 2);
+        let mut tunneled = Packet::new();
+        tunneled
+            .push(stack_layer("ethernet"))
+            .push(stack_ip_layer(
+                Ipv4Addr::new(10, 0, 0, 1),
+                outer_destination,
+            ))
+            .push(stack_layer("udp"))
+            .push(stack_layer("vxlan"))
+            .push(stack_layer("ethernet"))
+            .push(stack_ip_layer(
+                Ipv4Addr::new(192, 168, 1, 1),
+                Ipv4Addr::new(192, 168, 1, 5),
+            ));
+
+        assert_eq!(outer_scope_len(&tunneled), 4);
+        let path = outer_ip_path(&tunneled).unwrap().unwrap();
+        assert_eq!(path.header_destination, IpAddr::V4(outer_destination));
+
+        let mut plain = Packet::new();
+        plain.push(stack_layer("ethernet")).push(stack_ip_layer(
+            Ipv4Addr::new(10, 0, 0, 1),
+            outer_destination,
+        ));
+        assert_eq!(outer_scope_len(&plain), plain.len());
+    }
+
+    #[test]
+    fn a_tunneled_ip_header_is_not_an_outer_path() {
+        let mut packet = Packet::new();
+        packet
+            .push(stack_layer("vxlan"))
+            .push(stack_layer("ethernet"))
+            .push(stack_ip_layer(
+                Ipv4Addr::new(192, 168, 1, 1),
+                Ipv4Addr::new(192, 168, 1, 5),
+            ));
+
+        assert_eq!(outer_scope_len(&packet), 1);
+        assert_eq!(outer_ip_path(&packet).unwrap(), None);
     }
 
     #[test]

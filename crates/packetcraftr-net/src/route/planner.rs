@@ -11,7 +11,7 @@ use packetcraftr_error::{Category, Classification, Classified, Kind};
 use packetcraftr_packet::{
     Packet,
     field::FieldValue,
-    layer::ProtocolId,
+    layer::{Layer, ProtocolId},
     semantics::{self, BuiltinProtocol},
 };
 
@@ -145,8 +145,16 @@ impl Classified for PlanError {
 #[derive(Clone, Debug, Default)]
 pub struct RoutePlanner;
 
+/// Layers that express intent for the packet transmitted directly on the
+/// wire. An encapsulated frame behind a tunnel boundary carries its own
+/// Ethernet, VLAN, ARP, and IP layers, but those describe the tunneled
+/// network, never the link this packet leaves on.
+fn outer_layers(packet: &Packet) -> impl Iterator<Item = &dyn Layer> {
+    packet.iter().take(semantics::outer_scope_len(packet))
+}
+
 fn packet_has_link_layer_intent(packet: &Packet) -> bool {
-    packet.iter().any(|layer| {
+    outer_layers(packet).any(|layer| {
         matches!(
             BuiltinProtocol::of(layer),
             Some(BuiltinProtocol::Ethernet | BuiltinProtocol::Vlan | BuiltinProtocol::Vlan8021ad)
@@ -164,7 +172,7 @@ impl RoutePlanner {
         options: &PlanOptions,
         provider: &P,
     ) -> Result<PlannedRoute, PlanError> {
-        if let Some(protocol) = packet.iter().find_map(|layer| {
+        if let Some(protocol) = outer_layers(packet).find_map(|layer| {
             matches!(
                 BuiltinProtocol::of(layer),
                 Some(
@@ -182,7 +190,7 @@ impl RoutePlanner {
         if options.link_mode == LinkMode::Layer3 && has_link_layer_intent {
             return Err(PlanError::EthernetInLayer3);
         }
-        let outer_ip_protocol = packet.iter().find_map(|layer| {
+        let outer_ip_protocol = outer_layers(packet).find_map(|layer| {
             let protocol = BuiltinProtocol::of(layer)?;
             protocol.is_ip().then_some(protocol)
         });
@@ -332,16 +340,14 @@ impl RoutePlanner {
                         .filter(|source| source.is_ipv4() == lookup_destination.is_ipv4())
                 })
         });
-        let explicit_destination_mac = packet
-            .iter()
+        let explicit_destination_mac = outer_layers(packet)
             .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
             .and_then(|layer| layer.field(semantics::DESTINATION))
             .and_then(|value| match value {
                 FieldValue::Mac(value) if value != [0; 6] => Some(MacAddress(value)),
                 _ => None,
             });
-        let explicit_source_mac = packet
-            .iter()
+        let explicit_source_mac = outer_layers(packet)
             .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
             .and_then(|layer| layer.field(semantics::SOURCE))
             .and_then(|value| match value {
@@ -386,8 +392,7 @@ impl RoutePlanner {
             source_mac,
             neighbor_vlan_tags,
             synthesized_ethernet: mode == LinkMode::Layer2
-                && !packet
-                    .iter()
+                && !outer_layers(packet)
                     .any(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Ethernet)),
             route,
             mode,
@@ -616,8 +621,7 @@ fn extract_neighbor_vlan_tags(packet: &Packet) -> Result<Vec<NeighborVlanTag>, P
 }
 
 fn arp_link_macs(packet: &Packet) -> (Option<MacAddress>, Option<MacAddress>) {
-    let Some(layer) = packet
-        .iter()
+    let Some(layer) = outer_layers(packet)
         .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Arp))
     else {
         return (None, None);

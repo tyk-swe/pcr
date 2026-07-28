@@ -144,16 +144,7 @@ impl Dissector {
         options: DecodeOptions,
         original: Bytes,
     ) -> Result<DecodedPacket, DecodeError> {
-        let allow_trailing_padding = matches!(
-            BuiltinProtocol::from_id(&root),
-            Some(
-                BuiltinProtocol::Ethernet
-                    | BuiltinProtocol::BsdNull
-                    | BuiltinProtocol::BsdLoop
-                    | BuiltinProtocol::LinuxSll
-                    | BuiltinProtocol::LinuxSll2
-            )
-        );
+        let mut allow_trailing_padding = link_scope_allows_padding(BuiltinProtocol::from_id(&root));
         let mut packet = Packet::new();
         let mut layouts = Vec::new();
         let mut diagnostics = Vec::new();
@@ -332,9 +323,20 @@ impl Dissector {
                 range: ByteRange::new(absolute_offset, layer_end),
                 fields,
             });
+            let starts_encapsulated_frame = BuiltinProtocol::from_id(binding_parent)
+                .is_some_and(BuiltinProtocol::is_encapsulation_boundary);
             packet.push_boxed(decoded.layer);
             if let Some(envelope) = decoded.network {
                 network = Some(envelope);
+            }
+            if starts_encapsulated_frame {
+                // The payload is a complete encapsulated frame: the enclosing
+                // network envelope ends here, and the inner stack opens its
+                // own link-padding scope rooted at the selected child.
+                network = None;
+                allow_trailing_padding = link_scope_allows_padding(
+                    next_protocol.as_ref().and_then(BuiltinProtocol::from_id),
+                );
             }
             diagnostics.extend(decoded.diagnostics.into_iter().map(|mut diagnostic| {
                 if diagnostic.layer.is_none() {
@@ -441,6 +443,22 @@ impl Dissector {
             diagnostics,
         })
     }
+}
+
+/// Whether a stack rooted at this protocol may carry link-layer padding after
+/// a declared network length. Applies to the capture root and, equally, to the
+/// root of an encapsulated frame behind a tunnel boundary.
+fn link_scope_allows_padding(root: Option<BuiltinProtocol>) -> bool {
+    matches!(
+        root,
+        Some(
+            BuiltinProtocol::Ethernet
+                | BuiltinProtocol::BsdNull
+                | BuiltinProtocol::BsdLoop
+                | BuiltinProtocol::LinuxSll
+                | BuiltinProtocol::LinuxSll2
+        )
+    )
 }
 
 fn append_padding(

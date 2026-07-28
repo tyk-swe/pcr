@@ -116,6 +116,114 @@ fn send_materializes_only_the_outer_ip_envelope() {
     assert!(envelopes[1].destination.is_unspecified());
 }
 
+fn vxlan_request() -> Packet {
+    let mut request = Packet::new();
+    request
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 49152,
+            destination_port: 4789,
+            ..Udp::default()
+        })
+        .push(Vxlan {
+            vni: 42,
+            ..Vxlan::default()
+        })
+        .push(Ethernet {
+            destination: [9; 6],
+            source: [8; 6],
+            ether_type: WireValue::Auto,
+        })
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 168, 1, 1),
+            destination: Ipv4Addr::new(192, 168, 1, 5),
+            ..Ipv4::default()
+        })
+        .push(Icmpv4::default());
+    request
+}
+
+#[test]
+fn layer3_send_accepts_a_vxlan_packet_with_a_tunneled_ethernet_frame() {
+    let io = RecordingIo::default();
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(route(LinkCapability::Layer3)),
+        CountingNeighbors::default(),
+        io.clone(),
+        TrafficPolicy::default(),
+    );
+
+    let report = client
+        .send(
+            vxlan_request(),
+            SendOptions {
+                plan: PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    interface: None,
+                    preferred_source: None,
+                },
+                ..SendOptions::default()
+            },
+        )
+        .unwrap();
+
+    // The tunneled Ethernet frame is payload, not outer link intent: the
+    // transmitted packet still starts at the outer IPv4 header.
+    assert_eq!(report.built.bytes[0] >> 4, 4);
+    assert_eq!(io.0.lock().unwrap()[0], report.built.bytes);
+}
+
+#[test]
+fn layer2_send_synthesizes_the_outer_ethernet_around_a_tunneled_frame() {
+    let io = RecordingIo::default();
+    let neighbors = CountingNeighbors::default();
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        neighbors.clone(),
+        io,
+        TrafficPolicy::default(),
+    );
+
+    let report = client
+        .send(
+            vxlan_request(),
+            SendOptions {
+                plan: PlanOptions {
+                    link_mode: LinkMode::Layer2,
+                    interface: None,
+                    preferred_source: None,
+                },
+                ..SendOptions::default()
+            },
+        )
+        .unwrap();
+
+    // The synthesized outer Ethernet got the resolved and interface-owned
+    // MACs; the tunneled frame's addresses never satisfied the link plan.
+    assert_eq!(&report.built.bytes[..6], &[0, 1, 2, 3, 4, 5]);
+    assert_eq!(&report.built.bytes[6..12], &[2, 0, 0, 0, 0, 1]);
+    assert_eq!(neighbors.0.load(Ordering::SeqCst), 1);
+    let frames = report
+        .built
+        .packet
+        .iter()
+        .filter_map(|layer| layer.as_any().downcast_ref::<Ethernet>())
+        .collect::<Vec<_>>();
+    assert_eq!(frames.len(), 2);
+    assert_eq!(frames[1].destination, [9; 6]);
+    assert_eq!(frames[1].source, [8; 6]);
+}
+
 #[test]
 fn send_materializes_resolved_and_interface_owned_macs() {
     let io = RecordingIo::default();

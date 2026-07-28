@@ -276,6 +276,8 @@ const DIRECT: &[Direct] = &[
         protocol: "gre",
         field: "protocol_type",
     },
+    // VXLAN's conventional spellings (vxlan.vni, vxlan.flags) are its
+    // canonical field names, which resolve without registration.
 ];
 
 /// The nine TCP control flags, in their wire bit order.

@@ -7,7 +7,7 @@
 
 use super::super::{
     capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher, network as ip, raw,
-    support, transport,
+    support, transport, tunnel,
 };
 
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
@@ -21,6 +21,7 @@ use link::{ArpCodec, EthernetCodec, Vlan8021adCodec, VlanCodec};
 use raw::{MalformedCodec, PaddingCodec, RawCodec};
 use support::BUILTIN_CAPTURE_ROOTS;
 use transport::{SctpCodec, TcpCodec, UdpCodec};
+use tunnel::VxlanCodec;
 
 use packetcraftr_packet::{
     registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
@@ -87,6 +88,23 @@ impl ProtocolModule for BuiltinProtocols {
             100,
         )?;
         bind(builder, BuiltinProtocol::Gre, 0, BuiltinProtocol::Raw, -100)?;
+
+        // Overlay encapsulations hang off their registered transport
+        // ports; VXLAN always carries an inner Ethernet frame.
+        bind(
+            builder,
+            BuiltinProtocol::Udp,
+            4789,
+            BuiltinProtocol::Vxlan,
+            100,
+        )?;
+        bind(
+            builder,
+            BuiltinProtocol::Vxlan,
+            0,
+            BuiltinProtocol::Ethernet,
+            100,
+        )?;
 
         // Payload-bearing transports use discriminator zero as their typed raw child.
         for parent in [

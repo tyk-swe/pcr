@@ -76,6 +76,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every command the filter is compiled before any input is read or any live
   work is planned, and a filter that names an unknown field or needs a
   conversation index is refused up front.
+- Added the VXLAN overlay encapsulation (RFC 7348) as a fully constructible
+  and dissectible built-in protocol with exact round-trip: UDP traffic on
+  the registered port 4789 — in either direction — decodes into the VXLAN
+  header and its inner Ethernet frame, `vxlan(vni=…)` participates in
+  `build`, live workflows, and fuzzing like every other codec, and
+  `vxlan.vni` filters work alongside occurrence selection
+  (`ipv4#2.destination == …`) for addressing the inner stack. Deviant flag
+  bits and non-zero reserved fields are diagnostics on decode and
+  permissive-mode territory on build. To make port-registered
+  encapsulations reachable, UDP decoding now offers both port numbers as
+  child discriminators before its raw fallback; traffic away from
+  registered ports decodes exactly as before. The tunnel boundary is
+  honoured end to end: dissection restarts the network envelope at the
+  inner Ethernet frame, so minimum-frame padding inside the tunnel reads
+  as link padding rather than malformed trailing bytes; route planning and
+  link materialization take link intent, MAC addresses, and VLAN tags only
+  from the outer stack, so a Layer 3 send of a VXLAN packet no longer
+  trips over its own tunneled Ethernet frame; and a strict build requires
+  the registered port on one UDP endpoint when the datagram carries an
+  encapsulation — and, conversely, refuses an opaque raw payload sitting
+  on a registered port — because either way the bytes would not dissect
+  back into the same layers (permissive builds keep a
+  `build.udp_encapsulation_port` warning instead).
 - Added `packetcraftr follow <PATH> --stream <tcp|udp>:<INDEX>`, extracting
   one conversation's payload from a capture file entirely offline. The index
   is the same first-seen conversation numbering `stats` reports and stream

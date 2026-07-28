@@ -40,6 +40,7 @@ macro_rules! builtin_protocol_catalog {
             Udp { canonical: "udp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: reverse_flow, codec: UdpCodec }
             Vlan { canonical: "vlan", aliases: ["dot1q", "8021q"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: VlanCodec }
             Vlan8021ad { canonical: "vlan8021ad", aliases: ["dot1ad", "8021ad", "qinq"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: Vlan8021adCodec }
+            Vxlan { canonical: "vxlan", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: VxlanCodec }
         }
     };
 }
@@ -130,6 +131,14 @@ macro_rules! define_builtin_protocol {
                         | Self::Ipv6HopByHop
                         | Self::Ipv6Srh
                 )
+            }
+
+            /// Whether this protocol's payload is a complete encapsulated
+            /// frame. Layers after such a boundary form their own stack: they
+            /// end the enclosing network envelope and carry no link-layer or
+            /// routing intent for the packet that is transmitted directly.
+            pub const fn is_encapsulation_boundary(self) -> bool {
+                matches!(self, Self::Vxlan)
             }
         }
     };

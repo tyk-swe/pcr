@@ -3,30 +3,36 @@
 
 //! Command-specific CLI adapters.
 
+mod build;
 mod capture;
+mod dissect;
 mod dns;
+mod exchange;
 mod expert;
 mod follow;
 mod fuzz;
 mod interfaces;
 mod network;
-mod offline;
 mod offline_analysis;
 mod protocols;
+mod read;
 mod replay;
 mod scan;
 mod stats;
 mod traceroute;
 
-pub(super) use capture::{run_capture, run_exchange};
+pub(super) use build::run_build;
+pub(super) use capture::run_capture;
+pub(super) use dissect::run_dissect;
 pub(super) use dns::run_dns;
+pub(super) use exchange::run_exchange;
 pub(super) use expert::run_expert;
 pub(super) use follow::run_follow;
 pub(super) use fuzz::run_fuzz;
 pub(super) use interfaces::run_interfaces;
 pub(super) use network::{run_plan, run_routes, run_send};
-pub(super) use offline::{run_build, run_dissect, run_read};
 pub(super) use protocols::run_protocols;
+pub(super) use read::run_read;
 pub(super) use replay::run_replay;
 pub(super) use scan::run_scan;
 pub(super) use stats::run_stats;

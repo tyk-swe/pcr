@@ -6,8 +6,8 @@ inspecting native routes and interfaces, and running bounded live-network
 workflows. Its live operations are policy-gated so that destination scope,
 hostname resolution, malformed traffic, and operation budgets are explicit.
 
-PacketcraftR is currently a pre-1.0 beta (`0.4.0-beta.2`). Interfaces and
-serialized v1 contracts can still change incompatibly between beta releases.
+PacketcraftR is currently a stable pre-1.0 release (`0.4.0`). Interfaces and
+serialized v1 contracts can still change incompatibly between minor releases.
 Review the [changelog](CHANGELOG.md) before upgrading.
 
 Use PacketcraftR only on systems and networks you own or are explicitly
@@ -20,7 +20,10 @@ sensitive traffic or disrupt a network when used incorrectly.
   versioned JSON, or YAML and emit text, JSON, hexadecimal, or exact raw bytes.
 - Dissect bounded raw frames and preserve unknown or malformed bytes with
   diagnostics.
-- Read and transcode classic PCAP and PCAPNG files without live-network access.
+- Read, filter, dissect, and transcode classic PCAP and PCAPNG files without
+  live-network access, including filtered capture-file extraction.
+- Analyze captures offline with bounded conversation statistics, TCP/UDP
+  payload following, stream-aware filters, reassembly, and expert findings.
 - Generate deterministic, field-aware fuzz cases offline; live fuzzing is a
   separate opt-in.
 - Enumerate interfaces and passively inspect route decisions.
@@ -41,18 +44,23 @@ The default registry provides exact construction and bounded dissection for
 these protocol families:
 
 - capture and link framing: BSD NULL and LOOP, Linux cooked capture v1 and v2,
-  Ethernet II, IEEE 802.1Q and 802.1ad VLANs, and ARP;
-- network and control: IPv4, IPv6, ICMPv4, ICMPv6, IGMP, GRE, and the IPv6
-  Hop-by-Hop, Destination Options, Fragment, and Segment Routing headers;
-- transport and payload: TCP, UDP, SCTP common headers with validated opaque
-  chunks, plus raw, padding, and malformed-byte preservation layers.
+  Ethernet II, IEEE 802.1Q and 802.1ad VLANs, IEEE 802.3 LLC/SNAP, PPPoE and
+  PPP, MPLS label stacks, and ARP;
+- network, control, and tunnels: IPv4, IPv6, ICMPv4, ICMPv6, IGMP, GRE with
+  ERSPAN Type II and III, L2TPv3, IPsec AH and ESP, and the IPv6 Hop-by-Hop,
+  Destination Options, Fragment, and Segment Routing headers;
+- transport, overlays, and payload: TCP, UDP, SCTP common headers with
+  validated opaque chunks, VXLAN, GENEVE, plus raw, padding, and
+  malformed-byte preservation layers.
 
 IPv4 and IPv6 can be nested inside either IP version through their standard
-protocol/next-header bindings, and GRE can carry typed IPv4 or IPv6 payloads.
-Unknown numeric link types and unknown discriminators remain bounded and are
-preserved as raw bytes. Built-in protocol support is header-focused: SCTP
-chunks are not decoded into typed chunk models, DNS messages remain owned by
-the DNS workflow, and other application payloads are represented as raw bytes.
+protocol/next-header bindings. GRE can carry typed IP and ERSPAN payloads;
+VXLAN and GENEVE can carry inner Ethernet or typed IP stacks. Unknown numeric
+link types and unknown discriminators remain bounded and are preserved as raw
+bytes. Built-in protocol support is header-focused: SCTP chunks are not decoded
+into typed chunk models, ESP ciphertext stays opaque, DNS messages remain owned
+by the DNS workflow, and other application payloads are represented as raw
+bytes.
 
 ## Output formats and terminal colour
 

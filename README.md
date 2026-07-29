@@ -55,12 +55,12 @@ these protocol families:
 
 IPv4 and IPv6 can be nested inside either IP version through their standard
 protocol/next-header bindings. GRE can carry typed IP and ERSPAN payloads;
-VXLAN and GENEVE can carry inner Ethernet or typed IP stacks. Unknown numeric
-link types and unknown discriminators remain bounded and are preserved as raw
-bytes. Built-in protocol support is header-focused: SCTP chunks are not decoded
-into typed chunk models, ESP ciphertext stays opaque, DNS messages remain owned
-by the DNS workflow, and other application payloads are represented as raw
-bytes.
+VXLAN carries inner Ethernet frames, while GENEVE can carry inner Ethernet or
+typed IP stacks. Unknown numeric link types and unknown discriminators remain
+bounded and are preserved as raw bytes. Built-in protocol support is
+header-focused: SCTP chunks are not decoded into typed chunk models, ESP
+ciphertext stays opaque, DNS messages remain owned by the DNS workflow, and
+other application payloads are represented as raw bytes.
 
 ## Output formats and terminal colour
 

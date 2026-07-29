@@ -244,21 +244,20 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     // length byte bounds the complete sockaddr allocation.
     let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
     let ip = sockaddr_ip(bytes)?;
-    match (interface_address, ip) {
-        (IpAddr::V4(_), IpAddr::V4(mask)) => Some(
-            mask.octets()
-                .iter()
-                .map(|byte| byte.count_ones())
-                .sum::<u32>() as u8,
-        ),
-        (IpAddr::V6(_), IpAddr::V6(mask)) => Some(
-            mask.octets()
-                .iter()
-                .map(|byte| byte.count_ones())
-                .sum::<u32>() as u8,
-        ),
-        _ => None,
-    }
+    let bits = match (interface_address, ip) {
+        (IpAddr::V4(_), IpAddr::V4(mask)) => mask
+            .octets()
+            .iter()
+            .map(|byte| byte.count_ones())
+            .sum::<u32>(),
+        (IpAddr::V6(_), IpAddr::V6(mask)) => mask
+            .octets()
+            .iter()
+            .map(|byte| byte.count_ones())
+            .sum::<u32>(),
+        _ => return None,
+    };
+    u8::try_from(bits).ok()
 }
 
 fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddress> {
@@ -303,19 +302,26 @@ fn query_route(
     let sequence = ROUTE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     // SAFETY: `getpid` has no preconditions.
     let pid = unsafe { libc::getpid() };
-    let destination_address = encode_sockaddr(destination);
+    let destination_address = encode_sockaddr(destination)?;
     let message_length = size_of::<libc::rt_msghdr>() + roundup(destination_address.len());
-    if message_length > usize::from(u16::MAX) {
-        return Err(NativeRouteError::InvalidResponse {
+    let wire_message_length =
+        u16::try_from(message_length).map_err(|_| NativeRouteError::InvalidResponse {
             message: "macOS route request exceeded the routing-socket limit".to_owned(),
-        });
-    }
+        })?;
+    let route_version =
+        u8::try_from(libc::RTM_VERSION).map_err(|_| NativeRouteError::InvalidResponse {
+            message: "macOS RTM_VERSION does not fit its routing-socket field".to_owned(),
+        })?;
+    let route_type =
+        u8::try_from(libc::RTM_GET).map_err(|_| NativeRouteError::InvalidResponse {
+            message: "macOS RTM_GET does not fit its routing-socket field".to_owned(),
+        })?;
     // SAFETY: all-zero is a valid baseline for this C message structure; all
     // discriminating and length fields are assigned immediately below.
     let mut header: libc::rt_msghdr = unsafe { std::mem::zeroed() };
-    header.rtm_msglen = message_length as u16;
-    header.rtm_version = libc::RTM_VERSION as u8;
-    header.rtm_type = libc::RTM_GET as u8;
+    header.rtm_msglen = wire_message_length;
+    header.rtm_version = route_version;
+    header.rtm_type = route_type;
     header.rtm_flags = libc::RTF_UP | libc::RTF_HOST;
     header.rtm_addrs = libc::RTA_DST;
     header.rtm_pid = pid;
@@ -385,8 +391,8 @@ fn query_route(
         // reads are used because a byte buffer has no C-struct alignment.
         let response_header =
             unsafe { ptr::read_unaligned(bytes.as_ptr().cast::<libc::rt_msghdr>()) };
-        if response_header.rtm_version != libc::RTM_VERSION as u8
-            || response_header.rtm_type != libc::RTM_GET as u8
+        if response_header.rtm_version != route_version
+            || response_header.rtm_type != route_type
             || response_header.rtm_pid != pid
             || response_header.rtm_seq != sequence
         {
@@ -422,23 +428,39 @@ fn query_route(
     })
 }
 
-fn encode_sockaddr(address: IpAddr) -> Vec<u8> {
+fn encode_sockaddr(address: IpAddr) -> Result<Vec<u8>, NativeRouteError> {
     match address {
         IpAddr::V4(address) => {
             // SAFETY: zero is valid for unused sockaddr fields.
             let mut value: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-            value.sin_len = size_of::<libc::sockaddr_in>() as u8;
-            value.sin_family = libc::AF_INET as libc::sa_family_t;
+            value.sin_len = u8::try_from(size_of::<libc::sockaddr_in>()).map_err(|_| {
+                NativeRouteError::InvalidResponse {
+                    message: "macOS sockaddr_in length does not fit sin_len".to_owned(),
+                }
+            })?;
+            value.sin_family = libc::sa_family_t::try_from(libc::AF_INET).map_err(|_| {
+                NativeRouteError::InvalidResponse {
+                    message: "macOS AF_INET does not fit sa_family_t".to_owned(),
+                }
+            })?;
             value.sin_addr.s_addr = u32::from_ne_bytes(address.octets());
-            structure_bytes(&value)
+            Ok(structure_bytes(&value))
         }
         IpAddr::V6(address) => {
             // SAFETY: zero is valid for unused sockaddr fields.
             let mut value: libc::sockaddr_in6 = unsafe { std::mem::zeroed() };
-            value.sin6_len = size_of::<libc::sockaddr_in6>() as u8;
-            value.sin6_family = libc::AF_INET6 as libc::sa_family_t;
+            value.sin6_len = u8::try_from(size_of::<libc::sockaddr_in6>()).map_err(|_| {
+                NativeRouteError::InvalidResponse {
+                    message: "macOS sockaddr_in6 length does not fit sin6_len".to_owned(),
+                }
+            })?;
+            value.sin6_family = libc::sa_family_t::try_from(libc::AF_INET6).map_err(|_| {
+                NativeRouteError::InvalidResponse {
+                    message: "macOS AF_INET6 does not fit sa_family_t".to_owned(),
+                }
+            })?;
             value.sin6_addr.s6_addr = address.octets();
-            structure_bytes(&value)
+            Ok(structure_bytes(&value))
         }
     }
 }
@@ -488,7 +510,7 @@ mod tests {
 
     #[test]
     fn route_address_parser_accepts_only_an_unpadded_final_compact_sockaddr() {
-        let mut destination = encode_sockaddr(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0)));
+        let mut destination = encode_sockaddr(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0))).unwrap();
         let compact_mask = [7_u8, 0, 0xff, 0xff, 0xff, 0, 0];
         destination.extend_from_slice(&compact_mask);
         let addresses =
@@ -505,10 +527,10 @@ mod tests {
 
     #[test]
     fn route_address_parser_uses_darwin_32_bit_sockaddr_alignment() {
-        let mut message = encode_sockaddr(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0)));
+        let mut message = encode_sockaddr(IpAddr::V4(Ipv4Addr::new(10, 50, 1, 0))).unwrap();
         let mut gateway = [0_u8; 20];
-        gateway[0] = gateway.len() as u8;
-        gateway[1] = libc::AF_LINK as u8;
+        gateway[0] = u8::try_from(gateway.len()).unwrap();
+        gateway[1] = u8::try_from(libc::AF_LINK).unwrap();
         message.extend_from_slice(&gateway);
         message.extend_from_slice(&[7_u8, 0, 0xff, 0xff, 0xff, 0, 0]);
 
@@ -535,7 +557,7 @@ mod tests {
             IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
             IpAddr::V6("2001:db8::1".parse().unwrap()),
         ] {
-            let encoded = encode_sockaddr(address);
+            let encoded = encode_sockaddr(address).unwrap();
             assert_eq!(sockaddr_ip(&encoded), Some(address));
             assert_eq!(sockaddr_ip(&encoded[..encoded.len() - 1]), None);
         }
@@ -551,7 +573,7 @@ mod tests {
         let differently_typed = 0x5a_u8;
         assert_eq!(
             link_mtu(
-                libc::AF_INET as libc::sa_family_t,
+                libc::sa_family_t::try_from(libc::AF_INET).unwrap(),
                 (&differently_typed as *const u8).cast(),
             ),
             None
@@ -562,7 +584,7 @@ mod tests {
         data.ifi_mtu = 1500;
         assert_eq!(
             link_mtu(
-                libc::AF_LINK as libc::sa_family_t,
+                libc::sa_family_t::try_from(libc::AF_LINK).unwrap(),
                 (&data as *const libc::if_data).cast(),
             ),
             Some(1500)

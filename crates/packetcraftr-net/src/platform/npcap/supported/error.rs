@@ -86,7 +86,7 @@ pub(super) fn interface_conversion_error(
         message: format!(
             "{operation} rejected interface index {}: {} (Win32 error {code})",
             interface.index,
-            std::io::Error::from_raw_os_error(code as i32)
+            std::io::Error::from_raw_os_error(code.cast_signed())
         ),
     }
 }
@@ -98,7 +98,7 @@ pub(super) fn error_buffer_message(buffer: &[c_char; PCAP_ERROR_BUFFER_SIZE]) ->
         .iter()
         .copied()
         .take_while(|character| *character != 0)
-        .map(|character| character as u8)
+        .map(i8::cast_unsigned)
         .collect();
     let message = String::from_utf8_lossy(&bytes).into_owned();
     if message.is_empty() {

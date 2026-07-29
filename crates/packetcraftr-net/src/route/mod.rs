@@ -42,6 +42,34 @@ pub(crate) use native_policy::find_interface;
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub(crate) use native_policy::{
-    NativeRouteSnapshot, finish_route, interface_decision, validate_native_interface,
-    validate_preferred_source_family,
+    NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
 };
+
+#[cfg(any(
+    all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos")
+    ),
+    all(any(feature = "native-interfaces", feature = "native-route"), windows)
+))]
+pub(crate) fn validate_native_interface(
+    interface: &crate::interface::InterfaceInfo,
+) -> Result<(), NativeRouteError> {
+    if interface.id.name.is_empty() || interface.id.index == 0 {
+        return Err(NativeRouteError::InvalidResponse {
+            message: "operating system returned an incomplete interface identity".to_owned(),
+        });
+    }
+    for assigned in &interface.addresses {
+        let maximum = if assigned.address.is_ipv4() { 32 } else { 128 };
+        if assigned.prefix_length > maximum {
+            return Err(NativeRouteError::InvalidResponse {
+                message: format!(
+                    "interface {} returned invalid prefix length {} for {}",
+                    interface.id.name, assigned.prefix_length, assigned.address
+                ),
+            });
+        }
+    }
+    Ok(())
+}

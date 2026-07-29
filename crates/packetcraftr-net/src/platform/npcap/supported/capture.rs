@@ -42,16 +42,14 @@ pub(super) fn open_capture(
     // SAFETY: handle is activated and live; pcap_datalink only reads its
     // negotiated link-layer type.
     let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
-    if datalink < 0 {
-        return Err(LiveIoError::Capture {
-            message: format!(
-                "Npcap could not report the data-link type for {}: {}",
-                interface.name,
-                handle.error_message()
-            ),
-        });
-    }
-    let link_type = LinkType(datalink as u32);
+    let datalink = u32::try_from(datalink).map_err(|_| LiveIoError::Capture {
+        message: format!(
+            "Npcap could not report the data-link type for {}: {}",
+            interface.name,
+            handle.error_message()
+        ),
+    })?;
+    let link_type = LinkType(datalink);
     let interrupt = Arc::new(NpcapInterrupt(Arc::clone(&handle)));
     Ok(NativeCaptureParts {
         source: Box::new(NpcapCaptureSource {

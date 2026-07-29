@@ -7,7 +7,10 @@ use std::net::IpAddr;
 
 use crate::interface::{InterfaceAddress, InterfaceInfo};
 
-use super::{DestinationScope, InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason};
+use super::{
+    DestinationScope, InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason,
+    validate_native_interface,
+};
 
 pub(crate) struct NativeRouteSnapshot {
     pub interface: InterfaceInfo,
@@ -145,26 +148,6 @@ pub(crate) fn find_interface(
         name: requested.name.clone(),
         index: requested.index,
     })
-}
-
-pub(crate) fn validate_native_interface(interface: &InterfaceInfo) -> Result<(), NativeRouteError> {
-    if interface.id.name.is_empty() || interface.id.index == 0 {
-        return Err(NativeRouteError::InvalidResponse {
-            message: "operating system returned an incomplete interface identity".to_owned(),
-        });
-    }
-    for assigned in &interface.addresses {
-        let maximum = if assigned.address.is_ipv4() { 32 } else { 128 };
-        if assigned.prefix_length > maximum {
-            return Err(NativeRouteError::InvalidResponse {
-                message: format!(
-                    "interface {} returned invalid prefix length {} for {}",
-                    interface.id.name, assigned.prefix_length, assigned.address
-                ),
-            });
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn classify_destination(address: IpAddr) -> DestinationScope {

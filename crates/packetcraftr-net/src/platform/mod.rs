@@ -77,13 +77,20 @@ use super::route::NativeRouteError;
     any(target_os = "linux", target_os = "macos")
 ))]
 use super::route::find_interface;
+#[cfg(any(
+    all(
+        feature = "native-route",
+        any(target_os = "linux", target_os = "macos")
+    ),
+    all(any(feature = "native-interfaces", feature = "native-route"), windows)
+))]
+use super::route::validate_native_interface;
 #[cfg(all(
     feature = "native-route",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 use super::route::{
-    NativeRouteSnapshot, finish_route, interface_decision, validate_native_interface,
-    validate_preferred_source_family,
+    NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
 };
 
 #[cfg(any(

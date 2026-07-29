@@ -8,6 +8,7 @@
 #![allow(unsafe_code)]
 
 use std::mem::{align_of, size_of};
+#[cfg(feature = "native-route")]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[cfg(feature = "native-route")]
@@ -25,12 +26,11 @@ use windows::Win32::NetworkManagement::IpHelper::{
 use windows::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
 #[cfg(feature = "native-route")]
 use windows::Win32::NetworkManagement::Ndis::NET_LUID_LH;
-use windows::Win32::Networking::WinSock::{
-    AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
-};
+use windows::Win32::Networking::WinSock::AF_UNSPEC;
 #[cfg(feature = "native-route")]
 use windows::Win32::Networking::WinSock::{
-    IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN6_0, SOCKADDR_INET,
+    AF_INET, AF_INET6, IN_ADDR, IN_ADDR_0, IN6_ADDR, IN6_ADDR_0, SOCKADDR_IN, SOCKADDR_IN6,
+    SOCKADDR_IN6_0, SOCKADDR_INET,
 };
 
 use self::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
@@ -41,11 +41,10 @@ use super::{
     NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
 };
 #[cfg(feature = "native-route")]
+use crate::route::InterfaceId;
+#[cfg(feature = "native-route")]
 use crate::route::{RouteDecision, RouteSelectionReason};
-use crate::{
-    interface::InterfaceInfo,
-    route::{InterfaceId, NativeRouteError},
-};
+use crate::{interface::InterfaceInfo, route::NativeRouteError};
 
 mod adapter;
 
@@ -341,7 +340,7 @@ fn win32_error(operation: &'static str, error: WIN32_ERROR) -> NativeRouteError 
         operation,
         message: format!(
             "{} (Win32 error {})",
-            std::io::Error::from_raw_os_error(error.0 as i32),
+            std::io::Error::from_raw_os_error(error.0.cast_signed()),
             error.0
         ),
     }

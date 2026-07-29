@@ -287,8 +287,7 @@ fn socket_address_ip(
     address: &windows::Win32::Networking::WinSock::SOCKET_ADDRESS,
     bounds: BufferBounds,
 ) -> Result<Option<IpAddr>, NativeRouteError> {
-    if address.lpSockaddr.is_null() || address.iSockaddrLength < size_of::<ADDRESS_FAMILY>() as i32
-    {
+    if address.lpSockaddr.is_null() {
         return Ok(None);
     }
     let length = usize::try_from(address.iSockaddrLength).map_err(|_| {
@@ -296,6 +295,9 @@ fn socket_address_ip(
             message: "Windows returned a negative socket-address length".to_owned(),
         }
     })?;
+    if length < size_of::<ADDRESS_FAMILY>() {
+        return Ok(None);
+    }
     if !bounds.contains_bytes(address.lpSockaddr.cast(), length) {
         return Err(NativeRouteError::InvalidResponse {
             message: "Windows socket address extended outside its response buffer".to_owned(),
@@ -305,7 +307,7 @@ fn socket_address_ip(
     // unaligned read before the family-specific alignment checks below.
     let family = unsafe { std::ptr::read_unaligned(address.lpSockaddr.cast::<ADDRESS_FAMILY>()) };
     match family {
-        AF_INET if address.iSockaddrLength >= size_of::<SOCKADDR_IN>() as i32 => {
+        AF_INET if length >= size_of::<SOCKADDR_IN>() => {
             if !bounds.contains(address.lpSockaddr.cast::<SOCKADDR_IN>()) {
                 return Err(NativeRouteError::InvalidResponse {
                     message: "Windows returned a misaligned IPv4 socket address".to_owned(),
@@ -318,7 +320,7 @@ fn socket_address_ip(
             let bytes = unsafe { value.sin_addr.S_un.S_addr.to_ne_bytes() };
             Ok(Some(IpAddr::V4(Ipv4Addr::from(bytes))))
         }
-        AF_INET6 if address.iSockaddrLength >= size_of::<SOCKADDR_IN6>() as i32 => {
+        AF_INET6 if length >= size_of::<SOCKADDR_IN6>() => {
             if !bounds.contains(address.lpSockaddr.cast::<SOCKADDR_IN6>()) {
                 return Err(NativeRouteError::InvalidResponse {
                     message: "Windows returned a misaligned IPv6 socket address".to_owned(),

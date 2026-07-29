@@ -13,308 +13,267 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `packetcraftr-budget`, `packetcraftr-capture`, `packetcraftr-session`,
   `packetcraftr-packet`, `packetcraftr-protocol`, `packetcraftr-net`,
   `packetcraftr-client`, `packetcraftr-analysis`, `packetcraftr-workflow`, and
-  `packetcraftr-output` — so consumers can compile only the parts they use.
-- Added `packetcraftr-budget`, holding the cooperative `Deadline` accounting
-  that bounds every offline and live operation. It depends on nothing but
-  `std`, so it sits at the bottom of the graph beside `packetcraftr-error` and
-  both halves of the toolkit can bound themselves without depending on each
-  other.
+  `packetcraftr-output` — so consumers compile only what they use.
+  `packetcraftr-budget` holds the cooperative `Deadline` accounting that bounds
+  every offline and live operation; its `std`-only dependency makes it a
+  bottom-layer peer of `packetcraftr-error`, letting both halves bound
+  themselves without depending on each other.
 - Added offline `packetcraftr protocols [PROTOCOL]` discovery with stable
   built-in capability listings, case-insensitive alias lookup, reflective field
   details, and text or aggregate JSON output.
 - Added a bounded display-filter language in `packet::filter`, evaluated
-  against dissected packets — for example
-  `ipv4.source in 10.0.0.0/8 && udp.destination_port == 53`. Paths resolve from
-  reserved synthetic
-  names (`frame.*`, `tcp.stream`, `udp.stream`), then registered spellings,
-  then canonical `<protocol-or-alias>.<field>` names taken straight from each
-  protocol's reflective schema, so every field listed by
-  `packetcraftr protocols <NAME>` is filterable without further registration.
-  The grammar covers boolean operators, ordered comparisons, prefix and set
-  membership, `contains`, byte slices, layer-presence tests, and explicit
-  occurrence selection (`ipv4#2.source`) for tunnelled stacks. There is no
-  regular-expression operator. Compilation is bounded in source length,
-  nesting, term count, and set size, and both the parser and the evaluator use
-  explicit stacks rather than recursion. A `filter_expression` fuzz target
-  covers compilation, and CI smoke-tests it alongside the existing targets.
+  against dissected packets (for example,
+  `ipv4.source in 10.0.0.0/8 && udp.destination_port == 53`). Paths resolve in
+  order from reserved synthetic names (`frame.*`, `tcp.stream`, `udp.stream`),
+  registered spellings, then canonical `<protocol-or-alias>.<field>` names from
+  each protocol's reflective schema, making every field shown by
+  `packetcraftr protocols <NAME>` filterable without registration. The grammar
+  covers boolean operators, ordered comparisons, prefix and set membership,
+  `contains`, byte slices, layer-presence tests, and explicit occurrence
+  selection (`ipv4#2.source`) for tunnelled stacks, but no regular expressions.
+  Compilation bounds source length, nesting, terms, and set size; parser and
+  evaluator use explicit stacks, not recursion. The `filter_expression` fuzz
+  target covers compilation and is CI smoke-tested with the existing targets.
 - Added `--filter <EXPR>` and `--dissect` to `packetcraftr read`. Filtering
-  keeps only the frames a display filter accepts and implies dissection;
-  without either flag `read` is byte-for-byte unchanged and pays no new cost.
-  `--dissect` names the layer chain in text output and carries the full
-  dissected stack in NDJSON. A filtered read can also write `--output pcap` or
-  `--output pcapng`, so extracting a subset of a capture into a new file no
-  longer needs a separate tool; frames stream out as they match, interface
-  descriptions and the frame, byte, and per-frame bounds are carried through,
-  and a filter that accepts nothing still writes a readable empty capture.
-  Writing classic PCAP from a PCAPNG source stays refused whether or not a
-  filter is present, since classic PCAP cannot represent per-interface
-  metadata. A filter that names an unknown field, or that reads a conversation
-  index this command does not maintain, is rejected before any input is read.
+  retains accepted frames and implies dissection; without either flag, `read`
+  remains byte-for-byte unchanged with no new cost. `--dissect` names the layer
+  chain in text and includes the full dissected stack in NDJSON. Filtered reads
+  can stream matching frames to `--output pcap` or `--output pcapng`, extracting
+  a capture subset without another tool while carrying interface descriptions
+  and frame, byte, and per-frame bounds; no matches still produce a readable
+  empty capture. Writing classic PCAP from a PCAPNG source remains refused with
+  or without a filter because classic PCAP cannot represent per-interface
+  metadata. Unknown fields and conversation indices that `read` does not
+  maintain are rejected before input is read.
 - Registered the conventional display-filter spellings for every built-in
-  protocol, so `ip.src`, `eth.dst`, `tcp.port`, `udp.dstport`, `vlan.id`,
-  `arp.opcode`, and the nine `tcp.flags.*` bits work alongside the canonical
-  field names. A bare flag path reads the flag, so `!tcp.flags.ack` means the
-  ACK bit is clear.
+  protocol: `ip.src`, `eth.dst`, `tcp.port`, `udp.dstport`, `vlan.id`,
+  `arp.opcode`, and all nine `tcp.flags.*` bits work alongside canonical names.
+  Bare flag paths read the flag, so `!tcp.flags.ack` means the ACK bit is clear.
 - Added `registry::Registry::schema`, which publishes each registered
-  protocol's reflective schema. Schemas are captured once when the registry is
-  built, so field metadata no longer requires constructing a throwaway layer
-  per lookup. A decode-only codec cannot produce a default layer and reports
-  no schema.
+  protocol's reflective schema. Schemas are captured once at registry build
+  instead of constructing a throwaway layer per lookup; a decode-only codec
+  cannot produce a default layer and reports no schema.
 - Added `registry::FilterFieldBinding` and `registry::Builder::bind_filter_field`
-  so a protocol module can publish additional display-filter spellings for its
-  reflective fields, including single-flag bit selections and paths that read
-  either of two fields. Canonical `<protocol>.<field>` paths need no binding.
-  Building the registry rejects a binding that names an unregistered protocol
-  or an absent field, selects no bits, shifts every selected bit away, or
-  shadows a canonical path.
+  so protocol modules can publish extra display-filter spellings for reflective
+  fields, including single-flag bit selections and paths reading either of two
+  fields; canonical `<protocol>.<field>` paths need no binding. Registry
+  construction rejects bindings naming an unregistered protocol or absent
+  field, selecting no bits, shifting every selected bit away, or shadowing a
+  canonical path.
 - Added `--filter <EXPR>` to `packetcraftr dissect`, `capture`, and `replay`,
-  completing display-filter coverage of every command that produces frames.
-  `dissect` emits the dissection only when the frame matches; a frame that
-  does not match emits nothing and the command still succeeds. `capture`
-  keeps only received frames the filter accepts — a display filter evaluated
-  after receipt, not a kernel filter, so it selects what is reported without
-  narrowing what the backend captures, and rejected frames still count
-  against the operation's frame and byte budgets. `replay` skips
-  non-matching frames before authorization, so they are never policy-checked
-  or transmitted while still counting against the frame budget, and the
-  transmitted frames keep their original wire spacing across the gaps. In
-  every command the filter is compiled before any input is read or any live
-  work is planned, and a filter that names an unknown field or needs a
-  conversation index is refused up front.
+  completing coverage of every frame-producing command. `dissect` emits only
+  matching frames; no match emits nothing but still succeeds. `capture`
+  filters after receipt, not in the kernel, selecting reported frames without
+  narrowing backend capture; rejected frames still consume operation frame and
+  byte budgets. `replay` skips non-matches before authorization, so they are
+  neither policy-checked nor transmitted but still consume frame budget;
+  transmitted frames retain their original wire spacing across gaps. Each
+  command compiles its filter before reading input or planning live work and
+  refuses unknown fields or required conversation indices up front.
 - Added the VXLAN overlay encapsulation (RFC 7348) as a fully constructible
-  and dissectible built-in protocol with exact round-trip: UDP traffic on
-  the registered port 4789 — in either direction — decodes into the VXLAN
-  header and its inner Ethernet frame, `vxlan(vni=…)` participates in
-  `build`, live workflows, and fuzzing like every other codec, and
-  `vxlan.vni` filters work alongside occurrence selection
-  (`ipv4#2.destination == …`) for addressing the inner stack. Deviant flag
-  bits and non-zero reserved fields are diagnostics on decode and
-  permissive-mode territory on build. To make port-registered
-  encapsulations reachable, UDP decoding now offers both port numbers as
-  child discriminators before its raw fallback; traffic away from
-  registered ports decodes exactly as before. The tunnel boundary is
-  honoured end to end: dissection restarts the network envelope at the
-  inner Ethernet frame, so minimum-frame padding inside the tunnel reads
-  as link padding rather than malformed trailing bytes; route planning and
-  link materialization take link intent, MAC addresses, and VLAN tags only
-  from the outer stack, so a Layer 3 send of a VXLAN packet no longer
-  trips over its own tunneled Ethernet frame; and a strict build requires
-  the registered port on one UDP endpoint when the datagram carries an
-  encapsulation — and, conversely, refuses an opaque raw payload sitting
-  on a registered port — because either way the bytes would not dissect
-  back into the same layers (permissive builds keep a
-  `build.udp_encapsulation_port` warning instead).
+  and dissectible exact-round-trip built-in. Registered UDP port 4789 in either
+  direction decodes the header and inner Ethernet frame; `vxlan(vni=…)`
+  participates in `build`, live workflows, and fuzzing like other codecs, while
+  `vxlan.vni` filters and occurrence selection
+  (`ipv4#2.destination == …`) address the inner stack. Deviant flag bits and
+  non-zero reserved fields are decode diagnostics and permissive-build
+  territory. UDP exposes both port numbers as child discriminators before raw
+  fallback, making registered encapsulations reachable; traffic away from
+  registered ports decodes unchanged. At the tunnel boundary, dissection
+  restarts the network envelope at inner Ethernet so minimum-frame padding is
+  link padding, not malformed trailing bytes; route planning and link
+  materialization use only outer link intent, MAC addresses, and VLAN tags,
+  preventing a Layer 3 VXLAN send from tripping over inner Ethernet. For exact
+  layer round-trip, a strict build requires a registered port on one endpoint
+  for encapsulated UDP and rejects opaque raw payloads on registered ports;
+  permissive builds emit `build.udp_encapsulation_port` instead.
 - Added the GENEVE overlay encapsulation (RFC 8926) with the same
-  end-to-end tunnel-boundary treatment as VXLAN. UDP traffic on port 6081
-  decodes the header, and the `protocol_type` EtherType selects the inner
-  frame: Transparent Ethernet Bridging (0x6558), IPv4, or IPv6, with
-  `protocol_type` resolving automatically from the child on build.
-  Variable option TLVs are carried verbatim for exact round-trip; a chain
-  that does not parse exactly, a C bit that disagrees with the options
-  present, and non-zero reserved bits are decode diagnostics and
-  permissive-mode territory on build. Only version 0 is dissected —
-  other versions are preserved as malformed bytes rather than guessed at.
+  end-to-end tunnel treatment as VXLAN. UDP port 6081 decodes its header;
+  the `protocol_type` EtherType selects the inner Transparent Ethernet Bridging
+  (0x6558), IPv4, or IPv6 frame and resolves automatically from the child on
+  build. Variable option TLVs are preserved verbatim for exact round-trip.
+  Inexact option chains, a C bit that disagrees with present options, and
+  non-zero reserved bits are decode diagnostics and permissive-build territory.
+  Only version 0 is dissected; other versions remain malformed bytes rather
+  than being guessed.
 - Added IEEE 802.2 LLC and SNAP as constructible, dissectible layers
-  with exact round-trip. LLC reads its one- or two-byte control format
-  from the wire, chains SNAP on the 0xAA SAP pair, and preserves
-  unregistered SAP payloads as typed raw bytes; SNAP's zero-OUI space is
-  the plain EtherType repertoire, so `llc/snap/ipv4` dissects and builds
-  like an Ethernet II stack, while vendor OUIs keep their own protocol
-  numbering. An Auto link `ether_type` above an LLC frame resolves to
-  the encoded 802.3 payload length, and minimum-frame padding beyond
-  that length reads as link padding exactly as it does for IP.
+  with exact round-trip. LLC reads its one- or two-byte control format from the
+  wire, chains SNAP on the 0xAA SAP pair, and preserves unregistered SAP
+  payloads as typed raw bytes. SNAP's zero-OUI space uses plain EtherTypes, so
+  `llc/snap/ipv4` builds and dissects like Ethernet II, while vendor OUIs retain
+  their own protocol numbering. An Auto link `ether_type` above LLC resolves
+  to the encoded 802.3 payload length; minimum-frame bytes beyond it are link
+  padding, as with IP.
 - Added the L2TPv3 session header over IP (RFC 3931, protocol 115),
-  reachable from both address families. The 32-bit session identifier —
-  zero addressing the control connection — dissects and filters as
-  `l2tpv3.session_id`, while everything after it stays opaque: the
-  negotiated cookie has no on-wire length, so recovering the tunneled
-  frame would be guesswork, and a strict build likewise refuses typed
-  children behind the header. L2TP over UDP port 1701 is deliberately
-  not bound — that port mixes v2 and v3, control and data, and binding
-  it to one interpretation would mis-dissect the others.
+  reachable from both address families. Its 32-bit session identifier (zero
+  addresses the control connection) dissects and filters as
+  `l2tpv3.session_id`; everything after it remains opaque because the
+  negotiated cookie has no on-wire length, making tunneled-frame recovery
+  guesswork; strict builds likewise reject typed children. L2TP over UDP port
+  1701 is deliberately unbound because it mixes v2 and v3 control and data,
+  which one interpretation would mis-dissect.
 - Added ERSPAN mirrored-frame headers: Type II on GRE protocol type
-  0x88BE and Type III on 0x22EB, both ending in the mirrored Ethernet
-  frame with the same tunnel-boundary treatment as VXLAN. The version
-  field and the enclosing GRE protocol type must agree — dissection
-  flags a disagreement and strict builds refuse it — and the Type III
+  0x88BE and Type III on 0x22EB, both ending in mirrored Ethernet with VXLAN's
+  tunnel-boundary treatment. The version and enclosing GRE type must agree;
+  dissection flags disagreement and strict builds reject it. Type III's
   timestamp, security group tag, and flag word round-trip exactly.
 - Added the IPsec headers: ESP (RFC 4303, IP protocol 50) and AH
-  (RFC 4302, protocol 51), reachable from IPv4, IPv6, and every
-  extension header in both address families. ESP decodes its SPI and
-  sequence number and deliberately keeps everything after them opaque —
-  ciphertext that happens to imitate an inner packet is never dissected.
-  AH authenticates rather than encrypts, so the protocol chain continues
-  through it: its ICV is sized by the length field, `next_header`
-  resolves from the child on build, and both headers round-trip exactly.
+  (RFC 4302, protocol 51), reachable from IPv4, IPv6, and every extension
+  header in both families. ESP decodes SPI and sequence number but leaves all
+  ciphertext opaque, never dissecting bytes that imitate an inner packet. AH
+  continues the protocol chain because it authenticates rather than encrypts;
+  its length field sizes the ICV, `next_header` resolves from the build child,
+  and both headers round-trip exactly.
 - Added PPPoE (RFC 2516) and the PPP protocol field it carries. Session
-  frames on EtherType 0x8864 decode the six-byte header and then the PPP
-  protocol number, which selects IPv4 or IPv6 and keeps LCP, IPCP, and
-  other control frames as typed opaque payloads that round-trip exactly;
-  discovery frames on 0x8863 preserve their tag list verbatim. The stage
-  code and the payload must agree on a strict build, `session_id` and
-  `code` filter under their canonical names, and an Auto EtherType
-  resolves to the session stage.
+  frames on EtherType 0x8864 decode the six-byte header and PPP protocol
+  number, selecting IPv4 or IPv6 while keeping LCP, IPCP, and other control
+  frames as exact-round-trip typed opaque payloads. Discovery frames on 0x8863
+  preserve their tag list verbatim. Strict builds require stage code and
+  payload to agree; `session_id` and `code` filter under canonical names, and
+  an Auto EtherType resolves to the session stage.
 - Added MPLS label stacks (RFC 3032) on EtherTypes 0x8847 and 0x8848 from
-  every link parent, including VLAN-tagged frames. Entries chain until
-  the S bit; the bottom-of-stack payload has no protocol field, so the
-  dissector sniffs its leading version nibble for IPv4 or IPv6 and keeps
-  anything else — pseudowire control words included — as opaque bytes
-  that still rebuild exactly. A strict build requires the S bit to agree
-  with what actually follows the entry, and `mpls.exp` and `mpls.bottom`
-  filter the traffic-class and S bits under their conventional names.
+  every link parent, including VLAN-tagged frames. Entries chain until the S
+  bit. Because the bottom payload has no protocol field, the dissector sniffs
+  its leading version nibble for IPv4 or IPv6; everything else, including
+  pseudowire control words, remains exact-round-trip opaque bytes. Strict builds
+  require S to match what follows; `mpls.exp` and `mpls.bottom` conventionally
+  name the traffic-class and S bits.
 - Added `packetcraftr follow <PATH> --stream <tcp|udp>:<INDEX>`, extracting
-  one conversation's payload from a capture file entirely offline. The index
-  is the same first-seen conversation numbering `stats` reports and stream
-  filters match, so the conversation one command names is the conversation
-  another extracts. TCP payload is delivered through bounded reassembly in
-  stream order per direction — with bytes stranded behind missing segments
-  reported rather than silently dropped — and UDP emits one chunk per
-  datagram. `--direction` narrows output to the client (the conversation's
-  first captured sender) or the server, `text` and `hex` interleave both
-  directions with markers in delivery order, `raw` emits one direction's
-  exact bytes for piping and rejects `--direction both` as
-  indistinguishable, and aggregate JSON carries the chunks with endpoints
-  and per-direction totals under a contract published in the v1 schema and
-  examples. Extraction stays exactly-once across connection lifecycle
-  seams — closing-segment retransmissions, four-tuple reuse with or
-  without the same initial sequence number, and resets, whose diagnostic
-  payload is never emitted as stream data. IP-fragmented datagrams carry
-  no conversation index and are not followed.
-- Added `workflow::analysis::follow`, the engine behind the CLI command: a
-  `FollowCollector` selecting one conversation from the shared analysis
-  pipeline and yielding its payload `Chunk`s in delivery order with a
-  per-direction `FollowSummary`.
+  one conversation's payload from a capture file entirely offline. Its index is
+  the first-seen numbering reported by `stats` and matched by stream filters,
+  so commands name the same conversation. Bounded TCP reassembly delivers
+  stream-ordered payload per direction and reports, rather than silently drops,
+  bytes stranded behind missing segments; UDP emits one chunk per datagram.
+  `--direction` selects the client (first captured sender) or server; `text` and
+  `hex` interleave both marked directions in delivery order; `raw` emits one
+  direction's exact bytes for piping and rejects
+  `--direction both` as indistinguishable. Aggregate JSON includes chunks,
+  endpoints, and per-direction totals under the published v1 schema and
+  examples. Extraction remains exactly once across closing-segment
+  retransmissions, resets (whose diagnostic payload is never stream data), and
+  four-tuple reuse with or without the same initial sequence number.
+  IP-fragmented datagrams have no conversation index and cannot be followed.
+  The CLI's `workflow::analysis::follow` engine supplies a `FollowCollector`
+  that selects one shared-pipeline conversation and yields payload `Chunk`s in
+  delivery order with a per-direction `FollowSummary`.
 - Added `packetcraftr expert <PATH>`, reporting cross-frame protocol health
-  findings over a capture file entirely offline. Retransmissions — including
-  retransmissions whose bytes conflict with the data first seen — come from
-  the bounded TCP reassembler, so they are byte-exact rather than heuristic;
-  retransmissions of data a mid-stream capture never observed are not
-  claimed, and a segment repeating a cleanly closed conversation's delivered
-  bytes is still reported after the reassembler has let the flow go.
-  Duplicate acknowledgments — reported only while they leave peer data
-  outstanding — zero windows and their probes, filled and exceeded receive
-  windows, keep-alives, resets,
-  and uncaptured earlier segments, including gaps a bare FIN carries, come
-  from cross-frame header tracking, with per-flow state restarting when a
-  new SYN reuses a four-tuple. Window fullness honours the handshake's
-  negotiated window scale and is reported only when both SYNs were captured,
-  since the scale is unknowable otherwise. Per-frame dissection diagnostics
-  such as checksum mismatches surface as findings under their own codes.
-  Data still buffered behind a missing segment when the capture ends is
-  reported against the final frame; a conversation that is merely still open
-  then — the normal state of any live conversation — is not a finding. Each
-  finding carries its severity, code, frame number, and conversation index,
-  and the summary tallies findings by severity and code. `--filter` narrows
-  the frames analysed while frame and stream numbering stay capture-global,
-  and stream-aware filters such as `tcp.stream == 7` are supported. Text,
-  aggregate JSON, and streaming NDJSON output are supported, with the JSON
-  contracts published in the v1 schema and examples.
-- Added `workflow::analysis::expert`, the engine behind the CLI command: an
-  `ExpertCollector` observing the shared analysis pipeline's per-frame
-  records and TCP reassembly events, producing `Finding` values and an
-  `ExpertSummary` with per-severity and per-code tallies.
+  findings over a capture file entirely offline. The bounded TCP reassembler
+  reports byte-exact rather than heuristic retransmissions, including bytes
+  conflicting with first-seen data; it does not claim unseen data in mid-stream
+  captures, but still reports a segment repeating delivered bytes after a
+  cleanly closed flow has been released.
+  Cross-frame header tracking reports duplicate ACKs only while peer data is
+  outstanding, zero windows and their probes, filled and exceeded receive
+  windows, keep-alives, resets, and uncaptured earlier segments (including gaps
+  carried by a bare FIN); a new SYN reusing a four-tuple restarts per-flow
+  state.
+  Window fullness uses negotiated scaling and requires both captured SYNs
+  because the scale is otherwise unknowable. Per-frame dissection diagnostics,
+  such as checksum mismatches, become findings under distinct codes. Data left
+  behind a missing segment at capture end is reported on the final frame;
+  merely remaining open, normal for a live conversation, is not a finding.
+  Each finding includes severity, code, frame number, and conversation index;
+  summaries tally severity and code. `--filter` narrows analysed frames while
+  frame and stream numbering remain capture-global and supports stream-aware
+  expressions such as `tcp.stream == 7`. Text, aggregate JSON, and streaming
+  NDJSON are supported, with JSON contracts published in the v1 schema and
+  examples. The CLI's `workflow::analysis::expert` engine uses an
+  `ExpertCollector` to observe shared pipeline per-frame records and TCP
+  reassembly events, producing `Finding` values and an `ExpertSummary` with
+  per-severity and per-code tallies.
 - Added `packetcraftr stats <PATH>`, computing aggregate statistics over a
-  capture file entirely offline: `--table conversations` (per-conversation
-  frames, bytes, and duration split by direction, keyed by the same stream
-  indices display filters use), `endpoints` (per-address transmit and
-  receive tallies), `protocols` (per-protocol frame counts, shares, and
-  bytes), `ports` (per-transport-port tallies), and `io` (a time series
-  bucketed by `--interval-ms`). `--filter` narrows every table, and because
-  stats assigns conversation indices, stream-aware filters such as
-  `tcp.stream == 7` work here. Text and aggregate JSON output are supported,
+  capture file entirely offline: `--table conversations` gives
+  per-conversation frames, bytes, and duration split by direction, keyed by
+  display filters' stream indices; `endpoints`, per-address transmit/receive
+  tallies; `protocols`, per-protocol frame counts, shares, and bytes; `ports`,
+  per-transport-port tallies; and `io`, a `--interval-ms`-bucketed time series.
+  `--filter` narrows every table, and stats-assigned indices enable stream-aware
+  expressions such as `tcp.stream == 7`. Text and aggregate JSON are supported,
   with the JSON contract published in the v1 schema and examples.
 - Added the bounded offline analysis pipeline in `workflow::analysis`: a
-  shared read → dissect → index → filter → dispatch loop over capture files,
-  with first-seen conversation indexing (`StreamIndex`, `CanonicalFlow`) and
-  adapters (`tcp_segment`, `udp_flow`, `ip_fragment`) that map decoded layers
-  onto the session crate's reassembly inputs, making bounded TCP stream and
-  IP fragment reassembly reachable for the first time. Conversation indices
-  are assigned over the whole capture before any display filter runs, so an
-  index one run reports is the index another run extracts, while reassembly
-  consumes only the frames the filter keeps. `tcp.stream` and `udp.stream`
-  filters evaluate against separate per-transport slots, so a UDP
-  conversation index can never satisfy a `tcp.stream` comparison on an
-  encapsulated frame that belongs to both. Every run is bounded in frames,
-  bytes, per-frame size, conversations, and duration, and reassembly expiry
-  follows the capture's own clock rather than the wall clock. A segment a
-  flow's bounded reassembly window cannot absorb — sparse and filtered
-  captures routinely jump further than it — evicts that flow's state,
-  surfacing whatever it still buffered, and re-anchors a fresh generation
-  rather than failing the run.
+  shared capture-file read → dissect → index → filter → dispatch loop.
+  First-seen indexing (`StreamIndex`, `CanonicalFlow`) and adapters
+  (`tcp_segment`, `udp_flow`, `ip_fragment`) map decoded layers to the session
+  crate's reassembly inputs, exposing bounded TCP-stream and IP-fragment
+  reassembly for the first time. Indices are assigned capture-wide before
+  filtering, so runs report and extract the same conversation, while reassembly
+  sees only retained frames. `tcp.stream` and `udp.stream` evaluate against
+  separate per-transport slots, preventing a UDP index from satisfying
+  `tcp.stream` on an encapsulated frame belonging to both. Runs are bounded by
+  frames, bytes, per-frame size, conversations, and duration; expiry follows
+  capture time, not wall time. A segment beyond a flow's bounded window, common
+  in sparse or filtered captures, evicts its state, surfaces buffered data, and
+  re-anchors a new generation instead of failing the run.
 - Exposed `session::tcp::Reassembler::limits` and `flow_count`, matching the
-  accessors the fragment reassembler already had.
-- Added `session::tcp::Reassembler::evict_flow`, `flow_base_sequence`,
-  `flow_next_sequence`, and `flow_observed_payload`, so a caller that knows
-  a connection is over can retire its state immediately and tell a
-  retransmitted handshake from four-tuple reuse. The analysis pipeline uses
-  them to evict stale directions when a SYN starts a new connection over a
-  reused four-tuple — judged by base continuity and by whether a SYN-ACK's
-  acknowledgment falls inside the reverse direction's tracked range — so the
-  new generation's segments are never measured against the finished
-  connection's sequence base, while simultaneous opens, retransmitted
-  handshakes, and Fast Open SYNs keep their state.
+  fragment reassembler accessors, and added
+  `session::tcp::Reassembler::evict_flow`, `flow_base_sequence`,
+  `flow_next_sequence`, and `flow_observed_payload`. Callers can immediately
+  retire known-finished connections and distinguish retransmitted handshakes
+  from four-tuple reuse. The analysis pipeline uses them to evict stale
+  directions when a SYN begins a connection on a reused four-tuple, judging
+  base continuity and whether a SYN-ACK acknowledgment lies in the reverse
+  direction's tracked range. The new generation's segments are therefore never
+  measured from a finished connection's sequence base, while simultaneous
+  opens, retransmitted handshakes, and Fast Open SYNs retain state.
 - Added `workflow::replay::run_with_selector` and the `replay::Selector` seam,
-  which decides per frame whether replay proceeds, after the stream budgets
-  and before any authorization, delay, or transmission work. A skipped frame
-  still consumes frame budget — selection can never extend how much input one
-  operation reads — but is never authorized or transmitted, contributes no
-  bytes, and leaves the timing reference untouched, so the frames actually
-  transmitted keep their original wire spacing. A selector failure stops the
-  operation as the new `replay::Error::Selection` variant.
+  deciding per frame after stream budgets but before authorization, delay, or
+  transmission. Skips still consume frame budget, so selection cannot extend
+  an operation's input read, but are never authorized or transmitted,
+  contribute no bytes, and leave the timing reference untouched; transmitted
+  frames retain original wire spacing. Selector failure stops the operation as
+  the new `replay::Error::Selection` variant.
 
 ### Changed
 
 - **Breaking:** offline capture analysis moved out of `packetcraftr-workflow`
   into its own `packetcraftr-analysis` crate, re-exported as
   `packetcraftr::analysis`. Replace `packetcraftr::workflow::analysis` with
-  `packetcraftr::analysis`; the items themselves are unchanged. The split makes
-  the offline/live separation a dependency edge rather than a convention:
+  `packetcraftr::analysis`; items are otherwise unchanged. This makes the
+  offline/live split a dependency edge rather than a convention:
   `packetcraftr-analysis` depends on neither `packetcraftr-client` nor
-  `packetcraftr-net`, so it cannot grow a resolver, route, capture, or
-  transmission seam without that dependency appearing first.
+  `packetcraftr-net`, so any resolver, route, capture, or transmission seam
+  would first require a visible dependency.
 - **Breaking:** `BoundaryError` moved from `packetcraftr-workflow` to
-  `packetcraftr-error`, which is where the rest of the classified error
-  vocabulary lives and is now the only crate both the offline and live halves
-  need in order to report across a seam. `packetcraftr::workflow::BoundaryError`
-  still resolves through a re-export; `packetcraftr::error::BoundaryError` is
-  the canonical path. Its `from_error`, `with_source`, `internal_execution`,
-  and `execution_validation` constructors are now public.
+  `packetcraftr-error`, alongside the classified error vocabulary and in the
+  only crate both offline and live halves need for seam reporting.
+  `packetcraftr::workflow::BoundaryError` remains a re-export;
+  `packetcraftr::error::BoundaryError` is canonical. Its `from_error`,
+  `with_source`, `internal_execution`, and `execution_validation` constructors
+  are now public.
 - **Breaking:** an Ethernet or VLAN `ether_type` at or below 1500 now
-  dissects as an IEEE 802.3 payload length framing an LLC header, with
-  bytes beyond the declared length treated as link padding; such frames
-  previously fell through to a raw payload with an unknown-binding
-  warning. Values 1501-1535 remain undefined and still decode as raw.
-  The Linux cooked-capture headers are unaffected.
+  dissects as an IEEE 802.3 payload length framing an LLC header, with bytes
+  beyond the declared length treated as link padding; previously such frames
+  fell through to raw payload with an unknown-binding warning. Values
+  1501-1535 remain undefined and raw; Linux cooked-capture headers are
+  unchanged.
 - Restructured the repository into a Cargo workspace of per-domain crates under
-  `crates/`, with a virtual root manifest owning shared dependency versions,
-  lints, and the release profile. Cargo now enforces the domain layering that
-  was previously convention. The `packetcraftr` crate re-exports every domain
-  under its existing name, so `packetcraftr::packet::…` and the rest of the
-  public API are unchanged.
+  `crates/`; a virtual root manifest owns shared dependency versions, lints,
+  and the release profile, and Cargo enforces the former conventional layering.
+  `packetcraftr` re-exports every domain under its existing name, preserving
+  `packetcraftr::packet::…` and the rest of the public API.
 - Moved the `native-*` features to `packetcraftr-net`, forwarded by
-  `packetcraftr` and `packetcraftr-cli`. Feature selection now requires
-  `--package`, as in `cargo build --package packetcraftr-cli --features
+  `packetcraftr` and `packetcraftr-cli`. Feature selection now needs
+  `--package`, for example `cargo build --package packetcraftr-cli --features
   native-route`.
 - Made `Layer::declared_layout_fields` available in all builds rather than only
-  under `cfg(test)`, so conformance tests outside the defining crate can reach
-  it. It keeps its default empty implementation.
+  under `cfg(test)`, allowing conformance tests outside the defining crate to
+  reach it; its default implementation remains empty.
 - Made `client::Stats::checked_add` a public method on the type instead of a
   workflow-private extension.
 - Renamed the canonical interface-enumeration feature to
-  `native-interfaces`; native route, Layer 2, and Layer 3 capabilities now
-  enable it explicitly.
+  `native-interfaces`, now explicitly enabled by native route, Layer 2, and
+  Layer 3 capabilities.
 - Extended the pre-1.0 public output API and `packetcraftr.output/v1` command
   vocabulary with the additive `protocols` aggregate result contracts.
 - Documented project purpose, intended audience, and authorization scope in the
-  crate root, the contributor guide, and the transmission, replay, scan,
-  traceroute, and ARP module docs.
+  crate root, contributor guide, and transmission, replay, scan, traceroute,
+  and ARP module docs.
 
 ### Removed
 
 - Removed the unreleased `cli` feature. The command-line interface is now the
-  `packetcraftr-cli` crate, so it is selected by building that package rather
-  than by enabling a feature, and library-only builds simply depend on the
-  library crates.
+  `packetcraftr-cli` crate, selected by building that package rather than
+  enabling a feature; library-only builds depend directly on library crates.
 - Removed the redundant `net::exchange::Io` marker trait; generic code can use
   the public `net::transmit::Sender + net::capture::Provider` bounds directly.
 

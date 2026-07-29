@@ -39,3 +39,10 @@ History follows Conventional Commits: `fix(session): handle reassembly timeout`.
 ## Security & Live Operations
 
 Use live networking only on explicitly authorized systems. Preserve `TrafficPolicy`, authorization checks, finite budgets, and the separation between offline and live workflow entry points. Consult `README.md` for safety gates and `SECURITY.md` for vulnerability reporting.
+
+## Tool preference
+
+- Prefer built-in Read, Edit, Write tools for file operations.
+- Avoid shell-based file reading, searching, or editing when a built-in tool can perform the operation.
+- Avoid complex inline shell, heredocs, nested quoting, and multi-stage pipelines.
+- Keep tool output bounded; save full logs to a file and return only relevant diagnostics.

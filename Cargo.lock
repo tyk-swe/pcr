@@ -971,7 +971,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
 name = "packetcraftr"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "criterion",
@@ -991,7 +991,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-analysis"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-budget",
@@ -1005,11 +1005,11 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-budget"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 
 [[package]]
 name = "packetcraftr-capture"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-error",
@@ -1020,7 +1020,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-cli"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "anstream",
  "anstyle",
@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-client"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-capture",
@@ -1047,14 +1047,14 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-error"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "packetcraftr-net"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "futures-util",
@@ -1076,7 +1076,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-output"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-analysis",
@@ -1093,7 +1093,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-packet"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "noyalib",
@@ -1105,7 +1105,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-protocol"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-capture",
@@ -1116,7 +1116,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-session"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-packet",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "packetcraftr-workflow"
-version = "0.4.0-beta.2"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "packetcraftr-budget",

@@ -7,14 +7,14 @@ network access as potentially security-sensitive.
 
 ## Supported versions
 
-PacketcraftR is pre-1.0. Security fixes target the default branch and the most
-recent beta release when a backport is practical.
+PacketcraftR is pre-1.0. Security fixes target the default branch and the latest
+`0.4.x` release when a backport is practical.
 
 | Version | Supported |
 | --- | --- |
 | `main` | Yes |
-| Latest `0.4.0-beta.*` release | Yes |
-| Older beta and pre-beta releases | No |
+| Latest `0.4.x` release | Yes |
+| Beta and older releases | No |
 
 ## Reporting a vulnerability
 

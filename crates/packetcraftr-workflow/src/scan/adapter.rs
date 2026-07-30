@@ -1,30 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Executes homogeneous scan batches through the client's capture-ready
-/// exchange lifecycle.
 use super::{
     BoundaryError, FieldValue, NeighborResolver, PacketTemplate, RouteProvider, ScanBatch,
     ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport, TemplateValues,
     classify_scan_response,
 };
+use crate::client_executor::{ClientExecutor, Scan};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
-pub struct ClientExecutor<'a, R, N, I> {
-    client: &'a packetcraftr_client::Client<R, N, I>,
-    options: packetcraftr_client::exchange::Options,
-}
-
-impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
-    pub fn new(
-        client: &'a packetcraftr_client::Client<R, N, I>,
-        options: packetcraftr_client::exchange::Options,
-    ) -> Self {
-        Self { client, options }
-    }
-}
-
-impl<R, N, I> ScanExecutor for ClientExecutor<'_, R, N, I>
+/// Executes homogeneous scan batches through the client's capture-ready
+/// exchange lifecycle.
+impl<R, N, I> ScanExecutor for ClientExecutor<'_, R, N, I, Scan>
 where
     R: RouteProvider,
     N: NeighborResolver,

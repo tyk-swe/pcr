@@ -30,7 +30,7 @@ with a capability error. Default and all-feature profiles add interface
 enumeration and the remaining native providers.
 
 The complete enforced matrix, tool versions, thresholds, release checks, and
-artifacts are recorded in the [CI baseline](docs/ci-baseline.md).
+artifacts live in the [CI workflows](.github/workflows/).
 
 Linux native networking also has a strict, opt-in namespace harness. It is not
 part of ordinary unprivileged `cargo test`; its dedicated entry point fails
@@ -127,7 +127,7 @@ Use one or more area labels and one type label.
 | --- | --- |
 | `area/platform` | Native platform backends, interfaces, routes, capture, and transmission. |
 | `area/client` | Client planning, send, policy, and exchange lifecycle. |
-| `area/protocol` | Protocol codecs, registry, matching, catalog, and support manifest. |
+| `area/protocol` | Protocol codecs, registry, matching, catalog, and support tables. |
 | `area/workflow` | Replay, scan, traceroute, DNS, and fuzz workflows. |
 | `area/cli` | CLI arguments, execution, help, diagnostics, and rendering. |
 | `area/output` | Output models, envelope, schemas, and published documents. |

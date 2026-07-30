@@ -74,8 +74,10 @@ mod model;
 #[cfg(test)]
 mod tests;
 
+/// Executes traceroute batches through a client's capture-ready exchange lifecycle.
+pub type ClientExecutor<'a, R, N, I> =
+    super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Traceroute>;
 pub use super::target_adapter::PolicyAuthorizer;
-pub use adapter::ClientExecutor;
 pub use classification::{
     TracerouteResponseClassification as ResponseClassification,
     classify_traceroute_response as classify_response,

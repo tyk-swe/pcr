@@ -11,17 +11,16 @@
 //! GRE, IGMP, ICMPv4/ICMPv6, selected IPv6 extension headers, TCP, UDP, SCTP,
 //! and raw/malformed/padding preservation layers.
 //!
-//! Protocol presence does not imply support in every workflow. Use
-//! [`support::BUILTIN_PROTOCOL_SUPPORT`] for the versioned build, dissect,
-//! exact-round-trip, matcher, capture-root, fallback, and workflow matrix, and
-//! [`builtin::registry`] to construct the immutable default registry.
+//! [`support::BUILTIN_PROTOCOLS`] reports built-in construction, dissection,
+//! exact-round-trip, matcher, and decode-only capabilities;
+//! [`support::BUILTIN_CAPTURE_ROOTS`] reports capture bindings.
+//! [`builtin::registry`] constructs the immutable default registry.
 //!
 //! The built-ins focus on packet headers and bounded framing. SCTP chunks are
 //! validated opaque bytes rather than typed chunk models, DNS messages are
 //! owned by the DNS workflow rather than registered as an application codec,
 //! and other application payloads use [`packetcraftr_packet::layer::Raw`]. Unknown
-//! discriminators and malformed bytes follow the fallback policy declared in
-//! the capability manifest.
+//! discriminators and malformed bytes are preserved by the registry.
 
 pub mod builtin;
 pub mod capture;

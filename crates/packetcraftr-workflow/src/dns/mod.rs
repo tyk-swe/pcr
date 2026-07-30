@@ -91,8 +91,10 @@ mod model;
 mod tests;
 mod wire;
 
+/// Executes DNS queries through a client's capture-ready exchange lifecycle.
+pub type ClientExecutor<'a, R, N, I> =
+    super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Dns>;
 pub use super::target_adapter::PolicyAuthorizer;
-pub use adapter::ClientExecutor;
 pub use engine::dns as run;
 pub use error::{DnsError as Error, DnsWireError as WireError};
 pub use model::{

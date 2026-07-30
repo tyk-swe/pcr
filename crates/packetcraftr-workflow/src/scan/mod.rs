@@ -76,8 +76,10 @@ mod model;
 #[cfg(test)]
 mod tests;
 
+/// Executes scan batches through a client's capture-ready exchange lifecycle.
+pub type ClientExecutor<'a, R, N, I> =
+    super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Scan>;
 pub use super::target_adapter::PolicyAuthorizer;
-pub use adapter::ClientExecutor;
 pub use classification::{
     ScanResponseClassification as ResponseClassification,
     classify_scan_response as classify_response,

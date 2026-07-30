@@ -30,7 +30,7 @@ Use rustfmt defaults and four-space indentation. Name modules, functions, and te
 
 ## Testing Guidelines
 
-Use Rust’s built-in `#[test]` harness and descriptive behavior names, such as `classic_pcap_rejects_zero_snapshot_length`. Add focused regressions and use controlled providers instead of real sockets. CI requires 78% line coverage. Update fixtures, schemas, examples, and CLI goldens together when contracts change.
+Use Rust’s built-in `#[test]` harness and descriptive behavior names, such as `classic_pcap_rejects_zero_snapshot_length`. Add focused regressions and use controlled providers instead of real sockets. CI requires 85% line coverage. Update fixtures, schemas, and published examples together when contracts change.
 
 ## Commit & Pull Request Guidelines
 

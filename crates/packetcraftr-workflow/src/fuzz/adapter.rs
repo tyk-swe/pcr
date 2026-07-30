@@ -8,6 +8,7 @@ use super::{
     NeighborResolver, Packet, PacketTemplate, RouteProvider,
 };
 use crate::BoundaryError;
+use crate::client_executor::{ClientExecutor, Fuzz};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
 pub struct PolicyAuthorizer<'a> {
@@ -54,21 +55,7 @@ impl FuzzAuthorizer for PolicyAuthorizer<'_> {
 
 /// Executes one generated fuzz case through the client's capture-ready
 /// exchange lifecycle.
-pub struct ClientExecutor<'a, R, N, I> {
-    client: &'a packetcraftr_client::Client<R, N, I>,
-    options: packetcraftr_client::exchange::Options,
-}
-
-impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
-    pub fn new(
-        client: &'a packetcraftr_client::Client<R, N, I>,
-        options: packetcraftr_client::exchange::Options,
-    ) -> Self {
-        Self { client, options }
-    }
-}
-
-impl<R, N, I> FuzzExecutor for ClientExecutor<'_, R, N, I>
+impl<R, N, I> FuzzExecutor for ClientExecutor<'_, R, N, I, Fuzz>
 where
     R: RouteProvider,
     N: NeighborResolver,

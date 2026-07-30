@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Removed the unused aggregate protocol-support manifest, workflow matrix, and
+  fallback metadata. Consumers should use `support::BUILTIN_PROTOCOLS` and
+  `support::BUILTIN_CAPTURE_ROOTS`, the tables used by the runtime registry and
+  protocol-discovery command.
+- Removed unused `Composite` and `Dispatch` provider-introspection methods;
+  construction and their `PacketIo`/capture delegation remain unchanged.
+- Unified the scan, traceroute, DNS, and fuzz `ClientExecutor` re-exports around
+  one shared carrier while retaining their domain-specific executor traits.
+
 ### Fixed
 
 - Fixed `replay --interface <INDEX>` treating a numeric selector as both an

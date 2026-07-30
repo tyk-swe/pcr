@@ -31,7 +31,7 @@
 //! - [`packet`] owns layers, documents, registries, exact building, and bounded
 //!   dissection;
 //! - [`protocol`] supplies the built-in codecs, matchers, capture roots, and
-//!   capability manifest;
+//!   capability tables;
 //! - [`session`] provides bounded fragment and transport reassembly state; and
 //! - [`workflow`] implements replay, scan, traceroute, DNS, and fuzz workflows.
 //!
@@ -42,10 +42,9 @@
 //!
 //! The packet and protocol domains are runtime-neutral. Native availability is
 //! selected separately through Cargo features and the providers in [`net`].
-//! Consumers that need the exact built-in build, dissect, matcher, capture-root,
-//! or workflow matrix should inspect
-//! [`protocol::support::BUILTIN_PROTOCOL_SUPPORT`] instead of inferring support
-//! from a protocol type's presence.
+//! Consumers that need exact built-in codec or capture-root capabilities should
+//! inspect [`protocol::support::BUILTIN_PROTOCOLS`] and
+//! [`protocol::support::BUILTIN_CAPTURE_ROOTS`].
 //!
 //! ```
 //! use std::sync::Arc;

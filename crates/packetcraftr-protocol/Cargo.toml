@@ -1,6 +1,6 @@
 [package]
 name = "packetcraftr-protocol"
-description = "Built-in PacketcraftR protocol codecs, matchers, and capability manifest"
+description = "Built-in PacketcraftR protocol codecs, matchers, and capability tables"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

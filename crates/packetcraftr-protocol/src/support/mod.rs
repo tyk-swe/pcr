@@ -1,20 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Versioned built-in capability information.
+//! Built-in codec and capture-root capability information.
 //!
-//! [`BUILTIN_PROTOCOL_SUPPORT`] is the canonical machine-readable inventory for
-//! built-in codecs, capture roots, strict fallback behavior, and per-workflow
-//! protocol obligations. Individual rows distinguish construction, dissection,
-//! exact round trips, response matching, and decode-only support.
+//! [`BUILTIN_PROTOCOLS`] distinguishes construction, dissection, exact round
+//! trips, response matching, and decode-only support. [`BUILTIN_CAPTURE_ROOTS`]
+//! lists the default registry's numeric capture bindings.
 
 mod manifest;
 
 pub(crate) use manifest::aliases;
 pub use manifest::{
-    BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOL_SUPPORT, BUILTIN_PROTOCOLS,
-    CaptureRootByteOrder as CaptureByteOrder, CaptureRootSupport as CaptureRoot,
-    PROTOCOL_SUPPORT_SCHEMA_V1, ProtocolFallbackSupport as Fallback, ProtocolSupport as Protocol,
-    ProtocolSupportManifest as Manifest, STABLE_WORKFLOW_PROTOCOLS,
-    WorkflowProtocolSupport as Workflow,
+    BUILTIN_CAPTURE_ROOTS, BUILTIN_PROTOCOLS, CaptureRootByteOrder as CaptureByteOrder,
+    CaptureRootSupport as CaptureRoot, ProtocolSupport as Protocol,
 };

@@ -1,30 +1,17 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Executes homogeneous traceroute hop batches through the client's
-/// capture-ready exchange lifecycle.
 use super::{
     BoundaryError, NeighborResolver, PacketTemplate, RouteProvider, TemplateValues,
     TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
     TracerouteStrategy, classify_traceroute_response,
 };
+use crate::client_executor::{ClientExecutor, Traceroute};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
-pub struct ClientExecutor<'a, R, N, I> {
-    client: &'a packetcraftr_client::Client<R, N, I>,
-    options: packetcraftr_client::exchange::Options,
-}
-
-impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
-    pub fn new(
-        client: &'a packetcraftr_client::Client<R, N, I>,
-        options: packetcraftr_client::exchange::Options,
-    ) -> Self {
-        Self { client, options }
-    }
-}
-
-impl<R, N, I> TracerouteExecutor for ClientExecutor<'_, R, N, I>
+/// Executes homogeneous traceroute hop batches through the client's
+/// capture-ready exchange lifecycle.
+impl<R, N, I> TracerouteExecutor for ClientExecutor<'_, R, N, I, Traceroute>
 where
     R: RouteProvider,
     N: NeighborResolver,

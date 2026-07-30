@@ -168,18 +168,6 @@ impl<L2, L3> Dispatch<L2, L3> {
     pub fn new(layer2: L2, layer3: L3) -> Self {
         Self { layer2, layer3 }
     }
-
-    pub fn layer2(&self) -> &L2 {
-        &self.layer2
-    }
-
-    pub fn layer3(&self) -> &L3 {
-        &self.layer3
-    }
-
-    pub fn into_parts(self) -> (L2, L3) {
-        (self.layer2, self.layer3)
-    }
 }
 
 impl<L2, L3> Sender for Dispatch<L2, L3>

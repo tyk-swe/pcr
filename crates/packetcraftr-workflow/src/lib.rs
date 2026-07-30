@@ -7,6 +7,7 @@
 
 mod address_family;
 mod bounded_probe;
+mod client_executor;
 pub mod clock;
 pub mod dns;
 mod evidence;

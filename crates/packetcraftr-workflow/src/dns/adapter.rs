@@ -1,29 +1,16 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Executes one DNS query through the client's capture-ready exchange
-/// lifecycle.
 use super::{
     BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse,
     NeighborResolver, PacketTemplate, ProbeTransport, RouteProvider, probe,
 };
+use crate::client_executor::{ClientExecutor, Dns};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
-pub struct ClientExecutor<'a, R, N, I> {
-    client: &'a packetcraftr_client::Client<R, N, I>,
-    options: packetcraftr_client::exchange::Options,
-}
-
-impl<'a, R, N, I> ClientExecutor<'a, R, N, I> {
-    pub fn new(
-        client: &'a packetcraftr_client::Client<R, N, I>,
-        options: packetcraftr_client::exchange::Options,
-    ) -> Self {
-        Self { client, options }
-    }
-}
-
-impl<R, N, I> DnsExecutor for ClientExecutor<'_, R, N, I>
+/// Executes one DNS query through the client's capture-ready exchange
+/// lifecycle.
+impl<R, N, I> DnsExecutor for ClientExecutor<'_, R, N, I, Dns>
 where
     R: RouteProvider,
     N: NeighborResolver,

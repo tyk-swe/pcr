@@ -7,7 +7,7 @@ use std::io::{self, Write};
 #[cfg(test)]
 use std::{cell::RefCell, str};
 
-use anstyle::{AnsiColor, Style};
+use clap::builder::styling::{AnsiColor, Style};
 use packetcraftr::{
     capture::{Format, Frame, Writer},
     output, packet,

@@ -25,16 +25,6 @@ pub(super) fn binary() -> Command {
     command
 }
 
-pub(super) fn normalize_cli_text(bytes: &[u8]) -> String {
-    let text = String::from_utf8(bytes.to_vec())
-        .unwrap()
-        .replace("\r\n", "\n");
-    text.split('\n')
-        .map(str::trim_end)
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 pub(super) fn temp_path(label: &str) -> PathBuf {
     let suffix = SystemTime::now()
         .duration_since(UNIX_EPOCH)

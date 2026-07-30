@@ -20,7 +20,6 @@ native-layer3 = ["packetcraftr/native-layer3"]
 
 [dependencies]
 anstream.workspace = true
-anstyle.workspace = true
 clap.workspace = true
 packetcraftr.workspace = true
 serde.workspace = true

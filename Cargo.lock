@@ -1023,7 +1023,6 @@ name = "packetcraftr-cli"
 version = "0.4.0"
 dependencies = [
  "anstream",
- "anstyle",
  "clap",
  "jsonschema",
  "packetcraftr",

@@ -63,7 +63,7 @@ mod mutation;
 #[cfg(test)]
 mod tests;
 
-pub use adapter::{ClientExecutor, PolicyAuthorizer};
+pub use adapter::PolicyAuthorizer;
 pub use engine::{fuzz as run, fuzz_live as run_live};
 pub use error::FuzzError as Error;
 pub use model::{
@@ -75,6 +75,9 @@ pub use model::{
     FuzzStats as Stats, FuzzStrategy as Strategy, FuzzTarget as Target,
     FuzzTargetParseError as TargetParseError,
 };
+/// Executes fuzz cases through a client's capture-ready exchange lifecycle.
+pub type ClientExecutor<'a, R, N, I> =
+    super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Fuzz>;
 
 #[cfg(test)]
 use engine::{fuzz, fuzz_live};

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Scan, traceroute, DNS, and fuzz workflow arguments.
-
 use std::net::IpAddr;
 
 use clap::{Args, ValueEnum};

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Capture replay command.
-
 use std::fs::File;
 use std::io::{self, Write};
 use std::sync::Arc;

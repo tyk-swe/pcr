@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Shared capture-file and terminal rendering.
-
 use std::io::{self, Write};
 #[cfg(test)]
 use std::{cell::RefCell, str};

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// CLI error classification and exit-code mapping.
-
 use packetcraftr::{
     analysis,
     error::{Classification, Classified, Kind},

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Root parser, command hierarchy, and global CLI values.
-
 use clap::{Parser, Subcommand, ValueEnum};
 use packetcraftr::output;
 

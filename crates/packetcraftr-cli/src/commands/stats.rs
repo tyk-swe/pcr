@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Offline capture-statistics command.
-
 use std::net::SocketAddr;
 use std::time::Duration;
 

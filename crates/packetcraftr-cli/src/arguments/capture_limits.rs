@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Shared capture resource limits and overflow policy values.
-
 use clap::{Args, ValueEnum};
 use packetcraftr::{capture, net};
 

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Entrypoint dispatch and live runtime composition.
-
 use std::net::IpAddr;
 use std::process::ExitCode;
 use std::sync::Arc;

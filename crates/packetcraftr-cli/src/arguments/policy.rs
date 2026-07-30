@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Shared live-traffic and replay policy arguments.
-
 use clap::Args;
 use packetcraftr::{capture, client, net};
 

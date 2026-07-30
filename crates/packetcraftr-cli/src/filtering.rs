@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Compilation, classification, and per-frame evaluation of display filters.
-
 use std::sync::Arc;
 
 use packetcraftr::{

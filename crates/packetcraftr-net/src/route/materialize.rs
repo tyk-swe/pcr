@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Neighbor resolution and route materialization.
-
 use crate::{Error as LiveIoError, capture::CaptureStatistics};
 use packetcraftr_capture::Frame;
 

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Bounded recipe, file, and standard-input handling.
-
 use std::fs::File;
 use std::io::{self, IsTerminal, Read};
 use std::path::Path;

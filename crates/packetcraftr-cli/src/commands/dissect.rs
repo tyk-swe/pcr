@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-// Offline packet dissection command.
-
 use std::time::SystemTime;
 
 use packetcraftr::{

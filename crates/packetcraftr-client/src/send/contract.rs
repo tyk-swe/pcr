@@ -157,3 +157,125 @@ impl Classified for ClientError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr_error::{Category, Classified, Kind};
+
+    use super::{ClientError, SendOptions};
+    use crate::policy::TrafficPolicyError;
+    use packetcraftr_net::Error as LiveIoError;
+
+    #[test]
+    fn default_send_options_are_conservative() {
+        let options = SendOptions::default();
+        assert_eq!(options.destination, None);
+        assert!(!options.allow_permissive_live);
+        assert_eq!(options.plan, Default::default());
+        assert_eq!(options.build, Default::default());
+    }
+
+    #[test]
+    fn client_owned_error_variants_have_stable_classifications() {
+        let cases = [
+            (
+                ClientError::PermissiveLiveOptInRequired,
+                "policy.permissive_live_opt_in",
+                Kind::Policy,
+            ),
+            (
+                ClientError::HeterogeneousExchangeRoute,
+                "cli.heterogeneous_exchange_route",
+                Kind::Cli,
+            ),
+            (
+                ClientError::Template {
+                    message: "too large".to_owned(),
+                },
+                "packet.template",
+                Kind::Packet,
+            ),
+            (
+                ClientError::PacketMaterialization {
+                    layer: 1,
+                    field: "source",
+                    message: "missing".to_owned(),
+                },
+                "packet.materialization",
+                Kind::Packet,
+            ),
+            (
+                ClientError::PacketExceedsMtu {
+                    actual: 1_501,
+                    mtu: 1_500,
+                },
+                "packet.mtu",
+                Kind::Packet,
+            ),
+            (
+                ClientError::InvalidExchangeOption {
+                    field: "timeout",
+                    message: "must be finite".to_owned(),
+                },
+                "cli.exchange_limit",
+                Kind::Cli,
+            ),
+        ];
+
+        for (error, code, kind) in cases {
+            let classification = error.classification();
+            assert_eq!(classification.code, code);
+            assert_eq!(classification.kind, kind);
+            assert!(classification.remediation.is_some());
+            assert!(!error.to_string().is_empty());
+        }
+    }
+
+    #[test]
+    fn wrapped_policy_and_live_io_errors_preserve_their_classification() {
+        let policy = ClientError::Policy(TrafficPolicyError::PacketLimit {
+            actual: 2,
+            limit: 1,
+        });
+        assert_eq!(policy.classification().code, "policy.packet_limit");
+
+        let io = ClientError::Io(LiveIoError::Privilege {
+            message: "denied".to_owned(),
+        });
+        assert_eq!(io.classification().code, "capability.privilege");
+    }
+
+    #[test]
+    fn cleanup_failure_preserves_operation_classification_and_both_causes() {
+        let error = ClientError::OperationAndCaptureShutdown {
+            operation: LiveIoError::Send {
+                message: "send failed".to_owned(),
+            },
+            shutdown: LiveIoError::Capture {
+                message: "shutdown failed".to_owned(),
+            },
+        };
+        let classification = error.classification();
+        assert_eq!(classification.code, "io.send");
+        assert_eq!(classification.kind, Kind::Io);
+        assert_eq!(classification.category, Category::Cleanup);
+        assert_eq!(
+            error.causes(),
+            vec![
+                "packet transmission failed: send failed".to_owned(),
+                "capture failed: shutdown failed".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn client_owned_errors_have_no_nested_causes() {
+        assert!(
+            ClientError::Template {
+                message: "invalid".to_owned(),
+            }
+            .causes()
+            .is_empty()
+        );
+    }
+}

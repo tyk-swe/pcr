@@ -212,3 +212,76 @@ fn map_send_error(interface: &InterfaceId, error: PcapError) -> LiveIoError {
         message: format!("libpcap injection on {} failed: {message}", interface.name),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn interface() -> InterfaceId {
+        InterfaceId {
+            name: "test0".to_owned(),
+            index: 7,
+        }
+    }
+
+    #[test]
+    fn open_error_maps_all_permission_spellings_to_privilege() {
+        for message in [
+            "Permission denied",
+            "Operation not permitted",
+            "Access is denied",
+        ] {
+            let error = map_open_error(&interface(), PcapError::PcapError(message.to_owned()));
+            assert!(matches!(error, LiveIoError::Privilege { .. }));
+            assert!(error.to_string().contains("test0"));
+        }
+    }
+
+    #[test]
+    fn open_error_maps_missing_device_spellings_to_device() {
+        for message in [
+            "No such device",
+            "device not found",
+            "interface does not exist",
+        ] {
+            let error = map_open_error(&interface(), PcapError::PcapError(message.to_owned()));
+            assert!(matches!(
+                error,
+                LiveIoError::Device { interface, .. } if interface == "test0"
+            ));
+        }
+    }
+
+    #[test]
+    fn other_open_errors_remain_capture_errors() {
+        let error = map_open_error(
+            &interface(),
+            PcapError::PcapError("backend failure".to_owned()),
+        );
+        assert!(matches!(error, LiveIoError::Capture { .. }));
+        assert!(error.to_string().contains("backend failure"));
+    }
+
+    #[test]
+    fn send_error_maps_all_permission_spellings_to_privilege() {
+        for message in [
+            "Permission denied",
+            "Operation not permitted",
+            "Access is denied",
+        ] {
+            let error = map_send_error(&interface(), PcapError::PcapError(message.to_owned()));
+            assert!(matches!(error, LiveIoError::Privilege { .. }));
+            assert!(error.to_string().contains("test0"));
+        }
+    }
+
+    #[test]
+    fn other_send_errors_remain_send_errors() {
+        let error = map_send_error(
+            &interface(),
+            PcapError::PcapError("backend failure".to_owned()),
+        );
+        assert!(matches!(error, LiveIoError::Send { .. }));
+        assert!(error.to_string().contains("backend failure"));
+    }
+}

@@ -100,3 +100,123 @@ impl Classified for TracerouteError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr_error::{BoundaryError, Classification, Classified, Kind};
+
+    use super::TracerouteError;
+    use std::time::Duration;
+
+    fn boundary() -> BoundaryError {
+        BoundaryError::new(
+            "controlled failure",
+            Classification::new("io.test", Kind::Io, Some("retry safely")),
+            vec!["root cause".to_owned()],
+        )
+    }
+
+    #[test]
+    fn traceroute_error_classifications_and_sequences_cover_every_family() {
+        let cases = [
+            (
+                TracerouteError::InvalidLimit {
+                    field: "hops",
+                    value: 0,
+                    reason: "must be non-zero".to_owned(),
+                },
+                "cli.traceroute_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                TracerouteError::InvalidPort {
+                    message: "zero".to_owned(),
+                },
+                "cli.traceroute_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                TracerouteError::InvalidTimeout {
+                    value: Duration::ZERO,
+                    maximum: Duration::from_secs(1),
+                },
+                "cli.traceroute_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                TracerouteError::InvalidDuration {
+                    value: Duration::ZERO,
+                    maximum: Duration::from_secs(1),
+                },
+                "cli.traceroute_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                TracerouteError::AddressFamily { family: "IPv6" },
+                "packet.target_address_family",
+                Kind::Packet,
+                None,
+            ),
+            (
+                TracerouteError::DurationLimit {
+                    actual: Duration::from_secs(2),
+                    limit: Duration::from_secs(1),
+                },
+                "policy.traceroute_duration_limit",
+                Kind::Policy,
+                None,
+            ),
+            (
+                TracerouteError::Clock {
+                    sequence: 2,
+                    message: "clock failed".to_owned(),
+                },
+                "io.traceroute_clock",
+                Kind::Io,
+                Some(2),
+            ),
+            (
+                TracerouteError::InvalidEvidence {
+                    sequence: 3,
+                    message: "invalid".to_owned(),
+                },
+                "internal.traceroute_evidence",
+                Kind::Internal,
+                Some(3),
+            ),
+            (
+                TracerouteError::StatisticsOverflow { sequence: 4 },
+                "internal.traceroute_evidence",
+                Kind::Internal,
+                Some(4),
+            ),
+        ];
+
+        for (error, code, kind, sequence) in cases {
+            assert_eq!(error.sequence(), sequence);
+            let classification = error.classification();
+            assert_eq!(classification.code, code);
+            assert_eq!(classification.kind, kind);
+            assert!(classification.remediation.is_some());
+            assert!(!error.to_string().is_empty());
+        }
+    }
+
+    #[test]
+    fn traceroute_boundary_errors_delegate_classification_and_causes() {
+        for error in [
+            TracerouteError::Authorization(boundary()),
+            TracerouteError::Execution {
+                sequence: 7,
+                source: boundary(),
+            },
+        ] {
+            assert_eq!(error.classification().code, "io.test");
+            assert_eq!(error.causes(), vec!["root cause".to_owned()]);
+        }
+    }
+}

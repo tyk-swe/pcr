@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed `replay --interface <INDEX>` treating a numeric selector as both an
+  interface index and a literal interface name, which prevented ordinary
+  numeric interface selection from resolving.
+- Fixed filtered replay NDJSON records reusing source-capture positions as
+  stream-envelope sequences, which could make evidence and completion records
+  duplicate or nonmonotonic. Stream sequences are now contiguous while each
+  replay result continues to report its independent `source_sequence`.
+
 ## [0.4.0] - 2026-07-29
 
 ### Added

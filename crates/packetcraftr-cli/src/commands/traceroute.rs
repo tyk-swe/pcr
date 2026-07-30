@@ -272,6 +272,130 @@ fn trace_completion_name(value: output::traceroute::Completion) -> &'static str 
     }
 }
 
+#[cfg(test)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "stream rendering is kept beside its output-event implementation"
+)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{
+        render_traceroute_stream, render_traceroute_text, trace_completion_name,
+        trace_probe_status_name, trace_response_kind_name,
+    };
+    use crate::rendering::capture_stdout;
+    use packetcraftr::output::{
+        envelope::Stats,
+        frame::Timestamp,
+        traceroute::{
+            Completion, Hop, Probe, ProbeStatus, ResponseKind, Result as TracerouteResult,
+        },
+    };
+
+    fn result() -> TracerouteResult {
+        TracerouteResult {
+            target: "example.test".to_owned(),
+            resolved_addresses: vec!["192.0.2.9".parse().unwrap()],
+            destination: "192.0.2.9".parse().unwrap(),
+            strategy: "udp".to_owned(),
+            destination_port: Some(33434),
+            hops: vec![
+                Hop {
+                    hop_limit: 1,
+                    probes: vec![Probe {
+                        sequence: 4,
+                        hop_limit: 1,
+                        attempt: 1,
+                        strategy: "udp".to_owned(),
+                        destination: "192.0.2.9".parse().unwrap(),
+                        destination_port: Some(33434),
+                        status: ProbeStatus::Response,
+                        response_kind: Some(ResponseKind::Intermediate),
+                        responder: Some("192.0.2.1".parse().unwrap()),
+                        sent_at: Timestamp {
+                            unix_seconds: 1,
+                            nanoseconds: 0,
+                        },
+                        received_at: Some(Timestamp {
+                            unix_seconds: 1,
+                            nanoseconds: 2,
+                        }),
+                        latency: Some(Duration::from_nanos(2)),
+                        frame: None,
+                        reason: "time exceeded".to_owned(),
+                    }],
+                },
+                Hop {
+                    hop_limit: 2,
+                    probes: vec![Probe {
+                        sequence: 5,
+                        hop_limit: 2,
+                        attempt: 1,
+                        strategy: "udp".to_owned(),
+                        destination: "192.0.2.9".parse().unwrap(),
+                        destination_port: None,
+                        status: ProbeStatus::Timeout,
+                        response_kind: None,
+                        responder: None,
+                        sent_at: Timestamp {
+                            unix_seconds: 2,
+                            nanoseconds: 0,
+                        },
+                        received_at: None,
+                        latency: None,
+                        frame: None,
+                        reason: "timeout".to_owned(),
+                    }],
+                },
+            ],
+            undecoded: Vec::new(),
+            completion: Completion::MaximumHops,
+        }
+    }
+
+    #[test]
+    fn traceroute_text_names_cover_every_public_enum_variant() {
+        assert_eq!(trace_probe_status_name(ProbeStatus::Response), "response");
+        assert_eq!(trace_probe_status_name(ProbeStatus::Timeout), "timeout");
+        for (value, expected) in [
+            (ResponseKind::Intermediate, "intermediate"),
+            (ResponseKind::DestinationReached, "destination_reached"),
+            (ResponseKind::Unreachable, "unreachable"),
+        ] {
+            assert_eq!(trace_response_kind_name(value), expected);
+        }
+        for (value, expected) in [
+            (Completion::DestinationReached, "destination_reached"),
+            (Completion::Unreachable, "unreachable"),
+            (Completion::MaximumHops, "maximum_hops"),
+            (Completion::Timeout, "timeout"),
+        ] {
+            assert_eq!(trace_completion_name(value), expected);
+        }
+    }
+
+    #[test]
+    fn traceroute_text_and_stream_render_present_and_absent_evidence() {
+        let stats = Stats {
+            packets_completed: 2,
+            bytes: 96,
+            ..Stats::default()
+        };
+        let ((text, stream), rendered) = capture_stdout(|| {
+            (
+                render_traceroute_text(result(), Vec::new(), stats.clone()),
+                render_traceroute_stream(result(), Vec::new(), stats),
+            )
+        });
+        assert!(text.is_ok());
+        assert!(stream.is_ok());
+        let rendered = crate::rendering::terminal_document(&rendered);
+        assert!(rendered.contains("response=intermediate"));
+        assert!(rendered.contains("\"sequence\":2"));
+    }
+}
+
 fn render_traceroute_stream(
     result: output::traceroute::Result,
     diagnostics: Vec<packet::diagnostic::Diagnostic>,

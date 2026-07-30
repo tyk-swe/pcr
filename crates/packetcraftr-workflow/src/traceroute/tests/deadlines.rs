@@ -49,21 +49,19 @@ fn slow_executor_expires_before_the_next_traceroute_hop() {
 }
 
 #[test]
-fn candidate_heavy_hop_expires_before_the_next_traceroute_execution() {
-    struct CandidateHeavyExecutor {
+fn executor_reported_elapsed_time_expires_before_the_next_traceroute_execution() {
+    struct AccountedSlowExecutor {
         calls: usize,
     }
 
-    impl TracerouteExecutor for CandidateHeavyExecutor {
+    impl TracerouteExecutor for AccountedSlowExecutor {
         fn execute(
             &mut self,
             batch: &TracerouteBatch,
         ) -> Result<TracerouteBatchExecution, BoundaryError> {
             self.calls += 1;
             let mut execution = MixedHopExecutor.execute(batch)?;
-            let candidate = execution.unsolicited.pop().unwrap();
-            execution.unsolicited = vec![candidate; DEFAULT_CAPTURE_QUEUE_FRAMES];
-            execution.stats.elapsed = Duration::ZERO;
+            execution.stats.elapsed = Duration::from_millis(6);
             Ok(execution)
         }
     }
@@ -73,7 +71,7 @@ fn candidate_heavy_hop_expires_before_the_next_traceroute_execution() {
     request.probes_per_hop = 1;
     request.timeout = Duration::from_nanos(1);
     request.limits.max_duration = Duration::from_millis(5);
-    let mut executor = CandidateHeavyExecutor { calls: 0 };
+    let mut executor = AccountedSlowExecutor { calls: 0 };
 
     let error = traceroute(
         &request,

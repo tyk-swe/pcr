@@ -243,3 +243,164 @@ fn convert_bucket(row: &IoBucketStat) -> StatsIoBucketOutput {
         bytes: row.bytes,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    use packetcraftr_analysis::stats::{
+        ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
+        TransportKind,
+    };
+
+    use super::{StatsCommandResult, StatsTableName, StatsTransport};
+
+    fn report() -> StatsReport {
+        StatsReport {
+            interval: Duration::from_millis(250),
+            frames: 3,
+            bytes: 300,
+            first_timestamp: Some(UNIX_EPOCH + Duration::from_secs(2)),
+            last_timestamp: Some(UNIX_EPOCH + Duration::from_secs(5)),
+            protocols: vec![ProtocolStat {
+                protocol: "tcp".to_owned(),
+                frames: 3,
+                bytes: 300,
+            }],
+            conversations: vec![ConversationStat {
+                transport: TransportKind::Tcp,
+                stream: 7,
+                address_a: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                port_a: 12_345,
+                address_b: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)),
+                port_b: 443,
+                frames_a_to_b: 2,
+                bytes_a_to_b: 200,
+                frames_b_to_a: 1,
+                bytes_b_to_a: 100,
+                first_timestamp: UNIX_EPOCH + Duration::from_secs(2),
+                last_timestamp: UNIX_EPOCH + Duration::from_secs(5),
+            }],
+            endpoints: vec![EndpointStat {
+                address: IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)),
+                tx_frames: 2,
+                tx_bytes: 200,
+                rx_frames: 1,
+                rx_bytes: 100,
+            }],
+            ports: vec![PortStat {
+                transport: TransportKind::Udp,
+                port: 53,
+                frames: 3,
+                bytes: 300,
+            }],
+            io: vec![IoBucketStat {
+                offset: Duration::from_millis(250),
+                frames: 2,
+                bytes: 200,
+            }],
+        }
+    }
+
+    #[test]
+    fn stats_table_names_have_stable_wire_names() {
+        for (table, expected) in [
+            (StatsTableName::Conversations, "conversations"),
+            (StatsTableName::Endpoints, "endpoints"),
+            (StatsTableName::Protocols, "protocols"),
+            (StatsTableName::Ports, "ports"),
+            (StatsTableName::Io, "io"),
+        ] {
+            assert_eq!(table.as_str(), expected);
+        }
+    }
+
+    #[test]
+    fn stats_transport_conversion_covers_tcp_and_udp() {
+        assert_eq!(
+            StatsTransport::from(TransportKind::Tcp),
+            StatsTransport::Tcp
+        );
+        assert_eq!(
+            StatsTransport::from(TransportKind::Udp),
+            StatsTransport::Udp
+        );
+    }
+
+    #[test]
+    fn conversation_table_converts_directional_counts_and_duration() {
+        let result =
+            StatsCommandResult::try_from_report(StatsTableName::Conversations, &report(), 8)
+                .unwrap();
+        assert_eq!(result.frames_read, 8);
+        assert_eq!(result.frames_matched, 3);
+        assert_eq!(result.bytes_matched, 300);
+        let rows = result.conversations.unwrap();
+        assert_eq!(rows[0].stream, 7);
+        assert_eq!(rows[0].transport, StatsTransport::Tcp);
+        assert_eq!(rows[0].frames_a_to_b, 2);
+        assert_eq!(rows[0].bytes_b_to_a, 100);
+        assert_eq!(rows[0].duration, Duration::from_secs(3));
+        assert!(result.endpoints.is_none());
+        assert!(result.protocols.is_none());
+        assert!(result.ports.is_none());
+        assert!(result.io.is_none());
+    }
+
+    #[test]
+    fn endpoint_table_converts_all_directional_totals() {
+        let result =
+            StatsCommandResult::try_from_report(StatsTableName::Endpoints, &report(), 3).unwrap();
+        let rows = result.endpoints.unwrap();
+        assert_eq!(rows[0].tx_frames, 2);
+        assert_eq!(rows[0].tx_bytes, 200);
+        assert_eq!(rows[0].rx_frames, 1);
+        assert_eq!(rows[0].rx_bytes, 100);
+        assert!(result.conversations.is_none());
+    }
+
+    #[test]
+    fn protocol_table_clones_names_and_counts() {
+        let result =
+            StatsCommandResult::try_from_report(StatsTableName::Protocols, &report(), 3).unwrap();
+        let rows = result.protocols.unwrap();
+        assert_eq!(rows[0].protocol, "tcp");
+        assert_eq!(rows[0].frames, 3);
+        assert_eq!(rows[0].bytes, 300);
+        assert!(result.ports.is_none());
+    }
+
+    #[test]
+    fn port_table_converts_transport_and_counts() {
+        let result =
+            StatsCommandResult::try_from_report(StatsTableName::Ports, &report(), 3).unwrap();
+        let rows = result.ports.unwrap();
+        assert_eq!(rows[0].transport, StatsTransport::Udp);
+        assert_eq!(rows[0].port, 53);
+        assert_eq!(rows[0].frames, 3);
+        assert_eq!(rows[0].bytes, 300);
+        assert!(result.io.is_none());
+    }
+
+    #[test]
+    fn io_table_preserves_interval_offset_and_counts() {
+        let result = StatsCommandResult::try_from_report(StatsTableName::Io, &report(), 3).unwrap();
+        let io = result.io.unwrap();
+        assert_eq!(io.interval, Duration::from_millis(250));
+        assert_eq!(io.buckets[0].offset, Duration::from_millis(250));
+        assert_eq!(io.buckets[0].frames, 2);
+        assert_eq!(io.buckets[0].bytes, 200);
+        assert!(result.protocols.is_none());
+    }
+
+    #[test]
+    fn stats_conversion_preserves_absent_timestamps() {
+        let mut report = report();
+        report.first_timestamp = None;
+        report.last_timestamp = None;
+        let result = StatsCommandResult::try_from_report(StatsTableName::Io, &report, 3).unwrap();
+        assert_eq!(result.first_timestamp, None);
+        assert_eq!(result.last_timestamp, None);
+    }
+}

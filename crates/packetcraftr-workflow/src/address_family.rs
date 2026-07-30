@@ -32,3 +32,32 @@ impl AddressFamily {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use super::AddressFamily;
+
+    #[test]
+    fn any_address_family_accepts_both_ip_versions() {
+        assert!(AddressFamily::Any.accepts(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        assert!(AddressFamily::Any.accepts(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+    }
+
+    #[test]
+    fn explicit_address_families_reject_the_other_ip_version() {
+        assert!(AddressFamily::Ipv4.accepts(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+        assert!(!AddressFamily::Ipv4.accepts(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert!(AddressFamily::Ipv6.accepts(IpAddr::V6(Ipv6Addr::LOCALHOST)));
+        assert!(!AddressFamily::Ipv6.accepts(IpAddr::V4(Ipv4Addr::LOCALHOST)));
+    }
+
+    #[test]
+    fn address_family_labels_are_stable_and_any_is_default() {
+        assert_eq!(AddressFamily::default(), AddressFamily::Any);
+        assert_eq!(AddressFamily::Any.label(), "requested");
+        assert_eq!(AddressFamily::Ipv4.label(), "IPv4");
+        assert_eq!(AddressFamily::Ipv6.label(), "IPv6");
+    }
+}

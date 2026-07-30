@@ -189,3 +189,162 @@ impl Classified for DnsError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr_error::{BoundaryError, Classification, Classified, Kind};
+
+    use super::{DnsError, DnsWireError};
+    use std::time::Duration;
+
+    fn boundary() -> BoundaryError {
+        BoundaryError::new(
+            "controlled failure",
+            Classification::new("io.test", Kind::Io, Some("retry safely")),
+            vec!["root cause".to_owned()],
+        )
+    }
+
+    #[test]
+    fn dns_wire_unrelated_detection_is_exact() {
+        let unrelated = [
+            DnsWireError::TransactionIdMismatch {
+                expected: 1,
+                actual: 2,
+            },
+            DnsWireError::QuestionNameMismatch {
+                expected: "a.test".to_owned(),
+                actual: "b.test".to_owned(),
+            },
+            DnsWireError::QuestionTypeMismatch {
+                expected: 1,
+                actual: 28,
+            },
+            DnsWireError::QuestionClassMismatch { actual: 3 },
+        ];
+        for error in unrelated {
+            assert!(error.is_unrelated());
+            assert!(!error.to_string().is_empty());
+        }
+        for error in [
+            DnsWireError::NotResponse,
+            DnsWireError::PointerLoop { offset: 12 },
+            DnsWireError::InvalidRdata {
+                record_type: 1,
+                offset: 12,
+                message: "invalid".to_owned(),
+            },
+        ] {
+            assert!(!error.is_unrelated());
+        }
+    }
+
+    #[test]
+    fn dns_error_classifications_and_sequences_cover_every_family() {
+        let cases = [
+            (
+                DnsError::InvalidLimit {
+                    field: "attempts",
+                    value: 0,
+                    reason: "must be non-zero".to_owned(),
+                },
+                "cli.dns_limit",
+                Kind::Cli,
+                None,
+            ),
+            (DnsError::InvalidPort, "cli.dns_limit", Kind::Cli, None),
+            (
+                DnsError::InvalidSourcePort,
+                "cli.dns_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                DnsError::InvalidTimeout {
+                    value: Duration::ZERO,
+                    maximum: Duration::from_secs(1),
+                },
+                "cli.dns_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                DnsError::InvalidDuration {
+                    value: Duration::ZERO,
+                    maximum: Duration::from_secs(1),
+                },
+                "cli.dns_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                DnsError::Query(DnsWireError::NameTooLong),
+                "packet.dns_query",
+                Kind::Packet,
+                None,
+            ),
+            (
+                DnsError::AddressFamily { family: "IPv6" },
+                "packet.target_address_family",
+                Kind::Packet,
+                None,
+            ),
+            (
+                DnsError::DurationLimit {
+                    actual: Duration::from_secs(2),
+                    limit: Duration::from_secs(1),
+                },
+                "policy.dns_duration_limit",
+                Kind::Policy,
+                None,
+            ),
+            (
+                DnsError::Clock {
+                    attempt: 0,
+                    message: "clock failed".to_owned(),
+                },
+                "io.dns_clock",
+                Kind::Io,
+                Some(0),
+            ),
+            (
+                DnsError::InvalidEvidence {
+                    attempt: 2,
+                    message: "invalid".to_owned(),
+                },
+                "internal.dns_evidence",
+                Kind::Internal,
+                Some(1),
+            ),
+            (
+                DnsError::StatisticsOverflow { attempt: 3 },
+                "internal.dns_evidence",
+                Kind::Internal,
+                Some(2),
+            ),
+        ];
+
+        for (error, code, kind, sequence) in cases {
+            assert_eq!(error.sequence(), sequence);
+            let classification = error.classification();
+            assert_eq!(classification.code, code);
+            assert_eq!(classification.kind, kind);
+            assert!(classification.remediation.is_some());
+            assert!(!error.to_string().is_empty());
+        }
+    }
+
+    #[test]
+    fn dns_boundary_errors_delegate_classification_and_causes() {
+        for error in [
+            DnsError::Authorization(boundary()),
+            DnsError::Execution {
+                attempt: 7,
+                source: boundary(),
+            },
+        ] {
+            assert_eq!(error.classification().code, "io.test");
+            assert_eq!(error.causes(), vec!["root cause".to_owned()]);
+        }
+    }
+}

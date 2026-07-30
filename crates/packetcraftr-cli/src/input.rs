@@ -179,7 +179,15 @@ pub(super) fn validate_capture_stream_limits(
 
 #[cfg(test)]
 mod tests {
-    use super::read_bounded_allow_empty;
+    use std::io::Cursor;
+    use std::path::Path;
+
+    use packetcraftr::packet::document::Format;
+
+    use super::{
+        document_format_from_path, read_bounded, read_bounded_allow_empty,
+        validate_capture_stream_limits,
+    };
 
     #[test]
     fn bounded_input_rejects_an_unrepresentable_sentinel_limit() {
@@ -187,5 +195,54 @@ mod tests {
             .unwrap_err();
         assert_eq!(error.exit_code, 70);
         assert!(error.message.contains("cannot be represented"));
+    }
+
+    #[test]
+    fn document_extensions_are_case_insensitive_and_explicit() {
+        assert_eq!(
+            document_format_from_path(Path::new("packet.JSON")),
+            Some(Format::Json)
+        );
+        assert_eq!(
+            document_format_from_path(Path::new("packet.yaml")),
+            Some(Format::Yaml)
+        );
+        assert_eq!(
+            document_format_from_path(Path::new("packet.YML")),
+            Some(Format::Yaml)
+        );
+        assert_eq!(document_format_from_path(Path::new("packet.txt")), None);
+        assert_eq!(document_format_from_path(Path::new("packet")), None);
+    }
+
+    #[test]
+    fn bounded_reads_accept_the_limit_and_reject_the_next_byte() {
+        assert_eq!(
+            read_bounded_allow_empty(Cursor::new(b"abc"), 3).unwrap(),
+            b"abc"
+        );
+        let error = read_bounded_allow_empty(Cursor::new(b"abcd"), 3).unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains("exceeds 3 byte limit"));
+    }
+
+    #[test]
+    fn required_bounded_reads_reject_empty_input() {
+        let error = read_bounded(Cursor::new(Vec::<u8>::new()), 1).unwrap_err();
+        assert_eq!(error.exit_code, 2);
+        assert!(error.message.contains("non-empty stdin"));
+    }
+
+    #[test]
+    fn capture_stream_limits_are_nonzero_and_consistent() {
+        assert!(validate_capture_stream_limits(1, 10, 10, 1).is_ok());
+        for limits in [(0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 0, 1), (1, 1, 1, 0)] {
+            let error =
+                validate_capture_stream_limits(limits.0, limits.1, limits.2, limits.3).unwrap_err();
+            assert_eq!(error.classification.code, "cli.capture_limit");
+        }
+        let error = validate_capture_stream_limits(1, 10, 11, 1).unwrap_err();
+        assert_eq!(error.classification.code, "cli.capture_limit");
+        assert!(error.message.contains("exceeds max-bytes"));
     }
 }

@@ -417,7 +417,45 @@ impl ReplayTransmitter for SystemTransmitter {
 
 #[cfg(test)]
 mod identity_tests {
+    use std::time::SystemTime;
+
+    use packetcraftr_capture::LinkType;
+    use packetcraftr_net::interface::{Address as InterfaceAddress, Flags as InterfaceFlags};
+    use packetcraftr_net::link::MacAddress;
+
     use super::*;
+
+    fn interface(capability: LinkCapability, link_type: LinkType) -> InterfaceInfo {
+        InterfaceInfo {
+            id: InterfaceId {
+                name: "test0".to_owned(),
+                index: 7,
+            },
+            description: Some("test interface".to_owned()),
+            mac_address: Some(MacAddress([0x02, 0, 0, 0, 0, 7])),
+            addresses: vec![InterfaceAddress {
+                address: "192.0.2.7".parse().unwrap(),
+                prefix_length: 24,
+            }],
+            flags: InterfaceFlags {
+                up: true,
+                broadcast: true,
+                multicast: true,
+                ..InterfaceFlags::default()
+            },
+            mtu: Some(1_500),
+            capability,
+            link_type,
+        }
+    }
+
+    fn raw_ipv4_frame() -> Frame {
+        let mut bytes = vec![0_u8; 20];
+        bytes[0] = 0x45;
+        bytes[12..16].copy_from_slice(&[192, 0, 2, 1]);
+        bytes[16..20].copy_from_slice(&[192, 0, 2, 2]);
+        Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).unwrap()
+    }
 
     #[test]
     fn requested_interface_requires_every_supplied_identity_component() {
@@ -447,5 +485,124 @@ mod identity_tests {
                 index: 0,
             }
         ));
+    }
+
+    #[test]
+    fn cached_interface_resolution_accepts_supported_layer_modes_without_system_io() {
+        let selected = interface(LinkCapability::Layer2And3, LinkType::ETHERNET);
+        let requested = selected.id.clone();
+        let mut transmitter = SystemTransmitter::new();
+        transmitter.validated_interface = Some(selected);
+        let ethernet = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![0; 14]).unwrap();
+        assert_eq!(
+            transmitter
+                .resolve(&requested, LinkMode::Layer2, &ethernet)
+                .unwrap(),
+            requested
+        );
+        assert!(transmitter.validated_network.is_none());
+
+        let raw = raw_ipv4_frame();
+        assert_eq!(
+            transmitter
+                .resolve(&requested, LinkMode::Layer3, &raw)
+                .unwrap(),
+            requested
+        );
+        assert_eq!(
+            transmitter
+                .validated_network
+                .as_ref()
+                .unwrap()
+                .1
+                .destination,
+            "192.0.2.2".parse::<std::net::IpAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn cached_interface_resolution_rejects_unsupported_modes() {
+        let selected = interface(LinkCapability::Layer3, LinkType::RAW);
+        let requested = selected.id.clone();
+        let mut transmitter = SystemTransmitter::new();
+        transmitter.validated_interface = Some(selected);
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0; 20]).unwrap();
+        let error = transmitter
+            .resolve(&requested, LinkMode::Layer2, &frame)
+            .unwrap_err();
+        assert!(matches!(error, LiveIoError::Unsupported { .. }));
+    }
+
+    #[test]
+    fn cached_interface_resolution_rejects_auto_and_link_type_mismatch() {
+        let selected = interface(LinkCapability::Layer2And3, LinkType::ETHERNET);
+        let requested = selected.id.clone();
+        let mut transmitter = SystemTransmitter::new();
+        transmitter.validated_interface = Some(selected);
+        let raw = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0; 20]).unwrap();
+        assert!(matches!(
+            transmitter.resolve(&requested, LinkMode::Auto, &raw),
+            Err(LiveIoError::Unsupported { .. })
+        ));
+        assert!(matches!(
+            transmitter.resolve(&requested, LinkMode::Layer2, &raw),
+            Err(LiveIoError::Device { .. })
+        ));
+    }
+
+    #[test]
+    fn layer_two_route_materialization_preserves_validated_interface_evidence() {
+        let selected = interface(LinkCapability::Layer2And3, LinkType::ETHERNET);
+        let transmitter = SystemTransmitter::new();
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![0; 14]).unwrap();
+        let route = transmitter
+            .materialized_route(&selected, LinkMode::Layer2, &frame)
+            .unwrap();
+        assert_eq!(route.plan.route.interface, selected.id);
+        assert_eq!(route.plan.route.source_mac, selected.mac_address);
+        assert_eq!(
+            route.plan.route.selected_address,
+            Some("192.0.2.7".parse::<std::net::IpAddr>().unwrap())
+        );
+        assert_eq!(route.plan.route.mtu, 1_500);
+        assert_eq!(
+            route.plan.route.selection_reason,
+            RouteSelectionReason::InterfaceOnly
+        );
+        assert_eq!(route.plan.route.destination_scope, DestinationScope::Link);
+        assert_eq!(route.plan.mode, LinkMode::Layer2);
+        assert!(route.neighbor_resolution.is_none());
+    }
+
+    #[test]
+    fn layer_three_route_requires_matching_validated_frame_and_auto_is_never_materialized() {
+        let selected = interface(LinkCapability::Layer2And3, LinkType::RAW);
+        let transmitter = SystemTransmitter::new();
+        let frame = raw_ipv4_frame();
+        assert!(matches!(
+            transmitter.materialized_route(&selected, LinkMode::Layer3, &frame),
+            Err(LiveIoError::InvalidTransmissionFrame { .. })
+        ));
+        assert!(matches!(
+            transmitter.materialized_route(&selected, LinkMode::Auto, &frame),
+            Err(LiveIoError::UnresolvedLinkMode)
+        ));
+    }
+
+    #[test]
+    fn transmission_requires_the_exact_prevalidated_interface() {
+        let mut transmitter = SystemTransmitter::new();
+        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![0; 14]).unwrap();
+        let error = ReplayTransmitter::transmit(
+            &mut transmitter,
+            &InterfaceId {
+                name: "test0".to_owned(),
+                index: 7,
+            },
+            LinkMode::Layer2,
+            &frame,
+        )
+        .unwrap_err();
+        assert!(matches!(error, LiveIoError::Device { .. }));
     }
 }

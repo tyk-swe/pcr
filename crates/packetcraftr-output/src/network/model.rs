@@ -528,3 +528,147 @@ pub enum ExchangeStreamCommandResult {
         unanswered: Vec<u64>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr_net::{
+        interface::{Flags, Id},
+        link::{Capability, MacAddress, Mode},
+        neighbor::{VlanKind, VlanTag},
+        route::{Scope, SelectionReason},
+    };
+
+    use super::{
+        InterfaceCapabilityOutput, InterfaceFlagsOutput, RouteCapabilityOutput,
+        RouteInterfaceOutput, RouteMacAddressOutput, RouteModeOutput, RouteScopeOutput,
+        RouteSelectionOutput, RouteVlanKindOutput, RouteVlanTagOutput,
+    };
+
+    #[test]
+    fn interface_flags_conversion_preserves_every_flag() {
+        assert_eq!(
+            InterfaceFlagsOutput::from(Flags {
+                up: true,
+                broadcast: false,
+                loopback: true,
+                point_to_point: false,
+                multicast: true,
+            }),
+            InterfaceFlagsOutput {
+                up: true,
+                broadcast: false,
+                loopback: true,
+                point_to_point: false,
+                multicast: true,
+            }
+        );
+    }
+
+    #[test]
+    fn interface_and_route_capability_conversions_are_exhaustive() {
+        for (input, interface, route) in [
+            (
+                Capability::Layer2,
+                InterfaceCapabilityOutput::Layer2,
+                RouteCapabilityOutput::Layer2,
+            ),
+            (
+                Capability::Layer3,
+                InterfaceCapabilityOutput::Layer3,
+                RouteCapabilityOutput::Layer3,
+            ),
+            (
+                Capability::Layer2And3,
+                InterfaceCapabilityOutput::Layer2And3,
+                RouteCapabilityOutput::Layer2And3,
+            ),
+        ] {
+            assert_eq!(InterfaceCapabilityOutput::from(input), interface);
+            assert_eq!(RouteCapabilityOutput::from(input), route);
+        }
+    }
+
+    #[test]
+    fn route_interface_conversion_preserves_name_and_index() {
+        assert_eq!(
+            RouteInterfaceOutput::from(Id {
+                name: "eth-test".to_owned(),
+                index: 42,
+            }),
+            RouteInterfaceOutput {
+                name: "eth-test".to_owned(),
+                index: 42,
+            }
+        );
+    }
+
+    #[test]
+    fn route_selection_conversions_are_exhaustive() {
+        for (input, expected) in [
+            (SelectionReason::Local, RouteSelectionOutput::Local),
+            (SelectionReason::OnLink, RouteSelectionOutput::OnLink),
+            (SelectionReason::Gateway, RouteSelectionOutput::Gateway),
+            (
+                SelectionReason::InterfaceOnly,
+                RouteSelectionOutput::InterfaceOnly,
+            ),
+        ] {
+            assert_eq!(RouteSelectionOutput::from(input), expected);
+        }
+    }
+
+    #[test]
+    fn route_scope_conversions_are_exhaustive() {
+        for (input, expected) in [
+            (Scope::Host, RouteScopeOutput::Host),
+            (Scope::Link, RouteScopeOutput::Link),
+            (Scope::Private, RouteScopeOutput::Private),
+            (Scope::Global, RouteScopeOutput::Global),
+            (Scope::Multicast, RouteScopeOutput::Multicast),
+            (Scope::Unspecified, RouteScopeOutput::Unspecified),
+        ] {
+            assert_eq!(RouteScopeOutput::from(input), expected);
+        }
+    }
+
+    #[test]
+    fn route_mode_conversions_are_exhaustive() {
+        for (input, expected) in [
+            (Mode::Auto, RouteModeOutput::Auto),
+            (Mode::Layer2, RouteModeOutput::Layer2),
+            (Mode::Layer3, RouteModeOutput::Layer3),
+        ] {
+            assert_eq!(RouteModeOutput::from(input), expected);
+        }
+    }
+
+    #[test]
+    fn route_mac_conversion_and_display_use_canonical_lowercase_octets() {
+        let output = RouteMacAddressOutput::from(MacAddress([0, 1, 10, 16, 254, 255]));
+        assert_eq!(output.0, [0, 1, 10, 16, 254, 255]);
+        assert_eq!(output.to_string(), "00:01:0a:10:fe:ff");
+    }
+
+    #[test]
+    fn route_vlan_conversion_preserves_both_tag_kinds_and_fields() {
+        for (input, expected_kind) in [
+            (VlanKind::Ieee8021Q, RouteVlanKindOutput::Ieee8021Q),
+            (VlanKind::Ieee8021Ad, RouteVlanKindOutput::Ieee8021Ad),
+        ] {
+            assert_eq!(
+                RouteVlanTagOutput::from(VlanTag {
+                    kind: input,
+                    priority: 7,
+                    drop_eligible: true,
+                    vlan_id: 4094,
+                }),
+                RouteVlanTagOutput {
+                    kind: expected_kind,
+                    priority: 7,
+                    drop_eligible: true,
+                    vlan_id: 4094,
+                }
+            );
+        }
+    }
+}

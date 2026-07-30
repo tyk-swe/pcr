@@ -567,3 +567,254 @@ pub enum DnsStreamCommandResult {
         rejected_record_count: usize,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use packetcraftr_workflow::dns::{
+        AttemptStatus as WorkflowAttemptStatus, Edns, EdnsOption, Name, Outcome as WorkflowOutcome,
+        Record, RecordValue, Section as WorkflowSection,
+    };
+
+    use super::{
+        DnsAttemptStatus, DnsEdnsOutput, DnsOutcome, DnsRecordData, DnsRecordOutput, DnsSection,
+    };
+
+    fn name(value: &str) -> Name {
+        Name::from_labels(
+            value
+                .trim_end_matches('.')
+                .split('.')
+                .map(|label| Bytes::copy_from_slice(label.as_bytes())),
+        )
+        .unwrap()
+    }
+
+    fn output(value: RecordValue) -> DnsRecordData {
+        DnsRecordOutput::from_record(Record {
+            owner: name("owner.example."),
+            class: 1,
+            ttl: 300,
+            value,
+        })
+        .data
+    }
+
+    #[test]
+    fn dns_sections_convert_and_display_stably() {
+        for (input, expected, display) in [
+            (WorkflowSection::Answer, DnsSection::Answer, "answer"),
+            (
+                WorkflowSection::Authority,
+                DnsSection::Authority,
+                "authority",
+            ),
+            (
+                WorkflowSection::Additional,
+                DnsSection::Additional,
+                "additional",
+            ),
+        ] {
+            let actual = DnsSection::from(input);
+            assert_eq!(actual, expected);
+            assert_eq!(actual.to_string(), display);
+        }
+    }
+
+    #[test]
+    fn dns_attempt_statuses_convert_exhaustively() {
+        for (input, expected) in [
+            (WorkflowAttemptStatus::Response, DnsAttemptStatus::Response),
+            (
+                WorkflowAttemptStatus::Truncated,
+                DnsAttemptStatus::Truncated,
+            ),
+            (WorkflowAttemptStatus::Timeout, DnsAttemptStatus::Timeout),
+            (
+                WorkflowAttemptStatus::Unrelated,
+                DnsAttemptStatus::Unrelated,
+            ),
+            (
+                WorkflowAttemptStatus::DecodeFailure,
+                DnsAttemptStatus::DecodeFailure,
+            ),
+            (
+                WorkflowAttemptStatus::NetworkFailure,
+                DnsAttemptStatus::NetworkFailure,
+            ),
+        ] {
+            assert_eq!(DnsAttemptStatus::from(input), expected);
+        }
+    }
+
+    #[test]
+    fn dns_outcomes_convert_exhaustively() {
+        for (input, expected) in [
+            (WorkflowOutcome::Response, DnsOutcome::Response),
+            (WorkflowOutcome::Truncated, DnsOutcome::Truncated),
+            (WorkflowOutcome::Timeout, DnsOutcome::Timeout),
+            (WorkflowOutcome::Unrelated, DnsOutcome::Unrelated),
+            (WorkflowOutcome::DecodeFailure, DnsOutcome::DecodeFailure),
+            (WorkflowOutcome::NetworkFailure, DnsOutcome::NetworkFailure),
+        ] {
+            assert_eq!(DnsOutcome::from(input), expected);
+        }
+    }
+
+    #[test]
+    fn a_record_conversion_preserves_the_address() {
+        assert!(matches!(
+            output(RecordValue::A("192.0.2.1".parse().unwrap())),
+            DnsRecordData::A { address } if address.to_string() == "192.0.2.1"
+        ));
+    }
+
+    #[test]
+    fn aaaa_record_conversion_preserves_the_address() {
+        assert!(matches!(
+            output(RecordValue::Aaaa("2001:db8::1".parse().unwrap())),
+            DnsRecordData::Aaaa { address } if address.to_string() == "2001:db8::1"
+        ));
+    }
+
+    #[test]
+    fn canonical_name_record_conversion_uses_dns_presentation_form() {
+        assert_eq!(
+            output(RecordValue::Cname(name("canonical.example."))),
+            DnsRecordData::Cname {
+                canonical_name: "canonical.example.".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn mail_exchange_record_conversion_preserves_preference_and_name() {
+        assert_eq!(
+            output(RecordValue::Mx {
+                preference: 10,
+                exchange: name("mail.example."),
+            }),
+            DnsRecordData::Mx {
+                preference: 10,
+                exchange: "mail.example.".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn name_server_and_pointer_record_conversions_preserve_names() {
+        assert_eq!(
+            output(RecordValue::Ns(name("ns.example."))),
+            DnsRecordData::Ns {
+                name_server: "ns.example.".to_owned(),
+            }
+        );
+        assert_eq!(
+            output(RecordValue::Ptr(name("host.example."))),
+            DnsRecordData::Ptr {
+                pointer: "host.example.".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn soa_record_conversion_preserves_every_timing_field() {
+        assert_eq!(
+            output(RecordValue::Soa {
+                primary_name_server: name("ns.example."),
+                responsible_mailbox: name("hostmaster.example."),
+                serial: 1,
+                refresh: 2,
+                retry: 3,
+                expire: 4,
+                minimum: 5,
+            }),
+            DnsRecordData::Soa {
+                primary_name_server: "ns.example.".to_owned(),
+                responsible_mailbox: "hostmaster.example.".to_owned(),
+                serial: 1,
+                refresh: 2,
+                retry: 3,
+                expire: 4,
+                minimum: 5,
+            }
+        );
+    }
+
+    #[test]
+    fn service_record_conversion_preserves_priority_weight_port_and_target() {
+        assert_eq!(
+            output(RecordValue::Srv {
+                priority: 1,
+                weight: 2,
+                port: 443,
+                target: name("service.example."),
+            }),
+            DnsRecordData::Srv {
+                priority: 1,
+                weight: 2,
+                port: 443,
+                target: "service.example.".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn text_record_conversion_has_lossy_display_and_exact_hex() {
+        assert_eq!(
+            output(RecordValue::Txt(vec![
+                Bytes::from_static(b"plain"),
+                Bytes::from_static(&[0xff, 0x00]),
+            ])),
+            DnsRecordData::Txt {
+                strings: vec!["plain".to_owned(), "\u{fffd}\0".to_owned()],
+                strings_hex: vec!["706c61696e".to_owned(), "ff00".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn edns_conversion_preserves_flags_and_exact_option_bytes() {
+        let edns = Edns {
+            udp_payload_size: 1_232,
+            extended_response_code: 2,
+            version: 1,
+            dnssec_ok: true,
+            flags: 0x1234,
+            options: vec![EdnsOption {
+                code: 8,
+                data: Bytes::from_static(&[0, 1, 0xfe, 0xff]),
+            }],
+        };
+        let expected = DnsEdnsOutput {
+            udp_payload_size: 1_232,
+            extended_response_code: 2,
+            version: 1,
+            dnssec_ok: true,
+            flags: 0x1234,
+            options: vec![super::DnsEdnsOptionOutput {
+                code: 8,
+                data_hex: "0001feff".to_owned(),
+            }],
+        };
+        assert_eq!(DnsEdnsOutput::from(edns.clone()), expected);
+        assert_eq!(
+            output(RecordValue::Opt(edns)),
+            DnsRecordData::Opt { edns: expected }
+        );
+    }
+
+    #[test]
+    fn unknown_record_conversion_preserves_type_and_exact_rdata() {
+        assert_eq!(
+            output(RecordValue::Unknown {
+                type_code: 65_000,
+                rdata: Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]),
+            }),
+            DnsRecordData::Unknown {
+                type_code: 65_000,
+                rdata_hex: "deadbeef".to_owned(),
+            }
+        );
+    }
+}

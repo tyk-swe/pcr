@@ -249,3 +249,156 @@ impl HostnameResolver for SystemHostnameResolver {
         Ok(addresses)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    use packetcraftr_error::{Classified, Kind};
+
+    use super::{Hostname, IpVersion, LiveTarget, ResolvedTarget, TargetResolutionError};
+    use crate::policy::TrafficPolicyError;
+
+    #[test]
+    fn hostname_parsing_canonicalizes_ascii_case_and_one_trailing_dot() {
+        let hostname = "WWW.Example.COM.".parse::<Hostname>().unwrap();
+        assert_eq!(hostname.as_str(), "www.example.com");
+        assert_eq!(hostname.to_string(), "www.example.com");
+    }
+
+    #[test]
+    fn hostname_parsing_accepts_boundary_sized_labels_and_name() {
+        let label = "a".repeat(63);
+        let hostname = format!("{label}.{label}.{label}.{}", "b".repeat(61));
+        assert_eq!(hostname.len(), 253);
+        assert_eq!(hostname.parse::<Hostname>().unwrap().as_str(), hostname);
+    }
+
+    #[test]
+    fn hostname_parsing_rejects_invalid_grammar_and_limits() {
+        let invalid = [
+            String::new(),
+            ".".to_owned(),
+            "éxample.test".to_owned(),
+            "a..test".to_owned(),
+            "-a.test".to_owned(),
+            "a-.test".to_owned(),
+            "a_b.test".to_owned(),
+            format!("{}.test", "a".repeat(64)),
+            "a".repeat(254),
+        ];
+        for hostname in invalid {
+            let error = hostname.parse::<Hostname>().unwrap_err();
+            assert!(matches!(
+                error,
+                TargetResolutionError::InvalidHostname { .. }
+            ));
+        }
+    }
+
+    #[test]
+    fn live_target_prefers_ip_address_parsing_then_hostname_parsing() {
+        assert_eq!(
+            "192.0.2.1".parse::<LiveTarget>().unwrap(),
+            LiveTarget::Address(IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)))
+        );
+        assert!(matches!(
+            "Example.Test".parse::<LiveTarget>().unwrap(),
+            LiveTarget::Hostname(hostname) if hostname.as_str() == "example.test"
+        ));
+        assert!("not a hostname".parse::<LiveTarget>().is_err());
+    }
+
+    #[test]
+    fn resolved_target_accessors_and_family_selection_preserve_order() {
+        let first = IpAddr::V6(Ipv6Addr::LOCALHOST);
+        let second = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let target = ResolvedTarget {
+            declared: LiveTarget::Address(first),
+            addresses: vec![first, second],
+        };
+
+        assert_eq!(target.declared(), &LiveTarget::Address(first));
+        assert_eq!(target.addresses(), &[first, second]);
+        assert_eq!(target.selected_address(), first);
+        assert_eq!(target.address_for_version(IpVersion::V4), Some(second));
+        assert_eq!(target.address_for_version(IpVersion::V6), Some(first));
+        assert_eq!(IpVersion::V4.label(), "IPv4");
+        assert_eq!(IpVersion::V6.label(), "IPv6");
+    }
+
+    #[test]
+    fn unavailable_address_family_returns_none() {
+        let address = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let target = ResolvedTarget {
+            declared: LiveTarget::Address(address),
+            addresses: vec![address],
+        };
+        assert_eq!(target.address_for_version(IpVersion::V6), None);
+    }
+
+    #[test]
+    fn target_resolution_error_classifications_cover_every_family() {
+        let cases = [
+            (
+                TargetResolutionError::InvalidHostname {
+                    hostname: String::new(),
+                    reason: "must not be empty",
+                },
+                "cli.live_target",
+                Kind::Cli,
+            ),
+            (
+                TargetResolutionError::InvalidAddressLimit {
+                    value: 0,
+                    maximum: 64,
+                },
+                "cli.live_target",
+                Kind::Cli,
+            ),
+            (
+                TargetResolutionError::Resolver {
+                    hostname: "example.test".to_owned(),
+                    message: "failed".to_owned(),
+                },
+                "io.hostname_resolution",
+                Kind::Io,
+            ),
+            (
+                TargetResolutionError::NoAddresses {
+                    hostname: "example.test".to_owned(),
+                },
+                "io.hostname_resolution",
+                Kind::Io,
+            ),
+            (
+                TargetResolutionError::AddressLimit {
+                    hostname: "example.test".to_owned(),
+                    limit: 1,
+                },
+                "io.hostname_address_limit",
+                Kind::Io,
+            ),
+            (
+                TargetResolutionError::AddressFamilyUnavailable { family: "IPv6" },
+                "packet.target_address_family",
+                Kind::Packet,
+            ),
+            (
+                TargetResolutionError::Policy(TrafficPolicyError::PublicDestination {
+                    destination: "8.8.8.8".parse().unwrap(),
+                }),
+                "policy.public_destination",
+                Kind::Policy,
+            ),
+        ];
+
+        for (error, code, kind) in cases {
+            let classification = error.classification();
+            assert_eq!(classification.code, code);
+            assert_eq!(classification.kind, kind);
+            assert!(classification.remediation.is_some());
+            assert!(!error.to_string().is_empty());
+        }
+    }
+}

@@ -256,6 +256,141 @@ fn scan_probe_status_name(value: output::scan::ProbeStatus) -> &'static str {
     }
 }
 
+#[cfg(test)]
+#[expect(
+    clippy::items_after_test_module,
+    reason = "stream rendering is kept beside its output-event implementation"
+)]
+mod tests {
+    use std::time::Duration;
+
+    use super::{
+        render_scan_stream, render_scan_text, scan_classification_name, scan_probe_status_name,
+    };
+    use crate::rendering::capture_stdout;
+    use packetcraftr::output::{
+        envelope::Stats,
+        frame::Timestamp,
+        scan::{Classification, Evidence, Port, ProbeStatus, Result as ScanResult},
+    };
+
+    fn evidence() -> Evidence {
+        Evidence {
+            protocol: "tcp".to_owned(),
+            destination: "192.0.2.1".parse().unwrap(),
+            destination_port: Some(443),
+            attempt: 2,
+            status: ProbeStatus::Response,
+            classification: Classification::Open,
+            responder: Some("192.0.2.1".parse().unwrap()),
+            sent_at: Timestamp {
+                unix_seconds: -1,
+                nanoseconds: 500_000_000,
+            },
+            received_at: Some(Timestamp {
+                unix_seconds: 0,
+                nanoseconds: 0,
+            }),
+            latency: Some(Duration::from_millis(5)),
+            frame: None,
+            reason: "SYN-ACK".to_owned(),
+        }
+    }
+
+    fn result() -> ScanResult {
+        ScanResult {
+            target: "example.test".to_owned(),
+            resolved_addresses: vec!["192.0.2.1".parse().unwrap()],
+            ports: vec![
+                Port {
+                    port: 443,
+                    transport: "tcp".to_owned(),
+                    classification: Classification::Open,
+                    evidence: vec![evidence()],
+                },
+                Port {
+                    port: 0,
+                    transport: "icmp".to_owned(),
+                    classification: Classification::Timeout,
+                    evidence: vec![Evidence {
+                        protocol: "icmpv4".to_owned(),
+                        destination_port: None,
+                        status: ProbeStatus::Timeout,
+                        classification: Classification::Timeout,
+                        responder: None,
+                        received_at: None,
+                        latency: None,
+                        reason: "timeout".to_owned(),
+                        ..evidence()
+                    }],
+                },
+            ],
+            undecoded: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn scan_text_names_cover_every_public_enum_variant() {
+        for (value, expected) in [
+            (Classification::Open, "open"),
+            (Classification::Closed, "closed"),
+            (Classification::Filtered, "filtered"),
+            (Classification::Unreachable, "unreachable"),
+            (Classification::Unknown, "unknown"),
+            (Classification::Timeout, "timeout"),
+        ] {
+            assert_eq!(scan_classification_name(value), expected);
+        }
+        assert_eq!(scan_probe_status_name(ProbeStatus::Response), "response");
+        assert_eq!(scan_probe_status_name(ProbeStatus::Timeout), "timeout");
+    }
+
+    #[test]
+    fn scan_text_and_stream_render_all_optional_evidence_shapes() {
+        let stats = Stats {
+            packets_completed: 2,
+            bytes: 64,
+            ..Stats::default()
+        };
+        let ((text, stream), rendered) = capture_stdout(|| {
+            (
+                render_scan_text(result(), Vec::new(), stats.clone()),
+                render_scan_stream(result(), Vec::new(), stats),
+            )
+        });
+        assert!(text.is_ok());
+        assert!(stream.is_ok());
+        let rendered = crate::rendering::terminal_document(&rendered);
+        assert!(rendered.contains("icmp classification=timeout"));
+        assert!(rendered.contains("\"sequence\":2"));
+    }
+
+    #[test]
+    fn scan_renderers_reject_endpoints_without_evidence() {
+        let result = ScanResult {
+            target: "example.test".to_owned(),
+            resolved_addresses: vec!["192.0.2.1".parse().unwrap()],
+            ports: vec![Port {
+                port: 80,
+                transport: "tcp".to_owned(),
+                classification: Classification::Unknown,
+                evidence: Vec::new(),
+            }],
+            undecoded: Vec::new(),
+        };
+        let ((text, stream), _) = capture_stdout(|| {
+            (
+                render_scan_text(result.clone(), Vec::new(), Stats::default()),
+                render_scan_stream(result, Vec::new(), Stats::default()),
+            )
+        });
+        let text_error = text.unwrap_err();
+        assert_eq!(text_error.exit_code, 70);
+        let stream_error = stream.unwrap_err();
+        assert_eq!(stream_error.sequence, Some(0));
+    }
+}
+
 fn render_scan_stream(
     result: output::scan::Result,
     diagnostics: Vec<packet::diagnostic::Diagnostic>,

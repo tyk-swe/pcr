@@ -103,3 +103,123 @@ impl Classified for ScanError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr_error::{BoundaryError, Classification, Classified, Kind};
+
+    use super::ScanError;
+    use std::time::Duration;
+
+    fn boundary() -> BoundaryError {
+        BoundaryError::new(
+            "controlled failure",
+            Classification::new("io.test", Kind::Io, Some("retry safely")),
+            vec!["root cause".to_owned()],
+        )
+    }
+
+    #[test]
+    fn scan_error_classifications_and_sequences_cover_every_family() {
+        let cases = [
+            (
+                ScanError::InvalidLimit {
+                    field: "attempts",
+                    value: 0,
+                    reason: "must be non-zero".to_owned(),
+                },
+                "cli.scan_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                ScanError::InvalidPorts {
+                    message: "empty".to_owned(),
+                },
+                "cli.scan_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                ScanError::InvalidTimeout {
+                    value: Duration::ZERO,
+                    maximum: Duration::from_secs(1),
+                },
+                "cli.scan_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                ScanError::InvalidDuration {
+                    value: Duration::ZERO,
+                    maximum: Duration::from_secs(1),
+                },
+                "cli.scan_limit",
+                Kind::Cli,
+                None,
+            ),
+            (
+                ScanError::AddressFamily { family: "IPv6" },
+                "packet.target_address_family",
+                Kind::Packet,
+                None,
+            ),
+            (
+                ScanError::DurationLimit {
+                    actual: Duration::from_secs(2),
+                    limit: Duration::from_secs(1),
+                },
+                "policy.scan_duration_limit",
+                Kind::Policy,
+                None,
+            ),
+            (
+                ScanError::Clock {
+                    sequence: 2,
+                    message: "clock failed".to_owned(),
+                },
+                "io.scan_clock",
+                Kind::Io,
+                Some(2),
+            ),
+            (
+                ScanError::InvalidEvidence {
+                    sequence: 3,
+                    message: "invalid".to_owned(),
+                },
+                "internal.scan_evidence",
+                Kind::Internal,
+                Some(3),
+            ),
+            (
+                ScanError::StatisticsOverflow { sequence: 4 },
+                "internal.scan_evidence",
+                Kind::Internal,
+                Some(4),
+            ),
+        ];
+
+        for (error, code, kind, sequence) in cases {
+            assert_eq!(error.sequence(), sequence);
+            let classification = error.classification();
+            assert_eq!(classification.code, code);
+            assert_eq!(classification.kind, kind);
+            assert!(classification.remediation.is_some());
+            assert!(!error.to_string().is_empty());
+        }
+    }
+
+    #[test]
+    fn scan_boundary_errors_delegate_classification_and_causes() {
+        for error in [
+            ScanError::Authorization(boundary()),
+            ScanError::Execution {
+                sequence: 7,
+                source: boundary(),
+            },
+        ] {
+            assert_eq!(error.classification().code, "io.test");
+            assert_eq!(error.causes(), vec!["root cause".to_owned()]);
+        }
+    }
+}

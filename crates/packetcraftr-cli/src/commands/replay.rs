@@ -19,7 +19,8 @@ use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities, FrameSelector};
 use super::super::input::validate_capture_stream_limits;
 use super::super::rendering::{
-    capture_file_format, emit_json, emit_json_compact, spaced_hex, write_stdout_line,
+    capture_file_format, emit_json, emit_json_compact, next_stream_sequence, spaced_hex,
+    write_stdout_line,
 };
 use super::super::runtime::{default_registry_arc, validate_interface_selector};
 
@@ -67,11 +68,16 @@ fn replay_timing(arguments: &ReplayArgs) -> Result<workflow::replay::Timing, Cli
 }
 
 fn requested_replay_interface(selector: &str) -> Result<net::interface::Id, CliError> {
-    let index = validate_interface_selector("replay", Some(selector))?.unwrap_or(0);
-    Ok(net::interface::Id {
-        name: selector.to_owned(),
-        index,
-    })
+    match validate_interface_selector("replay", Some(selector))? {
+        Some(index) => Ok(net::interface::Id {
+            name: String::new(),
+            index,
+        }),
+        None => Ok(net::interface::Id {
+            name: selector.to_owned(),
+            index: 0,
+        }),
+    }
 }
 
 pub(crate) fn run_replay(
@@ -199,6 +205,7 @@ pub(crate) fn run_replay(
             )
         }
         output::contract::Format::Ndjson => {
+            let mut sequence = 0_u64;
             let summary = execute_replay(
                 &mut reader,
                 &options,
@@ -206,9 +213,8 @@ pub(crate) fn run_replay(
                 &mut authorizer,
                 &mut transmitter,
                 &mut clock,
-                emit_replay_ndjson_evidence,
+                |evidence| emit_replay_ndjson_evidence(&mut sequence, evidence),
             )?;
-            let sequence = summary.frames_completed;
             let stats = replay_stats(&summary, started.elapsed());
             let result = output::replay::Result::from_summary(
                 summary,
@@ -307,17 +313,21 @@ fn write_replay_text_evidence(
 }
 
 fn emit_replay_ndjson_evidence(
+    sequence: &mut u64,
     evidence: workflow::replay::FrameEvidence,
 ) -> Result<(), workflow::replay::Error> {
-    let sequence = evidence.source_sequence;
+    let source_sequence = evidence.source_sequence;
     let result = replay_output_frame(evidence)?;
     emit_json_compact(&output::envelope::Stream::success(
         output::contract::Command::Replay,
-        sequence,
+        *sequence,
         result,
         Vec::new(),
     ))
-    .map_err(|source| workflow::replay::Error::output(sequence, source.message))
+    .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))?;
+    *sequence = next_stream_sequence(*sequence)
+        .map_err(|source| workflow::replay::Error::output(source_sequence, source.message))?;
+    Ok(())
 }
 
 fn replay_capture_output<W: Write>(
@@ -410,8 +420,11 @@ mod tests {
         net, workflow,
     };
 
-    use super::write_replay_capture_evidence;
+    use super::{
+        emit_replay_ndjson_evidence, requested_replay_interface, write_replay_capture_evidence,
+    };
     use crate::capture_output::CaptureOutput;
+    use crate::rendering::capture_stdout;
 
     #[test]
     fn replay_pcapng_evidence_preserves_source_timestamp_metadata() {
@@ -455,5 +468,83 @@ mod tests {
                 timestamp_offset: -1,
             }
         );
+    }
+
+    #[test]
+    fn numeric_replay_interface_selectors_are_index_only() {
+        assert_eq!(
+            requested_replay_interface("2").unwrap(),
+            net::interface::Id {
+                name: String::new(),
+                index: 2,
+            }
+        );
+        assert_eq!(
+            requested_replay_interface("eth0").unwrap(),
+            net::interface::Id {
+                name: "eth0".to_owned(),
+                index: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn replay_interface_selector_rejects_ambiguous_numeric_values() {
+        for selector in ["", "0", "4294967296"] {
+            let error = requested_replay_interface(selector).unwrap_err();
+            assert_eq!(error.exit_code, 2, "{selector}");
+        }
+    }
+
+    #[test]
+    fn replay_output_keeps_source_position_separate_from_stream_position() {
+        let frame = Frame::new(
+            SystemTime::UNIX_EPOCH,
+            capture::LinkType::RAW,
+            vec![0x60; 40],
+        )
+        .unwrap();
+        let evidence = workflow::replay::FrameEvidence {
+            source_sequence: 17,
+            source_interface_id: None,
+            capture_interface: capture::Interface {
+                link_type: capture::LinkType::RAW,
+                snap_len: 128,
+                timestamp_resolution: capture::TimestampResolution::Decimal(6),
+                timestamp_offset: 0,
+            },
+            interface: net::interface::Id {
+                name: "test0".to_owned(),
+                index: 1,
+            },
+            link_mode: net::link::Mode::Layer3,
+            scheduled_delay: Duration::ZERO,
+            bytes_sent: 40,
+            frame,
+        };
+
+        let later_evidence = workflow::replay::FrameEvidence {
+            source_sequence: 42,
+            ..evidence.clone()
+        };
+        let mut stream_sequence = 0;
+        let ((first, second), rendered) = capture_stdout(|| {
+            (
+                emit_replay_ndjson_evidence(&mut stream_sequence, evidence),
+                emit_replay_ndjson_evidence(&mut stream_sequence, later_evidence),
+            )
+        });
+        assert!(first.is_ok());
+        assert!(second.is_ok());
+        assert_eq!(stream_sequence, 2);
+
+        let records = rendered
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(records[0]["sequence"], 0);
+        assert_eq!(records[0]["result"]["source_sequence"], 17);
+        assert_eq!(records[1]["sequence"], 1);
+        assert_eq!(records[1]["result"]["source_sequence"], 42);
     }
 }

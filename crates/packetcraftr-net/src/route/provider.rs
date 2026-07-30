@@ -124,3 +124,87 @@ impl Classified for NativeRouteError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use packetcraftr_error::{Classified, Kind};
+
+    use super::NativeRouteError;
+
+    #[test]
+    fn native_route_error_classifications_are_stable_and_actionable() {
+        let cases = [
+            (
+                NativeRouteError::Unsupported {
+                    message: "disabled".to_owned(),
+                },
+                "capability.route",
+                Kind::Capability,
+            ),
+            (
+                NativeRouteError::RouteNotFound {
+                    destination: "192.0.2.1".parse().unwrap(),
+                },
+                "io.route_not_found",
+                Kind::Io,
+            ),
+            (
+                NativeRouteError::InterfaceNotFound {
+                    name: "test0".to_owned(),
+                    index: 7,
+                },
+                "io.interface_not_found",
+                Kind::Io,
+            ),
+            (
+                NativeRouteError::InterfaceMismatch {
+                    requested: "test0".to_owned(),
+                    requested_index: 7,
+                    actual: "test1".to_owned(),
+                    actual_index: 8,
+                },
+                "io.route_selection",
+                Kind::Io,
+            ),
+            (
+                NativeRouteError::SourceFamilyMismatch {
+                    preferred_source: "192.0.2.1".parse().unwrap(),
+                    destination: "2001:db8::1".parse().unwrap(),
+                },
+                "io.route_selection",
+                Kind::Io,
+            ),
+            (
+                NativeRouteError::SourceUnavailable {
+                    preferred_source: "192.0.2.1".parse().unwrap(),
+                    interface: "test0".to_owned(),
+                },
+                "io.route_selection",
+                Kind::Io,
+            ),
+            (
+                NativeRouteError::InvalidResponse {
+                    message: "invalid".to_owned(),
+                },
+                "internal.route_response",
+                Kind::Internal,
+            ),
+            (
+                NativeRouteError::OperatingSystem {
+                    operation: "lookup",
+                    message: "failed".to_owned(),
+                },
+                "io.route",
+                Kind::Io,
+            ),
+        ];
+
+        for (error, code, kind) in cases {
+            let classification = error.classification();
+            assert_eq!(classification.code, code);
+            assert_eq!(classification.kind, kind);
+            assert!(classification.remediation.is_some());
+            assert!(!error.to_string().is_empty());
+        }
+    }
+}

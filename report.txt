@@ -1,0 +1,1179 @@
+# PacketcraftR consolidated static audit report
+
+**Consolidated:** 2026-07-30
+**Sources:** three independently generated static reports, originally stored as `1.txt`, `2.txt`, and `3.txt`
+**Scope reported by the sources:** 13 workspace crates, 427 Rust files, approximately 102,000 Rust source lines, 1,032 test functions, 6 fuzz targets, and 77 explicit unsafe blocks
+**Method:** editorial deduplication and cross-referencing of the three reports; this consolidation is not an independent source-code or runtime validation
+**Validation limitation:** the source reports state that they did not compile the workspace or run its tests, Clippy, Miri, sanitizers, or platform-specific runtime checks. Treat every finding as a static-analysis claim until reproduced.
+
+## How this report is organized
+
+- `EC-*` identifiers are the 149-entry catalogue from the broad edge-case review.
+- `SUP-*` identifiers capture findings that were absent from that catalogue or materially strengthen one of its entries.
+- Source-report counts are not added together because many findings overlap and several use different severity models.
+- Where the reports disagree about intended behavior, the disagreement is preserved under **Classification conflicts** instead of silently choosing the more severe label.
+
+## Executive summary
+
+The broad source report catalogued **149 edge cases**: **1 High**, **48 Medium**, **83 Low**, and **17 informational/documented compatibility edges**. The other two reports add **29 supplemental finding groups or material refinements**. Those 29 are not all additive: several deepen an existing `EC-*` entry, and two expose classification conflicts.
+
+No obvious memory-unsafety exploit was found in the inspected native FFI. The strongest parts of the codebase are prospective accounting, checked integer arithmetic, bounded parser framing, sticky failure handling, explicit unsafe isolation, fuzz-target coverage, and deterministic evidence validation. The largest residual risks are semantic boundaries rather than unchecked indexing: authorization-to-execution drift, time/lifecycle regressions, cross-interface identity collisions, post-side-effect errors that look retryable, and standards-valid wire variants that are rejected or interpreted opaquely.
+
+### Highest-priority conclusions
+
+- **SUP-001 — PCAPNG metadata has no cumulative byte budget** (`High`, static claim). Up to roughly 64 GiB of metadata can be read under default block limits before the metadata-block count rejects the stream.
+- **SUP-002 — Final external-codec output is not re-authorized** (`High`, static claim). A second build after route/policy validation can change a destination without a final policy check.
+- **SUP-003 — Fragmented transport traffic is filtered before reassembly** (`High impact`, classification disputed). Transport filters cannot see fragment payloads represented as raw data, so fragmented TCP/UDP may never reach reassembly.
+- **EC-005 / EC-013 / EC-022 — Stateful identities omit capture and encapsulation scope** (`Medium` in the broad catalogue, `High` in another report). Independent interfaces, VRFs, VLANs, or tunnels can be merged into one stream or datagram.
+- **SUP-010 — Promotion can delete retained unsolicited evidence in multiple paths** (`High impact`, static claim). Deadline expiry, missing freshness, and partial request eligibility can remove already captured evidence.
+- **SUP-011 — Replay read-side limits are incomplete and post-read** (`High`, static claim). Selector-skipped frames bypass the byte total, and count/size limits are applied only after reading.
+- **SUP-004 — Release builds use the exact Rust 1.97.0 pin despite a reported 1.97.1 critical optimizer fix** (`High operational`, conditional). The pin is directly observable; actual PacketcraftR artifact corruption was not demonstrated.
+- **EC-127 — Execution is not cryptographically or structurally bound to the authorized built packet** (`High`, `Confirmed`, live fuzz). Policy authorizes cloned prebuilt packets/destination, but validation only checks executor.built == executor.sent; unauthorized bytes/destination can cross the live boundary. Evidence: `crates/packetcraftr-workflow/src/fuzz/engine.rs:69-130,163-181; crates/packetcraftr-workflow/src/fuzz/execution.rs:41-118; crates/packetcraftr-workflow/src/fuzz/adapter.rs:64-75`
+- **EC-001 — An older caller timestamp moves an active datagram backward in time** (`Medium`, `Confirmed`, fragment reassembly). The flow can expire earlier than it should even though newer traffic was already observed. Evidence: `crates/packetcraftr-session/src/fragment.rs:265-276,334-342; TCP already clamps at crates/packetcraftr-session/src/tcp/pending/commit.rs:26-29,93`
+- **EC-002 — A complete one-fragment datagram is rejected by the retained-table aggregate budget** (`Medium`, `Confirmed`, fragment reassembly). A packet that retains no table state can fail AggregateByteLimit because accounting runs before the direct-complete fast path. Evidence: `crates/packetcraftr-session/src/fragment.rs:238-263; crates/packetcraftr-session/src/fragment/accounting.rs:44-75`
+- **EC-003 — Non-final fragment payload length is not required to be an 8-byte multiple** (`Medium`, `Confirmed`, fragment reassembly). Malformed IPv4/IPv6 fragment layouts can enter reassembly even though the built-in packet encoders refuse to create them. Evidence: `crates/packetcraftr-session/src/fragment.rs:150-168; encoder checks in crates/packetcraftr-protocol/src/network/ipv4.rs:172-183 and crates/packetcraftr-protocol/src/ipv6/model.rs:355-367`
+- **EC-005 — Datagram identity omits interface, VRF, namespace, and tunnel context** (`Medium`, `Confirmed`, fragment reassembly). Unrelated datagrams can collide, overlap, complete together, or evict each other. Evidence: `crates/packetcraftr-session/src/fragment.rs:24-30; adapter construction crates/packetcraftr-analysis/src/session_index.rs:249-286`
+- **EC-010 — Traffic after a clean FIN can implicitly create a fresh generation** (`Medium`, `Confirmed`, TCP reassembly). The public reassembler can produce a spurious empty generation, later eviction evidence, or confusing state. Evidence: `crates/packetcraftr-session/src/tcp/engine.rs:64-70; crates/packetcraftr-session/src/tcp/pending.rs:189-199; crates/packetcraftr-session/src/tcp/pending/commit.rs:60-68`
+- **EC-013 — Flow identity omits interface, namespace, VRF, and tunnel context** (`Medium`, `Confirmed`, TCP reassembly). Unrelated TCP byte streams can be merged, conflict, reset, or evict one another. Evidence: `crates/packetcraftr-session/src/tcp.rs:25-31`
+- **EC-016 — Instant overflow freezes capture time at the current value** (`Medium`, `Confirmed`, analysis clock). Expiry time stops advancing instead of saturating/failing, so stale reassembly state remains until final flush. Evidence: `crates/packetcraftr-analysis/src/pipeline.rs:507-518`
+- **EC-022 — Conversation IDs omit interface and network-context scope** (`Medium`, `Confirmed`, analysis stream index). Frames receive the same tcp.stream/udp.stream and are merged in stats/follow output. Evidence: `crates/packetcraftr-analysis/src/session_index.rs:20-41,51-82`
+- **EC-023 — Positive pcap_activate warning statuses are treated as fatal errors** (`Medium`, `Confirmed`, Npcap). Capture is rejected even though the handle is usable. Evidence: `crates/packetcraftr-net/src/platform/npcap/supported/handles.rs:121-130; only negative codes are modeled in supported/abi.rs:16-23`
+- **EC-027 — A backend error makes already queued frames permanently undrainable** (`Medium`, `Confirmed`, live capture). next_captured_frame returns the error before queue.pop_front, so exact evidence already captured is lost to the caller. Evidence: `crates/packetcraftr-net/src/platform/live_capture/session.rs:113-136`
+- **EC-028 — Initial statistics support is mandatory for readiness** (`Medium`, `Confirmed`, live capture). The worker exits before set_ready, making capture unusable for an ancillary feature. Evidence: `crates/packetcraftr-net/src/platform/live_capture/worker.rs:21-36`
+- **EC-029 — Final statistics failure converts a successful capture shutdown into failure** (`Medium`, `Confirmed`, live capture). The session reports an error after useful work and can cause higher layers to discard results or retry. Evidence: `crates/packetcraftr-net/src/platform/live_capture/worker.rs:93-107; crates/packetcraftr-net/src/platform/live_capture/session.rs:150-170`
+- **EC-030 — Receiver counter reset/backward movement becomes a near-2^32 drop delta** (`Medium`, `Confirmed`, live capture). wrapping_sub records billions of dropped frames and can overflow aggregate statistics. Evidence: `crates/packetcraftr-net/src/platform/live_capture/queue.rs:220-255`
+- **EC-031 — Shutdown can block forever waiting for a nonresponsive worker** (`Medium`, `Confirmed`, live capture). shutdown joins without a timeout, hanging the caller/process. Evidence: `crates/packetcraftr-net/src/platform/live_capture/session.rs:150-163`
+- **EC-032 — ECMP/multipath routing always chooses the first non-dead nexthop** (`Medium`, `Confirmed`, Linux route). The chosen interface/gateway can differ from the kernel flow hash and actual packet route. Evidence: `crates/packetcraftr-net/src/platform/linux/query.rs:64-85`
+- **EC-035 — Route and interface queries have no operation timeout** (`Medium`, `Confirmed`, Linux netlink). Both uncached thread join and cached worker response wait can block indefinitely. Evidence: `crates/packetcraftr-net/src/platform/linux/worker.rs:108-133,146-237`
+- **EC-045 — IPv4 directed broadcasts are not recognized as Ethernet broadcast** (`Medium`, `High`, route materialization). The planner may attempt ARP for the broadcast address and raw IPv4 only enables SO_BROADCAST for 255.255.255.255. Evidence: `crates/packetcraftr-net/src/route/materialize.rs:232-252; crates/packetcraftr-net/src/platform/raw_ip/submission.rs:62-67`
+
+## Detailed P0/P1 findings
+
+### EC-127: Execution is not cryptographically or structurally bound to the authorized built packet
+
+**Severity / priority / confidence:** High / P0 / Confirmed
+**Component / type:** live fuzz / Authorization-boundary defect
+**Trigger:** A custom executor, changed ClientExecutor options, or future drift builds/sends bytes or a destination different from the prebuilt campaign.
+**Impact:** Policy authorizes cloned prebuilt packets/destination, but validation only checks executor.built == executor.sent; unauthorized bytes/destination can cross the live boundary.
+**Evidence:** `crates/packetcraftr-workflow/src/fuzz/engine.rs:69-130,163-181; crates/packetcraftr-workflow/src/fuzz/execution.rs:41-118; crates/packetcraftr-workflow/src/fuzz/adapter.rs:64-75`
+**Recommended change:** Pass the exact authorized BuiltPacket and destination into execute, hash/compare exact bytes and route destination afterward, and remove duplicate external option sources.
+
+### EC-001: An older caller timestamp moves an active datagram backward in time
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** fragment reassembly / Correctness defect
+**Trigger:** Push any later fragment with now < the flow's previous last_update, then expire using a current timestamp.
+**Impact:** The flow can expire earlier than it should even though newer traffic was already observed.
+**Evidence:** `crates/packetcraftr-session/src/fragment.rs:265-276,334-342; TCP already clamps at crates/packetcraftr-session/src/tcp/pending/commit.rs:26-29,93`
+**Recommended change:** Assign last_update = last_update.max(now), and add a non-monotonic timestamp regression test.
+
+### EC-002: A complete one-fragment datagram is rejected by the retained-table aggregate budget
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** fragment reassembly / Accounting defect
+**Trigger:** Fill aggregate retained state near max_aggregate_bytes, then push offset=0, MF=false for a new datagram.
+**Impact:** A packet that retains no table state can fail AggregateByteLimit because accounting runs before the direct-complete fast path.
+**Evidence:** `crates/packetcraftr-session/src/fragment.rs:238-263; crates/packetcraftr-session/src/fragment/accounting.rs:44-75`
+**Recommended change:** Take the zero-retention completion fast path before aggregate retained-state accounting; still enforce per-flow/protocol packet size.
+
+### EC-003: Non-final fragment payload length is not required to be an 8-byte multiple
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** fragment reassembly / Wire-semantics validation gap
+**Trigger:** Call Reassembler::push directly with more_fragments=true and bytes.len() % 8 != 0.
+**Impact:** Malformed IPv4/IPv6 fragment layouts can enter reassembly even though the built-in packet encoders refuse to create them.
+**Evidence:** `crates/packetcraftr-session/src/fragment.rs:150-168; encoder checks in crates/packetcraftr-protocol/src/network/ipv4.rs:172-183 and crates/packetcraftr-protocol/src/ipv6/model.rs:355-367`
+**Recommended change:** Reject a non-final fragment whose byte length is not divisible by eight, or explicitly document this API as protocol-agnostic.
+
+### EC-005: Datagram identity omits interface, VRF, namespace, and tunnel context
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** fragment reassembly / Attribution defect
+**Trigger:** Analyze fragments with the same addresses, identification, and next-header arriving on independent interfaces or overlapping network contexts.
+**Impact:** Unrelated datagrams can collide, overlap, complete together, or evict each other.
+**Evidence:** `crates/packetcraftr-session/src/fragment.rs:24-30; adapter construction crates/packetcraftr-analysis/src/session_index.rs:249-286`
+**Recommended change:** Carry a caller-defined scope key (at least capture interface; ideally namespace/tunnel identity) into DatagramKey.
+
+### EC-010: Traffic after a clean FIN can implicitly create a fresh generation
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** TCP reassembly / Lifecycle defect
+**Trigger:** Reach the FIN byte so the direction is removed, then call push with a later ACK-only/control segment for the still half-closed connection.
+**Impact:** The public reassembler can produce a spurious empty generation, later eviction evidence, or confusing state.
+**Evidence:** `crates/packetcraftr-session/src/tcp/engine.rs:64-70; crates/packetcraftr-session/src/tcp/pending.rs:189-199; crates/packetcraftr-session/src/tcp/pending/commit.rs:60-68`
+**Recommended change:** Require explicit open/SYN for an absent flow, retain a bounded closed-direction tombstone, or document and enforce caller-side control filtering.
+
+### EC-013: Flow identity omits interface, namespace, VRF, and tunnel context
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** TCP reassembly / Attribution defect
+**Trigger:** Feed identical four-tuples from independent capture interfaces or overlapping address spaces.
+**Impact:** Unrelated TCP byte streams can be merged, conflict, reset, or evict one another.
+**Evidence:** `crates/packetcraftr-session/src/tcp.rs:25-31`
+**Recommended change:** Add a caller-provided scope discriminator to FlowKey and propagate it from analysis/live capture.
+
+### EC-016: Instant overflow freezes capture time at the current value
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** analysis clock / Correctness defect
+**Trigger:** A capture timestamp is so far after the first timestamp that base.checked_add(offset) returns None.
+**Impact:** Expiry time stops advancing instead of saturating/failing, so stale reassembly state remains until final flush.
+**Evidence:** `crates/packetcraftr-analysis/src/pipeline.rs:507-518`
+**Recommended change:** Return a typed timestamp-range error or saturate to the latest representable Instant rather than falling back to base.
+
+### EC-022: Conversation IDs omit interface and network-context scope
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** analysis stream index / Attribution defect
+**Trigger:** The same endpoint tuple appears on two interfaces/VRFs/tunnels in one input.
+**Impact:** Frames receive the same tcp.stream/udp.stream and are merged in stats/follow output.
+**Evidence:** `crates/packetcraftr-analysis/src/session_index.rs:20-41,51-82`
+**Recommended change:** Include capture interface and an optional caller scope in CanonicalFlow.
+
+### EC-023: Positive pcap_activate warning statuses are treated as fatal errors
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** Npcap / Correctness defect
+**Trigger:** Npcap activates successfully but returns a positive PCAP_WARNING_* status.
+**Impact:** Capture is rejected even though the handle is usable.
+**Evidence:** `crates/packetcraftr-net/src/platform/npcap/supported/handles.rs:121-130; only negative codes are modeled in supported/abi.rs:16-23`
+**Recommended change:** Treat status >= 0 as activated, surface positive statuses as diagnostics, and reserve errors for negative values.
+
+### EC-027: A backend error makes already queued frames permanently undrainable
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** live capture / Data-retention contract defect
+**Trigger:** The worker enqueues frames, then records an error before the consumer drains them.
+**Impact:** next_captured_frame returns the error before queue.pop_front, so exact evidence already captured is lost to the caller.
+**Evidence:** `crates/packetcraftr-net/src/platform/live_capture/session.rs:113-136`
+**Recommended change:** Choose and document a drain-then-error policy, or return a terminal error alongside the final queued batch.
+
+### EC-028: Initial statistics support is mandatory for readiness
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** live capture / Compatibility defect
+**Trigger:** A capture backend can deliver frames but its statistics call is unsupported or temporarily fails.
+**Impact:** The worker exits before set_ready, making capture unusable for an ancillary feature.
+**Evidence:** `crates/packetcraftr-net/src/platform/live_capture/worker.rs:21-36`
+**Recommended change:** Treat unsupported statistics as zero/unknown with a diagnostic; reserve fatal errors for corrupt statistics contracts.
+
+### EC-029: Final statistics failure converts a successful capture shutdown into failure
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** live capture / Post-success failure
+**Trigger:** Frames were captured successfully, but source.statistics fails during shutdown.
+**Impact:** The session reports an error after useful work and can cause higher layers to discard results or retry.
+**Evidence:** `crates/packetcraftr-net/src/platform/live_capture/worker.rs:93-107; crates/packetcraftr-net/src/platform/live_capture/session.rs:150-170`
+**Recommended change:** Return frames/results with a separate incomplete-statistics diagnostic or structured terminal status.
+
+### EC-030: Receiver counter reset/backward movement becomes a near-2^32 drop delta
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** live capture / Accounting defect
+**Trigger:** A backend resets a 32-bit drop counter, swaps handles, or reports a lower value for any non-wrap reason.
+**Impact:** wrapping_sub records billions of dropped frames and can overflow aggregate statistics.
+**Evidence:** `crates/packetcraftr-net/src/platform/live_capture/queue.rs:220-255`
+**Recommended change:** Differentiate plausible wrap from reset; reset the baseline or mark statistics discontinuous.
+
+### EC-031: Shutdown can block forever waiting for a nonresponsive worker
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** live capture / Liveness defect
+**Trigger:** Backend interrupt does not wake next_event or the worker is stuck in a driver call.
+**Impact:** shutdown joins without a timeout, hanging the caller/process.
+**Evidence:** `crates/packetcraftr-net/src/platform/live_capture/session.rs:150-163`
+**Recommended change:** Provide bounded shutdown, detach/quarantine a stuck worker, and return a typed timeout.
+
+### EC-032: ECMP/multipath routing always chooses the first non-dead nexthop
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** Linux route / Route-selection mismatch
+**Trigger:** Kernel returns RTA_MULTIPATH with multiple live weighted nexthops.
+**Impact:** The chosen interface/gateway can differ from the kernel flow hash and actual packet route.
+**Evidence:** `crates/packetcraftr-net/src/platform/linux/query.rs:64-85`
+**Recommended change:** Honor weights and a deterministic flow hash, or ask the kernel with sufficient flow attributes and use its selected nexthop.
+
+### EC-035: Route and interface queries have no operation timeout
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** Linux netlink / Liveness defect
+**Trigger:** The netlink future or socket connection wedges and never resolves.
+**Impact:** Both uncached thread join and cached worker response wait can block indefinitely.
+**Evidence:** `crates/packetcraftr-net/src/platform/linux/worker.rs:108-133,146-237`
+**Recommended change:** Wrap operations in a bounded runtime timeout and return a typed OS timeout; make shutdown bounded too.
+
+### EC-045: IPv4 directed broadcasts are not recognized as Ethernet broadcast
+
+**Severity / priority / confidence:** Medium / P1 / High
+**Component / type:** route materialization / Correctness defect
+**Trigger:** Send to a subnet-directed broadcast such as 192.0.2.255/24.
+**Impact:** The planner may attempt ARP for the broadcast address and raw IPv4 only enables SO_BROADCAST for 255.255.255.255.
+**Evidence:** `crates/packetcraftr-net/src/route/materialize.rs:232-252; crates/packetcraftr-net/src/platform/raw_ip/submission.rs:62-67`
+**Recommended change:** Carry route prefix/broadcast metadata and map directed broadcast to ff:ff:ff:ff:ff:ff / SO_BROADCAST.
+
+### EC-046: Native raw sends are synchronous and have no deadline/cancellation seam
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** raw IP / Liveness defect
+**Trigger:** The OS send call blocks due to driver/network stack behavior.
+**Impact:** Client/workflow deadlines cannot preempt it; a send or replay can hang indefinitely.
+**Evidence:** `crates/packetcraftr-net/src/platform/raw_ip/submission.rs; client send/exchange only checks deadlines around provider calls`
+**Recommended change:** Add OS-level send timeout/cancellation where available and an asynchronous/bounded provider contract.
+
+### EC-052: Only the first resolved address matching packet family is routed
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** target resolution / Availability / selection defect
+**Trigger:** A hostname returns multiple same-family addresses and the first is unroutable while a later one is usable.
+**Impact:** The operation fails without trying an authorized fallback address.
+**Evidence:** `crates/packetcraftr-client/src/target/contract.rs:133-142; crates/packetcraftr-client/src/lib.rs:267-276`
+**Recommended change:** Attempt authorized addresses in resolver order with route fallback, bounded by the existing address limit.
+
+### EC-055: Deadlines are cooperative around synchronous provider calls
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** client deadlines / Liveness defect
+**Trigger:** Resolver, route, neighbor, capture, build extension, or I/O provider blocks beyond the deadline.
+**Impact:** The operation can exceed max_duration indefinitely because checks run only before/after the call.
+**Evidence:** `crates/packetcraftr-client/src/lib.rs:473-550,566-585; exchange transaction provider calls`
+**Recommended change:** Use timeout-aware provider traits or run blocking providers behind cancellable bounded workers.
+
+### EC-056: The one-packet send API has no timeout at all
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** client send / Liveness defect
+**Trigger:** Any route, neighbor, build, or transmission provider hangs.
+**Impact:** send() can block forever and has no caller-controlled deadline unlike exchange/workflows.
+**Evidence:** `crates/packetcraftr-client/src/lib.rs:314-370`
+**Recommended change:** Add SendOptions.timeout/deadline and thread it through every live provider.
+
+### EC-060: A failure after transmission can discard all committed send evidence
+
+**Severity / priority / confidence:** Medium / P1 / High
+**Component / type:** exchange transaction / Transaction / retry hazard
+**Trigger:** Transmission succeeds, then capture shutdown/statistics, decode, promotion, validation, or a post-call deadline check fails.
+**Impact:** Caller receives Err with no structured committed-state record and may retry, duplicating packets.
+**Evidence:** `crates/packetcraftr-client/src/exchange/transaction.rs and finalize paths; same pattern visible in replay engine`
+**Recommended change:** Return an error type carrying sent frames/counts and a committed flag, or make post-send failures nonfatal diagnostics.
+
+### EC-061: Capture statistics completeness can veto otherwise valid exchange results
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** exchange capture / Post-success failure
+**Trigger:** Valid responses were captured but shutdown/final statistics fails.
+**Impact:** The exchange fails and useful responses/sent evidence may be lost to the caller.
+**Evidence:** `client exchange finalization plus crates/packetcraftr-net/src/platform/live_capture/worker.rs:93-107`
+**Recommended change:** Separate data validity from statistics completeness and return partial/unknown statistics explicitly.
+
+### EC-069: A learned neighbor is discarded if cleanup/statistics fails afterward
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** neighbor resolution / Post-success failure
+**Trigger:** A matching ARP/NA was received, then capture shutdown or statistics validation fails.
+**Impact:** The cache is not populated and retry emits more discovery traffic despite a valid answer.
+**Evidence:** `crates/packetcraftr-net/src/neighbor/provider.rs:143-188`
+**Recommended change:** Commit the neighbor before ancillary cleanup and return cleanup incompleteness as a diagnostic/partial status.
+
+### EC-072: FCS metadata is discarded
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** PCAP/PCAPNG / Capture correctness / compatibility defect
+**Trigger:** Read classic PCAP network-word FCS bits or PCAPNG if_fcslen.
+**Impact:** Trailing FCS bytes can be interpreted as payload, checksum/dissection can be wrong, and transcoding loses metadata.
+**Evidence:** `crates/packetcraftr-capture/src/pcap/classic.rs:41-51; Interface has no FCS field at pcap/models.rs:194-205; PCAPNG parser recognizes only tsresol/tsoffset`
+**Recommended change:** Add per-interface FCS presence/length metadata and teach dissectors/transcoders whether captured bytes include it.
+
+### EC-088: Valid Segment Routing Headers containing TLVs/padding are rejected
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** IPv6 SRH / Standards compatibility defect
+**Trigger:** Decode an SRH whose Hdr Ext Len covers segment list plus TLVs/padding.
+**Impact:** The decoder treats every byte after the fixed header as 16-byte segments and requires total remainder % 16 == 0; encoder cannot represent TLVs.
+**Evidence:** `crates/packetcraftr-protocol/src/ipv6/model.rs:505-604,607-674`
+**Recommended change:** Derive segment-list length from last_entry, parse/preserve a bounded TLV area, and validate Hdr Ext Len independently.
+
+### EC-106: The same unsolicited frame can satisfy more than one probe
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** probe response selection / Attribution defect
+**Trigger:** A weakly attributable reply matches multiple requests, especially repeated UDP/TCP attempts with coarse/equal timestamps.
+**Impact:** One ambient packet can create multiple successes because unsolicited candidates are never consumed.
+**Evidence:** `crates/packetcraftr-workflow/src/bounded_probe.rs:186-203`
+**Recommended change:** Assign each exact frame to at most one probe using strongest correlation and deterministic global matching.
+
+### EC-113: Bare RST sequence matching aliases all SYN probes whose ACK field is zero
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** TCP probe matcher / Response-correlation defect
+**Trigger:** A bare RST with sequence 0 arrives for a tuple used by multiple SYN probes; requests use ACK=0 and differ only in sequence.
+**Impact:** The response matches any such request despite not acknowledging its unique SYN sequence; stale/spoofed RST can satisfy the wrong probe.
+**Evidence:** `crates/packetcraftr-protocol/src/matcher/reverse_flow.rs:77-123; traceroute SYN construction crates/packetcraftr-workflow/src/traceroute/engine.rs:271-302; tests accept bare RST at reverse_flow/tests.rs:145-163`
+**Recommended change:** For bare RST, correlate against request sequence according to RFC reset generation rules plus IP identity/token, or avoid reusing the tuple concurrently.
+
+### EC-119: A successful transmission can be reported as DurationLimit before evidence emission
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** replay / Transaction / retry hazard
+**Trigger:** transmit succeeds and the deadline crosses during/just after the provider call.
+**Impact:** Counters are committed internally, then enforce_deadline returns Err; caller may retry the same frame and duplicate wire traffic.
+**Evidence:** `crates/packetcraftr-workflow/src/replay/engine.rs:208-243`
+**Recommended change:** Return a committed transmission result with a terminal overrun flag, or check deadline only before irreversible send and report late completion as evidence.
+
+### EC-120: Output callback failure occurs after wire transmission
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** replay / Transaction / retry hazard
+**Trigger:** emit() fails due to serialization, broken pipe, or downstream sink error.
+**Impact:** replay_capture returns Err after packet transmission; no summary carrying committed progress is returned.
+**Evidence:** `crates/packetcraftr-workflow/src/replay/engine.rs:227-243`
+**Recommended change:** Separate transmission result from evidence sink status and return a partial ReplaySummary on failure.
+
+### EC-121: Invalid provider evidence is detected only after the provider may have sent
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** replay / Transaction / provider-contract edge
+**Trigger:** Backend transmits but reports wrong interface/byte counts/frame evidence.
+**Impact:** The operation errors without a reliable committed marker although the external side effect already happened.
+**Evidence:** `crates/packetcraftr-workflow/src/replay/engine.rs:208-225`
+**Recommended change:** Make provider transmit return an unambiguous committed receipt and preserve it inside the error.
+
+### EC-125: Any error discards the terminal summary for prior successful frames
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** replay / Partial-result loss
+**Trigger:** Frame N fails after frames 0..N-1 transmitted.
+**Impact:** Caller cannot reliably learn completed frame/byte counts from the Result type.
+**Evidence:** `crates/packetcraftr-workflow/src/replay/engine.rs returns Result<ReplaySummary, ReplayError> without partial progress`
+**Recommended change:** Embed partial ReplaySummary/last committed sequence in ReplayError.
+
+### EC-128: Prepared-case and evidence memory budgets are independent
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** live fuzz / Aggregate memory accounting defect
+**Trigger:** Prepared recipes/built/decoded values approach max_total_bytes and retained live evidence also approaches max_evidence_bytes (which may equal max_total_bytes).
+**Impact:** Total retained memory can approach roughly twice the advertised total, before clones/transients.
+**Evidence:** `crates/packetcraftr-workflow/src/fuzz/mutation/preparation.rs:50-53,91-97,149-164; crates/packetcraftr-workflow/src/fuzz/execution.rs:159-217`
+**Recommended change:** Use one shared operation-wide memory budget for cases, decoded values, evidence, and transient authorization clones.
+
+### EC-132: One executor failure discards structured results for earlier sent cases
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** live fuzz / Partial-result / retry hazard
+**Trigger:** A later case fails after prior cases transmitted successfully.
+**Impact:** fuzz_live returns Err without a partial FuzzResult, so retries can duplicate prior cases and evidence is lost.
+**Evidence:** `crates/packetcraftr-workflow/src/fuzz/engine.rs:143-219`
+**Recommended change:** Carry partial result/last committed case in FuzzError or support continue-on-error with bounded error records.
+
+### EC-135: A stdout/flush failure after live side effects reports the command as failed
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** CLI output / Transaction / retry hazard
+**Trigger:** send/exchange/replay/scan/traceroute/DNS/fuzz transmits, then JSON/text/NDJSON output fails.
+**Impact:** Shell sees nonzero and an operator/automation may retry, duplicating traffic even though the operation committed.
+**Evidence:** `crates/packetcraftr-cli/src/rendering.rs:95-105,163-170,198-225; crates/packetcraftr-cli/src/runtime.rs:116-141`
+**Recommended change:** Emit/prepare output before irreversible work where possible; otherwise return a distinct committed-but-output-failed exit/status with durable evidence.
+
+### EC-140: A release tag can publish without running or depending on CI tests/lints
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** release workflow / Release-safety gap
+**Trigger:** Push a v* tag on a commit whose CI failed or never ran.
+**Impact:** Release workflow only validates metadata/build/archive smoke and can publish a compiling but broken release.
+**Evidence:** `.github/workflows/release.yml:1-15,109-160,245-268`
+**Recommended change:** Require a successful CI workflow/check suite for the exact tag SHA, or rerun the full release gate in the workflow.
+
+### EC-141: Windows all-features smoke never exercises Npcap loading/activation
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** release workflow / Runtime coverage gap
+**Trigger:** Packaged binary has a DLL search, ABI, warning-status, or runtime-version issue.
+**Impact:** --version succeeds while native capture/transmit remains broken.
+**Evidence:** `.github/workflows/release.yml:200-228; release notes require Npcap runtime`
+**Recommended change:** Add a no-privilege loader/version probe and mocked activation-status test on Windows release artifacts.
+
+### EC-144: Date gates will intentionally fail every CI run after fixed 2026 deadlines
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** CI dependency policy / Operational time bomb
+**Trigger:** The calendar reaches 2026-09-16 or 2026-10-12 without editing/remediating the exception.
+**Impact:** All pushes/PRs fail regardless of code changes.
+**Evidence:** `.github/workflows/ci.yml:35-40`
+**Recommended change:** Track the remediation as a scheduled issue/automation and make the error message name the required dependency/action.
+
+### EC-149: Release/CI smoke does not exercise real route/capture/transmit startup on macOS or Windows
+
+**Severity / priority / confidence:** Medium / P1 / Confirmed
+**Component / type:** native runtime CI / Runtime coverage gap
+**Trigger:** Builds link but native API behavior, permissions, media mapping, or loader integration regresses.
+**Impact:** Compilation and --version smoke pass while core native features fail at runtime.
+**Evidence:** `.github/workflows/ci.yml platform matrix and .github/workflows/release.yml archive smoke steps`
+**Recommended change:** Add privilege-free interface/route probes and mocked backend contract tests per platform; keep privileged E2E where runners allow it.
+
+## Complete compact catalogue
+
+### AH
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-098 | Info | P3 | Confirmed | Authentication data is represented but never verified | `crates/packetcraftr-protocol/src/tunnel/ipsec.rs:264-486` |
+
+### ARP
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-102 | Info | P3 | Confirmed | Typed ARP support is limited to Ethernet/IPv4 | `ARP codec in crates/packetcraftr-protocol/src/link` |
+
+### CI MSRV
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-142 | Low | P2 | Confirmed | MSRV checks cover Linux only | `.github/workflows/ci.yml:97-123; platform test matrix uses rust-toolchain current at 48-89` |
+
+### CI dependency policy
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-144 | Medium | P1 | Confirmed | Date gates will intentionally fail every CI run after fixed 2026 deadlines | `.github/workflows/ci.yml:35-40` |
+
+### CI features
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-143 | Low | P2 | Confirmed | Feature-powerset coverage runs only on Linux | `.github/workflows/ci.yml:149-152 versus platform jobs 48-89` |
+
+### CLI JSON
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-137 | Low | P2 | Confirmed | Pretty aggregate JSON buffers the entire serialized document | `crates/packetcraftr-cli/src/rendering.rs:95-99` |
+
+### CLI NDJSON
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-138 | Low | P2 | High | A partial terminal record can be followed by another attempted error record | `crates/packetcraftr-cli/src/rendering.rs:216-225; crates/packetcraftr-cli/src/runtime.rs:119-139` |
+
+### CLI capture output
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-139 | Low | P2 | Confirmed | Capture-file output is fully buffered in memory | `crates/packetcraftr-cli/src/rendering.rs:29-67` |
+
+### CLI output
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-135 | Medium | P1 | Confirmed | A stdout/flush failure after live side effects reports the command as failed | `crates/packetcraftr-cli/src/rendering.rs:95-105,163-170,198-225; crates/packetcraftr-cli/src/runtime.rs:116-141` |
+| EC-136 | Low | P2 | Confirmed | Broken pipe is treated as a generic I/O failure | `crates/packetcraftr-cli/src/rendering.rs:163-170,198-225` |
+
+### ESP
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-097 | Info | P3 | Confirmed | ESP trailer/padding/ICV structure is mostly opaque | `crates/packetcraftr-protocol/src/tunnel/ipsec.rs:104-190` |
+
+### Ethernet
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-103 | Info | P3 | Confirmed | Values 1501..1535 remain an ambiguous length/EtherType gap | `Ethernet decoder selection logic in packetcraft protocol link codecs` |
+
+### FieldValue
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-083 | Medium | P2 | High | Programmatically constructed deeply nested lists can overflow the stack | `crates/packetcraftr-packet/src/field/value.rs:175-204; public enum construction bypasses bounded document parsers` |
+
+### GENEVE
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-095 | Medium | P2 | High | Unknown critical options do not stop inner-payload dissection | `crates/packetcraftr-protocol/src/tunnel/geneve.rs:96-115 and decode path` |
+
+### GRE
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-100 | Info | P3 | Confirmed | Only GRE version 0 without routing/PPTP variants is modeled | `crates/packetcraftr-protocol/src/gre/model.rs:201-223; crates/packetcraftr-protocol/src/gre/mod.rs` |
+
+### IPv4 options
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-090 | Low | P2 | Confirmed | IPv4 option bytes are width-checked but not TLV-validated | `crates/packetcraftr-protocol/src/network/ipv4.rs:116-159,340-355` |
+
+### IPv6 SRH
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-088 | Medium | P1 | Confirmed | Valid Segment Routing Headers containing TLVs/padding are rejected | `crates/packetcraftr-protocol/src/ipv6/model.rs:505-604,607-674` |
+
+### IPv6 options
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-089 | Low | P2 | Confirmed | Hop-by-Hop and Destination option bytes are not semantically parsed | `crates/packetcraftr-protocol/src/ipv6/model.rs:91-180` |
+
+### IPv6/UDP
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-092 | Info | P3 | Confirmed | Jumbogram payload-length semantics are unsupported end-to-end | `IPv6 codec crates/packetcraftr-protocol/src/network/ipv6.rs:154-156,224-237; UDP decode length checks` |
+
+### Layer-2 transmit
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-026 | Low | P2 | Confirmed | Every packet send creates and activates a fresh pcap/Npcap handle | `crates/packetcraftr-net/src/platform/pcap_backend.rs:68-89; crates/packetcraftr-net/src/platform/npcap/supported/transmit.rs:18-53` |
+
+### Linux interfaces
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-034 | Low | P2 | Confirmed | All non-Ethernet link types are modeled as RAW Layer 3 | `crates/packetcraftr-net/src/platform/linux/query.rs:153-187` |
+
+### Linux netlink
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-035 | Medium | P1 | Confirmed | Route and interface queries have no operation timeout | `crates/packetcraftr-net/src/platform/linux/worker.rs:108-133,146-237` |
+| EC-036 | Low | P3 | Confirmed | A long-lived caller thread retains its own netlink worker thread | `crates/packetcraftr-net/src/platform/linux/worker.rs:135-158` |
+
+### Linux route
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-032 | Medium | P1 | Confirmed | ECMP/multipath routing always chooses the first non-dead nexthop | `crates/packetcraftr-net/src/platform/linux/query.rs:64-85` |
+| EC-033 | Low | P2 | Confirmed | A route reply missing OIF silently inherits the caller hint | `crates/packetcraftr-net/src/platform/linux/query.rs:86-90` |
+
+### MPLS
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-099 | Low | P2 | Confirmed | Inner protocol is guessed from the first payload nibble | `crates/packetcraftr-protocol/src/tunnel/mpls.rs:156-168` |
+
+### NDP
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-067 | Medium | P2 | Confirmed | Neighbor Advertisements behind IPv6 extension headers are not recognized | `crates/packetcraftr-net/src/neighbor/wire.rs:277-285` |
+| EC-068 | Low | P2 | High | Matching requires a narrow source/destination MAC pattern | `crates/packetcraftr-net/src/neighbor/wire.rs matcher and provider request context` |
+
+### Npcap
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-023 | Medium | P1 | Confirmed | Positive pcap_activate warning statuses are treated as fatal errors | `crates/packetcraftr-net/src/platform/npcap/supported/handles.rs:121-130; only negative codes are modeled in supported/abi.rs:16-23` |
+| EC-024 | Low | P2 | High | Unsupported immediate mode aborts capture instead of falling back | `crates/packetcraftr-net/src/platform/npcap/supported/handles.rs:114-120,134-153` |
+| EC-025 | Low | P2 | Confirmed | The first DLL-load failure is cached for the entire process | `crates/packetcraftr-net/src/platform/npcap/supported/loader.rs:140-155` |
+
+### PCAP/PCAPNG
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-072 | Medium | P1 | Confirmed | FCS metadata is discarded | `crates/packetcraftr-capture/src/pcap/classic.rs:41-51; Interface has no FCS field at pcap/models.rs:194-205; PCAPNG parser recognizes only tsresol/tsoffset` |
+
+### PCAPNG EPB
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-075 | Low | P3 | High | Only direction bits are interpreted from EPB flags | `PCAPNG packet option parsing and Frame direction model` |
+
+### PCAPNG options
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-073 | Info | P3 | Confirmed | Option lists without opt_endofopt are accepted | `crates/packetcraftr-capture/src/pcap/pcapng/options.rs:13-70 and tests` |
+| EC-074 | Low | P3 | Confirmed | Unknown options are discarded rather than preserved | `crates/packetcraftr-capture/src/pcap/pcapng/interface.rs:35-82 and other option visitors` |
+
+### PCAPNG timestamps
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-081 | Low | P3 | High | Exotic resolution/offset combinations can be rejected despite fitting the file format | `TimestampResolution conversion in capture pcap wire/model paths` |
+
+### PPPoE discovery
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-096 | Low | P3 | Confirmed | Discovery tags are opaque and malformed TLVs are not diagnosed | `crates/packetcraftr-protocol/src/tunnel/pppoe.rs:261-270` |
+
+### Packet API
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-082 | Medium | P2 | Confirmed | mutate_fixed_width_layer relies entirely on caller discipline | `crates/packetcraftr-packet/src/model.rs:212-226` |
+
+### SCTP
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-093 | Low | P2 | Confirmed | Decoder accepts nonzero chunk padding that strict encoder rejects | `crates/packetcraftr-protocol/src/transport/sctp.rs:111,152,282-290` |
+| EC-094 | Info | P3 | Confirmed | An SCTP packet with no chunks is rejected | `crates/packetcraftr-protocol/src/transport/sctp.rs:240-243` |
+
+### TCP options
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-091 | Low | P2 | Confirmed | TCP option bytes are width-checked but not TLV-validated | `crates/packetcraftr-protocol/src/transport/tcp.rs:130-155,241-254` |
+
+### TCP probe matcher
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-113 | Medium | P1 | Confirmed | Bare RST sequence matching aliases all SYN probes whose ACK field is zero | `crates/packetcraftr-protocol/src/matcher/reverse_flow.rs:77-123; traceroute SYN construction crates/packetcraftr-workflow/src/traceroute/engine.rs:271-302; tests accept bare RST at reverse_flow/tests.rs:145-163` |
+
+### TCP reassembly
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-010 | Medium | P1 | Confirmed | Traffic after a clean FIN can implicitly create a fresh generation | `crates/packetcraftr-session/src/tcp/engine.rs:64-70; crates/packetcraftr-session/src/tcp/pending.rs:189-199; crates/packetcraftr-session/src/tcp/pending/commit.rs:60-68` |
+| EC-011 | Low | P2 | High | An empty ACK after FIN can be rejected as BeyondFinalSequence | `crates/packetcraftr-session/src/tcp/pending.rs:92-107` |
+| EC-012 | Low | P2 | Confirmed | Idempotent open_flow does not refresh last activity | `crates/packetcraftr-session/src/tcp/engine.rs:21-36,122-130` |
+| EC-013 | Medium | P1 | Confirmed | Flow identity omits interface, namespace, VRF, and tunnel context | `crates/packetcraftr-session/src/tcp.rs:25-31` |
+| EC-014 | Low | P2 | Confirmed | Midstream tuple reuse without a visible SYN requires external eviction | `crates/packetcraftr-session/src/tcp/engine.rs:64-70,140-150` |
+| EC-015 | Medium | P2 | High | Pending-merge and history growth use infallible transient allocations | `crates/packetcraftr-session/src/tcp/pending.rs:342-377; crates/packetcraftr-session/src/tcp/state.rs:90-110` |
+
+### UDP scan
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-117 | Low | P2 | Confirmed | Repeated attempts to one endpoint are transport-identical | `scan probe construction and shared ResponseSelector; ICMP quotes may carry extra IP identity but direct UDP does not` |
+
+### VXLAN
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-101 | Info | P3 | Confirmed | VXLAN-GPE/GBP extensions are not decoded as their own formats | `VXLAN codec in crates/packetcraftr-protocol/src/tunnel` |
+
+### Windows interfaces
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-041 | Low | P3 | Confirmed | Invalid UTF-16 friendly names silently become index-N | `crates/packetcraftr-net/src/platform/windows/adapter.rs:155-163,258-284` |
+| EC-042 | Low | P2 | Confirmed | Adapter enumeration gives up after four buffer-resize races | `crates/packetcraftr-net/src/platform/windows.rs:65-132` |
+| EC-043 | Low | P2 | Confirmed | Only Ethernet and Wi-Fi with a six-byte MAC are treated as Layer 2 | `crates/packetcraftr-net/src/platform/windows/adapter.rs:164-197` |
+
+### Windows route
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-044 | Low | P2 | Confirmed | Path-specific route MTU is never supplied to route normalization | `crates/packetcraftr-net/src/platform/windows.rs:249-267; crates/packetcraftr-net/src/route/native_policy.rs:69-78` |
+
+### analysis clock
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-016 | Medium | P1 | Confirmed | Instant overflow freezes capture time at the current value | `crates/packetcraftr-analysis/src/pipeline.rs:507-518` |
+
+### analysis follow
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-021 | Info | P3 | Confirmed | Client/server direction is anchored to the first captured sender across tuple reuse | `crates/packetcraftr-analysis/src/follow.rs:20-25,175-205` |
+
+### analysis pipeline
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-019 | Info | P3 | Confirmed | Filtering before reassembly intentionally creates stream gaps | `crates/packetcraftr-analysis/src/pipeline.rs:245-279` |
+
+### analysis statistics
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-017 | Low | P2 | Confirmed | Out-of-order timestamps make I/O buckets inconsistent with reported first_timestamp | `crates/packetcraftr-analysis/src/stats.rs:197-217` |
+
+### analysis stream index
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-020 | Info | P3 | Confirmed | tcp.stream identifies an endpoint conversation, not one TCP incarnation | `crates/packetcraftr-analysis/src/session_index.rs:15-42,44-82; CHANGELOG.md:164-177` |
+| EC-022 | Medium | P1 | Confirmed | Conversation IDs omit interface and network-context scope | `crates/packetcraftr-analysis/src/session_index.rs:20-41,51-82` |
+
+### analysis timing
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-018 | Low | P2 | Confirmed | PCAPNG Simple Packet Blocks receive a UNIX_EPOCH sentinel timestamp | `crates/packetcraftr-capture/src/pcap/pcapng/packet.rs:200-225; consumed by analysis pipeline timing` |
+
+### budget API
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-112 | Low | P3 | Confirmed | Calling start_accounting twice drops the previous prospective phase | `crates/packetcraftr-budget/src/lib.rs:64-87` |
+
+### capture Reader
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-076 | Low | P2 | Confirmed | Any read error permanently finishes the stream | `crates/packetcraftr-capture/src/pcap/reader.rs:193-203` |
+
+### capture Reader/Writer
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-080 | Info | P3 | Confirmed | get_mut/into_inner allow callers to violate stream invariants | `public Reader/Writer inner-access methods` |
+
+### capture Writer
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-077 | Low | P2 | Confirmed | Output failures are sticky but already-written bytes are irreversible | `capture writer state/error paths across classic and pcapng writers` |
+
+### classic PCAP writer
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-078 | Low | P3 | Confirmed | Timestamp range is limited to unsigned 32-bit seconds | `classic PCAP timestamp encoding in crates/packetcraftr-capture/src/pcap/classic.rs` |
+| EC-079 | Low | P3 | Confirmed | Microsecond output rejects sub-microsecond timestamps instead of rounding | `crates/packetcraftr-capture/src/pcap/writer.rs:441-449; crates/packetcraftr-capture/src/pcap/tests/transcode_cases.rs:209-228` |
+
+### client deadlines
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-055 | Medium | P1 | Confirmed | Deadlines are cooperative around synchronous provider calls | `crates/packetcraftr-client/src/lib.rs:473-550,566-585; exchange transaction provider calls` |
+
+### client send
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-056 | Medium | P1 | Confirmed | The one-packet send API has no timeout at all | `crates/packetcraftr-client/src/lib.rs:314-370` |
+
+### coverage CI
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-147 | Low | P3 | Confirmed | The 85% coverage gate measures Linux workspace code only | `.github/workflows/ci.yml:181-205` |
+
+### exchange accumulation
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-057 | Low | P2 | Confirmed | max_responses=0 silently discards every otherwise matching response | `crates/packetcraftr-client/src/exchange/accumulator.rs:221-237; options validation allows zero` |
+| EC-058 | Low | P2 | Confirmed | A matching frame arriving after the response cap is dropped instead of preserved as unsolicited | `crates/packetcraftr-client/src/exchange/accumulator.rs:221-237` |
+
+### exchange capture
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-061 | Medium | P1 | Confirmed | Capture statistics completeness can veto otherwise valid exchange results | `client exchange finalization plus crates/packetcraftr-net/src/platform/live_capture/worker.rs:93-107` |
+
+### exchange options
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-062 | Info | P3 | Confirmed | A zero timeout is accepted and means preparation must finish immediately | `crates/packetcraftr-client/src/exchange/options.rs:14-44; contract default/field crates/packetcraftr-client/src/exchange/contract.rs:25-50` |
+
+### exchange promotion
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-059 | Info | P3 | Confirmed | Late workflow promotion clears retained unsolicited evidence | `crates/packetcraftr-client/src/exchange/accumulator.rs:377-385; locked by crates/packetcraftr-client/src/tests/promotion.rs:145-216` |
+
+### exchange transaction
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-060 | Medium | P1 | High | A failure after transmission can discard all committed send evidence | `crates/packetcraftr-client/src/exchange/transaction.rs and finalize paths; same pattern visible in replay engine` |
+
+### expression API
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-104 | Low | P2 | High | Standalone hexadecimal decoding has no public input-size ceiling | `crates/packetcraftr-packet/src/expression/parser.rs: decode_hex around 406+` |
+
+### external codecs
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-086 | Low | P2 | High | stop=true can still interact with next-child resolution | `crates/packetcraftr-packet/src/decode/engine.rs:302-372` |
+| EC-087 | Medium | P2 | High | Trusted codec callbacks can allocate before host-side bounds validation | `decode/build registry extension seams and post-return checks` |
+
+### fragment reassembly
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-001 | Medium | P1 | Confirmed | An older caller timestamp moves an active datagram backward in time | `crates/packetcraftr-session/src/fragment.rs:265-276,334-342; TCP already clamps at crates/packetcraftr-session/src/tcp/pending/commit.rs:26-29,93` |
+| EC-002 | Medium | P1 | Confirmed | A complete one-fragment datagram is rejected by the retained-table aggregate budget | `crates/packetcraftr-session/src/fragment.rs:238-263; crates/packetcraftr-session/src/fragment/accounting.rs:44-75` |
+| EC-003 | Medium | P1 | Confirmed | Non-final fragment payload length is not required to be an 8-byte multiple | `crates/packetcraftr-session/src/fragment.rs:150-168; encoder checks in crates/packetcraftr-protocol/src/network/ipv4.rs:172-183 and crates/packetcraftr-protocol/src/ipv6/model.rs:355-367` |
+| EC-004 | Low | P2 | High | Configured reassembly limits can permit impossible IP datagram lengths | `crates/packetcraftr-session/src/fragment.rs:161-168,293-307` |
+| EC-005 | Medium | P1 | Confirmed | Datagram identity omits interface, VRF, namespace, and tunnel context | `crates/packetcraftr-session/src/fragment.rs:24-30; adapter construction crates/packetcraftr-analysis/src/session_index.rs:249-286` |
+| EC-006 | Low | P2 | Confirmed | Completion allocation temporarily coexists with all retained segments | `crates/packetcraftr-session/src/fragment.rs:284-307` |
+| EC-007 | Medium | P2 | High | Huge programmatic limits reach infallible Vec allocations | `crates/packetcraftr-session/src/fragment.rs:302; crates/packetcraftr-session/src/fragment/commit.rs:20-45` |
+| EC-008 | Low | P3 | Confirmed | Duplicate fragments consume fragment-count budget and refresh liveness | `crates/packetcraftr-session/src/fragment.rs:184-193,238-276` |
+| EC-009 | Low | P3 | Confirmed | Completed datagrams have no replay tombstone | `crates/packetcraftr-session/src/fragment.rs:284-315` |
+
+### fuzz CI
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-146 | Low | P2 | Confirmed | Fuzz smoke runs only on Linux | `.github/workflows/ci.yml:212-255` |
+
+### fuzz lints
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-148 | Low | P2 | Confirmed | The separate fuzz workspace does not actually mirror root Clippy lints | `Cargo.toml:13-32; fuzz/Cargo.toml:14-24` |
+
+### fuzz request
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-130 | Low | P3 | Confirmed | Duplicate strategies are accepted | `fuzz request validation and pair construction crates/packetcraftr-workflow/src/fuzz/mutation/preparation.rs:32-43` |
+
+### fuzz shrinking
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-134 | Low | P3 | Confirmed | Shrink candidate deduplication is quadratic | `crates/packetcraftr-workflow/src/fuzz/mutation/value.rs:302-304` |
+
+### fuzz statistics
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-131 | Low | P2 | Confirmed | Offline and live packets_attempted use different meanings | `crates/packetcraftr-workflow/src/fuzz/engine.rs:31-38 versus live stats initialization/execution` |
+| EC-133 | Low | P2 | Confirmed | Elapsed time omits preparation, authorization, decoding, and retention overhead | `crates/packetcraftr-workflow/src/fuzz/engine.rs:220-228; preparation has separate Deadline accounting but not final stats` |
+
+### link synthesis
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-051 | Low | P2 | Confirmed | The materializer assumes Ethernet for Layer-2 construction | `crates/packetcraftr-net/src/route/materialize.rs and platform interface capability mappings` |
+
+### live capture
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-027 | Medium | P1 | Confirmed | A backend error makes already queued frames permanently undrainable | `crates/packetcraftr-net/src/platform/live_capture/session.rs:113-136` |
+| EC-028 | Medium | P1 | Confirmed | Initial statistics support is mandatory for readiness | `crates/packetcraftr-net/src/platform/live_capture/worker.rs:21-36` |
+| EC-029 | Medium | P1 | Confirmed | Final statistics failure converts a successful capture shutdown into failure | `crates/packetcraftr-net/src/platform/live_capture/worker.rs:93-107; crates/packetcraftr-net/src/platform/live_capture/session.rs:150-170` |
+| EC-030 | Medium | P1 | Confirmed | Receiver counter reset/backward movement becomes a near-2^32 drop delta | `crates/packetcraftr-net/src/platform/live_capture/queue.rs:220-255` |
+| EC-031 | Medium | P1 | Confirmed | Shutdown can block forever waiting for a nonresponsive worker | `crates/packetcraftr-net/src/platform/live_capture/session.rs:150-163` |
+
+### live fuzz
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-127 | High | P0 | Confirmed | Execution is not cryptographically or structurally bound to the authorized built packet | `crates/packetcraftr-workflow/src/fuzz/engine.rs:69-130,163-181; crates/packetcraftr-workflow/src/fuzz/execution.rs:41-118; crates/packetcraftr-workflow/src/fuzz/adapter.rs:64-75` |
+| EC-128 | Medium | P1 | Confirmed | Prepared-case and evidence memory budgets are independent | `crates/packetcraftr-workflow/src/fuzz/mutation/preparation.rs:50-53,91-97,149-164; crates/packetcraftr-workflow/src/fuzz/execution.rs:159-217` |
+| EC-129 | Low | P2 | Confirmed | Authorization clones every built packet while prepared cases retain their own copies | `crates/packetcraftr-workflow/src/fuzz/engine.rs:113-130` |
+| EC-132 | Medium | P1 | Confirmed | One executor failure discards structured results for earlier sent cases | `crates/packetcraftr-workflow/src/fuzz/engine.rs:143-219` |
+
+### macOS route
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-037 | Low | P2 | Confirmed | Routing-socket response search is capped at 64 messages, 4096 bytes, and two seconds | `crates/packetcraftr-net/src/platform/macos.rs:295-429` |
+| EC-038 | Low | P2 | High | Netmask prefix length counts set bits without checking contiguity | `crates/packetcraftr-net/src/platform/macos.rs:236-260` |
+| EC-040 | Low | P2 | High | Unscoped IPv6 link-local destinations are ambiguous | `crates/packetcraftr-net/src/platform/macos.rs:150-210 and RTM_IFSCOPE request construction` |
+
+### macOS route parser
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-039 | Low | P3 | Confirmed | Trailing undeclared bytes after sockaddr slots are ignored | `crates/packetcraftr-net/src/platform/macos/parser.rs:37-97` |
+
+### native runtime CI
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-149 | Medium | P1 | Confirmed | Release/CI smoke does not exercise real route/capture/transmit startup on macOS or Windows | `.github/workflows/ci.yml platform matrix and .github/workflows/release.yml archive smoke steps` |
+
+### neighbor cache
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-065 | Low | P2 | Confirmed | Fixed TTL entries are returned without reachability refresh | `crates/packetcraftr-net/src/neighbor/cache.rs:13-41; crates/packetcraftr-net/src/neighbor/provider.rs:308-342` |
+
+### neighbor resolution
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-063 | Low | P2 | Confirmed | Capture readiness receives an additional full attempt timeout | `crates/packetcraftr-net/src/neighbor/provider.rs:206-299` |
+| EC-064 | Low | P2 | Confirmed | Concurrent cache misses are not coalesced | `crates/packetcraftr-net/src/neighbor/provider.rs and cache lookup flow` |
+| EC-066 | Low | P2 | High | A valid matching response can be rejected because evidence retention is full | `crates/packetcraftr-net/src/neighbor/provider.rs:451-484` |
+| EC-069 | Medium | P1 | Confirmed | A learned neighbor is discarded if cleanup/statistics fails afterward | `crates/packetcraftr-net/src/neighbor/provider.rs:143-188` |
+
+### packet builder
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-084 | Medium | P2 | High | Packet-buffer growth uses infallible large allocation | `crates/packetcraftr-packet/src/build/engine/buffer.rs:95-134` |
+
+### packet public model
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-085 | Low | P2 | Confirmed | Direct object construction bypasses parser depth/size/shape limits | `public constructors across packet/model.rs and field/value.rs versus bounded parsers` |
+
+### probe pacing
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-108 | Low | P3 | Confirmed | Configured probes_per_second is conservative batch pacing, not actual start rate | `crates/packetcraftr-workflow/src/bounded_probe.rs:266-288` |
+
+### probe response selection
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-105 | Low | P2 | Confirmed | Every unsolicited frame is reclassified for every probe | `crates/packetcraftr-workflow/src/bounded_probe.rs:149-203` |
+| EC-106 | Medium | P1 | Confirmed | The same unsolicited frame can satisfy more than one probe | `crates/packetcraftr-workflow/src/bounded_probe.rs:186-203` |
+| EC-110 | Low | P3 | Confirmed | Matched response slices are sorted in place | `crates/packetcraftr-workflow/src/bounded_probe.rs:128-140` |
+
+### probe timing
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-107 | Low | P2 | Confirmed | Unsolicited freshness uses wall-clock SystemTime | `crates/packetcraftr-workflow/src/evidence/candidate_selection.rs:10-21` |
+
+### raw IP
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-046 | Medium | P1 | Confirmed | Native raw sends are synchronous and have no deadline/cancellation seam | `crates/packetcraftr-net/src/platform/raw_ip/submission.rs; client send/exchange only checks deadlines around provider calls` |
+| EC-047 | Low | P2 | Confirmed | A fresh raw socket is opened for every packet | `crates/packetcraftr-net/src/platform/raw_ip/submission.rs` |
+| EC-048 | Info | P3 | Confirmed | IPv6 jumbograms and UDP length-zero jumbograms are rejected | `crates/packetcraftr-net/src/platform/raw_ip/preparation.rs:146-163; protocol IPv6/UDP codecs` |
+| EC-049 | Low | P3 | Confirmed | IPv4 identification zero is rejected even for DF packets | `crates/packetcraftr-net/src/platform/raw_ip/preparation.rs` |
+
+### release integrity
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-145 | Low | P2 | Confirmed | Checksums are unsigned and colocated with the artifacts | `.github/workflows/release.yml:268-311,327-331` |
+
+### release workflow
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-140 | Medium | P1 | Confirmed | A release tag can publish without running or depending on CI tests/lints | `.github/workflows/release.yml:1-15,109-160,245-268` |
+| EC-141 | Medium | P1 | Confirmed | Windows all-features smoke never exercises Npcap loading/activation | `.github/workflows/release.yml:200-228; release notes require Npcap runtime` |
+
+### replay
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-119 | Medium | P1 | Confirmed | A successful transmission can be reported as DurationLimit before evidence emission | `crates/packetcraftr-workflow/src/replay/engine.rs:208-243` |
+| EC-120 | Medium | P1 | Confirmed | Output callback failure occurs after wire transmission | `crates/packetcraftr-workflow/src/replay/engine.rs:227-243` |
+| EC-121 | Medium | P1 | Confirmed | Invalid provider evidence is detected only after the provider may have sent | `crates/packetcraftr-workflow/src/replay/engine.rs:208-225` |
+| EC-125 | Medium | P1 | Confirmed | Any error discards the terminal summary for prior successful frames | `crates/packetcraftr-workflow/src/replay/engine.rs returns Result<ReplaySummary, ReplayError> without partial progress` |
+
+### replay interface
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-124 | Low | P2 | Confirmed | Validated interface metadata is cached for the rest of the run | `crates/packetcraftr-workflow/src/replay/adapter.rs:200-278` |
+
+### replay numbering
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-126 | Low | P3 | Confirmed | Selector frame number is 1-based but emitted source_sequence is 0-based | `crates/packetcraftr-workflow/src/replay/model.rs:186-200; crates/packetcraftr-workflow/src/replay/engine.rs:65-70,108,117,233` |
+
+### replay timing
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-122 | Low | P2 | Confirmed | Backward source timestamps collapse to zero delay | `crates/packetcraftr-workflow/src/replay/model.rs:45-53` |
+| EC-123 | Low | P3 | Confirmed | Sub-nanosecond scaled/fixed intervals are rejected rather than rounded | `crates/packetcraftr-workflow/src/replay/model.rs:54-83` |
+
+### route materialization
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-045 | Medium | P1 | High | IPv4 directed broadcasts are not recognized as Ethernet broadcast | `crates/packetcraftr-net/src/route/materialize.rs:232-252; crates/packetcraftr-net/src/platform/raw_ip/submission.rs:62-67` |
+
+### route model
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-070 | Low | P2 | Confirmed | Public RouteDecision values can be internally inconsistent | `public structs in crates/packetcraftr-net/src/route/models.rs and normalization only on native paths` |
+| EC-071 | Low | P3 | Confirmed | needs_neighbor_resolution trusts manually inconsistent route state | `crates/packetcraftr-net/src/route/models.rs:169-176` |
+
+### routing / send
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-050 | Info | P3 | Confirmed | Exact-send mode never falls back to IPv4 fragmentation | `client MTU validation and raw preparation paths` |
+
+### scan aggregation
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-118 | Low | P3 | Confirmed | One higher-ranked result permanently dominates contradictory later evidence | `crates/packetcraftr-workflow/src/scan/engine.rs:580-606 and classification rank logic` |
+
+### scan classification
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-116 | Low | P2 | Confirmed | PortUnreachable is classified Closed for every transport | `crates/packetcraftr-workflow/src/scan/classification.rs:19-37` |
+
+### target resolution
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-052 | Medium | P1 | Confirmed | Only the first resolved address matching packet family is routed | `crates/packetcraftr-client/src/target/contract.rs:133-142; crates/packetcraftr-client/src/lib.rs:267-276` |
+| EC-053 | Medium | P2 | High | A nonconforming resolver can force unbounded duplicate scanning | `crates/packetcraftr-client/src/policy/authorization.rs:87-119; system resolver crates/packetcraftr-client/src/target/contract.rs:219-249` |
+
+### traceroute
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-114 | Low | P2 | Confirmed | Any terminal result among attempts stops later hops | `crates/packetcraftr-workflow/src/traceroute/engine.rs:667-673` |
+
+### traceroute ICMP
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-115 | Low | P3 | Confirmed | Probe identity truncates the operation sequence to 16 bits | `crates/packetcraftr-workflow/src/traceroute/engine.rs:314-322` |
+
+### traffic policy
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-054 | Low | P2 | Confirmed | IPv4-mapped private IPv6 and multicast are classified as public | `crates/packetcraftr-client/src/address.rs:8-25` |
+
+### workflow deadlines
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-111 | Low | P2 | Confirmed | A post-execution deadline check can mask the executor error | `crates/packetcraftr-workflow/src/bounded_probe.rs:290-299` |
+
+### workflow statistics
+
+| ID | Sev | Pri | Confidence | Finding | Evidence |
+|---|---:|---:|---|---|---|
+| EC-109 | Low | P2 | Confirmed | Stats.elapsed omits significant orchestration work | `crates/packetcraftr-workflow/src/bounded_probe.rs:262-318; crates/packetcraftr-workflow/src/fuzz/engine.rs:152-224` |
+
+## Supplemental findings and refinements
+
+The following entries come from the other two reports. “New” means the broad `EC-*` catalogue has no equivalent entry; “expands” means the supplemental report identifies a materially broader mechanism or impact.
+
+- **SUP-001 — PCAPNG metadata has no cumulative byte budget** (`High`, new). The reader permits 4,096 metadata blocks of up to 16 MiB each and reads a block body before incrementing/checking the block count. A hostile stream can therefore drive roughly 64 GiB of metadata I/O while higher-level frame-byte budgets remain untouched. **Evidence:** `crates/packetcraftr-capture/src/pcap/models.rs:12-19`; `crates/packetcraftr-capture/src/pcap/reader.rs:207-305`. **Action:** check declared block length against per-gap and operation-wide metadata-byte budgets before reading the body, and pass remaining operation budget into the reader.
+
+- **SUP-002 — Final external-codec output is not re-authorized** (`High`, new). Destination policy is applied before route planning, but an external codec can participate in a second full build after MAC materialization. The final path checks length and permissive-build status, not the final destination. A stateful or defective trusted codec can therefore change route-bearing bytes after authorization. **Evidence:** `crates/packetcraftr-client/src/lib.rs:289-356,483-552`; `crates/packetcraftr-client/src/materialize.rs:192-204`; `crates/packetcraftr-packet/src/build/engine.rs:219-269`. **Action:** extract and authorize destinations after the final build, or build network bytes once and patch only a validated Ethernet field range.
+
+- **SUP-003 — Transport filtering can prevent fragment reassembly entirely** (`High impact`, new mechanism; classification disputed). The display filter runs before fragment reassembly, while fragmented IPv4/IPv6 payloads remain `Raw`. A filter such as `tcp.port == 80` can reject every fragment before a TCP layer exists. **Evidence:** `crates/packetcraftr-analysis/src/pipeline.rs:245-253,426-435`; `crates/packetcraftr-protocol/src/network/ipv4.rs:329-363`; `crates/packetcraftr-protocol/src/ipv6/model.rs:431-448`. **Action:** feed bounded stateful analysis before display filtering, or add an explicit fragment-aware filtering phase.
+
+- **SUP-004 — Release configuration pins a compiler version covered by a reported critical optimizer fix** (`High operational`, new, conditional). `rust-toolchain.toml` pins Rust 1.97.0, and one source report states that Rust 1.97.1 predates v0.4.0 and fixes a critical x86-64 miscompilation. The configuration is directly checkable; no PacketcraftR artifact corruption was demonstrated. **Evidence:** `rust-toolchain.toml:1-3`; `CHANGELOG.md:31`; `.github/workflows/release.yml:156-159`. **Action:** independently confirm the upstream advisory, pin at least 1.97.1 if applicable, and rebuild/reissue affected x86-64 artifacts from a clean target.
+
+- **SUP-005 — Reassembly performs full-table expiry scans on pushable traffic** (`Medium`, new). Analysis calls TCP or fragment expiry before each push, and expiry scans the complete active table; fragment expiry also sorts collected keys. Crafted captures can force approximately `O(frames × active_flows)` work. **Evidence:** `crates/packetcraftr-analysis/src/pipeline.rs:273-278,426-434`; `crates/packetcraftr-session/src/tcp/engine.rs:122-132`; `crates/packetcraftr-session/src/fragment.rs:334-365`. **Action:** use an expiry heap/timing wheel or otherwise inspect only states whose deadlines are due.
+
+- **SUP-006 — Response freshness starts before a blocking send commits** (`Medium`, new). Exchange records the freshness anchor before `io.send` returns. A matching frame observed during a slow provider call can later be treated as an unambiguous post-send response, while moving the anchor after return would incorrectly reject very fast legitimate replies. **Evidence:** `crates/packetcraftr-client/src/exchange/transaction.rs:210-227`; `crates/packetcraftr-client/src/exchange/accumulator.rs:166-175,488-498`. **Action:** have providers report a transmission interval or commit instant and classify in-call observations as ambiguous when no commit marker exists.
+
+- **SUP-007 — Timestamp discontinuities can pin the analysis clock beyond the overflow case** (`Medium`, expands `EC-016`). A future first timestamp, a later forward outlier, or `Instant` overflow can cause subsequent timestamps to clamp to a stale maximum, delaying expiry and allowing unrelated state to coexist. **Evidence:** `crates/packetcraftr-analysis/src/pipeline.rs:474-529`. **Action:** define a typed discontinuity policy: reject, expire/re-anchor, or begin a new capture epoch.
+
+- **SUP-008 — Simultaneous-open side state is not coupled to TCP lifecycle** (`Medium`, new). `half_open_pure_syns` is pruned only by later non-pure traffic in the same direction, not by flow expiry, eviction, close, reset, replacement, or flush. Historical keys can permanently consume its cap and disable protection for new flows. **Evidence:** `crates/packetcraftr-analysis/src/pipeline.rs:168-172,283-290,359`; TCP removal paths in `crates/packetcraftr-session/src/tcp/engine.rs`. **Action:** derive the decision from generation-aware reassembler state or prune the side table on every lifecycle event.
+
+- **SUP-009 — Public Serde deserialization bypasses packet-document hardening** (`Low/Medium`, new). `PacketDocument`, `LayerDocument`, and recursive `FieldValue` shapes publicly derive `Deserialize`, while the stable byte, depth, layer, YAML, and structural limits live only in bounded parse constructors. Downstream generic deserialization can silently bypass those limits. **Evidence:** `crates/packetcraftr-packet/src/document/model.rs:31-44,147-218`; `crates/packetcraftr-packet/src/field/value.rs:59-77`. **Action:** remove direct checked-type deserialization, introduce an explicitly unchecked intermediate type, or implement bounded custom conversion.
+
+- **SUP-010 — Workflow promotion deletes evidence in more cases than deadline expiry** (`High impact`, expands `EC-059`). Promotion transfers ownership out of `unsolicited`. On deadline expiry, missing freshness, or a frame observed before all requests become eligible, some or all candidates can be dropped instead of returned as ambient evidence. **Evidence:** `crates/packetcraftr-client/src/exchange/accumulator.rs:299-385`; `crates/packetcraftr-client/src/tests/promotion.rs:145-216,285-350`. **Action:** keep captured evidence append-only and store correlation as frame/request references plus eligibility metadata.
+
+- **SUP-011 — Replay read-side budgets are bypassable and enforced after reads** (`High`, new). Selector-skipped frames bypass `max_bytes`, permitting about 156 GiB of payload reads under the stated defaults. Frame-count and per-frame-size checks also occur only after the reader has returned the complete frame. **Evidence:** `crates/packetcraftr-workflow/src/replay/engine.rs:65-138`; `crates/packetcraftr-workflow/src/replay/model.rs:90-105,175-194`. **Action:** charge every returned frame to a read-side counter and pass remaining count/size/byte budgets into the reader before body allocation.
+
+- **SUP-012 — Stream IDs are allocated before filtering** (`Medium`, new). Every decoded flow enters the global stream map before the filter runs, so 8,192 irrelevant flows can exhaust `max_flows` before a targeted frame is reached. **Evidence:** `crates/packetcraftr-analysis/src/pipeline.rs:232-253`; `crates/packetcraftr-analysis/src/session_index.rs:62-82`. **Action:** separate global numbering from selected-flow limits, or make global indexing an explicit mode.
+
+- **SUP-013 — Analysis frame and byte ceilings are post-read limits** (`Medium`, new). With `max_frames=N`, frame `N+1` is fully read before failure. A frame exceeding the total-byte limit and preceding PCAPNG metadata are likewise read before the analysis layer rejects them. **Evidence:** `crates/packetcraftr-analysis/src/pipeline.rs:185-219`; `crates/packetcraftr-capture/src/pcap/reader.rs:207-305`. **Action:** enforce remaining limits in the reader before record bodies are read.
+
+- **SUP-014 — TCP history accounting does not reconcile actual `VecDeque` capacity** (`Medium`, new). Planning charges a requested capacity, then commit calls `VecDeque::with_capacity`; allocator/container rounding can reserve more than was charged. **Evidence:** `crates/packetcraftr-session/src/tcp/state.rs:56-62,98-105`; `crates/packetcraftr-session/src/tcp/pending/accounting.rs:67-80`. **Action:** use fallible exact reservation where possible and charge the actual resulting capacity.
+
+- **SUP-015 — Live-capture `max_bytes` measures payload, not queue-resident memory** (`Medium`, new). Queue accounting omits frame structs, `Bytes` handles, deque slots/capacity, and metadata, so many tiny frames can consume several times the configured amount. **Evidence:** `crates/packetcraftr-net/src/capture.rs:21-24`; `crates/packetcraftr-net/src/platform/live_capture/queue.rs:86-94,200-214,261-269`. **Action:** rename the contract to payload bytes or conservatively charge fixed per-frame/container overhead.
+
+- **SUP-016 — Response clones are not charged to a resident-memory budget** (`Medium`, expands `EC-106`). One unsolicited packet can be cloned into multiple response collections. Raw bytes may be shared, but decoded layer objects, layouts, diagnostics, and vector metadata are duplicated after the candidate was charged only once. **Evidence:** `crates/packetcraftr-client/src/exchange/accumulator.rs:314-350`; `crates/packetcraftr-client/src/exchange/contract.rs:21-59`; `crates/packetcraftr-packet/src/decode/engine.rs:72-79`. **Action:** store shared packet/frame references and budget response objects separately.
+
+- **SUP-017 — Filter `!=` uses existential repeated-value semantics** (`Medium`, new but documented). For a multi-valued path such as `tcp.port`, `tcp.port != 80` is true when any value differs, so traffic with one endpoint on port 80 usually passes. **Evidence:** `crates/packetcraftr-packet/src/filter/eval.rs:119-163`. **Action:** define inequality as “no value equals,” or require explicit `any`/`all` syntax and warn on the ambiguous legacy form.
+
+- **SUP-018 — Finalizing a built packet can create a second full-size copy** (`Medium`, new). When buffer slack remains, `into_bytes` copies the active slice while the original allocation is still alive, roughly doubling instantaneous packet memory. **Evidence:** `crates/packetcraftr-packet/src/build/engine/buffer.rs:95-142`. **Action:** split/freeze owned mutable bytes or document and budget the peak copy.
+
+- **SUP-019 — Generic macOS struct serialization has an unproven unsafe contract** (`Medium confidence`, new). `structure_bytes<T>` exposes arbitrary C-struct object representations. Current concrete sockaddr types may contain no problematic padding, but the generic helper cannot guarantee all bytes are initialized or wire-safe for future callers. **Evidence:** `crates/packetcraftr-net/src/platform/macos.rs:431-471`. **Action:** serialize concrete fields explicitly or prove no-padding/POD invariants per concrete type.
+
+- **SUP-020 — Neighbor evidence removal is quadratic** (`Low`, new). Repeated `Vec::remove(0)` shifts the remaining frame list and can produce `O(n²)` work. **Evidence:** `crates/packetcraftr-net/src/neighbor/provider.rs:451-484`. **Action:** use `VecDeque`.
+
+- **SUP-021 — Filter evaluation allocates for full program length on every packet** (`Low`, new). The evaluator creates a boolean vector sized to the postfix program even though only maximum stack depth is needed. **Evidence:** `crates/packetcraftr-packet/src/filter/eval.rs:37-65`. **Action:** record maximum stack depth at compile time and reuse bounded scratch storage if profiling justifies it.
+
+- **SUP-022 — Unknown string escapes silently remove the backslash** (`Low`, new). Expressions such as `"\q"` become `"q"` rather than failing or preserving the input. **Evidence:** `crates/packetcraftr-packet/src/expression/parser.rs:241-278`. **Action:** reject unknown escapes or preserve the backslash.
+
+- **SUP-023 — `frame.time_epoch` collapses pre-1970 timestamps to zero** (`Low`, new). Genuine negative epoch timestamps become indistinguishable from UNIX epoch and from other timestamp-sentinel behavior. **Evidence:** `crates/packetcraftr-packet/src/filter/eval.rs:232-249`. **Action:** expose signed seconds or an optional/provenance-aware timestamp.
+
+- **SUP-024 — Statistics offset conversion saturates at a `u64` nanosecond limit** (`Low`, new). The implementation saturates near 584 years even though `Duration` can represent a much larger seconds value. **Evidence:** `crates/packetcraftr-analysis/src/stats.rs:350-364`. **Action:** construct `Duration` from quotient/remainder seconds and nanoseconds.
+
+- **SUP-025 — Non-exhaustive enum conversions defer schema drift to runtime panic** (`Low`, new). Wildcard `unreachable!` arms keep downstream code compiling when an upstream non-exhaustive enum gains a variant, then panic when that variant is converted. **Evidence:** `crates/packetcraftr-output/src/protocols/model.rs:70-86`; `crates/packetcraftr-output/src/replay/model.rs:42-52`. **Action:** use typed fallible conversion or an exhaustive helper in the defining crate.
+
+- **SUP-026 — The nightly fuzz run has little job-time margin** (`Low operational`, new). A ten-minute campaign sits in a fifteen-minute job that must also update packages, install nightly and `cargo-fuzz`, build, and upload artifacts. **Evidence:** `.github/workflows/fuzz.yml:34-66`. **Action:** increase the job timeout or use a prepared image.
+
+- **SUP-027 — Release dependency verification is Linux-specific** (`Low operational`, expands `EC-141` / `EC-149`). Release smoke uses `ldd` but has no equivalent `otool -L`, Windows import inspection, or functional native-backend initialization. **Evidence:** `.github/workflows/release.yml:229-236`. **Action:** add target-native dependency inspection and a privilege-free backend startup probe.
+
+- **SUP-028 — `tcp.stream` has conflicting intended semantics across the reports** (`Design decision`, refinement of `EC-020`). The implementation permanently indexes a canonical four-tuple, while one report expects a connection-generation ID and another says endpoint-conversation semantics are deliberate. **Evidence:** `crates/packetcraftr-analysis/src/session_index.rs:20-82`; changelog/follow behavior cited by `EC-020`. **Action:** retain the current field only if it is explicitly named/documented as a conversation ID; add a separate generation-aware connection ID if Wireshark-style stream semantics are required.
+
+- **SUP-029 — The `paste` advisory waiver is narrow and time-bounded** (`Informational`, governed exception rather than a defect). One report confirmed a documented exception for `RUSTSEC-2024-0436` with a reverse-dependency explanation, internal remediation target, and hard expiry. **Evidence:** `deny.toml:10-16`; `docs/security/RUSTSEC-2024-0436.md`. **Action:** keep the deadline and do not broaden or silently extend the waiver.
+
+## Classification conflicts
+
+1. **Connection identity:** `EC-020` treats four-tuple-wide `tcp.stream` as deliberate endpoint-conversation behavior; `SUP-028` records another report’s claim that users will reasonably read it as a per-connection generation. This needs an API/product decision, not a severity vote.
+2. **Filtering before reassembly:** the broad report treats pre-reassembly filtering and resulting stream gaps as intentional (`EC-019`), while `SUP-003` shows that a transport filter may eliminate every fragment before transport fields exist. Even if the ordering is intentional, the fragmented-traffic consequence should be documented and regression-tested.
+3. **Evidence deletion:** deadline-driven clearing is explicitly covered by tests (`EC-059`), while `SUP-010` classifies it as a high-impact evidence-preservation failure and identifies additional deletion paths. Intentional behavior can still violate the public forensic contract; ownership and API semantics should be reviewed together.
+
+## Supplemental priority regression tests
+
+1. `pcapng_metadata_budget_rejects_declared_block_before_body_read`: a metadata-heavy stream must fail at the configured cumulative limit without consuming the next block body.
+2. `external_codec_final_build_cannot_change_authorized_destination`: a stateful test codec changes its destination on the second build and the client rejects it before send.
+3. `fragmented_transport_filter_has_explicit_semantics`: lock in the chosen behavior for `tcp.port == 80` over a fragmented TCP datagram.
+4. `promotion_never_deletes_unsolicited_evidence`: cover deadline, `freshness=None`, and partially eligible request sets.
+5. `replay_read_budget_charges_selector_skips`: selector-skipped frames must still exhaust the read-side byte limit.
+6. `analysis_limits_reject_before_next_record_body`: frame and byte limits are communicated to the capture reader before the over-limit body is read.
+7. `capture_clock_discontinuity_starts_new_epoch_or_errors`: exercise a future first timestamp, a large forward jump, backward motion, and `Instant` overflow.
+8. `expired_or_evicted_flow_removes_half_open_syn_state`: all TCP lifecycle removals release the associated simultaneous-open guard.
+9. `tcp_history_charges_actual_reserved_capacity`: allocator rounding cannot leave retained capacity uncharged.
+10. `repeated_field_inequality_matches_documented_quantifier`: cover source/destination values on opposite sides of the predicate.
+11. `pre_epoch_filter_timestamp_is_not_unix_epoch`: negative capture time remains distinguishable from zero and unavailable time.
+12. `release_compiler_pin_is_not_covered_by_active_critical_advisory`: CI checks the pinned compiler against the project’s accepted advisory source.
+
+## Baseline catalogue regression tests
+
+1. `fragment_out_of_order_now_does_not_regress_last_update`: push at T=10, duplicate/new fragment at T=5, assert expiry uses T=10.
+2. `single_fragment_completion_does_not_consume_retained_aggregate_budget`: fill retained table, then complete an independent offset-0 final fragment successfully.
+3. `fragment_rejects_nonfinal_payload_not_multiple_of_eight`: exercise IPv4 and IPv6 adapter paths plus direct API.
+4. `reassembly_keys_are_interface_scoped`: identical fragment/TCP tuples on interfaces 1 and 2 remain independent.
+5. `npcap_positive_activate_warning_is_success`: mock every positive warning class and assert a diagnostic plus usable handle.
+6. `capture_drains_queued_frames_before_terminal_error`: codify the desired queue/error precedence.
+7. `native_drop_counter_reset_is_not_wrap`: lower current counter must reset/mark discontinuity, not add billions.
+8. `target_resolution_falls_back_to_second_routable_address`: first same-family route fails, second succeeds without re-resolution.
+9. `ndp_na_after_extension_header_matches`: Hop-by-Hop/Destination/AH-bounded chains reach ICMPv6.
+10. `srh_with_tlv_round_trips`: Last Entry determines segment list; trailing TLVs/padding are preserved.
+11. `bare_rst_cannot_match_two_syn_probes`: multiple request sequences on one tuple receive a bare sequence-zero RST; at most one/none correlates.
+12. `unsolicited_frame_is_consumed_once`: one exact response cannot satisfy multiple scan/traceroute attempts.
+13. `replay_error_carries_committed_progress`: force deadline/output/evidence failure after transmit and assert partial summary/committed marker.
+14. `fuzz_executor_must_send_authorized_build`: malicious executor returns internally consistent but different bytes/destination; boundary rejects before/after send as designed.
+15. `pcap_fcs_metadata_survives_transcode`: classic PCAP and PCAPNG FCS length remains available and payload dissectors exclude it when appropriate.
+16. `release_requires_ci_for_tag_sha`: workflow-level policy/test that a tag cannot publish without the full check suite.
+
+## Recommended remediation order
+
+1. **Close authorization gaps:** bind live-fuzz execution to the exact authorized bytes/destination and re-authorize the external codec’s final built destination.
+2. **Move limits before reads and allocations:** add cumulative PCAPNG metadata accounting, charge selector-skipped replay frames, and pass remaining analysis/replay limits into capture readers.
+3. **Preserve committed work and evidence:** make captured evidence append-only and return committed-state/partial-result errors for replay, exchange, fuzz, and CLI output failures.
+4. **Fix state identity and filtering contracts:** add interface/direction/encapsulation scope, decide whether stream IDs represent conversations or generations, and specify fragmented-traffic filter behavior.
+5. **Repair clocks and lifecycle coupling:** keep fragment activity monotonic, define discontinuity epochs, and prune simultaneous-open state with TCP lifecycle events.
+6. **Repair native correctness:** handle Npcap warnings, drain queues consistently, recognize counter resets, bound shutdown/netlink operations, and correct directed-broadcast routing.
+7. **Make memory ceilings truthful:** account for empty flow metadata, actual container capacity, queue/container overhead, response clones, transient merge buffers, and packet-finalization copies; use fallible reservation on input-sized allocations.
+8. **Tighten response correlation:** fix bare TCP RST matching, one-frame/one-probe assignment, and pre-send freshness ambiguity.
+9. **Address wire compatibility:** support SRH TLVs, NDP extension chains, and capture FCS metadata, then prioritize option/tag parsing according to product scope.
+10. **Harden release gates:** verify the compiler advisory, require CI for the exact tag SHA and branch ancestry, add target-native artifact probes, and publish signed provenance.
+
+## Important non-defects / deliberate semantics
+
+- Current changelog/tests treat `tcp.stream` as an endpoint-conversation identifier. `SUP-028` remains open because the field name can imply per-connection generations to downstream consumers.
+- Workflow promotion clearing unsolicited evidence at the deadline is explicitly tested. `SUP-010` challenges the public contract and additional deletion paths, not whether the current test matches the implementation.
+- Filters run before reassembly by design. `SUP-003` records the stronger consequence that transport-layer filters may reject every fragment before a transport layer exists.
+- Exact send/replay intentionally avoids ordinary IP-stack fragmentation and supports only modeled media. These are compatibility/product-scope edges unless broader behavior is promised.
+- Opaque IP/TCP/PPPoE/IPsec option payloads are memory-safe preservation choices. They become correctness issues only when callers interpret “decoded” as semantically validated.
+- IPv6 jumbograms, GRE variants, VXLAN-GPE/GBP, generic ARP, and some non-Ethernet media are explicit support limitations, not hidden memory-safety bugs.
+
+## Consolidation caveats
+
+- The three inputs were LLM-generated static reports. This document merges their claims and evidence; it does not certify correctness or exploitability.
+- The live-capture queue’s error-before-drain behavior is a data-retention/API policy issue, not a memory-corruption claim.
+- The inspected Npcap FFI was reported to check null pointers, returned lengths, and structure bounds carefully. The identified Npcap defect concerns status-code semantics.
+- Findings involving standards variants (SRH TLVs, NDP extension chains, FCS metadata) are source-confirmed implementation limitations; exact product severity depends on the compatibility guarantees you intend.
+- Compile failures, test regressions, Miri/loom behavior, sanitizers, the reported compiler advisory, and actual platform runtime behavior remain unverified.
+- No companion CSV was present in the workspace; this report is self-contained.

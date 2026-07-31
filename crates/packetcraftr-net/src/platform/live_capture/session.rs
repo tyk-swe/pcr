@@ -81,9 +81,11 @@ impl NativeCaptureSession {
 impl CaptureSession for NativeCaptureSession {
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
         validate_timeout(timeout)?;
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .expect("validated bounded capture timeout must fit Instant");
+        let Some(deadline) = Instant::now().checked_add(timeout) else {
+            return Err(LiveIoError::CaptureReadiness {
+                message: "capture readiness deadline is not representable".to_owned(),
+            });
+        };
         let mut state = self.shared.lock()?;
         while !state.ready && !state.closed && state.error.is_none() {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
@@ -120,9 +122,11 @@ impl CaptureSession for NativeCaptureSession {
         timeout: Duration,
     ) -> Result<Option<CapturedFrame>, LiveIoError> {
         validate_timeout(timeout)?;
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .expect("validated bounded capture timeout must fit Instant");
+        let Some(deadline) = Instant::now().checked_add(timeout) else {
+            return Err(LiveIoError::DeadlineExceeded {
+                operation: "waiting for captured frame",
+            });
+        };
         let mut state = self.shared.lock()?;
         loop {
             if let Some(captured) = state.queue.front() {
@@ -157,9 +161,9 @@ impl CaptureSession for NativeCaptureSession {
         if let Some(result) = &self.shutdown_result {
             return result.clone();
         }
-        self.stop.store(true, Ordering::Release);
-        if let Some(interrupt) = &self.interrupt {
-            interrupt.interrupt();
+        self.request_stop();
+        if let Some(worker) = self.worker.as_ref() {
+            wait_for_worker(worker, SHUTDOWN_TIMEOUT)?;
         }
         let join_result = self.worker.take().map_or(Ok(()), join_worker);
         self.interrupt.take();
@@ -189,10 +193,21 @@ impl CaptureSession for NativeCaptureSession {
     }
 }
 
-fn join_worker(worker: JoinHandle<()>) -> Result<(), LiveIoError> {
-    let deadline = Instant::now()
-        .checked_add(SHUTDOWN_TIMEOUT)
-        .expect("fixed native capture shutdown timeout must fit Instant");
+impl NativeCaptureSession {
+    fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(interrupt) = &self.interrupt {
+            interrupt.interrupt();
+        }
+    }
+}
+
+fn wait_for_worker(worker: &JoinHandle<()>, timeout: Duration) -> Result<(), LiveIoError> {
+    let Some(deadline) = Instant::now().checked_add(timeout) else {
+        return Err(LiveIoError::DeadlineExceeded {
+            operation: "shutting down native capture",
+        });
+    };
     while !worker.is_finished() {
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
             return Err(LiveIoError::DeadlineExceeded {
@@ -201,6 +216,10 @@ fn join_worker(worker: JoinHandle<()>) -> Result<(), LiveIoError> {
         };
         thread::park_timeout(remaining.min(Duration::from_millis(10)));
     }
+    Ok(())
+}
+
+fn join_worker(worker: JoinHandle<()>) -> Result<(), LiveIoError> {
     worker.join().map_err(|_| LiveIoError::Capture {
         message: "native capture worker panicked during shutdown".to_owned(),
     })
@@ -208,6 +227,9 @@ fn join_worker(worker: JoinHandle<()>) -> Result<(), LiveIoError> {
 
 impl Drop for NativeCaptureSession {
     fn drop(&mut self) {
-        let _ = self.shutdown();
+        self.request_stop();
+        if let Some(worker) = self.worker.take() {
+            let _ = join_worker(worker);
+        }
     }
 }

@@ -78,6 +78,9 @@ fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
 }
 
 fn workflow_accumulator_with_unsolicited(
+    request_count: usize,
+    frame_count: usize,
+    options: ExchangeOptions,
     promotion_deadline: impl FnOnce() -> Instant,
 ) -> (
     ExchangeAccumulator,
@@ -95,49 +98,58 @@ fn workflow_accumulator_with_unsolicited(
             BuildOptions::default(),
         )
         .unwrap();
-    let prepared = vec![PreparedExchangePacket {
-        built: built.clone(),
-        route: MaterializedRoute {
-            plan: PlannedRoute {
-                route: route(LinkCapability::Layer3),
-                mode: LinkMode::Layer3,
-                lookup_destination: Some(IpAddr::V4(destination)),
-                final_destination: Some(IpAddr::V4(destination)),
-                visited_destinations: vec![IpAddr::V4(destination)],
-                packet_source: Some(IpAddr::V4(source)),
-                neighbor_source: Some(IpAddr::V4(source)),
-                neighbor_target: Some(IpAddr::V4(destination)),
-                destination_mac: None,
-                source_mac: None,
-                neighbor_vlan_tags: Vec::new(),
-                synthesized_ethernet: false,
-            },
-            neighbor_resolution: None,
+    let prepared_route = MaterializedRoute {
+        plan: PlannedRoute {
+            route: route(LinkCapability::Layer3),
+            mode: LinkMode::Layer3,
+            lookup_destination: Some(IpAddr::V4(destination)),
+            final_destination: Some(IpAddr::V4(destination)),
+            visited_destinations: vec![IpAddr::V4(destination)],
+            packet_source: Some(IpAddr::V4(source)),
+            neighbor_source: Some(IpAddr::V4(source)),
+            neighbor_target: Some(IpAddr::V4(destination)),
+            destination_mac: None,
+            source_mac: None,
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
         },
-    }];
-    let sent_at = vec![Instant::now()];
+        neighbor_resolution: None,
+    };
+    let prepared = (0..request_count)
+        .map(|_| PreparedExchangePacket {
+            built: built.clone(),
+            route: prepared_route.clone(),
+        })
+        .collect::<Vec<_>>();
+    let sent_at = vec![Instant::now(); request_count];
     let process_deadline = sent_at[0].checked_add(Duration::from_secs(1)).unwrap();
     let dissector = Dissector::new(Arc::clone(&registry));
-    let options = ExchangeOptions::default();
-    let mut accumulator = ExchangeAccumulator::new(1);
+    let mut accumulator = ExchangeAccumulator::new(request_count);
 
-    let outcome = accumulator.process(
-        CapturedFrame::new(
-            Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, built.bytes.clone()).unwrap(),
-            sent_at[0],
-        ),
-        ExchangeProcessContext {
-            registry: &registry,
-            dissector: &dissector,
-            prepared: &prepared,
-            sent_at: &sent_at,
-            deadline: process_deadline,
-            options: &options,
-        },
-    );
-    assert_eq!(outcome, ExchangeProcessOutcome::Continue);
+    for index in 0..frame_count {
+        let outcome = accumulator.process(
+            CapturedFrame::new(
+                Frame::new(
+                    std::time::UNIX_EPOCH + Duration::from_secs(index as u64),
+                    LinkType::IPV4,
+                    built.bytes.clone(),
+                )
+                .unwrap(),
+                sent_at[0],
+            ),
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline: process_deadline,
+                options: &options,
+            },
+        );
+        assert_eq!(outcome, ExchangeProcessOutcome::Continue);
+    }
     assert!(accumulator.responses.is_empty());
-    assert_eq!(accumulator.unsolicited.len(), 1);
+    assert_eq!(accumulator.unsolicited.len(), frame_count);
 
     (accumulator, prepared, sent_at, promotion_deadline())
 }
@@ -145,7 +157,7 @@ fn workflow_accumulator_with_unsolicited(
 #[test]
 fn expired_workflow_promotion_does_not_invoke_matcher() {
     let (mut accumulator, prepared, sent_at, deadline) =
-        workflow_accumulator_with_unsolicited(|| {
+        workflow_accumulator_with_unsolicited(1, 1, ExchangeOptions::default(), || {
             Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .unwrap()
@@ -168,7 +180,7 @@ fn expired_workflow_promotion_does_not_invoke_matcher() {
     assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
     assert_eq!(matcher_calls, 0);
     assert!(accumulator.responses.is_empty());
-    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.unsolicited.len(), 1);
     assert_eq!(
         accumulator
             .diagnostics
@@ -182,11 +194,10 @@ fn expired_workflow_promotion_does_not_invoke_matcher() {
 #[test]
 fn workflow_promotion_crossing_deadline_is_not_committed() {
     let (mut accumulator, prepared, sent_at, deadline) =
-        workflow_accumulator_with_unsolicited(|| {
-            Instant::now()
-                .checked_add(Duration::from_millis(100))
-                .unwrap()
+        workflow_accumulator_with_unsolicited(1, 1, ExchangeOptions::default(), || {
+            Instant::now().checked_add(Duration::from_secs(1)).unwrap()
         });
+    accumulator.expire_workflow_after_checks(2);
     let mut matcher_calls = 0;
 
     let outcome = accumulator.promote_workflow_unsolicited(
@@ -198,7 +209,6 @@ fn workflow_promotion_crossing_deadline_is_not_committed() {
         },
         &mut |_, _, _| {
             matcher_calls += 1;
-            std::thread::sleep(Duration::from_millis(150));
             true
         },
     );
@@ -206,7 +216,7 @@ fn workflow_promotion_crossing_deadline_is_not_committed() {
     assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
     assert_eq!(matcher_calls, 1);
     assert!(accumulator.responses.is_empty());
-    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.unsolicited.len(), 1);
     assert!(
         accumulator
             .diagnostics
@@ -216,9 +226,157 @@ fn workflow_promotion_crossing_deadline_is_not_committed() {
 }
 
 #[test]
+fn workflow_promotion_timeout_preserves_promoted_and_unprocessed_evidence() {
+    let (mut accumulator, prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(1, 3, ExchangeOptions::default(), || {
+            Instant::now().checked_add(Duration::from_secs(1)).unwrap()
+        });
+    let retained_before = accumulator.retained_evidence();
+    accumulator.expire_workflow_after_checks(3);
+
+    let outcome = accumulator.promote_workflow_unsolicited(
+        WorkflowPromotionContext {
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            max_responses: 3,
+        },
+        &mut |_, _, _| true,
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
+    assert_eq!(accumulator.responses.len(), 1);
+    assert_eq!(accumulator.unsolicited.len(), 2);
+    assert_eq!(accumulator.retained_evidence(), retained_before);
+    assert_eq!(
+        accumulator.responses.len() + accumulator.unsolicited.len(),
+        retained_before.0
+    );
+}
+
+#[test]
+fn workflow_promotion_final_deadline_check_preserves_commit_and_later_arrival() {
+    let (mut accumulator, prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(1, 1, ExchangeOptions::default(), || {
+            Instant::now().checked_add(Duration::from_secs(1)).unwrap()
+        });
+    let retained_before = accumulator.retained_evidence();
+    accumulator.expire_workflow_after_checks(3);
+
+    let outcome = accumulator.promote_workflow_unsolicited(
+        WorkflowPromotionContext {
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            max_responses: 1,
+        },
+        &mut |_, _, _| true,
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
+    assert_eq!(accumulator.responses.len(), 1);
+    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.retained_evidence(), retained_before);
+
+    let registry = Arc::new(default_registry().unwrap());
+    let dissector = Dissector::new(Arc::clone(&registry));
+    let options = ExchangeOptions::default();
+    let later = accumulator.process(
+        CapturedFrame::new(
+            Frame::new(
+                std::time::UNIX_EPOCH + Duration::from_secs(1),
+                LinkType::IPV4,
+                prepared[0].built.bytes.clone(),
+            )
+            .unwrap(),
+            Instant::now(),
+        ),
+        ExchangeProcessContext {
+            registry: &registry,
+            dissector: &dissector,
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            options: &options,
+        },
+    );
+    assert_eq!(later, ExchangeProcessOutcome::CorrelationDeadlineExpired);
+    assert_eq!(accumulator.responses.len(), 1);
+    assert_eq!(accumulator.unsolicited.len(), 1);
+    assert_eq!(
+        accumulator.retained_evidence(),
+        (retained_before.0 + 1, retained_before.1 * 2)
+    );
+    assert_ne!(
+        accumulator.responses[0].response.frame.timestamp,
+        accumulator.unsolicited[0].frame.timestamp
+    );
+}
+
+#[test]
+fn workflow_promotion_transfers_evidence_without_recharging_at_limits() {
+    let options = ExchangeOptions {
+        max_responses: 3,
+        max_unsolicited: 3,
+        max_capture_queue_frames: 3,
+        max_captured_bytes: 84,
+        ..ExchangeOptions::default()
+    };
+    let (mut accumulator, prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(1, 3, options.clone(), || {
+            Instant::now().checked_add(Duration::from_secs(1)).unwrap()
+        });
+    assert_eq!(accumulator.retained_evidence(), (3, 84));
+
+    assert_eq!(
+        accumulator.promote_workflow_unsolicited(
+            WorkflowPromotionContext {
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                max_responses: 3,
+            },
+            &mut |_, _, _| true,
+        ),
+        ExchangeProcessOutcome::Continue
+    );
+    assert_eq!(accumulator.responses.len(), 3);
+    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.retained_evidence(), (3, 84));
+
+    let registry = Arc::new(default_registry().unwrap());
+    let dissector = Dissector::new(Arc::clone(&registry));
+    assert_eq!(
+        accumulator.process(
+            CapturedFrame::new(
+                Frame::new(
+                    std::time::UNIX_EPOCH + Duration::from_secs(3),
+                    LinkType::IPV4,
+                    prepared[0].built.bytes.clone(),
+                )
+                .unwrap(),
+                Instant::now(),
+            ),
+            ExchangeProcessContext {
+                registry: &registry,
+                dissector: &dissector,
+                prepared: &prepared,
+                sent_at: &sent_at,
+                deadline,
+                options: &options,
+            },
+        ),
+        ExchangeProcessOutcome::Continue
+    );
+    assert_eq!(accumulator.responses.len(), 3);
+    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.retained_evidence(), (3, 84));
+}
+
+#[test]
 fn unmatched_frame_is_preserved_when_only_earlier_requests_were_eligible() {
     let (mut accumulator, mut prepared, sent_at, deadline) =
-        workflow_accumulator_with_unsolicited(|| {
+        workflow_accumulator_with_unsolicited(1, 1, ExchangeOptions::default(), || {
             Instant::now()
                 .checked_add(Duration::from_millis(100))
                 .unwrap()
@@ -244,6 +402,32 @@ fn unmatched_frame_is_preserved_when_only_earlier_requests_were_eligible() {
 }
 
 #[test]
+fn workflow_promotion_assigns_each_frame_to_one_deterministic_winner() {
+    let (mut accumulator, prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(10, 1, ExchangeOptions::default(), || {
+            Instant::now().checked_add(Duration::from_secs(1)).unwrap()
+        });
+    accumulator.response_counts[0] = 1;
+
+    let outcome = accumulator.promote_workflow_unsolicited(
+        WorkflowPromotionContext {
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            max_responses: 10,
+        },
+        &mut |request_index, _, _| request_index < 2,
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::Continue);
+    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.responses.len(), 1);
+    assert_eq!(accumulator.responses[0].request_index, 1);
+    assert_eq!(accumulator.response_counts[0], 1);
+    assert_eq!(accumulator.response_counts[1], 1);
+}
+
+#[test]
 fn workflow_promotion_runs_before_native_capture_wait_consumes_deadline() {
     let registry = Arc::new(default_registry().unwrap());
     let source = Ipv4Addr::new(10, 0, 0, 1);
@@ -266,6 +450,7 @@ fn workflow_promotion_runs_before_native_capture_wait_consumes_deadline() {
             response: Arc::new(Mutex::new(Some(
                 Frame::new(std::time::UNIX_EPOCH, LinkType::IPV4, response.bytes).unwrap(),
             ))),
+            arm_delay: Duration::ZERO,
         },
         TrafficPolicy::default(),
     );

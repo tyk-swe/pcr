@@ -7,13 +7,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 
-use super::wire::{
-    replay_link_mode, replay_network_envelope, replay_wire_destinations,
-    validate_transmission_evidence,
-};
+use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
 use super::*;
 use crate::BoundaryError;
 use packetcraftr_capture::Writer;
+use packetcraftr_packet::semantics::{WireDestinations, final_wire_destinations};
 use packetcraftr_packet::{Packet, layer::Raw};
 use packetcraftr_protocol::{network::Ipv4, transport::Udp};
 use std::result::Result;
@@ -93,11 +91,12 @@ fn replay_timing_with_non_positive_or_unrepresentable_values_returns_invalid_tim
 fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
     let mut ipv4 = vec![0_u8; 20];
     ipv4[0] = 0x45;
+    ipv4[2..4].copy_from_slice(&20_u16.to_be_bytes());
     ipv4[16..20].copy_from_slice(&[8, 8, 8, 8]);
     let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, ipv4).unwrap();
     assert_eq!(
-        replay_wire_destinations(&frame).unwrap().addresses,
-        [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
+        final_wire_destinations(frame.link_type, frame.bytes()),
+        WireDestinations::Destinations(vec![IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))])
     );
     let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
     let authorizer = SystemAuthorizer::new(
@@ -239,15 +238,15 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
         unsupported[6] = 43;
         unsupported[24..40].copy_from_slice(&Ipv6Addr::LOCALHOST.octets());
         if unsupported.len() == 48 {
+            unsupported[4..6].copy_from_slice(&8_u16.to_be_bytes());
             unsupported[40] = 59;
             unsupported[42] = 0;
         }
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, unsupported).unwrap();
-        assert!(
-            replay_wire_destinations(&frame)
-                .unwrap()
-                .has_unsupported_routing_header
-        );
+        assert!(matches!(
+            final_wire_destinations(frame.link_type, frame.bytes()),
+            WireDestinations::MalformedOrAmbiguous { .. }
+        ));
         let authorizer = SystemAuthorizer::new(
             packetcraftr_client::policy::Policy::default(),
             Arc::clone(&registry),
@@ -258,7 +257,7 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
             .unwrap_err();
         assert_eq!(
             error.classification().code,
-            "capability.replay_routing_header"
+            "packet.replay_packet_semantics"
         );
     }
 }
@@ -267,13 +266,13 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
 fn replay_srh_validation_requires_the_header_to_name_the_active_segment() {
     let active: Ipv6Addr = "fd00::10".parse().unwrap();
     let final_destination: Ipv6Addr = "fd00::20".parse().unwrap();
-    let mut bytes = vec![0_u8; 80];
+    let mut bytes = vec![0_u8; 88];
     bytes[0] = 0x60;
-    bytes[4..6].copy_from_slice(&40_u16.to_be_bytes());
+    bytes[4..6].copy_from_slice(&48_u16.to_be_bytes());
     bytes[6] = 43;
     bytes[24..40].copy_from_slice(&active.octets());
     bytes[40] = 59;
-    bytes[41] = 4;
+    bytes[41] = 5;
     bytes[42] = 4;
     bytes[43] = 1;
     bytes[44] = 1;
@@ -281,21 +280,19 @@ fn replay_srh_validation_requires_the_header_to_name_the_active_segment() {
     bytes[64..80].copy_from_slice(&active.octets());
     let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes.clone()).unwrap();
 
-    let destinations = replay_wire_destinations(&frame).unwrap();
-    assert!(!destinations.has_unsupported_routing_header);
-    assert!(
-        destinations
-            .addresses
-            .contains(&IpAddr::V6(final_destination))
-    );
+    let WireDestinations::Destinations(destinations) =
+        final_wire_destinations(frame.link_type, frame.bytes())
+    else {
+        panic!("valid SRH was not accepted");
+    };
+    assert!(destinations.contains(&IpAddr::V6(final_destination)));
 
     bytes[24..40].copy_from_slice(&Ipv6Addr::LOCALHOST.octets());
     let malformed = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
-    assert!(
-        replay_wire_destinations(&malformed)
-            .unwrap()
-            .has_unsupported_routing_header
-    );
+    assert!(matches!(
+        final_wire_destinations(malformed.link_type, malformed.bytes()),
+        WireDestinations::MalformedOrAmbiguous { .. }
+    ));
 }
 
 #[test]
@@ -467,6 +464,7 @@ fn replay_wire_destinations_walks_vlan_and_ipv4_source_routes() {
     bytes[12..14].copy_from_slice(&0x8100_u16.to_be_bytes());
     bytes[16..18].copy_from_slice(&0x0800_u16.to_be_bytes());
     bytes[18] = 0x47;
+    bytes[20..22].copy_from_slice(&28_u16.to_be_bytes());
     bytes[34..38].copy_from_slice(&final_destination.octets());
     bytes[38..45].copy_from_slice(&[
         131,
@@ -477,28 +475,32 @@ fn replay_wire_destinations_walks_vlan_and_ipv4_source_routes() {
         route_destination.octets()[2],
         route_destination.octets()[3],
     ]);
-    let destinations =
-        replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap())
-            .unwrap();
+    let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap();
+    let WireDestinations::Destinations(destinations) =
+        final_wire_destinations(frame.link_type, frame.bytes())
+    else {
+        panic!("valid VLAN IPv4 source route was not accepted");
+    };
     assert_eq!(
-        destinations.addresses,
+        destinations,
         [IpAddr::V4(final_destination), IpAddr::V4(route_destination)]
     );
-    assert!(!destinations.has_unsupported_routing_header);
 }
 
 #[test]
 fn replay_wire_destinations_fail_closed_on_malformed_ipv4_options() {
     let mut bytes = vec![0_u8; 24];
     bytes[0] = 0x46;
+    bytes[2..4].copy_from_slice(&24_u16.to_be_bytes());
     bytes[16..20].copy_from_slice(&[10, 0, 0, 2]);
     bytes[20..24].copy_from_slice(&[131, 1, 0, 0]);
-    let error =
-        match replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap()) {
-            Ok(_) => panic!("malformed source-route option was accepted"),
-            Err(error) => error,
-        };
-    assert!(error.to_string().contains("invalid length 1"));
+    let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
+    let WireDestinations::MalformedOrAmbiguous { reason } =
+        final_wire_destinations(frame.link_type, frame.bytes())
+    else {
+        panic!("malformed source-route option was accepted");
+    };
+    assert!(reason.contains("invalid length 1"));
 }
 
 #[test]
@@ -506,6 +508,7 @@ fn replay_wire_destinations_walks_non_routing_ipv6_extensions() {
     let destination: Ipv6Addr = "fd00::2".parse().unwrap();
     let mut bytes = vec![0_u8; 64];
     bytes[0] = 0x60;
+    bytes[4..6].copy_from_slice(&24_u16.to_be_bytes());
     bytes[6] = 0;
     bytes[24..40].copy_from_slice(&destination.octets());
     bytes[40] = 44;
@@ -513,23 +516,42 @@ fn replay_wire_destinations_walks_non_routing_ipv6_extensions() {
     bytes[48] = 51;
     bytes[56] = 59;
     bytes[57] = 0;
-    let destinations =
-        replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap()).unwrap();
-    assert_eq!(destinations.addresses, [IpAddr::V6(destination)]);
-    assert!(!destinations.has_unsupported_routing_header);
+    let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
+    assert_eq!(
+        final_wire_destinations(frame.link_type, frame.bytes()),
+        WireDestinations::Destinations(vec![IpAddr::V6(destination)])
+    );
 }
 
 #[test]
-fn replay_wire_destinations_ignores_truncated_non_routing_extensions() {
+fn replay_wire_destinations_rejects_truncated_non_routing_extensions() {
     for (next_header, length) in [(44, 44), (51, 41), (0, 44), (60, 44)] {
         let mut bytes = vec![0_u8; length];
         bytes[0] = 0x60;
+        let payload_length = u16::try_from(length - 40).unwrap();
+        bytes[4..6].copy_from_slice(&payload_length.to_be_bytes());
         bytes[6] = next_header;
-        let result =
-            replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap())
-                .unwrap();
-        assert!(!result.has_unsupported_routing_header, "{next_header}");
+        let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
+        assert!(
+            matches!(
+                final_wire_destinations(frame.link_type, frame.bytes()),
+                WireDestinations::MalformedOrAmbiguous { .. }
+            ),
+            "{next_header}"
+        );
     }
+
+    let mut bytes = vec![0_u8; 48];
+    bytes[0] = 0x60;
+    bytes[4..6].copy_from_slice(&8_u16.to_be_bytes());
+    bytes[6] = 44;
+    bytes[40] = 43;
+    bytes[42..44].copy_from_slice(&8_u16.to_be_bytes());
+    let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
+    assert!(matches!(
+        final_wire_destinations(frame.link_type, frame.bytes()),
+        WireDestinations::MalformedOrAmbiguous { .. }
+    ));
 }
 
 #[test]

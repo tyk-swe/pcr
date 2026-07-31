@@ -67,10 +67,20 @@ fn drain_available<C: CaptureSession>(
                 operation: "draining capture before all requests were sent",
             });
         }
-        let Some(frame) = capture.inner.next_captured_frame(Duration::ZERO)? else {
+        let frame = capture.inner.next_captured_frame(Duration::ZERO)?;
+        let provider_missed_deadline = enforced_deadline
+            .is_some_and(|deadline| deadline.checked_duration_since(Instant::now()).is_none());
+        let Some(frame) = frame else {
+            if provider_missed_deadline {
+                return Err(LiveIoError::DeadlineExceeded {
+                    operation: "draining capture before all requests were sent",
+                });
+            }
             return Ok(());
         };
-        if captured.process(frame, context) == ExchangeProcessOutcome::CorrelationDeadlineExpired {
+        let outcome = captured.process(frame, context);
+        if provider_missed_deadline || outcome == ExchangeProcessOutcome::CorrelationDeadlineExpired
+        {
             if enforced_deadline.is_some() {
                 return Err(LiveIoError::DeadlineExceeded {
                     operation: "draining capture before all requests were sent",
@@ -166,7 +176,13 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
                 operation: "waiting for capture readiness",
             },
         )?;
-        self.capture.inner.wait_ready(readiness_timeout)
+        self.capture.inner.wait_ready(readiness_timeout)?;
+        self.deadline.checked_duration_since(Instant::now()).ok_or(
+            LiveIoError::DeadlineExceeded {
+                operation: "waiting for capture readiness",
+            },
+        )?;
+        Ok(())
     }
 
     fn send_and_correlate<I: PacketIo>(
@@ -211,6 +227,7 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
         let send_wall_time = SystemTime::now();
         let frame = TransmissionFrame::try_new(&built.bytes, route)?;
         let report = io.send(frame)?;
+        self.ensure_send_deadline()?;
         validate_send_report(&built.bytes, &report)?;
         let link_type = match route.plan.mode {
             LinkMode::Layer2 => route.plan.route.link_type,
@@ -241,7 +258,12 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
     ) -> Result<(), LiveIoError> {
         if !self.correlation_stopped {
             while let Some(remaining) = self.deadline.checked_duration_since(Instant::now()) {
-                let Some(frame) = self.capture.inner.next_captured_frame(remaining)? else {
+                let frame = self.capture.inner.next_captured_frame(remaining)?;
+                let provider_missed_deadline = self
+                    .deadline
+                    .checked_duration_since(Instant::now())
+                    .is_none();
+                let Some(frame) = frame else {
                     break;
                 };
                 let context = Self::process_context(
@@ -255,6 +277,9 @@ impl<C: CaptureSession> ExchangeTransaction<C> {
                 if self.captured.process(frame, context)
                     == ExchangeProcessOutcome::CorrelationDeadlineExpired
                 {
+                    break;
+                }
+                if provider_missed_deadline {
                     break;
                 }
                 if self.promote_workflow(workflow_matcher)

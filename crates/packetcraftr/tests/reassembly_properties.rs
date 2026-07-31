@@ -21,6 +21,7 @@ fn limits() -> ReassemblyLimits {
 
 fn fragment_key(id: u32) -> fragment::DatagramKey {
     fragment::DatagramKey {
+        scope: 0,
         source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
         identification: id,
@@ -30,6 +31,7 @@ fn fragment_key(id: u32) -> fragment::DatagramKey {
 
 fn tcp_key(port: u16) -> tcp::FlowKey {
     tcp::FlowKey {
+        scope: 0,
         source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         source_port: port,
         destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),

@@ -263,3 +263,48 @@ fn slow_send_consumes_absolute_deadline_and_stops_later_requests() {
         })
     ));
 }
+
+#[test]
+fn late_capture_arm_is_cleaned_up_without_readiness_or_send() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(route(LinkCapability::Layer3)),
+        CountingNeighbors::default(),
+        DeadlineConsumingExchangeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(None)),
+            arm_delay: Duration::from_millis(25),
+        },
+        TrafficPolicy::default(),
+    );
+    let error = client
+        .exchange(
+            &PacketTemplate::new(packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12_345,
+                9,
+            )),
+            ExchangeOptions {
+                send: SendOptions {
+                    plan: PlanOptions {
+                        link_mode: LinkMode::Layer3,
+                        ..PlanOptions::default()
+                    },
+                    ..SendOptions::default()
+                },
+                timeout: Duration::from_millis(10),
+                ..ExchangeOptions::default()
+            },
+        )
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        ClientError::Io(LiveIoError::DeadlineExceeded {
+            operation: "preparing the exchange"
+        })
+    ));
+    assert_eq!(*events.lock().unwrap(), ["arm", "shutdown"]);
+}

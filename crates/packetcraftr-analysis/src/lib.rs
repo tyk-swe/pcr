@@ -39,12 +39,15 @@ use packetcraftr_packet::decode::{
 use packetcraftr_packet::filter::{Context as FilterContext, Filter};
 use packetcraftr_packet::{
     Packet,
-    layer::{Padding, Raw},
+    layer::{Layer, Padding, Raw},
     registry::ProtocolRegistry,
 };
+use packetcraftr_protocol::gre::Gre;
 use packetcraftr_protocol::ipv6::Fragment as Ipv6Fragment;
+use packetcraftr_protocol::link::{Vlan, Vlan8021ad};
 use packetcraftr_protocol::network::{Ipv4, Ipv6};
 use packetcraftr_protocol::transport::{Tcp, Udp};
+use packetcraftr_protocol::tunnel::{Ah, Erspan, Geneve, L2tpv3, Mpls, Pppoe, Vxlan};
 use packetcraftr_session::ReassemblyLimits;
 use packetcraftr_session::fragment::{
     DatagramKey as FragmentKey, Event as FragmentEvent, Fragment, OverlapPolicy,
@@ -68,6 +71,8 @@ pub use pipeline::{
     AnalysisLimits as Limits, AnalysisOptions as Options, AnalysisSummary as Summary, FrameRecord,
     run,
 };
-pub use session_index::{CanonicalFlow, StreamIndex, ip_fragment, tcp_segment, udp_flow};
+pub use session_index::{
+    AnalysisScope, CanonicalFlow, ScopeComponent, StreamIndex, ip_fragment, tcp_segment, udp_flow,
+};
 
 use error::AnalysisError;

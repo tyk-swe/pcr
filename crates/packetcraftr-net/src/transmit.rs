@@ -122,6 +122,9 @@ pub struct Report {
 
 /// Unified packet-I/O seam used by the root client and test providers.
 pub trait Sender: Send + Sync {
+    /// Sends synchronously. Custom implementations must use finite waits or
+    /// cancellation; an outer deadline can prevent later sends only after this
+    /// method returns.
     fn send(&self, frame: Frame<'_>) -> Result<Report, Error>;
 }
 

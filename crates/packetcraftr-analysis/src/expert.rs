@@ -115,7 +115,12 @@ impl ExpertCollector {
     /// Folds one matched frame, returning the findings it revealed.
     pub fn observe(&mut self, record: &FrameRecord<'_>) -> Vec<Finding> {
         let mut findings = Vec::new();
-        let frame_transports = transports(&record.decoded.packet);
+        let mut frame_transports = transports(record.decoded);
+        if let (Some((_, _, flow, _)), Some(scoped)) =
+            (frame_transports.tcp.as_mut(), record.tcp_flow)
+        {
+            *flow = scoped.clone();
+        }
         // Dissection problems the decoder already diagnosed — malformed
         // layers, checksum mismatches, bounded-chain warnings — surface as
         // findings under their own codes. A tunnelled frame belongs to both
@@ -129,8 +134,8 @@ impl ExpertCollector {
         // like a diagnostic naming no layer at all, name no conversation.
         let indexed_boundary = {
             let indexed_outer = [
-                frame_transports.tcp.as_ref().map(|(index, _, _)| *index),
-                frame_transports.udp.as_ref().map(|(index, _)| *index),
+                frame_transports.tcp.as_ref().map(|(index, _, _, _)| *index),
+                frame_transports.udp.as_ref().map(|(index, _, _)| *index),
             ]
             .into_iter()
             .flatten()
@@ -152,7 +157,7 @@ impl ExpertCollector {
                     (None, None) => None,
                     (Some(tcp_stream), Some(udp_stream)) => {
                         match (&frame_transports.tcp, &frame_transports.udp) {
-                            (Some((tcp_index, _, _)), Some((udp_index, _))) => {
+                            (Some((tcp_index, _, _, _)), Some((udp_index, _, _))) => {
                                 diagnostic.layer.map(|layer| {
                                     let (outer_index, outer_stream, inner_stream) =
                                         if tcp_index < udp_index {
@@ -190,7 +195,7 @@ impl ExpertCollector {
         }
 
         let frame_tcp = frame_transports.tcp;
-        let frame_payload_len = frame_tcp.as_ref().map_or(0, |(index, _, _)| {
+        let frame_payload_len = frame_tcp.as_ref().map_or(0, |(index, _, _, _)| {
             transport_payload(record.decoded, *index).len()
         });
         // A keep-alive probe deliberately re-sends one byte below the
@@ -199,7 +204,7 @@ impl ExpertCollector {
         // retransmission; the probe itself is reported by the header view.
         // Keep-alives exist only in synchronized state, so a probe always
         // carries ACK.
-        let keep_alive_probe = frame_tcp.as_ref().is_some_and(|(_, flow, tcp)| {
+        let keep_alive_probe = frame_tcp.as_ref().is_some_and(|(_, _, flow, tcp)| {
             frame_payload_len <= 1
                 && tcp.flags & Tcp::ACK != 0
                 && tcp.flags & (Tcp::SYN | Tcp::FIN | Tcp::RST) == 0
@@ -216,7 +221,7 @@ impl ExpertCollector {
         // data, so its overlap with delivered bytes is no retransmission.
         let reset_frame = frame_tcp
             .as_ref()
-            .is_some_and(|(_, _, tcp)| tcp.flags & Tcp::RST != 0);
+            .is_some_and(|(_, _, _, tcp)| tcp.flags & Tcp::RST != 0);
 
         // The reassembler's byte-exact sequence tracking is the authority on
         // retransmission, including content that changed under retransmit.
@@ -305,7 +310,7 @@ impl ExpertCollector {
             }
         }
 
-        if let Some((_, flow, tcp)) = frame_tcp {
+        if let Some((_, _, flow, tcp)) = frame_tcp {
             self.observe_tcp(record, &flow, tcp, frame_payload_len, &mut findings);
         }
 

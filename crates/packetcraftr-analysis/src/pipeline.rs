@@ -7,7 +7,10 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
-use super::session_index::{StreamIndex, ip_fragment, tcp_segment, transports, udp_flow};
+use super::session_index::{
+    AnalysisScope, ScopeIndex, StreamIndex, scoped_ip_fragment, tcp_segment_from_transport,
+    transports,
+};
 use super::{
     AnalysisError, Arc, Bytes, CaptureError, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES,
     DEFAULT_STREAM_FRAMES, Deadline, DecodeOptions, DecodedPacket, Decoder, Filter, FilterContext,
@@ -88,6 +91,9 @@ pub struct AnalysisOptions<'a> {
     /// its events with each record. Costs memory proportional to reordering,
     /// so commands that only count leave it off.
     pub tcp_events: bool,
+    /// Deliberately merges otherwise identical conversations across capture
+    /// interfaces and stable encapsulation namespaces.
+    pub merge_capture_scopes: bool,
     pub limits: AnalysisLimits,
 }
 
@@ -102,6 +108,14 @@ pub struct FrameRecord<'a> {
     pub tcp_stream: Option<u64>,
     /// Conversation index of the innermost UDP flow, when there is one.
     pub udp_stream: Option<u64>,
+    /// Directional, scope-qualified identity of the innermost TCP flow.
+    pub tcp_flow: Option<&'a FlowKey>,
+    /// Directional, scope-qualified identity of the innermost UDP flow.
+    pub udp_flow: Option<&'a FlowKey>,
+    /// Capture and encapsulation namespace of the innermost TCP flow.
+    pub tcp_scope: Option<&'a AnalysisScope>,
+    /// Capture and encapsulation namespace of the innermost UDP flow.
+    pub udp_scope: Option<&'a AnalysisScope>,
     /// TCP reassembly events this frame produced, when requested, including
     /// evictions of flows whose idle expiry this frame's arrival revealed.
     pub tcp_events: &'a [TcpEvent],
@@ -153,6 +167,8 @@ where
     let decoder = Decoder::new(registry);
     let mut tcp_streams = StreamIndex::new();
     let mut udp_streams = StreamIndex::new();
+    let mut scopes = ScopeIndex::default();
+    let scope_limit = limits.max_flows.saturating_mul(3);
     // The flow budget governs reassembly state too: fragmented datagrams
     // never reach a stream index, so without this a fragment-heavy capture
     // could buffer the session default regardless of the configured bound.
@@ -232,13 +248,51 @@ where
         // Conversation indices exist independently of the filter, so an
         // index reported by an unfiltered run names the same conversation in
         // a filtered one.
-        let segment = tcp_segment(&decoded);
+        let mut frame_transports = transports(&decoded);
+        let acknowledgment = frame_transports
+            .tcp
+            .as_ref()
+            .and_then(|(_, _, _, tcp)| (tcp.flags & Tcp::ACK != 0).then_some(tcp.acknowledgment));
+        let acknowledged = acknowledgment.is_some();
+        let (tcp_scope, segment) = match frame_transports
+            .tcp
+            .take()
+            .and_then(|transport| tcp_segment_from_transport(&decoded, transport))
+        {
+            Some((scope, mut segment)) => {
+                segment.flow.scope =
+                    scopes.assign(&scope, number, scope_limit, options.merge_capture_scopes)?;
+                (Some(scope), Some(segment))
+            }
+            None => (None, None),
+        };
         let tcp_stream = match &segment {
             Some(segment) => Some(tcp_streams.assign(&segment.flow, number, limits.max_flows)?),
             None => None,
         };
-        let udp_stream = match udp_flow(&decoded) {
-            Some(flow) => Some(udp_streams.assign(&flow, number, limits.max_flows)?),
+        let tcp_flow = segment.as_ref().map(|segment| segment.flow.clone());
+        let (udp_scope, udp_flow) = match frame_transports
+            .udp
+            .take()
+            .map(|(_, scope, flow)| (scope, flow))
+        {
+            Some((scope, mut flow)) => {
+                flow.scope =
+                    scopes.assign(&scope, number, scope_limit, options.merge_capture_scopes)?;
+                (Some(scope), Some(flow))
+            }
+            None => (None, None),
+        };
+        let udp_stream = match &udp_flow {
+            Some(flow) => Some(udp_streams.assign(flow, number, limits.max_flows)?),
+            None => None,
+        };
+        let fragment = match scoped_ip_fragment(&decoded) {
+            Some((scope, mut fragment)) => {
+                fragment.key.scope =
+                    scopes.assign(&scope, number, scope_limit, options.merge_capture_scopes)?;
+                Some(fragment)
+            }
             None => None,
         };
 
@@ -282,9 +336,6 @@ where
                 }
             }
             if pushable && let Some(segment) = segment {
-                let acknowledged = transports(&decoded.packet)
-                    .tcp
-                    .is_some_and(|(_, _, tcp)| tcp.flags & Tcp::ACK != 0);
                 let flow = segment.flow.clone();
                 let pure_syn = segment.syn && !acknowledged && segment.payload.is_empty();
                 // A SYN — client SYN or SYN-ACK — that replaces this
@@ -301,13 +352,6 @@ where
                 // open.
                 if segment.syn {
                     let first = segment.sequence.wrapping_add(1);
-                    let acknowledgment = acknowledged
-                        .then(|| {
-                            transports(&decoded.packet)
-                                .tcp
-                                .map(|(_, _, tcp)| tcp.acknowledgment)
-                        })
-                        .flatten();
                     let reverse = segment.flow.reverse();
                     // A SYN-ACK acknowledging something outside the tracked
                     // reverse range names a SYN this capture did not see:
@@ -435,7 +479,6 @@ where
                 }
             }
         }
-        let fragment = ip_fragment(&decoded);
         if fragment.is_some() || sweep_due {
             fragment_events.extend(fragments.expire(now));
         }
@@ -453,6 +496,10 @@ where
             decoded: &decoded,
             tcp_stream,
             udp_stream,
+            tcp_flow: tcp_flow.as_ref(),
+            udp_flow: udp_flow.as_ref(),
+            tcp_scope: tcp_scope.as_ref(),
+            udp_scope: udp_scope.as_ref(),
             tcp_events: &tcp_events,
             fragment_events: &fragment_events,
         })

@@ -112,6 +112,20 @@ pub(super) fn plan_push_accounting(
 }
 
 impl PushAccountingPlan {
+    pub(super) fn account_actual_history_allocation(
+        mut self,
+        actual: usize,
+        limit: usize,
+    ) -> Result<Self, Error> {
+        self.prospective_aggregate_memory = replace_history_allocation(
+            self.prospective_aggregate_memory,
+            self.history_allocation,
+            actual,
+            limit,
+        )?;
+        Ok(self)
+    }
+
     pub(super) fn final_aggregates(
         self,
         closed: bool,
@@ -131,5 +145,35 @@ impl PushAccountingPlan {
                 .checked_sub(self.old_memory_charge)
                 .ok_or(Error::AggregateByteLimit { limit })?,
         ))
+    }
+}
+
+fn replace_history_allocation(
+    prospective_memory: usize,
+    planned: usize,
+    actual: usize,
+    limit: usize,
+) -> Result<usize, Error> {
+    let adjusted = prospective_memory
+        .checked_sub(planned)
+        .and_then(|memory| memory.checked_add(actual))
+        .ok_or(Error::AggregateByteLimit { limit })?;
+    if adjusted > limit {
+        return Err(Error::AggregateByteLimit { limit });
+    }
+    Ok(adjusted)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn actual_history_capacity_replaces_the_planned_memory_charge() {
+        assert_eq!(replace_history_allocation(10, 4, 8, 14), Ok(14));
+        assert_eq!(
+            replace_history_allocation(10, 4, 8, 13),
+            Err(Error::AggregateByteLimit { limit: 13 })
+        );
     }
 }

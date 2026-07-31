@@ -50,6 +50,7 @@ fuzz_target!(|data: &[u8]| {
                 let result = fragments.push(
                     fragment::Fragment {
                         key: fragment::DatagramKey {
+                            scope: 0,
                             source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
                             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
                             identification: low_u32(word >> 8) % 24,
@@ -77,6 +78,7 @@ fuzz_target!(|data: &[u8]| {
                 let result = tcp.push(
                     tcp::Segment {
                         flow: tcp::FlowKey {
+                            scope: 0,
                             source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
                             source_port: 40_000 + (low_u16(word >> 8) % 24),
                             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),

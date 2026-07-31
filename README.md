@@ -245,9 +245,11 @@ legal authorization, operating-system privileges, or additional packet/byte
 budget.
 
 PacketcraftR checks every route-bearing destination declared by a packet.
-Replay checks each decoded frame. A policy rejection is reported as
-`policy.public_destination` before interface discovery, route lookup, capture,
-or transmission.
+Send, exchange, and replay also inspect the exact final Ethernet/VLAN or raw-IP
+bytes that will be transmitted. Declared destinations are rejected before
+interface discovery or route lookup; final-wire rejections occur before
+neighbor discovery, capture, or transmission. A public-destination rejection
+is reported as `policy.public_destination`.
 
 ### Hostname resolution
 

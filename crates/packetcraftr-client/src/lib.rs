@@ -26,9 +26,11 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use packetcraftr_capture::LinkType;
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{CaptureProvider, CaptureStatistics},
+    link::LinkMode,
     route::{
         InterfaceId, NeighborResolver, PlanOptions, PlannedRoute, RouteDecision, RoutePlanner,
         RouteProvider,
@@ -39,7 +41,7 @@ use packetcraftr_packet::{
     Packet,
     build::{Builder, BuiltPacket},
     registry::ProtocolRegistry,
-    semantics::BuiltinProtocol,
+    semantics::{BuiltinProtocol, WireDestinations, final_wire_destinations},
     template::PacketTemplate,
 };
 
@@ -305,6 +307,9 @@ where
             ensure_preparation_deadline(deadline)?;
         }
         let plan = self.planner.plan(packet, destination, options, provider)?;
+        if let Some(deadline) = deadline {
+            ensure_preparation_deadline(deadline)?;
+        }
         for destination in &plan.visited_destinations {
             self.policy.authorize_destination(*destination)?;
         }
@@ -328,6 +333,7 @@ where
         )?;
         validate_mtu(&preliminary, plan.route.mtu)?;
         self.authorize_built(&preliminary, options.allow_permissive_live)?;
+        self.authorize_final_wire(&preliminary, &plan)?;
         self.policy
             .authorize_operation(1, preliminary.bytes.len() as u64)?;
         let preliminary_len = preliminary.bytes.len();
@@ -341,13 +347,14 @@ where
                 builder.build(packet_to_send, context, options.build)?
             };
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
-            self.authorize_built(&built, options.allow_permissive_live)?;
-            self.policy
-                .authorize_operation(1, built.bytes.len() as u64)?;
             built
         } else {
             preliminary
         };
+        self.authorize_built(&built, options.allow_permissive_live)?;
+        self.authorize_final_wire(&built, &route.plan)?;
+        self.policy
+            .authorize_operation(1, built.bytes.len() as u64)?;
         // Link-layer synthesis is already included in the exact build. The
         // typed frame selects the matching native provider boundary.
         let io_report = self
@@ -385,6 +392,30 @@ where
             }
         }
         Ok(())
+    }
+
+    fn authorize_final_wire(
+        &self,
+        built: &BuiltPacket,
+        route: &PlannedRoute,
+    ) -> Result<(), ClientError> {
+        let link_type = match route.mode {
+            LinkMode::Layer2 => route.route.link_type,
+            LinkMode::Layer3 => LinkType::RAW,
+            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
+        };
+        match final_wire_destinations(link_type, &built.bytes) {
+            WireDestinations::NoRoute => Ok(()),
+            WireDestinations::Destinations(destinations) => {
+                for destination in destinations {
+                    self.policy.authorize_destination(destination)?;
+                }
+                Ok(())
+            }
+            WireDestinations::MalformedOrAmbiguous { reason } => {
+                Err(TrafficPolicyError::InvalidPacketSemantics { reason }.into())
+            }
+        }
     }
 }
 
@@ -501,6 +532,7 @@ where
             ensure_preparation_deadline(deadline)?;
             validate_mtu(&preliminary, plan.route.mtu)?;
             self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
+            self.authorize_final_wire(&preliminary, &plan)?;
             total_bytes = total_bytes
                 .checked_add(preliminary.bytes.len() as u64)
                 .ok_or(TrafficPolicyError::ByteLimit {
@@ -549,6 +581,7 @@ where
             };
             ensure_preparation_deadline(deadline)?;
             self.authorize_built(&built, options.send.allow_permissive_live)?;
+            self.authorize_final_wire(&built, &route.plan)?;
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             prepared_packets.push(PreparedExchangePacket { built, route });
         }
@@ -574,15 +607,16 @@ where
         let first_route = &prepared
             .packets
             .first()
-            .expect("non-empty prepared exchange")
+            .ok_or_else(|| ClientError::Template {
+                message: "template expanded to no packets".to_owned(),
+            })?
             .route
             .plan;
-        ensure_preparation_deadline(prepared.deadline)?;
+        let deadline = prepared.deadline;
+        ensure_preparation_deadline(deadline)?;
         let capture = self.io.arm_capture(first_route, prepared.capture_limits)?;
-        Ok(ExchangeTransaction::new(
-            Arc::clone(&self.registry),
-            capture,
-            prepared,
-        ))
+        let transaction = ExchangeTransaction::new(Arc::clone(&self.registry), capture, prepared);
+        ensure_preparation_deadline(deadline)?;
+        Ok(transaction)
     }
 }

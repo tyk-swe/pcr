@@ -24,6 +24,9 @@ const TCP_SERIAL_HALF_SPACE: usize = 1usize << 31;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FlowKey {
+    /// Run-local namespace assigned by the caller.
+    #[serde(default)]
+    pub scope: u64,
     pub source: IpAddr,
     pub source_port: u16,
     pub destination: IpAddr,
@@ -34,6 +37,7 @@ impl FlowKey {
     #[must_use]
     pub fn reverse(&self) -> Self {
         Self {
+            scope: self.scope,
             source: self.destination,
             source_port: self.destination_port,
             destination: self.source,

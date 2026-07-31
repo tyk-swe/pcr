@@ -102,7 +102,10 @@ impl Statistics {
 
 pub trait Session: Send {
     /// Readiness is an explicit barrier. No exchange frame may be sent first.
+    /// Custom implementations must honor the finite timeout; callers can only
+    /// observe an outer deadline cooperatively after this method returns.
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error>;
+    /// Custom implementations must not block longer than the finite timeout.
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error>;
     /// Stop the receiver and join all capture work before returning. An error
     /// means the implementation could not confirm complete cleanup.
@@ -237,6 +240,9 @@ pub(crate) fn validate_timeout(timeout: Duration) -> Result<(), Error> {
 pub trait Provider: Send + Sync {
     type Capture: Session;
 
+    /// Arms capture synchronously. Custom implementations must use finite
+    /// waits or cancellation so an outer cooperative deadline can be checked
+    /// after this method returns.
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error>;
 }
 

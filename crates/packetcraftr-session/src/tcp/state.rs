@@ -110,11 +110,6 @@ pub(super) fn prepare_emitted_history(
         .map_err(|_| Error::AllocationFailed {
             requested: capacity,
         })?;
-    if resized.capacity() != capacity {
-        return Err(Error::AllocationFailed {
-            requested: capacity,
-        });
-    }
     let skip = state
         .emitted_history
         .len()
@@ -162,4 +157,34 @@ pub(super) fn append_emitted_history(
         .emitted_history
         .extend(output[output_skip..].iter().copied());
     state.history_start_offset = history_start_offset;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_history_allocation_leaves_state_retryable() {
+        let mut state = TcpFlowState::new(0, Instant::now());
+        state.emitted_history.extend(b"abc");
+
+        assert_eq!(
+            prepare_emitted_history(&state, 3, usize::MAX),
+            Err(Error::AllocationFailed {
+                requested: usize::MAX
+            })
+        );
+        assert_eq!(
+            state.emitted_history.iter().copied().collect::<Vec<_>>(),
+            b"abc"
+        );
+
+        let replacement = prepare_emitted_history(&state, 3, 4).unwrap().unwrap();
+        assert!(replacement.capacity() >= 4);
+        assert_eq!(replacement.iter().copied().collect::<Vec<_>>(), b"abc");
+        assert_eq!(
+            state.emitted_history.iter().copied().collect::<Vec<_>>(),
+            b"abc"
+        );
+    }
 }

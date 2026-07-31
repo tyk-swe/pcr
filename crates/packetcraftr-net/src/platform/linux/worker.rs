@@ -69,6 +69,15 @@ where
         let mut worker = worker.borrow_mut();
         if worker
             .as_ref()
+            .is_some_and(|worker| worker.startup_error.is_some())
+        {
+            if let Some(starting) = worker.as_mut() {
+                starting.shutdown()?;
+            }
+            worker.take();
+        }
+        if worker
+            .as_ref()
             .is_none_or(|worker| worker.namespace != namespace)
         {
             // Linux network namespaces are selected per calling thread. Drop
@@ -77,10 +86,16 @@ where
             worker.take();
             *worker = Some(NetlinkWorker::start(namespace)?);
         }
-        let result = worker
+        if let Some(error) = worker
             .as_ref()
-            .expect("the netlink worker was initialized above")
-            .execute(operation);
+            .and_then(|worker| worker.startup_error.clone())
+        {
+            return Err(error);
+        }
+        let Some(current) = worker.as_ref() else {
+            return Err(netlink_channel_error("was not initialized"));
+        };
+        let result = current.execute(operation);
         match result {
             Ok(value) => Ok(value),
             Err(NetlinkExecutionError::Operation(error)) => Err(error),
@@ -161,6 +176,10 @@ pub(super) struct NetlinkWorker {
     pub(super) namespace: NetworkNamespaceId,
     pub(super) commands: Sender<NetlinkCommand>,
     pub(super) thread: Option<JoinHandle<()>>,
+    startup_error: Option<NativeRouteError>,
+    shutdown_requested: bool,
+    shutdown_send_error: Option<NativeRouteError>,
+    shutdown_result: Option<Result<(), NativeRouteError>>,
 }
 
 impl NetlinkWorker {
@@ -172,25 +191,13 @@ impl NetlinkWorker {
             .spawn(move || netlink_worker(command_receiver, setup_sender))
             .map_err(|error| os_error("spawn netlink worker", error))?;
 
-        match setup_receiver.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
-            Ok(Ok(())) => Ok(Self {
-                namespace,
-                commands,
-                thread: Some(thread),
-            }),
-            Ok(Err(error)) => {
-                let _ = thread.join();
-                Err(error)
-            }
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                if thread.join().is_err() {
-                    Err(netlink_worker_panicked())
-                } else {
-                    Err(netlink_channel_error("setup response channel closed"))
-                }
-            }
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(netlink_timeout("initialize netlink")),
-        }
+        complete_netlink_start(
+            namespace,
+            commands,
+            thread,
+            &setup_receiver,
+            NETLINK_OPERATION_TIMEOUT,
+        )
     }
 
     pub(super) fn execute<F, Fut, T>(&self, operation: F) -> Result<T, NetlinkExecutionError>
@@ -199,6 +206,9 @@ impl NetlinkWorker {
         Fut: Future<Output = Result<T, NativeRouteError>> + Send + 'static,
         T: Send + 'static,
     {
+        if let Some(error) = self.startup_error.clone() {
+            return Err(NetlinkExecutionError::Worker(error));
+        }
         let operation = Box::new(move |handle| {
             Box::pin(async move {
                 operation(handle)
@@ -235,18 +245,83 @@ impl NetlinkWorker {
     }
 
     pub(super) fn shutdown(&mut self) -> Result<(), NativeRouteError> {
-        let Some(thread) = self.thread.take() else {
-            return Ok(());
-        };
-        let send_result = self.commands.send(NetlinkCommand::Shutdown);
-        join_netlink_worker(thread, NETLINK_RESPONSE_TIMEOUT)?;
-        send_result.map_err(|_| netlink_channel_error("shutdown command channel closed"))
+        if let Some(result) = &self.shutdown_result {
+            return result.clone();
+        }
+        self.request_shutdown();
+        if let Some(thread) = self.thread.as_ref() {
+            wait_for_netlink_worker(thread, NETLINK_RESPONSE_TIMEOUT)?;
+        }
+        let join_result = self.thread.take().map_or(Ok(()), join_netlink_worker);
+        let result =
+            join_result.and_then(|()| self.shutdown_send_error.clone().map_or(Ok(()), Err));
+        self.shutdown_result = Some(result.clone());
+        result
+    }
+
+    fn request_shutdown(&mut self) {
+        if self.shutdown_requested {
+            return;
+        }
+        self.shutdown_requested = true;
+        if self.commands.send(NetlinkCommand::Shutdown).is_err() {
+            self.shutdown_send_error =
+                Some(netlink_channel_error("shutdown command channel closed"));
+        }
     }
 }
 
 impl Drop for NetlinkWorker {
     fn drop(&mut self) {
-        let _ = self.shutdown();
+        self.request_shutdown();
+        if let Some(thread) = self.thread.take() {
+            let _ = join_netlink_worker(thread);
+        }
+    }
+}
+
+fn complete_netlink_start(
+    namespace: NetworkNamespaceId,
+    commands: Sender<NetlinkCommand>,
+    thread: JoinHandle<()>,
+    setup_receiver: &Receiver<Result<(), NativeRouteError>>,
+    timeout: Duration,
+) -> Result<NetlinkWorker, NativeRouteError> {
+    match setup_receiver.recv_timeout(timeout) {
+        Ok(Ok(())) => Ok(NetlinkWorker {
+            namespace,
+            commands,
+            thread: Some(thread),
+            startup_error: None,
+            shutdown_requested: false,
+            shutdown_send_error: None,
+            shutdown_result: None,
+        }),
+        Ok(Err(error)) => {
+            let _ = thread.join();
+            Err(error)
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            if thread.join().is_err() {
+                Err(netlink_worker_panicked())
+            } else {
+                Err(netlink_channel_error("setup response channel closed"))
+            }
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let error = netlink_timeout("initialize netlink");
+            let mut worker = NetlinkWorker {
+                namespace,
+                commands,
+                thread: Some(thread),
+                startup_error: Some(error.clone()),
+                shutdown_requested: false,
+                shutdown_send_error: None,
+                shutdown_result: None,
+            };
+            worker.request_shutdown();
+            Ok(worker)
+        }
     }
 }
 
@@ -336,7 +411,10 @@ fn netlink_timeout(operation: &'static str) -> NativeRouteError {
     }
 }
 
-fn join_netlink_worker(thread: JoinHandle<()>, timeout: Duration) -> Result<(), NativeRouteError> {
+fn wait_for_netlink_worker(
+    thread: &JoinHandle<()>,
+    timeout: Duration,
+) -> Result<(), NativeRouteError> {
     let deadline = Instant::now()
         .checked_add(timeout)
         .ok_or_else(|| netlink_timeout("shut down netlink worker"))?;
@@ -346,6 +424,10 @@ fn join_netlink_worker(thread: JoinHandle<()>, timeout: Duration) -> Result<(), 
         };
         thread::park_timeout(remaining.min(Duration::from_millis(10)));
     }
+    Ok(())
+}
+
+fn join_netlink_worker(thread: JoinHandle<()>) -> Result<(), NativeRouteError> {
     thread.join().map_err(|_| netlink_worker_panicked())
 }
 
@@ -394,12 +476,92 @@ mod tests {
         });
 
         assert!(matches!(
-            join_netlink_worker(worker, Duration::ZERO),
+            wait_for_netlink_worker(&worker, Duration::ZERO),
             Err(NativeRouteError::OperatingSystem {
                 operation: "shut down netlink worker",
                 ..
             })
         ));
         release.store(true, Ordering::Release);
+        wait_for_netlink_worker(&worker, Duration::from_secs(1)).unwrap();
+        join_netlink_worker(worker).unwrap();
+    }
+
+    #[test]
+    fn netlink_setup_timeout_retains_worker_until_joined() {
+        let release = Arc::new(AtomicBool::new(false));
+        let exited = Arc::new(AtomicBool::new(false));
+        let worker_release = Arc::clone(&release);
+        let worker_exited = Arc::clone(&exited);
+        let (commands, command_receiver) = mpsc::channel();
+        let (setup_sender, setup_receiver) = mpsc::sync_channel(1);
+        let thread = thread::spawn(move || {
+            while !worker_release.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_millis(1));
+            }
+            let _ = setup_sender.send(Ok(()));
+            assert!(matches!(
+                command_receiver.recv(),
+                Ok(NetlinkCommand::Shutdown)
+            ));
+            worker_exited.store(true, Ordering::Release);
+        });
+
+        let mut worker = complete_netlink_start(
+            NetworkNamespaceId {
+                device: 1,
+                inode: 2,
+            },
+            commands,
+            thread,
+            &setup_receiver,
+            Duration::ZERO,
+        )
+        .unwrap();
+        assert!(matches!(
+            worker.startup_error.as_ref(),
+            Some(NativeRouteError::OperatingSystem {
+                operation: "initialize netlink",
+                ..
+            })
+        ));
+        assert!(worker.shutdown_requested);
+        assert!(worker.thread.is_some());
+
+        release.store(true, Ordering::Release);
+        worker.shutdown().unwrap();
+        assert!(worker.thread.is_none());
+        assert!(exited.load(Ordering::Acquire));
+        worker.shutdown().unwrap();
+    }
+
+    #[test]
+    fn netlink_shutdown_preserves_and_caches_worker_panic() {
+        let (commands, command_receiver) = mpsc::channel();
+        let thread = thread::spawn(move || {
+            drop(command_receiver);
+            panic!("synthetic netlink worker panic");
+        });
+        let mut worker = NetlinkWorker {
+            namespace: NetworkNamespaceId {
+                device: 1,
+                inode: 2,
+            },
+            commands,
+            thread: Some(thread),
+            startup_error: None,
+            shutdown_requested: false,
+            shutdown_send_error: None,
+            shutdown_result: None,
+        };
+
+        for _ in 0..2 {
+            assert!(matches!(
+                worker.shutdown(),
+                Err(NativeRouteError::InvalidResponse { message })
+                    if message == "Linux netlink worker panicked"
+            ));
+        }
+        assert!(worker.thread.is_none());
     }
 }

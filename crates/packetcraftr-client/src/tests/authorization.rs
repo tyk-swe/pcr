@@ -3,6 +3,58 @@
 
 use super::*;
 
+fn raw_ipv4(destination: Ipv4Addr) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 20];
+    bytes[0] = 0x45;
+    bytes[2..4].copy_from_slice(&20_u16.to_be_bytes());
+    bytes[12..16].copy_from_slice(&Ipv4Addr::new(10, 0, 0, 1).octets());
+    bytes[16..20].copy_from_slice(&destination.octets());
+    bytes
+}
+
+fn raw_ipv6(destination: std::net::Ipv6Addr) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 40];
+    bytes[0] = 0x60;
+    bytes[6] = 59;
+    bytes[8..24].copy_from_slice(&std::net::Ipv6Addr::LOCALHOST.octets());
+    bytes[24..40].copy_from_slice(&destination.octets());
+    bytes
+}
+
+fn raw_ethernet_request(ether_type: u16, payload: Vec<u8>, vlan: bool) -> Packet {
+    let mut request = Packet::new();
+    request.push(Ethernet {
+        destination: [0; 6],
+        source: [0; 6],
+        ether_type: WireValue::Exact(if vlan { 0x8100 } else { ether_type }),
+    });
+    if vlan {
+        request.push(Vlan {
+            vlan_id: 42,
+            ether_type: WireValue::Exact(ether_type),
+            ..Vlan::default()
+        });
+    }
+    request.push(Raw::new(Bytes::from(payload)));
+    request
+}
+
+fn permissive_layer2_options() -> SendOptions {
+    SendOptions {
+        destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+        plan: PlanOptions {
+            link_mode: LinkMode::Layer2,
+            interface: None,
+            preferred_source: None,
+        },
+        build: BuildOptions {
+            mode: packetcraftr_packet::build::BuildMode::Permissive,
+            ..BuildOptions::default()
+        },
+        allow_permissive_live: true,
+    }
+}
+
 #[test]
 fn mapped_private_ipv4_destination_is_not_treated_as_public_ipv6() {
     let destination = "::ffff:10.0.0.2".parse().unwrap();
@@ -60,6 +112,188 @@ fn materialized_packet_destinations_are_authorized() {
             TrafficPolicyError::PublicDestination { destination }
         )) if destination == IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
     ));
+}
+
+#[test]
+fn permissive_raw_ethernet_and_vlan_cannot_hide_public_ipv4() {
+    for vlan in [false, true] {
+        let neighbors = CountingNeighbors::default();
+        let io = RecordingIo::default();
+        let client = Client::new(
+            Arc::new(default_registry().unwrap()),
+            FixedRoutes(RouteDecision {
+                capability: LinkCapability::Layer2And3,
+                link_type: LinkType::ETHERNET,
+                ..route(LinkCapability::Layer2And3)
+            }),
+            neighbors.clone(),
+            io.clone(),
+            TrafficPolicy {
+                allow_permissive_packets: true,
+                ..TrafficPolicy::default()
+            },
+        );
+        let error = client
+            .send(
+                raw_ethernet_request(0x0800, raw_ipv4(Ipv4Addr::new(8, 8, 8, 8)), vlan),
+                permissive_layer2_options(),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            ClientError::Policy(TrafficPolicyError::PublicDestination { destination })
+                if destination == IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
+        ));
+        assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
+        assert!(io.0.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn private_raw_vlan_is_authorized_as_the_exact_transmitted_bytes() {
+    let io = RecordingIo::default();
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        CountingNeighbors::default(),
+        io.clone(),
+        TrafficPolicy {
+            allow_permissive_packets: true,
+            ..TrafficPolicy::default()
+        },
+    );
+    let report = client
+        .send(
+            raw_ethernet_request(0x0800, raw_ipv4(Ipv4Addr::new(10, 0, 0, 2)), true),
+            permissive_layer2_options(),
+        )
+        .unwrap();
+    assert_eq!(
+        io.0.lock().unwrap().as_slice(),
+        std::slice::from_ref(&report.built.bytes)
+    );
+    assert_eq!(report.wire_bytes, report.built.bytes);
+}
+
+#[test]
+fn permissive_raw_ethernet_rejects_global_ipv6_and_truncated_ip() {
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        CountingNeighbors::default(),
+        RejectingPacketIo,
+        TrafficPolicy {
+            allow_permissive_packets: true,
+            ..TrafficPolicy::default()
+        },
+    );
+    let global: std::net::Ipv6Addr = "2001:4860:4860::8888".parse().unwrap();
+    let global_error = client
+        .send(
+            raw_ethernet_request(0x86dd, raw_ipv6(global), false),
+            permissive_layer2_options(),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(
+            global_error,
+            ClientError::Policy(
+                TrafficPolicyError::PublicDestination {
+                    destination: IpAddr::V6(destination)
+                }
+            ) if destination == global
+        ),
+        "{global_error:?}"
+    );
+    assert!(matches!(
+        client.send(
+            raw_ethernet_request(0x0800, vec![0x45; 19], false),
+            permissive_layer2_options(),
+        ),
+        Err(ClientError::Policy(
+            TrafficPolicyError::InvalidPacketSemantics { .. }
+        ))
+    ));
+}
+
+#[test]
+fn exact_wire_policy_denial_happens_before_exchange_capture() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        CountingNeighbors::default(),
+        ScriptedExchangeIo {
+            events: Arc::clone(&events),
+            response: Arc::new(Mutex::new(None)),
+            deliver_before_send: false,
+            limits: Arc::new(Mutex::new(Vec::new())),
+            capture_statistics: CaptureStatistics::default(),
+        },
+        TrafficPolicy {
+            allow_permissive_packets: true,
+            ..TrafficPolicy::default()
+        },
+    );
+    let error = client
+        .exchange(
+            &PacketTemplate::new(raw_ethernet_request(
+                0x0800,
+                raw_ipv4(Ipv4Addr::new(8, 8, 8, 8)),
+                true,
+            )),
+            ExchangeOptions {
+                send: permissive_layer2_options(),
+                ..ExchangeOptions::default()
+            },
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        ClientError::Policy(TrafficPolicyError::PublicDestination { .. })
+    ));
+    assert!(events.lock().unwrap().is_empty());
+}
+
+#[test]
+fn unknown_raw_ether_type_has_no_route_bearing_destination() {
+    let io = RecordingIo::default();
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        CountingNeighbors::default(),
+        io.clone(),
+        TrafficPolicy {
+            allow_permissive_packets: true,
+            ..TrafficPolicy::default()
+        },
+    );
+    let report = client
+        .send(
+            raw_ethernet_request(0x88b5, vec![1, 2, 3, 4], false),
+            permissive_layer2_options(),
+        )
+        .unwrap();
+    assert_eq!(
+        io.0.lock().unwrap().as_slice(),
+        std::slice::from_ref(&report.built.bytes)
+    );
 }
 
 #[test]

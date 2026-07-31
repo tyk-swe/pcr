@@ -23,7 +23,10 @@ fn byte_limit_bounds_buffered_window_not_flow_lifetime() {
         );
     }
     assert_eq!(reassembler.aggregate_bytes(), 4);
-    assert_eq!(reassembler.aggregate_memory_charge(), 4);
+    assert_eq!(
+        reassembler.aggregate_memory_charge(),
+        reassembler.flows[&flow()].emitted_history.capacity()
+    );
 }
 
 #[test]
@@ -37,11 +40,17 @@ fn emitted_history_shares_per_flow_and_aggregate_limits_with_pending_data() {
     reassembler.open_flow(flow(), 100, now).unwrap();
     reassembler.push(segment(100, b"abcd"), now).unwrap();
     assert_eq!(reassembler.aggregate_bytes(), 4);
-    assert_eq!(reassembler.aggregate_memory_charge(), 4);
+    let history_capacity = reassembler.flows[&flow()].emitted_history.capacity();
+    assert!(history_capacity >= 4);
+    assert_eq!(reassembler.aggregate_memory_charge(), history_capacity);
 
     reassembler.push(segment(106, b"x"), now).unwrap();
     assert_eq!(reassembler.aggregate_bytes(), 4);
-    assert_eq!(reassembler.aggregate_memory_charge(), 68);
+    let state = &reassembler.flows[&flow()];
+    assert_eq!(
+        reassembler.aggregate_memory_charge(),
+        PENDING_SEGMENT_METADATA_CHARGE + state.pending_bytes + state.emitted_history.capacity()
+    );
 
     let evicted = reassembler.push(segment(100, b"X"), now).unwrap();
     assert!(evicted.iter().any(|event| matches!(
@@ -66,7 +75,6 @@ fn pending_data_releases_excess_history_allocation() {
     let now = Instant::now();
     let limits = ReassemblyLimits {
         max_bytes_per_flow: 8,
-        max_aggregate_bytes: 72,
         ..ReassemblyLimits::default()
     };
     let mut reassembler = Reassembler::new(limits);
@@ -79,7 +87,10 @@ fn pending_data_releases_excess_history_allocation() {
     assert_eq!(state.pending_bytes, 7);
     assert_eq!(state.emitted_history.len(), 1);
     assert!(state.emitted_history.capacity() <= 1);
-    assert_eq!(reassembler.aggregate_memory_charge(), 72);
+    assert_eq!(
+        reassembler.aggregate_memory_charge(),
+        PENDING_SEGMENT_METADATA_CHARGE + 7 + state.emitted_history.capacity()
+    );
 }
 
 #[test]

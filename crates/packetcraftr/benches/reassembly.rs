@@ -19,6 +19,7 @@ const TCP_SMALL_SEGMENTS: usize = 4_096;
 
 fn fragment_key() -> DatagramKey {
     DatagramKey {
+        scope: 0,
         source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         destination: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
         identification: 7,
@@ -28,6 +29,7 @@ fn fragment_key() -> DatagramKey {
 
 fn tcp_key() -> FlowKey {
     FlowKey {
+        scope: 0,
         source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         source_port: 12_345,
         destination: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),

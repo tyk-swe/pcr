@@ -50,6 +50,9 @@ fn materialize<N: NeighborResolver>(
 }
 
 pub trait NeighborResolver: Send + Sync {
+    /// Resolves synchronously. Custom implementations must bound blocking or
+    /// support cancellation; callers can enforce outer deadlines only before
+    /// and after this method returns.
     fn resolve_request(
         &self,
         request: &NeighborRequest,

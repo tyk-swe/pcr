@@ -38,6 +38,7 @@ pub(crate) fn run_stats(
     let options = analysis::Options {
         filter: filter.as_ref(),
         tcp_events: false,
+        merge_capture_scopes: false,
         limits,
     };
     let summary = analysis::run(&mut reader, registry, &options, |record| {

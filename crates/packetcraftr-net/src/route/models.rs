@@ -78,6 +78,10 @@ pub struct RouteDecision {
 pub trait RouteProvider: Send + Sync {
     type Error: std::error::Error + Send + Sync + 'static;
 
+    /// Provider calls are synchronous and cannot be forcibly interrupted.
+    /// Custom implementations must use finite waits or cancellation so an
+    /// outer cooperative operation deadline can be observed after they return.
+    ///
     /// Passive lookup only. Implementations must not emit neighbor traffic.
     ///
     /// A client may reuse a successful decision for identical arguments during

@@ -27,6 +27,7 @@
 //!
 //!     Some(Segment {
 //!         flow: FlowKey {
+//!             scope: 0,
 //!             source: ipv4.source.into(),
 //!             source_port: tcp.source_port,
 //!             destination: ipv4.destination.into(),
@@ -46,6 +47,7 @@
 //!
 //!     Some(Fragment {
 //!         key: DatagramKey {
+//!             scope: 0,
 //!             source: ipv4.source.into(),
 //!             destination: ipv4.destination.into(),
 //!             identification: u32::from(ipv4.identification),

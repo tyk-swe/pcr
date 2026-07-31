@@ -23,6 +23,9 @@ mod plan;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct DatagramKey {
+    /// Run-local namespace assigned by the caller.
+    #[serde(default)]
+    pub scope: u64,
     pub source: IpAddr,
     pub destination: IpAddr,
     pub identification: u32,
@@ -428,6 +431,7 @@ mod tests {
 
     fn key() -> DatagramKey {
         DatagramKey {
+            scope: 0,
             source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
             destination: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),
             identification: 7,

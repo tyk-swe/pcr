@@ -52,6 +52,7 @@ pub(crate) fn run_follow(
         filter: Some(&filter),
         // Only TCP needs reassembly; UDP chunks come straight from frames.
         tcp_events: selector.transport == StreamTransport::Tcp,
+        merge_capture_scopes: false,
         limits,
     };
     let mut collector = FollowCollector::new(selector);

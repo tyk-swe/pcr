@@ -169,7 +169,10 @@ impl FollowCollector {
         if record.tcp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some((_, flow, tcp)) = transports(&record.decoded.packet).tcp else {
+        let Some((_, _, _, tcp)) = transports(record.decoded).tcp else {
+            return Vec::new();
+        };
+        let Some(flow) = record.tcp_flow else {
             return Vec::new();
         };
         let client = self
@@ -186,7 +189,7 @@ impl FollowCollector {
         // or expiry — whose delayed duplicates the edges still catch.
         if tcp.flags & Tcp::SYN != 0 {
             let first = tcp.sequence.wrapping_add(1);
-            let (recorded, closed, evicted) = if flow == client {
+            let (recorded, closed, evicted) = if *flow == client {
                 (
                     &mut self.client_syn_base,
                     self.client_closed,
@@ -280,7 +283,10 @@ impl FollowCollector {
         if record.udp_stream != Some(self.selector.index) {
             return Vec::new();
         }
-        let Some((index, flow)) = transports(&record.decoded.packet).udp else {
+        let Some((index, _, _)) = transports(record.decoded).udp else {
+            return Vec::new();
+        };
+        let Some(flow) = record.udp_flow else {
             return Vec::new();
         };
         let client = self
@@ -289,7 +295,7 @@ impl FollowCollector {
             .get_or_insert_with(|| flow.clone())
             .clone();
         self.summary.frames += 1;
-        let direction = if flow == client {
+        let direction = if *flow == client {
             Direction::ClientToServer
         } else {
             Direction::ServerToClient

@@ -11,6 +11,7 @@ use super::*;
 
 fn flow() -> FlowKey {
     FlowKey {
+        scope: 0,
         source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
         source_port: 12345,
         destination: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 2)),

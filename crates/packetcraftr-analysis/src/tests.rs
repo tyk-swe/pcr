@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::Cursor;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::{Duration, UNIX_EPOCH};
 
 use bytes::Bytes;
 
 use super::pipeline::{AnalysisLimits, AnalysisOptions};
 use super::*;
-use packetcraftr_capture::{Frame, LinkType, Writer};
+use packetcraftr_capture::{Frame, LinkType, PcapNgOptions, Writer};
 use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
 use packetcraftr_packet::field::WireValue;
 use packetcraftr_packet::filter::Options as FilterOptions;
@@ -35,6 +35,23 @@ fn capture(packets: Vec<Packet>) -> Reader<Cursor<Vec<u8>>> {
             build_bytes(packet),
         )
         .unwrap();
+        writer.write_frame(&frame).unwrap();
+    }
+    Reader::new(Cursor::new(writer.into_inner())).unwrap()
+}
+
+fn interface_capture(packets: Vec<(u32, Packet)>) -> Reader<Cursor<Vec<u8>>> {
+    let mut writer = Writer::pcapng_with_options(Vec::new(), PcapNgOptions::default()).unwrap();
+    assert_eq!(writer.add_interface(LinkType::RAW).unwrap(), 0);
+    assert_eq!(writer.add_interface(LinkType::RAW).unwrap(), 1);
+    for (index, (interface, packet)) in packets.into_iter().enumerate() {
+        let mut frame = Frame::new(
+            UNIX_EPOCH + Duration::from_secs(index as u64),
+            LinkType::RAW,
+            build_bytes(packet),
+        )
+        .unwrap();
+        frame.interface = Some(interface);
         writer.write_frame(&frame).unwrap();
     }
     Reader::new(Cursor::new(writer.into_inner())).unwrap()
@@ -96,6 +113,74 @@ fn fragment_packet(offset_units: u16, more_fragments: bool, payload: &'static [u
             ..Ipv4::default()
         })
         .push(Raw::new(Bytes::from_static(payload)));
+    packet
+}
+
+fn ipv6_fragment_packet(offset_units: u16, more_fragments: bool, payload: &'static [u8]) -> Packet {
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv6 {
+            source: Ipv6Addr::LOCALHOST,
+            destination: Ipv6Addr::from([0xfd, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]),
+            ..Ipv6::default()
+        })
+        .push(Ipv6Fragment {
+            next_header: WireValue::Exact(17),
+            fragment_offset: offset_units,
+            more_fragments,
+            identification: 7,
+        })
+        .push(Raw::new(Bytes::from_static(payload)));
+    packet
+}
+
+fn vxlan_tcp_packet(vni: u32, reverse_inner: bool) -> Packet {
+    let (inner_source, inner_source_port, inner_destination, inner_destination_port) =
+        if reverse_inner {
+            (
+                Ipv4Addr::new(192, 168, 1, 2),
+                2000,
+                Ipv4Addr::new(192, 168, 1, 1),
+                1000,
+            )
+        } else {
+            (
+                Ipv4Addr::new(192, 168, 1, 1),
+                1000,
+                Ipv4Addr::new(192, 168, 1, 2),
+                2000,
+            )
+        };
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: Ipv4Addr::new(10, 0, 0, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 49_152,
+            destination_port: 4_789,
+            ..Udp::default()
+        })
+        .push(Vxlan {
+            vni,
+            ..Vxlan::default()
+        })
+        .push(packetcraftr_protocol::link::Ethernet::default())
+        .push(Ipv4 {
+            source: inner_source,
+            destination: inner_destination,
+            ..Ipv4::default()
+        })
+        .push(Tcp {
+            source_port: inner_source_port,
+            destination_port: inner_destination_port,
+            sequence: 100,
+            flags: Tcp::ACK,
+            ..Tcp::default()
+        })
+        .push(Raw::new(Bytes::from_static(b"x")));
     packet
 }
 

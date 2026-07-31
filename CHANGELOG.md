@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Scoped offline stream identities and IPv4/IPv6 fragment reassembly by
+  capture interface and stable encapsulation namespaces by default, while
+  retaining an explicit opt-in for cross-scope merging.
+- Made exchange correlation assign each retained frame to at most one request
+  and preserve accepted evidence and exact accounting across promotion
+  deadlines; TCP history accounting now charges allocator-reported capacity.
+- Retained ownership of native capture and Linux netlink workers across
+  bounded shutdown and setup timeouts so shutdown can be retried and Drop
+  never detaches a live worker.
+- Applied public-destination policy to the exact final Ethernet/VLAN or raw-IP
+  bytes used by send, exchange, and replay, and added cooperative deadline
+  checks around synchronous live providers to prevent later transmissions.
 - Bounded cumulative PCAPNG metadata bytes before block-body reads, with a new
   `ReaderOptions::max_metadata_bytes_per_frame` ceiling and resource-limit
   classification for capture size, interface, and metadata limits.

@@ -50,6 +50,158 @@ fn pipeline_numbers_frames_and_canonicalizes_conversations() {
 }
 
 #[test]
+fn capture_interfaces_scope_tcp_udp_and_explicit_merge_is_opt_in() {
+    let packets = vec![
+        (
+            0,
+            tcp_packet([10, 0, 0, 1], 1000, [10, 0, 0, 2], 2000, 100, b"a"),
+        ),
+        (
+            1,
+            tcp_packet([10, 0, 0, 1], 1000, [10, 0, 0, 2], 2000, 100, b"b"),
+        ),
+        (
+            0,
+            tcp_packet([10, 0, 0, 2], 2000, [10, 0, 0, 1], 1000, 200, b"c"),
+        ),
+        (0, udp_packet([10, 0, 0, 3], 53, 53)),
+        (1, udp_packet([10, 0, 0, 3], 53, 53)),
+    ];
+    let mut streams = Vec::new();
+    let summary = run(
+        &mut interface_capture(packets.clone()),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            streams.push((
+                record.tcp_stream,
+                record.udp_stream,
+                record
+                    .tcp_scope
+                    .or(record.udp_scope)
+                    .and_then(|scope| scope.interface),
+            ));
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        streams,
+        [
+            (Some(0), None, Some(0)),
+            (Some(1), None, Some(1)),
+            (Some(0), None, Some(0)),
+            (None, Some(0), Some(0)),
+            (None, Some(1), Some(1)),
+        ]
+    );
+    assert_eq!((summary.tcp_stream_count, summary.udp_stream_count), (2, 2));
+
+    let (_, merged) = observe(
+        &mut interface_capture(packets),
+        &AnalysisOptions {
+            merge_capture_scopes: true,
+            ..AnalysisOptions::default()
+        },
+    );
+    assert_eq!((merged.tcp_stream_count, merged.udp_stream_count), (1, 1));
+}
+
+#[test]
+fn tunnel_namespace_scopes_inner_tcp_and_keeps_reverse_direction_together() {
+    let mut observed = Vec::new();
+    let summary = run(
+        &mut capture(vec![
+            vxlan_tcp_packet(42, false),
+            vxlan_tcp_packet(43, false),
+            vxlan_tcp_packet(42, true),
+        ]),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            observed.push((
+                record.tcp_stream,
+                record.tcp_scope.map(|scope| scope.components().to_vec()),
+            ));
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        observed.iter().map(|item| item.0).collect::<Vec<_>>(),
+        [Some(0), Some(1), Some(0)]
+    );
+    assert!(matches!(
+        observed[0].1.as_deref(),
+        Some(components)
+            if components.len() == 2
+                && components.contains(&ScopeComponent::Vxlan { vni: 42 })
+    ));
+    assert!(matches!(
+        observed[1].1.as_deref(),
+        Some(components)
+            if components.contains(&ScopeComponent::Vxlan { vni: 43 })
+    ));
+    assert_eq!(summary.tcp_stream_count, 2);
+}
+
+#[test]
+fn capture_interfaces_scope_ipv4_and_ipv6_fragment_reassembly() {
+    let mut packets = Vec::new();
+    for packet in [
+        fragment_packet(0, true, b"01234567"),
+        ipv6_fragment_packet(0, true, b"01234567"),
+    ] {
+        packets.push((0, packet.clone()));
+        packets.push((1, packet));
+    }
+    for packet in [
+        fragment_packet(1, false, b"abcdef"),
+        ipv6_fragment_packet(1, false, b"abcdef"),
+    ] {
+        packets.push((0, packet.clone()));
+        packets.push((1, packet));
+    }
+    let mut completed = Vec::new();
+    run(
+        &mut interface_capture(packets),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            completed.extend(
+                record
+                    .fragment_events
+                    .iter()
+                    .filter_map(|event| match event {
+                        FragmentEvent::Complete(datagram) => Some((
+                            datagram.key.scope,
+                            datagram.key.source,
+                            datagram.bytes.clone(),
+                        )),
+                        FragmentEvent::Expired { .. } => None,
+                    }),
+            );
+            Ok(())
+        },
+    )
+    .unwrap();
+    completed.sort_by_key(|(scope, source, _)| (*scope, *source));
+    assert_eq!(completed.len(), 4);
+    assert_eq!(
+        completed
+            .iter()
+            .map(|(scope, _, bytes)| (*scope, bytes.as_ref()))
+            .collect::<Vec<_>>(),
+        [
+            (0, b"01234567abcdef".as_slice()),
+            (0, b"01234567abcdef".as_slice()),
+            (1, b"01234567abcdef".as_slice()),
+            (1, b"01234567abcdef".as_slice()),
+        ]
+    );
+}
+
+#[test]
 fn filter_narrows_dispatch_without_renumbering_or_reindexing() {
     let registry = registry();
     let filter = Filter::compile("tcp", &registry, FilterOptions::default()).unwrap();
@@ -349,12 +501,14 @@ fn conversations_report_in_assigned_index_order() {
     // The first-seen flow sorts canonically AFTER the second-seen flow, so a
     // table-order walk would invert them.
     let first = FlowKey {
+        scope: 0,
         source: "10.0.0.9".parse().unwrap(),
         source_port: 1,
         destination: "10.0.0.8".parse().unwrap(),
         destination_port: 1,
     };
     let second = FlowKey {
+        scope: 0,
         source: "10.0.0.1".parse().unwrap(),
         source_port: 1,
         destination: "10.0.0.2".parse().unwrap(),

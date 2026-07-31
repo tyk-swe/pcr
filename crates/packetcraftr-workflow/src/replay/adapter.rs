@@ -4,10 +4,7 @@
 /// Production replay authorizer. It checks complete capture evidence, applies
 /// the traffic policy to raw routing destinations before any I/O, and requires
 /// an exact decode/build round trip.
-use super::wire::{
-    ReplayWireDestinations, map_replay_route_error, replay_network_envelope,
-    replay_wire_destinations,
-};
+use super::wire::{map_replay_route_error, replay_network_envelope};
 use super::{
     Arc, BuildContext, BuildMode, BuildOptions, Builder, Classification, DecodeOptions, Decoder,
     DestinationScope, DispatchPacketIo, Frame, InterfaceId, InterfaceInfo, InterfaceProvider, Kind,
@@ -18,6 +15,7 @@ use super::{
     TransmissionFrame,
 };
 use crate::BoundaryError;
+use packetcraftr_packet::semantics::{WireDestinations, final_wire_destinations};
 
 pub struct SystemAuthorizer {
     policy: packetcraftr_client::policy::Policy,
@@ -74,38 +72,25 @@ impl SystemAuthorizer {
                 )
             })?;
         }
-        let ReplayWireDestinations {
-            addresses,
-            has_unsupported_routing_header,
-        } = replay_wire_destinations(frame).map_err(|source| {
-            BoundaryError::with_source(
-                source.to_string(),
-                Classification::new(
-                    "packet.replay_packet_semantics",
-                    Kind::Packet,
-                    Some("repair malformed route-bearing packet fields before live replay"),
-                ),
-                Vec::new(),
-                source,
-            )
-        })?;
-        for destination in addresses {
+        let destinations = match final_wire_destinations(frame.link_type, frame.bytes()) {
+            WireDestinations::NoRoute => Vec::new(),
+            WireDestinations::Destinations(destinations) => destinations,
+            WireDestinations::MalformedOrAmbiguous { reason } => {
+                return Err(BoundaryError::new(
+                    reason,
+                    Classification::new(
+                        "packet.replay_packet_semantics",
+                        Kind::Packet,
+                        Some("repair malformed route-bearing packet fields before live replay"),
+                    ),
+                    Vec::new(),
+                ));
+            }
+        };
+        for destination in destinations {
             self.policy
                 .authorize_destination(destination)
                 .map_err(BoundaryError::from_error)?;
-        }
-        if has_unsupported_routing_header {
-            return Err(BoundaryError::new(
-                "captured IPv6 packet uses an unsupported routing header",
-                Classification::new(
-                    "capability.replay_routing_header",
-                    Kind::Capability,
-                    Some(
-                        "replay only typed RFC 8754 Segment Routing Headers; unsupported routing types cannot be policy-authorized safely",
-                    ),
-                ),
-                Vec::new(),
-            ));
         }
         let decoded = Decoder::new(Arc::clone(&self.registry))
             .decode(frame.clone(), DecodeOptions::default())

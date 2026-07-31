@@ -132,6 +132,7 @@ impl CaptureProvider for ScriptedExchangeIo {
 pub(crate) struct DeadlineConsumingExchangeIo {
     pub(crate) events: Arc<Mutex<Vec<&'static str>>>,
     pub(crate) response: Arc<Mutex<Option<Frame>>>,
+    pub(crate) arm_delay: Duration,
 }
 
 impl PacketIo for DeadlineConsumingExchangeIo {
@@ -194,6 +195,7 @@ impl CaptureProvider for DeadlineConsumingExchangeIo {
         _limits: CaptureQueueLimits,
     ) -> Result<Self::Capture, LiveIoError> {
         self.events.lock().unwrap().push("arm");
+        std::thread::sleep(self.arm_delay);
         Ok(DeadlineConsumingCapture {
             events: Arc::clone(&self.events),
             response: Arc::clone(&self.response),

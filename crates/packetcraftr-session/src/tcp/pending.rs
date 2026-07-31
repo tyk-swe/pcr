@@ -180,6 +180,11 @@ pub(super) fn plan_push(
     )?;
     let history_replacement =
         prepare_emitted_history(state, initial_history_capacity, history_allocation)?;
+    let actual_history_allocation = history_replacement
+        .as_ref()
+        .map_or(state.emitted_history.capacity(), VecDeque::capacity);
+    let accounting = accounting
+        .account_actual_history_allocation(actual_history_allocation, limits.max_aggregate_bytes)?;
     let direct_payload = if merge.direct_output {
         let end = payload_start
             .checked_add(payload.len())

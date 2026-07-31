@@ -29,6 +29,7 @@ pub(crate) fn run_expert(
         filter: filter.as_ref(),
         // Expert needs the reassembler's byte-exact retransmission evidence.
         tcp_events: true,
+        merge_capture_scopes: false,
         limits,
     };
     let mut collector = analysis::expert::ExpertCollector::new();

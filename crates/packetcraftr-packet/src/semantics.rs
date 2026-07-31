@@ -10,5 +10,7 @@ use super::layer::{Layer, ProtocolId};
 pub use super::protocol_catalog::{BuiltinProtocol, builtin_protocol_catalog};
 
 pub use ip::*;
+pub use wire::{WireDestinations, final_wire_destinations};
 
 mod ip;
+mod wire;

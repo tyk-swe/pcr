@@ -141,6 +141,7 @@ mod tests {
 
     struct BlockingSource {
         release: Arc<AtomicBool>,
+        exited: Arc<AtomicBool>,
     }
 
     impl NativeCaptureSource for BlockingSource {
@@ -153,6 +154,12 @@ mod tests {
 
         fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
             Ok(NativeCaptureStatistics::default())
+        }
+    }
+
+    impl Drop for BlockingSource {
+        fn drop(&mut self) {
+            self.exited.store(true, Ordering::Release);
         }
     }
 
@@ -275,10 +282,12 @@ mod tests {
     #[test]
     fn shutdown_is_bounded_when_capture_source_ignores_interrupt() {
         let release = Arc::new(AtomicBool::new(false));
+        let exited = Arc::new(AtomicBool::new(false));
         let mut session = NativeCaptureSession::spawn(
             NativeCaptureParts {
                 source: Box::new(BlockingSource {
                     release: Arc::clone(&release),
+                    exited: Arc::clone(&exited),
                 }),
                 interrupt: Arc::new(MockInterrupt(Arc::new(AtomicUsize::new(0)))),
                 interface: InterfaceId {
@@ -304,6 +313,45 @@ mod tests {
             })
         ));
         release.store(true, Ordering::Release);
+        session.shutdown().unwrap();
+        assert!(exited.load(Ordering::Acquire));
+        session.shutdown().unwrap();
+    }
+
+    #[test]
+    fn drop_joins_a_capture_worker_retained_after_shutdown_timeout() {
+        let release = Arc::new(AtomicBool::new(false));
+        let exited = Arc::new(AtomicBool::new(false));
+        let mut session = NativeCaptureSession::spawn(
+            NativeCaptureParts {
+                source: Box::new(BlockingSource {
+                    release: Arc::clone(&release),
+                    exited: Arc::clone(&exited),
+                }),
+                interrupt: Arc::new(MockInterrupt(Arc::new(AtomicUsize::new(0)))),
+                interface: InterfaceId {
+                    name: "mock0".to_owned(),
+                    index: 7,
+                },
+                link_type: LinkType::ETHERNET,
+            },
+            CaptureQueueLimits {
+                max_frames: 1,
+                max_bytes: 4,
+                snap_length: 4,
+                overflow_policy: CaptureOverflowPolicy::Fail,
+            },
+        )
+        .unwrap();
+        session.wait_ready(Duration::from_secs(1)).unwrap();
+        assert!(matches!(
+            session.shutdown(),
+            Err(LiveIoError::DeadlineExceeded { .. })
+        ));
+
+        release.store(true, Ordering::Release);
+        drop(session);
+        assert!(exited.load(Ordering::Acquire));
     }
 
     #[test]

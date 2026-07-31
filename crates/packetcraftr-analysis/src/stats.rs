@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
-use super::session_index::{CanonicalFlow, tcp_segment, udp_flow};
+use super::session_index::CanonicalFlow;
 use super::{AnalysisError, FlowKey, FrameRecord, Ipv4, Ipv6};
 
 /// Which transport a conversation or port tally belongs to.
@@ -228,11 +228,11 @@ impl StatsCollector {
 
         // Conversations and ports, keyed by the indices the pipeline
         // assigned so filters, follow-ups, and reports all agree.
-        if let (Some(stream), Some(segment)) = (record.tcp_stream, tcp_segment(record.decoded)) {
-            self.conversation(TransportKind::Tcp, stream, &segment.flow, bytes, timestamp);
+        if let (Some(stream), Some(flow)) = (record.tcp_stream, record.tcp_flow) {
+            self.conversation(TransportKind::Tcp, stream, flow, bytes, timestamp);
         }
-        if let (Some(stream), Some(flow)) = (record.udp_stream, udp_flow(record.decoded)) {
-            self.conversation(TransportKind::Udp, stream, &flow, bytes, timestamp);
+        if let (Some(stream), Some(flow)) = (record.udp_stream, record.udp_flow) {
+            self.conversation(TransportKind::Udp, stream, flow, bytes, timestamp);
         }
     }
 

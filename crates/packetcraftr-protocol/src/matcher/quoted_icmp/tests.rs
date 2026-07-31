@@ -88,6 +88,61 @@ fn matchers_accept_quoted_icmp_errors_for_each_probe_transport() {
 }
 
 #[test]
+fn port_unreachable_codes_do_not_depend_on_quoted_transport() {
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let destination = Ipv4Addr::new(10, 0, 0, 2);
+    let router = Ipv4Addr::new(10, 0, 0, 254);
+    let mut tcp = Packet::new();
+    tcp.push(Ipv4 {
+        source,
+        destination,
+        ..Ipv4::default()
+    })
+    .push(Tcp {
+        source_port: 12_345,
+        destination_port: 443,
+        sequence: 17,
+        flags: Tcp::SYN,
+        ..Tcp::default()
+    });
+    let mut response = quoted_icmpv4_time_exceeded(router, source, 6, &tcp);
+    let icmp = response.get_mut::<Icmpv4>().unwrap();
+    icmp.icmp_type = 3;
+    icmp.code = 3;
+    assert_eq!(
+        quoted_icmp_error(&response).unwrap().kind,
+        super::QuotedIcmpError::PortUnreachable
+    );
+
+    let source_v6: Ipv6Addr = "fd00::1".parse().unwrap();
+    let destination_v6: Ipv6Addr = "fd00::2".parse().unwrap();
+    let router_v6: Ipv6Addr = "fd00::fe".parse().unwrap();
+    let mut udp_v6 = Packet::new();
+    udp_v6
+        .push(Ipv6 {
+            source: source_v6,
+            destination: destination_v6,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 443,
+            ..Udp::default()
+        });
+    let mut response = quoted_icmpv6_time_exceeded(router_v6, source_v6, &udp_v6);
+    let icmp = response.get_mut::<Icmpv6>().unwrap();
+    icmp.icmp_type = 1;
+    icmp.code = 4;
+    let mut body = icmp.body.to_vec();
+    body[10] = 6;
+    icmp.body = body.into();
+    assert_eq!(
+        quoted_icmp_error(&response).unwrap().kind,
+        super::QuotedIcmpError::PortUnreachable
+    );
+}
+
+#[test]
 fn quoted_icmp_errors_require_matching_transport_and_inner_payload_lengths() {
     let source = Ipv4Addr::new(10, 0, 0, 1);
     let destination = Ipv4Addr::new(10, 0, 0, 2);

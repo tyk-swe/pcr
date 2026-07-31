@@ -67,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Corrected multi-segment service-response statistics, tunneled and
   extension-bearing quoted ICMP correlation, unusable ARP claims, and
   optional-duration text rendering.
+- Classified ICMP port-unreachable codes independently of the quoted transport
+  and reported disjoint fragment overlaps as separate exact ranges.
 
 ## [0.4.0] - 2026-07-29
 

@@ -11,11 +11,18 @@ use bytes::Bytes;
 use super::{Error, OverlapPolicy};
 
 #[derive(Clone, Copy, Debug)]
+pub(super) struct FragmentOverlap {
+    pub(super) start: u32,
+    pub(super) end: u32,
+    pub(super) length: usize,
+    pub(super) conflicting: bool,
+}
+
+#[derive(Clone, Debug)]
 pub(super) struct FragmentMergePlan {
     pub(super) added_bytes: usize,
     pub(super) has_conflicting_overlap: bool,
-    pub(super) overlap_start: Option<u32>,
-    pub(super) overlap_end: u32,
+    pub(super) overlaps: Vec<FragmentOverlap>,
     pub(super) overlap_length: usize,
     pub(super) segment_count: usize,
     pub(super) first_affected: Option<u32>,
@@ -34,8 +41,7 @@ impl FragmentMergePlan {
         Self {
             added_bytes,
             has_conflicting_overlap: false,
-            overlap_start: None,
-            overlap_end: offset,
+            overlaps: Vec::new(),
             overlap_length: 0,
             segment_count,
             first_affected: None,
@@ -85,18 +91,25 @@ pub(super) fn plan_fragment_merge(
                 let length = (overlap_end - overlap_start) as usize;
                 let existing_start = (overlap_start - start) as usize;
                 let fragment_start = (overlap_start - offset) as usize;
-                plan.overlap_start = Some(
-                    plan.overlap_start
-                        .map_or(overlap_start, |start| start.min(overlap_start)),
-                );
-                plan.overlap_end = plan.overlap_end.max(overlap_end);
                 plan.overlap_length = plan
                     .overlap_length
                     .checked_add(length)
                     .ok_or(Error::OffsetOverflow)?;
                 let existing_overlap = &existing_bytes[existing_start..existing_start + length];
                 let fragment_overlap = &fragment[fragment_start..fragment_start + length];
-                if existing_overlap != fragment_overlap {
+                let conflicting = existing_overlap != fragment_overlap;
+                plan.overlaps
+                    .try_reserve(1)
+                    .map_err(|_| Error::AllocationFailed {
+                        requested: std::mem::size_of::<FragmentOverlap>(),
+                    })?;
+                plan.overlaps.push(FragmentOverlap {
+                    start: overlap_start,
+                    end: overlap_end,
+                    length,
+                    conflicting,
+                });
+                if conflicting {
                     plan.has_conflicting_overlap = true;
                     if policy == OverlapPolicy::RejectConflicting {
                         #[expect(

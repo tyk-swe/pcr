@@ -15,7 +15,7 @@ pub(super) fn commit_fragment(
     segments: &mut BTreeMap<u32, Bytes>,
     offset: u32,
     fragment: Bytes,
-    plan: FragmentMergePlan,
+    plan: &FragmentMergePlan,
 ) -> Result<(), Error> {
     let Some(mut current) = plan.first_affected else {
         let replaced = segments.insert(offset, copy_bytes(&fragment)?);

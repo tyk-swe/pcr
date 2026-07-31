@@ -80,16 +80,15 @@ pub fn quoted_icmp_error(response: &Packet) -> Option<QuotedIcmpErrorQuote> {
     ) {
         return None;
     }
-    let udp = quoted.protocol == 17;
     let kind = match icmp_protocol {
         BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
-            3 if udp => QuotedIcmpError::PortUnreachable,
+            3 => QuotedIcmpError::PortUnreachable,
             9 | 10 | 13 => QuotedIcmpError::AdministrativelyProhibited,
             _ => QuotedIcmpError::DestinationUnreachable,
         },
         BuiltinProtocol::Icmpv4 if icmp_type == 11 => QuotedIcmpError::TimeExceeded,
         BuiltinProtocol::Icmpv6 if icmp_type == 1 => match code {
-            4 if udp => QuotedIcmpError::PortUnreachable,
+            4 => QuotedIcmpError::PortUnreachable,
             1 | 5 | 6 => QuotedIcmpError::AdministrativelyProhibited,
             _ => QuotedIcmpError::DestinationUnreachable,
         },

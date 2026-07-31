@@ -287,12 +287,13 @@ impl Reassembler {
         let new_memory_charge = accounting.new_memory_charge;
         let aggregate_memory_charge = accounting.aggregate_memory_charge;
         let fragment_count = accounting.fragment_count;
-        let overlap = merge.overlap_start.map(|offset| Event::Overlap {
-            key: key.clone(),
-            offset,
-            end: merge.overlap_end,
-            length: merge.overlap_length,
-            conflicting: merge.has_conflicting_overlap,
+        let overlap_key = key.clone();
+        let overlaps = merge.overlaps.iter().map(move |overlap| Event::Overlap {
+            key: overlap_key.clone(),
+            offset: overlap.start,
+            end: overlap.end,
+            length: overlap.length,
+            conflicting: overlap.conflicting,
         });
 
         if has_existing_flow {
@@ -301,7 +302,7 @@ impl Reassembler {
                     .flows
                     .get_mut(&key)
                     .expect("validated fragment flow remains present");
-                commit_fragment(&mut state.segments, offset, bytes, merge)?;
+                commit_fragment(&mut state.segments, offset, bytes, &merge)?;
                 state.final_length = final_length;
                 state.stored_bytes = stored_bytes;
                 state.fragment_count = fragment_count;
@@ -335,9 +336,9 @@ impl Reassembler {
                     fragment_count: state.fragment_count,
                     had_conflicting_overlap: state.had_conflicting_overlap,
                 });
-                return Ok(overlap.into_iter().chain([complete]).collect());
+                return Ok(overlaps.chain([complete]).collect());
             }
-            return Ok(overlap.into_iter().collect());
+            return Ok(overlaps.collect());
         }
 
         let mut state = DatagramState {
@@ -348,7 +349,7 @@ impl Reassembler {
             last_update: now,
             had_conflicting_overlap: merge.has_conflicting_overlap,
         };
-        commit_fragment(&mut state.segments, offset, bytes, merge)?;
+        commit_fragment(&mut state.segments, offset, bytes, &merge)?;
         self.flows.insert(key, state);
         self.aggregate_bytes = aggregate;
         self.aggregate_memory_charge = aggregate_memory_charge;
@@ -633,6 +634,62 @@ mod tests {
                 had_conflicting_overlap: true,
                 ..
             })] if bytes == &Bytes::from_static(b"abcdefghijklmnopZ")
+        ));
+    }
+
+    #[test]
+    fn disjoint_overlaps_produce_separate_events() {
+        let now = Instant::now();
+        let mut reassembler =
+            Reassembler::new(ReassemblyLimits::default(), OverlapPolicy::KeepFirst);
+        for (offset, bytes) in [
+            (0, Bytes::from_static(b"abcdefgh")),
+            (16, Bytes::from_static(b"qrstuvwx")),
+        ] {
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset,
+                        more_fragments: true,
+                        bytes,
+                    },
+                    now,
+                )
+                .unwrap();
+        }
+
+        let events = reassembler
+            .push(
+                Fragment {
+                    key: key(),
+                    offset: 0,
+                    more_fragments: false,
+                    bytes: Bytes::from_static(b"abcdefghIJKLMNOPqrstuvwx"),
+                },
+                now,
+            )
+            .unwrap();
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                Event::Overlap {
+                    offset: 0,
+                    end: 8,
+                    length: 8,
+                    conflicting: false,
+                    ..
+                },
+                Event::Overlap {
+                    offset: 16,
+                    end: 24,
+                    length: 8,
+                    conflicting: false,
+                    ..
+                },
+                Event::Complete(_)
+            ]
         ));
     }
 

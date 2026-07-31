@@ -460,7 +460,9 @@
             "endpoints",
             "protocols",
             "ports",
-            "io"
+            "io",
+            "service_response_time",
+            "lengths"
           ]
         },
         "frames_read": {
@@ -504,6 +506,15 @@
         },
         "io": {
           "$ref": "#/$defs/statsIo"
+        },
+        "service_response_time": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsServiceResponseTime"
+          }
+        },
+        "lengths": {
+          "$ref": "#/$defs/statsLengths"
         }
       },
       "allOf": [
@@ -696,8 +707,436 @@
               ]
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "service_response_time"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "service_response_time"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "table": {
+                "const": "lengths"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "lengths"
+            ]
+          }
+        },
+        {
+          "oneOf": [
+            {
+              "required": [
+                "conversations"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "endpoints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "protocols"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "ports"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "io"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "service_response_time"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lengths"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "endpoints"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "conversations"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "protocols"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "ports"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "io"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "service_response_time"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lengths"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "protocols"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "conversations"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "endpoints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "ports"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "io"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "service_response_time"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lengths"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "ports"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "conversations"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "endpoints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "protocols"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "io"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "service_response_time"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lengths"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "io"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "conversations"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "endpoints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "protocols"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "ports"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "service_response_time"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lengths"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "service_response_time"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "conversations"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "endpoints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "protocols"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "ports"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "io"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lengths"
+                    ]
+                  }
+                ]
+              }
+            },
+            {
+              "required": [
+                "lengths"
+              ],
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "conversations"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "endpoints"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "protocols"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "ports"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "io"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "service_response_time"
+                    ]
+                  }
+                ]
+              }
+            }
+          ]
         }
       ],
+      "additionalProperties": false
+    },
+    "statsLengths": {
+      "type": "object",
+      "required": [
+        "frames",
+        "buckets"
+      ],
+      "properties": {
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        },
+        "minimum": {
+          "$ref": "#/$defs/uint64"
+        },
+        "maximum": {
+          "$ref": "#/$defs/uint64"
+        },
+        "mean": {
+          "$ref": "#/$defs/uint64"
+        },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsLengthBucket"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "statsLengthBucket": {
+      "type": "object",
+      "required": [
+        "lower_bound",
+        "frames"
+      ],
+      "properties": {
+        "lower_bound": {
+          "$ref": "#/$defs/uint64"
+        },
+        "upper_bound": {
+          "$ref": "#/$defs/uint64"
+        },
+        "frames": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
+      "additionalProperties": false
+    },
+    "statsServiceResponseTime": {
+      "type": "object",
+      "required": [
+        "transport",
+        "service_port",
+        "request_bursts",
+        "samples",
+        "unanswered_requests",
+        "orphan_responses",
+        "timestamp_regressions",
+        "buckets"
+      ],
+      "properties": {
+        "transport": {
+          "enum": [
+            "tcp",
+            "udp"
+          ]
+        },
+        "service_port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "request_bursts": {
+          "$ref": "#/$defs/uint64"
+        },
+        "samples": {
+          "$ref": "#/$defs/uint64"
+        },
+        "unanswered_requests": {
+          "$ref": "#/$defs/uint64"
+        },
+        "orphan_responses": {
+          "$ref": "#/$defs/uint64"
+        },
+        "timestamp_regressions": {
+          "$ref": "#/$defs/uint64"
+        },
+        "minimum": {
+          "$ref": "#/$defs/duration"
+        },
+        "maximum": {
+          "$ref": "#/$defs/duration"
+        },
+        "mean": {
+          "$ref": "#/$defs/duration"
+        },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/statsServiceResponseTimeBucket"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "statsServiceResponseTimeBucket": {
+      "type": "object",
+      "required": [
+        "lower_bound",
+        "samples"
+      ],
+      "properties": {
+        "lower_bound": {
+          "$ref": "#/$defs/duration"
+        },
+        "upper_bound": {
+          "$ref": "#/$defs/duration"
+        },
+        "samples": {
+          "$ref": "#/$defs/uint64"
+        }
+      },
       "additionalProperties": false
     },
     "statsConversation": {

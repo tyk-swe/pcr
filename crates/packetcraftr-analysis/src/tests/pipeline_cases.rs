@@ -385,23 +385,32 @@ fn fragment_reassembly_completes_split_datagrams() {
 }
 
 #[test]
-fn conflicting_reassembly_data_classifies_as_packet_not_budget() {
-    // Two fragments claim the same byte range with different content. That
-    // is corrupted or hostile capture data, and no budget change fixes it,
-    // so it must not classify as a resource limit.
-    let error = run(
+fn conflicting_reassembly_data_is_reported_without_ending_analysis() {
+    let mut events = Vec::new();
+    let summary = run(
         &mut capture(vec![
             fragment_packet(0, true, b"01234567"),
             fragment_packet(0, true, b"abcdefgh"),
         ]),
         registry(),
         &AnalysisOptions::default(),
-        |_| Ok(()),
+        |record| {
+            events.extend(record.fragment_events.iter().cloned());
+            Ok(())
+        },
     )
-    .unwrap_err();
-    assert!(matches!(error, Error::Fragments { number: 2, .. }));
-    assert_eq!(error.classification().code, "packet.reassembly");
-    assert_eq!(error.classification().kind, Kind::Packet);
+    .unwrap();
+    assert_eq!(summary.frames_read, 2);
+    assert!(matches!(
+        events.as_slice(),
+        [FragmentEvent::Overlap {
+            offset: 0,
+            end: 8,
+            length: 8,
+            conflicting: true,
+            ..
+        }]
+    ));
 }
 
 #[test]
@@ -415,6 +424,7 @@ fn incomplete_fragments_at_end_of_capture_are_surfaced_not_dropped() {
             key,
             received_bytes: 8,
             fragment_count: 1,
+            ..
         }] if key.identification == 7
     ));
 }
@@ -681,4 +691,201 @@ fn stats_collector_tallies_every_table_with_stable_orders() {
             ..
         })
     ));
+}
+
+#[test]
+fn lengths_use_original_length_and_keep_captured_bytes() {
+    let tcp = tcp_packet([10, 0, 0, 1], 40_000, [10, 0, 0, 2], 443, 1, b"x");
+    let udp = udp_packet_between([10, 0, 0, 3], 50_000, [10, 0, 0, 4], 53, b"y");
+    let tcp_bytes = u64::try_from(build_bytes(tcp.clone()).len()).unwrap();
+    let udp_bytes = u64::try_from(build_bytes(udp.clone()).len()).unwrap();
+    let mut collector = stats::StatsCollector::new(Duration::from_secs(1)).unwrap();
+    run(
+        &mut capture_timed_with_lengths(vec![
+            (UNIX_EPOCH, tcp, 64),
+            (UNIX_EPOCH + Duration::from_secs(1), udp, 1519),
+            (
+                UNIX_EPOCH + Duration::from_secs(2),
+                tcp_packet([10, 0, 0, 1], 40_000, [10, 0, 0, 2], 443, 2, b"z"),
+                262_144,
+            ),
+        ]),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let report = collector.finish();
+    assert_eq!(report.lengths.frames, 3);
+    assert_eq!(report.lengths.minimum, Some(64));
+    assert_eq!(report.lengths.maximum, Some(262_144));
+    assert_eq!(report.lengths.mean, Some((64 + 1519 + 262_144) / 3));
+    assert_eq!(report.bytes, tcp_bytes + udp_bytes + tcp_bytes);
+    assert_eq!(
+        report
+            .lengths
+            .buckets
+            .iter()
+            .map(|bucket| (bucket.lower_bound, bucket.upper_bound, bucket.frames))
+            .collect::<Vec<_>>(),
+        [
+            (64, Some(128), 1),
+            (1519, Some(2048), 1),
+            (262_144, None, 1),
+        ]
+    );
+}
+
+#[test]
+fn service_response_time_handles_roles_empty_udp_and_stable_ports() {
+    let client = [10, 0, 0, 1];
+    let server = [10, 0, 0, 2];
+    let mut collector = stats::StatsCollector::new(Duration::from_secs(1)).unwrap();
+    run(
+        &mut capture_timed(vec![
+            (
+                UNIX_EPOCH,
+                tcp_syn_packet(client, 40_000, server, 443, 1, None, 512, None),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(1),
+                tcp_syn_packet(server, 443, client, 40_000, 50, Some(2), 512, None),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(2),
+                tcp_flags_packet(
+                    client,
+                    40_000,
+                    server,
+                    443,
+                    2,
+                    51,
+                    Tcp::ACK,
+                    512,
+                    b"request",
+                ),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(3),
+                tcp_flags_packet(client, 40_000, server, 443, 9, 51, Tcp::ACK, 512, b"latest"),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(5),
+                tcp_flags_packet(
+                    server,
+                    443,
+                    client,
+                    40_000,
+                    51,
+                    16,
+                    Tcp::ACK,
+                    512,
+                    b"response",
+                ),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_millis(5_001),
+                tcp_flags_packet(server, 443, client, 40_000, 59, 16, Tcp::ACK, 512, b"tail"),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(6),
+                udp_packet_between(client, 50_000, server, 53, b""),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(7),
+                udp_packet_between(server, 53, client, 50_000, b""),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(8),
+                udp_packet_between(client, 50_001, server, 123, b"request"),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(9),
+                udp_packet_between(server, 123, client, 50_001, b"response"),
+            ),
+        ]),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let rows = collector.finish().service_response_time;
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.transport, row.service_port))
+            .collect::<Vec<_>>(),
+        [
+            (stats::TransportKind::Tcp, 443),
+            (stats::TransportKind::Udp, 53),
+            (stats::TransportKind::Udp, 123),
+        ]
+    );
+    assert_eq!(rows[0].request_bursts, 1);
+    assert_eq!(rows[0].samples, 1);
+    assert_eq!(rows[0].orphan_responses, 0);
+    assert_eq!(rows[0].minimum, Some(Duration::from_secs(2)));
+    assert_eq!(rows[1].samples, 1);
+    assert_eq!(rows[2].samples, 1);
+}
+
+#[test]
+fn service_response_time_counts_regressions_unanswered_orphans_and_syn_resets() {
+    let client = [10, 0, 0, 1];
+    let server = [10, 0, 0, 2];
+    let mut collector = stats::StatsCollector::new(Duration::from_secs(1)).unwrap();
+    run(
+        &mut capture_timed(vec![
+            (
+                UNIX_EPOCH + Duration::from_secs(10),
+                tcp_packet(client, 40_000, server, 443, 1, b"request"),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(20),
+                tcp_packet(client, 40_000, server, 443, 2, b"latest"),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(5),
+                tcp_packet(server, 443, client, 40_000, 1, b"regression"),
+            ),
+        ]),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let row = &collector.finish().service_response_time[0];
+    assert_eq!(row.request_bursts, 1);
+    assert_eq!(row.samples, 0);
+    assert_eq!(row.timestamp_regressions, 1);
+    assert_eq!(row.unanswered_requests, 0);
+
+    let mut collector = stats::StatsCollector::new(Duration::from_secs(1)).unwrap();
+    run(
+        &mut capture(vec![
+            tcp_syn_packet(client, 40_000, server, 443, 1, None, 512, None),
+            tcp_packet(client, 40_000, server, 443, 2, b"old"),
+            tcp_syn_packet(client, 40_000, server, 443, 99, None, 512, None),
+            tcp_packet(server, 443, client, 40_000, 500, b"new"),
+        ]),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .unwrap();
+    let row = &collector.finish().service_response_time[0];
+    assert_eq!(row.unanswered_requests, 1);
+    assert_eq!(row.orphan_responses, 1);
+    assert_eq!(row.samples, 0);
 }

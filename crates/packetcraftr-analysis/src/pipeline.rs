@@ -105,9 +105,31 @@ pub struct FrameRecord<'a> {
     /// TCP reassembly events this frame produced, when requested, including
     /// evictions of flows whose idle expiry this frame's arrival revealed.
     pub tcp_events: &'a [TcpEvent],
-    /// Fragment reassembly outcomes: a datagram this frame completed, and
-    /// any datagrams whose expiry this frame's arrival revealed.
+    /// Fragment reassembly outcomes: overlap evidence, a datagram this frame
+    /// completed, and any expiries this frame's arrival revealed.
     pub fragment_events: &'a [FragmentEvent],
+    tcp_streams: &'a StreamIndex,
+    udp_streams: &'a StreamIndex,
+    max_flows: usize,
+}
+
+impl FrameRecord<'_> {
+    /// Looks up a direction-neutral TCP conversation in the capture-global
+    /// index built before display filtering.
+    pub fn tcp_stream_for(&self, flow: &FlowKey) -> Option<u64> {
+        self.tcp_streams.get(flow)
+    }
+
+    /// Looks up a direction-neutral UDP conversation in the capture-global
+    /// index built before display filtering.
+    pub fn udp_stream_for(&self, flow: &FlowKey) -> Option<u64> {
+        self.udp_streams.get(flow)
+    }
+
+    /// Returns the analysis flow ceiling that bounds retained expert state.
+    pub fn max_flows(&self) -> usize {
+        self.max_flows
+    }
 }
 
 /// Terminal counters and residue for a completed analysis run.
@@ -175,7 +197,11 @@ where
             max_flows: limits.max_flows,
             ..ReassemblyLimits::default()
         },
-        OverlapPolicy::default(),
+        // Protocol overlap is evidence, not a reason to terminate offline
+        // analysis. The reassembler still exposes RejectConflicting for
+        // strict callers; this pipeline retains deterministic first-seen
+        // bytes and delivers overlap events to the expert collector.
+        OverlapPolicy::KeepFirst,
     );
     let mut clock = CaptureClock::new();
 
@@ -455,6 +481,9 @@ where
             udp_stream,
             tcp_events: &tcp_events,
             fragment_events: &fragment_events,
+            tcp_streams: &tcp_streams,
+            udp_streams: &udp_streams,
+            max_flows: limits.max_flows,
         })
         .map_err(|source| AnalysisError::Sink { number, source })?;
     }

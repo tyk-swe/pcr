@@ -55,11 +55,20 @@ pub struct Datagram {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
+    Overlap {
+        key: DatagramKey,
+        offset: u32,
+        end: u32,
+        length: usize,
+        conflicting: bool,
+    },
     Complete(Datagram),
     Expired {
         key: DatagramKey,
         received_bytes: usize,
         fragment_count: usize,
+        missing_ranges: Vec<std::ops::Range<u32>>,
+        final_length: Option<u32>,
     },
 }
 
@@ -143,7 +152,8 @@ impl Reassembler {
         self.aggregate_memory_charge
     }
 
-    /// Admits one fragment, returning an event once a datagram completes.
+    /// Admits one fragment, returning overlap evidence followed by completion
+    /// when both are revealed by the same fragment.
     ///
     /// # Panics
     ///
@@ -153,7 +163,7 @@ impl Reassembler {
     /// corrupted its own state; every input-driven rejection, including
     /// conflicting overlaps and exhausted budgets, is reported through
     /// [`enum@Error`].
-    pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Option<Event>, Error> {
+    pub fn push(&mut self, fragment: Fragment, now: Instant) -> Result<Vec<Event>, Error> {
         let Fragment {
             key,
             offset,
@@ -185,12 +195,12 @@ impl Reassembler {
             if self.limits.max_fragments_per_datagram == 0 {
                 return Err(Error::FragmentLimit { limit: 0 });
             }
-            return Ok(Some(Event::Complete(Datagram {
+            return Ok(vec![Event::Complete(Datagram {
                 key,
                 bytes,
                 fragment_count: 1,
                 had_conflicting_overlap: false,
-            })));
+            })]);
         }
         if !has_existing_flow && self.flows.len() >= self.limits.max_flows {
             return Err(Error::FlowLimit {
@@ -277,6 +287,13 @@ impl Reassembler {
         let new_memory_charge = accounting.new_memory_charge;
         let aggregate_memory_charge = accounting.aggregate_memory_charge;
         let fragment_count = accounting.fragment_count;
+        let overlap = merge.overlap_start.map(|offset| Event::Overlap {
+            key: key.clone(),
+            offset,
+            end: merge.overlap_end,
+            length: merge.overlap_length,
+            conflicting: merge.has_conflicting_overlap,
+        });
 
         if has_existing_flow {
             let complete = {
@@ -312,14 +329,15 @@ impl Reassembler {
                     .next()
                     .expect("complete datagram retains its coalesced segment");
                 debug_assert_eq!(datagram_bytes.len(), length as usize);
-                return Ok(Some(Event::Complete(Datagram {
+                let complete = Event::Complete(Datagram {
                     key,
                     bytes: datagram_bytes,
                     fragment_count: state.fragment_count,
                     had_conflicting_overlap: state.had_conflicting_overlap,
-                })));
+                });
+                return Ok(overlap.into_iter().chain([complete]).collect());
             }
-            return Ok(None);
+            return Ok(overlap.into_iter().collect());
         }
 
         let mut state = DatagramState {
@@ -334,7 +352,7 @@ impl Reassembler {
         self.flows.insert(key, state);
         self.aggregate_bytes = aggregate;
         self.aggregate_memory_charge = aggregate_memory_charge;
-        Ok(None)
+        Ok(Vec::new())
     }
 
     pub fn expire(&mut self, now: Instant) -> Vec<Event> {
@@ -362,11 +380,7 @@ impl Reassembler {
                 self.aggregate_bytes = self.aggregate_bytes.saturating_sub(state.stored_bytes);
                 let charge = datagram_memory_charge(&state).unwrap_or(0);
                 self.aggregate_memory_charge = self.aggregate_memory_charge.saturating_sub(charge);
-                Some(Event::Expired {
-                    key,
-                    received_bytes: state.stored_bytes,
-                    fragment_count: state.fragment_count,
-                })
+                Some(incomplete_event(key, state))
             })
             .collect()
     }
@@ -385,17 +399,50 @@ impl Reassembler {
             .into_iter()
             .filter_map(|key| {
                 let state = self.flows.remove(&key)?;
-                Some(Event::Expired {
-                    key,
-                    received_bytes: state.stored_bytes,
-                    fragment_count: state.fragment_count,
-                })
+                Some(incomplete_event(key, state))
             })
             .collect();
         self.aggregate_bytes = 0;
         self.aggregate_memory_charge = 0;
         events
     }
+}
+
+fn incomplete_event(key: DatagramKey, state: DatagramState) -> Event {
+    let missing_ranges = missing_ranges(&state.segments, state.final_length);
+    Event::Expired {
+        key,
+        received_bytes: state.stored_bytes,
+        fragment_count: state.fragment_count,
+        missing_ranges,
+        final_length: state.final_length,
+    }
+}
+
+fn missing_ranges(
+    segments: &BTreeMap<u32, Bytes>,
+    final_length: Option<u32>,
+) -> Vec<std::ops::Range<u32>> {
+    let mut missing = Vec::new();
+    let mut cursor = 0_u32;
+    for (offset, bytes) in segments {
+        if *offset > cursor {
+            missing.push(cursor..*offset);
+        }
+        let Some(end) = u32::try_from(bytes.len())
+            .ok()
+            .and_then(|length| offset.checked_add(length))
+        else {
+            continue;
+        };
+        cursor = cursor.max(end);
+    }
+    if let Some(final_length) = final_length
+        && cursor < final_length
+    {
+        missing.push(cursor..final_length);
+    }
+    missing
 }
 
 fn datagram_memory_charge(state: &DatagramState) -> Option<usize> {
@@ -454,9 +501,9 @@ mod tests {
                     now,
                 )
                 .unwrap()
-                .is_none()
+                .is_empty()
         );
-        let event = reassembler
+        let events = reassembler
             .push(
                 Fragment {
                     key: key(),
@@ -466,11 +513,10 @@ mod tests {
                 },
                 now,
             )
-            .unwrap()
             .unwrap();
         assert!(matches!(
-            event,
-            Event::Complete(value) if value.bytes == Bytes::from_static(b"abcdefghijk")
+            events.as_slice(),
+            [Event::Complete(value)] if value.bytes == Bytes::from_static(b"abcdefghijk")
         ));
     }
 
@@ -561,7 +607,7 @@ mod tests {
                 now,
             )
             .unwrap();
-        let event = reassembler
+        let events = reassembler
             .push(
                 Fragment {
                     key: key(),
@@ -571,17 +617,22 @@ mod tests {
                 },
                 now,
             )
-            .unwrap()
             .unwrap();
 
         assert!(matches!(
-            event,
-            Event::Complete(Datagram {
+            events.as_slice(),
+            [Event::Overlap {
+                offset: 8,
+                end: 16,
+                length: 8,
+                conflicting: true,
+                ..
+            }, Event::Complete(Datagram {
                 bytes,
                 fragment_count: 2,
                 had_conflicting_overlap: true,
                 ..
-            }) if bytes == Bytes::from_static(b"abcdefghijklmnopZ")
+            })] if bytes == &Bytes::from_static(b"abcdefghijklmnopZ")
         ));
     }
 
@@ -869,7 +920,7 @@ mod tests {
 
         let event = reassembler.push(fragment, Instant::now()).unwrap();
 
-        assert!(matches!(event, Some(Event::Complete(_))));
+        assert!(matches!(event.as_slice(), [Event::Complete(_)]));
         assert_eq!(reassembler.flow_count(), 0);
         assert_eq!(reassembler.aggregate_memory_charge(), 0);
     }

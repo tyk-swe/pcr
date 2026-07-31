@@ -51,8 +51,7 @@ pub(crate) fn run_expert(
             error
         }
     })?;
-    let (trailing, expert_summary) =
-        collector.finish(&summary.trailing_tcp_events, summary.frames_read);
+    let (trailing, expert_summary) = collector.finish(&summary);
     for finding in trailing {
         emit_finding(output, finding.into(), &mut sequence, &mut retained)?;
     }

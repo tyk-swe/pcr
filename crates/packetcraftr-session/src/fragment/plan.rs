@@ -14,6 +14,9 @@ use super::{Error, OverlapPolicy};
 pub(super) struct FragmentMergePlan {
     pub(super) added_bytes: usize,
     pub(super) has_conflicting_overlap: bool,
+    pub(super) overlap_start: Option<u32>,
+    pub(super) overlap_end: u32,
+    pub(super) overlap_length: usize,
     pub(super) segment_count: usize,
     pub(super) first_affected: Option<u32>,
     pub(super) affected_segment_count: usize,
@@ -31,6 +34,9 @@ impl FragmentMergePlan {
         Self {
             added_bytes,
             has_conflicting_overlap: false,
+            overlap_start: None,
+            overlap_end: offset,
+            overlap_length: 0,
             segment_count,
             first_affected: None,
             affected_segment_count: 0,
@@ -52,7 +58,6 @@ pub(super) fn plan_fragment_merge(
         .ok_or(Error::OffsetOverflow)?;
     let segment_count = existing.len().checked_add(1).ok_or(Error::OffsetOverflow)?;
     let mut plan = FragmentMergePlan::disjoint(fragment.len(), offset, new_end, segment_count);
-    let mut overlapping_bytes = 0usize;
     {
         let mut consider = |start: u32, existing_bytes: &[u8]| -> Result<(), Error> {
             let end = start
@@ -80,7 +85,13 @@ pub(super) fn plan_fragment_merge(
                 let length = (overlap_end - overlap_start) as usize;
                 let existing_start = (overlap_start - start) as usize;
                 let fragment_start = (overlap_start - offset) as usize;
-                overlapping_bytes = overlapping_bytes
+                plan.overlap_start = Some(
+                    plan.overlap_start
+                        .map_or(overlap_start, |start| start.min(overlap_start)),
+                );
+                plan.overlap_end = plan.overlap_end.max(overlap_end);
+                plan.overlap_length = plan
+                    .overlap_length
                     .checked_add(length)
                     .ok_or(Error::OffsetOverflow)?;
                 let existing_overlap = &existing_bytes[existing_start..existing_start + length];
@@ -117,7 +128,7 @@ pub(super) fn plan_fragment_merge(
     }
     plan.added_bytes = plan
         .added_bytes
-        .checked_sub(overlapping_bytes)
+        .checked_sub(plan.overlap_length)
         .ok_or(Error::OffsetOverflow)?;
     plan.segment_count = plan
         .segment_count

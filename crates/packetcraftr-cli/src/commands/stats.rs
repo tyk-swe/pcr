@@ -17,13 +17,9 @@ pub(crate) fn run_stats(
     arguments: StatsArgs,
     output: output::contract::Format,
 ) -> Result<(), CliError> {
-    // The format contract is enforced before any input is read, so asking
-    // for an unsupported encoding never pays for a full analysis pass.
     output::contract::Command::Stats
         .require_format(output)
         .map_err(CliError::classified)?;
-    // Stats assigns conversation indices, so stream-aware filters like
-    // `tcp.stream == 7` are supported here.
     let PreparedOfflineAnalysis {
         registry,
         filter,
@@ -32,9 +28,7 @@ pub(crate) fn run_stats(
     let mut collector =
         analysis::stats::StatsCollector::new(Duration::from_millis(arguments.interval_ms))
             .map_err(analysis_cli_error)?;
-
     let mut reader = open_offline_reader(&arguments.path, arguments.limits.capture)?;
-
     let options = analysis::Options {
         filter: filter.as_ref(),
         tcp_events: false,
@@ -73,6 +67,8 @@ pub(crate) fn stats_table(table: CliStatsTable) -> output::stats::Table {
         CliStatsTable::Protocols => output::stats::Table::Protocols,
         CliStatsTable::Ports => output::stats::Table::Ports,
         CliStatsTable::Io => output::stats::Table::Io,
+        CliStatsTable::ServiceResponseTime => output::stats::Table::ServiceResponseTime,
+        CliStatsTable::Lengths => output::stats::Table::Lengths,
     }
 }
 
@@ -94,10 +90,10 @@ fn render_text(
                     row.stream,
                     SocketAddr::new(row.address_a, row.port_a),
                     SocketAddr::new(row.address_b, row.port_b),
-                    row.frames_a_to_b + row.frames_b_to_a,
+                    row.frames_a_to_b.saturating_add(row.frames_b_to_a),
                     row.frames_a_to_b,
                     row.frames_b_to_a,
-                    row.bytes_a_to_b + row.bytes_b_to_a,
+                    row.bytes_a_to_b.saturating_add(row.bytes_b_to_a),
                     row.bytes_a_to_b,
                     row.bytes_b_to_a,
                     row.duration(),
@@ -142,14 +138,65 @@ fn render_text(
                 ))?;
             }
         }
+        CliStatsTable::Lengths => {
+            let lengths = &report.lengths;
+            write_stdout_line(format_args!(
+                "lengths: frames {} minimum {:?} maximum {:?} mean {:?}",
+                lengths.frames, lengths.minimum, lengths.maximum, lengths.mean
+            ))?;
+            for bucket in &lengths.buckets {
+                let upper = bucket
+                    .upper_bound
+                    .map_or_else(|| "+inf".to_owned(), |upper| upper.to_string());
+                write_stdout_line(format_args!(
+                    "  [{}, {}): frames {} ({:.1}%)",
+                    bucket.lower_bound,
+                    upper,
+                    bucket.frames,
+                    percent(bucket.frames, lengths.frames)
+                ))?;
+            }
+        }
+        CliStatsTable::ServiceResponseTime => {
+            for row in &report.service_response_time {
+                write_stdout_line(format_args!(
+                    "{} service port {}: request bursts {} samples {} unanswered {} orphan {} regressions {}",
+                    row.transport.as_str(),
+                    row.service_port,
+                    row.request_bursts,
+                    row.samples,
+                    row.unanswered_requests,
+                    row.orphan_responses,
+                    row.timestamp_regressions
+                ))?;
+                write_stdout_line(format_args!(
+                    "  minimum {} maximum {} mean {}",
+                    format_optional_duration(row.minimum, "-"),
+                    format_optional_duration(row.maximum, "-"),
+                    format_optional_duration(row.mean, "-")
+                ))?;
+                for bucket in &row.buckets {
+                    write_stdout_line(format_args!(
+                        "  [{:?}, {}): samples {} ({:.1}%)",
+                        bucket.lower_bound,
+                        format_optional_duration(bucket.upper_bound, "+inf"),
+                        bucket.samples,
+                        percent(bucket.samples, row.samples)
+                    ))?;
+                }
+            }
+        }
     }
     Ok(())
 }
 
+fn format_optional_duration(duration: Option<Duration>, absent: &str) -> String {
+    duration.map_or_else(|| absent.to_owned(), |duration| format!("{duration:?}"))
+}
+
 #[expect(
     clippy::cast_precision_loss,
-    reason = "counter magnitudes that exceed the f64 mantissa are far beyond any capture this \
-              renders, and the result is a display percentage"
+    reason = "counter magnitudes that exceed the f64 mantissa are far beyond any capture this renders, and the result is a display percentage"
 )]
 fn percent(part: u64, whole: u64) -> f64 {
     if whole == 0 {

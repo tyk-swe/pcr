@@ -37,4 +37,7 @@ pub mod transport;
 pub mod tunnel;
 
 #[doc(hidden)]
-pub use matcher::{QuotedIcmpError, QuotedProbeTransport, quoted_icmp_error_kind};
+pub use matcher::{
+    QuotedIcmpError, QuotedIcmpErrorQuote, QuotedPacket, QuotedProbeTransport, quoted_icmp_error,
+    quoted_icmp_error_kind,
+};

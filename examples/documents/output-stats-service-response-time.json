@@ -1,0 +1,67 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "table": "service_response_time",
+    "frames_read": 3,
+    "frames_matched": 3,
+    "bytes_matched": 162,
+    "first_timestamp": {
+      "unix_seconds": 0,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 2,
+      "nanoseconds": 0
+    },
+    "service_response_time": [
+      {
+        "transport": "tcp",
+        "service_port": 443,
+        "request_bursts": 1,
+        "samples": 1,
+        "unanswered_requests": 0,
+        "orphan_responses": 0,
+        "timestamp_regressions": 0,
+        "minimum": {
+          "secs": 1,
+          "nanos": 0
+        },
+        "maximum": {
+          "secs": 1,
+          "nanos": 0
+        },
+        "mean": {
+          "secs": 1,
+          "nanos": 0
+        },
+        "buckets": [
+          {
+            "lower_bound": {
+              "secs": 1,
+              "nanos": 0
+            },
+            "upper_bound": {
+              "secs": 2,
+              "nanos": 0
+            },
+            "samples": 1
+          }
+        ]
+      },
+      {
+        "transport": "udp",
+        "service_port": 53,
+        "request_bursts": 1,
+        "samples": 0,
+        "unanswered_requests": 1,
+        "orphan_responses": 0,
+        "timestamp_regressions": 0,
+        "buckets": []
+      }
+    ]
+  },
+  "diagnostics": []
+}

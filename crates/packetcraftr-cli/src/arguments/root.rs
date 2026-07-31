@@ -89,7 +89,7 @@ Examples:
   packetcraftr --output json follow capture.pcapng --stream udp:2"#;
 const EXPERT_AFTER_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
 
-Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. Stream-aware filters such as 'tcp.stream == 7' are supported.
+Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. IPv4/IPv6 fragment overlap, gap, and incomplete states; correlated ICMP errors; and interface/VLAN-scoped ARP/IPv4 address conflicts are also reported. Stream-aware filters such as 'tcp.stream == 7' are supported.
 
 Examples:
   packetcraftr expert capture.pcapng
@@ -99,10 +99,14 @@ const STATS_AFTER_HELP: &str = r#"Statistics are computed offline over dissected
 
 Conversation (stream) indices are assigned in first-seen order over the whole capture before any --filter runs, so the index one invocation reports names the same conversation in every other invocation, and stream-aware filters such as 'tcp.stream == 7' are supported.
 
+The lengths table buckets original on-wire frame lengths, not captured lengths. The service-response-time table is a generic matched-frame request-burst heuristic, not protocol-aware transaction correlation: TCP handshake roles are used when available and otherwise the first matched sender is the requester, while UDP uses its first sender, including empty datagrams. Inferred roles and samples use only frames kept by --filter. TCP control-only packets do not produce response-time samples.
+
 Examples:
   packetcraftr stats capture.pcapng --table conversations
   packetcraftr stats capture.pcapng --table protocols --filter 'ip.src in 10.0.0.0/8'
-  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100"#;
+  packetcraftr --output json stats capture.pcapng --table io --interval-ms 100
+  packetcraftr stats capture.pcapng --table lengths
+  packetcraftr stats capture.pcapng --table service-response-time"#;
 const TRACEROUTE_AFTER_HELP: &str = r#"Examples:
   packetcraftr traceroute 192.0.2.1 --strategy icmp
   packetcraftr --output ndjson traceroute example.test --allow-hostname-resolution"#;

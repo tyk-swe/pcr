@@ -3,6 +3,7 @@
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+use bytes::Bytes;
 use packetcraftr_packet::{
     Packet,
     codec::NetworkEnvelope,
@@ -10,7 +11,7 @@ use packetcraftr_packet::{
     semantics::{self, BuiltinProtocol},
 };
 
-use super::sctp::sctp_initiate_tag;
+use super::{network_endpoints_before, sctp::sctp_initiate_tag};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum QuotedIcmpError {
@@ -26,6 +27,82 @@ pub enum QuotedProbeTransport {
     Udp,
     Sctp,
     Icmp,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotedPacket {
+    pub source: IpAddr,
+    pub destination: IpAddr,
+    pub protocol: u8,
+    pub payload: Bytes,
+}
+
+impl QuotedPacket {
+    pub fn transport_ports(&self) -> Option<(u16, u16)> {
+        let ports = self.payload.get(..4)?;
+        Some((
+            u16::from_be_bytes([ports[0], ports[1]]),
+            u16::from_be_bytes([ports[2], ports[3]]),
+        ))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotedIcmpErrorQuote {
+    pub kind: QuotedIcmpError,
+    pub responder: IpAddr,
+    pub response_destination: IpAddr,
+    pub quoted: QuotedPacket,
+}
+
+/// Parses a recognized ICMP error and its quoted initial IP packet without
+/// requiring the original request to be retained.
+pub fn quoted_icmp_error(response: &Packet) -> Option<QuotedIcmpErrorQuote> {
+    let (icmp_index, layer) = response.iter().enumerate().find(|(_, layer)| {
+        matches!(
+            BuiltinProtocol::of(*layer),
+            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6)
+        )
+    })?;
+    let icmp_protocol = BuiltinProtocol::of(layer)?;
+    let icmp_type = u8::try_from(layer.field("type")?.as_u64()?).ok()?;
+    let code = u8::try_from(layer.field("code")?.as_u64()?).ok()?;
+    let FieldValue::Bytes(body) = layer.field("body")? else {
+        return None;
+    };
+    if body.len() < 4 {
+        return None;
+    }
+    let quoted = parse_quoted_probe(body.slice(4..))?;
+    if matches!(
+        (icmp_protocol, quoted.source),
+        (BuiltinProtocol::Icmpv4, IpAddr::V6(_)) | (BuiltinProtocol::Icmpv6, IpAddr::V4(_))
+    ) {
+        return None;
+    }
+    let udp = quoted.protocol == 17;
+    let kind = match icmp_protocol {
+        BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
+            3 if udp => QuotedIcmpError::PortUnreachable,
+            9 | 10 | 13 => QuotedIcmpError::AdministrativelyProhibited,
+            _ => QuotedIcmpError::DestinationUnreachable,
+        },
+        BuiltinProtocol::Icmpv4 if icmp_type == 11 => QuotedIcmpError::TimeExceeded,
+        BuiltinProtocol::Icmpv6 if icmp_type == 1 => match code {
+            4 if udp => QuotedIcmpError::PortUnreachable,
+            1 | 5 | 6 => QuotedIcmpError::AdministrativelyProhibited,
+            _ => QuotedIcmpError::DestinationUnreachable,
+        },
+        BuiltinProtocol::Icmpv6 if icmp_type == 3 => QuotedIcmpError::TimeExceeded,
+        _ => return None,
+    };
+    let response_network = network_endpoints_before(response, icmp_index)?;
+    Some(QuotedIcmpErrorQuote {
+        kind,
+        responder: response_network.source,
+        response_destination: response_network.destination,
+        quoted,
+    })
 }
 
 /// Identifies an ICMP error that quotes the exact request. The client exchange
@@ -50,53 +127,23 @@ pub fn quoted_icmp_error_kind(
     if transport != expected_transport {
         return None;
     }
-    let layer = response.iter().find(|layer| {
-        matches!(
-            BuiltinProtocol::of(*layer),
-            Some(BuiltinProtocol::Icmpv4 | BuiltinProtocol::Icmpv6)
-        )
-    })?;
-    let icmp_protocol = BuiltinProtocol::of(layer)?;
-    let icmp_type = u8::try_from(layer.field("type")?.as_u64()?).ok()?;
-    let code = u8::try_from(layer.field("code")?.as_u64()?).ok()?;
-    let kind = match icmp_protocol {
-        BuiltinProtocol::Icmpv4 if icmp_type == 3 => match code {
-            3 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
-            9 | 10 | 13 => QuotedIcmpError::AdministrativelyProhibited,
-            _ => QuotedIcmpError::DestinationUnreachable,
-        },
-        BuiltinProtocol::Icmpv4 if icmp_type == 11 => QuotedIcmpError::TimeExceeded,
-        BuiltinProtocol::Icmpv6 if icmp_type == 1 => match code {
-            4 if transport == QuotedProbeTransport::Udp => QuotedIcmpError::PortUnreachable,
-            1 | 5 | 6 => QuotedIcmpError::AdministrativelyProhibited,
-            _ => QuotedIcmpError::DestinationUnreachable,
-        },
-        BuiltinProtocol::Icmpv6 if icmp_type == 3 => QuotedIcmpError::TimeExceeded,
-        _ => return None,
-    };
-    let FieldValue::Bytes(body) = layer.field("body")? else {
-        return None;
-    };
+    let error = quoted_icmp_error(response)?;
     let request_network = outer_network_envelope(request)?;
-    let response_destination = outer_network_envelope(response)?.destination;
-    if request_network.source != response_destination {
+    if request_network.source != error.response_destination {
         return None;
     }
-    if !quoted_probe_matches(transport, request, request_network, body.get(4..)?) {
+    if !quoted_probe_matches(transport, request, request_network, error.quoted) {
         return None;
     }
-    Some(kind)
+    Some(error.kind)
 }
 
 fn quoted_probe_matches(
     transport: QuotedProbeTransport,
     request: &Packet,
     network: NetworkEnvelope,
-    quote: &[u8],
+    quoted: QuotedPacket,
 ) -> bool {
-    let Some(quoted) = parse_quoted_probe(quote) else {
-        return false;
-    };
     if quoted.source != network.source || quoted.destination != network.destination {
         return false;
     }
@@ -121,18 +168,7 @@ fn quoted_probe_matches(
             let Some(key) = semantics::transport_key(layer) else {
                 return false;
             };
-            let source_port = key.source_port.to_be_bytes();
-            let destination_port = key.destination_port.to_be_bytes();
-            if quoted.payload.get(..4)
-                != Some(
-                    &[
-                        source_port[0],
-                        source_port[1],
-                        destination_port[0],
-                        destination_port[1],
-                    ][..],
-                )
-            {
+            if quoted.transport_ports() != Some((key.source_port, key.destination_port)) {
                 return false;
             }
             match transport {
@@ -155,7 +191,7 @@ fn quoted_probe_matches(
                         return false;
                     };
                     quoted.payload.get(4..8) == Some(&verification_tag.to_be_bytes()[..])
-                        && quoted_sctp_init_matches(layer, request, layer_index, quoted.payload)
+                        && quoted_sctp_init_matches(layer, request, layer_index, &quoted.payload)
                 }
                 QuotedProbeTransport::Udp => true,
                 QuotedProbeTransport::Icmp => unreachable!("ICMP uses the other match arm"),
@@ -232,14 +268,7 @@ fn quoted_sctp_init_matches(
     payload.get(8..12) == Some(&checksum_bytes[..]) && payload.get(12..20) == chunk.get(..8)
 }
 
-struct QuotedProbe<'a> {
-    source: IpAddr,
-    destination: IpAddr,
-    protocol: u8,
-    payload: &'a [u8],
-}
-
-fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
+fn parse_quoted_probe(bytes: Bytes) -> Option<QuotedPacket> {
     match bytes.first()? >> 4 {
         4 => {
             if bytes.len() < 20 {
@@ -257,11 +286,11 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
             if fragment_offset != 0 {
                 return None;
             }
-            Some(QuotedProbe {
+            Some(QuotedPacket {
                 source: IpAddr::V4(Ipv4Addr::new(bytes[12], bytes[13], bytes[14], bytes[15])),
                 destination: IpAddr::V4(Ipv4Addr::new(bytes[16], bytes[17], bytes[18], bytes[19])),
                 protocol: bytes[9],
-                payload: &bytes[header_len..total_length.min(bytes.len())],
+                payload: bytes.slice(header_len..total_length.min(bytes.len())),
             })
         }
         6 => {
@@ -273,11 +302,53 @@ fn parse_quoted_probe(bytes: &[u8]) -> Option<QuotedProbe<'_>> {
                 return None;
             }
             let end = 40_usize.checked_add(payload_length)?.min(bytes.len());
-            Some(QuotedProbe {
+            let mut protocol = bytes[6];
+            let mut payload_start = 40;
+            loop {
+                let header = bytes.get(payload_start..end)?;
+                match protocol {
+                    0 | 43 | 60 => {
+                        let length = usize::from(*header.get(1)?)
+                            .checked_add(1)?
+                            .checked_mul(8)?;
+                        if header.len() < length {
+                            return None;
+                        }
+                        protocol = header[0];
+                        payload_start = payload_start.checked_add(length)?;
+                    }
+                    44 => {
+                        if header.len() < 8 {
+                            return None;
+                        }
+                        let fragment = u16::from_be_bytes([header[2], header[3]]);
+                        if fragment & 0xfff8 != 0 {
+                            return None;
+                        }
+                        protocol = header[0];
+                        payload_start = payload_start.checked_add(8)?;
+                    }
+                    51 => {
+                        let length = usize::from(*header.get(1)?)
+                            .checked_add(2)?
+                            .checked_mul(4)?;
+                        if length < 12 || header.len() < length {
+                            return None;
+                        }
+                        protocol = header[0];
+                        payload_start = payload_start.checked_add(length)?;
+                    }
+                    _ => break,
+                }
+            }
+            if end < payload_start.checked_add(8)? {
+                return None;
+            }
+            Some(QuotedPacket {
                 source: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[8..24]).ok()?)),
                 destination: IpAddr::V6(Ipv6Addr::from(<[u8; 16]>::try_from(&bytes[24..40]).ok()?)),
-                protocol: bytes[6],
-                payload: &bytes[40..end],
+                protocol,
+                payload: bytes.slice(payload_start..end),
             })
         }
         _ => None,

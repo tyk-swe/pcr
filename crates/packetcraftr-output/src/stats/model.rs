@@ -7,7 +7,8 @@ use std::time::Duration;
 use serde::Serialize;
 
 use packetcraftr_analysis::stats::{
-    ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
+    ConversationStat, EndpointStat, IoBucketStat, LengthBucketStat, LengthsStat, PortStat,
+    ProtocolStat, ServiceResponseTimeBucketStat, ServiceResponseTimeStat, StatsReport,
     TransportKind,
 };
 
@@ -23,6 +24,8 @@ pub enum StatsTableName {
     Protocols,
     Ports,
     Io,
+    ServiceResponseTime,
+    Lengths,
 }
 
 impl StatsTableName {
@@ -33,6 +36,8 @@ impl StatsTableName {
             Self::Protocols => "protocols",
             Self::Ports => "ports",
             Self::Io => "io",
+            Self::ServiceResponseTime => "service_response_time",
+            Self::Lengths => "lengths",
         }
     }
 }
@@ -108,6 +113,52 @@ pub struct StatsIoOutput {
     pub buckets: Vec<StatsIoBucketOutput>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StatsLengthBucketOutput {
+    pub lower_bound: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upper_bound: Option<u64>,
+    pub frames: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StatsLengthsOutput {
+    pub frames: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean: Option<u64>,
+    pub buckets: Vec<StatsLengthBucketOutput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StatsServiceResponseTimeBucketOutput {
+    pub lower_bound: Duration,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upper_bound: Option<Duration>,
+    pub samples: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct StatsServiceResponseTimeOutput {
+    pub transport: StatsTransport,
+    pub service_port: u16,
+    pub request_bursts: u64,
+    pub samples: u64,
+    pub unanswered_requests: u64,
+    pub orphan_responses: u64,
+    pub timestamp_regressions: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub maximum: Option<Duration>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mean: Option<Duration>,
+    pub buckets: Vec<StatsServiceResponseTimeBucketOutput>,
+}
+
 /// Aggregate result of `stats`, carrying exactly the requested table.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct StatsCommandResult {
@@ -131,6 +182,10 @@ pub struct StatsCommandResult {
     pub ports: Option<Vec<StatsPortOutput>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub io: Option<StatsIoOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_response_time: Option<Vec<StatsServiceResponseTimeOutput>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lengths: Option<StatsLengthsOutput>,
 }
 
 impl StatsCommandResult {
@@ -152,6 +207,8 @@ impl StatsCommandResult {
             protocols: None,
             ports: None,
             io: None,
+            service_response_time: None,
+            lengths: None,
         };
         match table {
             StatsTableName::Conversations => {
@@ -177,6 +234,18 @@ impl StatsCommandResult {
                     interval: report.interval,
                     buckets: report.io.iter().map(convert_bucket).collect(),
                 });
+            }
+            StatsTableName::ServiceResponseTime => {
+                result.service_response_time = Some(
+                    report
+                        .service_response_time
+                        .iter()
+                        .map(convert_service_response_time)
+                        .collect(),
+                );
+            }
+            StatsTableName::Lengths => {
+                result.lengths = Some(convert_lengths(&report.lengths));
             }
         }
         Ok(result)
@@ -244,13 +313,62 @@ fn convert_bucket(row: &IoBucketStat) -> StatsIoBucketOutput {
     }
 }
 
+fn convert_lengths(row: &LengthsStat) -> StatsLengthsOutput {
+    StatsLengthsOutput {
+        frames: row.frames,
+        minimum: row.minimum,
+        maximum: row.maximum,
+        mean: row.mean,
+        buckets: row.buckets.iter().map(convert_length_bucket).collect(),
+    }
+}
+
+fn convert_length_bucket(row: &LengthBucketStat) -> StatsLengthBucketOutput {
+    StatsLengthBucketOutput {
+        lower_bound: row.lower_bound,
+        upper_bound: row.upper_bound,
+        frames: row.frames,
+    }
+}
+
+fn convert_service_response_time(row: &ServiceResponseTimeStat) -> StatsServiceResponseTimeOutput {
+    StatsServiceResponseTimeOutput {
+        transport: row.transport.into(),
+        service_port: row.service_port,
+        request_bursts: row.request_bursts,
+        samples: row.samples,
+        unanswered_requests: row.unanswered_requests,
+        orphan_responses: row.orphan_responses,
+        timestamp_regressions: row.timestamp_regressions,
+        minimum: row.minimum,
+        maximum: row.maximum,
+        mean: row.mean,
+        buckets: row
+            .buckets
+            .iter()
+            .map(convert_service_response_time_bucket)
+            .collect(),
+    }
+}
+
+fn convert_service_response_time_bucket(
+    row: &ServiceResponseTimeBucketStat,
+) -> StatsServiceResponseTimeBucketOutput {
+    StatsServiceResponseTimeBucketOutput {
+        lower_bound: row.lower_bound,
+        upper_bound: row.upper_bound,
+        samples: row.samples,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
     use std::time::{Duration, UNIX_EPOCH};
 
     use packetcraftr_analysis::stats::{
-        ConversationStat, EndpointStat, IoBucketStat, PortStat, ProtocolStat, StatsReport,
+        ConversationStat, EndpointStat, IoBucketStat, LengthBucketStat, LengthsStat, PortStat,
+        ProtocolStat, ServiceResponseTimeBucketStat, ServiceResponseTimeStat, StatsReport,
         TransportKind,
     };
 
@@ -300,6 +418,34 @@ mod tests {
                 frames: 2,
                 bytes: 200,
             }],
+            lengths: LengthsStat {
+                frames: 3,
+                minimum: Some(40),
+                maximum: Some(80),
+                mean: Some(60),
+                buckets: vec![LengthBucketStat {
+                    lower_bound: 0,
+                    upper_bound: Some(64),
+                    frames: 3,
+                }],
+            },
+            service_response_time: vec![ServiceResponseTimeStat {
+                transport: TransportKind::Tcp,
+                service_port: 443,
+                request_bursts: 2,
+                samples: 1,
+                unanswered_requests: 1,
+                orphan_responses: 0,
+                timestamp_regressions: 0,
+                minimum: Some(Duration::from_secs(1)),
+                maximum: Some(Duration::from_secs(1)),
+                mean: Some(Duration::from_secs(1)),
+                buckets: vec![ServiceResponseTimeBucketStat {
+                    lower_bound: Duration::from_secs(1),
+                    upper_bound: Some(Duration::from_secs(2)),
+                    samples: 1,
+                }],
+            }],
         }
     }
 
@@ -311,6 +457,8 @@ mod tests {
             (StatsTableName::Protocols, "protocols"),
             (StatsTableName::Ports, "ports"),
             (StatsTableName::Io, "io"),
+            (StatsTableName::ServiceResponseTime, "service_response_time"),
+            (StatsTableName::Lengths, "lengths"),
         ] {
             assert_eq!(table.as_str(), expected);
         }
@@ -402,5 +550,28 @@ mod tests {
         let result = StatsCommandResult::try_from_report(StatsTableName::Io, &report, 3).unwrap();
         assert_eq!(result.first_timestamp, None);
         assert_eq!(result.last_timestamp, None);
+    }
+
+    #[test]
+    fn lengths_table_converts_summary_and_buckets() {
+        let result =
+            StatsCommandResult::try_from_report(StatsTableName::Lengths, &report(), 3).unwrap();
+        let lengths = result.lengths.unwrap();
+        assert_eq!(lengths.frames, 3);
+        assert_eq!(lengths.mean, Some(60));
+        assert_eq!(lengths.buckets[0].upper_bound, Some(64));
+        assert!(result.service_response_time.is_none());
+    }
+
+    #[test]
+    fn service_response_time_table_converts_summary_and_buckets() {
+        let result =
+            StatsCommandResult::try_from_report(StatsTableName::ServiceResponseTime, &report(), 3)
+                .unwrap();
+        let rows = result.service_response_time.unwrap();
+        assert_eq!(rows[0].service_port, 443);
+        assert_eq!(rows[0].samples, 1);
+        assert_eq!(rows[0].buckets[0].lower_bound, Duration::from_secs(1));
+        assert!(result.lengths.is_none());
     }
 }

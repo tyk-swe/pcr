@@ -125,6 +125,33 @@ fn schemas_reject_representative_contract_violations() {
         );
     }
 
+    let mut lengths = json!({
+        "schema": "packetcraftr.output/v1",
+        "command": "stats",
+        "mode": "aggregate",
+        "status": "success",
+        "result": {
+            "table": "lengths",
+            "frames_read": 1,
+            "frames_matched": 1,
+            "bytes_matched": 1,
+            "lengths": {"frames": 1, "buckets": []}
+        },
+        "diagnostics": []
+    });
+    assert!(output.is_valid(&lengths));
+    lengths["result"]["service_response_time"] = json!([]);
+    assert!(!output.is_valid(&lengths), "accepted mixed stats payloads");
+    lengths["result"]["table"] = json!("conversations");
+    lengths["result"]
+        .as_object_mut()
+        .unwrap()
+        .remove("service_response_time");
+    assert!(
+        !output.is_valid(&lengths),
+        "accepted mismatched stats payload"
+    );
+
     let build_success = json_file(root().join("examples/documents/output-build-success.json"));
 
     let mut malformed_embedded_packet = build_success.clone();

@@ -212,6 +212,28 @@ fn published_stats_outputs_match_the_cli() {
     let actual: serde_json::Value = serde_json::from_slice(&success.stdout).unwrap();
     assert_eq!(actual, json_file("output-stats-success.json"));
 
+    for (table, golden) in [
+        ("lengths", "output-stats-lengths.json"),
+        (
+            "service-response-time",
+            "output-stats-service-response-time.json",
+        ),
+    ] {
+        let output = binary()
+            .args(["--output", "json", "stats"])
+            .arg(&fixture)
+            .args(["--table", table])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let actual: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(actual, json_file(golden));
+    }
+
     let error = binary()
         .args([
             "--output",

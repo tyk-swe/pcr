@@ -39,7 +39,7 @@ fn expert_detects_retransmission_duplicate_ack_zero_window_keep_alive_and_reset(
         },
     )
     .unwrap();
-    let (trailing, summary) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, summary) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let by_code = |code: &str| {
@@ -98,7 +98,7 @@ fn expert_reports_out_of_order_data_and_window_full() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -173,7 +173,7 @@ fn expert_applies_the_negotiated_window_scale_and_requires_both_syns() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let window_full = findings
@@ -224,7 +224,7 @@ fn expert_counts_a_fin_toward_window_fullness() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -260,7 +260,7 @@ fn data_past_the_advertised_edge_is_an_overrun_not_a_full_window() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -305,7 +305,7 @@ fn expert_reads_a_syn_carried_window_unscaled() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -346,7 +346,7 @@ fn expert_starts_fresh_header_state_when_a_connection_is_reused() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let codes = findings
@@ -388,7 +388,7 @@ fn expert_ignores_retransmissions_of_data_the_capture_never_observed() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let retransmissions = findings
@@ -437,7 +437,7 @@ fn a_reused_tuple_replaces_reverse_reassembly_state() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -478,7 +478,7 @@ fn expert_reports_a_gap_carried_by_a_bare_fin() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -517,7 +517,7 @@ fn expert_reports_retransmissions_arriving_after_a_clean_close() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let retransmissions = findings
@@ -560,7 +560,7 @@ fn expert_reports_keep_alive_probes_without_retransmission_findings() {
         },
     )
     .unwrap();
-    let (trailing, summary) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, summary) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -605,7 +605,7 @@ fn a_reuse_first_seen_through_a_syn_ack_also_replaces_reverse_state() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -650,7 +650,7 @@ fn a_one_sided_reuse_first_seen_as_a_new_syn_replaces_reverse_state() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -693,7 +693,7 @@ fn a_one_sided_reuse_first_seen_as_a_syn_ack_replaces_reverse_state() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -735,7 +735,7 @@ fn a_gap_beyond_the_reassembly_window_re_anchors_instead_of_aborting() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -801,7 +801,7 @@ fn idle_eviction_re_anchors_the_expert_observation_base() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -839,7 +839,7 @@ fn a_reset_retires_both_directions_and_their_buffered_residue() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -884,7 +884,7 @@ fn a_syn_ack_reusing_its_sequence_for_a_new_client_starts_fresh() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -924,7 +924,7 @@ fn a_retransmitted_fast_open_syn_is_a_retransmission_not_reuse() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert_eq!(
@@ -965,7 +965,7 @@ fn a_pure_syn_reusing_the_same_isn_after_data_starts_fresh() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1004,7 +1004,7 @@ fn a_retransmitted_syn_keeps_the_peers_state() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert_eq!(
@@ -1044,7 +1044,7 @@ fn a_duplicate_teardown_acknowledgment_is_not_loss_evidence() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1080,7 +1080,7 @@ fn closed_flow_retransmissions_stop_at_the_payload_boundary() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1120,7 +1120,7 @@ fn expert_does_not_call_a_gap_filling_segment_a_retransmission() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1155,7 +1155,7 @@ fn a_one_byte_segment_without_ack_is_not_a_keep_alive() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1198,7 +1198,7 @@ fn a_syn_reusing_a_closed_generations_sequence_starts_fresh() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1237,7 +1237,7 @@ fn a_zero_length_keep_alive_is_not_a_duplicate_acknowledgment() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1281,7 +1281,7 @@ fn a_simultaneous_open_syn_ack_still_records_window_facts() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1320,7 +1320,7 @@ fn a_stale_reordered_acknowledgment_does_not_roll_window_state_back() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1394,7 +1394,7 @@ fn a_retransmitted_older_segment_never_replaces_the_window() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1434,7 +1434,7 @@ fn data_against_a_zero_window_is_a_probe_or_an_overrun() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let by_code = |code: &str| {
@@ -1477,7 +1477,7 @@ fn zero_window_findings_need_no_handshake_and_probes_sit_at_the_edge() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let by_code = |code: &str| {
@@ -1518,7 +1518,7 @@ fn a_stale_syn_ack_does_not_survive_a_new_client_syn() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1556,7 +1556,7 @@ fn repeated_persist_probes_stay_zero_window_probes() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     let by_code = |code: &str| {
@@ -1595,7 +1595,7 @@ fn a_reset_payload_is_not_stream_data_for_window_analysis() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1638,7 +1638,7 @@ fn a_reset_payload_overlapping_delivered_bytes_is_not_a_retransmission() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(
@@ -1679,7 +1679,7 @@ fn a_closed_direction_reports_no_keep_alives() {
         },
     )
     .unwrap();
-    let (trailing, _) = collector.finish(&pipeline.trailing_tcp_events, pipeline.frames_read);
+    let (trailing, _) = collector.finish(&pipeline);
     findings.extend(trailing);
 
     assert!(

@@ -71,6 +71,8 @@ pub(crate) enum CliStatsTable {
     Protocols,
     Ports,
     Io,
+    ServiceResponseTime,
+    Lengths,
 }
 
 /// Capture-reader bounds shared by the offline analysis commands.

@@ -4,9 +4,10 @@
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 
 use packetcraftr::capture::{Format as CaptureFormat, Frame, LinkType, Writer};
+use serde_json::Value;
 
 use super::support::{binary, decode_output_hex, temp_path, write_capture};
 
@@ -656,6 +657,63 @@ fn stats_reports_conversations_protocols_and_io_over_a_capture() {
 
     let io = stats(&["--table", "io", "--interval-ms", "500"]);
     assert!(io.contains("+0ns: frames 1"));
+
+    let lengths = stats(&["--table", "lengths"]);
+    assert!(lengths.contains("lengths: frames 2"));
+    assert!(lengths.contains("[0, 64): frames 2"));
+
+    let service = stats(&["--table", "service-response-time"]);
+    assert!(service.contains("tcp service port 443"));
+    assert!(service.contains("samples 0"));
+    assert!(service.contains("minimum - maximum - mean -"));
+
+    let json = binary()
+        .args(["--output", "json", "stats"])
+        .arg(&capture)
+        .args(["--table", "lengths"])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let json: Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(json["result"]["table"], "lengths");
+    assert!(json["result"]["lengths"].is_object());
+    assert!(json["result"]["service_response_time"].is_null());
+}
+
+#[test]
+fn stats_formats_service_response_durations_without_option_syntax() {
+    let request = built_frame(
+        "ethernet/ipv4(source=192.168.0.1,destination=192.168.0.2)\
+         /tcp(source_port=1000,destination_port=443,flags=16)/raw(text=request)",
+    );
+    let response = built_frame(
+        "ethernet/ipv4(source=192.168.0.2,destination=192.168.0.1)\
+         /tcp(source_port=443,destination_port=1000,flags=16)/raw(text=response)",
+    );
+    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    for (timestamp, bytes) in [
+        (UNIX_EPOCH, request),
+        (UNIX_EPOCH + Duration::from_secs(10), response),
+    ] {
+        writer
+            .write_frame(&Frame::new(timestamp, LinkType::ETHERNET, bytes).unwrap())
+            .unwrap();
+    }
+    let capture = temp_path("stats-service-response");
+    std::fs::write(&capture, writer.into_inner()).unwrap();
+
+    let output = binary()
+        .args(["stats"])
+        .arg(capture)
+        .args(["--table", "service-response-time"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).unwrap();
+    assert!(text.contains("minimum 10s maximum 10s mean 10s"));
+    assert!(text.contains("[10s, +inf)"));
+    assert!(!text.contains("Some("));
+    assert!(!text.contains("None"));
 }
 
 #[test]
@@ -779,6 +837,57 @@ fn expert_reports_tcp_anomalies_over_a_capture() {
     let reset_only = expert(&["--filter", "tcp.flags.reset == 1"]);
     assert!(reset_only.contains("in 1 of 5 frame(s)"), "{reset_only}");
     assert!(!reset_only.contains("tcp.retransmission"), "{reset_only}");
+}
+
+#[test]
+fn expert_reports_non_tcp_findings_in_every_supported_format() {
+    let mut frame = built_frame(
+        "ethernet/ipv4(source=192.0.2.1,destination=198.51.100.2)\
+         /udp(source_port=12345,destination_port=53)/raw(text=query)",
+    );
+    frame[24] ^= 1;
+    let capture = write_capture(&[&frame], false);
+    let run = |format: &str| {
+        let output = binary()
+            .arg("expert")
+            .arg(&capture)
+            .args(["--output", format])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{format}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    };
+
+    let text = String::from_utf8(run("text")).unwrap();
+    assert!(
+        text.contains("#1 Warning decode.ipv4_checksum (udp stream 0)"),
+        "{text}"
+    );
+
+    let aggregate: serde_json::Value = serde_json::from_slice(&run("json")).unwrap();
+    let finding = &aggregate["result"]["findings"][0];
+    assert_eq!(finding["code"], "decode.ipv4_checksum");
+    assert_eq!(finding["severity"], "warning");
+    assert_eq!(finding["frame"], 1);
+    assert_eq!(finding["transport"], "udp");
+    assert_eq!(finding["stream"], 0);
+
+    let ndjson = String::from_utf8(run("ndjson")).unwrap();
+    let records = ndjson
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0]["result"]["code"], "decode.ipv4_checksum");
+    assert_eq!(records[0]["result"]["severity"], "warning");
+    assert_eq!(records[0]["result"]["frame"], 1);
+    assert_eq!(records[0]["result"]["transport"], "udp");
+    assert_eq!(records[0]["result"]["stream"], 0);
+    assert_eq!(records[1]["result"]["warnings"], 1);
 }
 
 #[test]

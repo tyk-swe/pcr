@@ -7,8 +7,8 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
-use super::session_index::{CanonicalFlow, tcp_segment, udp_flow};
-use super::{AnalysisError, FlowKey, FrameRecord, Ipv4, Ipv6};
+use super::session_index::{CanonicalFlow, transport_payload, transports};
+use super::{AnalysisError, FlowKey, FrameRecord, Ipv4, Ipv6, Tcp};
 
 /// Which transport a conversation or port tally belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,8 +35,8 @@ pub struct Tally {
 
 impl Tally {
     fn add(&mut self, bytes: u64) {
-        self.frames += 1;
-        self.bytes += bytes;
+        self.frames = self.frames.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
     }
 }
 
@@ -108,6 +108,48 @@ pub struct IoBucketStat {
     pub bytes: u64,
 }
 
+/// One fixed wire-length bucket, lower-inclusive and upper-exclusive.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LengthBucketStat {
+    pub lower_bound: u64,
+    pub upper_bound: Option<u64>,
+    pub frames: u64,
+}
+
+/// Distribution of original on-wire frame lengths.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LengthsStat {
+    pub frames: u64,
+    pub minimum: Option<u64>,
+    pub maximum: Option<u64>,
+    pub mean: Option<u64>,
+    pub buckets: Vec<LengthBucketStat>,
+}
+
+/// One fixed response-time bucket, lower-inclusive and upper-exclusive.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceResponseTimeBucketStat {
+    pub lower_bound: Duration,
+    pub upper_bound: Option<Duration>,
+    pub samples: u64,
+}
+
+/// Heuristic request-burst response-time statistics for one service port.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ServiceResponseTimeStat {
+    pub transport: TransportKind,
+    pub service_port: u16,
+    pub request_bursts: u64,
+    pub samples: u64,
+    pub unanswered_requests: u64,
+    pub orphan_responses: u64,
+    pub timestamp_regressions: u64,
+    pub minimum: Option<Duration>,
+    pub maximum: Option<Duration>,
+    pub mean: Option<Duration>,
+    pub buckets: Vec<ServiceResponseTimeBucketStat>,
+}
+
 /// Everything one statistics pass computed.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StatsReport {
@@ -128,6 +170,90 @@ pub struct StatsReport {
     pub ports: Vec<PortStat>,
     /// Non-empty buckets in time order, offset from the first matched frame.
     pub io: Vec<IoBucketStat>,
+    pub lengths: LengthsStat,
+    /// Sorted by transport, then service port.
+    pub service_response_time: Vec<ServiceResponseTimeStat>,
+}
+
+const LENGTH_BUCKET_BOUNDS: [u128; 15] = [
+    0, 64, 128, 256, 512, 1024, 1519, 2048, 4096, 8192, 16_384, 32_768, 65_536, 131_072, 262_144,
+];
+
+const RESPONSE_TIME_BUCKET_BOUNDS: [u128; 8] = [
+    0,
+    1_000_000,
+    10_000_000,
+    100_000_000,
+    1_000_000_000,
+    2_000_000_000,
+    5_000_000_000,
+    10_000_000_000,
+];
+
+#[derive(Clone, Debug)]
+struct FixedHistogram<const N: usize> {
+    bounds: [u128; N],
+    counts: [u64; N],
+    count: u64,
+    sum: u128,
+    minimum: Option<u128>,
+    maximum: Option<u128>,
+}
+
+impl<const N: usize> FixedHistogram<N> {
+    fn new(bounds: [u128; N]) -> Self {
+        Self {
+            bounds,
+            counts: [0; N],
+            count: 0,
+            sum: 0,
+            minimum: None,
+            maximum: None,
+        }
+    }
+
+    fn add(&mut self, value: u128) {
+        let index = self.bounds[1..].partition_point(|bound| value >= *bound);
+        self.counts[index] = self.counts[index].saturating_add(1);
+        self.count = self.count.saturating_add(1);
+        self.sum = self.sum.saturating_add(value);
+        self.minimum = Some(self.minimum.map_or(value, |old| old.min(value)));
+        self.maximum = Some(self.maximum.map_or(value, |old| old.max(value)));
+    }
+
+    fn mean(&self) -> Option<u128> {
+        (self.count != 0).then(|| self.sum / u128::from(self.count))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct ServiceEndpoint {
+    address: IpAddr,
+    port: u16,
+}
+
+#[derive(Clone, Debug, Default)]
+struct PairingState {
+    requester: Option<ServiceEndpoint>,
+    service: Option<ServiceEndpoint>,
+    pending: Option<SystemTime>,
+    response_active: bool,
+    syn_sequence: Option<u32>,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ServiceRowState {
+    request_bursts: u64,
+    unanswered_requests: u64,
+    orphan_responses: u64,
+    timestamp_regressions: u64,
+    histogram: FixedHistogram<8>,
+}
+
+impl Default for FixedHistogram<8> {
+    fn default() -> Self {
+        Self::new(RESPONSE_TIME_BUCKET_BOUNDS)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -169,6 +295,9 @@ pub struct StatsCollector {
     endpoints: BTreeMap<IpAddr, EndpointTally>,
     ports: BTreeMap<(TransportKind, u16), Tally>,
     io: BTreeMap<u64, Tally>,
+    lengths: FixedHistogram<15>,
+    service_conversations: BTreeMap<(TransportKind, u64), PairingState>,
+    service_rows: BTreeMap<(TransportKind, u16), ServiceRowState>,
 }
 
 impl StatsCollector {
@@ -193,15 +322,20 @@ impl StatsCollector {
             endpoints: BTreeMap::new(),
             ports: BTreeMap::new(),
             io: BTreeMap::new(),
+            lengths: FixedHistogram::new(LENGTH_BUCKET_BOUNDS),
+            service_conversations: BTreeMap::new(),
+            service_rows: BTreeMap::new(),
         })
     }
 
     /// Folds one matched frame into every table.
     pub fn observe(&mut self, record: &FrameRecord<'_>) {
         let bytes = u64::from(record.decoded.frame.captured_length());
+        let original_length = u128::from(record.decoded.frame.original_length());
         let timestamp = record.decoded.frame.timestamp;
-        self.frames += 1;
-        self.bytes += bytes;
+        self.frames = self.frames.saturating_add(1);
+        self.bytes = self.bytes.saturating_add(bytes);
+        self.lengths.add(original_length);
         self.observe_time(timestamp, bytes);
 
         // Protocol presence: once per distinct protocol per frame.
@@ -228,11 +362,165 @@ impl StatsCollector {
 
         // Conversations and ports, keyed by the indices the pipeline
         // assigned so filters, follow-ups, and reports all agree.
-        if let (Some(stream), Some(segment)) = (record.tcp_stream, tcp_segment(record.decoded)) {
-            self.conversation(TransportKind::Tcp, stream, &segment.flow, bytes, timestamp);
+        let frame_transports = transports(&record.decoded.packet);
+        if let (Some(stream), Some((index, flow, tcp))) = (record.tcp_stream, frame_transports.tcp)
+        {
+            let payload = transport_payload(record.decoded, index);
+            self.conversation(TransportKind::Tcp, stream, &flow, bytes, timestamp);
+            self.observe_tcp_service(stream, &flow, tcp.sequence, tcp.flags, &payload, timestamp);
         }
-        if let (Some(stream), Some(flow)) = (record.udp_stream, udp_flow(record.decoded)) {
+        if let (Some(stream), Some((_, flow))) = (record.udp_stream, frame_transports.udp) {
             self.conversation(TransportKind::Udp, stream, &flow, bytes, timestamp);
+            self.observe_udp_service(stream, &flow, timestamp);
+        }
+    }
+
+    fn observe_tcp_service(
+        &mut self,
+        stream: u64,
+        flow: &FlowKey,
+        sequence: u32,
+        flags: u16,
+        payload: &[u8],
+        timestamp: SystemTime,
+    ) {
+        let source = ServiceEndpoint {
+            address: flow.source,
+            port: flow.source_port,
+        };
+        let destination = ServiceEndpoint {
+            address: flow.destination,
+            port: flow.destination_port,
+        };
+        let syn = flags & Tcp::SYN != 0;
+        let ack = flags & Tcp::ACK != 0;
+        let mut abandoned_port = None;
+        let service = {
+            let state = self
+                .service_conversations
+                .entry((TransportKind::Tcp, stream))
+                .or_default();
+            if syn && !ack {
+                if state.syn_sequence != Some(sequence) {
+                    if state.pending.take().is_some() {
+                        abandoned_port = state.service.map(|endpoint| endpoint.port);
+                    }
+                    state.response_active = false;
+                    state.requester = Some(source);
+                    state.service = Some(destination);
+                    state.syn_sequence = Some(sequence);
+                }
+            } else if state.requester.is_none() {
+                if syn && ack {
+                    state.requester = Some(destination);
+                    state.service = Some(source);
+                } else {
+                    state.requester = Some(source);
+                    state.service = Some(destination);
+                }
+            }
+            state.service
+        };
+
+        if let Some(port) = abandoned_port {
+            let row = self
+                .service_rows
+                .entry((TransportKind::Tcp, port))
+                .or_default();
+            row.unanswered_requests = row.unanswered_requests.saturating_add(1);
+        }
+        let Some(service) = service else { return };
+        self.service_rows
+            .entry((TransportKind::Tcp, service.port))
+            .or_default();
+        if !payload.is_empty() {
+            self.observe_pairing((TransportKind::Tcp, stream), source, timestamp);
+        }
+    }
+
+    fn observe_udp_service(&mut self, stream: u64, flow: &FlowKey, timestamp: SystemTime) {
+        let source = ServiceEndpoint {
+            address: flow.source,
+            port: flow.source_port,
+        };
+        let destination = ServiceEndpoint {
+            address: flow.destination,
+            port: flow.destination_port,
+        };
+        let service = {
+            let state = self
+                .service_conversations
+                .entry((TransportKind::Udp, stream))
+                .or_default();
+            if state.requester.is_none() {
+                state.requester = Some(source);
+                state.service = Some(destination);
+            }
+            state.service
+        };
+        if let Some(service) = service {
+            self.service_rows
+                .entry((TransportKind::Udp, service.port))
+                .or_default();
+            self.observe_pairing((TransportKind::Udp, stream), source, timestamp);
+        }
+    }
+
+    fn observe_pairing(
+        &mut self,
+        key: (TransportKind, u64),
+        source: ServiceEndpoint,
+        timestamp: SystemTime,
+    ) {
+        enum Outcome {
+            Burst,
+            Response(u128),
+            Regression,
+            Orphan,
+        }
+
+        let (port, outcome) = {
+            let state = self.service_conversations.get_mut(&key).unwrap();
+            let Some(requester) = state.requester else {
+                return;
+            };
+            let Some(service) = state.service else { return };
+            let outcome = if source == requester {
+                state.response_active = false;
+                if state.pending.replace(timestamp).is_some() {
+                    return;
+                }
+                Outcome::Burst
+            } else if source == service {
+                if state.response_active {
+                    return;
+                }
+                state.response_active = true;
+                match state.pending.take() {
+                    Some(pending) => match timestamp.duration_since(pending) {
+                        Ok(duration) => Outcome::Response(duration.as_nanos()),
+                        Err(_) => Outcome::Regression,
+                    },
+                    None => Outcome::Orphan,
+                }
+            } else {
+                Outcome::Orphan
+            };
+            (service.port, outcome)
+        };
+
+        let row = self.service_rows.entry((key.0, port)).or_default();
+        match outcome {
+            Outcome::Burst => {
+                row.request_bursts = row.request_bursts.saturating_add(1);
+            }
+            Outcome::Response(nanoseconds) => row.histogram.add(nanoseconds),
+            Outcome::Regression => {
+                row.timestamp_regressions = row.timestamp_regressions.saturating_add(1);
+            }
+            Outcome::Orphan => {
+                row.orphan_responses = row.orphan_responses.saturating_add(1);
+            }
         }
     }
 
@@ -372,6 +660,21 @@ impl StatsCollector {
             })
             .collect();
 
+        let lengths = lengths_stat(self.lengths);
+        let mut service_rows = self.service_rows;
+        for ((transport, _stream), state) in self.service_conversations {
+            if let (Some(service), Some(_)) = (state.service, state.pending) {
+                let row = service_rows.entry((transport, service.port)).or_default();
+                row.unanswered_requests = row.unanswered_requests.saturating_add(1);
+            }
+        }
+        let service_response_time = service_rows
+            .into_iter()
+            .map(|((transport, service_port), state)| {
+                service_response_stat(transport, service_port, state)
+            })
+            .collect();
+
         StatsReport {
             interval,
             frames: self.frames,
@@ -383,7 +686,75 @@ impl StatsCollector {
             endpoints,
             ports,
             io,
+            lengths,
+            service_response_time,
         }
+    }
+}
+
+fn lengths_stat(histogram: FixedHistogram<15>) -> LengthsStat {
+    let buckets = histogram
+        .bounds
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| histogram.counts[*index] != 0)
+        .map(|(index, bound)| LengthBucketStat {
+            lower_bound: u64::try_from(*bound).expect("fixed length bound fits u64"),
+            upper_bound: histogram
+                .bounds
+                .get(index + 1)
+                .map(|upper| u64::try_from(*upper).expect("fixed length bound fits u64")),
+            frames: histogram.counts[index],
+        })
+        .collect();
+    LengthsStat {
+        frames: histogram.count,
+        minimum: histogram
+            .minimum
+            .map(|value| u64::try_from(value).expect("frame length fits u64")),
+        maximum: histogram
+            .maximum
+            .map(|value| u64::try_from(value).expect("frame length fits u64")),
+        mean: histogram
+            .mean()
+            .map(|value| u64::try_from(value).expect("frame length fits u64")),
+        buckets,
+    }
+}
+
+fn service_response_stat(
+    transport: TransportKind,
+    service_port: u16,
+    state: ServiceRowState,
+) -> ServiceResponseTimeStat {
+    let buckets = state
+        .histogram
+        .bounds
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| state.histogram.counts[*index] != 0)
+        .map(|(index, bound)| ServiceResponseTimeBucketStat {
+            lower_bound: duration_from_nanos_saturating(*bound),
+            upper_bound: state
+                .histogram
+                .bounds
+                .get(index + 1)
+                .map(|upper| duration_from_nanos_saturating(*upper)),
+            samples: state.histogram.counts[index],
+        })
+        .collect();
+    ServiceResponseTimeStat {
+        transport,
+        service_port,
+        request_bursts: state.request_bursts,
+        samples: state.histogram.count,
+        unanswered_requests: state.unanswered_requests,
+        orphan_responses: state.orphan_responses,
+        timestamp_regressions: state.timestamp_regressions,
+        minimum: state.histogram.minimum.map(duration_from_nanos_saturating),
+        maximum: state.histogram.maximum.map(duration_from_nanos_saturating),
+        mean: state.histogram.mean().map(duration_from_nanos_saturating),
+        buckets,
     }
 }
 
@@ -412,7 +783,7 @@ fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{StatsCollector, duration_from_nanos_saturating};
+    use super::{FixedHistogram, StatsCollector, duration_from_nanos_saturating};
     use std::time::{Duration, UNIX_EPOCH};
 
     #[test]
@@ -436,5 +807,33 @@ mod tests {
         );
         assert_eq!(report.io[0].frames, 2);
         assert_eq!(report.io[1].offset, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn fixed_histogram_uses_lower_inclusive_upper_exclusive_buckets() {
+        let mut histogram = FixedHistogram::new([0, 10, 20]);
+        for value in [0, 9, 10, 19, 20] {
+            histogram.add(value);
+        }
+        assert_eq!(histogram.counts, [2, 2, 1]);
+        assert_eq!(histogram.count, 5);
+        assert_eq!(histogram.minimum, Some(0));
+        assert_eq!(histogram.maximum, Some(20));
+        assert_eq!(histogram.mean(), Some(11));
+    }
+
+    #[test]
+    fn fixed_histogram_empty_and_extreme_values_finish_without_overflow() {
+        let empty = FixedHistogram::new([0, 1]);
+        assert_eq!(empty.count, 0);
+        assert_eq!(empty.mean(), None);
+        assert_eq!(empty.minimum, None);
+        assert_eq!(empty.maximum, None);
+        let mut histogram = FixedHistogram::new([0]);
+        histogram.add(u128::MAX);
+        histogram.add(u128::MAX);
+        assert_eq!(histogram.count, 2);
+        assert_eq!(histogram.sum, u128::MAX);
+        assert_eq!(histogram.counts, [2]);
     }
 }

@@ -1,0 +1,34 @@
+{
+  "schema": "packetcraftr.output/v1",
+  "command": "stats",
+  "mode": "aggregate",
+  "status": "success",
+  "result": {
+    "table": "lengths",
+    "frames_read": 3,
+    "frames_matched": 3,
+    "bytes_matched": 162,
+    "first_timestamp": {
+      "unix_seconds": 0,
+      "nanoseconds": 0
+    },
+    "last_timestamp": {
+      "unix_seconds": 2,
+      "nanoseconds": 0
+    },
+    "lengths": {
+      "frames": 3,
+      "minimum": 43,
+      "maximum": 60,
+      "mean": 54,
+      "buckets": [
+        {
+          "lower_bound": 0,
+          "upper_bound": 64,
+          "frames": 3
+        }
+      ]
+    }
+  },
+  "diagnostics": []
+}

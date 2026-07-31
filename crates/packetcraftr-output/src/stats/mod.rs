@@ -7,6 +7,9 @@ mod model;
 pub use model::{
     StatsCommandResult as Result, StatsConversationOutput as Conversation,
     StatsEndpointOutput as Endpoint, StatsIoBucketOutput as IoBucket, StatsIoOutput as Io,
-    StatsPortOutput as Port, StatsProtocolOutput as Protocol, StatsTableName as Table,
+    StatsLengthBucketOutput as LengthBucket, StatsLengthsOutput as Lengths,
+    StatsPortOutput as Port, StatsProtocolOutput as Protocol,
+    StatsServiceResponseTimeBucketOutput as ServiceResponseTimeBucket,
+    StatsServiceResponseTimeOutput as ServiceResponseTime, StatsTableName as Table,
     StatsTransport as Transport,
 };

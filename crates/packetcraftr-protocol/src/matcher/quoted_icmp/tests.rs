@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -20,7 +20,8 @@ use packetcraftr_packet::{
 };
 
 use super::super::{
-    EchoMatcher, QuotedProbeTransport, ReverseFlowMatcher, quoted_icmp_error_kind,
+    EchoMatcher, QuotedProbeTransport, ReverseFlowMatcher, quoted_icmp_error,
+    quoted_icmp_error_kind,
     tests::{
         MalformedIpv4, echo, quoted_icmpv4_time_exceeded, quoted_icmpv6_time_exceeded, sctp_init,
     },
@@ -130,6 +131,9 @@ fn quoted_icmp_errors_require_matching_transport_and_inner_payload_lengths() {
         });
     let valid_v6 = quoted_icmpv6_time_exceeded(router_v6, source_v6, &request_v6);
     assert!(quoted_icmp_error_kind(&request_v6, &valid_v6, QuotedProbeTransport::Udp).is_some());
+    let mut mixed_family = quoted_icmpv4_time_exceeded(router, source, 17, &request);
+    mixed_family.get_mut::<Icmpv4>().unwrap().body = valid_v6.get::<Icmpv6>().unwrap().body.clone();
+    assert!(quoted_icmp_error(&mixed_family).is_none());
     let mut malformed_v6 = valid_v6;
     let mut body = malformed_v6.get::<Icmpv6>().unwrap().body.to_vec();
     body[8..10].copy_from_slice(&0_u16.to_be_bytes());
@@ -137,6 +141,93 @@ fn quoted_icmp_errors_require_matching_transport_and_inner_payload_lengths() {
     assert!(
         quoted_icmp_error_kind(&request_v6, &malformed_v6, QuotedProbeTransport::Udp).is_none()
     );
+}
+
+#[test]
+fn quoted_icmp_uses_the_ip_envelope_enclosing_the_icmp_layer() {
+    let source = Ipv4Addr::new(10, 0, 0, 1);
+    let destination = Ipv4Addr::new(10, 0, 0, 2);
+    let router = Ipv4Addr::new(10, 0, 0, 254);
+    let mut request = Packet::new();
+    request
+        .push(Ipv4 {
+            source,
+            destination,
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 33_434,
+            ..Udp::default()
+        });
+    let mut response = quoted_icmpv4_time_exceeded(router, source, 17, &request);
+    response
+        .insert(
+            0,
+            Ipv4 {
+                source: Ipv4Addr::new(192, 0, 2, 1),
+                destination: Ipv4Addr::new(192, 0, 2, 2),
+                ..Ipv4::default()
+            },
+        )
+        .unwrap();
+
+    let error = quoted_icmp_error(&response).unwrap();
+    assert_eq!(error.responder, IpAddr::V4(router));
+    assert_eq!(error.response_destination, IpAddr::V4(source));
+    assert_eq!(
+        quoted_icmp_error_kind(&request, &response, QuotedProbeTransport::Udp),
+        Some(super::QuotedIcmpError::TimeExceeded)
+    );
+}
+
+#[test]
+fn quoted_ipv6_walks_supported_extension_header_chains() {
+    let source: Ipv6Addr = "fd00::1".parse().unwrap();
+    let destination: Ipv6Addr = "fd00::2".parse().unwrap();
+    let router: Ipv6Addr = "fd00::fe".parse().unwrap();
+    let mut request = Packet::new();
+    request
+        .push(Ipv6 {
+            source,
+            destination,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 33_434,
+            ..Udp::default()
+        });
+
+    let mut quote = vec![0_u8; 96];
+    quote[0] = 0x60;
+    quote[4..6].copy_from_slice(&56_u16.to_be_bytes());
+    quote[6] = 0;
+    quote[8..24].copy_from_slice(&source.octets());
+    quote[24..40].copy_from_slice(&destination.octets());
+    quote[40] = 43;
+    quote[48] = 44;
+    quote[56] = 51;
+    quote[64] = 60;
+    quote[65] = 2;
+    quote[80] = 17;
+    quote[88..90].copy_from_slice(&12_345_u16.to_be_bytes());
+    quote[90..92].copy_from_slice(&33_434_u16.to_be_bytes());
+    let mut body = vec![0_u8; 4];
+    body.extend(quote);
+    let mut response = quoted_icmpv6_time_exceeded(router, source, &request);
+    response.get_mut::<Icmpv6>().unwrap().body = body.into();
+
+    assert_eq!(
+        quoted_icmp_error_kind(&request, &response, QuotedProbeTransport::Udp),
+        Some(super::QuotedIcmpError::TimeExceeded)
+    );
+
+    let icmp = response.get_mut::<Icmpv6>().unwrap();
+    let mut body = icmp.body.to_vec();
+    body[62..64].copy_from_slice(&8_u16.to_be_bytes());
+    icmp.body = body.into();
+    assert!(quoted_icmp_error(&response).is_none());
 }
 
 #[test]

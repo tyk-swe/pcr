@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Extended offline expert analysis with bounded IPv4/IPv6 fragment overlap,
+  gap, and incomplete-datagram findings; correlated ICMP errors; and
+  interface/VLAN-scoped ARP/IPv4 address-conflict findings. Stable codes are
+  `ip.fragment_overlap`, `ip.fragment_overlap_conflicting`, `ip.fragment_gap`,
+  `ip.fragment_incomplete`, `icmp.time_exceeded`, `icmp.port_unreachable`,
+  `icmp.destination_unreachable`, `icmp.administratively_prohibited`,
+  `arp.address_conflict`, and `ipv4.address_conflict`.
+- Changed fragment reassembly pushes to return all events revealed by one
+  fragment. Expiry events now expose exact missing ranges and an optional final
+  length; offline analysis retains first-seen bytes after conflicting overlaps,
+  while strict callers can continue using `RejectConflicting`.
 - Removed the unused aggregate protocol-support manifest, workflow matrix, and
   fallback metadata. Consumers should use `support::BUILTIN_PROTOCOLS` and
   `support::BUILTIN_CAPTURE_ROOTS`, the tables used by the runtime registry and
@@ -53,6 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   replay result continues to report its independent `source_sequence`.
 - Rejected non-contiguous macOS interface netmasks instead of deriving
   misleading route prefixes from them.
+- Corrected multi-segment service-response statistics, tunneled and
+  extension-bearing quoted ICMP correlation, unusable ARP claims, and
+  optional-duration text rendering.
 
 ## [0.4.0] - 2026-07-29
 
@@ -239,6 +253,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--filter` narrows every table, and stats-assigned indices enable stream-aware
   expressions such as `tcp.stream == 7`. Text and aggregate JSON are supported,
   with the JSON contract published in the v1 schema and examples.
+- Added `--table lengths`, which buckets original on-wire lengths while
+  retaining captured lengths for `bytes_matched`, and
+  `--table service-response-time`, a deterministic matched-frame request-burst
+  heuristic with unanswered, orphan-response, and timestamp-regression counts.
+  TCP control-only frames do not produce response-time samples.
 - Added the bounded offline analysis pipeline in `workflow::analysis`: a
   shared capture-file read → dissect → index → filter → dispatch loop.
   First-seen indexing (`StreamIndex`, `CanonicalFlow`) and adapters

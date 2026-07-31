@@ -8,13 +8,16 @@ use std::collections::{BTreeMap, HashMap};
 use packetcraftr_packet::diagnostic::DiagnosticSeverity;
 
 use super::session_index::{transport_payload, transports};
-use super::{FlowKey, FrameRecord, Tcp, TcpEvent};
+use super::{FlowKey, FrameRecord, Summary, Tcp, TcpEvent};
 
 use finding::new as new_finding;
 use tcp::DirectionState;
 
+mod address_conflict;
 mod finding;
+mod fragment;
 mod generation;
+mod icmp;
 mod observation;
 mod tcp;
 
@@ -91,19 +94,24 @@ impl ExpertSummary {
     }
 }
 
-/// Detects cross-frame TCP conditions from dissected headers.
+/// Detects bounded cross-frame TCP, fragment, ICMP, and L2 address conditions
+/// from dissected headers and the pipeline's existing reassembly/index state.
 ///
 /// Retransmission and gap evidence comes from the session reassembler's
 /// sequence tracking, delivered through the pipeline's TCP events; the
 /// header-derived conditions here — duplicate acknowledgment, zero window,
 /// window full, keep-alive, reset — need acknowledgment and window fields
-/// reassembly deliberately does not carry.
+/// reassembly deliberately does not carry. Fragment findings reuse the
+/// pipeline's bounded datagram state, ICMP correlation reuses capture-global
+/// stream indices, and address claims retain at most `AnalysisLimits::max_flows`
+/// distinct IPv4/MAC pairs.
 #[derive(Debug, Default)]
 pub struct ExpertCollector {
     flows: HashMap<FlowKey, DirectionState>,
     /// Conversation index per directional flow, retained so end-of-capture
     /// findings can still name the stream they belong to.
     streams: HashMap<FlowKey, u64>,
+    address_conflicts: address_conflict::State,
     summary: ExpertSummary,
 }
 
@@ -188,6 +196,10 @@ impl ExpertCollector {
                 diagnostic.message.clone(),
             ));
         }
+
+        fragment::observe(record.fragment_events, record.number, &mut findings);
+        icmp::observe(record, &mut findings);
+        self.address_conflicts.observe(record, &mut findings);
 
         let frame_tcp = frame_transports.tcp;
         let frame_payload_len = frame_tcp.as_ref().map_or(0, |(index, _, _)| {
@@ -329,17 +341,11 @@ impl ExpertCollector {
         findings
     }
 
-    /// Finishes the pass, folding in the pipeline's trailing reassembly
-    /// events: a flow flushed with bytes still buffered never healed its
-    /// holes, which is evidence the per-frame view cannot carry. Returned
-    /// findings are attributed to `end_number`, the last frame read.
-    pub fn finish(
-        mut self,
-        trailing: &[super::TcpEvent],
-        end_number: u64,
-    ) -> (Vec<Finding>, ExpertSummary) {
+    /// Finishes the pass, folding in trailing TCP and fragment reassembly
+    /// events. Returned findings are attributed to the last frame read.
+    pub fn finish(mut self, analysis: &Summary) -> (Vec<Finding>, ExpertSummary) {
         let mut findings = Vec::new();
-        for event in trailing {
+        for event in &analysis.trailing_tcp_events {
             if let TcpEvent::Evicted {
                 flow,
                 pending_bytes,
@@ -349,7 +355,7 @@ impl ExpertCollector {
                 findings.push(new_finding(
                     DiagnosticSeverity::Info,
                     "tcp.incomplete_at_end",
-                    end_number,
+                    analysis.frames_read,
                     self.streams
                         .get(flow)
                         .or_else(|| self.streams.get(&flow.reverse()))
@@ -363,6 +369,11 @@ impl ExpertCollector {
                 ));
             }
         }
+        fragment::observe(
+            &analysis.trailing_fragment_events,
+            analysis.frames_read,
+            &mut findings,
+        );
         for finding in &findings {
             self.summary.count(finding);
         }

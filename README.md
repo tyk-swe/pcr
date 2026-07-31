@@ -23,7 +23,9 @@ sensitive traffic or disrupt a network when used incorrectly.
 - Read, filter, dissect, and transcode classic PCAP and PCAPNG files without
   live-network access, including filtered capture-file extraction.
 - Analyze captures offline with bounded conversation statistics, TCP/UDP
-  payload following, stream-aware filters, reassembly, and expert findings.
+  payload following, stream-aware filters, reassembly, and expert findings for
+  checksums, TCP behavior, IP fragments, quoted ICMP errors, and scoped
+  ARP/IPv4 address conflicts.
 - Generate deterministic, field-aware fuzz cases offline; live fuzzing is a
   separate opt-in.
 - Enumerate interfaces and passively inspect route decisions.

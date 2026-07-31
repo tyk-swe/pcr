@@ -243,21 +243,36 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     // SAFETY: getifaddrs owns the live record for this call, and its leading
     // length byte bounds the complete sockaddr allocation.
     let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
-    let ip = sockaddr_ip(bytes)?;
-    let bits = match (interface_address, ip) {
-        (IpAddr::V4(_), IpAddr::V4(mask)) => mask
-            .octets()
-            .iter()
-            .map(|byte| byte.count_ones())
-            .sum::<u32>(),
-        (IpAddr::V6(_), IpAddr::V6(mask)) => mask
-            .octets()
-            .iter()
-            .map(|byte| byte.count_ones())
-            .sum::<u32>(),
-        _ => return None,
-    };
-    u8::try_from(bits).ok()
+    let mask = sockaddr_ip(bytes)?;
+    if interface_address.is_ipv4() != mask.is_ipv4() {
+        return None;
+    }
+    netmask_prefix(mask)
+}
+
+fn netmask_prefix(mask: IpAddr) -> Option<u8> {
+    match mask {
+        IpAddr::V4(mask) => {
+            let mask = u32::from(mask);
+            let prefix = mask.leading_ones();
+            let canonical = u32::MAX.checked_shl(u32::BITS - prefix).unwrap_or_default();
+            if mask != canonical {
+                return None;
+            }
+            u8::try_from(prefix).ok()
+        }
+        IpAddr::V6(mask) => {
+            let mask = u128::from(mask);
+            let prefix = mask.leading_ones();
+            let canonical = u128::MAX
+                .checked_shl(u128::BITS - prefix)
+                .unwrap_or_default();
+            if mask != canonical {
+                return None;
+            }
+            u8::try_from(prefix).ok()
+        }
+    }
 }
 
 fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddress> {
@@ -566,6 +581,24 @@ mod tests {
             assert!(parse_route_addresses(&bytes, libc::RTA_DST).is_err());
         }
         assert!(parse_route_addresses(&[2, 0xff, 0, 0], libc::RTA_DST).is_ok());
+    }
+
+    #[test]
+    fn netmask_prefix_accepts_only_contiguous_masks() {
+        let cases = [
+            ("0.0.0.0", Some(0_u8)),
+            ("255.255.254.0", Some(23)),
+            ("255.255.255.255", Some(32)),
+            ("255.0.255.0", None),
+            ("::", Some(0)),
+            ("ffff:ffff:ffff:ffff::", Some(64)),
+            ("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", Some(128)),
+            ("ffff:ffff:0:ffff::", None),
+        ];
+
+        for (mask, expected) in cases {
+            assert_eq!(netmask_prefix(mask.parse().unwrap()), expected, "{mask}");
+        }
     }
 
     #[test]

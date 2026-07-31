@@ -889,3 +889,38 @@ fn service_response_time_counts_regressions_unanswered_orphans_and_syn_resets() 
     assert_eq!(row.orphan_responses, 1);
     assert_eq!(row.samples, 0);
 }
+
+#[test]
+fn service_response_time_ignores_tcp_request_retransmission_timestamps() {
+    let client = [10, 0, 0, 1];
+    let server = [10, 0, 0, 2];
+    let mut collector = stats::StatsCollector::new(Duration::from_secs(1)).unwrap();
+    run(
+        &mut capture_timed(vec![
+            (
+                UNIX_EPOCH,
+                tcp_packet(client, 40_000, server, 443, 1, b"request"),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(10),
+                tcp_packet(client, 40_000, server, 443, 1, b"request"),
+            ),
+            (
+                UNIX_EPOCH + Duration::from_secs(11),
+                tcp_packet(server, 443, client, 40_000, 1, b"response"),
+            ),
+        ]),
+        registry(),
+        &AnalysisOptions::default(),
+        |record| {
+            collector.observe(&record);
+            Ok(())
+        },
+    )
+    .unwrap();
+
+    let row = &collector.finish().service_response_time[0];
+    assert_eq!(row.request_bursts, 1);
+    assert_eq!(row.samples, 1);
+    assert_eq!(row.minimum, Some(Duration::from_secs(11)));
+}

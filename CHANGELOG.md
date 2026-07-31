@@ -88,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared its aggregate memory ceiling across those scopes, discarded empty
   scope tables, and stopped treating routed IPv4 source addresses as
   link-layer ownership claims.
+- Excluded TCP request retransmissions from service-response timing so repeated
+  sequence ranges do not replace the original request timestamp.
 
 ## [0.4.0] - 2026-07-29
 

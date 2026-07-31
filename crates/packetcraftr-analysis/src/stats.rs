@@ -239,6 +239,7 @@ struct PairingState {
     pending: Option<SystemTime>,
     response_active: bool,
     syn_sequence: Option<u32>,
+    request_next_sequence: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -409,6 +410,7 @@ impl StatsCollector {
                     state.requester = Some(source);
                     state.service = Some(destination);
                     state.syn_sequence = Some(sequence);
+                    state.request_next_sequence = None;
                 }
             } else if state.requester.is_none() {
                 if syn && ack {
@@ -434,7 +436,32 @@ impl StatsCollector {
             .entry((TransportKind::Tcp, service.port))
             .or_default();
         if !payload.is_empty() {
-            self.observe_pairing((TransportKind::Tcp, stream), source, timestamp);
+            let payload_len = u32::try_from(payload.len()).unwrap_or(u32::MAX);
+            let request_advances = {
+                let state = self
+                    .service_conversations
+                    .get_mut(&(TransportKind::Tcp, stream))
+                    .unwrap();
+                if state.requester != Some(source) {
+                    true
+                } else {
+                    let end = sequence.wrapping_add(payload_len);
+                    let advances = state.request_next_sequence.is_none_or(|next| {
+                        let distance = end.wrapping_sub(next);
+                        distance != 0 && distance < (1_u32 << 31)
+                    });
+                    if advances {
+                        state.request_next_sequence = Some(end);
+                    }
+                    advances
+                }
+            };
+            self.observe_pairing(
+                (TransportKind::Tcp, stream),
+                source,
+                timestamp,
+                request_advances,
+            );
         }
     }
 
@@ -462,7 +489,7 @@ impl StatsCollector {
             self.service_rows
                 .entry((TransportKind::Udp, service.port))
                 .or_default();
-            self.observe_pairing((TransportKind::Udp, stream), source, timestamp);
+            self.observe_pairing((TransportKind::Udp, stream), source, timestamp, true);
         }
     }
 
@@ -471,6 +498,7 @@ impl StatsCollector {
         key: (TransportKind, u64),
         source: ServiceEndpoint,
         timestamp: SystemTime,
+        request_advances: bool,
     ) {
         enum Outcome {
             Burst,
@@ -486,6 +514,9 @@ impl StatsCollector {
             };
             let Some(service) = state.service else { return };
             let outcome = if source == requester {
+                if !request_advances {
+                    return;
+                }
                 state.response_active = false;
                 if state.pending.replace(timestamp).is_some() {
                     return;

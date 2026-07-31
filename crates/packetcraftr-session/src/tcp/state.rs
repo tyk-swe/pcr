@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use bytes::Bytes;
 
+use super::Error;
 use super::PENDING_SEGMENT_METADATA_CHARGE;
 
 #[derive(Debug)]
@@ -95,13 +96,31 @@ pub(super) fn trim_emitted_history(state: &mut TcpFlowState, capacity: usize) {
     }
 }
 
-pub(super) fn resize_emitted_history(state: &mut TcpFlowState, capacity: usize) {
+pub(super) fn prepare_emitted_history(
+    state: &TcpFlowState,
+    retained_capacity: usize,
+    capacity: usize,
+) -> Result<Option<VecDeque<u8>>, Error> {
     if state.emitted_history.capacity() == capacity {
-        return;
+        return Ok(None);
     }
-    let mut resized = VecDeque::with_capacity(capacity);
-    resized.extend(state.emitted_history.drain(..));
-    state.emitted_history = resized;
+    let mut resized = VecDeque::new();
+    resized
+        .try_reserve_exact(capacity)
+        .map_err(|_| Error::AllocationFailed {
+            requested: capacity,
+        })?;
+    if resized.capacity() != capacity {
+        return Err(Error::AllocationFailed {
+            requested: capacity,
+        });
+    }
+    let skip = state
+        .emitted_history
+        .len()
+        .saturating_sub(retained_capacity);
+    resized.extend(state.emitted_history.range(skip..).copied());
+    Ok(Some(resized))
 }
 
 #[expect(

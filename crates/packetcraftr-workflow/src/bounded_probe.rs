@@ -130,6 +130,7 @@ pub(super) trait ProbeLifecycle<B> {
 pub(super) struct ResponseSelector<'a, M> {
     matched: Peekable<Iter<'a, M>>,
     unsolicited: &'a [DecodedPacket],
+    consumed_unsolicited: HashSet<usize>,
 }
 
 impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
@@ -138,6 +139,7 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
         Self {
             matched: matched.iter().peekable(),
             unsolicited,
+            consumed_unsolicited: HashSet::new(),
         }
     }
 
@@ -157,6 +159,7 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
         mut check_deadline: impl FnMut() -> Result<(), E>,
     ) -> Result<Option<ResponseCandidate<'a, O>>, E> {
         let mut best = None;
+        let mut best_unsolicited = None;
         while self
             .matched
             .peek()
@@ -167,8 +170,8 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
                 .matched
                 .next()
                 .expect("peeked matched response must remain available");
-            if let Some(observation) = classify(response.response()) {
-                select_response_candidate(
+            if let Some(observation) = classify(response.response())
+                && select_response_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -179,14 +182,19 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
                     timeout,
                     &rank,
                     &tie_break_key,
-                );
+                )
+            {
+                best_unsolicited = None;
             }
             check_deadline()?;
         }
-        for response in self.unsolicited {
+        for (index, response) in self.unsolicited.iter().enumerate() {
+            if self.consumed_unsolicited.contains(&index) {
+                continue;
+            }
             check_deadline()?;
-            if let Some(observation) = classify(response) {
-                select_response_candidate(
+            if let Some(observation) = classify(response)
+                && select_response_candidate(
                     &mut best,
                     ResponseCandidate {
                         observation,
@@ -197,9 +205,14 @@ impl<'a, M: MatchedResponseEvidence> ResponseSelector<'a, M> {
                     timeout,
                     &rank,
                     &tie_break_key,
-                );
+                )
+            {
+                best_unsolicited = Some(index);
             }
             check_deadline()?;
+        }
+        if let Some(index) = best_unsolicited {
+            self.consumed_unsolicited.insert(index);
         }
         Ok(best)
     }
@@ -291,9 +304,10 @@ where
         deadline
             .start_accounting(Duration::ZERO)
             .map_err(|error| L::duration_error(error.actual, error.limit))?;
-        let execution = lifecycle.execute(batch);
+        let execution = lifecycle
+            .execute(batch)
+            .map_err(|source| L::execution_error(sequence, source))?;
         check_deadline(deadline, L::duration_error)?;
-        let execution = execution.map_err(|source| L::execution_error(sequence, source))?;
         deadline
             .account(execution.stats().elapsed)
             .map_err(|error| L::duration_error(error.actual, error.limit))?;
@@ -325,4 +339,78 @@ pub(super) fn check_deadline<E>(
     deadline
         .check()
         .map_err(|error| duration_error(error.actual, error.limit))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+    use std::time::UNIX_EPOCH;
+
+    use packetcraftr_capture::LinkType;
+    use packetcraftr_packet::{Packet, layout};
+
+    use super::super::evidence::ResponseEvidence;
+    use super::*;
+
+    struct NoMatchedResponses;
+
+    impl ResponseEvidence for NoMatchedResponses {
+        fn response(&self) -> &DecodedPacket {
+            unreachable!("the fixture has no matched responses")
+        }
+
+        fn latency(&self) -> Duration {
+            unreachable!("the fixture has no matched responses")
+        }
+    }
+
+    impl MatchedResponseEvidence for NoMatchedResponses {
+        fn request_index(&self) -> usize {
+            unreachable!("the fixture has no matched responses")
+        }
+    }
+
+    #[test]
+    fn one_unsolicited_frame_can_satisfy_only_one_probe() {
+        let frame = Frame::new(
+            UNIX_EPOCH + Duration::from_millis(1),
+            LinkType::RAW,
+            &[1_u8][..],
+        )
+        .unwrap();
+        let response = DecodedPacket {
+            packet: Packet::new(),
+            original: frame.bytes().clone(),
+            frame,
+            layout: layout::Packet::default(),
+            diagnostics: Vec::new(),
+        };
+        let mut matched = Vec::<NoMatchedResponses>::new();
+        let mut selector = ResponseSelector::new(&mut matched, std::slice::from_ref(&response));
+
+        let first = selector
+            .select(
+                0,
+                UNIX_EPOCH,
+                Duration::from_millis(10),
+                |_| Some(()),
+                |_| 0,
+                |_| (),
+                || Ok::<(), Infallible>(()),
+            )
+            .unwrap();
+        assert!(first.is_some());
+        let second = selector
+            .select(
+                1,
+                UNIX_EPOCH,
+                Duration::from_millis(10),
+                |_| Some(()),
+                |_| 0,
+                |_| (),
+                || Ok::<(), Infallible>(()),
+            )
+            .unwrap();
+        assert!(second.is_none());
+    }
 }

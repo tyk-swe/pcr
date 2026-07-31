@@ -255,7 +255,12 @@ fn parse_quoted(input: &str) -> Result<String, ExpressionError> {
                 't' => '\t',
                 '"' => '"',
                 '\\' => '\\',
-                other => other,
+                other => {
+                    return Err(ExpressionError::Syntax {
+                        offset: offset + 1,
+                        message: format!("unsupported escape `\\{other}`"),
+                    });
+                }
             });
             escaped = false;
         } else if character == '\\' {
@@ -487,6 +492,14 @@ mod tests {
             parse_value_bounded(r#""a\"b""#, 0, 64).unwrap(),
             FieldValue::Text("a\"b".to_owned())
         );
+    }
+
+    #[test]
+    fn quoted_values_reject_unsupported_escapes_instead_of_mutating_them() {
+        assert!(matches!(
+            parse_value_bounded(r#""a\qb""#, 0, 64),
+            Err(ExpressionError::Syntax { offset: 3, .. })
+        ));
     }
 
     #[test]

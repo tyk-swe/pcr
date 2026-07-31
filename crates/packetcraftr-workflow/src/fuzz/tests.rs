@@ -204,7 +204,15 @@ fn fuzz_limits_reject_zero_and_excessive_duration() {
 }
 
 #[test]
-fn fuzz_request_rejects_empty_or_excessive_strategy_sets() {
+fn fuzz_request_rejects_empty_duplicate_or_excessive_strategy_sets() {
+    assert!(matches!(
+        FuzzRequest {
+            strategies: vec![FuzzStrategy::Boundary, FuzzStrategy::Boundary],
+            ..FuzzRequest::default()
+        }
+        .validate(),
+        Err(FuzzError::InvalidStrategies)
+    ));
     assert!(matches!(
         FuzzRequest {
             strategies: Vec::new(),
@@ -984,6 +992,53 @@ fn evidence_truncation_never_turns_a_correlated_response_into_timeout() {
         &mut clock,
     )
     .unwrap();
+    assert_eq!(result.cases[0].outcome, FuzzCaseOutcome::Response);
+    assert!(result.cases[0].responses.is_empty());
+    assert!(
+        result
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "fuzz.evidence_limit")
+    );
+}
+
+#[test]
+fn preparation_and_live_evidence_share_the_aggregate_byte_budget() {
+    let base_request = FuzzRequest {
+        cases: 1,
+        strategies: vec![FuzzStrategy::BitFlip],
+        targets: vec!["2.bytes".parse().unwrap()],
+        ..FuzzRequest::default()
+    };
+    let prepared = super::mutation::prepare(
+        &base_request,
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
+        &mut Deadline::new(base_request.limits.max_duration),
+    )
+    .unwrap();
+    let max_total_bytes = usize::try_from(prepared.retained_byte_count).unwrap() + 1;
+    let mut request = base_request;
+    request.limits.max_packet_bytes = max_total_bytes;
+    request.limits.max_total_bytes = max_total_bytes;
+    request.limits.max_evidence_bytes = max_total_bytes;
+    request.build.max_packet_size = max_total_bytes;
+    let mut executor = RecordingExecutor {
+        response: Some(vec![0xaa, 0xbb]),
+        ..RecordingExecutor::default()
+    };
+
+    let result = fuzz_live(
+        &request,
+        FuzzLiveOptions::default(),
+        udp_fuzz_packet(),
+        fuzz_protocol_registry(),
+        &mut RecordingAuthorizer::default(),
+        &mut executor,
+        &mut RecordingClock::default(),
+    )
+    .unwrap();
+
     assert_eq!(result.cases[0].outcome, FuzzCaseOutcome::Response);
     assert!(result.cases[0].responses.is_empty());
     assert!(

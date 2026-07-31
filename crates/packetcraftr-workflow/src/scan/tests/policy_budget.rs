@@ -222,6 +222,39 @@ fn slow_executor_expires_before_the_next_scan_batch() {
 }
 
 #[test]
+fn slow_executor_error_is_not_masked_by_the_duration_limit() {
+    struct SlowRejectExecutor;
+
+    impl ScanExecutor for SlowRejectExecutor {
+        fn execute(&mut self, _batch: &ScanBatch) -> Result<ScanBatchExecution, BoundaryError> {
+            std::thread::sleep(Duration::from_millis(20));
+            Err(BoundaryError::new(
+                "executor failed",
+                ErrorClassification::new("io.test", Kind::Io, None),
+                Vec::new(),
+            ))
+        }
+    }
+
+    let address = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
+    let mut request = tcp_scan_request(Target::Address(address));
+    request.limits.max_duration = Duration::from_millis(5);
+
+    let error = scan(
+        &request,
+        &mut AddressListAuthorizer {
+            addresses: vec![address],
+        },
+        &default_registry().unwrap(),
+        &mut SlowRejectExecutor,
+        &mut NoopClock,
+    )
+    .unwrap_err();
+
+    assert!(matches!(error, ScanError::Execution { .. }));
+}
+
+#[test]
 fn executor_reported_elapsed_time_expires_before_the_next_scan_execution() {
     struct AccountedSlowExecutor {
         calls: usize,

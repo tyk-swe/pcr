@@ -266,6 +266,15 @@ fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, ScanError> {
     })
 }
 
+const SCAN_UDP_SOURCE_PORT_BASE: u16 = 49_152;
+
+fn scan_udp_source_port(attempt: u32) -> u16 {
+    let width = u32::from(u16::MAX) - u32::from(SCAN_UDP_SOURCE_PORT_BASE) + 1;
+    let offset = attempt.saturating_sub(1) % width;
+    u16::try_from(u32::from(SCAN_UDP_SOURCE_PORT_BASE) + offset)
+        .expect("ephemeral source-port arithmetic must remain within u16")
+}
+
 #[expect(
     clippy::cast_possible_truncation,
     reason = "the operation-local sequence is reduced to the 32-bit and 20-bit wire fields the \
@@ -288,6 +297,7 @@ pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
                     ..Tcp::default()
                 }),
                 ScanTransport::Udp => packet.push(Udp {
+                    source_port: scan_udp_source_port(probe.attempt),
                     destination_port: probe.port.expect("validated UDP scan port"),
                     ..Udp::default()
                 }),
@@ -310,6 +320,7 @@ pub(super) fn probe_packet(probe: &ScanProbe) -> Packet {
                     ..Tcp::default()
                 }),
                 ScanTransport::Udp => packet.push(Udp {
+                    source_port: scan_udp_source_port(probe.attempt),
                     destination_port: probe.port.expect("validated UDP scan port"),
                     ..Udp::default()
                 }),
@@ -437,7 +448,8 @@ pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool 
                 && tcp.flags == Tcp::SYN
         }),
         ScanTransport::Udp => sent.get::<Udp>().is_some_and(|udp| {
-            udp.destination_port == probe.port.expect("validated UDP scan port")
+            udp.source_port == scan_udp_source_port(probe.attempt)
+                && udp.destination_port == probe.port.expect("validated UDP scan port")
         }),
         ScanTransport::Icmp => match probe.address {
             IpAddr::V4(_) => sent.get::<Icmpv4>().is_some_and(|icmp| {

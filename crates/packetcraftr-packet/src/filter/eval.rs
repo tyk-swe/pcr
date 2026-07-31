@@ -233,15 +233,22 @@ fn frame_value(context: &Context<'_>, which: FrameField) -> Option<FieldValue> {
     let frame = &context.decoded.frame;
     Some(match which {
         FrameField::Number => FieldValue::Unsigned(context.number),
-        // Whole seconds since the epoch, matching how timestamps are rendered
-        // elsewhere. A pre-epoch timestamp has no unsigned representation and
-        // reads as zero rather than dropping the frame from every comparison.
-        FrameField::TimeEpoch => FieldValue::Unsigned(
-            frame
-                .timestamp
-                .duration_since(UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_secs()),
-        ),
+        // Floor to whole Unix seconds, matching the capture and output layers.
+        FrameField::TimeEpoch => match frame.timestamp.duration_since(UNIX_EPOCH) {
+            Ok(elapsed) => FieldValue::Unsigned(elapsed.as_secs()),
+            Err(error) => {
+                let elapsed = error.duration();
+                let magnitude = elapsed
+                    .as_secs()
+                    .checked_add(u64::from(elapsed.subsec_nanos() != 0))?;
+                let seconds = if magnitude == 1_u64 << 63 {
+                    i64::MIN
+                } else {
+                    i64::try_from(magnitude).ok()?.checked_neg()?
+                };
+                FieldValue::Signed(seconds)
+            }
+        },
         FrameField::Length => FieldValue::Unsigned(u64::from(frame.original_length())),
         FrameField::CapturedLength => FieldValue::Unsigned(u64::from(frame.captured_length())),
         FrameField::InterfaceId => FieldValue::Unsigned(u64::from(frame.interface?)),

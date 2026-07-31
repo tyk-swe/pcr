@@ -207,7 +207,6 @@ where
 
         enforce_deadline(&deadline, sequence)?;
         let transmission = transmitter.transmit(&concrete_interface, mode, &frame);
-        enforce_deadline(&deadline, sequence)?;
         let transmission =
             transmission.map_err(|source| ReplayError::Transmission { sequence, source })?;
         if transmission.interface != concrete_interface {
@@ -228,7 +227,6 @@ where
         bytes_completed = next_bytes;
         scheduled_duration = next_duration;
         previous_timestamp = Some(frame.timestamp);
-        enforce_deadline(&deadline, sequence)?;
         let emitted = emit(ReplayFrameEvidence {
             source_sequence: sequence,
             source_interface_id: frame.interface,
@@ -239,8 +237,8 @@ where
             bytes_sent: transmission.report.bytes_sent as u64,
             frame,
         });
-        enforce_deadline(&deadline, sequence)?;
         emitted?;
+        enforce_deadline(&deadline, sequence)?;
     }
 
     enforce_deadline(&deadline, frames_attempted)?;

@@ -228,6 +228,14 @@ impl FuzzRequest {
                 reason: format!("at most {MAX_FUZZ_STRATEGIES} strategies may be selected"),
             });
         }
+        if self
+            .strategies
+            .iter()
+            .enumerate()
+            .any(|(index, strategy)| self.strategies[..index].contains(strategy))
+        {
+            return Err(FuzzError::InvalidStrategies);
+        }
         let final_case_offset =
             u64::try_from(self.cases - 1).map_err(|_| FuzzError::CaseIndexOverflow)?;
         self.first_case

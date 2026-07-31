@@ -302,6 +302,31 @@ mod tests {
     }
 
     #[test]
+    fn udp_retries_use_distinct_source_ports() {
+        let mut probe = ScanProbe {
+            sequence: 0,
+            address: IpAddr::V4(Ipv4Addr::LOCALHOST),
+            transport: ScanTransport::Udp,
+            port: Some(53),
+            attempt: 1,
+        };
+        let first = probe
+            .packet()
+            .get::<packetcraftr_protocol::transport::Udp>()
+            .unwrap()
+            .source_port;
+        probe.sequence = 1;
+        probe.attempt = 2;
+        let second = probe
+            .packet()
+            .get::<packetcraftr_protocol::transport::Udp>()
+            .unwrap()
+            .source_port;
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
     fn scan_limits_reject_each_zero_and_above_maximum_resource() {
         let mut cases = Vec::new();
         for field in 0..5 {

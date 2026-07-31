@@ -44,6 +44,8 @@ pub enum AnalysisError {
     },
     #[error("analysis ran {actual:?}, exceeding the configured duration of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
+    #[error("capture timestamp at frame {number} exceeds the monotonic analysis clock range")]
+    TimestampRange { number: u64 },
     #[error("analysis consumer failed at frame {number}: {source}")]
     Sink {
         number: u64,
@@ -62,6 +64,7 @@ impl AnalysisError {
             | Self::StreamLimit { number, .. }
             | Self::Reassembly { number, .. }
             | Self::Fragments { number, .. }
+            | Self::TimestampRange { number }
             | Self::Sink { number, .. } => Some(*number),
             _ => None,
         }
@@ -88,6 +91,11 @@ impl Classified for AnalysisError {
                 Kind::Packet,
                 Some("repair the frame or raise the per-frame byte limit it was read under"),
             ),
+            Self::TimestampRange { .. } => Classification::new(
+                "packet.timestamp",
+                Kind::Packet,
+                Some("repair the capture timestamp that exceeds the platform clock range"),
+            ),
             Self::StreamLimit { .. } | Self::DurationLimit { .. } => resource_limit(),
             // Reassembly fails for two distinct reasons: a finite budget was
             // exhausted, or the capture itself carries conflicting data. Only
@@ -97,6 +105,7 @@ impl Classified for AnalysisError {
                 | TcpError::SegmentLimit { .. }
                 | TcpError::FlowByteLimit { .. }
                 | TcpError::AggregateByteLimit { .. }
+                | TcpError::AllocationFailed { .. }
                 | TcpError::InvalidWindowLimit { .. } => resource_limit(),
                 _ => malformed_reassembly(),
             },
@@ -104,6 +113,7 @@ impl Classified for AnalysisError {
                 FragmentError::FlowLimit { .. }
                 | FragmentError::FlowByteLimit { .. }
                 | FragmentError::AggregateByteLimit { .. }
+                | FragmentError::AllocationFailed { .. }
                 | FragmentError::FragmentLimit { .. } => resource_limit(),
                 _ => malformed_reassembly(),
             },

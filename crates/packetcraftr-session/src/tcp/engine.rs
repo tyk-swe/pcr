@@ -63,6 +63,14 @@ impl Reassembler {
     /// table untouched.
     pub fn push(&mut self, segment: Segment, now: Instant) -> Result<Vec<Event>, Error> {
         self.validate_limits()?;
+        if segment.payload.is_empty()
+            && !segment.syn
+            && !segment.fin
+            && !segment.rst
+            && !self.flows.contains_key(&segment.flow)
+        {
+            return Ok(Vec::new());
+        }
         let first_payload_sequence = segment.sequence.wrapping_add(u32::from(segment.syn));
         let (changes_generation, aggregate_bytes, aggregate_memory_charge) = {
             let existing = self.flows.get(&segment.flow);

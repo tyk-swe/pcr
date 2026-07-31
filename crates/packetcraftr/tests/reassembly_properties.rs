@@ -157,7 +157,7 @@ fn fragment_reassembly_expiry_uses_per_datagram_last_update() {
                     key,
                     offset: 0,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"ab"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 start,
             )
@@ -167,9 +167,9 @@ fn fragment_reassembly_expiry_uses_per_datagram_last_update() {
         .push(
             fragment::Fragment {
                 key: refreshed.clone(),
-                offset: 2,
+                offset: 8,
                 more_fragments: true,
-                bytes: Bytes::from_static(b"cd"),
+                bytes: Bytes::from_static(b"ijklmnop"),
             },
             start + Duration::from_millis(5),
         )
@@ -179,14 +179,14 @@ fn fragment_reassembly_expiry_uses_per_datagram_last_update() {
     assert_eq!(expired.len(), 1);
     assert!(matches!(
         &expired[0],
-        fragment::Event::Expired { key, received_bytes: 2, fragment_count: 1 } if *key == older
+        fragment::Event::Expired { key, received_bytes: 8, fragment_count: 1 } if *key == older
     ));
     assert_eq!(state.flow_count(), 1);
 
     let expired = state.expire(start + Duration::from_millis(16));
     assert!(matches!(
         expired.as_slice(),
-        [fragment::Event::Expired { key, received_bytes: 4, fragment_count: 2 }] if *key == refreshed
+        [fragment::Event::Expired { key, received_bytes: 16, fragment_count: 2 }] if *key == refreshed
     ));
     assert_eq!(state.aggregate_bytes(), 0);
 }

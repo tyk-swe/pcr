@@ -68,6 +68,10 @@ pub enum Event {
 pub enum Error {
     #[error("zero-length fragments are not accepted for reassembly")]
     EmptyFragment,
+    #[error("non-final fragment payload length {length} is not a multiple of eight bytes")]
+    UnalignedNonFinalFragment { length: usize },
+    #[error("fragment byte offset {offset} is not a multiple of eight")]
+    UnalignedFragmentOffset { offset: u32 },
     #[error("fragment range overflows its 32-bit offset")]
     OffsetOverflow,
     #[error("fragment datagram exceeds per-flow limit {limit} bytes")]
@@ -76,6 +80,8 @@ pub enum Error {
     FlowLimit { limit: usize },
     #[error("fragment table would exceed aggregate byte limit {limit}")]
     AggregateByteLimit { limit: usize },
+    #[error("could not allocate {requested} bytes for fragment reassembly")]
+    AllocationFailed { requested: usize },
     #[error("datagram reached fragment limit {limit}")]
     FragmentLimit { limit: usize },
     #[error("conflicting fragment overlap at byte offset {offset}")]
@@ -158,15 +164,34 @@ impl Reassembler {
         if bytes.is_empty() {
             return Err(Error::EmptyFragment);
         }
+        if more_fragments && !bytes.len().is_multiple_of(8) {
+            return Err(Error::UnalignedNonFinalFragment {
+                length: bytes.len(),
+            });
+        }
+        if !offset.is_multiple_of(8) {
+            return Err(Error::UnalignedFragmentOffset { offset });
+        }
         let end = offset
             .checked_add(u32::try_from(bytes.len()).map_err(|_| Error::OffsetOverflow)?)
             .ok_or(Error::OffsetOverflow)?;
-        if end as usize > self.limits.max_bytes_per_flow {
+        if usize::try_from(end).map_or(true, |end| end > self.limits.max_bytes_per_flow) {
             return Err(Error::FlowByteLimit {
                 limit: self.limits.max_bytes_per_flow,
             });
         }
         let has_existing_flow = self.flows.contains_key(&key);
+        if !has_existing_flow && !more_fragments && offset == 0 {
+            if self.limits.max_fragments_per_datagram == 0 {
+                return Err(Error::FragmentLimit { limit: 0 });
+            }
+            return Ok(Some(Event::Complete(Datagram {
+                key,
+                bytes,
+                fragment_count: 1,
+                had_conflicting_overlap: false,
+            })));
+        }
         if !has_existing_flow && self.flows.len() >= self.limits.max_flows {
             return Err(Error::FlowLimit {
                 limit: self.limits.max_flows,
@@ -253,26 +278,17 @@ impl Reassembler {
         let aggregate_memory_charge = accounting.aggregate_memory_charge;
         let fragment_count = accounting.fragment_count;
 
-        if !has_existing_flow && !more_fragments && offset == 0 {
-            return Ok(Some(Event::Complete(Datagram {
-                key,
-                bytes,
-                fragment_count,
-                had_conflicting_overlap: false,
-            })));
-        }
-
         if has_existing_flow {
             let complete = {
                 let state = self
                     .flows
                     .get_mut(&key)
                     .expect("validated fragment flow remains present");
-                commit_fragment(&mut state.segments, offset, bytes, merge);
+                commit_fragment(&mut state.segments, offset, bytes, merge)?;
                 state.final_length = final_length;
                 state.stored_bytes = stored_bytes;
                 state.fragment_count = fragment_count;
-                state.last_update = now;
+                state.last_update = state.last_update.max(now);
                 state.had_conflicting_overlap |= merge.has_conflicting_overlap;
                 state
                     .final_length
@@ -290,22 +306,12 @@ impl Reassembler {
                 self.aggregate_memory_charge = self
                     .aggregate_memory_charge
                     .saturating_sub(new_memory_charge);
-                let datagram_bytes = if state.segments.len() == 1 {
-                    let (_, bytes) = state
-                        .segments
-                        .into_iter()
-                        .next()
-                        .expect("complete datagram retains its coalesced segment");
-                    debug_assert_eq!(bytes.len(), length as usize);
-                    bytes
-                } else {
-                    let mut bytes = Vec::with_capacity(length as usize);
-                    for segment in state.segments.values() {
-                        bytes.extend_from_slice(segment);
-                    }
-                    bytes.truncate(length as usize);
-                    Bytes::from(bytes)
-                };
+                let (_, datagram_bytes) = state
+                    .segments
+                    .into_iter()
+                    .next()
+                    .expect("complete datagram retains its coalesced segment");
+                debug_assert_eq!(datagram_bytes.len(), length as usize);
                 return Ok(Some(Event::Complete(Datagram {
                     key,
                     bytes: datagram_bytes,
@@ -324,7 +330,7 @@ impl Reassembler {
             last_update: now,
             had_conflicting_overlap: merge.has_conflicting_overlap,
         };
-        commit_fragment(&mut state.segments, offset, bytes, merge);
+        commit_fragment(&mut state.segments, offset, bytes, merge)?;
         self.flows.insert(key, state);
         self.aggregate_bytes = aggregate;
         self.aggregate_memory_charge = aggregate_memory_charge;
@@ -441,9 +447,9 @@ mod tests {
                 .push(
                     Fragment {
                         key: key(),
-                        offset: 3,
+                        offset: 8,
                         more_fragments: false,
-                        bytes: Bytes::from_static(b"def"),
+                        bytes: Bytes::from_static(b"ijk"),
                     },
                     now,
                 )
@@ -456,7 +462,7 @@ mod tests {
                     key: key(),
                     offset: 0,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"abc"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 now,
             )
@@ -464,7 +470,7 @@ mod tests {
             .unwrap();
         assert!(matches!(
             event,
-            Event::Complete(value) if value.bytes == Bytes::from_static(b"abcdef")
+            Event::Complete(value) if value.bytes == Bytes::from_static(b"abcdefghijk")
         ));
     }
 
@@ -481,7 +487,7 @@ mod tests {
                     key: key(),
                     offset: 0,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"ab"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 now,
             )
@@ -490,9 +496,9 @@ mod tests {
             .push(
                 Fragment {
                     key: key(),
-                    offset: 2,
+                    offset: 8,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"cd"),
+                    bytes: Bytes::from_static(b"ijklmnop"),
                 },
                 now,
             )
@@ -500,7 +506,7 @@ mod tests {
 
         let state = reassembler.flows.get(&key()).unwrap();
         assert_eq!(state.segments.len(), 1);
-        assert_eq!(&state.segments[&0][..], b"abcd");
+        assert_eq!(&state.segments[&0][..], b"abcdefghijklmnop");
         assert_eq!(state.fragment_count, 2);
     }
 
@@ -512,9 +518,9 @@ mod tests {
             OverlapPolicy::RejectConflicting,
         );
         for (offset, bytes) in [
-            (0, b"ab".as_slice()),
-            (4, b"ef".as_slice()),
-            (2, b"cd".as_slice()),
+            (0, b"abcdefgh".as_slice()),
+            (16, b"qrstuvwx".as_slice()),
+            (8, b"ijklmnop".as_slice()),
         ] {
             reassembler
                 .push(
@@ -531,11 +537,11 @@ mod tests {
 
         let state = reassembler.flows.get(&key()).unwrap();
         assert_eq!(state.segments.len(), 1);
-        assert_eq!(&state.segments[&0][..], b"abcdef");
+        assert_eq!(&state.segments[&0][..], b"abcdefghijklmnopqrstuvwx");
         assert_eq!(state.fragment_count, 3);
         assert_eq!(
             reassembler.aggregate_memory_charge(),
-            DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE + 6
+            DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE + 24
         );
     }
 
@@ -550,7 +556,7 @@ mod tests {
                     key: key(),
                     offset: 0,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"abc"),
+                    bytes: Bytes::from_static(b"abcdefghijklmnop"),
                 },
                 now,
             )
@@ -559,9 +565,9 @@ mod tests {
             .push(
                 Fragment {
                     key: key(),
-                    offset: 1,
+                    offset: 8,
                     more_fragments: false,
-                    bytes: Bytes::from_static(b"XYZ"),
+                    bytes: Bytes::from_static(b"XXXXXXXXZ"),
                 },
                 now,
             )
@@ -575,7 +581,7 @@ mod tests {
                 fragment_count: 2,
                 had_conflicting_overlap: true,
                 ..
-            }) if bytes == Bytes::from_static(b"abcZ")
+            }) if bytes == Bytes::from_static(b"abcdefghijklmnopZ")
         ));
     }
 
@@ -588,22 +594,22 @@ mod tests {
             .push(
                 Fragment {
                     key: key(),
-                    offset: 10,
+                    offset: 8,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"abc"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 now,
             )
             .unwrap();
-        let pointer = reassembler.flows[&key()].segments[&10].as_ptr();
+        let pointer = reassembler.flows[&key()].segments[&8].as_ptr();
 
         reassembler
             .push(
                 Fragment {
                     key: key(),
-                    offset: 10,
+                    offset: 8,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"abc"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 now,
             )
@@ -611,7 +617,7 @@ mod tests {
 
         let state = &reassembler.flows[&key()];
         assert_eq!(state.segments.len(), 1);
-        assert_eq!(state.segments[&10].as_ptr(), pointer);
+        assert_eq!(state.segments[&8].as_ptr(), pointer);
     }
 
     #[test]
@@ -627,7 +633,7 @@ mod tests {
                     key: key(),
                     offset: 0,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"abcd"),
+                    bytes: Bytes::from_static(b"abcdefghijklmnop"),
                 },
                 now,
             )
@@ -641,14 +647,14 @@ mod tests {
             .push(
                 Fragment {
                     key: key(),
-                    offset: 2,
+                    offset: 8,
                     more_fragments: false,
-                    bytes: Bytes::from_static(b"XY"),
+                    bytes: Bytes::from_static(b"XXXXXXXX"),
                 },
                 now,
             )
             .unwrap_err();
-        assert!(matches!(error, Error::ConflictingOverlap { offset: 2 }));
+        assert!(matches!(error, Error::ConflictingOverlap { offset: 8 }));
         assert_eq!(
             before,
             (
@@ -660,7 +666,7 @@ mod tests {
         let state = reassembler.flows.get(&key()).unwrap();
         assert_eq!(state.final_length, None);
         assert_eq!(state.fragment_count, 1);
-        assert_eq!(&state.segments[&0][..], b"abcd");
+        assert_eq!(&state.segments[&0][..], b"abcdefghijklmnop");
     }
 
     #[test]
@@ -677,7 +683,7 @@ mod tests {
                     key: key(),
                     offset: 0,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"abc"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 now,
             )
@@ -699,7 +705,7 @@ mod tests {
                     key: key(),
                     offset: 8,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"ij"),
+                    bytes: Bytes::from_static(b"ijklmnop"),
                 },
                 now,
             )
@@ -720,11 +726,11 @@ mod tests {
             Error::BeyondFinalLength { final_length: 4 }
         );
         assert_eq!(reassembler.flow_count(), 1);
-        assert_eq!(reassembler.aggregate_bytes(), 2);
+        assert_eq!(reassembler.aggregate_bytes(), 8);
         assert!(matches!(
             reassembler.flush().as_slice(),
             [Event::Expired {
-                received_bytes: 2,
+                received_bytes: 8,
                 fragment_count: 1,
                 ..
             }]
@@ -735,7 +741,7 @@ mod tests {
     fn aggregate_limit_charges_sparse_fragment_metadata() {
         let now = Instant::now();
         let limits = ReassemblyLimits {
-            max_aggregate_bytes: 193,
+            max_aggregate_bytes: 200,
             ..ReassemblyLimits::default()
         };
         let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
@@ -745,29 +751,29 @@ mod tests {
                     key: key(),
                     offset: 0,
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"a"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 now,
             )
             .unwrap();
-        assert_eq!(reassembler.aggregate_bytes(), 1);
-        assert_eq!(reassembler.aggregate_memory_charge(), 193);
+        assert_eq!(reassembler.aggregate_bytes(), 8);
+        assert_eq!(reassembler.aggregate_memory_charge(), 200);
         assert_eq!(
             reassembler
                 .push(
                     Fragment {
                         key: key(),
-                        offset: 2,
+                        offset: 16,
                         more_fragments: true,
-                        bytes: Bytes::from_static(b"b"),
+                        bytes: Bytes::from_static(b"ijklmnop"),
                     },
                     now,
                 )
                 .unwrap_err(),
-            Error::AggregateByteLimit { limit: 193 }
+            Error::AggregateByteLimit { limit: 200 }
         );
-        assert_eq!(reassembler.aggregate_bytes(), 1);
-        assert_eq!(reassembler.aggregate_memory_charge(), 193);
+        assert_eq!(reassembler.aggregate_bytes(), 8);
+        assert_eq!(reassembler.aggregate_memory_charge(), 200);
     }
 
     #[test]
@@ -795,10 +801,117 @@ mod tests {
     }
 
     #[test]
+    fn wire_alignment_is_validated_without_creating_state() {
+        let now = Instant::now();
+        let mut reassembler = Reassembler::new(
+            ReassemblyLimits::default(),
+            OverlapPolicy::RejectConflicting,
+        );
+
+        assert_eq!(
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset: 0,
+                        more_fragments: true,
+                        bytes: Bytes::from_static(b"short"),
+                    },
+                    now,
+                )
+                .unwrap_err(),
+            Error::UnalignedNonFinalFragment { length: 5 }
+        );
+        assert_eq!(
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset: 1,
+                        more_fragments: false,
+                        bytes: Bytes::from_static(b"x"),
+                    },
+                    now,
+                )
+                .unwrap_err(),
+            Error::UnalignedFragmentOffset { offset: 1 }
+        );
+        assert_eq!(reassembler.flow_count(), 0);
+    }
+
+    #[test]
+    fn complete_single_fragment_does_not_consume_retained_state_budgets() {
+        let fragment = Fragment {
+            key: key(),
+            offset: 0,
+            more_fragments: false,
+            bytes: Bytes::from_static(b"complete"),
+        };
+        let mut denied = Reassembler::new(
+            ReassemblyLimits {
+                max_fragments_per_datagram: 0,
+                ..ReassemblyLimits::default()
+            },
+            OverlapPolicy::RejectConflicting,
+        );
+        assert_eq!(
+            denied.push(fragment.clone(), Instant::now()).unwrap_err(),
+            Error::FragmentLimit { limit: 0 }
+        );
+
+        let limits = ReassemblyLimits {
+            max_flows: 0,
+            max_aggregate_bytes: 0,
+            max_fragments_per_datagram: 1,
+            ..ReassemblyLimits::default()
+        };
+        let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
+
+        let event = reassembler.push(fragment, Instant::now()).unwrap();
+
+        assert!(matches!(event, Some(Event::Complete(_))));
+        assert_eq!(reassembler.flow_count(), 0);
+        assert_eq!(reassembler.aggregate_memory_charge(), 0);
+    }
+
+    #[test]
+    fn older_fragment_timestamp_does_not_regress_idle_expiry() {
+        let start = Instant::now();
+        let limits = ReassemblyLimits {
+            fragment_expiry: Duration::from_secs(5),
+            ..ReassemblyLimits::default()
+        };
+        let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
+        for (offset, now) in [
+            (0, start + Duration::from_secs(10)),
+            (16, start + Duration::from_secs(5)),
+        ] {
+            reassembler
+                .push(
+                    Fragment {
+                        key: key(),
+                        offset,
+                        more_fragments: true,
+                        bytes: Bytes::from_static(b"abcdefgh"),
+                    },
+                    now,
+                )
+                .unwrap();
+        }
+
+        assert!(
+            reassembler
+                .expire(start + Duration::from_secs(11))
+                .is_empty()
+        );
+        assert_eq!(reassembler.expire(start + Duration::from_secs(15)).len(), 1);
+    }
+
+    #[test]
     fn disjoint_fragments_do_not_retain_a_large_input_slice() {
         let now = Instant::now();
         let backing = Bytes::from(vec![7_u8; 4_096]);
-        let slice = backing.slice(2_048..2_049);
+        let slice = backing.slice(2_048..2_056);
         let slice_pointer = slice.as_ptr();
         let mut reassembler = Reassembler::new(
             ReassemblyLimits::default(),
@@ -809,7 +922,7 @@ mod tests {
             .push(
                 Fragment {
                     key: key(),
-                    offset: 10,
+                    offset: 8,
                     more_fragments: true,
                     bytes: slice,
                 },
@@ -817,8 +930,8 @@ mod tests {
             )
             .unwrap();
 
-        let stored = &reassembler.flows[&key()].segments[&10];
-        assert_eq!(stored.as_ref(), b"\x07");
+        let stored = &reassembler.flows[&key()].segments[&8];
+        assert_eq!(stored.as_ref(), b"\x07\x07\x07\x07\x07\x07\x07\x07");
         assert_ne!(stored.as_ptr(), slice_pointer);
     }
 
@@ -826,7 +939,7 @@ mod tests {
     fn sparse_aggregate_rejection_precedes_span_sized_scratch_allocation() {
         let now = Instant::now();
         let limits = ReassemblyLimits {
-            max_bytes_per_flow: 10_000_001,
+            max_bytes_per_flow: 10_000_008,
             max_aggregate_bytes: DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE,
             ..ReassemblyLimits::default()
         };
@@ -838,7 +951,7 @@ mod tests {
                         key: key(),
                         offset: 10_000_000,
                         more_fragments: true,
-                        bytes: Bytes::from_static(b"x"),
+                        bytes: Bytes::from_static(b"xxxxxxxx"),
                     },
                     now,
                 )

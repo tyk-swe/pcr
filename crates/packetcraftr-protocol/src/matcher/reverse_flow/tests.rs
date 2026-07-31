@@ -152,15 +152,30 @@ fn tcp_matcher_uses_acknowledgment_and_rst_sequence_state() {
     let wrong_syn_ack = tcp_packet(server, client, 500, 102, Tcp::SYN | Tcp::ACK);
     let valid_ack_rst = tcp_packet(server, client, 0, 101, Tcp::RST | Tcp::ACK);
     let wrong_ack_rst = tcp_packet(server, client, 0, 102, Tcp::RST | Tcp::ACK);
-    let valid_bare_rst = tcp_packet(server, client, 0, 0, Tcp::RST);
-    let wrong_bare_rst = tcp_packet(server, client, 1, 0, Tcp::RST);
 
-    for response in [valid_syn_ack, valid_ack_rst, valid_bare_rst] {
+    for response in [valid_syn_ack, valid_ack_rst] {
         assert!(matcher.matches(&request, &response).matched);
     }
-    for response in [wrong_syn_ack, wrong_ack_rst, wrong_bare_rst] {
+    for response in [wrong_syn_ack, wrong_ack_rst] {
         assert!(!matcher.matches(&request, &response).matched);
     }
+
+    let bare_rst = tcp_packet(server, client, 0, 0, Tcp::RST);
+    assert!(!matcher.matches(&request, &bare_rst).matched);
+
+    let acknowledged_request = tcp_packet(client, server, 100, 700, Tcp::ACK);
+    let valid_bare_rst = tcp_packet(server, client, 700, 0, Tcp::RST);
+    let wrong_bare_rst = tcp_packet(server, client, 701, 0, Tcp::RST);
+    assert!(
+        matcher
+            .matches(&acknowledged_request, &valid_bare_rst)
+            .matched
+    );
+    assert!(
+        !matcher
+            .matches(&acknowledged_request, &wrong_bare_rst)
+            .matched
+    );
 }
 
 #[test]

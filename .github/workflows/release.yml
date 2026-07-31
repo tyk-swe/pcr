@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -22,6 +23,19 @@ jobs:
       version: ${{ steps.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Require successful CI for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          successful_runs="$(
+            gh api --method GET \
+              "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f head_sha="$GITHUB_SHA" \
+              -f status=success \
+              --jq '[.workflow_runs[] | select(.event == "push")] | length'
+          )"
+          test "$successful_runs" -gt 0
       - name: Validate tag and extract changelog section
         id: metadata
         shell: bash

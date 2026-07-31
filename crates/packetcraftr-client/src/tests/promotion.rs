@@ -216,6 +216,34 @@ fn workflow_promotion_crossing_deadline_is_not_committed() {
 }
 
 #[test]
+fn unmatched_frame_is_preserved_when_only_earlier_requests_were_eligible() {
+    let (mut accumulator, mut prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(|| {
+            Instant::now()
+                .checked_add(Duration::from_millis(100))
+                .unwrap()
+        });
+    prepared.push(PreparedExchangePacket {
+        built: prepared[0].built.clone(),
+        route: prepared[0].route.clone(),
+    });
+
+    let outcome = accumulator.promote_workflow_unsolicited(
+        WorkflowPromotionContext {
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            max_responses: 1,
+        },
+        &mut |_, _, _| false,
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::Continue);
+    assert!(accumulator.responses.is_empty());
+    assert_eq!(accumulator.unsolicited.len(), 1);
+}
+
+#[test]
 fn workflow_promotion_runs_before_native_capture_wait_consumes_deadline() {
     let registry = Arc::new(default_registry().unwrap());
     let source = Ipv4Addr::new(10, 0, 0, 1);
@@ -340,7 +368,7 @@ fn built_in_workflow_path_cannot_promote_a_frame_without_ingress_time() {
         .unwrap();
     assert_eq!(matcher_calls, 0);
     assert!(result.responses.is_empty());
-    assert!(result.unsolicited.is_empty());
+    assert_eq!(result.unsolicited.len(), 1);
     assert!(
         result
             .diagnostics

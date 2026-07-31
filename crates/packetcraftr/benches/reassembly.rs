@@ -37,7 +37,7 @@ fn tcp_key() -> FlowKey {
 
 fn sparse_fragment_state() -> (FragmentReassembler, Instant) {
     let limits = ReassemblyLimits {
-        max_bytes_per_flow: 1_024,
+        max_bytes_per_flow: 4_096,
         max_fragments_per_datagram: FRAGMENT_SEGMENTS + 1,
         ..ReassemblyLimits::default()
     };
@@ -48,9 +48,9 @@ fn sparse_fragment_state() -> (FragmentReassembler, Instant) {
             .push(
                 Fragment {
                     key: fragment_key(),
-                    offset: u32::try_from(index * 2).expect("benchmark offset fits u32"),
+                    offset: u32::try_from(index * 16).expect("benchmark offset fits u32"),
                     more_fragments: true,
-                    bytes: Bytes::from_static(b"x"),
+                    bytes: Bytes::from_static(b"abcdefgh"),
                 },
                 now,
             )
@@ -131,11 +131,11 @@ fn bench_reassembly(criterion: &mut Criterion) {
     for (name, offset, bytes) in [
         (
             "disjoint",
-            u32::try_from(FRAGMENT_SEGMENTS * 2).expect("benchmark offset fits u32"),
-            Bytes::from_static(b"x"),
+            u32::try_from(FRAGMENT_SEGMENTS * 16).expect("benchmark offset fits u32"),
+            Bytes::from_static(b"abcdefgh"),
         ),
-        ("local_overlap", 100, Bytes::from_static(b"x")),
-        ("bridge", 1, Bytes::from_static(b"x")),
+        ("local_overlap", 800, Bytes::from_static(b"abcdefgh")),
+        ("bridge", 8, Bytes::from_static(b"abcdefgh")),
     ] {
         fragments.bench_with_input(
             BenchmarkId::from_parameter(name),

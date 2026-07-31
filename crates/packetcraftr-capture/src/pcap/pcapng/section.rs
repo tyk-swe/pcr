@@ -17,6 +17,7 @@ use super::options::visit_options;
 pub(in crate::pcap) struct SectionHeader {
     pub endianness: Endianness,
     pub length: Option<u64>,
+    pub block_length: usize,
 }
 
 pub(in crate::pcap) fn read_pcapng_block_header<R: Read>(
@@ -37,13 +38,14 @@ pub(in crate::pcap) fn read_section_header_after_type<R: Read>(
 ) -> Result<SectionHeader, Error> {
     let mut length = [0_u8; 4];
     read_exact_counted(reader, &mut length, "pcapng section header length")?;
-    read_section_header_with_length(reader, length, max_size, scratch)
+    read_section_header_with_length(reader, length, max_size, None, scratch)
 }
 
 pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
     reader: &mut R,
     raw_length: [u8; 4],
     max_size: usize,
+    metadata_budget: Option<(usize, usize)>,
     scratch: &mut Vec<u8>,
 ) -> Result<SectionHeader, Error> {
     let mut raw_bom = [0_u8; 4];
@@ -60,13 +62,24 @@ pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
     };
     let block_length = decode_u32(endianness, &raw_length);
     validate_pcapng_block_length(block_length, max_size)?;
+    let block_length_usize =
+        usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
+            length: block_length,
+        })?;
+    if let Some((consumed, limit)) = metadata_budget
+        && consumed
+            .checked_add(block_length_usize)
+            .is_none_or(|actual| actual > limit)
+    {
+        return Err(Error::MetadataByteLimit { limit });
+    }
     if block_length < 28 {
         return Err(Error::InvalidBlockLength {
             length: block_length,
         });
     }
 
-    let remaining_length = block_length as usize - 12;
+    let remaining_length = block_length_usize - 12;
     read_exact_vec(reader, scratch, remaining_length, "pcapng section header")?;
     let footer_offset = scratch.len() - 4;
     let trailing_length = decode_u32(endianness, &scratch[footer_offset..]);
@@ -108,6 +121,7 @@ pub(in crate::pcap) fn read_section_header_with_length<R: Read>(
     Ok(SectionHeader {
         endianness,
         length: u64::try_from(section_length).ok(),
+        block_length: block_length_usize,
     })
 }
 

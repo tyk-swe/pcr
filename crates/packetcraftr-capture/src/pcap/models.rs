@@ -17,6 +17,8 @@ pub const DEFAULT_INTERFACE_LIMIT: usize = 4_096;
 pub const DEFAULT_TOTAL_INTERFACE_LIMIT: usize = 65_536;
 /// Default maximum metadata blocks consumed before one packet is returned.
 pub const DEFAULT_METADATA_BLOCK_LIMIT: usize = 4_096;
+/// Default maximum metadata bytes consumed before one packet is returned.
+pub const DEFAULT_METADATA_BYTE_LIMIT: usize = 64 * 1024 * 1024;
 /// Default maximum frames accepted by one streaming capture writer or copy.
 pub const DEFAULT_STREAM_FRAMES: u64 = 10_000;
 /// Default maximum captured payload bytes accepted by one streaming writer or copy.
@@ -68,6 +70,8 @@ pub struct ReaderOptions {
     pub max_total_interfaces: usize,
     /// Maximum metadata blocks consumed while seeking the next frame.
     pub max_metadata_blocks_per_frame: usize,
+    /// Maximum metadata bytes consumed while seeking the next frame.
+    pub max_metadata_bytes_per_frame: usize,
 }
 
 impl Default for ReaderOptions {
@@ -77,6 +81,7 @@ impl Default for ReaderOptions {
             max_interfaces_per_section: DEFAULT_INTERFACE_LIMIT,
             max_total_interfaces: DEFAULT_TOTAL_INTERFACE_LIMIT,
             max_metadata_blocks_per_frame: DEFAULT_METADATA_BLOCK_LIMIT,
+            max_metadata_bytes_per_frame: DEFAULT_METADATA_BYTE_LIMIT,
         }
     }
 }
@@ -282,6 +287,8 @@ pub enum Error {
     TotalInterfaceLimit { limit: usize },
     #[error("pcapng stream exceeded {limit} metadata blocks before the next packet")]
     MetadataBlockLimit { limit: usize },
+    #[error("pcapng stream exceeded {limit} metadata bytes before the next packet")]
+    MetadataByteLimit { limit: usize },
     #[error("frame link type {actual} does not match interface {interface} link type {expected}")]
     InterfaceLinkTypeMismatch {
         interface: u32,
@@ -317,15 +324,19 @@ impl Classified for Error {
                 Kind::Cli,
                 Some("use a supported finite capture timestamp or replay timing option"),
             ),
-            Self::FrameLimitExceeded { .. } | Self::StreamByteLimitExceeded { .. } => {
-                Classification::new(
-                    "policy.capture_stream_limit",
-                    Kind::Policy,
-                    Some(
-                        "reduce the capture stream or deliberately raise its finite frame/byte budget",
-                    ),
-                )
-            }
+            Self::SizeLimitExceeded { .. }
+            | Self::InterfaceLimit { .. }
+            | Self::TotalInterfaceLimit { .. }
+            | Self::MetadataBlockLimit { .. }
+            | Self::MetadataByteLimit { .. }
+            | Self::FrameLimitExceeded { .. }
+            | Self::StreamByteLimitExceeded { .. } => Classification::new(
+                "policy.capture_stream_limit",
+                Kind::Policy,
+                Some(
+                    "reduce the capture stream or deliberately raise its finite frame/byte budget",
+                ),
+            ),
             _ => Classification::new(
                 "packet.capture_file",
                 Kind::Packet,

@@ -9,6 +9,14 @@ use std::time::{Duration, Instant};
 use libfuzzer_sys::fuzz_target;
 use packetcraftr::session::{ReassemblyLimits, fragment, tcp};
 
+fn low_u32(value: u64) -> u32 {
+    u32::try_from(value & u64::from(u32::MAX)).expect("mask bounds the value to 32 bits")
+}
+
+fn low_u16(value: u64) -> u16 {
+    u16::try_from(value & u64::from(u16::MAX)).expect("mask bounds the value to 16 bits")
+}
+
 fuzz_target!(|data: &[u8]| {
     let limits = ReassemblyLimits {
         max_flows: 16,
@@ -44,10 +52,10 @@ fuzz_target!(|data: &[u8]| {
                         key: fragment::DatagramKey {
                             source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
                             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
-                            identification: (word >> 8) as u32 % 24,
+                            identification: low_u32(word >> 8) % 24,
                             next_header: 17,
                         },
-                        offset: ((word >> 24) as u32 % 512) & !7,
+                        offset: (low_u32(word >> 24) % 512) & !7,
                         more_fragments: word & (1 << 8) != 0,
                         bytes: vec![(word >> 56) as u8; ((word >> 40) as usize % 32) + 1].into(),
                     },
@@ -70,11 +78,11 @@ fuzz_target!(|data: &[u8]| {
                     tcp::Segment {
                         flow: tcp::FlowKey {
                             source: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
-                            source_port: 40_000 + ((word >> 8) as u16 % 24),
+                            source_port: 40_000 + (low_u16(word >> 8) % 24),
                             destination: IpAddr::V4(Ipv4Addr::new(198, 51, 100, 2)),
                             destination_port: 443,
                         },
-                        sequence: (word >> 16) as u32,
+                        sequence: low_u32(word >> 16),
                         payload: vec![(word >> 56) as u8; ((word >> 48) as usize % 32) + 1].into(),
                         syn: word & (1 << 8) != 0,
                         fin: word & (1 << 9) != 0,

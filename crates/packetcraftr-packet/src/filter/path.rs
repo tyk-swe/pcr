@@ -258,7 +258,11 @@ pub(super) fn resolve(
             return Ok(Resolved::Field(FieldRef {
                 source: FieldSource::Frame(field),
                 slice: None,
-                kinds: vec![FieldSpec::synthetic(FieldKind::Unsigned)],
+                kinds: vec![FieldSpec::synthetic(if field == FrameField::TimeEpoch {
+                    FieldKind::Signed
+                } else {
+                    FieldKind::Unsigned
+                })],
                 path: path.to_owned(),
             }));
         }

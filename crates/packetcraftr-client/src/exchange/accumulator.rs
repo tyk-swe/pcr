@@ -304,6 +304,8 @@ impl ExchangeAccumulator {
             .split_off(self.workflow_examined_unsolicited);
         for (decoded, freshness) in candidates.into_iter().zip(candidate_freshness) {
             let Some(freshness) = freshness else {
+                self.unsolicited.push(decoded);
+                self.unsolicited_freshness.push(None);
                 continue;
             };
             if self.workflow_response_limit_reached(max_responses) {
@@ -329,7 +331,7 @@ impl ExchangeAccumulator {
                     matching_requests.push(request_index);
                 }
             }
-            if matching_requests.is_empty() && freshness.eligible_requests == prepared.len() {
+            if matching_requests.is_empty() {
                 self.unsolicited.push(decoded);
                 self.unsolicited_freshness.push(Some(freshness));
                 continue;

@@ -236,6 +236,26 @@ fn pcapng_metadata_work_is_bounded_per_read() {
 }
 
 #[test]
+fn pcapng_metadata_bytes_are_rejected_before_reading_the_block_body() {
+    let mut bytes = Writer::pcapng(Vec::new()).unwrap().into_inner();
+    bytes.extend_from_slice(&0x1234_u32.to_le_bytes());
+    bytes.extend_from_slice(&32_u32.to_le_bytes());
+    let mut reader = Reader::with_options(
+        Cursor::new(bytes),
+        ReaderOptions {
+            max_metadata_bytes_per_frame: 16,
+            ..ReaderOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(matches!(
+        reader.next_frame(),
+        Err(Error::MetadataByteLimit { limit: 16 })
+    ));
+}
+
+#[test]
 fn pcapng_ignores_reserved_fields_and_rejects_bad_padding_and_duplicate_singletons() {
     let mut interface_writer = Writer::pcapng(Vec::new()).unwrap();
     interface_writer.add_interface(LinkType::ETHERNET).unwrap();

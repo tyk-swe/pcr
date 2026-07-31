@@ -491,9 +491,10 @@ where
         }
         let fragment = ip_fragment(&decoded);
         if fragment.is_some() || sweep_due {
-            for reassembler in fragments.values_mut() {
+            fragments.retain(|_, reassembler| {
                 fragment_events.extend(reassembler.expire(now));
-            }
+                reassembler.flow_count() != 0
+            });
         }
         if let Some(fragment) = fragment {
             let scope = fragment_scope(&decoded);
@@ -512,10 +513,18 @@ where
                     },
                 });
             }
-            let reassembler = fragments.entry(scope).or_insert_with(|| {
+            let aggregate_limit = ReassemblyLimits::default().max_aggregate_bytes;
+            let other_scope_charge = fragments
+                .iter()
+                .filter(|(candidate, _)| *candidate != &scope)
+                .map(|(_, reassembler)| reassembler.aggregate_memory_charge())
+                .sum::<usize>();
+            let scope_limit = aggregate_limit.saturating_sub(other_scope_charge);
+            let reassembler = fragments.entry(scope.clone()).or_insert_with(|| {
                 FragmentReassembler::new(
                     ReassemblyLimits {
                         max_flows: limits.max_flows,
+                        max_aggregate_bytes: scope_limit,
                         ..ReassemblyLimits::default()
                     },
                     // Protocol overlap is evidence, not a reason to terminate
@@ -523,11 +532,15 @@ where
                     OverlapPolicy::KeepFirst,
                 )
             });
+            reassembler.set_max_aggregate_bytes(scope_limit);
             fragment_events.extend(
                 reassembler
                     .push(fragment, now)
                     .map_err(|source| AnalysisError::Fragments { number, source })?,
             );
+            if reassembler.flow_count() == 0 {
+                fragments.remove(&scope);
+            }
         }
 
         enforce_deadline(&deadline, limits)?;

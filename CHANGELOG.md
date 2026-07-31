@@ -70,8 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Classified ICMP port-unreachable codes independently of the quoted transport
   and reported disjoint fragment overlaps as separate exact ranges.
 - Kept offline fragment state separate by capture interface and VLAN stack,
-  and stopped treating routed IPv4 source addresses as link-layer ownership
-  claims.
+  shared its aggregate memory ceiling across those scopes, discarded empty
+  scope tables, and stopped treating routed IPv4 source addresses as
+  link-layer ownership claims.
 
 ## [0.4.0] - 2026-07-29
 

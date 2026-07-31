@@ -157,6 +157,14 @@ impl Reassembler {
         self.aggregate_memory_charge
     }
 
+    /// Updates this table's aggregate ceiling without discarding retained state.
+    ///
+    /// Callers that partition one budget across several reassemblers can use
+    /// this before each push to account for the bytes retained by the others.
+    pub fn set_max_aggregate_bytes(&mut self, max_aggregate_bytes: usize) {
+        self.limits.max_aggregate_bytes = max_aggregate_bytes;
+    }
+
     /// Admits one fragment, returning overlap evidence followed by completion
     /// when both are revealed by the same fragment.
     ///

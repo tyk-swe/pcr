@@ -30,7 +30,7 @@ fn ipv4_transport(tcp: bool) -> Vec<u8> {
     } else {
         packet.push(Udp {
             source_port: 12_345,
-            destination_port: 53,
+            destination_port: 5353,
             ..Udp::default()
         });
     }
@@ -48,7 +48,7 @@ fn ipv6_udp() -> Vec<u8> {
         })
         .push(Udp {
             source_port: 12_345,
-            destination_port: 53,
+            destination_port: 5353,
             ..Udp::default()
         })
         .push(Raw::new(Bytes::from_static(b"checksum coverage")));

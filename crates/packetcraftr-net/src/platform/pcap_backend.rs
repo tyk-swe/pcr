@@ -3,13 +3,17 @@
 
 //! libpcap-backed Layer 2 capture and injection for Linux and macOS.
 
-#![forbid(unsafe_code)]
+#![allow(unsafe_code)]
 
-use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::{
+    ffi::{CStr, CString, c_char, c_int, c_uint, c_void},
+    mem::MaybeUninit,
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 
 use bytes::Bytes;
-use pcap::{Active, Capture, Error as PcapError};
+use pcap::{Activated, Active, Capture, Error as PcapError};
 
 use super::live_capture::{
     CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
@@ -24,10 +28,33 @@ use crate::{
 use packetcraftr_capture::LinkType;
 
 const READ_TIMEOUT_MILLIS: i32 = 50;
+const PCAP_NETMASK_UNKNOWN: u32 = u32::MAX;
+
+#[link(name = "pcap")]
+unsafe extern "C" {
+    fn pcap_compile(
+        handle: *mut c_void,
+        program: *mut c_void,
+        source: *const c_char,
+        optimize: c_int,
+        netmask: u32,
+    ) -> c_int;
+    fn pcap_setfilter(handle: *mut c_void, program: *mut c_void) -> c_int;
+    fn pcap_freecode(program: *mut c_void);
+    fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
+}
+
+#[repr(C)]
+struct PcapBpfProgram {
+    instruction_count: c_uint,
+    instructions: *mut c_void,
+}
 
 pub(super) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
+    capture_filter: Option<&str>,
+    netmask: Option<u32>,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     let snap_length =
         i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
@@ -43,6 +70,14 @@ pub(super) fn open_capture(
         .immediate_mode(true)
         .open()
         .map_err(|error| map_open_error(interface, error))?;
+    if let Some(filter) = capture_filter {
+        install_capture_filter(
+            &mut capture,
+            interface,
+            filter,
+            netmask.unwrap_or(PCAP_NETMASK_UNKNOWN),
+        )?;
+    }
     let datalink = capture.get_datalink().0;
     let link_type =
         u32::try_from(datalink)
@@ -63,6 +98,82 @@ pub(super) fn open_capture(
         interface: interface.clone(),
         link_type,
     })
+}
+
+fn install_capture_filter(
+    capture: &mut Capture<Active>,
+    interface: &InterfaceId,
+    filter: &str,
+    netmask: u32,
+) -> Result<(), LiveIoError> {
+    let mut program = compile_capture_filter(capture, interface, filter, netmask)?;
+    let handle = capture.as_ptr().cast::<c_void>();
+    // SAFETY: program was initialized by pcap_compile for this live handle,
+    // which remains exclusively borrowed until installation returns.
+    let install_status =
+        unsafe { pcap_setfilter(handle, (&mut program as *mut PcapBpfProgram).cast()) };
+    let diagnostic = (install_status != 0).then(|| capture_error_message(handle));
+    // SAFETY: pcap_compile initialized this ABI-compatible local structure,
+    // pcap_setfilter has finished using it, and this is its single cleanup.
+    unsafe { pcap_freecode((&mut program as *mut PcapBpfProgram).cast()) };
+
+    if let Some(diagnostic) = diagnostic {
+        return Err(map_filter_install_error(interface, diagnostic));
+    }
+    Ok(())
+}
+
+fn compile_capture_filter<T: Activated>(
+    capture: &Capture<T>,
+    interface: &InterfaceId,
+    filter: &str,
+    netmask: u32,
+) -> Result<PcapBpfProgram, LiveIoError> {
+    let filter = CString::new(filter).map_err(|_| {
+        map_filter_compile_error(
+            interface,
+            "BPF expressions cannot contain an interior NUL byte",
+        )
+    })?;
+    let mut program = MaybeUninit::<PcapBpfProgram>::zeroed();
+    let handle = capture.as_ptr().cast::<c_void>();
+    // SAFETY: the pcap crate owns a live activated handle; program is the
+    // writable repr(C) layout of libpcap's bpf_program, filter is NUL-
+    // terminated, and no worker or other caller can access the handle.
+    let compile_status = unsafe {
+        pcap_compile(
+            handle,
+            program.as_mut_ptr().cast(),
+            filter.as_ptr(),
+            1,
+            netmask,
+        )
+    };
+    if compile_status != 0 {
+        return Err(map_filter_compile_error(
+            interface,
+            capture_error_message(handle),
+        ));
+    }
+
+    // SAFETY: successful pcap_compile initialized the local ABI structure.
+    Ok(unsafe { program.assume_init() })
+}
+
+fn capture_error_message(handle: *mut c_void) -> String {
+    // SAFETY: handle is a live pcap handle and pcap_geterr returns either null
+    // or a NUL-terminated diagnostic owned by that handle. Copy it before any
+    // later handle call can replace the backend buffer.
+    let diagnostic = unsafe { pcap_geterr(handle) };
+    if diagnostic.is_null() {
+        "unknown libpcap error".to_owned()
+    } else {
+        // SAFETY: the non-null pointer is the NUL-terminated pcap_geterr
+        // diagnostic promised above and is read only for this immediate copy.
+        unsafe { CStr::from_ptr(diagnostic) }
+            .to_string_lossy()
+            .into_owned()
+    }
 }
 
 pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {
@@ -213,6 +324,20 @@ fn map_send_error(interface: &InterfaceId, error: PcapError) -> LiveIoError {
     }
 }
 
+fn map_filter_compile_error(interface: &InterfaceId, error: impl std::fmt::Display) -> LiveIoError {
+    LiveIoError::InvalidCaptureFilter {
+        interface: interface.name.clone(),
+        message: format!("libpcap compilation failed: {error}"),
+    }
+}
+
+fn map_filter_install_error(interface: &InterfaceId, error: impl std::fmt::Display) -> LiveIoError {
+    LiveIoError::CaptureFilterInstallation {
+        interface: interface.name.clone(),
+        message: format!("libpcap installation failed: {error}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -283,5 +408,50 @@ mod tests {
         );
         assert!(matches!(error, LiveIoError::Send { .. }));
         assert!(error.to_string().contains("backend failure"));
+    }
+
+    #[test]
+    fn capture_filter_errors_preserve_compile_and_install_stages() {
+        let compile = map_filter_compile_error(
+            &interface(),
+            PcapError::PcapError("syntax error".to_owned()),
+        );
+        assert!(matches!(compile, LiveIoError::InvalidCaptureFilter { .. }));
+        assert!(compile.to_string().contains("test0"));
+        assert!(compile.to_string().contains("syntax error"));
+
+        let install = map_filter_install_error(
+            &interface(),
+            PcapError::PcapError("backend failure".to_owned()),
+        );
+        assert!(matches!(
+            install,
+            LiveIoError::CaptureFilterInstallation { .. }
+        ));
+        assert!(install.to_string().contains("test0"));
+        assert!(install.to_string().contains("backend failure"));
+    }
+
+    #[test]
+    fn broadcast_filter_compiles_with_the_interface_netmask() {
+        let capture = Capture::dead(pcap::Linktype::ETHERNET).unwrap();
+        let mut program = compile_capture_filter(
+            &capture,
+            &interface(),
+            "ip broadcast",
+            u32::from_ne_bytes([255, 255, 255, 0]),
+        )
+        .unwrap();
+        assert!(program.instruction_count > 0);
+        // SAFETY: the program was initialized by pcap_compile and is being
+        // released exactly once after the assertion.
+        unsafe { pcap_freecode((&mut program as *mut PcapBpfProgram).cast()) };
+
+        let unknown =
+            compile_capture_filter(&capture, &interface(), "ip broadcast", PCAP_NETMASK_UNKNOWN);
+        assert!(matches!(
+            unknown,
+            Err(LiveIoError::InvalidCaptureFilter { .. })
+        ));
     }
 }

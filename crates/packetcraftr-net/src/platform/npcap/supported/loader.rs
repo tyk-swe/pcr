@@ -30,8 +30,8 @@ use windows::{
 use super::{
     abi::{
         NPCAP_DEPENDENCY, PCAP_CHAR_ENC_UTF_8, PCAP_ERROR_BUFFER_SIZE, PcapActivate, PcapBreakLoop,
-        PcapClose, PcapCreate, PcapDatalink, PcapGetError, PcapInit, PcapNextEx, PcapSendPacket,
-        PcapSetInteger, PcapStats,
+        PcapClose, PcapCompile, PcapCreate, PcapDatalink, PcapFreeCode, PcapGetError, PcapInit,
+        PcapNextEx, PcapSendPacket, PcapSetFilter, PcapSetInteger, PcapStats,
     },
     error::{error_buffer_message, interface_conversion_error},
 };
@@ -40,7 +40,7 @@ use crate::{Error as LiveIoError, route::InterfaceId};
 pub(super) struct NpcapApi {
     // Function pointers remain valid only while their defining module is
     // loaded. This owner keeps it live for every use of the inert pointers.
-    _library: Library,
+    pub(super) _library: Library,
     pub(super) pcap_create: PcapCreate,
     pub(super) pcap_set_snaplen: PcapSetInteger,
     pub(super) pcap_set_promisc: PcapSetInteger,
@@ -48,6 +48,9 @@ pub(super) struct NpcapApi {
     pub(super) pcap_set_immediate_mode: PcapSetInteger,
     pub(super) pcap_activate: PcapActivate,
     pub(super) pcap_datalink: PcapDatalink,
+    pub(super) pcap_compile: PcapCompile,
+    pub(super) pcap_setfilter: PcapSetFilter,
+    pub(super) pcap_freecode: PcapFreeCode,
     pub(super) pcap_next_ex: PcapNextEx,
     pub(super) pcap_sendpacket: PcapSendPacket,
     pub(super) pcap_stats: PcapStats,
@@ -98,6 +101,13 @@ impl NpcapApi {
         // SAFETY: see the ABI note above.
         let pcap_datalink = unsafe { load_symbol::<PcapDatalink>(&library, b"pcap_datalink\0")? };
         // SAFETY: see the ABI note above.
+        let pcap_compile = unsafe { load_symbol::<PcapCompile>(&library, b"pcap_compile\0")? };
+        // SAFETY: see the ABI note above.
+        let pcap_setfilter =
+            unsafe { load_symbol::<PcapSetFilter>(&library, b"pcap_setfilter\0")? };
+        // SAFETY: see the ABI note above.
+        let pcap_freecode = unsafe { load_symbol::<PcapFreeCode>(&library, b"pcap_freecode\0")? };
+        // SAFETY: see the ABI note above.
         let pcap_next_ex = unsafe { load_symbol::<PcapNextEx>(&library, b"pcap_next_ex\0")? };
         // SAFETY: see the ABI note above.
         let pcap_sendpacket =
@@ -135,6 +145,9 @@ impl NpcapApi {
             pcap_set_immediate_mode,
             pcap_activate,
             pcap_datalink,
+            pcap_compile,
+            pcap_setfilter,
+            pcap_freecode,
             pcap_next_ex,
             pcap_sendpacket,
             pcap_stats,

@@ -663,7 +663,7 @@ fn stats_collector_tallies_every_table_with_stable_orders() {
     );
     assert_eq!((first.tx_frames, first.rx_frames), (1, 1));
 
-    // Ports: tcp 1000, tcp 2000, and udp 53 once even though it is both
+    // Ports: tcp 1000, tcp 2000, and udp 5353 once even though it is both
     // source and destination.
     assert_eq!(
         report
@@ -674,7 +674,7 @@ fn stats_collector_tallies_every_table_with_stable_orders() {
         [
             (stats::TransportKind::Tcp, 1000, 2),
             (stats::TransportKind::Tcp, 2000, 2),
-            (stats::TransportKind::Udp, 53, 2),
+            (stats::TransportKind::Udp, 5353, 2),
         ]
     );
 
@@ -696,7 +696,7 @@ fn stats_collector_tallies_every_table_with_stable_orders() {
 #[test]
 fn lengths_use_original_length_and_keep_captured_bytes() {
     let tcp = tcp_packet([10, 0, 0, 1], 40_000, [10, 0, 0, 2], 443, 1, b"x");
-    let udp = udp_packet_between([10, 0, 0, 3], 50_000, [10, 0, 0, 4], 53, b"y");
+    let udp = udp_packet_between([10, 0, 0, 3], 50_000, [10, 0, 0, 4], 5353, b"y");
     let tcp_bytes = u64::try_from(build_bytes(tcp.clone()).len()).unwrap();
     let udp_bytes = u64::try_from(build_bytes(udp.clone()).len()).unwrap();
     let mut collector = stats::StatsCollector::new(Duration::from_secs(1)).unwrap();

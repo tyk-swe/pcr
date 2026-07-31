@@ -6,8 +6,8 @@
 //! Portable built-in Internet protocol layers and their deterministic registry module.
 
 use super::super::{
-    capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher, network as ip, raw,
-    transport, tunnel,
+    application, capture as capture_link, gre, icmp, ipv6 as ipv6_ext, link, matcher,
+    network as ip, raw, transport, tunnel,
 };
 
 use capture_link::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
@@ -29,6 +29,8 @@ use packetcraftr_packet::{
     registry::{ProtocolModule, ProtocolRegistry, RegistryBuilder, RegistryError},
     semantics::{BuiltinProtocol, builtin_protocol_catalog},
 };
+
+use application::DnsCodec;
 
 mod registration;
 

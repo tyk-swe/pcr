@@ -19,6 +19,7 @@ macro_rules! builtin_protocol_catalog {
             Arp { canonical: "arp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: ArpCodec }
             BsdLoop { canonical: "bsd_loop", aliases: ["loop"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdLoopCodec }
             BsdNull { canonical: "bsd_null", aliases: ["null"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: BsdNullCodec }
+            Dns { canonical: "dns", aliases: [], constructible: false, dissect: true, exact_round_trip: true, matcher: none, codec: DnsCodec }
             Erspan { canonical: "erspan", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: ErspanCodec }
             Esp { canonical: "esp", aliases: [], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: EspCodec }
             Ethernet { canonical: "ethernet", aliases: ["eth", "ether", "ethernet2"], constructible: true, dissect: true, exact_round_trip: true, matcher: none, codec: EthernetCodec }

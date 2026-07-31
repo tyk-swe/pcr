@@ -23,8 +23,10 @@ mod transmit;
 pub(super) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
+    capture_filter: Option<&str>,
+    netmask: Option<u32>,
 ) -> Result<NativeCaptureParts, LiveIoError> {
-    capture::open_capture(interface, limits)
+    capture::open_capture(interface, limits, capture_filter, netmask)
 }
 
 pub(super) fn send_layer2(frame: Layer2Frame<'_>) -> Result<IoSendReport, LiveIoError> {

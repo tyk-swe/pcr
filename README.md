@@ -61,8 +61,10 @@ VXLAN carries inner Ethernet frames, while GENEVE can carry inner Ethernet or
 typed IP stacks. Unknown numeric link types and unknown discriminators remain
 bounded and are preserved as raw bytes. Built-in protocol support is
 header-focused: SCTP chunks are not decoded into typed chunk models, ESP
-ciphertext stays opaque, DNS messages remain owned by the DNS workflow, and
-other application payloads are represented as raw bytes.
+ciphertext stays opaque, DNS-over-UDP headers and bounded questions are
+dissected as a typed exact-round-trip payload, and other application payloads
+are represented as raw bytes. The DNS workflow remains authoritative for full
+resource-record, EDNS, correlation, and TCP-response decoding.
 
 ## Output formats and terminal colour
 
@@ -335,6 +337,25 @@ packetcraftr exchange \
 packetcraftr scan 192.168.56.10 \
   --transport tcp --ports 22,80,443 --interface eth0
 ```
+
+For `capture`, `--capture-filter` is native libpcap/Npcap BPF and
+`--filter` is PacketcraftR's post-capture display-filter language. They can be
+combined. Native filters accept stable resolver-free BPF keywords and numeric
+address, network, port, and protocol operands. Other symbolic tokens are
+rejected before compilation so libpcap/Npcap cannot perform hidden resolution:
+
+```console
+packetcraftr capture \
+  --packet 'ipv4(dst=192.168.56.53)/udp(dport=53)' \
+  --interface eth0 \
+  --capture-filter 'udp port 53' \
+  --filter 'udp.source_port == 53'
+```
+
+Frames rejected by native BPF never enter PacketcraftR's capture queue and do
+not consume its queue capacity or operation budgets. Frames that pass BPF
+occupy queue capacity; if the display filter later rejects them, they still
+consume the operation's frame and byte budgets.
 
 Other representative commands are:
 

@@ -96,8 +96,10 @@ pub(crate) struct CaptureArgs {
     /// Overall capture window in milliseconds.
     #[arg(long, default_value_t = 3_000)]
     pub(crate) timeout_ms: u64,
-    /// Keep only received frames matching a display filter, evaluated after
-    /// capture; this is not a kernel filter.
+    /// Resolver-free core libpcap/Npcap BPF, applied before capture.
+    #[arg(long, value_name = "BPF")]
+    pub(crate) capture_filter: Option<String>,
+    /// Keep only frames matching PacketcraftR's post-capture display filter.
     #[arg(long, value_name = "EXPR")]
     pub(crate) filter: Option<String>,
     #[command(flatten)]

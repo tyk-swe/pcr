@@ -63,11 +63,20 @@ Example:
   packetcraftr exchange --packet 'ipv4(dst=192.0.2.1)/icmpv4(type=8,code=0)' --timeout-ms 1000"#;
 const CAPTURE_AFTER_HELP: &str = r#"Live capture may require native features, dependencies, and privileges.
 
---filter is a display filter evaluated on each frame after it is received; it selects what is reported, and does not install a kernel capture filter or narrow what the backend captures. Frames the filter rejects still count against the operation's frame and byte budgets.
+--capture-filter <BPF> uses the stable resolver-free core of libpcap/Npcap BPF syntax and narrows what reaches PacketcraftR. Frames it rejects never enter PacketcraftR's capture queue and do not consume queue capacity or operation frame and byte budgets.
+
+Use core BPF keywords and numeric address, network, port, and protocol operands. Other symbolic tokens are rejected before native compilation so capture filters cannot perform hidden hostname or name-database resolution; --allow-hostname-resolution does not change this rule.
+
+--filter <EXPR> uses PacketcraftR's display-filter language after capture. Frames it rejects have already occupied PacketcraftR's capture queue and passed the native BPF filter, so they still consume operation frame and byte budgets.
+
+The two filters use different languages and may be combined.
 
 Examples:
   packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --timeout-ms 1000
-  packetcraftr capture --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' --filter 'udp.srcport == 53'"#;
+  packetcraftr capture \
+    --packet 'ipv4(dst=192.0.2.53)/udp(dport=53)' \
+    --capture-filter 'udp port 53' \
+    --filter 'udp.source_port == 53'"#;
 const REPLAY_AFTER_HELP: &str = r#"Replay is policy-gated and may require native features, dependencies, and privileges.
 
 Frames a --filter rejects are skipped before authorization, so they are never policy-checked or transmitted, but they still count against the operation's frame budget. Transmitted frames keep their original spacing: the delay before a kept frame spans any skipped frames in between.
@@ -251,6 +260,26 @@ mod tests {
             panic!("expected protocols command");
         };
         assert_eq!(arguments.protocol.as_deref(), Some("IP4"));
+    }
+
+    #[test]
+    fn capture_parses_native_and_display_filters_independently() {
+        let cli = Cli::try_parse_from([
+            "packetcraftr",
+            "capture",
+            "--packet",
+            "ipv4(dst=192.0.2.53)/udp(dport=53)",
+            "--capture-filter",
+            "udp port 53",
+            "--filter",
+            "udp.source_port == 53",
+        ])
+        .unwrap();
+        let Command::Capture(arguments) = cli.command else {
+            panic!("expected capture command");
+        };
+        assert_eq!(arguments.capture_filter.as_deref(), Some("udp port 53"));
+        assert_eq!(arguments.filter.as_deref(), Some("udp.source_port == 53"));
     }
 
     #[test]

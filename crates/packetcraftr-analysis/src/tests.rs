@@ -209,9 +209,9 @@ fn observe(
 fn two_conversation_capture() -> Reader<Cursor<Vec<u8>>> {
     capture(vec![
         tcp_packet([10, 0, 0, 1], 1000, [10, 0, 0, 2], 2000, 100, b"hi"),
-        udp_packet([10, 0, 0, 3], 53, 53),
+        udp_packet([10, 0, 0, 3], 5353, 5353),
         tcp_packet([10, 0, 0, 2], 2000, [10, 0, 0, 1], 1000, 500, b"yo"),
-        udp_packet([10, 0, 0, 3], 53, 53),
+        udp_packet([10, 0, 0, 3], 5353, 5353),
     ])
 }
 

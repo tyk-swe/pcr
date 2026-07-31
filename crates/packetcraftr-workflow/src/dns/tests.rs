@@ -19,6 +19,7 @@ use packetcraftr_client::target::{
     Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
 };
 use packetcraftr_error::Classified;
+use packetcraftr_packet::semantics::BuiltinProtocol;
 use packetcraftr_protocol::builtin::registry as default_registry;
 use packetcraftr_protocol::icmp::{Icmpv4, Icmpv6};
 use std::result::Result;
@@ -36,6 +37,37 @@ fn wire_name(name: &str) -> Vec<u8> {
     }
     bytes.push(0);
     bytes
+}
+
+#[test]
+fn dns_probe_uses_typed_port_53_and_raw_custom_payloads() {
+    let query = encode_dns_query("example.test", DnsQueryType::A, 7, true).unwrap();
+    let standard_probe = DnsProbe {
+        attempt: 1,
+        server_address: IpAddr::V4(Ipv4Addr::new(192, 0, 2, 53)),
+        server_port: 53,
+        source_port: 50_000,
+        transaction_id: 7,
+        query_name: "example.test.".to_owned(),
+        query_type: DnsQueryType::A,
+        query: query.clone(),
+    };
+    let standard = standard_probe.packet();
+    assert_eq!(standard.len(), 3);
+    assert_eq!(
+        BuiltinProtocol::of(standard.layer(2).unwrap()),
+        Some(BuiltinProtocol::Dns)
+    );
+
+    let custom = DnsProbe {
+        server_port: 5353,
+        ..standard_probe
+    }
+    .packet();
+    assert_eq!(
+        BuiltinProtocol::of(custom.layer(2).unwrap()),
+        Some(BuiltinProtocol::Raw)
+    );
 }
 
 #[derive(Clone)]

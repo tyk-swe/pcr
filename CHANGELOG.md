@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `packetcraftr capture --capture-filter <BPF>` to install native
+  libpcap/Npcap BPF before frames enter PacketcraftR's queue or operation
+  budgets, independently of the existing post-capture `--filter` display
+  language. Native compilation uses the selected interface's IPv4 netmask and
+  accepts the stable resolver-free BPF core with numeric operands to prevent
+  hidden name resolution.
+
 ### Changed
 
 - Extended offline expert analysis with bounded IPv4/IPv6 fragment overlap,
@@ -20,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fragment. Expiry events now expose exact missing ranges and an optional final
   length; offline analysis retains first-seen bytes after conflicting overlaps,
   while strict callers can continue using `RejectConflicting`.
+- Registered a bounded DNS-over-UDP dissector that publishes read-only header
+  and question fields, retains the complete payload for exact round trips, and
+  selects typed DNS on UDP port 53 while preserving raw custom-port payloads.
 - Removed the unused aggregate protocol-support manifest, workflow matrix, and
   fallback metadata. Consumers should use `support::BUILTIN_PROTOCOLS` and
   `support::BUILTIN_CAPTURE_ROOTS`, the tables used by the runtime registry and
@@ -31,6 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Accepted synthesized Ethernet envelopes when validating sent DNS probes and
+  rejected encoding dissected DNS layers whose public fields diverge from their
+  retained wire payload.
 - Bounded cumulative PCAPNG metadata bytes before block-body reads, with a new
   `ReaderOptions::max_metadata_bytes_per_frame` ceiling and resource-limit
   classification for capture size, interface, and metadata limits.

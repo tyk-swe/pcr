@@ -101,6 +101,7 @@ fn validate_resolver_free_capture_filter(
 fn capture_filter_has_symbolic_operand(source: &str) -> bool {
     let bytes = source.as_bytes();
     let mut offset = 0;
+    let mut ethernet_operand = false;
     while offset < bytes.len() {
         if bytes[offset] == b'\\' {
             return true;
@@ -113,9 +114,17 @@ fn capture_filter_has_symbolic_operand(source: &str) -> bool {
                 end += 1;
             }
             let atom = &source[offset..end];
-            if atom.contains(':')
-                && (atom.parse::<std::net::Ipv6Addr>().is_ok() || is_numeric_mac(atom))
-            {
+            if atom.parse::<std::net::Ipv6Addr>().is_ok() {
+                ethernet_operand = false;
+                offset = end;
+                continue;
+            }
+            if is_numeric_mac(atom) {
+                let allow_ethernet_mac = ethernet_operand;
+                ethernet_operand = false;
+                if !is_numeric_bpf_atom(atom, allow_ethernet_mac) {
+                    return true;
+                }
                 offset = end;
                 continue;
             }
@@ -130,7 +139,16 @@ fn capture_filter_has_symbolic_operand(source: &str) -> bool {
                 offset += 1;
             }
             let atom = &source[start..offset];
-            if !is_bpf_keyword(atom) && !is_numeric_bpf_atom(atom) {
+            if atom == "ether" {
+                ethernet_operand = true;
+                continue;
+            }
+            if ethernet_operand && is_ether_operand_modifier(atom) {
+                continue;
+            }
+            let allow_ethernet_mac = ethernet_operand;
+            ethernet_operand = false;
+            if !is_bpf_keyword(atom) && !is_numeric_bpf_atom(atom, allow_ethernet_mac) {
                 return true;
             }
             continue;
@@ -144,7 +162,10 @@ fn capture_filter_has_symbolic_operand(source: &str) -> bool {
     feature = "native-layer2",
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-fn is_numeric_bpf_atom(atom: &str) -> bool {
+fn is_numeric_bpf_atom(atom: &str, allow_ethernet_mac: bool) -> bool {
+    if is_numeric_mac(atom) && !allow_ethernet_mac && is_hostname_shaped_mac(atom) {
+        return false;
+    }
     atom.bytes().all(|byte| byte.is_ascii_digit())
         || atom
             .strip_prefix("0x")
@@ -196,6 +217,34 @@ fn is_numeric_mac(atom: &str) -> bool {
         }
     }
     false
+}
+
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+fn is_hostname_shaped_mac(atom: &str) -> bool {
+    (atom.len() == 12 && atom.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        || (atom.split('.').count() == 3
+            && atom.split('.').all(|component| {
+                component.len() == 4 && component.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }))
+        || (atom.split('-').count() == 6
+            && atom.split('-').all(|component| {
+                (1..=2).contains(&component.len())
+                    && component.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }))
+}
+
+#[cfg(all(
+    feature = "native-layer2",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+fn is_ether_operand_modifier(atom: &str) -> bool {
+    matches!(
+        atom,
+        "host" | "src" | "dst" | "addr1" | "addr2" | "address1" | "address2"
+    )
 }
 
 #[cfg(all(
@@ -299,6 +348,9 @@ mod tests {
             "udp dst port 53 and host 192.0.2.1",
             "ip6 host 2001:db8::1",
             "ether host 00:11:22:33:44:55",
+            "ether host 001122334455",
+            "ether host dead.beef.cafe",
+            "host 00:11:22:33:44:55",
             "tcp[tcpflags] & tcp-syn != 0",
             "ip broadcast",
         ] {
@@ -309,6 +361,9 @@ mod tests {
         }
         for source in [
             "host example.test",
+            "host 001122334455",
+            "host dead.beef.cafe",
+            "host 00-11-22-33-44-55",
             "src localhost",
             "net private",
             "gateway router",

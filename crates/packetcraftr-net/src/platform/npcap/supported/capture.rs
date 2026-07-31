@@ -240,3 +240,170 @@ impl CaptureInterrupt for NpcapInterrupt {
         unsafe { (self.0.api.pcap_breakloop)(self.0.raw.as_ptr()) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        ffi::{c_char, c_int, c_uchar, c_uint, c_void},
+        ptr::{NonNull, null_mut},
+        sync::{
+            Arc,
+            atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering},
+        },
+    };
+
+    use libloading::os::windows::Library;
+
+    use super::super::{
+        abi::{BpfProgram, PcapPacketHeader, PcapStatistics},
+        handles::NpcapHandle,
+        loader::NpcapApi,
+    };
+    use super::*;
+    use crate::Error as LiveIoError;
+
+    static COMPILE_STATUS: AtomicI32 = AtomicI32::new(0);
+    static SETFILTER_STATUS: AtomicI32 = AtomicI32::new(0);
+    static FREECODE_CALLS: AtomicUsize = AtomicUsize::new(0);
+    static LAST_NETMASK: AtomicU32 = AtomicU32::new(0);
+
+    unsafe extern "C" fn noop_create(_: *const c_char, _: *mut c_char) -> *mut c_void {
+        null_mut()
+    }
+
+    unsafe extern "C" fn noop_set_integer(_: *mut c_void, _: c_int) -> c_int {
+        0
+    }
+
+    unsafe extern "C" fn noop_activate(_: *mut c_void) -> c_int {
+        0
+    }
+
+    unsafe extern "C" fn noop_datalink(_: *mut c_void) -> c_int {
+        1
+    }
+
+    unsafe extern "C" fn test_compile(
+        _: *mut c_void,
+        program: *mut BpfProgram,
+        _: *const c_char,
+        _: c_int,
+        netmask: c_uint,
+    ) -> c_int {
+        LAST_NETMASK.store(netmask, Ordering::SeqCst);
+        let status = COMPILE_STATUS.load(Ordering::SeqCst);
+        if status == 0 {
+            // SAFETY: install_capture_filter supplies a valid writable program
+            // pointer for every successful controlled compile.
+            unsafe {
+                (*program).instruction_count = 1;
+                (*program).instructions = null_mut();
+            }
+        }
+        status
+    }
+
+    unsafe extern "C" fn test_setfilter(_: *mut c_void, _: *mut BpfProgram) -> c_int {
+        SETFILTER_STATUS.load(Ordering::SeqCst)
+    }
+
+    unsafe extern "C" fn test_freecode(_: *mut BpfProgram) {
+        FREECODE_CALLS.fetch_add(1, Ordering::SeqCst);
+    }
+
+    unsafe extern "C" fn noop_next_ex(
+        _: *mut c_void,
+        _: *mut *mut PcapPacketHeader,
+        _: *mut *const c_uchar,
+    ) -> c_int {
+        PCAP_ERROR_BREAK
+    }
+
+    unsafe extern "C" fn noop_send_packet(_: *mut c_void, _: *const c_uchar, _: c_int) -> c_int {
+        0
+    }
+
+    unsafe extern "C" fn noop_stats(_: *mut c_void, _: *mut PcapStatistics) -> c_int {
+        0
+    }
+
+    unsafe extern "C" fn noop_breakloop(_: *mut c_void) {}
+
+    unsafe extern "C" fn test_geterr(_: *mut c_void) -> *mut c_char {
+        c"controlled error".as_ptr().cast_mut()
+    }
+
+    unsafe extern "C" fn noop_close(_: *mut c_void) {}
+
+    fn api() -> Arc<NpcapApi> {
+        Arc::new(NpcapApi {
+            _library: Library::this().expect("the test executable is a Windows module"),
+            pcap_create: noop_create,
+            pcap_set_snaplen: noop_set_integer,
+            pcap_set_promisc: noop_set_integer,
+            pcap_set_timeout: noop_set_integer,
+            pcap_set_immediate_mode: noop_set_integer,
+            pcap_activate: noop_activate,
+            pcap_datalink: noop_datalink,
+            pcap_compile: test_compile,
+            pcap_setfilter: test_setfilter,
+            pcap_freecode: test_freecode,
+            pcap_next_ex: noop_next_ex,
+            pcap_sendpacket: noop_send_packet,
+            pcap_stats: noop_stats,
+            pcap_breakloop: noop_breakloop,
+            pcap_geterr: test_geterr,
+            pcap_close: noop_close,
+        })
+    }
+
+    fn test_handle() -> NpcapHandle {
+        NpcapHandle {
+            api: api(),
+            raw: NonNull::dangling(),
+        }
+    }
+
+    fn interface() -> InterfaceId {
+        InterfaceId {
+            name: "test0".to_owned(),
+            index: 7,
+        }
+    }
+
+    fn configure(compile_status: c_int, setfilter_status: c_int) {
+        COMPILE_STATUS.store(compile_status, Ordering::SeqCst);
+        SETFILTER_STATUS.store(setfilter_status, Ordering::SeqCst);
+        FREECODE_CALLS.store(0, Ordering::SeqCst);
+        LAST_NETMASK.store(0, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn install_capture_filter_classifies_failures_cleans_code_and_forwards_netmask() {
+        let interface = interface();
+        let netmask = 0xffff_ff00;
+
+        configure(PCAP_ERROR, 0);
+        let handle = test_handle();
+        let error = install_capture_filter(&handle, &interface, "ip", netmask).unwrap_err();
+        assert!(matches!(error, LiveIoError::InvalidCaptureFilter { .. }));
+        assert_eq!(FREECODE_CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(LAST_NETMASK.load(Ordering::SeqCst), netmask);
+
+        configure(0, PCAP_ERROR);
+        let handle = test_handle();
+        let error = install_capture_filter(&handle, &interface, "ip", netmask).unwrap_err();
+        assert!(matches!(
+            error,
+            LiveIoError::CaptureFilterInstallation { .. }
+        ));
+        assert_eq!(FREECODE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_NETMASK.load(Ordering::SeqCst), netmask);
+
+        configure(0, 0);
+        let handle = test_handle();
+        install_capture_filter(&handle, &interface, "ip", netmask).unwrap();
+        assert_eq!(FREECODE_CALLS.load(Ordering::SeqCst), 1);
+        assert_eq!(LAST_NETMASK.load(Ordering::SeqCst), netmask);
+    }
+}

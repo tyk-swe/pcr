@@ -6,14 +6,14 @@
 #![allow(unsafe_code)]
 
 use std::{
-    ffi::{CStr, CString, c_char, c_int, c_void},
+    ffi::{CStr, CString, c_char, c_int, c_uint, c_void},
     mem::MaybeUninit,
     sync::Arc,
     time::{Instant, SystemTime},
 };
 
 use bytes::Bytes;
-use pcap::{Activated, Active, BpfProgram, Capture, Error as PcapError};
+use pcap::{Activated, Active, Capture, Error as PcapError};
 
 use super::live_capture::{
     CaptureInterrupt, NativeCaptureEvent, NativeCaptureParts, NativeCaptureSource,
@@ -40,7 +40,14 @@ unsafe extern "C" {
         netmask: u32,
     ) -> c_int;
     fn pcap_setfilter(handle: *mut c_void, program: *mut c_void) -> c_int;
+    fn pcap_freecode(program: *mut c_void);
     fn pcap_geterr(handle: *mut c_void) -> *mut c_char;
+}
+
+#[repr(C)]
+struct PcapBpfProgram {
+    instruction_count: c_uint,
+    instructions: *mut c_void,
 }
 
 pub(super) fn open_capture(
@@ -104,8 +111,11 @@ fn install_capture_filter(
     // SAFETY: program was initialized by pcap_compile for this live handle,
     // which remains exclusively borrowed until installation returns.
     let install_status =
-        unsafe { pcap_setfilter(handle, (&mut program as *mut BpfProgram).cast()) };
+        unsafe { pcap_setfilter(handle, (&mut program as *mut PcapBpfProgram).cast()) };
     let diagnostic = (install_status != 0).then(|| capture_error_message(handle));
+    // SAFETY: pcap_compile initialized this ABI-compatible local structure,
+    // pcap_setfilter has finished using it, and this is its single cleanup.
+    unsafe { pcap_freecode((&mut program as *mut PcapBpfProgram).cast()) };
 
     if let Some(diagnostic) = diagnostic {
         return Err(map_filter_install_error(interface, diagnostic));
@@ -118,18 +128,18 @@ fn compile_capture_filter<T: Activated>(
     interface: &InterfaceId,
     filter: &str,
     netmask: u32,
-) -> Result<BpfProgram, LiveIoError> {
+) -> Result<PcapBpfProgram, LiveIoError> {
     let filter = CString::new(filter).map_err(|_| {
         map_filter_compile_error(
             interface,
             "BPF expressions cannot contain an interior NUL byte",
         )
     })?;
-    let mut program = MaybeUninit::<BpfProgram>::zeroed();
+    let mut program = MaybeUninit::<PcapBpfProgram>::zeroed();
     let handle = capture.as_ptr().cast::<c_void>();
-    // SAFETY: the pcap crate owns a live activated handle; program is a
-    // writable transparent wrapper around libpcap's bpf_program, filter is
-    // NUL-terminated, and no worker or other caller can access the handle.
+    // SAFETY: the pcap crate owns a live activated handle; program is the
+    // writable repr(C) layout of libpcap's bpf_program, filter is NUL-
+    // terminated, and no worker or other caller can access the handle.
     let compile_status = unsafe {
         pcap_compile(
             handle,
@@ -146,8 +156,7 @@ fn compile_capture_filter<T: Activated>(
         ));
     }
 
-    // SAFETY: successful pcap_compile initialized the transparent pcap crate
-    // wrapper. Its Drop performs the single matching pcap_freecode call.
+    // SAFETY: successful pcap_compile initialized the local ABI structure.
     Ok(unsafe { program.assume_init() })
 }
 
@@ -426,14 +435,17 @@ mod tests {
     #[test]
     fn broadcast_filter_compiles_with_the_interface_netmask() {
         let capture = Capture::dead(pcap::Linktype::ETHERNET).unwrap();
-        let program = compile_capture_filter(
+        let mut program = compile_capture_filter(
             &capture,
             &interface(),
             "ip broadcast",
             u32::from_ne_bytes([255, 255, 255, 0]),
         )
         .unwrap();
-        assert!(!program.get_instructions().is_empty());
+        assert!(program.instruction_count > 0);
+        // SAFETY: the program was initialized by pcap_compile and is being
+        // released exactly once after the assertion.
+        unsafe { pcap_freecode((&mut program as *mut PcapBpfProgram).cast()) };
 
         let unknown =
             compile_capture_filter(&capture, &interface(), "ip broadcast", PCAP_NETMASK_UNKNOWN);

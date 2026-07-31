@@ -40,7 +40,7 @@ use crate::{Error as LiveIoError, route::InterfaceId};
 pub(super) struct NpcapApi {
     // Function pointers remain valid only while their defining module is
     // loaded. This owner keeps it live for every use of the inert pointers.
-    _library: Library,
+    pub(super) _library: Library,
     pub(super) pcap_create: PcapCreate,
     pub(super) pcap_set_snaplen: PcapSetInteger,
     pub(super) pcap_set_promisc: PcapSetInteger,

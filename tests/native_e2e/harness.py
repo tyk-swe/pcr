@@ -23,7 +23,7 @@ TESTS_ROOT = NATIVE_E2E_ROOT.parent
 if str(TESTS_ROOT) not in sys.path:
     sys.path.insert(0, str(TESTS_ROOT))
 
-from native_e2e.cases import exchange, route, send  # noqa: E402
+from native_e2e.cases import capture, exchange, route, send  # noqa: E402
 from native_e2e.support import artifacts, diagnostics  # noqa: E402
 from native_e2e.support.command import CommandRunner  # noqa: E402
 from native_e2e.support.context import (  # noqa: E402
@@ -80,7 +80,7 @@ class CaseExecutionError(RuntimeError):
 
 
 def native_cases() -> tuple[NativeCase, ...]:
-    cases = (*route.cases(), *send.cases(), *exchange.cases())
+    cases = (*route.cases(), *send.cases(), *exchange.cases(), *capture.cases())
     names = [case.name for case in cases]
     slots = [case.address_slot for case in cases]
     ports = [

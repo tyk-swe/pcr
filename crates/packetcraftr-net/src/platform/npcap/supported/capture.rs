@@ -6,7 +6,8 @@
 #![allow(unsafe_code)]
 
 use std::{
-    ptr::NonNull,
+    ffi::CString,
+    ptr::{NonNull, null_mut},
     sync::Arc,
     time::{Instant, SystemTime},
 };
@@ -15,7 +16,7 @@ use bytes::Bytes;
 use packetcraftr_capture::LinkType;
 
 use super::{
-    abi::{PCAP_ERROR, PCAP_ERROR_BREAK, PcapStatistics},
+    abi::{BpfProgram, PCAP_ERROR, PCAP_ERROR_BREAK, PCAP_NETMASK_UNKNOWN, PcapStatistics},
     handles::{NpcapHandle, PromiscuousMode, open_handle},
 };
 use crate::{
@@ -31,6 +32,8 @@ use crate::{
 pub(super) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
+    capture_filter: Option<&str>,
+    netmask: Option<u32>,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     let snap_length =
         i32::try_from(limits.snap_length).map_err(|_| LiveIoError::InvalidCaptureQueueLimit {
@@ -39,6 +42,14 @@ pub(super) fn open_capture(
             reason: "Npcap snap length exceeds i32",
         })?;
     let handle = open_handle(interface, snap_length, PromiscuousMode::Enabled)?;
+    if let Some(filter) = capture_filter {
+        install_capture_filter(
+            &handle,
+            interface,
+            filter,
+            netmask.unwrap_or(PCAP_NETMASK_UNKNOWN),
+        )?;
+    }
     // SAFETY: handle is activated and live; pcap_datalink only reads its
     // negotiated link-layer type.
     let datalink = unsafe { (handle.api.pcap_datalink)(handle.raw.as_ptr()) };
@@ -60,6 +71,57 @@ pub(super) fn open_capture(
         interface: interface.clone(),
         link_type,
     })
+}
+
+fn install_capture_filter(
+    handle: &NpcapHandle,
+    interface: &InterfaceId,
+    filter: &str,
+    netmask: u32,
+) -> Result<(), LiveIoError> {
+    let filter = CString::new(filter).map_err(|_| LiveIoError::InvalidCaptureFilter {
+        interface: interface.name.clone(),
+        message: "Npcap BPF expressions cannot contain an interior NUL byte".to_owned(),
+    })?;
+    let mut program = BpfProgram {
+        instruction_count: 0,
+        instructions: null_mut(),
+    };
+    // SAFETY: handle is activated and live, program is a writable SDK-layout
+    // output structure, filter is NUL-terminated, and the API owner keeps the
+    // function pointer loaded for this call.
+    let compile_status = unsafe {
+        (handle.api.pcap_compile)(
+            handle.raw.as_ptr(),
+            &mut program,
+            filter.as_ptr(),
+            1,
+            netmask,
+        )
+    };
+    if compile_status != 0 {
+        let diagnostic = handle.error_message();
+        return Err(LiveIoError::InvalidCaptureFilter {
+            interface: interface.name.clone(),
+            message: format!("Npcap compilation failed: {diagnostic}"),
+        });
+    }
+
+    // SAFETY: successful pcap_compile initialized program for this live
+    // handle; the worker has not started, so this is the only handle call.
+    let install_status = unsafe { (handle.api.pcap_setfilter)(handle.raw.as_ptr(), &mut program) };
+    let diagnostic = (install_status != 0).then(|| handle.error_message());
+    // SAFETY: pcap_compile succeeded and this is the single matching
+    // pcap_freecode call, after pcap_setfilter has finished using the program.
+    unsafe { (handle.api.pcap_freecode)(&mut program) };
+
+    if let Some(diagnostic) = diagnostic {
+        return Err(LiveIoError::CaptureFilterInstallation {
+            interface: interface.name.clone(),
+            message: format!("Npcap installation failed: {diagnostic}"),
+        });
+    }
+    Ok(())
 }
 
 struct NpcapCaptureSource {

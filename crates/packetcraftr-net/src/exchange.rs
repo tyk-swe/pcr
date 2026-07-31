@@ -45,4 +45,13 @@ where
     ) -> Result<Self::Capture, Error> {
         self.capture.arm_capture(route, limits)
     }
+
+    fn arm_capture_with_filter(
+        &self,
+        route: &PlannedRoute,
+        limits: CaptureQueueLimits,
+        filter: &str,
+    ) -> Result<Self::Capture, Error> {
+        self.capture.arm_capture_with_filter(route, limits, filter)
+    }
 }

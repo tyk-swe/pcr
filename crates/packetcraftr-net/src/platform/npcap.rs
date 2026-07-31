@@ -19,14 +19,16 @@ mod supported;
 pub(super) fn open_capture(
     interface: &InterfaceId,
     limits: CaptureQueueLimits,
+    capture_filter: Option<&str>,
+    netmask: Option<u32>,
 ) -> Result<NativeCaptureParts, LiveIoError> {
     #[cfg(all(target_arch = "x86_64", target_env = "msvc"))]
     {
-        supported::open_capture(interface, limits)
+        supported::open_capture(interface, limits, capture_filter, netmask)
     }
     #[cfg(not(all(target_arch = "x86_64", target_env = "msvc")))]
     {
-        let _ = (interface, limits);
+        let _ = (interface, limits, capture_filter, netmask);
         Err(LiveIoError::Unsupported {
             message: "native Windows Layer 2 I/O supports only x86_64-pc-windows-msvc".to_owned(),
         })

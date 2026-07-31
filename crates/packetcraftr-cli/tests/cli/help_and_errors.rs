@@ -142,6 +142,24 @@ fn capture_commands_reserve_the_documented_queue_limit_contract() {
 }
 
 #[test]
+fn capture_help_distinguishes_native_bpf_and_display_filters() {
+    let output = binary().args(["capture", "--help"]).output().unwrap();
+    assert!(output.status.success());
+    let help = String::from_utf8(output.stdout).unwrap();
+    for expected in [
+        "--capture-filter",
+        "libpcap/Npcap BPF",
+        "stable resolver-free core",
+        "numeric address, network, port, and protocol operands",
+        "cannot perform hidden hostname or name-database resolution",
+        "PacketcraftR's display-filter language after capture",
+        "may be combined",
+    ] {
+        assert!(help.contains(expected), "missing {expected}\n{help}");
+    }
+}
+
+#[test]
 fn conflicting_recipe_sources_use_cli_exit_code() {
     let output = binary()
         .args(["build", "--packet", "raw()", "--packet-file", "packet.json"])

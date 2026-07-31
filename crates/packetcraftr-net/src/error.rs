@@ -55,6 +55,10 @@ pub enum Error {
     InvalidTransmissionFrame { message: String },
     #[error("capture failed: {message}")]
     Capture { message: String },
+    #[error("native capture filter was rejected for {interface}: {message}")]
+    InvalidCaptureFilter { interface: String, message: String },
+    #[error("native capture filter installation failed for {interface}: {message}")]
+    CaptureFilterInstallation { interface: String, message: String },
     #[error("capture did not become ready: {message}")]
     CaptureReadiness { message: String },
     #[error("live operation deadline expired while {operation}")]
@@ -145,6 +149,18 @@ impl Classified for Error {
                 Kind::Io,
                 Some(
                     "inspect the capture device state and native backend diagnostic before retrying",
+                ),
+            ),
+            Self::InvalidCaptureFilter { .. } => Classification::new(
+                "cli.capture_filter",
+                Kind::Cli,
+                Some("use a valid libpcap/Npcap BPF capture-filter expression"),
+            ),
+            Self::CaptureFilterInstallation { .. } => Classification::new(
+                "io.capture_filter",
+                Kind::Io,
+                Some(
+                    "inspect the selected interface and native backend diagnostic before retrying",
                 ),
             ),
             Self::CaptureReadiness { .. } => Classification::new(
@@ -327,6 +343,22 @@ mod tests {
                     message: "failed".to_owned(),
                 },
                 "io.capture",
+                Kind::Io,
+            ),
+            (
+                Error::InvalidCaptureFilter {
+                    interface: "test0".to_owned(),
+                    message: "syntax error".to_owned(),
+                },
+                "cli.capture_filter",
+                Kind::Cli,
+            ),
+            (
+                Error::CaptureFilterInstallation {
+                    interface: "test0".to_owned(),
+                    message: "backend failure".to_owned(),
+                },
+                "io.capture_filter",
                 Kind::Io,
             ),
             (

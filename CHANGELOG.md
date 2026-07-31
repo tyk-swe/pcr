@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added `packetcraftr capture --capture-filter <BPF>` to install native
+  libpcap/Npcap BPF before frames enter PacketcraftR's queue or operation
+  budgets, independently of the existing post-capture `--filter` display
+  language. Native compilation uses the selected interface's IPv4 netmask and
+  accepts the stable resolver-free BPF core with numeric operands to prevent
+  hidden name resolution.
+
 ### Changed
 
 - Removed the unused aggregate protocol-support manifest, workflow matrix, and

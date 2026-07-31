@@ -61,10 +61,11 @@ fn vlan_claim(mac: [u8; 6], address: Ipv4Addr, tags: &[(bool, u16)]) -> Packet {
             });
         }
     }
-    packet.push(Ipv4 {
-        source: address,
-        destination: Ipv4Addr::BROADCAST,
-        ..Ipv4::default()
+    packet.push(Arp {
+        sender_hardware: mac,
+        sender_protocol: address,
+        target_protocol: address,
+        ..Arp::default()
     });
     packet
 }
@@ -113,11 +114,11 @@ fn findings(packets: Vec<Packet>) -> Vec<expert::Finding> {
 }
 
 #[test]
-fn arp_and_ipv4_share_claim_evidence_and_use_revealing_code() {
+fn arp_claims_report_conflicting_link_layer_ownership() {
     let findings = findings(vec![
         arp_claim(MAC_A, ADDRESS),
-        ipv4_claim(MAC_B, ADDRESS),
-        ipv4_claim(MAC_B, ADDRESS),
+        arp_claim(MAC_B, ADDRESS),
+        arp_claim(MAC_B, ADDRESS),
         arp_claim(MAC_C, ADDRESS),
     ]);
     assert_eq!(
@@ -125,7 +126,7 @@ fn arp_and_ipv4_share_claim_evidence_and_use_revealing_code() {
             .iter()
             .map(|finding| (finding.number, finding.code.as_str()))
             .collect::<Vec<_>>(),
-        [(2, "ipv4.address_conflict"), (4, "arp.address_conflict"),]
+        [(2, "arp.address_conflict"), (4, "arp.address_conflict"),]
     );
     assert!(findings[0].message.contains("02:00:00:00:00:01"));
     assert!(findings[0].message.contains("first seen frame 1"));
@@ -153,9 +154,9 @@ fn pcapng_interfaces_scope_identical_addresses_independently() {
     let first = writer.add_interface(LinkType::ETHERNET).unwrap();
     let second = writer.add_interface(LinkType::ETHERNET).unwrap();
     for (number, interface, packet) in [
-        (0, first, ipv4_claim(MAC_A, ADDRESS)),
-        (1, second, ipv4_claim(MAC_B, ADDRESS)),
-        (2, first, ipv4_claim(MAC_C, ADDRESS)),
+        (0, first, arp_claim(MAC_A, ADDRESS)),
+        (1, second, arp_claim(MAC_B, ADDRESS)),
+        (2, first, arp_claim(MAC_C, ADDRESS)),
     ] {
         let mut frame = Frame::new(
             UNIX_EPOCH + Duration::from_secs(number),
@@ -177,21 +178,15 @@ fn pcapng_interfaces_scope_identical_addresses_independently() {
 }
 
 #[test]
-fn tunneled_inner_ipv4_source_is_never_claimed_by_outer_ethernet() {
-    let mut tunneled = Packet::new();
-    tunneled
-        .push(ethernet(MAC_B))
-        .push(Ipv4 {
-            source: Ipv4Addr::new(198, 51, 100, 1),
-            destination: Ipv4Addr::new(198, 51, 100, 2),
-            ..Ipv4::default()
-        })
-        .push(Ipv4 {
-            source: ADDRESS,
-            destination: Ipv4Addr::new(192, 0, 2, 20),
-            ..Ipv4::default()
-        });
-    assert!(findings(vec![ipv4_claim(MAC_A, ADDRESS), tunneled]).is_empty());
+fn ipv4_sources_are_not_treated_as_link_layer_ownership_claims() {
+    assert!(
+        findings(vec![
+            ipv4_claim(MAC_A, ADDRESS),
+            ipv4_claim(MAC_B, ADDRESS),
+            arp_claim(MAC_C, ADDRESS),
+        ])
+        .is_empty()
+    );
 }
 
 #[test]

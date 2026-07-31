@@ -4,7 +4,7 @@
 //! The bounded read → dissect → index → filter → dispatch loop shared by the
 //! offline analysis commands.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant, SystemTime};
 
 use super::session_index::{StreamIndex, ip_fragment, tcp_segment, transports, udp_flow};
@@ -14,8 +14,43 @@ use super::{
     FlowKey, FragmentEvent, FragmentReassembler, OverlapPolicy, ProtocolRegistry, Read, Reader,
     ReassemblyLimits, Segment, SessionTcpError, Tcp, TcpEvent, TcpReassembler,
 };
+use packetcraftr_protocol::link::{Vlan, Vlan8021ad};
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FragmentTag {
+    Ieee8021Q(u16),
+    Ieee8021Ad(u16),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct FragmentScope {
+    interface: Option<u32>,
+    tags: Vec<FragmentTag>,
+}
+
+fn fragment_scope(decoded: &DecodedPacket) -> FragmentScope {
+    let tags = decoded
+        .packet
+        .iter()
+        .skip(1)
+        .map_while(|layer| {
+            if let Some(vlan) = layer.as_any().downcast_ref::<Vlan>() {
+                Some(FragmentTag::Ieee8021Q(vlan.vlan_id))
+            } else {
+                layer
+                    .as_any()
+                    .downcast_ref::<Vlan8021ad>()
+                    .map(|vlan| FragmentTag::Ieee8021Ad(vlan.vlan_id))
+            }
+        })
+        .collect();
+    FragmentScope {
+        interface: decoded.frame.interface,
+        tags,
+    }
+}
 
 /// Finite resource ceilings for one analysis run.
 ///
@@ -192,17 +227,10 @@ where
     // carry no acknowledgment — and only a peer's own bare opening SYN may
     // survive a new pure SYN on the same tuple, as in a simultaneous open.
     let mut half_open_pure_syns: HashSet<FlowKey> = HashSet::new();
-    let mut fragments = FragmentReassembler::new(
-        ReassemblyLimits {
-            max_flows: limits.max_flows,
-            ..ReassemblyLimits::default()
-        },
-        // Protocol overlap is evidence, not a reason to terminate offline
-        // analysis. The reassembler still exposes RejectConflicting for
-        // strict callers; this pipeline retains deterministic first-seen
-        // bytes and delivers overlap events to the expert collector.
-        OverlapPolicy::KeepFirst,
-    );
+    // A datagram identity is meaningful only within its capture interface and
+    // Ethernet VLAN stack. Separate reassemblers prevent unrelated network
+    // scopes from contributing fragments to one another.
+    let mut fragments = BTreeMap::<FragmentScope, FragmentReassembler>::new();
     let mut clock = CaptureClock::new();
 
     let mut frames_read = 0_u64;
@@ -463,11 +491,40 @@ where
         }
         let fragment = ip_fragment(&decoded);
         if fragment.is_some() || sweep_due {
-            fragment_events.extend(fragments.expire(now));
+            for reassembler in fragments.values_mut() {
+                fragment_events.extend(reassembler.expire(now));
+            }
         }
         if let Some(fragment) = fragment {
+            let scope = fragment_scope(&decoded);
+            let new_datagram = fragments
+                .get(&scope)
+                .is_none_or(|reassembler| !reassembler.contains(&fragment.key));
+            let fragment_flows = fragments
+                .values()
+                .map(FragmentReassembler::flow_count)
+                .sum::<usize>();
+            if new_datagram && fragment_flows >= limits.max_flows {
+                return Err(AnalysisError::Fragments {
+                    number,
+                    source: packetcraftr_session::fragment::Error::FlowLimit {
+                        limit: limits.max_flows,
+                    },
+                });
+            }
+            let reassembler = fragments.entry(scope).or_insert_with(|| {
+                FragmentReassembler::new(
+                    ReassemblyLimits {
+                        max_flows: limits.max_flows,
+                        ..ReassemblyLimits::default()
+                    },
+                    // Protocol overlap is evidence, not a reason to terminate
+                    // offline analysis. Retain deterministic first-seen bytes.
+                    OverlapPolicy::KeepFirst,
+                )
+            });
             fragment_events.extend(
-                fragments
+                reassembler
                     .push(fragment, now)
                     .map_err(|source| AnalysisError::Fragments { number, source })?,
             );
@@ -499,7 +556,10 @@ where
             .as_mut()
             .map(TcpReassembler::flush)
             .unwrap_or_default(),
-        trailing_fragment_events: fragments.flush(),
+        trailing_fragment_events: fragments
+            .values_mut()
+            .flat_map(FragmentReassembler::flush)
+            .collect(),
     })
 }
 

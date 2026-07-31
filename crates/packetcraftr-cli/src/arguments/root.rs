@@ -89,7 +89,7 @@ Examples:
   packetcraftr --output json follow capture.pcapng --stream udp:2"#;
 const EXPERT_AFTER_HELP: &str = r#"Expert analysis is computed offline over dissected frames; no live capture or transmission is involved.
 
-Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. IPv4/IPv6 fragment overlap, gap, and incomplete states; correlated ICMP errors; and interface/VLAN-scoped ARP/IPv4 address conflicts are also reported. Stream-aware filters such as 'tcp.stream == 7' are supported.
+Retransmissions (including retransmissions whose content changed) come from bounded TCP reassembly, and duplicate acknowledgments, zero windows and their probes, window-full and window-exceeded conditions, keep-alives, resets, and uncaptured earlier segments come from cross-frame header tracking. Dissection diagnostics such as checksum mismatches surface as findings under their own codes. IPv4/IPv6 fragment overlap, gap, and incomplete states; correlated ICMP errors; and interface/VLAN-scoped ARP address conflicts are also reported. Stream-aware filters such as 'tcp.stream == 7' are supported.
 
 Examples:
   packetcraftr expert capture.pcapng

@@ -7,7 +7,6 @@ use std::net::Ipv4Addr;
 use packetcraftr_capture::LinkType;
 use packetcraftr_packet::diagnostic::DiagnosticSeverity;
 use packetcraftr_protocol::link::{Arp, Ethernet, Vlan, Vlan8021ad};
-use packetcraftr_protocol::network::Ipv4;
 
 use super::{Finding, FrameRecord, new_finding};
 
@@ -49,12 +48,13 @@ impl State {
         }
         let max_claims = record.max_flows();
         let packet = &record.decoded.packet;
-        let Some(ethernet) = packet
+        if packet
             .layer(0)
             .and_then(|layer| layer.as_any().downcast_ref::<Ethernet>())
-        else {
+            .is_none()
+        {
             return;
-        };
+        }
         let mut tags = Vec::new();
         let mut index = 1;
         while let Some(layer) = packet.layer(index) {
@@ -74,20 +74,11 @@ impl State {
             if unusable_ipv4(arp.sender_protocol) || unusable_mac(arp.sender_hardware) {
                 return;
             }
-            Some((
-                arp.sender_protocol,
-                arp.sender_hardware,
-                "arp.address_conflict",
-            ))
-        } else if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
-            if unusable_ipv4(ipv4.source) || unusable_mac(ethernet.source) {
-                return;
-            }
-            Some((ipv4.source, ethernet.source, "ipv4.address_conflict"))
+            Some((arp.sender_protocol, arp.sender_hardware))
         } else {
             None
         };
-        let Some((address, mac, code)) = observation else {
+        let Some((address, mac)) = observation else {
             return;
         };
         let scope = Scope {
@@ -124,7 +115,7 @@ impl State {
         if let Some(previous) = previous {
             findings.push(new_finding(
                 DiagnosticSeverity::Warning,
-                code,
+                "arp.address_conflict",
                 record.number,
                 None,
                 format!(

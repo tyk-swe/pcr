@@ -25,7 +25,7 @@ sensitive traffic or disrupt a network when used incorrectly.
 - Analyze captures offline with bounded conversation statistics, TCP/UDP
   payload following, stream-aware filters, reassembly, and expert findings for
   checksums, TCP behavior, IP fragments, quoted ICMP errors, and scoped
-  ARP/IPv4 address conflicts.
+  ARP address conflicts.
 - Generate deterministic, field-aware fuzz cases offline; live fuzzing is a
   separate opt-in.
 - Enumerate interfaces and passively inspect route decisions.

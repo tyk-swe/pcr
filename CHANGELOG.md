@@ -11,11 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Extended offline expert analysis with bounded IPv4/IPv6 fragment overlap,
   gap, and incomplete-datagram findings; correlated ICMP errors; and
-  interface/VLAN-scoped ARP/IPv4 address-conflict findings. Stable codes are
+  interface/VLAN-scoped ARP address-conflict findings. Stable codes are
   `ip.fragment_overlap`, `ip.fragment_overlap_conflicting`, `ip.fragment_gap`,
   `ip.fragment_incomplete`, `icmp.time_exceeded`, `icmp.port_unreachable`,
   `icmp.destination_unreachable`, `icmp.administratively_prohibited`,
-  `arp.address_conflict`, and `ipv4.address_conflict`.
+  and `arp.address_conflict`.
 - Changed fragment reassembly pushes to return all events revealed by one
   fragment. Expiry events now expose exact missing ranges and an optional final
   length; offline analysis retains first-seen bytes after conflicting overlaps,
@@ -69,6 +69,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional-duration text rendering.
 - Classified ICMP port-unreachable codes independently of the quoted transport
   and reported disjoint fragment overlaps as separate exact ranges.
+- Kept offline fragment state separate by capture interface and VLAN stack,
+  and stopped treating routed IPv4 source addresses as link-layer ownership
+  claims.
 
 ## [0.4.0] - 2026-07-29
 

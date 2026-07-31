@@ -7,6 +7,7 @@ use bytes::Bytes;
 use packetcraftr_packet::{Packet, diagnostic::DiagnosticSeverity, field::WireValue, layer::Raw};
 use packetcraftr_protocol::{
     ipv6::Fragment as Ipv6Fragment,
+    link::{Ethernet, Vlan},
     network::{Ipv4, Ipv6},
 };
 
@@ -61,6 +62,26 @@ fn findings(packets: Vec<Packet>) -> Vec<expert::Finding> {
         .into_iter()
         .filter(|finding| finding.code.starts_with("ip.fragment_"))
         .collect()
+}
+
+fn ethernet_ipv4_fragment(vlan: u16, identification: u16, bytes: &'static [u8]) -> Packet {
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet::default())
+        .push(Vlan {
+            vlan_id: vlan,
+            ..Vlan::default()
+        })
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            identification,
+            more_fragments: true,
+            protocol: WireValue::Exact(17),
+            ..Ipv4::default()
+        })
+        .push(Raw::new(Bytes::from_static(bytes)));
+    packet
 }
 
 #[test]
@@ -194,4 +215,50 @@ fn capture_time_expiry_is_attributed_to_the_frame_that_revealed_it() {
         .collect::<Vec<_>>();
     assert_eq!(findings.len(), 2);
     assert!(findings.iter().all(|finding| finding.number == 2));
+}
+
+#[test]
+fn identical_fragment_keys_on_different_interfaces_do_not_overlap() {
+    let mut writer = Writer::pcapng(Vec::new()).unwrap();
+    let first = writer.add_interface(LinkType::RAW).unwrap();
+    let second = writer.add_interface(LinkType::RAW).unwrap();
+    for (interface, bytes) in [(first, b"abcdefgh" as &'static [u8]), (second, b"XXXXXXXX")] {
+        let mut frame = Frame::new(
+            UNIX_EPOCH,
+            LinkType::RAW,
+            build_bytes(ipv4_fragment(10, 0, true, bytes)),
+        )
+        .unwrap();
+        frame.interface = Some(interface);
+        writer.write_frame(&frame).unwrap();
+    }
+    let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+    let findings = expert_findings(&mut reader, &AnalysisOptions::default());
+    assert!(
+        findings
+            .iter()
+            .all(|finding| !finding.code.contains("fragment_overlap")),
+        "{findings:?}"
+    );
+}
+
+#[test]
+fn identical_fragment_keys_on_different_vlans_do_not_overlap() {
+    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
+    for packet in [
+        ethernet_ipv4_fragment(10, 11, b"abcdefgh"),
+        ethernet_ipv4_fragment(20, 11, b"XXXXXXXX"),
+    ] {
+        writer
+            .write_frame(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, build_bytes(packet)).unwrap())
+            .unwrap();
+    }
+    let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
+    let findings = expert_findings(&mut reader, &AnalysisOptions::default());
+    assert!(
+        findings
+            .iter()
+            .all(|finding| !finding.code.contains("fragment_overlap")),
+        "{findings:?}"
+    );
 }

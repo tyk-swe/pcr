@@ -144,6 +144,11 @@ impl Reassembler {
         self.flows.len()
     }
 
+    /// Returns whether reassembly state exists for `key`.
+    pub fn contains(&self, key: &DatagramKey) -> bool {
+        self.flows.contains_key(key)
+    }
+
     pub fn aggregate_bytes(&self) -> usize {
         self.aggregate_bytes
     }

@@ -1,8 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
-
 use packetcraftr::{
     error::{Classification, Kind},
     output,
@@ -67,45 +65,17 @@ fn describe_protocol(name: &str, format: output::contract::Format) -> Result<(),
                     .any(|alias| alias.eq_ignore_ascii_case(name))
         })
         .ok_or_else(|| unknown_protocol(name))?;
-    let fields = if support.decode_only {
-        Vec::new()
-    } else {
-        let registry = default_registry_arc()?;
-        let codec = registry.codec(support.protocol).ok_or_else(|| {
-            CliError::new(
-                70,
-                format!(
-                    "built-in registry invariant failed: protocol {} has no codec",
-                    support.protocol
-                ),
-            )
-        })?;
-        let layer = codec.make_layer(&BTreeMap::new()).map_err(|source| {
-            CliError::new(
-                70,
-                format!(
-                    "built-in registry invariant failed: default {} layer: {source}",
-                    support.protocol
-                ),
-            )
-        })?;
-        if layer.protocol_id().as_str() != support.protocol {
-            return Err(CliError::new(
-                70,
-                format!(
-                    "built-in registry invariant failed: {} factory returned {}",
-                    support.protocol,
-                    layer.protocol_id()
-                ),
-            ));
-        }
-        layer
-            .schema()
-            .fields
-            .iter()
-            .map(output::protocols::Field::from)
-            .collect()
-    };
+    let registry = default_registry_arc()?;
+    let fields = registry
+        .schema(support.protocol)
+        .map(|schema| {
+            schema
+                .fields
+                .iter()
+                .map(output::protocols::Field::from)
+                .collect()
+        })
+        .unwrap_or_default();
     let detail = output::protocols::Detail::new(output::protocols::Summary::from(support), fields);
     match format {
         output::contract::Format::Text => render_detail(&detail),

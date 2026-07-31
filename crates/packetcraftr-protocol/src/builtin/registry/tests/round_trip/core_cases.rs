@@ -21,7 +21,7 @@ fn ethernet_ipv4_udp_round_trip_rebuilds_identical_bytes() {
         })
         .push(Udp {
             source_port: 12345,
-            destination_port: 53,
+            destination_port: 5353,
             ..Udp::default()
         })
         .push(Raw::new(Bytes::from_static(b"packet")));
@@ -49,6 +49,47 @@ fn ethernet_ipv4_udp_round_trip_rebuilds_identical_bytes() {
 }
 
 #[test]
+fn udp_port_53_dissects_dns_and_rebuilds_the_complete_payload() {
+    let registry = Arc::new(default_registry().unwrap());
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 49_999,
+            destination_port: 53,
+            ..Udp::default()
+        })
+        .push(
+            Dns::from_wire(Bytes::from_static(&[
+                0x12, 0x34, 0x01, 0x00, 0, 0, 0, 1, 0, 0, 0, 0, 0xde, 0xad, 0xbe,
+            ]))
+            .unwrap(),
+        );
+
+    let builder = Builder::new(Arc::clone(&registry));
+    let built = builder
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(built.bytes.clone(), "ipv4".into(), DecodeOptions::default())
+        .unwrap();
+    assert!(decoded.packet.get::<Dns>().is_some());
+    assert_eq!(decoded.packet.len(), 3);
+    let rebuilt = builder
+        .build(
+            decoded.packet,
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(rebuilt.bytes, built.bytes);
+}
+
+#[test]
 fn ipv4_udp_odd_payload_emits_known_checksum() {
     let registry = Arc::new(default_registry().unwrap());
     let mut packet = Packet::new();
@@ -60,7 +101,7 @@ fn ipv4_udp_odd_payload_emits_known_checksum() {
         })
         .push(Udp {
             source_port: 5_000,
-            destination_port: 53,
+            destination_port: 5353,
             ..Udp::default()
         })
         .push(Raw::new(Bytes::from_static(&[
@@ -70,7 +111,7 @@ fn ipv4_udp_odd_payload_emits_known_checksum() {
     let built = Builder::new(Arc::clone(&registry))
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
-    assert_eq!(&built.bytes[26..28], &[0x61, 0x42]);
+    assert_eq!(&built.bytes[26..28], &[0x4c, 0x8e]);
 
     let decoded = Dissector::new(registry)
         .decode_with_root(built.bytes, "ipv4".into(), DecodeOptions::default())

@@ -4,8 +4,8 @@
 //! Protocol-aware DNS response classification.
 
 use super::super::{
-    Bytes, DecodedPacket, DiagnosticSeverity, DnsLimits, DnsProbe, FieldValue, Packet,
-    ProbeTransport, ProtocolRegistry, ValidatedDnsResponse, probe,
+    Bytes, DecodedPacket, DiagnosticSeverity, Dns, DnsLimits, DnsProbe, MalformedLayer, Packet,
+    ProbeTransport, ProtocolRegistry, Raw, ValidatedDnsResponse, probe,
 };
 use super::decode::decode_dns_response;
 use packetcraftr_packet::semantics::BuiltinProtocol;
@@ -80,7 +80,7 @@ pub fn classify_dns_response(
                 reason: "correlated UDP response has an invalid checksum diagnostic".to_owned(),
             });
         }
-        let Some(payload) = raw_payload(&response.packet) else {
+        let Some(payload) = dns_payload(&response.packet) else {
             return Some(DnsResponseClassification::DecodeFailure {
                 reason: "correlated UDP response has no complete DNS payload".to_owned(),
             });
@@ -125,13 +125,34 @@ fn direct_udp_match(registry: &ProtocolRegistry, request: &Packet, response: &Pa
         .is_some_and(|matcher| matcher.matches(request, response).matched)
 }
 
-pub(crate) fn raw_payload(packet: &Packet) -> Option<Bytes> {
-    match packet
+pub(crate) fn dns_payload(packet: &Packet) -> Option<Bytes> {
+    let udp_index = packet
         .iter()
-        .find(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Raw))?
-        .field("bytes")?
-    {
-        FieldValue::Bytes(bytes) => Some(bytes),
+        .position(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))?;
+    let udp = packet.layer(udp_index)?;
+    let source_port = udp.field("source_port")?.as_u64()?;
+    let destination_port = udp.field("destination_port")?.as_u64()?;
+    let port_53 = source_port == 53 || destination_port == 53;
+    let payload = packet.layer(udp_index + 1)?;
+    match BuiltinProtocol::of(payload) {
+        Some(BuiltinProtocol::Dns) if port_53 => payload
+            .as_any()
+            .downcast_ref::<Dns>()
+            .map(|dns| dns.wire().clone()),
+        Some(BuiltinProtocol::Malformed) if port_53 => payload
+            .as_any()
+            .downcast_ref::<MalformedLayer>()
+            .filter(|layer| {
+                layer
+                    .intended_protocol
+                    .as_ref()
+                    .is_some_and(|protocol| protocol.as_str() == "dns")
+            })
+            .map(|layer| layer.bytes.clone()),
+        Some(BuiltinProtocol::Raw) => payload
+            .as_any()
+            .downcast_ref::<Raw>()
+            .map(|raw| raw.bytes.clone()),
         _ => None,
     }
 }

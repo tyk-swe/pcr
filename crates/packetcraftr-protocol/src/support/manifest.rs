@@ -324,7 +324,7 @@ mod tests {
             .map(|protocol| protocol.as_str())
             .collect::<BTreeSet<_>>();
         assert_eq!(declared.keys().copied().collect::<BTreeSet<_>>(), actual);
-        assert_eq!(declared.len(), 36);
+        assert_eq!(declared.len(), 37);
 
         for support in BUILTIN_PROTOCOLS {
             let identity = BuiltinProtocol::from_name(support.protocol)
@@ -369,7 +369,7 @@ mod tests {
                 .filter(|support| support.decode_only)
                 .map(|support| support.protocol)
                 .collect::<Vec<_>>(),
-            vec!["raw_ip"]
+            vec!["dns", "raw_ip"]
         );
 
         let roots = registry
@@ -398,7 +398,7 @@ mod tests {
     fn catalog_membership_is_independent_of_live_backend_features() {
         // Backends are feature-gated, but the portable built-in codec catalog
         // is not. This assertion runs in every CI feature profile.
-        assert_eq!(BuiltinProtocol::ALL.len(), 36);
+        assert_eq!(BuiltinProtocol::ALL.len(), 37);
         assert_eq!(BUILTIN_PROTOCOLS.len(), BuiltinProtocol::ALL.len());
         assert!(BuiltinProtocol::ALL.contains(&BuiltinProtocol::RawIp));
     }

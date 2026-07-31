@@ -44,20 +44,62 @@ fn every_constructible_builtin_publishes_its_schema_through_the_registry() {
         let constructible = codec.make_layer(&defaults).is_ok();
         assert_eq!(
             schema.is_some(),
-            constructible,
-            "{protocol} schema availability must track constructibility"
+            constructible || protocol.as_str() == "dns",
+            "{protocol} schema availability must track published schemas"
         );
         if let Some(schema) = schema {
             assert_eq!(&schema.protocol, protocol);
         }
     }
-    // `raw_ip` is the one decode-only built-in, so it anchors the negative case
-    // and keeps this test honest if the catalog ever loses its only such entry.
+    // `raw_ip` remains intentionally schemaless; DNS publishes a static schema
+    // even though it remains dissection-only.
     assert!(registry.schema("raw_ip").is_none());
     assert_eq!(
         registry.schema("ipv4").expect("ipv4 schema").protocol,
         packetcraftr_packet::layer::Id::new("ipv4")
     );
+}
+
+#[test]
+fn canonical_dns_filter_paths_use_the_published_decode_only_schema() {
+    use packetcraftr_packet::filter::{Context, Filter, Options};
+
+    let registry = Arc::new(default_registry().unwrap());
+    let mut packet = Packet::new();
+    packet
+        .push(Ipv4 {
+            source: Ipv4Addr::new(192, 0, 2, 1),
+            destination: Ipv4Addr::new(198, 51, 100, 2),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 49_999,
+            destination_port: 53,
+            ..Udp::default()
+        })
+        .push(
+            Dns::from_wire(Bytes::from_static(&[
+                0x12, 0x34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            ]))
+            .unwrap(),
+        );
+    let decoded = Dissector::new(Arc::clone(&registry))
+        .decode_with_root(
+            Builder::new(Arc::clone(&registry))
+                .build(packet, BuildContext::default(), BuildOptions::default())
+                .unwrap()
+                .bytes,
+            "ipv4".into(),
+            DecodeOptions::default(),
+        )
+        .unwrap();
+    let filter = Filter::compile("dns.id == 4660", &registry, Options::default()).unwrap();
+    assert!(filter.matches(&Context {
+        decoded: &decoded,
+        number: 1,
+        tcp_stream: None,
+        udp_stream: None,
+    }));
 }
 
 #[test]

@@ -3,9 +3,9 @@
 
 use super::{
     AddressFamily, Bytes, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
-    DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS, DEFAULT_MAX_DNS_TXT_BYTES,
-    DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
-    DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_TYPE_OPT, DecodedPacket, Diagnostic, DnsError,
+    DEFAULT_DNS_SERVER_PORT, DEFAULT_MAX_DNS_NAME_POINTERS, DEFAULT_MAX_DNS_RECORDS,
+    DEFAULT_MAX_DNS_TXT_BYTES, DEFAULT_MAX_DNS_TXT_STRINGS, DEFAULT_MAX_REJECTED_DNS_RECORDS,
+    DEFAULT_MAX_UNDECODED_DNS_FRAMES, DNS_TYPE_OPT, DecodedPacket, Diagnostic, Dns, DnsError,
     DnsWireError, Duration, Frame, IpAddr, Ipv4, Ipv4Addr, Ipv6, Ipv6Addr, MAX_DNS_ATTEMPTS,
     MAX_DNS_DURATION, MAX_DNS_MESSAGE_BYTES, MAX_DNS_NAME_POINTERS, MAX_DNS_RECORDS, MAX_SCAN_RATE,
     Packet, Raw, Serialize, Stats, SystemTime, Target, Udp, canonical_query_name, fmt,
@@ -556,13 +556,22 @@ impl DnsProbe {
                 });
             }
         }
-        packet
-            .push(Udp {
-                source_port: self.source_port,
-                destination_port: self.server_port,
-                ..Udp::default()
-            })
-            .push(Raw::new(self.query.clone()));
+        packet.push(Udp {
+            source_port: self.source_port,
+            destination_port: self.server_port,
+            ..Udp::default()
+        });
+        if self.server_port == DEFAULT_DNS_SERVER_PORT
+            || self.source_port == DEFAULT_DNS_SERVER_PORT
+        {
+            if let Ok(dns) = Dns::from_wire(self.query.clone()) {
+                packet.push(dns);
+            } else {
+                packet.push(Raw::new(self.query.clone()));
+            }
+        } else {
+            packet.push(Raw::new(self.query.clone()));
+        }
         packet
     }
 }

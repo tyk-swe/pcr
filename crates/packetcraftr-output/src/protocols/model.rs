@@ -151,8 +151,6 @@ pub struct ProtocolDetailResult {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
 
     #[test]
@@ -181,31 +179,17 @@ mod tests {
         let registry = packetcraftr_protocol::builtin::registry().unwrap();
 
         for support in support::BUILTIN_PROTOCOLS {
-            if support.decode_only {
-                let detail = ProtocolDetail::new(ProtocolSummary::from(support), Vec::new());
-                assert_eq!(detail.protocol, "raw_ip");
-                assert!(detail.fields.is_empty());
+            let Some(schema) = registry.schema(support.protocol) else {
+                assert_eq!(support.protocol, "raw_ip");
                 continue;
-            }
-
-            let layer = registry
-                .codec(support.protocol)
-                .unwrap()
-                .make_layer(&BTreeMap::new())
-                .unwrap();
-            let fields = layer
-                .schema()
+            };
+            let fields = schema
                 .fields
                 .iter()
                 .map(ProtocolField::from)
                 .collect::<Vec<_>>();
-            assert_eq!(
-                fields.len(),
-                layer.schema().fields.len(),
-                "{}",
-                support.protocol
-            );
-            for (actual, expected) in fields.iter().zip(layer.schema().fields) {
+            assert_eq!(fields.len(), schema.fields.len(), "{}", support.protocol);
+            for (actual, expected) in fields.iter().zip(schema.fields) {
                 assert_eq!(actual.name, expected.name, "{}", support.protocol);
                 assert_eq!(actual.kind, expected.kind.into(), "{}", support.protocol);
                 assert_eq!(actual.required, expected.required, "{}", support.protocol);

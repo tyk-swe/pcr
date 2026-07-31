@@ -11,7 +11,7 @@ use super::super::Packet;
 use super::super::build::{BuildContext, BuildMode};
 use super::super::diagnostic::Diagnostic;
 use super::super::field::FieldValue;
-use super::super::layer::{FieldError, Layer, ProtocolId};
+use super::super::layer::{FieldError, Layer, LayerSchema, ProtocolId};
 use super::super::layout::FieldLayout;
 use super::super::registry::{Discriminator, ProtocolRegistry};
 
@@ -142,6 +142,13 @@ pub trait LayerCodec: Send + Sync + fmt::Debug {
 
     fn aliases(&self) -> &'static [&'static str] {
         &[]
+    }
+
+    /// Publishes the reflective schema without requiring a constructible
+    /// layer. The default keeps existing codecs on their factory-based path.
+    fn published_schema(&self) -> Option<&'static LayerSchema> {
+        let fields = BTreeMap::new();
+        self.make_layer(&fields).ok().map(|layer| layer.schema())
     }
 
     fn encode(

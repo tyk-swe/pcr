@@ -28,8 +28,7 @@ fn system_capture_inner(
     limits: super::super::capture::CaptureQueueLimits,
     capture_filter: Option<&str>,
 ) -> Result<Box<dyn super::super::capture::CaptureSession>, LiveIoError> {
-    // Reject invalid bounds before opening a device or allocating native
-    // resources. NativeCaptureSession validates again at its ownership seam.
+    // Reject invalid bounds before opening a device or allocating native resources.
     let validated_limits = limits.validate()?;
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     {

@@ -62,7 +62,6 @@ reflective_layer! {
         "hop_limit" => { kind: Unsigned, derived: false, required: true, description: "Hop limit", get |layer| Some(reflect_get(&layer.hop_limit)), set |layer, value, name| reflect_set(&mut layer.hop_limit, ipv6_schema(), name, value), layout: (7, 8) },
         "source" => { kind: Ipv6, derived: false, required: true, description: "Source IPv6 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv6_schema(), name, value), layout: (8, 24) },
         "destination" => { kind: Ipv6, derived: false, required: true, description: "Destination IPv6 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv6_schema(), name, value), layout: (24, 40) },
-        normalize |layer| { layer.payload_length.normalize(); layer.next_header.normalize(); }
     }
     layout pub(crate) fn ipv6_layout();
 }

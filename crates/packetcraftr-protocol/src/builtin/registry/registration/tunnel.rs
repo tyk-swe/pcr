@@ -6,7 +6,7 @@ use packetcraftr_packet::{
     semantics::BuiltinProtocol,
 };
 
-use super::bind;
+use super::{bind, bind_link_children};
 use crate::tunnel::{
     MPLS_BOTTOM_RAW, MPLS_BOTTOM_VERSION_BASE, MPLS_NEXT_LABEL, PPPOE_DISCOVERY, PPPOE_SESSION,
 };
@@ -15,21 +15,14 @@ pub(super) fn register(builder: &mut RegistryBuilder) -> Result<(), RegistryErro
     bind(builder, BuiltinProtocol::Esp, 0, BuiltinProtocol::Raw, 0)?;
     bind(builder, BuiltinProtocol::L2tpv3, 0, BuiltinProtocol::Raw, 0)?;
 
+    bind_link_children(builder, BuiltinProtocol::Gre)?;
     bind(
         builder,
         BuiltinProtocol::Gre,
-        0x0800,
-        BuiltinProtocol::Ipv4,
+        0x6558,
+        BuiltinProtocol::Ethernet,
         100,
     )?;
-    bind(
-        builder,
-        BuiltinProtocol::Gre,
-        0x86dd,
-        BuiltinProtocol::Ipv6,
-        100,
-    )?;
-    bind(builder, BuiltinProtocol::Gre, 0, BuiltinProtocol::Raw, -100)?;
     bind(
         builder,
         BuiltinProtocol::Gre,

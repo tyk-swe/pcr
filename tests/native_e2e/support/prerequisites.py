@@ -11,7 +11,6 @@ import secrets
 import shutil
 
 from .command import CommandFailure, CommandRunner
-from .topology import _base36
 
 
 class PrerequisiteError(RuntimeError):
@@ -49,7 +48,7 @@ def check_prerequisites(runner: CommandRunner) -> None:
 def _probe_namespace_and_veth(runner: CommandRunner) -> None:
     pid = os.getpid()
     suffix = secrets.token_hex(3)
-    compact = f"{_base36(pid)[-6:]}{suffix}"
+    compact = f"{pid:x}"[-6:] + suffix
     namespace = f"pcr-preflight-{pid}-{suffix}"
     host_interface = f"f{compact}h"
     peer_interface = f"f{compact}n"

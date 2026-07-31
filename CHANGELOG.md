@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed repository-unused public scaffolding, including the secondary error
+  category taxonomy, impossible capture-frame validation, packet normalization
+  and layout-reflection hooks, offline fragment reporting and unused analysis
+  summaries/index accessors, reassembly limit getters, and duplicate output
+  result models. This is a breaking Rust API and output-schema simplification;
+  emitted command documents are unchanged.
+- Replaced replay's separate wire-route parser with the canonical built-in
+  dissector and shared fail-closed packet routing semantics.
 - Registered a bounded DNS-over-UDP dissector that publishes read-only header
   and question fields, retains the complete payload for exact round trips, and
   selects typed DNS on UDP port 53 while preserving raw custom-port payloads.
@@ -32,6 +40,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rejected live packets whose final Ethernet/VLAN bytes, malformed routing
+  layers, custom registries, or non-atomic IP fragments could conceal an
+  unauthorized destination; checks run on exact preliminary and rebuilt bytes
+  before neighbor discovery, capture, or transmission.
+- Made deadline arithmetic fail closed on duration overflow, refreshed active
+  TCP generations monotonically, accepted valid nonzero PCAPNG padding, and
+  made capture-writer flush failures retryable.
+- Registered GRE Transparent Ethernet Bridging and the complete built-in
+  EtherType child set, rejected native route sources absent from their selected
+  interface, and capped route MTUs to the route/interface minimum.
+- Validated fuzz recipes and live-capture PCAPNG settings before input or live
+  side effects, and preserved deadline-held unsolicited evidence while
+  assigning each response frame to one deterministic request.
 - Rejected reverse-flow correlation that only reversed an encapsulated probe's
   inner transport tuple, so injected or captured inner-tuple replies can no
   longer be treated as valid responses for tunneled probes; a direct reply must

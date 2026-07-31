@@ -59,12 +59,6 @@ where
             });
         }
         visitor(code, &options[offset..offset + length])?;
-        if options[offset + length..end].iter().any(|byte| *byte != 0) {
-            return Err(Error::InvalidData {
-                format: Format::PcapNg,
-                reason: "option padding is non-zero",
-            });
-        }
         offset = end;
     }
     Ok(())
@@ -143,36 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn nonzero_option_padding_is_rejected() {
+    fn option_padding_contents_are_ignored() {
         let options = [1, 0, 1, 0, 0xaa, 0, 1, 0];
-        assert!(matches!(
-            visit_options(&options, Endianness::Little, "test options", |_, _| Ok(())),
-            Err(Error::InvalidData {
-                format: Format::PcapNg,
-                ..
-            })
-        ));
-    }
-
-    #[test]
-    fn visitor_errors_are_propagated_without_visiting_later_options() {
-        let options = [1, 0, 0, 0, 2, 0, 0, 0];
-        let mut calls = 0;
-        let error = visit_options(&options, Endianness::Little, "test options", |_, _| {
-            calls += 1;
-            Err(Error::InvalidData {
-                format: Format::PcapNg,
-                reason: "visitor rejected option",
-            })
-        })
-        .unwrap_err();
-        assert_eq!(calls, 1);
-        assert!(matches!(
-            error,
-            Error::InvalidData {
-                reason: "visitor rejected option",
-                ..
-            }
-        ));
+        assert!(visit_options(&options, Endianness::Little, "test options", |_, _| Ok(())).is_ok());
     }
 }

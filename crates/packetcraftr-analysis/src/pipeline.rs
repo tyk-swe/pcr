@@ -7,12 +7,12 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
-use super::session_index::{StreamIndex, ip_fragment, tcp_segment, transports, udp_flow};
+use super::session_index::{StreamIndex, tcp_segment, transports, udp_flow};
 use super::{
     AnalysisError, Arc, Bytes, CaptureError, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES,
     DEFAULT_STREAM_FRAMES, Deadline, DecodeOptions, DecodedPacket, Decoder, Filter, FilterContext,
-    FlowKey, FragmentEvent, FragmentReassembler, OverlapPolicy, ProtocolRegistry, Read, Reader,
-    ReassemblyLimits, Segment, SessionTcpError, Tcp, TcpEvent, TcpReassembler,
+    FlowKey, ProtocolRegistry, Read, Reader, ReassemblyLimits, Segment, SessionTcpError, Tcp,
+    TcpEvent, TcpReassembler,
 };
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
@@ -105,9 +105,6 @@ pub struct FrameRecord<'a> {
     /// TCP reassembly events this frame produced, when requested, including
     /// evictions of flows whose idle expiry this frame's arrival revealed.
     pub tcp_events: &'a [TcpEvent],
-    /// Fragment reassembly outcomes: a datagram this frame completed, and
-    /// any datagrams whose expiry this frame's arrival revealed.
-    pub fragment_events: &'a [FragmentEvent],
 }
 
 /// Terminal counters and residue for a completed analysis run.
@@ -115,15 +112,9 @@ pub struct FrameRecord<'a> {
 pub struct AnalysisSummary {
     pub frames_read: u64,
     pub frames_matched: u64,
-    pub bytes_read: u64,
-    pub tcp_stream_count: u64,
-    pub udp_stream_count: u64,
     /// Data still buffered when the capture ended, flushed flow by flow.
     /// Streams that never saw FIN or RST surface their bytes here.
     pub trailing_tcp_events: Vec<TcpEvent>,
-    /// Fragmented datagrams still incomplete when the capture ended, so
-    /// missing tail fragments are reportable rather than silently dropped.
-    pub trailing_fragment_events: Vec<FragmentEvent>,
 }
 
 /// Runs the shared analysis loop, dispatching each matched frame to `sink`.
@@ -151,12 +142,9 @@ where
     let limits = &options.limits;
     let deadline = Deadline::new(limits.max_duration);
     let decoder = Decoder::new(registry);
-    let mut tcp_streams = StreamIndex::new();
-    let mut udp_streams = StreamIndex::new();
-    // The flow budget governs reassembly state too: fragmented datagrams
-    // never reach a stream index, so without this a fragment-heavy capture
-    // could buffer the session default regardless of the configured bound.
-    // The budget counts direction-neutral conversations, and the TCP
+    let mut tcp_streams = StreamIndex::default();
+    let mut udp_streams = StreamIndex::default();
+    // The flow budget counts direction-neutral conversations, and the TCP
     // reassembler keys each direction separately, so it gets two flow slots
     // per conversation.
     let mut tcp_reassembler = options.tcp_events.then(|| {
@@ -170,13 +158,6 @@ where
     // carry no acknowledgment — and only a peer's own bare opening SYN may
     // survive a new pure SYN on the same tuple, as in a simultaneous open.
     let mut half_open_pure_syns: HashSet<FlowKey> = HashSet::new();
-    let mut fragments = FragmentReassembler::new(
-        ReassemblyLimits {
-            max_flows: limits.max_flows,
-            ..ReassemblyLimits::default()
-        },
-        OverlapPolicy::default(),
-    );
     let mut clock = CaptureClock::new();
 
     let mut frames_read = 0_u64;
@@ -261,11 +242,10 @@ where
         // a throttled cadence otherwise, so idle state is still released
         // while nothing is being pushed. The eviction evidence rides with the
         // frame whose arrival revealed it.
-        let now = clock.at(timestamp, number)?;
-        let sweep_due = clock.should_sweep(now);
         let mut tcp_events = Vec::new();
-        let mut fragment_events = Vec::new();
         if let Some(reassembler) = &mut tcp_reassembler {
+            let now = clock.at(timestamp, number)?;
+            let sweep_due = clock.should_sweep(now);
             // A segment with no payload and no state-changing flag — the
             // common bare acknowledgment — advances reassembly by nothing,
             // so it is not allowed to consume flow state; it still received
@@ -435,18 +415,6 @@ where
                 }
             }
         }
-        let fragment = ip_fragment(&decoded);
-        if fragment.is_some() || sweep_due {
-            fragment_events.extend(fragments.expire(now));
-        }
-        if let Some(fragment) = fragment {
-            fragment_events.extend(
-                fragments
-                    .push(fragment, now)
-                    .map_err(|source| AnalysisError::Fragments { number, source })?,
-            );
-        }
-
         enforce_deadline(&deadline, limits)?;
         sink(FrameRecord {
             number,
@@ -454,7 +422,6 @@ where
             tcp_stream,
             udp_stream,
             tcp_events: &tcp_events,
-            fragment_events: &fragment_events,
         })
         .map_err(|source| AnalysisError::Sink { number, source })?;
     }
@@ -463,14 +430,10 @@ where
     Ok(AnalysisSummary {
         frames_read,
         frames_matched,
-        bytes_read,
-        tcp_stream_count: tcp_streams.len() as u64,
-        udp_stream_count: udp_streams.len() as u64,
         trailing_tcp_events: tcp_reassembler
             .as_mut()
             .map(TcpReassembler::flush)
             .unwrap_or_default(),
-        trailing_fragment_events: fragments.flush(),
     })
 }
 

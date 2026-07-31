@@ -215,14 +215,6 @@ mod tests {
                 support.protocol
             );
 
-            for layout_name in layer.declared_layout_fields() {
-                assert!(
-                    names.contains(layout_name),
-                    "{} layout field {layout_name} is absent from its schema",
-                    support.protocol
-                );
-            }
-
             for field in schema.fields {
                 let value = representative_value(field.kind, field.name);
                 let mut writable = layer.clone_box();

@@ -130,7 +130,7 @@ pub(crate) fn run_replay(
     )
     .map_err(CliError::classified)?;
     let mut authorizer =
-        workflow::replay::SystemAuthorizer::new(policy, registry, arguments.allow_malformed_live);
+        workflow::replay::SystemAuthorizer::new(policy, arguments.allow_malformed_live);
     let options = workflow::replay::Options {
         interface: requested_interface.clone(),
         link_mode: arguments.link_mode.into(),
@@ -380,7 +380,7 @@ fn replay_capture_output<W: Write>(
     Ok(output)
 }
 
-pub(crate) fn write_replay_capture_evidence<W: Write>(
+fn write_replay_capture_evidence<W: Write>(
     writer: &mut CaptureOutput<W>,
     evidence: workflow::replay::FrameEvidence,
 ) -> Result<(), workflow::replay::Error> {

@@ -66,7 +66,6 @@ reflective_layer! {
         "sender_protocol" => { kind: Ipv4, derived: false, required: true, description: "Sender IPv4 address", get |layer| Some(reflect_get(&layer.sender_protocol)), set |layer, value, name| reflect_set(&mut layer.sender_protocol, arp_schema(), name, value), layout: (14, 18) },
         "target_hardware" => { kind: Mac, derived: false, required: true, description: "Target hardware address", get |layer| Some(reflect_get(&layer.target_hardware)), set |layer, value, name| reflect_set(&mut layer.target_hardware, arp_schema(), name, value), layout: (18, 24) },
         "target_protocol" => { kind: Ipv4, derived: false, required: true, description: "Target IPv4 address", get |layer| Some(reflect_get(&layer.target_protocol)), set |layer, value, name| reflect_set(&mut layer.target_protocol, arp_schema(), name, value), layout: (24, 28) },
-        normalize |layer| { layer.hardware_len.normalize(); layer.protocol_len.normalize(); }
     }
     layout pub(crate) fn arp_layout();
 }

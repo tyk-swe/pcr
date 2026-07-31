@@ -351,7 +351,7 @@ fn external_codec_dependent_on_ethernet_macs_uses_the_rebuild_fallback() {
             source: [0; 6],
             ether_type: WireValue::Exact(0x88b5),
         })
-        .push(MacSensitiveLayer);
+        .push(MacSensitiveLayer::default());
 
     let report = client
         .send(

@@ -100,20 +100,3 @@ impl Default for ReassemblyLimits {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn preferred_public_reassembly_names_are_usable() {
-        let limits = super::ReassemblyLimits::default();
-        let reassembler = super::fragment::Reassembler::new(
-            limits.clone(),
-            super::fragment::OverlapPolicy::default(),
-        );
-        assert_eq!(reassembler.flow_count(), 0);
-
-        let reassembler = super::tcp::Reassembler::new(limits.clone());
-        assert_eq!(reassembler.flow_count(), 0);
-        assert_eq!(*reassembler.limits(), limits);
-    }
-}

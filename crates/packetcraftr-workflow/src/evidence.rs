@@ -12,7 +12,7 @@ pub(super) use candidate_selection::{
 pub(super) use exact_validation::{
     ExchangeEvidence, ExchangeEvidenceError, MatchedResponseEvidence, ResponseEvidence,
     format_exchange_evidence_error, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_exchange_evidence, validate_frame,
+    validate_capture_statistics_evidence, validate_exchange_evidence,
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
 

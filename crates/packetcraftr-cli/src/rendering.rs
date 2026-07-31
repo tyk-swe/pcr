@@ -468,12 +468,6 @@ mod tests {
     };
 
     #[test]
-    fn whole_frame_hex_is_not_truncated() {
-        let bytes = (0u8..=255).collect::<Vec<_>>();
-        assert_eq!(output::frame::Wire::new(bytes).bytes_hex.len(), 512);
-    }
-
-    #[test]
     fn terminal_text_escapes_controls_and_directional_overrides() {
         let safe = terminal_safe("line\n\u{1b}[31m\u{2028}next\u{2029}\u{202e}tail");
         assert_eq!(

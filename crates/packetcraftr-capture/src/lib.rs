@@ -122,22 +122,6 @@ impl Frame {
     pub fn bytes(&self) -> &Bytes {
         &self.bytes
     }
-
-    pub fn validate(&self) -> Result<(), Error> {
-        if self.bytes.len() != self.captured_length as usize {
-            return Err(Error::CapturedLengthMismatch {
-                declared: self.captured_length,
-                actual: self.bytes.len(),
-            });
-        }
-        if self.original_length < self.captured_length {
-            return Err(Error::OriginalLengthTooSmall {
-                captured: self.captured_length,
-                original: self.original_length,
-            });
-        }
-        Ok(())
-    }
 }
 
 impl<'de> Deserialize<'de> for Frame {
@@ -185,21 +169,5 @@ mod tests {
             "bytes": [1]
         });
         assert!(serde_json::from_value::<Frame>(value).is_err());
-    }
-
-    #[test]
-    fn bsd_raw_and_standard_raw_have_distinct_link_types() {
-        assert_eq!(LinkType::BSD_RAW, LinkType(12));
-        assert_eq!(LinkType::RAW, LinkType(101));
-        assert_ne!(LinkType::BSD_RAW, LinkType::RAW);
-    }
-
-    #[test]
-    fn constructors_preserve_length_invariants() {
-        let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::ETHERNET, vec![1, 2]).unwrap();
-        assert_eq!(frame.captured_length(), 2);
-        assert_eq!(frame.original_length(), 2);
-        assert_eq!(frame.bytes().as_ref(), &[1, 2]);
-        assert!(frame.validate().is_ok());
     }
 }

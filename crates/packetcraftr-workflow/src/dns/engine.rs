@@ -16,7 +16,7 @@ use super::{
     ProtocolRegistry, ResponseCandidate, ResponseEvidence, Stats, SystemTime,
     classify_dns_response, encode_dns_query, push_diagnostic_once, push_undecoded_limit_diagnostic,
     response_within_deadline, retain_evidence, select_response_candidate,
-    validate_aggregate_evidence_limits, validate_capture_statistics_evidence, validate_frame,
+    validate_aggregate_evidence_limits, validate_capture_statistics_evidence,
     validate_response_frames_and_deadlines, validate_sent_byte_accounting,
 };
 use packetcraftr_packet::semantics::BuiltinProtocol;
@@ -430,8 +430,6 @@ pub(super) fn validate_dns_execution(
     timeout: Duration,
 ) -> Result<(), DnsError> {
     let attempt = probe.attempt;
-    validate_frame(&execution.sent_evidence, "sent")
-        .map_err(|message| DnsError::InvalidEvidence { attempt, message })?;
     let Some(network) = dns_network_envelope(&execution.sent) else {
         return Err(DnsError::InvalidEvidence {
             attempt,
@@ -491,13 +489,8 @@ pub(super) fn validate_dns_execution(
     .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_capture_statistics_evidence(execution.stats.capture)
         .map_err(|error| map_dns_evidence_error(attempt, error))?;
-    validate_response_frames_and_deadlines(
-        &execution.responses,
-        &execution.unsolicited,
-        &execution.undecoded,
-        timeout,
-    )
-    .map_err(|error| map_dns_evidence_error(attempt, error))?;
+    validate_response_frames_and_deadlines(&execution.responses, &execution.unsolicited, timeout)
+        .map_err(|error| map_dns_evidence_error(attempt, error))?;
     validate_aggregate_evidence_limits(
         &execution.responses,
         &execution.unsolicited,
@@ -531,7 +524,6 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsErro
         ),
         ExchangeEvidenceError::InvalidMatchedResponse { message }
         | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
-        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
         | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
         ExchangeEvidenceError::MatchedResponseAfterTimeout { latency, timeout } => {
             format!("matched response latency {latency:?} exceeds timeout {timeout:?}")
@@ -539,7 +531,6 @@ fn map_dns_evidence_error(attempt: u32, error: ExchangeEvidenceError) -> DnsErro
         ExchangeEvidenceError::SentCardinality { .. }
         | ExchangeEvidenceError::MatchedResponseOutsideBatch
         | ExchangeEvidenceError::SentPacketMismatch { .. }
-        | ExchangeEvidenceError::InvalidSentFrame { .. }
         | ExchangeEvidenceError::IncompleteStatistics => {
             unreachable!("DNS validation does not produce batch-only evidence errors")
         }

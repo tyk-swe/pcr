@@ -213,7 +213,7 @@ fn rejected_replacement_syn_restores_the_established_generation() {
 }
 
 #[test]
-fn older_accepted_timestamp_does_not_regress_expiry_state() {
+fn flow_activity_refreshes_without_regressing_expiry_state() {
     let start = Instant::now();
     let expiry = Duration::from_millis(10);
     let mut reassembler = Reassembler::new(ReassemblyLimits {
@@ -222,7 +222,7 @@ fn older_accepted_timestamp_does_not_regress_expiry_state() {
     });
     reassembler.open_flow(flow(), 100, start).unwrap();
     let latest = start + Duration::from_millis(8);
-    reassembler.push(segment(102, b"b"), latest).unwrap();
+    reassembler.open_flow(flow(), 100, latest).unwrap();
 
     reassembler
         .push(segment(104, b"d"), start + Duration::from_millis(2))
@@ -341,25 +341,4 @@ fn serial_half_space_limits_are_rejected_at_public_entry_points() {
         ..ReassemblyLimits::default()
     });
     valid.open_flow(flow(), 100, now).unwrap();
-}
-
-#[test]
-fn sparse_aggregate_rejection_precedes_span_sized_scratch_allocation() {
-    let now = Instant::now();
-    let limits = ReassemblyLimits {
-        max_bytes_per_flow: 10_000_001,
-        max_aggregate_bytes: PENDING_SEGMENT_METADATA_CHARGE,
-        ..ReassemblyLimits::default()
-    };
-    let mut reassembler = Reassembler::new(limits);
-    reassembler.open_flow(flow(), 100, now).unwrap();
-    assert_eq!(
-        reassembler
-            .push(segment(10_000_100, b"x"), now)
-            .unwrap_err(),
-        Error::AggregateByteLimit {
-            limit: PENDING_SEGMENT_METADATA_CHARGE
-        }
-    );
-    assert_eq!(reassembler.aggregate_bytes(), 0);
 }

@@ -11,9 +11,11 @@ use super::pipeline::{AnalysisLimits, AnalysisOptions};
 use super::*;
 use packetcraftr_capture::{Frame, LinkType, Writer};
 use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
-use packetcraftr_packet::field::WireValue;
 use packetcraftr_packet::filter::Options as FilterOptions;
+use packetcraftr_packet::layer::Raw;
 use packetcraftr_session::tcp::Event as SessionTcpEvent;
+
+use super::session_index::{tcp_segment, udp_flow};
 
 fn registry() -> Arc<ProtocolRegistry> {
     Arc::new(packetcraftr_protocol::builtin::registry().unwrap())
@@ -83,29 +85,12 @@ fn udp_packet(source: [u8; 4], source_port: u16, destination_port: u16) -> Packe
     packet
 }
 
-fn fragment_packet(offset_units: u16, more_fragments: bool, payload: &'static [u8]) -> Packet {
-    let mut packet = Packet::new();
-    packet
-        .push(Ipv4 {
-            source: Ipv4Addr::new(10, 0, 0, 1),
-            destination: Ipv4Addr::new(10, 0, 0, 2),
-            identification: 7,
-            more_fragments,
-            fragment_offset: offset_units,
-            protocol: WireValue::Exact(17),
-            ..Ipv4::default()
-        })
-        .push(Raw::new(Bytes::from_static(payload)));
-    packet
-}
-
 #[derive(Debug, PartialEq)]
 struct Observed {
     number: u64,
     tcp_stream: Option<u64>,
     udp_stream: Option<u64>,
     tcp_event_count: usize,
-    completed_fragment_bytes: Option<usize>,
 }
 
 fn observe(
@@ -119,10 +104,6 @@ fn observe(
             tcp_stream: record.tcp_stream,
             udp_stream: record.udp_stream,
             tcp_event_count: record.tcp_events.len(),
-            completed_fragment_bytes: record.fragment_events.iter().find_map(|event| match event {
-                FragmentEvent::Complete(datagram) => Some(datagram.bytes.len()),
-                _ => None,
-            }),
         });
         Ok(())
     })

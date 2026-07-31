@@ -5,20 +5,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-
 from .command import CommandFailure, CommandRunner
 from .topology import Topology
 
-
-@dataclass(frozen=True)
-class DiagnosticSection:
-    title: str
-    body: str
-
-
 def collect(runner: CommandRunner, topology: Topology) -> str:
-    sections: list[DiagnosticSection] = []
+    sections: list[tuple[str, str]] = []
     _capture(
         sections,
         runner,
@@ -70,13 +61,12 @@ def collect(runner: CommandRunner, topology: Topology) -> str:
             )
 
     return "\n\n".join(
-        f"--- {section.title} ---\n{section.body}"
-        for section in sections
+        f"--- {title} ---\n{body}" for title, body in sections
     )
 
 
 def _capture(
-    sections: list[DiagnosticSection],
+    sections: list[tuple[str, str]],
     runner: CommandRunner,
     title: str,
     argv: tuple[str, ...],
@@ -94,6 +84,6 @@ def _capture(
         parts.append(output if output else "<stdout empty>")
         if stderr:
             parts.append(f"stderr:\n{stderr}")
-        sections.append(DiagnosticSection(title, "\n".join(parts)))
+        sections.append((title, "\n".join(parts)))
     except CommandFailure as error:
-        sections.append(DiagnosticSection(title, f"diagnostic command failed: {error}"))
+        sections.append((title, f"diagnostic command failed: {error}"))

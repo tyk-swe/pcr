@@ -67,8 +67,7 @@ impl CommandName {
             }
             Self::Send => SEND_FORMATS,
             Self::Exchange => EXCHANGE_FORMATS,
-            Self::Capture => CAPTURE_FORMATS,
-            Self::Read => READ_FORMATS,
+            Self::Capture | Self::Read => CAPTURE_FORMATS,
             Self::Replay => REPLAY_FORMATS,
             Self::Follow => FOLLOW_FORMATS,
             Self::Scan | Self::Traceroute | Self::Dns | Self::Fuzz | Self::Expert => TOOL_FORMATS,
@@ -118,15 +117,6 @@ impl OutputFormat {
             Self::Raw => "raw",
             Self::Pcap => "pcap",
             Self::Pcapng => "pcapng",
-        }
-    }
-
-    /// Structured output mode, if this is a machine-envelope format.
-    pub const fn mode(self) -> Option<OutputMode> {
-        match self {
-            Self::Json => Some(OutputMode::Aggregate),
-            Self::Ndjson => Some(OutputMode::Stream),
-            Self::Text | Self::Hex | Self::Raw | Self::Pcap | Self::Pcapng => None,
         }
     }
 }
@@ -181,13 +171,6 @@ const CAPTURE_FORMATS: &[OutputFormat] = &[
     OutputFormat::Pcap,
     OutputFormat::Pcapng,
 ];
-const READ_FORMATS: &[OutputFormat] = &[
-    OutputFormat::Text,
-    OutputFormat::Ndjson,
-    OutputFormat::Hex,
-    OutputFormat::Pcap,
-    OutputFormat::Pcapng,
-];
 const REPLAY_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Json,
@@ -236,7 +219,7 @@ pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
     },
     CommandOutputContract {
         command: CommandName::Read,
-        formats: READ_FORMATS,
+        formats: CAPTURE_FORMATS,
     },
     CommandOutputContract {
         command: CommandName::Replay,
@@ -288,9 +271,6 @@ pub enum OutputContractError {
         command: CommandName,
         format: OutputFormat,
     },
-    InvalidFrame {
-        message: String,
-    },
     TimestampOutOfRange,
     SequenceOverflow,
 }
@@ -311,9 +291,6 @@ impl fmt::Display for OutputContractError {
                 }
                 Ok(())
             }
-            Self::InvalidFrame { message } => {
-                write!(formatter, "invalid captured frame for output: {message}")
-            }
             Self::TimestampOutOfRange => {
                 formatter.write_str("capture timestamp is outside the signed v1 output range")
             }
@@ -333,11 +310,6 @@ impl Classified for OutputContractError {
                 "cli.output_format",
                 Kind::Cli,
                 Some("choose one of the formats listed for this command"),
-            ),
-            Self::InvalidFrame { .. } => Classification::new(
-                "packet.capture_record",
-                Kind::Packet,
-                Some("repair the capture record lengths before rendering it"),
             ),
             Self::TimestampOutOfRange => Classification::new(
                 "packet.timestamp_range",

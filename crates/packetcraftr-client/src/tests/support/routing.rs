@@ -95,8 +95,8 @@ impl RouteProvider for DestinationRoutes {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct MacSensitiveLayer;
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MacSensitiveLayer(pub(crate) Option<Bytes>);
 
 pub(crate) fn mac_sensitive_schema() -> &'static LayerSchema {
     static SCHEMA: OnceLock<LayerSchema> = OnceLock::new();
@@ -195,12 +195,24 @@ impl LayerCodec for MacSensitiveCodec {
         _payload: &[u8],
         context: &LayerEncodeContext<'_>,
     ) -> Result<EncodedLayer, CodecError> {
-        let source = context
-            .packet
-            .get::<Ethernet>()
-            .expect("test packet has Ethernet")
-            .source;
-        Ok(EncodedLayer::header(vec![source[0]], layer.clone_box()))
+        let layer = layer
+            .as_any()
+            .downcast_ref::<MacSensitiveLayer>()
+            .ok_or_else(|| CodecError::WrongLayer {
+                expected: self.protocol_id(),
+                actual: layer.protocol_id().clone(),
+            })?;
+        let bytes = match &layer.0 {
+            Some(bytes) => bytes.to_vec(),
+            None => vec![
+                context
+                    .packet
+                    .get::<Ethernet>()
+                    .expect("test packet has Ethernet")
+                    .source[0],
+            ],
+        };
+        Ok(EncodedLayer::header(bytes, Box::new(layer.clone())))
     }
 
     fn decode(
@@ -215,14 +227,17 @@ impl LayerCodec for MacSensitiveCodec {
                 available: 0,
             });
         }
-        Ok(DecodedLayerValue::terminal(Box::new(MacSensitiveLayer), 1))
+        Ok(DecodedLayerValue::terminal(
+            Box::new(MacSensitiveLayer::default()),
+            1,
+        ))
     }
 
     fn make_layer(
         &self,
         _fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, CodecError> {
-        Ok(Box::new(MacSensitiveLayer))
+        Ok(Box::new(MacSensitiveLayer::default()))
     }
 }
 

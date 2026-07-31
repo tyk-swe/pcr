@@ -31,19 +31,6 @@ pub(crate) fn finish_route(
         validate_interface_hint(hint, &snapshot.interface.id)?;
     }
     validate_preferred_source_family(destination, preferred_source)?;
-    if let Some(source) = preferred_source
-        && !snapshot
-            .interface
-            .addresses
-            .iter()
-            .any(|assigned| assigned.address == source)
-    {
-        return Err(NativeRouteError::SourceUnavailable {
-            preferred_source: source,
-            interface: snapshot.interface.id.name.clone(),
-        });
-    }
-
     if snapshot
         .next_hop
         .is_some_and(|next_hop| next_hop.is_ipv4() != destination.is_ipv4())
@@ -66,16 +53,40 @@ pub(crate) fn finish_route(
             message: "selected source family differs from destination family".to_owned(),
         });
     }
-    let mtu = snapshot
-        .route_mtu
-        .filter(|mtu| *mtu != 0)
-        .or(snapshot.interface.mtu.filter(|mtu| *mtu != 0))
-        .ok_or_else(|| NativeRouteError::InvalidResponse {
-            message: format!(
-                "interface {} reported no usable MTU",
-                snapshot.interface.id.name
-            ),
-        })?;
+    if !snapshot
+        .interface
+        .addresses
+        .iter()
+        .any(|assigned| assigned.address == selected_address)
+    {
+        return Err(if let Some(preferred_source) = preferred_source {
+            NativeRouteError::SourceUnavailable {
+                preferred_source,
+                interface: snapshot.interface.id.name.clone(),
+            }
+        } else {
+            NativeRouteError::InvalidResponse {
+                message: format!(
+                    "selected source {selected_address} is not assigned to interface {}",
+                    snapshot.interface.id.name
+                ),
+            }
+        });
+    }
+    let route_mtu = snapshot.route_mtu.filter(|mtu| *mtu != 0);
+    let interface_mtu = snapshot.interface.mtu.filter(|mtu| *mtu != 0);
+    let mtu = match (route_mtu, interface_mtu) {
+        (Some(route), Some(interface)) => route.min(interface),
+        (Some(mtu), None) | (None, Some(mtu)) => mtu,
+        (None, None) => {
+            return Err(NativeRouteError::InvalidResponse {
+                message: format!(
+                    "interface {} reported no usable MTU",
+                    snapshot.interface.id.name
+                ),
+            });
+        }
+    };
     let selection_reason = match snapshot.selection_reason {
         RouteSelectionReason::Local | RouteSelectionReason::InterfaceOnly => {
             snapshot.selection_reason

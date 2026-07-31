@@ -16,12 +16,8 @@ impl ByteRange {
         Self { start, end }
     }
 
-    pub fn len(self) -> usize {
+    pub(crate) fn len(self) -> usize {
         self.end.saturating_sub(self.start)
-    }
-
-    pub fn is_empty(self) -> bool {
-        self.start >= self.end
     }
 
     pub(crate) fn checked_shift(&mut self, amount: usize) -> bool {

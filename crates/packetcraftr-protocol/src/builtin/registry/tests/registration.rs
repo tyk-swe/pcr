@@ -35,6 +35,19 @@ fn builtin_registration_is_deterministic_and_has_portable_roots() {
 }
 
 #[test]
+fn gre_transparent_ethernet_selects_the_ethernet_codec() {
+    let registry = default_registry().unwrap();
+
+    assert_eq!(
+        registry
+            .child_for("gre", packetcraftr_packet::registry::Discriminator(0x6558))
+            .unwrap()
+            .as_str(),
+        "ethernet"
+    );
+}
+
+#[test]
 fn every_constructible_builtin_publishes_its_schema_through_the_registry() {
     let registry = default_registry().unwrap();
     let defaults = std::collections::BTreeMap::new();

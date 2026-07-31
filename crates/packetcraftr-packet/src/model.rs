@@ -245,13 +245,6 @@ impl Packet {
         Ok(())
     }
 
-    pub fn normalize(&mut self) {
-        self.invalidate_encoded_payload_lengths();
-        for layer in &mut self.layers {
-            layer.normalize();
-        }
-    }
-
     /// Compares protocol order and every reflected field.
     pub fn structurally_eq(&self, other: &Self) -> bool {
         if self.len() != other.len() {

@@ -88,10 +88,6 @@ impl Dissector {
         Self { registry }
     }
 
-    pub fn registry(&self) -> &Arc<ProtocolRegistry> {
-        &self.registry
-    }
-
     pub fn decode(
         &self,
         frame: Frame,
@@ -100,7 +96,6 @@ impl Dissector {
         if options.max_layers == 0 {
             return Err(DecodeError::LayerLimit { limit: 0 });
         }
-        frame.validate()?;
         if frame.bytes().len() > options.max_packet_size {
             return Err(DecodeError::PacketSizeLimit {
                 actual: frame.bytes().len(),

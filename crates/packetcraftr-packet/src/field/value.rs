@@ -32,11 +32,6 @@ impl<T> WireValue<T> {
             Self::Auto | Self::Raw(_) => None,
         }
     }
-
-    /// Resets a dependent field so the next build derives it again.
-    pub fn normalize(&mut self) {
-        *self = Self::Auto;
-    }
 }
 
 /// Stable reflective field types exposed by [`crate::layer::Schema`].
@@ -106,13 +101,6 @@ impl FieldValue {
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(value) => Some(*value),
-            _ => None,
-        }
-    }
-
-    pub fn as_bytes(&self) -> Option<&[u8]> {
-        match self {
-            Self::Bytes(value) => Some(value),
             _ => None,
         }
     }
@@ -214,11 +202,8 @@ mod tests {
     use super::{FieldValue, WireValue};
 
     #[test]
-    fn wire_value_exact_and_normalize_cover_all_modes() {
-        let mut exact = WireValue::Exact(7_u16);
-        assert_eq!(exact.exact(), Some(&7));
-        exact.normalize();
-        assert_eq!(exact, WireValue::Auto);
+    fn wire_value_exact_accepts_only_exact_values() {
+        assert_eq!(WireValue::Exact(7_u16).exact(), Some(&7));
         assert_eq!(WireValue::<u16>::Auto.exact(), None);
         assert_eq!(
             WireValue::<u16>::Raw(Bytes::from_static(&[1, 2])).exact(),
@@ -230,13 +215,8 @@ mod tests {
     fn field_value_accessors_accept_only_their_declared_kind() {
         assert_eq!(FieldValue::Unsigned(42).as_u64(), Some(42));
         assert_eq!(FieldValue::Bool(true).as_bool(), Some(true));
-        assert_eq!(
-            FieldValue::Bytes(Bytes::from_static(&[1, 2])).as_bytes(),
-            Some(&[1, 2][..])
-        );
         assert_eq!(FieldValue::Signed(42).as_u64(), None);
         assert_eq!(FieldValue::Unsigned(1).as_bool(), None);
-        assert_eq!(FieldValue::Text("bytes".to_owned()).as_bytes(), None);
     }
 
     #[test]

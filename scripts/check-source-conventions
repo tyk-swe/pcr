@@ -19,19 +19,17 @@ report() {
     status=1
 }
 
-files() {
-    find crates fuzz/fuzz_targets -name '*.rs' -type f 2>/dev/null | sort
-}
+mapfile -t files < <(find crates fuzz/fuzz_targets -name '*.rs' -type f 2>/dev/null | sort)
 
-while IFS= read -r file; do
-    mapfile -t header < <(sed -n '1,2p' "$file")
+for file in "${files[@]}"; do
+    mapfile -n 2 -t header < "$file"
     if [[ ${header[0]-} != "$expected_copyright" || ${header[1]-} != "$expected_spdx" ]]; then
         report "$file" 'missing the copyright/SPDX header pair on lines 1-2'
     fi
-done < <(files)
+done
 
 if ((status == 0)); then
-    printf 'source conventions: %s files checked, all clean\n' "$(files | wc -l | tr -d ' ')"
+    printf 'source conventions: %s files checked, all clean\n' "${#files[@]}"
 fi
 
 exit "$status"

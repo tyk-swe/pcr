@@ -4,12 +4,11 @@
 //! Conversation indexing and adapters from decoded layers to the session
 //! crate's reassembly inputs.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::net::IpAddr;
 
 use super::{
-    AnalysisError, Bytes, DecodedPacket, FlowKey, Fragment, FragmentKey, Ipv4, Ipv6, Ipv6Fragment,
-    Packet, Padding, Raw, Segment, Tcp, Udp,
+    AnalysisError, Bytes, DecodedPacket, FlowKey, Ipv4, Ipv6, Packet, Padding, Segment, Tcp, Udp,
 };
 
 /// One conversation, with its two endpoints in a direction-neutral order.
@@ -17,14 +16,14 @@ use super::{
 /// Both directions of a flow map onto the same canonical value, which is what
 /// lets one index describe the conversation an operator follows rather than
 /// the two one-way flows the wire carries.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct CanonicalFlow {
-    pub first: (IpAddr, u16),
-    pub second: (IpAddr, u16),
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(super) struct CanonicalFlow {
+    pub(super) first: (IpAddr, u16),
+    pub(super) second: (IpAddr, u16),
 }
 
 impl CanonicalFlow {
-    pub fn from_flow(flow: &FlowKey) -> Self {
+    pub(super) fn from_flow(flow: &FlowKey) -> Self {
         let near = (flow.source, flow.source_port);
         let far = (flow.destination, flow.destination_port);
         if near <= far {
@@ -48,20 +47,16 @@ impl CanonicalFlow {
 /// same conversation whether or not the run was filtered — which is what lets
 /// one command report an index and another extract it.
 #[derive(Debug, Default)]
-pub struct StreamIndex {
-    assignments: BTreeMap<CanonicalFlow, u64>,
+pub(super) struct StreamIndex {
+    assignments: HashMap<CanonicalFlow, u64>,
 }
 
 impl StreamIndex {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// Returns the conversation index for `flow`, assigning the next index
     /// on first sight. `number` is the capture frame being processed and
     /// `max_flows` the table bound; exceeding it is an error rather than a
     /// silent misattribution.
-    pub fn assign(
+    pub(super) fn assign(
         &mut self,
         flow: &FlowKey,
         number: u64,
@@ -80,34 +75,6 @@ impl StreamIndex {
         let index = self.assignments.len() as u64;
         self.assignments.insert(canonical, index);
         Ok(index)
-    }
-
-    pub fn get(&self, flow: &FlowKey) -> Option<u64> {
-        self.assignments
-            .get(&CanonicalFlow::from_flow(flow))
-            .copied()
-    }
-
-    pub fn len(&self) -> usize {
-        self.assignments.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.assignments.is_empty()
-    }
-
-    /// Conversations in index order, for reporting.
-    ///
-    /// The table itself sorts by canonical endpoints, which is not the order
-    /// indices were assigned in, so this reorders explicitly.
-    pub fn conversations(&self) -> Vec<(&CanonicalFlow, u64)> {
-        let mut all = self
-            .assignments
-            .iter()
-            .map(|(flow, index)| (flow, *index))
-            .collect::<Vec<_>>();
-        all.sort_by_key(|(_, index)| *index);
-        all
     }
 }
 
@@ -171,19 +138,6 @@ pub(super) fn transports(packet: &Packet) -> Transports<'_> {
     found
 }
 
-/// The raw payload directly following the layer at `index`, if any.
-///
-/// Only fragment payloads use this: both built-in IP codecs force a true
-/// fragment's payload to decode as a single raw layer, so the layer after
-/// the fragmented header is the whole payload.
-fn payload_after(packet: &Packet, index: usize) -> Bytes {
-    packet
-        .layer(index + 1)
-        .and_then(|layer| layer.as_any().downcast_ref::<Raw>())
-        .map(|raw| raw.bytes.clone())
-        .unwrap_or_default()
-}
-
 /// The exact wire bytes of the TCP payload at `transport_index`.
 ///
 /// The payload is reconstructed from the decode layout rather than from a
@@ -223,7 +177,7 @@ pub(super) fn transport_payload(decoded: &DecodedPacket, transport_index: usize)
 ///
 /// A pure control segment has an empty payload rather than no segment,
 /// because an empty SYN, FIN, or RST still carries stream state.
-pub fn tcp_segment(decoded: &DecodedPacket) -> Option<Segment> {
+pub(super) fn tcp_segment(decoded: &DecodedPacket) -> Option<Segment> {
     let (index, flow, tcp) = transports(&decoded.packet).tcp?;
     Some(Segment {
         flow,
@@ -236,55 +190,6 @@ pub fn tcp_segment(decoded: &DecodedPacket) -> Option<Segment> {
 }
 
 /// Maps a decoded stack onto the innermost UDP flow, when there is one.
-pub fn udp_flow(decoded: &DecodedPacket) -> Option<FlowKey> {
+pub(super) fn udp_flow(decoded: &DecodedPacket) -> Option<FlowKey> {
     transports(&decoded.packet).udp.map(|(_, flow)| flow)
-}
-
-/// Maps a decoded stack onto an IP fragment awaiting reassembly.
-///
-/// Both built-in IP codecs refuse to descend into a fragmented payload, so a
-/// true fragment's payload is always the raw layer that follows the network
-/// header; an atomic fragment (offset zero and no more-fragments flag) needs
-/// no reassembly and maps to nothing.
-pub fn ip_fragment(decoded: &DecodedPacket) -> Option<Fragment> {
-    for (index, layer) in decoded.packet.iter().enumerate() {
-        if let Some(ipv4) = layer.as_any().downcast_ref::<Ipv4>() {
-            if ipv4.more_fragments || ipv4.fragment_offset > 0 {
-                return Some(Fragment {
-                    key: FragmentKey {
-                        source: ipv4.source.into(),
-                        destination: ipv4.destination.into(),
-                        identification: u32::from(ipv4.identification),
-                        next_header: ipv4.protocol.exact().copied()?,
-                    },
-                    // IPv4 encodes the offset in eight-byte units.
-                    offset: u32::from(ipv4.fragment_offset) * 8,
-                    more_fragments: ipv4.more_fragments,
-                    bytes: payload_after(&decoded.packet, index),
-                });
-            }
-        } else if let Some(header) = layer.as_any().downcast_ref::<Ipv6Fragment>()
-            && (header.more_fragments || header.fragment_offset > 0)
-        {
-            let (source, destination) = decoded
-                .packet
-                .iter()
-                .take(index)
-                .filter_map(|layer| layer.as_any().downcast_ref::<Ipv6>())
-                .map(|ipv6| (ipv6.source.into(), ipv6.destination.into()))
-                .next_back()?;
-            return Some(Fragment {
-                key: FragmentKey {
-                    source,
-                    destination,
-                    identification: header.identification,
-                    next_header: header.next_header.exact().copied()?,
-                },
-                offset: u32::from(header.fragment_offset) * 8,
-                more_fragments: header.more_fragments,
-                bytes: payload_after(&decoded.packet, index),
-            });
-        }
-    }
-    None
 }

@@ -66,10 +66,6 @@ impl<L, C> ActiveNeighborResolver<L, C> {
             cache: Arc::new(Mutex::new(HashMap::new())),
         })
     }
-
-    pub fn options(&self) -> &NeighborResolutionOptions {
-        &self.options
-    }
 }
 
 impl<L, C> Default for ActiveNeighborResolver<L, C>
@@ -280,7 +276,7 @@ where
                         &mut captured,
                         &mut captured_bytes,
                         &mut evidence_truncated,
-                    )?;
+                    );
                     return Ok(NeighborExchangeOutcome {
                         mac_address: Some(mac_address),
                         attempts: attempt,
@@ -437,14 +433,13 @@ fn retain_evidence(
     captured_bytes: &mut usize,
     truncated: &mut bool,
 ) {
-    let next_bytes = captured_bytes.checked_add(frame.bytes().len());
     if captured.len() >= options.max_capture_queue_frames
-        || next_bytes.is_none_or(|bytes| bytes > options.max_captured_bytes)
+        || *captured_bytes + frame.bytes().len() > options.max_captured_bytes
     {
         *truncated = true;
         return;
     }
-    *captured_bytes = next_bytes.expect("checked evidence bytes");
+    *captured_bytes += frame.bytes().len();
     captured.push(frame);
 }
 
@@ -454,34 +449,17 @@ fn retain_matching_evidence(
     captured: &mut Vec<Frame>,
     captured_bytes: &mut usize,
     truncated: &mut bool,
-) -> Result<(), NeighborError> {
+) {
     let frame_length = frame.bytes().len();
     while captured.len() >= options.max_capture_queue_frames
-        || captured_bytes
-            .checked_add(frame_length)
-            .is_none_or(|bytes| bytes > options.max_captured_bytes)
+        || *captured_bytes + frame_length > options.max_captured_bytes
     {
-        let Some(discarded) = captured.first() else {
-            return Err(NeighborError::State {
-                message: "matching capture frame exceeded its validated evidence bound".to_owned(),
-            });
-        };
-        *captured_bytes = captured_bytes
-            .checked_sub(discarded.bytes().len())
-            .ok_or_else(|| NeighborError::State {
-                message: "neighbor evidence byte accounting underflowed".to_owned(),
-            })?;
-        captured.remove(0);
+        let discarded = captured.remove(0);
+        *captured_bytes -= discarded.bytes().len();
         *truncated = true;
     }
-    *captured_bytes =
-        captured_bytes
-            .checked_add(frame_length)
-            .ok_or_else(|| NeighborError::State {
-                message: "neighbor evidence byte accounting overflowed".to_owned(),
-            })?;
+    *captured_bytes += frame_length;
     captured.push(frame);
-    Ok(())
 }
 
 fn validate_captured_frame(
@@ -489,13 +467,6 @@ fn validate_captured_frame(
     frame: &Frame,
     snap_length: usize,
 ) -> Result<(), NeighborError> {
-    frame.validate().map_err(|error| {
-        resolution_error(
-            &request.interface,
-            request.target,
-            format!("capture returned an invalid frame: {error}"),
-        )
-    })?;
     if frame.bytes().len() > snap_length {
         return Err(resolution_error(
             &request.interface,

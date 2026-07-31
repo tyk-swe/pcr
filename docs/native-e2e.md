@@ -1,7 +1,7 @@
 # Linux native E2E testing
 
 The native E2E harness exercises PacketcraftR's Linux networking commands in
-seven isolated cases. Each case owns this topology for its full lifecycle:
+nine isolated cases. Each case owns this topology for its full lifecycle:
 
 ```text
 pcr-client <---- veth ----> pcr-router <---- veth ----> pcr-server
@@ -80,13 +80,15 @@ echoes from the requested port, receives without replying, or replies from a
 deliberately different source port. The fixture uses only Python
 standard-library sockets and never imports PacketcraftR.
 
-The seven command-specific cases cover:
+The nine command-specific cases cover:
 
 - IPv4 and IPv6 route planning without interface or source hints;
 - IPv4 and IPv6 native Layer 3 send, verified by the independent receiver;
 - a successful native UDP exchange, including live capture and correlation;
 - a bounded exchange timeout with a fixture-confirmed request;
-- native capture of a wrong-source-port UDP reply and matcher rejection.
+- native capture of a wrong-source-port UDP reply and matcher rejection;
+- native filtering before capture-budget accounting; and
+- rejection of an invalid native capture filter.
 
 Every JSON result is validated against the committed output-v1 schema with an
 independent Draft 2020-12 validator before semantic assertions run.
@@ -143,7 +145,7 @@ tests/native_e2e/fixtures/              independent UDP/TCP responder
 tests/native_e2e/support/               topology, barriers, schema, diagnostics
 ```
 
-Future `capture`, `scan`, `dns`, `traceroute`, and `replay` modules belong
+Future `scan`, `dns`, `traceroute`, and `replay` modules belong
 under `tests/native_e2e/cases/`. They receive `CaseContext`, which exposes the
 already-built PacketcraftR binary, the case topology, independent fixtures,
 and the audited command runner. PacketcraftR must not be used to verify its own

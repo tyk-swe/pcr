@@ -26,15 +26,6 @@ impl Filter {
         options: FilterOptions,
     ) -> Result<Self, FilterError> {
         let compiled = parser::compile(source, registry, &options)?;
-        // The parser is the only producer of programs, and evaluation assumes
-        // it emits balanced postfix. Check that here so a future grammar
-        // change surfaces as a compile error rather than a silent mismatch.
-        if !parser::is_balanced(&compiled.program) {
-            return Err(FilterError::Syntax {
-                offset: 0,
-                message: "display filter did not reduce to a single condition".to_owned(),
-            });
-        }
         Ok(Self {
             program: compiled.program,
             requirements: compiled.requirements,

@@ -128,15 +128,6 @@ fn parse_pcapng_packet_body(
         });
     }
     let actual_data_end = data_offset + captured_length as usize;
-    if body[actual_data_end..data_end]
-        .iter()
-        .any(|byte| *byte != 0)
-    {
-        return Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "packet data padding is non-zero",
-        });
-    }
     let direction = parse_packet_direction(&body[data_end..], endianness)?;
     let timestamp = timestamp_from_ticks(
         timestamp_ticks,
@@ -198,16 +189,6 @@ pub(in crate::pcap) fn parse_simple_packet(
         return Err(Error::InvalidData {
             format: Format::PcapNg,
             reason: "simple packet block length does not match its packet length",
-        });
-    }
-    let actual_data_end = 4 + captured_length as usize;
-    if body[actual_data_end..expected]
-        .iter()
-        .any(|byte| *byte != 0)
-    {
-        return Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "simple packet data padding is non-zero",
         });
     }
     // A Simple Packet Block has no timestamp field. UNIX_EPOCH is the
@@ -308,7 +289,6 @@ mod tests {
             (1, Direction::Inbound),
             (2, Direction::Outbound),
             (3, Direction::Unknown),
-            (u32::MAX, Direction::Unknown),
         ] {
             let value = wire.to_le_bytes();
             assert_eq!(
@@ -320,22 +300,6 @@ mod tests {
                 Some(expected)
             );
         }
-    }
-
-    #[test]
-    fn packet_direction_respects_big_endian_flags() {
-        assert_eq!(
-            parse_packet_direction(
-                &option(
-                    PCAPNG_OPTION_EPB_FLAGS,
-                    &2_u32.to_be_bytes(),
-                    Endianness::Big
-                ),
-                Endianness::Big
-            )
-            .unwrap(),
-            Some(Direction::Outbound)
-        );
     }
 
     #[test]

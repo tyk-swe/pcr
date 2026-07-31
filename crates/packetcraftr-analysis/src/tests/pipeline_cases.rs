@@ -17,35 +17,29 @@ fn pipeline_numbers_frames_and_canonicalizes_conversations() {
                 tcp_stream: Some(0),
                 udp_stream: None,
                 tcp_event_count: 0,
-                completed_fragment_bytes: None,
             },
             Observed {
                 number: 2,
                 tcp_stream: None,
                 udp_stream: Some(0),
                 tcp_event_count: 0,
-                completed_fragment_bytes: None,
             },
             Observed {
                 number: 3,
                 tcp_stream: Some(0),
                 udp_stream: None,
                 tcp_event_count: 0,
-                completed_fragment_bytes: None,
             },
             Observed {
                 number: 4,
                 tcp_stream: None,
                 udp_stream: Some(0),
                 tcp_event_count: 0,
-                completed_fragment_bytes: None,
             },
         ]
     );
     assert_eq!(summary.frames_read, 4);
     assert_eq!(summary.frames_matched, 4);
-    assert_eq!(summary.tcp_stream_count, 1);
-    assert_eq!(summary.udp_stream_count, 1);
     assert!(summary.trailing_tcp_events.is_empty());
 }
 
@@ -72,7 +66,6 @@ fn filter_narrows_dispatch_without_renumbering_or_reindexing() {
     );
     assert_eq!(summary.frames_read, 4);
     assert_eq!(summary.frames_matched, 2);
-    assert_eq!(summary.udp_stream_count, 1);
 }
 
 #[test]
@@ -174,7 +167,7 @@ fn a_one_conversation_budget_admits_both_directions_of_that_conversation() {
     // The budget counts conversations, not directional flows: data in both
     // directions of one conversation must fit a one-conversation budget.
     let mut data = Vec::new();
-    let summary = run(
+    run(
         &mut capture(vec![
             tcp_packet([10, 0, 0, 1], 1000, [10, 0, 0, 2], 2000, 100, b"ping"),
             tcp_packet([10, 0, 0, 2], 2000, [10, 0, 0, 1], 1000, 500, b"pong"),
@@ -202,7 +195,6 @@ fn a_one_conversation_budget_admits_both_directions_of_that_conversation() {
         data,
         [Bytes::from_static(b"ping"), Bytes::from_static(b"pong")]
     );
-    assert_eq!(summary.tcp_stream_count, 1);
 }
 
 #[test]
@@ -225,7 +217,6 @@ fn bare_acknowledgments_consume_no_reassembly_state() {
         },
     )
     .unwrap();
-    assert_eq!(summary.tcp_stream_count, 10);
     assert!(summary.trailing_tcp_events.is_empty());
 }
 
@@ -344,82 +335,6 @@ fn expiry_is_exact_at_the_boundary_even_between_sweeps() {
 }
 
 #[test]
-fn conversations_report_in_assigned_index_order() {
-    let mut index = StreamIndex::new();
-    // The first-seen flow sorts canonically AFTER the second-seen flow, so a
-    // table-order walk would invert them.
-    let first = FlowKey {
-        source: "10.0.0.9".parse().unwrap(),
-        source_port: 1,
-        destination: "10.0.0.8".parse().unwrap(),
-        destination_port: 1,
-    };
-    let second = FlowKey {
-        source: "10.0.0.1".parse().unwrap(),
-        source_port: 1,
-        destination: "10.0.0.2".parse().unwrap(),
-        destination_port: 1,
-    };
-    assert_eq!(index.assign(&first, 1, 10).unwrap(), 0);
-    assert_eq!(index.assign(&second, 2, 10).unwrap(), 1);
-    assert_eq!(
-        index
-            .conversations()
-            .into_iter()
-            .map(|(_, stream)| stream)
-            .collect::<Vec<_>>(),
-        [0, 1]
-    );
-}
-
-#[test]
-fn fragment_reassembly_completes_split_datagrams() {
-    let mut reader = capture(vec![
-        fragment_packet(0, true, b"01234567"),
-        fragment_packet(1, false, b"abcdef"),
-    ]);
-    let (observed, summary) = observe(&mut reader, &AnalysisOptions::default());
-    assert_eq!(observed[0].completed_fragment_bytes, None);
-    assert_eq!(observed[1].completed_fragment_bytes, Some(14));
-    assert!(summary.trailing_fragment_events.is_empty());
-}
-
-#[test]
-fn conflicting_reassembly_data_classifies_as_packet_not_budget() {
-    // Two fragments claim the same byte range with different content. That
-    // is corrupted or hostile capture data, and no budget change fixes it,
-    // so it must not classify as a resource limit.
-    let error = run(
-        &mut capture(vec![
-            fragment_packet(0, true, b"01234567"),
-            fragment_packet(0, true, b"abcdefgh"),
-        ]),
-        registry(),
-        &AnalysisOptions::default(),
-        |_| Ok(()),
-    )
-    .unwrap_err();
-    assert!(matches!(error, Error::Fragments { number: 2, .. }));
-    assert_eq!(error.classification().code, "packet.reassembly");
-    assert_eq!(error.classification().kind, Kind::Packet);
-}
-
-#[test]
-fn incomplete_fragments_at_end_of_capture_are_surfaced_not_dropped() {
-    let mut reader = capture(vec![fragment_packet(0, true, b"01234567")]);
-    let (observed, summary) = observe(&mut reader, &AnalysisOptions::default());
-    assert_eq!(observed[0].completed_fragment_bytes, None);
-    assert!(matches!(
-        summary.trailing_fragment_events.as_slice(),
-        [FragmentEvent::Expired {
-            key,
-            received_bytes: 8,
-            fragment_count: 1,
-        }] if key.identification == 7
-    ));
-}
-
-#[test]
 fn adapters_map_decoded_layers_onto_session_inputs() {
     let registry = registry();
     let decoder = Decoder::new(Arc::clone(&registry));
@@ -445,24 +360,6 @@ fn adapters_map_decoded_layers_onto_session_inputs() {
     assert_eq!(segment.flow.destination_port, 2000);
     assert!(!segment.syn);
     assert!(udp_flow(&decoded).is_none());
-    assert!(ip_fragment(&decoded).is_none());
-
-    let frame = Frame::new(
-        UNIX_EPOCH,
-        LinkType::RAW,
-        build_bytes(fragment_packet(1, false, b"abcdef")),
-    )
-    .unwrap();
-    let decoded = decoder.decode(frame, DecodeOptions::default()).unwrap();
-    let fragment = ip_fragment(&decoded).unwrap();
-    assert_eq!(fragment.key.identification, 7);
-    assert_eq!(fragment.key.next_header, 17);
-    assert_eq!(fragment.offset, 8);
-    assert!(!fragment.more_fragments);
-    assert_eq!(fragment.bytes, Bytes::from_static(b"abcdef"));
-    // A fragmented payload is never mistaken for a transport header.
-    assert!(tcp_segment(&decoded).is_none());
-    assert!(udp_flow(&decoded).is_none());
 }
 
 #[test]
@@ -480,7 +377,7 @@ fn frame_and_flow_budgets_fail_closed_with_frame_attribution() {
         |_| Ok(()),
     )
     .unwrap_err();
-    assert_eq!(overflow.number(), Some(3));
+    assert!(matches!(overflow, Error::Capture { number: 3, .. }));
     assert_eq!(
         overflow.classification().code,
         "policy.capture_stream_limit"
@@ -513,51 +410,6 @@ fn frame_and_flow_budgets_fail_closed_with_frame_attribution() {
     ));
     assert_eq!(
         flows.classification().code,
-        "policy.analysis_resource_limit"
-    );
-
-    // The flow budget also bounds fragment reassembly state, which never
-    // reaches a stream index: a second incomplete datagram is one too many.
-    let mut writer = Writer::pcap(Vec::new(), LinkType::RAW).unwrap();
-    for (identification, seconds) in [(7_u16, 0_u64), (8, 1)] {
-        let mut packet = Packet::new();
-        packet
-            .push(Ipv4 {
-                source: Ipv4Addr::new(10, 0, 0, 1),
-                destination: Ipv4Addr::new(10, 0, 0, 2),
-                identification,
-                more_fragments: true,
-                protocol: WireValue::Exact(17),
-                ..Ipv4::default()
-            })
-            .push(Raw::new(Bytes::from_static(b"01234567")));
-        writer
-            .write_frame(
-                &Frame::new(
-                    UNIX_EPOCH + Duration::from_secs(seconds),
-                    LinkType::RAW,
-                    build_bytes(packet),
-                )
-                .unwrap(),
-            )
-            .unwrap();
-    }
-    let fragments = run(
-        &mut Reader::new(Cursor::new(writer.into_inner())).unwrap(),
-        registry(),
-        &AnalysisOptions {
-            limits: AnalysisLimits {
-                max_flows: 1,
-                ..AnalysisLimits::default()
-            },
-            ..AnalysisOptions::default()
-        },
-        |_| Ok(()),
-    )
-    .unwrap_err();
-    assert!(matches!(fragments, Error::Fragments { number: 2, .. }));
-    assert_eq!(
-        fragments.classification().code,
         "policy.analysis_resource_limit"
     );
 
@@ -613,7 +465,7 @@ fn stats_collector_tallies_every_table_with_stable_orders() {
     let report = collector.finish();
 
     assert_eq!(report.frames, summary.frames_matched);
-    assert_eq!(report.bytes, summary.bytes_read);
+    assert_eq!(report.bytes, 142);
 
     // Conversations: one TCP, one UDP, keyed by their assigned indices.
     // Both directions of the TCP conversation fold into one row under

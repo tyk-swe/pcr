@@ -73,7 +73,6 @@ reflective_layer! {
             set |layer, value, name| reflect_set(&mut layer.body, igmp_schema(), name, value),
             layout: (4, 4 + body_len)
         },
-        normalize |layer| { layer.checksum.normalize(); }
     }
     layout pub(crate) fn igmp_layout(body_len: usize);
 }

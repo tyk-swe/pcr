@@ -3,6 +3,84 @@
 
 use super::*;
 
+fn raw_ipv4(destination: Ipv4Addr) -> Vec<u8> {
+    let mut bytes = vec![0_u8; 20];
+    bytes[0] = 0x45;
+    bytes[2..4].copy_from_slice(&20_u16.to_be_bytes());
+    bytes[12..16].copy_from_slice(&Ipv4Addr::new(10, 0, 0, 1).octets());
+    bytes[16..20].copy_from_slice(&destination.octets());
+    bytes
+}
+
+fn raw_ethernet_request(payload: Vec<u8>, ether_type: u16, vlan: bool) -> Packet {
+    let mut request = Packet::new();
+    request.push(Ethernet {
+        destination: [0; 6],
+        source: [0; 6],
+        ether_type: WireValue::Exact(if vlan { 0x8100 } else { ether_type }),
+    });
+    if vlan {
+        request.push(Vlan {
+            vlan_id: 42,
+            ether_type: WireValue::Exact(ether_type),
+            ..Vlan::default()
+        });
+    }
+    request.push(Raw::new(Bytes::from(payload)));
+    request
+}
+
+fn permissive_layer2_options() -> SendOptions {
+    SendOptions {
+        destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+        plan: PlanOptions {
+            link_mode: LinkMode::Layer2,
+            ..PlanOptions::default()
+        },
+        build: BuildOptions {
+            mode: packetcraftr_packet::build::BuildMode::Permissive,
+            ..BuildOptions::default()
+        },
+        allow_permissive_live: true,
+    }
+}
+
+#[test]
+fn temporary_malformed_gre_can_hide_public_destination() {
+    let neighbors = CountingNeighbors::default();
+    let io = RecordingIo::default();
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        neighbors,
+        io.clone(),
+        TrafficPolicy {
+            allow_permissive_packets: true,
+            ..TrafficPolicy::default()
+        },
+    );
+
+    let mut outer = raw_ipv4(Ipv4Addr::new(10, 0, 0, 2));
+    outer[2..4].copy_from_slice(&44_u16.to_be_bytes());
+    outer[9] = 47;
+    outer.extend_from_slice(&[0, 1, 0x08, 0]); // unsupported GRE version, IPv4 payload
+    outer.extend_from_slice(&raw_ipv4(Ipv4Addr::new(8, 8, 8, 8)));
+
+    assert!(
+        client
+            .send(
+                raw_ethernet_request(outer, 0x0800, false),
+                permissive_layer2_options(),
+            )
+            .is_ok()
+    );
+    assert!(!io.0.lock().unwrap().is_empty());
+}
+
 #[test]
 fn mapped_private_ipv4_destination_is_not_treated_as_public_ipv6() {
     let destination = "::ffff:10.0.0.2".parse().unwrap();
@@ -60,6 +138,133 @@ fn materialized_packet_destinations_are_authorized() {
             TrafficPolicyError::PublicDestination { destination }
         )) if destination == IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
     ));
+}
+
+#[test]
+fn exact_wire_authorization_rejects_hidden_or_malformed_destinations() {
+    let neighbors = CountingNeighbors::default();
+    let io = RecordingIo::default();
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer2And3,
+            link_type: LinkType::ETHERNET,
+            ..route(LinkCapability::Layer2And3)
+        }),
+        neighbors.clone(),
+        io.clone(),
+        TrafficPolicy {
+            allow_permissive_packets: true,
+            ..TrafficPolicy::default()
+        },
+    );
+
+    for vlan in [false, true] {
+        assert!(matches!(
+            client.send(
+                raw_ethernet_request(raw_ipv4(Ipv4Addr::new(8, 8, 8, 8)), 0x0800, vlan),
+                permissive_layer2_options(),
+            ),
+            Err(ClientError::Policy(
+                TrafficPolicyError::PublicDestination { .. }
+            ))
+        ));
+    }
+    assert!(matches!(
+        client.send(
+            raw_ethernet_request(vec![0x45; 19], 0x0800, false),
+            permissive_layer2_options(),
+        ),
+        Err(ClientError::Policy(
+            TrafficPolicyError::InvalidPacketSemantics { .. }
+        ))
+    ));
+    let mut unsupported_routing = vec![0_u8; 48];
+    unsupported_routing[0] = 0x60;
+    unsupported_routing[4..6].copy_from_slice(&8_u16.to_be_bytes());
+    unsupported_routing[6] = 43;
+    unsupported_routing[7] = 64;
+    unsupported_routing[8..24]
+        .copy_from_slice(&"fd00::1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+    unsupported_routing[24..40]
+        .copy_from_slice(&"fd00::2".parse::<std::net::Ipv6Addr>().unwrap().octets());
+    unsupported_routing[40] = 59;
+    unsupported_routing[42] = u8::MAX;
+    unsupported_routing[43] = 1;
+    assert!(matches!(
+        client.send(
+            raw_ethernet_request(unsupported_routing, 0x86dd, false),
+            permissive_layer2_options(),
+        ),
+        Err(ClientError::Policy(
+            TrafficPolicyError::InvalidPacketSemantics { .. }
+        ))
+    ));
+    let mut fragmented = vec![0_u8; 48];
+    fragmented[0] = 0x60;
+    fragmented[4..6].copy_from_slice(&8_u16.to_be_bytes());
+    fragmented[6] = 44;
+    fragmented[7] = 64;
+    fragmented[8..24].copy_from_slice(&"fd00::1".parse::<std::net::Ipv6Addr>().unwrap().octets());
+    fragmented[24..40].copy_from_slice(&"fd00::2".parse::<std::net::Ipv6Addr>().unwrap().octets());
+    fragmented[40] = 43;
+    fragmented[42..44].copy_from_slice(&8_u16.to_be_bytes());
+    assert!(matches!(
+        client.send(
+            raw_ethernet_request(fragmented, 0x86dd, false),
+            permissive_layer2_options(),
+        ),
+        Err(ClientError::Policy(
+            TrafficPolicyError::InvalidPacketSemantics { .. }
+        ))
+    ));
+    assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
+    assert!(io.0.lock().unwrap().is_empty());
+}
+
+#[test]
+fn custom_registry_cannot_hide_a_wire_destination() {
+    let mut builder = RegistryBuilder::new();
+    builder.register_codec(MacSensitiveCodec).unwrap();
+    builder
+        .bind_link_type(LinkType::RAW.0, "test.mac_sensitive")
+        .unwrap();
+    let neighbors = CountingNeighbors::default();
+    let io = RecordingIo::default();
+    let client = Client::new(
+        Arc::new(builder.build().unwrap()),
+        FixedRoutes(RouteDecision {
+            capability: LinkCapability::Layer3,
+            link_type: LinkType::RAW,
+            ..route(LinkCapability::Layer3)
+        }),
+        neighbors.clone(),
+        io.clone(),
+        TrafficPolicy::default(),
+    );
+    let mut request = Packet::new();
+    request.push(MacSensitiveLayer(Some(Bytes::from(raw_ipv4(
+        Ipv4Addr::new(8, 8, 8, 8),
+    )))));
+
+    assert!(matches!(
+        client.send(
+            request,
+            SendOptions {
+                destination: Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2))),
+                plan: PlanOptions {
+                    link_mode: LinkMode::Layer3,
+                    ..PlanOptions::default()
+                },
+                ..SendOptions::default()
+            },
+        ),
+        Err(ClientError::Policy(
+            TrafficPolicyError::PublicDestination { .. }
+        ))
+    ));
+    assert_eq!(neighbors.0.load(Ordering::SeqCst), 0);
+    assert!(io.0.lock().unwrap().is_empty());
 }
 
 #[test]

@@ -24,18 +24,6 @@ use super::super::network::encode_network;
 
 const ICMP_MIN_LEN: usize = 4;
 
-fn ensure_message_length(
-    name: &str,
-    contribution: usize,
-    payload_len: usize,
-) -> Result<(), CodecError> {
-    // Validate the full input before trailing padding is excluded from the checksum.
-    contribution
-        .checked_add(payload_len)
-        .ok_or_else(|| invalid(name, "message length overflow"))?;
-    Ok(())
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Icmpv4 {
     pub icmp_type: u8,
@@ -107,7 +95,6 @@ macro_rules! icmp_reflection {
                     set |layer, value, name| reflect_set(&mut layer.body, $schema(), name, value),
                     layout: (4, 4 + body_len)
                 },
-                normalize |layer| { layer.checksum.normalize(); }
             }
             layout pub(crate) fn $layout(body_len: usize);
         }
@@ -143,7 +130,6 @@ impl LayerCodec for Icmpv4Codec {
             .checked_add(layer.body.len())
             .ok_or_else(|| invalid("icmpv4", "message length overflow"))?;
         ensure_encode_budget("icmpv4", contribution, context)?;
-        ensure_message_length("icmpv4", contribution, payload.len())?;
         let covered_payload = payload_without_padding("icmpv4", payload, context)?;
         let mut prefix = Vec::with_capacity(contribution);
         prefix.extend_from_slice(&[layer.icmp_type, layer.code, 0, 0]);
@@ -237,7 +223,6 @@ impl LayerCodec for Icmpv6Codec {
             .checked_add(layer.body.len())
             .ok_or_else(|| invalid("icmpv6", "message length overflow"))?;
         ensure_encode_budget("icmpv6", contribution, context)?;
-        ensure_message_length("icmpv6", contribution, payload.len())?;
         let covered_payload = payload_without_padding("icmpv6", payload, context)?;
         let mut prefix = Vec::with_capacity(contribution);
         prefix.extend_from_slice(&[layer.icmp_type, layer.code, 0, 0]);

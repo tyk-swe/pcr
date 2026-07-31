@@ -2212,26 +2212,6 @@
       },
       "additionalProperties": false
     },
-    "scanPortResult": {
-      "type": "object",
-      "required": [
-        "target",
-        "resolved_address",
-        "port"
-      ],
-      "properties": {
-        "target": {
-          "type": "string"
-        },
-        "resolved_address": {
-          "type": "string"
-        },
-        "port": {
-          "$ref": "#/$defs/scanPort"
-        }
-      },
-      "additionalProperties": false
-    },
     "scanStreamResult": {
       "oneOf": [
         {

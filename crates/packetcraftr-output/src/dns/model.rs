@@ -47,31 +47,6 @@ impl fmt::Display for DnsSection {
     }
 }
 
-/// Output-v1 DNS attempt status.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DnsAttemptStatus {
-    Response,
-    Truncated,
-    Timeout,
-    Unrelated,
-    DecodeFailure,
-    NetworkFailure,
-}
-
-impl From<packetcraftr_workflow::dns::AttemptStatus> for DnsAttemptStatus {
-    fn from(value: packetcraftr_workflow::dns::AttemptStatus) -> Self {
-        match value {
-            packetcraftr_workflow::dns::AttemptStatus::Response => Self::Response,
-            packetcraftr_workflow::dns::AttemptStatus::Truncated => Self::Truncated,
-            packetcraftr_workflow::dns::AttemptStatus::Timeout => Self::Timeout,
-            packetcraftr_workflow::dns::AttemptStatus::Unrelated => Self::Unrelated,
-            packetcraftr_workflow::dns::AttemptStatus::DecodeFailure => Self::DecodeFailure,
-            packetcraftr_workflow::dns::AttemptStatus::NetworkFailure => Self::NetworkFailure,
-        }
-    }
-}
-
 /// Output-v1 DNS terminal outcome.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,6 +68,19 @@ impl From<packetcraftr_workflow::dns::Outcome> for DnsOutcome {
             packetcraftr_workflow::dns::Outcome::Unrelated => Self::Unrelated,
             packetcraftr_workflow::dns::Outcome::DecodeFailure => Self::DecodeFailure,
             packetcraftr_workflow::dns::Outcome::NetworkFailure => Self::NetworkFailure,
+        }
+    }
+}
+
+impl From<packetcraftr_workflow::dns::AttemptStatus> for DnsOutcome {
+    fn from(value: packetcraftr_workflow::dns::AttemptStatus) -> Self {
+        match value {
+            packetcraftr_workflow::dns::AttemptStatus::Response => Self::Response,
+            packetcraftr_workflow::dns::AttemptStatus::Truncated => Self::Truncated,
+            packetcraftr_workflow::dns::AttemptStatus::Timeout => Self::Timeout,
+            packetcraftr_workflow::dns::AttemptStatus::Unrelated => Self::Unrelated,
+            packetcraftr_workflow::dns::AttemptStatus::DecodeFailure => Self::DecodeFailure,
+            packetcraftr_workflow::dns::AttemptStatus::NetworkFailure => Self::NetworkFailure,
         }
     }
 }
@@ -479,7 +467,7 @@ pub struct DnsAttemptOutput {
     pub attempt: u32,
     pub server_address: IpAddr,
     pub source_port: u16,
-    pub status: DnsAttemptStatus,
+    pub status: DnsOutcome,
     pub sent_at: OutputTimestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub received_at: Option<OutputTimestamp>,
@@ -496,17 +484,6 @@ pub struct DnsAttemptOutput {
 pub struct DnsUndecodedOutput {
     pub attempt: u32,
     pub frame: FrameOutput,
-}
-
-/// One typed record produced by streaming `dns` output.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct DnsRecordCommandResult {
-    pub server: String,
-    pub server_port: u16,
-    pub query_name: String,
-    pub query_type: String,
-    pub section: DnsSection,
-    pub record: DnsRecordOutput,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -571,28 +548,13 @@ pub enum DnsStreamCommandResult {
 #[cfg(test)]
 mod tests {
     use bytes::Bytes;
-    use packetcraftr_workflow::dns::{
-        AttemptStatus as WorkflowAttemptStatus, Edns, EdnsOption, Name, Outcome as WorkflowOutcome,
-        Record, RecordValue, Section as WorkflowSection,
-    };
+    use packetcraftr_workflow::dns::{Edns, EdnsOption, Name, Record, RecordValue};
 
-    use super::{
-        DnsAttemptStatus, DnsEdnsOutput, DnsOutcome, DnsRecordData, DnsRecordOutput, DnsSection,
-    };
+    use super::{DnsEdnsOptionOutput, DnsEdnsOutput, DnsRecordData, DnsRecordOutput};
 
-    fn name(value: &str) -> Name {
-        Name::from_labels(
-            value
-                .trim_end_matches('.')
-                .split('.')
-                .map(|label| Bytes::copy_from_slice(label.as_bytes())),
-        )
-        .unwrap()
-    }
-
-    fn output(value: RecordValue) -> DnsRecordData {
+    fn record_data(value: RecordValue) -> DnsRecordData {
         DnsRecordOutput::from_record(Record {
-            owner: name("owner.example."),
+            owner: Name::from_labels([Bytes::from_static(b"example")]).unwrap(),
             class: 1,
             ttl: 300,
             value,
@@ -601,180 +563,15 @@ mod tests {
     }
 
     #[test]
-    fn dns_sections_convert_and_display_stably() {
-        for (input, expected, display) in [
-            (WorkflowSection::Answer, DnsSection::Answer, "answer"),
-            (
-                WorkflowSection::Authority,
-                DnsSection::Authority,
-                "authority",
-            ),
-            (
-                WorkflowSection::Additional,
-                DnsSection::Additional,
-                "additional",
-            ),
-        ] {
-            let actual = DnsSection::from(input);
-            assert_eq!(actual, expected);
-            assert_eq!(actual.to_string(), display);
-        }
-    }
-
-    #[test]
-    fn dns_attempt_statuses_convert_exhaustively() {
-        for (input, expected) in [
-            (WorkflowAttemptStatus::Response, DnsAttemptStatus::Response),
-            (
-                WorkflowAttemptStatus::Truncated,
-                DnsAttemptStatus::Truncated,
-            ),
-            (WorkflowAttemptStatus::Timeout, DnsAttemptStatus::Timeout),
-            (
-                WorkflowAttemptStatus::Unrelated,
-                DnsAttemptStatus::Unrelated,
-            ),
-            (
-                WorkflowAttemptStatus::DecodeFailure,
-                DnsAttemptStatus::DecodeFailure,
-            ),
-            (
-                WorkflowAttemptStatus::NetworkFailure,
-                DnsAttemptStatus::NetworkFailure,
-            ),
-        ] {
-            assert_eq!(DnsAttemptStatus::from(input), expected);
-        }
-    }
-
-    #[test]
-    fn dns_outcomes_convert_exhaustively() {
-        for (input, expected) in [
-            (WorkflowOutcome::Response, DnsOutcome::Response),
-            (WorkflowOutcome::Truncated, DnsOutcome::Truncated),
-            (WorkflowOutcome::Timeout, DnsOutcome::Timeout),
-            (WorkflowOutcome::Unrelated, DnsOutcome::Unrelated),
-            (WorkflowOutcome::DecodeFailure, DnsOutcome::DecodeFailure),
-            (WorkflowOutcome::NetworkFailure, DnsOutcome::NetworkFailure),
-        ] {
-            assert_eq!(DnsOutcome::from(input), expected);
-        }
-    }
-
-    #[test]
-    fn a_record_conversion_preserves_the_address() {
-        assert!(matches!(
-            output(RecordValue::A("192.0.2.1".parse().unwrap())),
-            DnsRecordData::A { address } if address.to_string() == "192.0.2.1"
-        ));
-    }
-
-    #[test]
-    fn aaaa_record_conversion_preserves_the_address() {
-        assert!(matches!(
-            output(RecordValue::Aaaa("2001:db8::1".parse().unwrap())),
-            DnsRecordData::Aaaa { address } if address.to_string() == "2001:db8::1"
-        ));
-    }
-
-    #[test]
-    fn canonical_name_record_conversion_uses_dns_presentation_form() {
+    fn binary_dns_fields_preserve_exact_bytes() {
         assert_eq!(
-            output(RecordValue::Cname(name("canonical.example."))),
-            DnsRecordData::Cname {
-                canonical_name: "canonical.example.".to_owned(),
-            }
-        );
-    }
-
-    #[test]
-    fn mail_exchange_record_conversion_preserves_preference_and_name() {
-        assert_eq!(
-            output(RecordValue::Mx {
-                preference: 10,
-                exchange: name("mail.example."),
-            }),
-            DnsRecordData::Mx {
-                preference: 10,
-                exchange: "mail.example.".to_owned(),
-            }
-        );
-    }
-
-    #[test]
-    fn name_server_and_pointer_record_conversions_preserve_names() {
-        assert_eq!(
-            output(RecordValue::Ns(name("ns.example."))),
-            DnsRecordData::Ns {
-                name_server: "ns.example.".to_owned(),
-            }
-        );
-        assert_eq!(
-            output(RecordValue::Ptr(name("host.example."))),
-            DnsRecordData::Ptr {
-                pointer: "host.example.".to_owned(),
-            }
-        );
-    }
-
-    #[test]
-    fn soa_record_conversion_preserves_every_timing_field() {
-        assert_eq!(
-            output(RecordValue::Soa {
-                primary_name_server: name("ns.example."),
-                responsible_mailbox: name("hostmaster.example."),
-                serial: 1,
-                refresh: 2,
-                retry: 3,
-                expire: 4,
-                minimum: 5,
-            }),
-            DnsRecordData::Soa {
-                primary_name_server: "ns.example.".to_owned(),
-                responsible_mailbox: "hostmaster.example.".to_owned(),
-                serial: 1,
-                refresh: 2,
-                retry: 3,
-                expire: 4,
-                minimum: 5,
-            }
-        );
-    }
-
-    #[test]
-    fn service_record_conversion_preserves_priority_weight_port_and_target() {
-        assert_eq!(
-            output(RecordValue::Srv {
-                priority: 1,
-                weight: 2,
-                port: 443,
-                target: name("service.example."),
-            }),
-            DnsRecordData::Srv {
-                priority: 1,
-                weight: 2,
-                port: 443,
-                target: "service.example.".to_owned(),
-            }
-        );
-    }
-
-    #[test]
-    fn text_record_conversion_has_lossy_display_and_exact_hex() {
-        assert_eq!(
-            output(RecordValue::Txt(vec![
-                Bytes::from_static(b"plain"),
-                Bytes::from_static(&[0xff, 0x00]),
-            ])),
+            record_data(RecordValue::Txt(vec![Bytes::from_static(&[0xff, 0x00])])),
             DnsRecordData::Txt {
-                strings: vec!["plain".to_owned(), "\u{fffd}\0".to_owned()],
-                strings_hex: vec!["706c61696e".to_owned(), "ff00".to_owned()],
+                strings: vec!["�\0".to_owned()],
+                strings_hex: vec!["ff00".to_owned()],
             }
         );
-    }
 
-    #[test]
-    fn edns_conversion_preserves_flags_and_exact_option_bytes() {
         let edns = Edns {
             udp_payload_size: 1_232,
             extended_response_code: 2,
@@ -792,22 +589,18 @@ mod tests {
             version: 1,
             dnssec_ok: true,
             flags: 0x1234,
-            options: vec![super::DnsEdnsOptionOutput {
+            options: vec![DnsEdnsOptionOutput {
                 code: 8,
                 data_hex: "0001feff".to_owned(),
             }],
         };
-        assert_eq!(DnsEdnsOutput::from(edns.clone()), expected);
         assert_eq!(
-            output(RecordValue::Opt(edns)),
+            record_data(RecordValue::Opt(edns)),
             DnsRecordData::Opt { edns: expected }
         );
-    }
 
-    #[test]
-    fn unknown_record_conversion_preserves_type_and_exact_rdata() {
         assert_eq!(
-            output(RecordValue::Unknown {
+            record_data(RecordValue::Unknown {
                 type_code: 65_000,
                 rdata: Bytes::from_static(&[0xde, 0xad, 0xbe, 0xef]),
             }),

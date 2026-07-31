@@ -46,18 +46,8 @@ const fn is_zero(value: &u64) -> bool {
 }
 
 impl Statistics {
-    /// Validates counter arithmetic and required frame/byte relationships.
+    /// Validates required frame/byte counter relationships.
     pub fn validate(self) -> Result<Self, Error> {
-        self.received_frames
-            .checked_add(self.dropped_frames)
-            .ok_or_else(|| Error::InvalidCaptureStatistics {
-                message: "received and dropped frame counters overflow u64".to_owned(),
-            })?;
-        self.received_bytes
-            .checked_add(self.dropped_bytes)
-            .ok_or_else(|| Error::InvalidCaptureStatistics {
-                message: "received and dropped byte counters overflow u64".to_owned(),
-            })?;
         if self.dropped_frames == 0 && self.dropped_bytes != 0 {
             return Err(Error::InvalidCaptureStatistics {
                 message: "dropped bytes were reported without a dropped frame".to_owned(),
@@ -170,8 +160,8 @@ impl Default for Limits {
 }
 
 impl Limits {
-    /// Validates non-zero limits, byte/snap consistency, and worst-case frame
-    /// accounting before a backend allocates or starts capture.
+    /// Validates bounded non-zero limits and byte/snap consistency before a
+    /// backend allocates or starts capture.
     pub fn validate(self) -> Result<Self, Error> {
         for (field, value) in [
             ("max_frames", self.max_frames),
@@ -206,31 +196,8 @@ impl Limits {
                 reason: "cannot exceed max_bytes",
             });
         }
-        self.max_frames
-            .checked_mul(self.snap_length)
-            .ok_or(Error::InvalidCaptureQueueLimit {
-                field: "max_frames * snap_length",
-                value: self.max_frames,
-                reason: "worst-case queue byte accounting overflows usize",
-            })?;
         Ok(self)
     }
-}
-
-pub(crate) fn validate_timeout(timeout: Duration) -> Result<(), Error> {
-    if timeout > MAX_TIMEOUT {
-        return Err(Error::InvalidCaptureTimeout {
-            timeout,
-            maximum: MAX_TIMEOUT,
-        });
-    }
-    Instant::now()
-        .checked_add(timeout)
-        .map(|_| ())
-        .ok_or(Error::InvalidCaptureTimeout {
-            timeout,
-            maximum: MAX_TIMEOUT,
-        })
 }
 
 /// Starts an owned capture stream using platform-neutral route and limit data.
@@ -255,9 +222,7 @@ pub trait Provider: Send + Sync {
 }
 
 /// Owned native capture session. The native handle and capture worker remain
-/// private behind this platform-neutral session wrapper. Timeout policy is
-/// enforced here before delegation; native backends also defend their direct
-/// crate-internal entry points.
+/// private behind this platform-neutral session wrapper.
 pub struct SystemSession {
     inner: Box<dyn Session>,
 }
@@ -270,12 +235,10 @@ impl SystemSession {
 
 impl Session for SystemSession {
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), Error> {
-        validate_timeout(timeout)?;
         self.inner.wait_ready(timeout)
     }
 
     fn next_captured_frame(&mut self, timeout: Duration) -> Result<Option<Captured>, Error> {
-        validate_timeout(timeout)?;
         self.inner.next_captured_frame(timeout)
     }
 
@@ -322,31 +285,6 @@ mod tests {
         DestinationScope, InterfaceId, PlannedRoute, RouteDecision, RouteSelectionReason,
     };
     use packetcraftr_capture::LinkType;
-    use packetcraftr_error::Classified;
-
-    struct CountingCapture {
-        calls: Arc<AtomicUsize>,
-    }
-
-    impl Session for CountingCapture {
-        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-
-        fn next_captured_frame(&mut self, _timeout: Duration) -> Result<Option<Captured>, Error> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            Ok(None)
-        }
-
-        fn shutdown(&mut self) -> Result<(), Error> {
-            Ok(())
-        }
-
-        fn statistics(&self) -> Statistics {
-            Statistics::default()
-        }
-    }
 
     #[derive(Debug)]
     struct TestCapture;
@@ -444,31 +382,6 @@ mod tests {
             neighbor_vlan_tags: Vec::new(),
             synthesized_ethernet: false,
         }
-    }
-
-    #[test]
-    fn system_session_rejects_invalid_timeouts_before_delegation() {
-        assert!(validate_timeout(MAX_TIMEOUT).is_ok());
-        let calls = Arc::new(AtomicUsize::new(0));
-        let mut session = SystemSession::new(Box::new(CountingCapture {
-            calls: Arc::clone(&calls),
-        }));
-
-        let errors = [
-            session.wait_ready(Duration::MAX).unwrap_err(),
-            session.next_captured_frame(Duration::MAX).unwrap_err(),
-        ];
-        for error in errors {
-            assert!(matches!(
-                &error,
-                Error::InvalidCaptureTimeout {
-                    maximum: MAX_TIMEOUT,
-                    ..
-                }
-            ));
-            assert_eq!(error.classification().code, "cli.capture_timeout");
-        }
-        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[test]

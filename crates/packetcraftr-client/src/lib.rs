@@ -21,14 +21,16 @@ mod tests;
 
 use std::collections::HashMap;
 use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{CaptureProvider, CaptureStatistics},
+    link::LinkMode,
     route::{
         InterfaceId, NeighborResolver, PlanOptions, PlannedRoute, RouteDecision, RoutePlanner,
         RouteProvider,
@@ -38,6 +40,7 @@ use packetcraftr_net::{
 use packetcraftr_packet::{
     Packet,
     build::{Builder, BuiltPacket},
+    decode::{DecodeOptions, Dissector},
     registry::ProtocolRegistry,
     semantics::BuiltinProtocol,
     template::PacketTemplate,
@@ -328,6 +331,7 @@ where
         )?;
         validate_mtu(&preliminary, plan.route.mtu)?;
         self.authorize_built(&preliminary, options.allow_permissive_live)?;
+        self.authorize_final_wire(&preliminary, &plan)?;
         self.policy
             .authorize_operation(1, preliminary.bytes.len() as u64)?;
         let preliminary_len = preliminary.bytes.len();
@@ -342,6 +346,7 @@ where
             };
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             self.authorize_built(&built, options.allow_permissive_live)?;
+            self.authorize_final_wire(&built, &route.plan)?;
             self.policy
                 .authorize_operation(1, built.bytes.len() as u64)?;
             built
@@ -384,6 +389,44 @@ where
                 return Err(TrafficPolicyError::PermissivePacket.into());
             }
         }
+        Ok(())
+    }
+
+    fn authorize_final_wire(
+        &self,
+        built: &BuiltPacket,
+        route: &PlannedRoute,
+    ) -> Result<(), ClientError> {
+        let link_type = match route.mode {
+            LinkMode::Layer2 => route.route.link_type,
+            LinkMode::Layer3 => LinkType::RAW,
+            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
+        };
+        let frame = Frame::new(
+            std::time::SystemTime::UNIX_EPOCH,
+            link_type,
+            built.bytes.clone(),
+        )
+        .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
+            reason: error.to_string(),
+        })?;
+        static REGISTRY: OnceLock<Result<Arc<ProtocolRegistry>, String>> = OnceLock::new();
+        let registry = REGISTRY
+            .get_or_init(|| {
+                packetcraftr_protocol::builtin::registry()
+                    .map(Arc::new)
+                    .map_err(|error| error.to_string())
+            })
+            .as_ref()
+            .map_err(|reason| TrafficPolicyError::InvalidPacketSemantics {
+                reason: reason.clone(),
+            })?;
+        let decoded = Dissector::new(Arc::clone(registry))
+            .decode(frame, DecodeOptions::default())
+            .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
+                reason: error.to_string(),
+            })?;
+        self.policy.authorize_packet_destinations(&decoded.packet)?;
         Ok(())
     }
 }
@@ -501,6 +544,7 @@ where
             ensure_preparation_deadline(deadline)?;
             validate_mtu(&preliminary, plan.route.mtu)?;
             self.authorize_built(&preliminary, options.send.allow_permissive_live)?;
+            self.authorize_final_wire(&preliminary, &plan)?;
             total_bytes = total_bytes
                 .checked_add(preliminary.bytes.len() as u64)
                 .ok_or(TrafficPolicyError::ByteLimit {
@@ -549,6 +593,7 @@ where
             };
             ensure_preparation_deadline(deadline)?;
             self.authorize_built(&built, options.send.allow_permissive_live)?;
+            self.authorize_final_wire(&built, &route.plan)?;
             require_fixed_width_link_materialization(preliminary_len, built.bytes.len())?;
             prepared_packets.push(PreparedExchangePacket { built, route });
         }

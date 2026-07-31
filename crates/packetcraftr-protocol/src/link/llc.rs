@@ -247,7 +247,6 @@ reflective_layer! {
     impl Snap {
         "oui" => { kind: Unsigned, derived: false, required: true, description: "Organizationally unique identifier; zero selects the EtherType space", get |layer| Some(FieldValue::from(layer.oui)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.oui = u32::try_from(value).ok().filter(|value| *value <= OUI_MAX).ok_or_else(|| out_of_range(snap_schema(), name))?; Ok(()) }, _ => Err(wrong_type(snap_schema(), name, "unsigned")) }, layout: (0, 3) },
         "protocol_id" => { kind: Unsigned, derived: true, required: false, description: "Protocol identifier within the OUI's numbering", get |layer| Some(reflect_get(&layer.protocol_id)), set |layer, value, name| reflect_set(&mut layer.protocol_id, snap_schema(), name, value), layout: (3, 5) },
-        normalize |layer| { layer.protocol_id.normalize(); }
     }
     layout pub(crate) fn snap_layout();
 }
@@ -301,7 +300,12 @@ impl LayerCodec for SnapCodec {
         let expectation = if layer.oui == 0 {
             // The zero OUI is the EtherType space, so the child derives the
             // identifier exactly as it would under Ethernet II.
-            expected_snap_discriminator(context, &layer.protocol_id)
+            super::super::common::expected_discriminator_for_value(
+                "snap",
+                context,
+                0_u16,
+                &layer.protocol_id,
+            )
         } else if matches!(layer.protocol_id, WireValue::Auto) {
             return Err(invalid(
                 "snap",
@@ -382,15 +386,6 @@ impl LayerCodec for SnapCodec {
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Snap::default(), fields)
     }
-}
-
-/// Like `expected_discriminator_for_value` but scoped to the SNAP zero-OUI
-/// EtherType space, which shares no discriminators above 16 bits.
-fn expected_snap_discriminator(
-    context: &LayerEncodeContext<'_>,
-    value: &WireValue<u16>,
-) -> ValueExpectation<u16> {
-    super::super::common::expected_discriminator_for_value("snap", context, 0_u16, value)
 }
 
 #[cfg(test)]

@@ -256,41 +256,16 @@ fn pcapng_metadata_bytes_are_rejected_before_reading_the_block_body() {
 }
 
 #[test]
-fn pcapng_ignores_reserved_fields_and_rejects_bad_padding_and_duplicate_singletons() {
+fn pcapng_ignores_reserved_and_packet_padding_bytes() {
     let mut interface_writer = Writer::pcapng(Vec::new()).unwrap();
     interface_writer.add_interface(LinkType::ETHERNET).unwrap();
     let interface_bytes = interface_writer.into_inner();
 
-    let mut bad_interface_reserved = interface_bytes.clone();
+    let mut bad_interface_reserved = interface_bytes;
     bad_interface_reserved[38] = 1;
     let mut reader = Reader::new(Cursor::new(bad_interface_reserved)).unwrap();
     assert_eq!(reader.next_frame().unwrap(), None);
     assert_eq!(reader.interfaces().len(), 1);
-
-    let mut bad_option_padding = interface_bytes.clone();
-    bad_option_padding[49] = 1;
-    let mut reader = Reader::new(Cursor::new(bad_option_padding)).unwrap();
-    assert!(matches!(
-        reader.next_frame(),
-        Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "option padding is non-zero",
-        })
-    ));
-
-    let mut duplicate_resolution = interface_bytes;
-    let duplicate = duplicate_resolution[44..52].to_vec();
-    duplicate_resolution.splice(52..52, duplicate);
-    duplicate_resolution[32..36].copy_from_slice(&40_u32.to_le_bytes());
-    duplicate_resolution[64..68].copy_from_slice(&40_u32.to_le_bytes());
-    let mut reader = Reader::new(Cursor::new(duplicate_resolution)).unwrap();
-    assert!(matches!(
-        reader.next_frame(),
-        Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "if_tsresol option appears more than once",
-        })
-    ));
 
     let mut packet_writer = Writer::new(Vec::new(), Format::PcapNg, LinkType::ETHERNET).unwrap();
     let mut packet = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]);
@@ -299,13 +274,7 @@ fn pcapng_ignores_reserved_fields_and_rejects_bad_padding_and_duplicate_singleto
     let mut bad_packet_padding = packet_writer.into_inner();
     bad_packet_padding[89] = 1;
     let mut reader = Reader::new(Cursor::new(bad_packet_padding)).unwrap();
-    assert!(matches!(
-        reader.next_frame(),
-        Err(Error::InvalidData {
-            format: Format::PcapNg,
-            reason: "packet data padding is non-zero",
-        })
-    ));
+    assert_eq!(reader.next_frame().unwrap().unwrap().bytes().as_ref(), &[1]);
 }
 
 #[test]

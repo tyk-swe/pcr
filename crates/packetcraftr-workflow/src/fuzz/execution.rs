@@ -70,13 +70,6 @@ pub(super) fn validate_execution(
         });
     }
     execution
-        .sent
-        .validate()
-        .map_err(|source| FuzzError::InvalidEvidence {
-            case_index: case.index,
-            message: format!("invalid sent evidence: {source}"),
-        })?;
-    execution
         .stats
         .capture
         .validate()
@@ -84,21 +77,6 @@ pub(super) fn validate_execution(
             case_index: case.index,
             message: format!("invalid capture statistics: {source}"),
         })?;
-    for (kind, frames) in [
-        ("response", &execution.responses),
-        ("unmatched", &execution.unmatched),
-        ("undecoded", &execution.undecoded),
-    ] {
-        for frame in frames {
-            deadline.check().map_err(duration_limit)?;
-            frame
-                .validate()
-                .map_err(|source| FuzzError::InvalidEvidence {
-                    case_index: case.index,
-                    message: format!("invalid {kind} evidence: {source}"),
-                })?;
-        }
-    }
     for response in &execution.responses {
         deadline.check().map_err(duration_limit)?;
         let within_deadline = response

@@ -105,10 +105,6 @@ reflective_layer! {
             set |layer, value, name| reflect_set(&mut layer.checksum, udp_schema(), name, value),
             layout: (6, 8)
         },
-        normalize |layer| {
-            layer.length.normalize();
-            layer.checksum.normalize();
-        }
     }
     layout pub(crate) fn udp_layout();
 }

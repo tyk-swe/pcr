@@ -12,8 +12,6 @@ const MAX_CONFIGURED_ATTEMPTS: u32 = 10;
 const MAX_CONFIGURED_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_CONFIGURED_CACHE_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_CONFIGURED_CACHE_ENTRIES: usize = 65_536;
-const MAX_CONFIGURED_CAPTURE_FRAMES: usize = 4_096;
-const MAX_CONFIGURED_CAPTURE_BYTES: usize = 256 * 1024 * 1024;
 const MIN_NEIGHBOR_SNAPSHOT_LENGTH: usize = 128;
 
 /// Finite work, retention, and cache bounds for active neighbor resolution.
@@ -62,16 +60,6 @@ impl NeighborResolutionOptions {
         if !(1..=MAX_CONFIGURED_CACHE_ENTRIES).contains(&self.max_cache_entries) {
             return Err(invalid_configuration(format!(
                 "max_cache_entries must be within 1..={MAX_CONFIGURED_CACHE_ENTRIES}"
-            )));
-        }
-        if !(1..=MAX_CONFIGURED_CAPTURE_FRAMES).contains(&self.max_capture_queue_frames) {
-            return Err(invalid_configuration(format!(
-                "max_capture_queue_frames must be within 1..={MAX_CONFIGURED_CAPTURE_FRAMES}"
-            )));
-        }
-        if self.max_captured_bytes == 0 || self.max_captured_bytes > MAX_CONFIGURED_CAPTURE_BYTES {
-            return Err(invalid_configuration(format!(
-                "max_captured_bytes must be within 1..={MAX_CONFIGURED_CAPTURE_BYTES}"
             )));
         }
         if self.snap_length < MIN_NEIGHBOR_SNAPSHOT_LENGTH {

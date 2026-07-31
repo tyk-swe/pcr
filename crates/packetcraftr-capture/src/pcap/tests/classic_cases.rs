@@ -269,17 +269,3 @@ fn truncated_records_are_not_reported_as_clean_eof() {
         })
     ));
 }
-
-#[test]
-fn classic_format_rejects_metadata_it_cannot_preserve() {
-    let mut writer = Writer::pcap(Vec::new(), LinkType::ETHERNET).unwrap();
-    let mut original = frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]);
-    original.interface = Some(0);
-    assert!(matches!(
-        writer.write_frame(&original),
-        Err(Error::MetadataNotRepresentable {
-            field: "interface",
-            ..
-        })
-    ));
-}

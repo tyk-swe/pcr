@@ -3,17 +3,16 @@
 
 use std::error::Error;
 use std::fmt;
-use std::sync::Arc;
 
 use crate::{Classification, Classified, Kind};
 
 /// Classified failure propagated across a workflow authorization or execution seam.
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct BoundaryError {
     message: String,
     classification: Classification,
     causes: Vec<String>,
-    source: Option<Arc<dyn Error + Send + Sync>>,
+    source: Option<Box<dyn Error + Send + Sync>>,
 }
 
 impl BoundaryError {
@@ -30,12 +29,6 @@ impl BoundaryError {
             causes,
             source: None,
         }
-    }
-
-    /// Borrows a classified error, copying its message, classification, and causes.
-    #[must_use]
-    pub fn classified(error: &(impl Classified + fmt::Display)) -> Self {
-        Self::new(error.to_string(), error.classification(), error.causes())
     }
 
     /// Erases an owned classified error, retaining it in the source chain.
@@ -64,7 +57,7 @@ impl BoundaryError {
             message: message.into(),
             classification,
             causes,
-            source: Some(Arc::new(source)),
+            source: Some(Box::new(source)),
         }
     }
 
@@ -102,27 +95,6 @@ impl BoundaryError {
     }
 }
 
-impl fmt::Debug for BoundaryError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("BoundaryError")
-            .field("message", &self.message)
-            .field("classification", &self.classification)
-            .field("causes", &self.causes)
-            .finish()
-    }
-}
-
-impl PartialEq for BoundaryError {
-    fn eq(&self, other: &Self) -> bool {
-        self.message == other.message
-            && self.classification == other.classification
-            && self.causes == other.causes
-    }
-}
-
-impl Eq for BoundaryError {}
-
 impl fmt::Display for BoundaryError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(&self.message)
@@ -150,7 +122,6 @@ impl Classified for BoundaryError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Category;
 
     #[derive(Debug)]
     struct TestError;
@@ -187,22 +158,6 @@ mod tests {
     }
 
     #[test]
-    fn source_does_not_affect_equality_or_debug_contract() {
-        let sourced = BoundaryError::from_error(TestError);
-        let source_free = BoundaryError::new(
-            "boundary failed",
-            Classification::new("test.boundary", Kind::Io, None),
-            vec!["underlying failure".to_owned()],
-        );
-
-        assert_eq!(sourced, source_free);
-        assert_eq!(
-            format!("{sourced:?}"),
-            "BoundaryError { message: \"boundary failed\", classification: Classification { code: \"test.boundary\", kind: Io, category: Io, remediation: None }, causes: [\"underlying failure\"] }"
-        );
-    }
-
-    #[test]
     fn invalid_executor_contracts_are_internal_invariants() {
         let error = BoundaryError::internal_execution(
             "executor returned inconsistent evidence",
@@ -213,7 +168,6 @@ mod tests {
 
         assert_eq!(classification.code, "internal.test_executor");
         assert_eq!(classification.kind, Kind::Internal);
-        assert_eq!(classification.category, Category::Invariant);
         assert_eq!(
             classification.remediation,
             Some("repair the executor contract")
@@ -231,7 +185,6 @@ mod tests {
 
         assert_eq!(classification.code, "cli.test_executor");
         assert_eq!(classification.kind, Kind::Cli);
-        assert_eq!(classification.category, Category::Validation);
         assert_eq!(classification.remediation, Some("repair the batch"));
     }
 }

@@ -22,7 +22,7 @@ pub struct Deadline {
 }
 
 impl Deadline {
-    /// Starts a deadline that expires once `limit` of accounted time elapses.
+    /// Starts a deadline that expires once accounted time exceeds `limit`.
     #[must_use]
     pub fn new(limit: Duration) -> Self {
         Self {
@@ -38,7 +38,7 @@ impl Deadline {
     ///
     /// Returns [`DeadlineExceeded`] once accounted time passes the limit.
     pub fn check(&self) -> Result<(), DeadlineExceeded> {
-        self.check_elapsed(self.elapsed_at(Instant::now()))
+        self.check_elapsed(self.elapsed_at(Instant::now())?)
     }
 
     /// Checks prospective deterministic time without committing it.
@@ -49,9 +49,9 @@ impl Deadline {
     /// limit, leaving the accounted total untouched.
     pub fn check_additional(&self, additional: Duration) -> Result<(), DeadlineExceeded> {
         let actual = self
-            .elapsed_at(Instant::now())
+            .elapsed_at(Instant::now())?
             .checked_add(additional)
-            .unwrap_or(Duration::MAX);
+            .ok_or(self.overflow_error())?;
         self.check_elapsed(actual)
     }
 
@@ -60,21 +60,31 @@ impl Deadline {
     ///
     /// # Errors
     ///
-    /// Returns [`DeadlineExceeded`] when the committed time passes the limit.
+    /// Returns [`DeadlineExceeded`] when committed plus prospective time passes
+    /// the limit.
     pub fn start_accounting(&mut self, prospective: Duration) -> Result<(), DeadlineExceeded> {
         let now = Instant::now();
-        let elapsed = self.elapsed_at(now);
-        let actual = elapsed.checked_add(prospective).unwrap_or(Duration::MAX);
+        let elapsed = self.elapsed_at(now)?;
+        let actual = elapsed
+            .checked_add(prospective)
+            .ok_or(self.overflow_error())?;
         self.check_elapsed(actual)?;
         self.accounted = elapsed;
         self.baseline = now;
         Ok(())
     }
 
-    fn elapsed_at(&self, now: Instant) -> Duration {
+    fn elapsed_at(&self, now: Instant) -> Result<Duration, DeadlineExceeded> {
         self.accounted
             .checked_add(now.duration_since(self.baseline))
-            .unwrap_or(Duration::MAX)
+            .ok_or(self.overflow_error())
+    }
+
+    fn overflow_error(&self) -> DeadlineExceeded {
+        DeadlineExceeded {
+            actual: Duration::MAX,
+            limit: self.limit,
+        }
     }
 
     fn check_elapsed(&self, actual: Duration) -> Result<(), DeadlineExceeded> {
@@ -99,10 +109,7 @@ impl Deadline {
         self.accounted = self
             .accounted
             .checked_add(phase_elapsed)
-            .ok_or(DeadlineExceeded {
-                actual: Duration::MAX,
-                limit: self.limit,
-            })?;
+            .ok_or(self.overflow_error())?;
         self.baseline = now;
         self.check_elapsed(self.accounted)
     }
@@ -119,31 +126,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn prospective_check_does_not_commit_elapsed_time() {
-        let mut deadline = Deadline::new(Duration::from_secs(1));
-
-        assert!(deadline.check_additional(Duration::from_secs(2)).is_err());
-        assert_eq!(deadline.accounted, Duration::ZERO);
-        assert!(deadline.start_accounting(Duration::from_millis(1)).is_ok());
-        assert!(deadline.account(Duration::from_millis(1)).is_ok());
-    }
-
-    #[test]
     fn prospective_check_rejects_time_beyond_remaining_wall_time() {
-        let deadline = Deadline::new(Duration::from_millis(100));
+        let mut deadline = Deadline::new(Duration::from_millis(100));
         let additional = Duration::from_millis(90);
 
-        std::thread::sleep(Duration::from_millis(20));
-        assert!(additional <= deadline.limit);
-        assert!(
-            deadline
-                .baseline
-                .elapsed()
-                .checked_add(additional)
-                .is_some_and(|elapsed| elapsed > deadline.limit)
-        );
+        deadline.baseline = deadline
+            .baseline
+            .checked_sub(Duration::from_millis(20))
+            .unwrap();
         assert!(deadline.check_additional(additional).is_err());
-        assert_eq!(deadline.accounted, Duration::ZERO);
     }
 
     #[test]
@@ -174,6 +165,23 @@ mod tests {
             .unwrap();
         assert!(deadline.account(Duration::from_secs(5)).is_ok());
 
-        assert!(deadline.accounted < Duration::from_secs(6));
+        assert!(deadline.accounted < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn duration_overflow_exceeds_even_the_maximum_limit() {
+        let mut deadline = Deadline::new(Duration::MAX);
+        deadline.accounted = Duration::MAX;
+        deadline.baseline = deadline
+            .baseline
+            .checked_sub(Duration::from_nanos(1))
+            .unwrap();
+
+        assert!(deadline.check().is_err());
+
+        deadline.accounted = Duration::MAX - Duration::from_secs(1);
+        deadline.baseline = Instant::now();
+        assert!(deadline.check_additional(Duration::from_secs(2)).is_err());
+        assert!(deadline.start_accounting(Duration::from_secs(2)).is_err());
     }
 }

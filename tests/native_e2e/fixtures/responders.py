@@ -50,7 +50,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--udp-mode",
         choices=("echo", "sink", "wrong-port"),
-        default="echo",
+        required=True,
     )
     parser.add_argument("--udp-response-port", type=int)
     parser.add_argument("--ready-socket", required=True)

@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
-import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,9 +46,8 @@ class CommandFailure(RuntimeError):
 class CommandRunner:
     """Runs commands directly or through the selected privilege boundary."""
 
-    def __init__(self, privilege_prefix: Sequence[str], *, verbose: bool = False) -> None:
+    def __init__(self, privilege_prefix: Sequence[str]) -> None:
         self._privilege_prefix = tuple(privilege_prefix)
-        self._verbose = verbose
         self.records: list[CommandRecord] = []
 
     @classmethod
@@ -63,8 +61,7 @@ class CommandRunner:
             raise ValueError(
                 "PCR_NATIVE_E2E_PRIVILEGE_MODE must be 'direct' or 'sudo'"
             )
-        verbose = os.environ.get("PCR_NATIVE_E2E_VERBOSE") == "1"
-        return cls(prefix, verbose=verbose)
+        return cls(prefix)
 
     def command(self, argv: Sequence[str], *, privileged: bool) -> tuple[str, ...]:
         command = tuple(str(argument) for argument in argv)
@@ -82,8 +79,6 @@ class CommandRunner:
         env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         command = self.command(argv, privileged=privileged)
-        if self._verbose:
-            print(f"+ {shlex.join(command)}", file=sys.stderr, flush=True)
         try:
             process = subprocess.Popen(
                 command,
@@ -149,8 +144,6 @@ class CommandRunner:
         env: Mapping[str, str] | None = None,
     ) -> subprocess.Popen[str]:
         command = self.command(argv, privileged=privileged)
-        if self._verbose:
-            print(f"+ {shlex.join(command)} &", file=sys.stderr, flush=True)
         try:
             process = subprocess.Popen(
                 command,

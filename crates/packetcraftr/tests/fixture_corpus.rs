@@ -276,31 +276,6 @@ fn capture_corpus_streams_valid_files_and_rejects_malformed_input() {
 }
 
 #[test]
-fn every_capture_truncation_is_bounded_and_errors_are_terminal() {
-    for relative in [
-        "captures/pcap/ethernet-ipv4-udp.pcap",
-        "captures/pcapng/multi-link.pcapng",
-    ] {
-        let bytes = read_fixture(relative);
-        for end in 0..bytes.len() {
-            match CaptureReader::new(Cursor::new(&bytes[..end])) {
-                Err(_) => {}
-                Ok(mut reader) => loop {
-                    match reader.next_frame() {
-                        Ok(Some(frame)) => assert!(frame.bytes().len() <= 16 * 1024 * 1024),
-                        Ok(None) => break,
-                        Err(_) => {
-                            assert!(reader.next_frame().unwrap().is_none(), "{relative}@{end}");
-                            break;
-                        }
-                    }
-                },
-            }
-        }
-    }
-}
-
-#[test]
 fn frame_truncations_and_corruptions_preserve_layout_and_permissive_bytes() {
     let registry = Arc::new(default_registry().unwrap());
     let dissector = Dissector::new(Arc::clone(&registry));

@@ -116,12 +116,6 @@ pub struct BuiltPacket {
     pub requires_live_opt_in: bool,
 }
 
-impl BuiltPacket {
-    pub fn into_bytes(self) -> Bytes {
-        self.bytes
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct Builder {
     registry: Arc<ProtocolRegistry>,
@@ -130,10 +124,6 @@ pub struct Builder {
 impl Builder {
     pub fn new(registry: Arc<ProtocolRegistry>) -> Self {
         Self { registry }
-    }
-
-    pub fn registry(&self) -> &Arc<ProtocolRegistry> {
-        &self.registry
     }
 
     /// Encodes a packet into exact wire bytes.
@@ -682,7 +672,7 @@ mod tests {
                 .all(|byte| *byte == 255)
         );
         let storage = built
-            .into_bytes()
+            .bytes
             .try_into_mut()
             .expect("built bytes are uniquely owned");
         assert!(storage.capacity() <= DEFAULT_MAX_LAYERS * 2);

@@ -7,7 +7,7 @@ use std::time::Duration;
 use packetcraftr::{analysis, output};
 
 use super::super::arguments::{CliStatsTable, StatsArgs};
-use super::super::errors::{CliError, analysis_cli_error};
+use super::super::errors::CliError;
 use super::super::rendering::{emit_json, write_stdout_line};
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
@@ -31,7 +31,7 @@ pub(crate) fn run_stats(
     } = prepare_offline_analysis(arguments.limits, arguments.filter.as_deref())?;
     let mut collector =
         analysis::stats::StatsCollector::new(Duration::from_millis(arguments.interval_ms))
-            .map_err(analysis_cli_error)?;
+            .map_err(CliError::classified)?;
 
     let mut reader = open_offline_reader(&arguments.path, arguments.limits.capture)?;
 
@@ -44,7 +44,7 @@ pub(crate) fn run_stats(
         collector.observe(&record);
         Ok(())
     })
-    .map_err(analysis_cli_error)?;
+    .map_err(CliError::classified)?;
     let report = collector.finish();
 
     match output {
@@ -66,7 +66,7 @@ pub(crate) fn run_stats(
     }
 }
 
-pub(crate) fn stats_table(table: CliStatsTable) -> output::stats::Table {
+fn stats_table(table: CliStatsTable) -> output::stats::Table {
     match table {
         CliStatsTable::Conversations => output::stats::Table::Conversations,
         CliStatsTable::Endpoints => output::stats::Table::Endpoints,

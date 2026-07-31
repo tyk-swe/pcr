@@ -71,7 +71,6 @@ reflective_layer! {
             set |layer, value, name| reflect_set(&mut layer.checksum, sctp_schema(), name, value),
             layout: (8, 12)
         },
-        normalize |layer| { layer.checksum.normalize(); }
     }
     layout pub(crate) fn sctp_layout();
 }

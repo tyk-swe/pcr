@@ -358,6 +358,30 @@ fn invalid_capture_and_exchange_limits_precede_packet_policy() {
 }
 
 #[test]
+fn fuzz_rejects_invalid_options_before_recipe_io() {
+    for (arguments, code) in [
+        (vec!["--field", "not-a-target"], "cli.error"),
+        (vec!["--live", "--rate", "0"], "cli.fuzz_limit"),
+    ] {
+        let output = binary()
+            .args([
+                "--output",
+                "json",
+                "fuzz",
+                "--packet-file",
+                "definitely-missing-packet.json",
+            ])
+            .args(arguments)
+            .output()
+            .unwrap();
+
+        assert_eq!(output.status.code(), Some(2));
+        let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(value["error"]["code"], code);
+    }
+}
+
+#[test]
 fn replay_rejects_unsupported_roots_and_public_targets_before_interface_io() {
     let unsupported = write_link_capture(LinkType::NULL, &[b"null"]);
     let output = binary()

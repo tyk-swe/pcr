@@ -206,7 +206,7 @@ pub(crate) fn run_send(
     }
 }
 
-pub(crate) fn send_capture_link_type(
+fn send_capture_link_type(
     mode: net::link::Mode,
     route_link_type: LinkType,
 ) -> Result<LinkType, CliError> {

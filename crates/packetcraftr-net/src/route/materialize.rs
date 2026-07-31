@@ -118,18 +118,13 @@ impl Classified for NeighborError {
     fn classification(&self) -> Classification {
         match self {
             Self::Io { source, .. } => source.classification(),
-            Self::Cleanup { source, .. } => source
-                .classification()
-                .with_category(Category::Cleanup),
-            Self::OperationAndCleanup { operation, .. } => operation
-                .classification()
-                .with_category(Category::Cleanup),
+            Self::Cleanup { source, .. } => source.classification(),
+            Self::OperationAndCleanup { operation, .. } => operation.classification(),
             Self::NotFound { .. } => Classification::new(
                 "io.neighbor_timeout",
                 Kind::Io,
                 Some("inspect the selected gateway, VLAN, and interface; the finite neighbor-resolution budget was exhausted"),
-            )
-            .with_category(Category::Timeout),
+            ),
             Self::Resolution { .. } => Classification::new(
                 "io.neighbor",
                 Kind::Io,

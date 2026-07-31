@@ -5,7 +5,6 @@ use std::fmt;
 
 use serde::Serialize;
 
-use packetcraftr_error::Classified;
 use packetcraftr_packet::{diagnostic::Diagnostic, document::PacketDocument};
 use packetcraftr_workflow::fuzz::Result as FuzzResult;
 
@@ -197,9 +196,7 @@ impl FuzzCommandResult {
                     .decoded
                     .as_ref()
                     .map(|decoded| PacketDocument::from_packet(&decoded.packet));
-                let output_error = case.error.as_ref().map(|error| {
-                    OutputError::new(error.classification(), error.to_string(), error.causes())
-                });
+                let output_error = case.error.as_ref().map(OutputError::classified);
                 Ok(FuzzCaseOutput {
                     index: case.index,
                     seed: case.seed,

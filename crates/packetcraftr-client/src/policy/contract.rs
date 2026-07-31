@@ -42,8 +42,6 @@ pub enum TrafficPolicyError {
     PublicDestination { destination: IpAddr },
     #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
     InvalidPacketSemantics { reason: String },
-    #[error("traffic policy cannot authorize packet routing semantics: {reason}")]
-    InvalidIpv4Options { reason: String },
     #[error("traffic policy denies hostname resolution for {hostname}")]
     HostnameResolution { hostname: String },
     #[error("traffic policy denies permissively built packets")]
@@ -63,10 +61,6 @@ impl Classified for TrafficPolicyError {
             ),
             Self::InvalidPacketSemantics { .. } => (
                 "policy.invalid_packet_semantics",
-                "repair malformed or unsupported route-bearing packet fields before live transmission",
-            ),
-            Self::InvalidIpv4Options { .. } => (
-                "policy.invalid_ipv4_options",
                 "repair malformed or unsupported route-bearing packet fields before live transmission",
             ),
             Self::HostnameResolution { .. } => (

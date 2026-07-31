@@ -355,7 +355,6 @@ fn exchange_surfaces_operation_and_cleanup_failures() {
             },
         )
         .unwrap_err();
-    assert_eq!(error.classification().category, Category::Cleanup);
     assert!(matches!(
         error,
         ClientError::OperationAndCaptureShutdown {

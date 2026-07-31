@@ -21,11 +21,9 @@ use super::exchange::{
 use super::materialize::patch_builtin_ethernet;
 use super::policy::{TrafficPolicy, TrafficPolicyError};
 use super::send::{ClientError, SendOptions};
-use super::target::{
-    Hostname, HostnameResolver, IpVersion, LiveTarget, ResolvedTarget, TargetResolutionError,
-};
+use super::target::{Hostname, HostnameResolver, LiveTarget, TargetResolutionError};
 use packetcraftr_capture::{Frame, LinkType};
-use packetcraftr_error::{Category, Classified, Kind};
+use packetcraftr_error::{Classified, Kind};
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{
@@ -36,9 +34,9 @@ use packetcraftr_net::{
     link::{LinkCapability, LinkMode, MacAddress},
     neighbor::Error as NeighborError,
     route::{
-        DestinationScope, InterfaceId, MaterializedRoute, NativeRouteError, NeighborRequest,
-        NeighborResolution, NeighborResolver, PlanError, PlanOptions, PlannedRoute, RouteDecision,
-        RouteProvider, RouteSelectionReason,
+        DestinationScope, InterfaceId, MaterializedRoute, NeighborRequest, NeighborResolution,
+        NeighborResolver, PlanError, PlanOptions, PlannedRoute, RouteDecision, RouteProvider,
+        RouteSelectionReason,
     },
     transmit::{IoSendReport, PacketIo, TransmissionFrame},
 };

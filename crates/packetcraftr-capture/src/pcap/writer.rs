@@ -14,7 +14,7 @@ use super::models::{
 use super::pcapng::{write_enhanced_packet, write_interface_description, write_section_header};
 use super::wire::{
     WRITER_TIMESTAMP_RESOLUTION, align_to_u32, timestamp_to_ticks, usize_to_u32_limit,
-    validate_frame_lengths, validate_timestamp_resolution,
+    validate_frame_size, validate_timestamp_resolution,
 };
 
 pub(super) enum WriterState {
@@ -337,7 +337,7 @@ impl<W: Write> Writer<W> {
     /// before emitting any bytes for it.
     pub fn write_frame(&mut self, frame: &Frame) -> Result<(), Error> {
         self.ensure_output_available()?;
-        validate_frame_lengths(frame, self.max_size)?;
+        validate_frame_size(frame, self.max_size)?;
 
         let next_frames = self
             .frames_written
@@ -419,7 +419,7 @@ impl<W: Write> Writer<W> {
                 actual: frame.link_type.0,
             });
         }
-        if snap_len != 0 && frame.captured_length() > snap_len {
+        if frame.captured_length() > snap_len {
             return Err(Error::SizeLimitExceeded {
                 kind: "pcap captured packet",
                 declared: u64::from(frame.captured_length()),
@@ -503,11 +503,11 @@ impl<W: Write> Writer<W> {
     }
 
     fn select_interface(&self, frame: &Frame) -> Result<InterfacePlan, Error> {
+        let interfaces = match &self.state {
+            WriterState::PcapNg { interfaces, .. } => interfaces,
+            WriterState::Pcap { .. } => unreachable!("format checked by caller"),
+        };
         if let Some(interface_id) = frame.interface {
-            let interfaces = match &self.state {
-                WriterState::PcapNg { interfaces, .. } => interfaces,
-                WriterState::Pcap { .. } => unreachable!("format checked by caller"),
-            };
             let interface =
                 interfaces
                     .get(interface_id as usize)
@@ -529,57 +529,44 @@ impl<W: Write> Writer<W> {
             });
         }
 
+        let mut matches = interfaces
+            .iter()
+            .enumerate()
+            .filter(|(_, interface)| interface.link_type == frame.link_type);
+        let Some((index, description)) = matches.next() else {
+            let description = Interface {
+                link_type: frame.link_type,
+                snap_len: usize_to_u32_limit(self.max_size)?,
+                timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
+                timestamp_offset: 0,
+            };
+            let (_, id) = self.validate_new_interface(description)?;
+            return Ok(InterfacePlan {
+                id,
+                description,
+                requires_description_block: true,
+            });
+        };
+        if matches.next().is_some() {
+            return Err(Error::AmbiguousInterface {
+                link_type: frame.link_type.0,
+            });
+        }
         #[expect(
             clippy::cast_possible_truncation,
-            reason = "validate_new_interface refuses an interface whose index exceeds u32, so \
-                      every enumerated index already fits the 32-bit PCAPNG interface id"
+            reason = "validate_new_interface refuses indexes above u32"
         )]
-        let matching_interfaces = match &self.state {
-            WriterState::PcapNg { interfaces, .. } => interfaces
-                .iter()
-                .enumerate()
-                .filter(|(_, interface)| interface.link_type == frame.link_type)
-                // validate_new_interface refuses an interface whose index exceeds u32, so every
-                // enumerated index here already fits the 32-bit PCAPNG interface id.
-                .map(|(index, _)| index as u32)
-                .collect::<Vec<_>>(),
-            WriterState::Pcap { .. } => unreachable!("format checked by caller"),
-        };
-
-        match matching_interfaces.as_slice() {
-            [interface_id] => {
-                let description = match &self.state {
-                    WriterState::PcapNg { interfaces, .. } => interfaces[*interface_id as usize],
-                    WriterState::Pcap { .. } => unreachable!("format checked by caller"),
-                };
-                Ok(InterfacePlan {
-                    id: *interface_id,
-                    description,
-                    requires_description_block: false,
-                })
-            }
-            [] => {
-                let description = Interface {
-                    link_type: frame.link_type,
-                    snap_len: usize_to_u32_limit(self.max_size)?,
-                    timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
-                    timestamp_offset: 0,
-                };
-                let (_, id) = self.validate_new_interface(description)?;
-                Ok(InterfacePlan {
-                    id,
-                    description,
-                    requires_description_block: true,
-                })
-            }
-            _ => Err(Error::AmbiguousInterface {
-                link_type: frame.link_type.0,
-            }),
-        }
+        let id = index as u32;
+        Ok(InterfacePlan {
+            id,
+            description: *description,
+            requires_description_block: false,
+        })
     }
 
     pub fn flush(&mut self) -> Result<(), Error> {
-        self.write_output(|inner| inner.flush().map_err(Error::from))
+        self.ensure_output_available()?;
+        self.inner.flush().map_err(Error::from)
     }
 
     fn ensure_output_available(&self) -> Result<(), Error> {

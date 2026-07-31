@@ -83,7 +83,7 @@ impl SharedCapture {
         self.changed.notify_all();
     }
 
-    pub(super) fn enqueue(&self, captured: CapturedFrame) -> Result<bool, LiveIoError> {
+    pub(super) fn enqueue(&self, captured: CapturedFrame) -> Result<(), LiveIoError> {
         let mut state = self.lock()?;
         let frame_bytes = captured.frame.bytes().len();
         let would_exceed_frames = state.queue.len() >= self.limits.max_frames;
@@ -119,7 +119,7 @@ impl SharedCapture {
                         "dropped bytes",
                     )?;
                     state.statistics = statistics;
-                    return Ok(true);
+                    return Ok(());
                 }
                 CaptureOverflowPolicy::DropOldest => {
                     let mut retained_frames = state.queue.len();
@@ -164,7 +164,7 @@ impl SharedCapture {
                             "dropped bytes",
                         )?;
                         state.statistics = statistics;
-                        return Ok(true);
+                        return Ok(());
                     }
 
                     let mut statistics = state.statistics;
@@ -193,7 +193,7 @@ impl SharedCapture {
                     state.queue.push_back(captured);
                     drop(state);
                     self.changed.notify_one();
-                    return Ok(false);
+                    return Ok(());
                 }
             }
         }
@@ -214,7 +214,7 @@ impl SharedCapture {
         state.queue.push_back(captured);
         drop(state);
         self.changed.notify_one();
-        Ok(false)
+        Ok(())
     }
 
     pub(super) fn add_native_drop_deltas(

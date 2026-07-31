@@ -70,7 +70,6 @@ macro_rules! declare_vlan_layer {
                 "drop_eligible" => { kind: Bool, derived: false, required: false, description: "Drop eligible indicator", get |layer| Some(reflect_get(&layer.drop_eligible)), set |layer, value, name| reflect_set(&mut layer.drop_eligible, $schema(), name, value), layout: (0, 2) },
                 "vlan_id" => { kind: Unsigned, derived: false, required: true, description: "VLAN identifier", get |layer| Some(reflect_get(&layer.vlan_id)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vlan_id = u16::try_from(value).ok().filter(|value| *value <= 4095).ok_or_else(|| out_of_range($schema(), name))?; Ok(()) }, _ => Err(wrong_type($schema(), name, "unsigned")) }, layout: (0, 2) },
                 "ether_type" => { kind: Unsigned, derived: true, required: false, description: "Encapsulated EtherType", get |layer| Some(reflect_get(&layer.ether_type)), set |layer, value, name| reflect_set(&mut layer.ether_type, $schema(), name, value), layout: (2, 4) },
-                normalize |layer| { layer.ether_type.normalize(); }
             }
             layout pub(crate) fn $layout();
         }

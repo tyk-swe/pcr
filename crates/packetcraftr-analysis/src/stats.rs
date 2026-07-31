@@ -26,11 +26,10 @@ impl TransportKind {
     }
 }
 
-/// Frame and byte pair used by every tally.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct Tally {
-    pub frames: u64,
-    pub bytes: u64,
+struct Tally {
+    frames: u64,
+    bytes: u64,
 }
 
 impl Tally {

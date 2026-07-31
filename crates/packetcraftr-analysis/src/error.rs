@@ -4,7 +4,6 @@
 //! Failure from a bounded offline analysis run.
 
 use super::{CaptureError, Classification, Classified, DecodeError, Duration, Error, Kind};
-use packetcraftr_session::fragment::Error as FragmentError;
 use packetcraftr_session::tcp::Error as TcpError;
 
 #[derive(Debug, Error)]
@@ -36,12 +35,6 @@ pub enum AnalysisError {
         #[source]
         source: packetcraftr_session::tcp::Error,
     },
-    #[error("fragment reassembly failed at frame {number}: {source}")]
-    Fragments {
-        number: u64,
-        #[source]
-        source: packetcraftr_session::fragment::Error,
-    },
     #[error("analysis ran {actual:?}, exceeding the configured duration of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },
     #[error("capture timestamp at frame {number} exceeds the monotonic analysis clock range")]
@@ -52,23 +45,6 @@ pub enum AnalysisError {
         #[source]
         source: crate::BoundaryError,
     },
-}
-
-impl AnalysisError {
-    /// The 1-based capture frame number the failure is attributed to, when
-    /// one frame is responsible.
-    pub fn number(&self) -> Option<u64> {
-        match self {
-            Self::Capture { number, .. }
-            | Self::Decode { number, .. }
-            | Self::StreamLimit { number, .. }
-            | Self::Reassembly { number, .. }
-            | Self::Fragments { number, .. }
-            | Self::TimestampRange { number }
-            | Self::Sink { number, .. } => Some(*number),
-            _ => None,
-        }
-    }
 }
 
 impl Classified for AnalysisError {
@@ -109,14 +85,6 @@ impl Classified for AnalysisError {
                 | TcpError::InvalidWindowLimit { .. } => resource_limit(),
                 _ => malformed_reassembly(),
             },
-            Self::Fragments { source, .. } => match source {
-                FragmentError::FlowLimit { .. }
-                | FragmentError::FlowByteLimit { .. }
-                | FragmentError::AggregateByteLimit { .. }
-                | FragmentError::AllocationFailed { .. }
-                | FragmentError::FragmentLimit { .. } => resource_limit(),
-                _ => malformed_reassembly(),
-            },
             Self::Sink { source, .. } => source.classification(),
         }
     }
@@ -126,7 +94,6 @@ impl Classified for AnalysisError {
             Self::Capture { source, .. } => vec![source.to_string()],
             Self::Decode { source, .. } => vec![source.to_string()],
             Self::Reassembly { source, .. } => vec![source.to_string()],
-            Self::Fragments { source, .. } => vec![source.to_string()],
             Self::Sink { source, .. } => source.causes(),
             _ => Vec::new(),
         }

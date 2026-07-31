@@ -1,7 +1,7 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Transactional PCAPNG reader-state planning and application.
+//! PCAPNG reader state.
 
 use super::super::{
     models::{Endianness, Error, Interface},
@@ -13,16 +13,6 @@ pub(in crate::pcap) struct PcapNgState {
     interfaces: Vec<Interface>,
     interface_base: u32,
     remaining_in_section: Option<u64>,
-}
-
-pub(super) struct SectionTransition {
-    endianness: Endianness,
-    interface_base: u32,
-    remaining_in_section: Option<u64>,
-}
-
-pub(super) struct InterfaceTransition {
-    description: Interface,
 }
 
 impl PcapNgState {
@@ -51,11 +41,11 @@ impl PcapNgState {
         self.remaining_in_section
     }
 
-    pub(super) fn plan_section(
-        &self,
+    pub(super) fn start_section(
+        &mut self,
         header: SectionHeader,
         max_interfaces: usize,
-    ) -> Result<SectionTransition, Error> {
+    ) -> Result<(), Error> {
         let section_interfaces =
             u32::try_from(self.interfaces.len()).map_err(|_| Error::InterfaceLimit {
                 limit: max_interfaces,
@@ -66,18 +56,11 @@ impl PcapNgState {
                 .ok_or(Error::InterfaceLimit {
                     limit: max_interfaces,
                 })?;
-        Ok(SectionTransition {
-            endianness: header.endianness,
-            interface_base,
-            remaining_in_section: header.length,
-        })
-    }
-
-    pub(super) fn apply_section(&mut self, transition: SectionTransition) {
-        self.endianness = transition.endianness;
+        self.endianness = header.endianness;
         self.interfaces.clear();
-        self.interface_base = transition.interface_base;
-        self.remaining_in_section = transition.remaining_in_section;
+        self.interface_base = interface_base;
+        self.remaining_in_section = header.length;
+        Ok(())
     }
 
     pub(super) fn commit_block(&mut self, block_length: u32) {
@@ -86,32 +69,25 @@ impl PcapNgState {
         }
     }
 
-    pub(super) fn plan_interface(
-        &self,
+    pub(super) fn add_interface(
+        &mut self,
+        all_interfaces: &mut Vec<Interface>,
         description: Interface,
-        total_interfaces: usize,
         max_interfaces: usize,
         max_total_interfaces: usize,
-    ) -> Result<InterfaceTransition, Error> {
+    ) -> Result<(), Error> {
         if self.interfaces.len() >= max_interfaces {
             return Err(Error::InterfaceLimit {
                 limit: max_interfaces,
             });
         }
-        if total_interfaces >= max_total_interfaces {
+        if all_interfaces.len() >= max_total_interfaces {
             return Err(Error::TotalInterfaceLimit {
                 limit: max_total_interfaces,
             });
         }
-        Ok(InterfaceTransition { description })
-    }
-
-    pub(super) fn apply_interface(
-        &mut self,
-        all_interfaces: &mut Vec<Interface>,
-        transition: InterfaceTransition,
-    ) {
-        self.interfaces.push(transition.description);
-        all_interfaces.push(transition.description);
+        self.interfaces.push(description);
+        all_interfaces.push(description);
+        Ok(())
     }
 }

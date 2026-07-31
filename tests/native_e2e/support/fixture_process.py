@@ -17,10 +17,6 @@ from typing import IO, Any
 from .command import CommandFailure, CommandRunner
 from .topology import Topology
 
-UDP_PORT = 41_000
-TCP_PORT = 41_001
-
-
 class FixtureError(RuntimeError):
     """The independent responder did not start or stay healthy."""
 
@@ -33,10 +29,10 @@ class ResponderProcess:
         native_e2e_root: Path,
         temporary_directory: Path,
         *,
-        udp_port: int = UDP_PORT,
-        tcp_port: int = TCP_PORT,
-        udp_mode: str = "echo",
-        udp_response_port: int | None = None,
+        udp_port: int,
+        tcp_port: int,
+        udp_mode: str,
+        udp_response_port: int | None,
     ) -> None:
         if udp_mode not in {"echo", "sink", "wrong-port"}:
             raise ValueError(f"unsupported UDP fixture mode {udp_mode!r}")
@@ -54,7 +50,6 @@ class ResponderProcess:
         self.runner = runner
         self.topology = topology
         self.script = native_e2e_root / "fixtures" / "responders.py"
-        self.temporary_directory = temporary_directory
         self.udp_port = udp_port
         self.tcp_port = tcp_port
         self.udp_mode = udp_mode

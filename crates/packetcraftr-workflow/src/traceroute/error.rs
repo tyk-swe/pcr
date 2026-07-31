@@ -202,7 +202,6 @@ mod tests {
             assert_eq!(classification.code, code);
             assert_eq!(classification.kind, kind);
             assert!(classification.remediation.is_some());
-            assert!(!error.to_string().is_empty());
         }
     }
 

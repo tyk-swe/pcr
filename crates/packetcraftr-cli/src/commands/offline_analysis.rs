@@ -15,7 +15,7 @@ use packetcraftr::{
 };
 
 use super::super::arguments::{OfflineAnalysisLimits, OfflineCaptureLimits};
-use super::super::errors::{CliError, analysis_cli_error};
+use super::super::errors::CliError;
 use super::super::filtering::{self, Capabilities};
 use super::super::input::validate_capture_stream_limits;
 use super::super::runtime::default_registry_arc;
@@ -58,7 +58,7 @@ pub(super) fn prepare_offline_analysis(
         max_flows: limits.max_flows,
         max_duration: Duration::from_millis(limits.max_duration_ms),
     };
-    limits.validate().map_err(analysis_cli_error)?;
+    limits.validate().map_err(CliError::classified)?;
 
     Ok(PreparedOfflineAnalysis {
         registry,

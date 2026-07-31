@@ -8,6 +8,7 @@ use std::fmt;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use super::{BuiltinProtocol, FieldValue, Layer, Packet, ProtocolId};
+use crate::layer::MalformedLayer;
 
 pub use transport::{TransportKey, transport_key, transport_keys_are_reversed};
 pub use vlan::{VlanKind, VlanMetadata, vlan_metadata};
@@ -24,6 +25,8 @@ pub const SEGMENTS_LEFT: &str = "segments_left";
 pub const LAST_ENTRY: &str = "last_entry";
 pub const TARGET_PROTOCOL: &str = "target_protocol";
 pub const IPV4_OPTIONS: &str = "options";
+const FRAGMENT_OFFSET: &str = "fragment_offset";
+const MORE_FRAGMENTS: &str = "more_fragments";
 
 const ROUTE_FIELDS: [&str; 3] = [DESTINATION, SEGMENTS, TARGET_PROTOCOL];
 
@@ -187,6 +190,7 @@ fn ip_path_at(
     let header_destination = ip_field(layer, DESTINATION, protocol)?;
 
     if protocol == BuiltinProtocol::Ipv4 {
+        reject_non_atomic_fragment(layer)?;
         let source_route = match layer.field(IPV4_OPTIONS) {
             Some(FieldValue::Bytes(options)) => parse_ipv4_source_routes(&options)?,
             None => ParsedIpv4SourceRoutes::default(),
@@ -233,6 +237,9 @@ fn ip_path_at(
         if !candidate_protocol.is_ipv6_extension() {
             break;
         }
+        if candidate_protocol == BuiltinProtocol::Ipv6Fragment {
+            reject_non_atomic_fragment(candidate)?;
+        }
         if candidate_protocol == BuiltinProtocol::Ipv6Srh {
             if segment_route.is_some() {
                 return Err(SemanticError::new(
@@ -273,6 +280,38 @@ fn ip_path_at(
             declared_route_destinations: Vec::new(),
         })
     }
+}
+
+fn reject_non_atomic_fragment(layer: &dyn Layer) -> Result<(), SemanticError> {
+    let offset = match layer.field(FRAGMENT_OFFSET) {
+        Some(FieldValue::Unsigned(value)) => value,
+        None => 0,
+        Some(_) => {
+            return Err(SemanticError::field(
+                layer.protocol_id(),
+                FRAGMENT_OFFSET,
+                "is not unsigned",
+            ));
+        }
+    };
+    let more = match layer.field(MORE_FRAGMENTS) {
+        Some(FieldValue::Bool(value)) => value,
+        None => false,
+        Some(_) => {
+            return Err(SemanticError::field(
+                layer.protocol_id(),
+                MORE_FRAGMENTS,
+                "is not boolean",
+            ));
+        }
+    };
+    if offset != 0 || more {
+        return Err(SemanticError::new(format!(
+            "non-atomic {} fragment may hide a live destination",
+            layer.protocol_id()
+        )));
+    }
+    Ok(())
 }
 
 fn typed_segment_route(
@@ -385,6 +424,16 @@ fn ip_field(
 pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> {
     let mut destinations = Vec::new();
     for (index, layer) in packet.iter().enumerate() {
+        if let Some(malformed) = layer.as_any().downcast_ref::<MalformedLayer>()
+            && let Some(intended) = malformed.intended_protocol.as_ref()
+            && BuiltinProtocol::from_id(intended)
+                .is_some_and(malformed_protocol_may_hide_destination)
+        {
+            return Err(SemanticError::new(format!(
+                "malformed {} layer may hide a live destination: {}",
+                intended, malformed.reason
+            )));
+        }
         match BuiltinProtocol::of(layer) {
             Some(BuiltinProtocol::Ipv4 | BuiltinProtocol::Ipv6) => {
                 let protocol = BuiltinProtocol::of(layer).expect("matched built-in IP protocol");
@@ -435,6 +484,13 @@ pub fn live_destinations(packet: &Packet) -> Result<Vec<IpAddr>, SemanticError> 
         }
     }
     Ok(destinations)
+}
+
+fn malformed_protocol_may_hide_destination(protocol: BuiltinProtocol) -> bool {
+    protocol == BuiltinProtocol::RawIp
+        || protocol == BuiltinProtocol::Arp
+        || protocol.is_ip()
+        || protocol.is_ipv6_extension()
 }
 
 fn validate_attached_srh(packet: &Packet, srh_index: usize) -> Result<(), SemanticError> {
@@ -622,8 +678,11 @@ mod tests {
     #[derive(Clone, Debug)]
     struct StackLayer {
         schema: &'static LayerSchema,
-        source: Option<Ipv4Addr>,
-        destination: Option<Ipv4Addr>,
+        source: Option<IpAddr>,
+        destination: Option<IpAddr>,
+        fragment_offset: Option<u64>,
+        more_fragments: Option<bool>,
+        next_header: Option<u64>,
     }
 
     fn stack_layer(protocol: &'static str) -> StackLayer {
@@ -638,13 +697,16 @@ mod tests {
             })),
             source: None,
             destination: None,
+            fragment_offset: None,
+            more_fragments: None,
+            next_header: None,
         }
     }
 
     fn stack_ip_layer(source: Ipv4Addr, destination: Ipv4Addr) -> StackLayer {
         StackLayer {
-            source: Some(source),
-            destination: Some(destination),
+            source: Some(IpAddr::V4(source)),
+            destination: Some(IpAddr::V4(destination)),
             ..stack_layer("ipv4")
         }
     }
@@ -668,9 +730,12 @@ mod tests {
 
         fn field(&self, name: &str) -> Option<FieldValue> {
             match name {
-                SOURCE => self.source.map(FieldValue::Ipv4),
-                DESTINATION => self.destination.map(FieldValue::Ipv4),
+                SOURCE => self.source.map(ip_field_value),
+                DESTINATION => self.destination.map(ip_field_value),
                 IPV4_OPTIONS => None,
+                FRAGMENT_OFFSET => self.fragment_offset.map(FieldValue::Unsigned),
+                MORE_FRAGMENTS => self.more_fragments.map(FieldValue::Bool),
+                "next_header" => self.next_header.map(FieldValue::Unsigned),
                 _ => None,
             }
         }
@@ -680,6 +745,13 @@ mod tests {
                 protocol: self.protocol_id().clone(),
                 field: name.to_owned(),
             })
+        }
+    }
+
+    fn ip_field_value(value: IpAddr) -> FieldValue {
+        match value {
+            IpAddr::V4(value) => FieldValue::Ipv4(value),
+            IpAddr::V6(value) => FieldValue::Ipv6(value),
         }
     }
 
@@ -742,5 +814,37 @@ mod tests {
             field: DESTINATION_PORT,
         });
         assert_eq!(live_destinations(&packet).unwrap(), Vec::<IpAddr>::new());
+    }
+
+    #[test]
+    fn malformed_route_layers_fail_closed() {
+        for protocol in ["raw_ip", "ipv4", "ipv6_srh"] {
+            let mut packet = Packet::new();
+            packet.push(crate::layer::MalformedLayer::new(
+                Some(ProtocolId::new(protocol)),
+                Vec::<u8>::new(),
+                "truncated",
+            ));
+            assert!(live_destinations(&packet).is_err(), "{protocol}");
+        }
+    }
+
+    #[test]
+    fn non_atomic_ip_fragments_fail_closed_including_type_43() {
+        let mut ipv4 = Packet::new();
+        let mut ipv4_layer = stack_ip_layer(Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST);
+        ipv4_layer.more_fragments = Some(true);
+        ipv4.push(ipv4_layer);
+        assert!(live_destinations(&ipv4).is_err());
+
+        let mut ipv6 = Packet::new();
+        let mut ipv6_layer = stack_layer("ipv6");
+        ipv6_layer.source = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        ipv6_layer.destination = Some(IpAddr::V6(Ipv6Addr::LOCALHOST));
+        let mut fragment = stack_layer("ipv6_fragment");
+        fragment.fragment_offset = Some(1);
+        fragment.next_header = Some(43);
+        ipv6.push(ipv6_layer).push(fragment);
+        assert!(live_destinations(&ipv6).is_err());
     }
 }

@@ -172,14 +172,6 @@ impl ScanCommandResult {
     }
 }
 
-/// One classified port record produced by streaming `scan` output.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct ScanPortCommandResult {
-    pub target: String,
-    pub resolved_address: IpAddr,
-    pub port: ScanPortOutput,
-}
-
 /// One independently useful event in structured scan streaming output.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]

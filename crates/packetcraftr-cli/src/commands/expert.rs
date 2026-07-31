@@ -5,7 +5,6 @@ use packetcraftr::{analysis, output};
 
 use super::super::arguments::ExpertArgs;
 use super::super::errors::CliError;
-use super::super::errors::analysis_cli_error;
 use super::super::rendering::{emit_json, emit_json_compact, write_stdout_line};
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
@@ -42,7 +41,7 @@ pub(crate) fn run_expert(
         Ok(())
     });
     let summary = outcome.map_err(|error| {
-        let error = analysis_cli_error(error);
+        let error = CliError::classified(error);
         // Streamed records are numbered by emission, not by capture frame,
         // so a terminal stream error continues that numbering.
         if matches!(output, output::contract::Format::Ndjson) {

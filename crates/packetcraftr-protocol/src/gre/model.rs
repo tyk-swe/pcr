@@ -67,7 +67,6 @@ reflective_layer! {
         "key" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE key", get |layer| layer.key.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.key = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
         "sequence" => { kind: Unsigned, derived: false, required: false, description: "Optional GRE sequence number", get |layer| layer.sequence.map(FieldValue::from), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.sequence = Some(u32::try_from(value).map_err(|_| out_of_range(gre_schema(), name))?); Ok(()) }, _ => Err(wrong_type(gre_schema(), name, "unsigned")) } },
         "reserved_bits" => { kind: Unsigned, derived: false, required: false, description: "Receiver-ignored GRE bits 6 through 12", get |layer| Some(reflect_get(&layer.reserved_bits)), set |layer, value, name| reflect_set(&mut layer.reserved_bits, gre_schema(), name, value), layout: (0, 2) },
-        normalize |layer| { layer.protocol_type.normalize(); if let Some(checksum) = &mut layer.checksum { checksum.normalize(); } }
     }
     layout pub(crate) fn gre_static_layout();
 }

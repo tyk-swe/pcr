@@ -28,7 +28,6 @@ struct ReversedProtocolLayers<'request, 'response> {
     response: &'response dyn Layer,
 }
 
-#[inline(always)]
 fn reversed_protocol_layers<'request, 'response>(
     protocol: BuiltinProtocol,
     request: &'request Packet,

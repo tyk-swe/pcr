@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import ipaddress
 import json
 import os
@@ -15,15 +14,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from .command import CommandFailure, CommandRunner
-
-
-def _base36(value: int) -> str:
-    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
-    digits: list[str] = []
-    while value:
-        value, remainder = divmod(value, len(alphabet))
-        digits.append(alphabet[remainder])
-    return "".join(reversed(digits)) or "0"
 
 
 @dataclass(frozen=True)
@@ -40,15 +30,10 @@ class TopologyNames:
     @classmethod
     def unique(cls) -> "TopologyNames":
         pid = os.getpid()
-        hint = os.environ.get("PCR_NATIVE_E2E_RUN_ID")
-        suffix = (
-            hashlib.sha256(hint.encode("utf-8")).hexdigest()[:6]
-            if hint is not None
-            else secrets.token_hex(3)
-        )
+        suffix = secrets.token_hex(3)
         run_id = f"{pid}-{suffix}"
-        compact = f"{_base36(pid)[-6:]}{suffix}"
-        names = cls(
+        compact = f"{pid:x}"[-6:] + suffix
+        return cls(
             run_id=run_id,
             client_namespace=f"pcr-client-{run_id}",
             router_namespace=f"pcr-router-{run_id}",
@@ -58,12 +43,6 @@ class TopologyNames:
             router_server_interface=f"p{compact}r1",
             server_interface=f"p{compact}s",
         )
-        interfaces = names.interfaces
-        if len(set(interfaces)) != len(interfaces):
-            raise RuntimeError("generated native-E2E interface names are not unique")
-        if any(len(name) > 15 for name in interfaces):
-            raise RuntimeError("generated native-E2E interface name exceeds Linux IFNAMSIZ")
-        return names
 
     @property
     def namespaces(self) -> tuple[str, str, str]:
@@ -85,18 +64,18 @@ class TopologyNames:
 
 @dataclass(frozen=True)
 class AddressPlan:
-    client_ipv4: str = "10.203.0.2"
-    router_client_ipv4: str = "10.203.0.1"
-    router_server_ipv4: str = "10.203.0.5"
-    server_ipv4: str = "10.203.0.6"
-    client_ipv4_network: str = "10.203.0.0/30"
-    server_ipv4_network: str = "10.203.0.4/30"
-    client_ipv6: str = "fd70:6372:1::2"
-    router_client_ipv6: str = "fd70:6372:1::1"
-    router_server_ipv6: str = "fd70:6372:2::1"
-    server_ipv6: str = "fd70:6372:2::2"
-    client_ipv6_network: str = "fd70:6372:1::/64"
-    server_ipv6_network: str = "fd70:6372:2::/64"
+    client_ipv4: str
+    router_client_ipv4: str
+    router_server_ipv4: str
+    server_ipv4: str
+    client_ipv4_network: str
+    server_ipv4_network: str
+    client_ipv6: str
+    router_client_ipv6: str
+    router_server_ipv6: str
+    server_ipv6: str
+    client_ipv6_network: str
+    server_ipv6_network: str
 
     @classmethod
     def isolated(cls, slot: int) -> "AddressPlan":
@@ -160,11 +139,11 @@ class Topology:
         self,
         runner: CommandRunner,
         names: TopologyNames,
-        addresses: AddressPlan | None = None,
+        addresses: AddressPlan,
     ) -> None:
         self.runner = runner
         self.names = names
-        self.addresses = addresses or AddressPlan()
+        self.addresses = addresses
         self.addresses.validate()
 
     def setup(self) -> None:

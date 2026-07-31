@@ -33,7 +33,6 @@ packetcraftr-workflow.workspace = true
 [dev-dependencies]
 bytes.workspace = true
 criterion.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 
 [[bench]]

@@ -80,7 +80,6 @@ reflective_layer! {
         "vni" => { kind: Unsigned, derived: false, required: true, description: "24-bit virtual network identifier", get |layer| Some(FieldValue::from(layer.vni)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.vni = u32::try_from(value).ok().filter(|value| *value <= VNI_MAX).ok_or_else(|| out_of_range(geneve_schema(), name))?; Ok(()) }, _ => Err(wrong_type(geneve_schema(), name, "unsigned")) }, layout: (4, 7) },
         "reserved2" => { kind: Unsigned, derived: false, required: false, description: "Reserved byte after the VNI", get |layer| Some(reflect_get(&layer.reserved2)), set |layer, value, name| reflect_set(&mut layer.reserved2, geneve_schema(), name, value), layout: (7, 8) },
         "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim GENEVE option TLV bytes", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, geneve_schema(), name, value), layout: (GENEVE_BASE_LEN, options_end) },
-        normalize |layer| { layer.protocol_type.normalize(); }
     }
     layout pub(crate) fn geneve_layout(options_end: usize);
 }

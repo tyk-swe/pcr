@@ -514,29 +514,3 @@ fn describe(token: &Token) -> String {
         Token::Slice(_) => "a byte slice".to_owned(),
     }
 }
-
-/// Reports whether the compiled operator sequence is balanced.
-///
-/// Evaluation pops operands assuming a well-formed program; this is the
-/// invariant the parser guarantees, asserted once at compile time so a future
-/// parser change cannot silently produce a program that underflows.
-pub(super) fn is_balanced(program: &[Op]) -> bool {
-    let mut operands = 0_usize;
-    for op in program {
-        match op {
-            Op::Leaf(_) => operands += 1,
-            Op::Not => {
-                if operands == 0 {
-                    return false;
-                }
-            }
-            Op::And | Op::Or => {
-                if operands < 2 {
-                    return false;
-                }
-                operands -= 1;
-            }
-        }
-    }
-    operands == 1
-}

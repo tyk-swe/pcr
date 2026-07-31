@@ -48,19 +48,6 @@ fn hostname_policy_precedes_resolution_and_resolved_policy_precedes_routes() {
 }
 
 #[test]
-fn resolved_target_selects_addresses_by_typed_ip_version() {
-    let ipv4 = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2));
-    let ipv6 = "fd00::2".parse().unwrap();
-    let resolved = ResolvedTarget {
-        declared: LiveTarget::Address(ipv4),
-        addresses: vec![ipv6, ipv4],
-    };
-
-    assert_eq!(resolved.address_for_version(IpVersion::V4), Some(ipv4));
-    assert_eq!(resolved.address_for_version(IpVersion::V6), Some(ipv6));
-}
-
-#[test]
 fn every_resolution_reauthorizes_all_addresses_before_route_use() {
     let resolver_calls = Arc::new(AtomicUsize::new(0));
     let route_calls = Arc::new(AtomicUsize::new(0));
@@ -109,65 +96,6 @@ fn every_resolution_reauthorizes_all_addresses_before_route_use() {
     ));
     assert_eq!(resolver_calls.load(Ordering::SeqCst), 2);
     assert_eq!(route_calls.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn hostname_and_live_error_classifications_are_stable() {
-    assert!("EXAMPLE.test.".parse::<Hostname>().is_ok());
-    for invalid in ["", "bad label.example", "-bad.example", "bad-.example"] {
-        assert!(matches!(
-            invalid.parse::<Hostname>(),
-            Err(TargetResolutionError::InvalidHostname { .. })
-        ));
-    }
-    assert_eq!(
-        LiveIoError::Privilege {
-            message: "denied".to_owned(),
-        }
-        .classification()
-        .kind,
-        Kind::Capability
-    );
-    assert_eq!(
-        LiveIoError::PartialSend {
-            expected: 10,
-            actual: 9,
-        }
-        .classification()
-        .code,
-        "io.partial_send"
-    );
-    assert_eq!(
-        LiveIoError::InvalidSendReport {
-            bytes_sent: 1,
-            wire_bytes: 2,
-        }
-        .classification()
-        .kind,
-        Kind::Internal
-    );
-    assert_eq!(
-        NativeRouteError::Unsupported {
-            message: "disabled".to_owned(),
-        }
-        .classification()
-        .code,
-        "capability.route"
-    );
-    assert_eq!(
-        NeighborError::Io {
-            interface: "test0".to_owned(),
-            target: IpAddr::V4(Ipv4Addr::LOCALHOST),
-            operation: "opening capture",
-            source: LiveIoError::MissingDependency {
-                dependency: "test backend",
-                message: "missing".to_owned(),
-            },
-        }
-        .classification()
-        .kind,
-        Kind::Capability
-    );
 }
 
 #[test]

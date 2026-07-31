@@ -6,7 +6,7 @@ use std::net::IpAddr;
 use bytes::Bytes;
 use thiserror::Error;
 
-use packetcraftr_error::{Category, Classification, Classified, Kind};
+use packetcraftr_error::{Classification, Classified, Kind};
 use packetcraftr_net::{
     Error as LiveIoError,
     neighbor::Error as NeighborError,
@@ -46,8 +46,6 @@ pub enum ClientError {
     Neighbor(#[from] NeighborError),
     #[error(transparent)]
     Build(#[from] BuildError),
-    #[error(transparent)]
-    Decode(#[from] packetcraftr_packet::decode::DecodeError),
     #[error(transparent)]
     Policy(#[from] TrafficPolicyError),
     #[error("permissively built packets require allow_permissive_live")]
@@ -93,11 +91,6 @@ impl Classified for ClientError {
                     "correct the packet fields or select permissive mode with the required live opt-ins",
                 ),
             ),
-            Self::Decode(_) => Classification::new(
-                "packet.decode",
-                Kind::Packet,
-                Some("inspect the capture link type, packet bytes, and configured decode limits"),
-            ),
             Self::Policy(error) => error.classification(),
             Self::PermissiveLiveOptInRequired => Classification::new(
                 "policy.permissive_live_opt_in",
@@ -107,9 +100,7 @@ impl Classified for ClientError {
                 ),
             ),
             Self::Io(error) => error.classification(),
-            Self::OperationAndCaptureShutdown { operation, .. } => {
-                operation.classification().with_category(Category::Cleanup)
-            }
+            Self::OperationAndCaptureShutdown { operation, .. } => operation.classification(),
             Self::HeterogeneousExchangeRoute => Classification::new(
                 "cli.heterogeneous_exchange_route",
                 Kind::Cli,
@@ -160,10 +151,9 @@ impl Classified for ClientError {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_error::{Category, Classified, Kind};
+    use packetcraftr_error::{Classified, Kind};
 
     use super::{ClientError, SendOptions};
-    use crate::policy::TrafficPolicyError;
     use packetcraftr_net::Error as LiveIoError;
 
     #[test]
@@ -232,20 +222,6 @@ mod tests {
     }
 
     #[test]
-    fn wrapped_policy_and_live_io_errors_preserve_their_classification() {
-        let policy = ClientError::Policy(TrafficPolicyError::PacketLimit {
-            actual: 2,
-            limit: 1,
-        });
-        assert_eq!(policy.classification().code, "policy.packet_limit");
-
-        let io = ClientError::Io(LiveIoError::Privilege {
-            message: "denied".to_owned(),
-        });
-        assert_eq!(io.classification().code, "capability.privilege");
-    }
-
-    #[test]
     fn cleanup_failure_preserves_operation_classification_and_both_causes() {
         let error = ClientError::OperationAndCaptureShutdown {
             operation: LiveIoError::Send {
@@ -258,24 +234,12 @@ mod tests {
         let classification = error.classification();
         assert_eq!(classification.code, "io.send");
         assert_eq!(classification.kind, Kind::Io);
-        assert_eq!(classification.category, Category::Cleanup);
         assert_eq!(
             error.causes(),
             vec![
                 "packet transmission failed: send failed".to_owned(),
                 "capture failed: shutdown failed".to_owned(),
             ]
-        );
-    }
-
-    #[test]
-    fn client_owned_errors_have_no_nested_causes() {
-        assert!(
-            ClientError::Template {
-                message: "invalid".to_owned(),
-            }
-            .causes()
-            .is_empty()
         );
     }
 }

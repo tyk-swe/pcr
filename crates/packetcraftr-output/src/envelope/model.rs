@@ -11,48 +11,10 @@ use packetcraftr_packet::diagnostic::Diagnostic;
 
 use super::super::contract::{CommandName, OUTPUT_SCHEMA_V1, OutputMode};
 
-/// Stable structured error carried by aggregate and streaming envelopes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum OutputErrorKind {
-    Cli,
-    Packet,
-    Capability,
-    Io,
-    Policy,
-    Internal,
-}
-
-impl OutputErrorKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Cli => "cli",
-            Self::Packet => "packet",
-            Self::Capability => "capability",
-            Self::Io => "io",
-            Self::Policy => "policy",
-            Self::Internal => "internal",
-        }
-    }
-}
-
-impl From<Kind> for OutputErrorKind {
-    fn from(value: Kind) -> Self {
-        match value {
-            Kind::Cli => Self::Cli,
-            Kind::Packet => Self::Packet,
-            Kind::Capability => Self::Capability,
-            Kind::Io => Self::Io,
-            Kind::Policy => Self::Policy,
-            Kind::Internal => Self::Internal,
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct OutputError {
     pub code: String,
-    pub kind: OutputErrorKind,
+    pub kind: Kind,
     pub message: String,
     pub causes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -67,7 +29,7 @@ impl OutputError {
     ) -> Self {
         Self {
             code: classification.code.to_owned(),
-            kind: classification.kind.into(),
+            kind: classification.kind,
             message: message.into(),
             causes,
             remediation: classification.remediation.map(str::to_owned),
@@ -252,12 +214,6 @@ impl<T> AggregateOutput<T> {
         self.stats = Some(stats);
         self
     }
-
-    #[must_use]
-    pub fn with_diagnostics(mut self, diagnostics: Vec<Diagnostic>) -> Self {
-        self.diagnostics = diagnostics.into_iter().map(Into::into).collect();
-        self
-    }
 }
 
 /// Aggregate error envelope with no unused success-result type parameter.
@@ -310,12 +266,6 @@ impl<T> StreamRecord<T> {
     #[must_use]
     pub fn with_stats(mut self, stats: OperationStats) -> Self {
         self.stats = Some(stats);
-        self
-    }
-
-    #[must_use]
-    pub fn with_diagnostics(mut self, diagnostics: Vec<Diagnostic>) -> Self {
-        self.diagnostics = diagnostics.into_iter().map(Into::into).collect();
         self
     }
 }

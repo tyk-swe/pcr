@@ -386,8 +386,7 @@ impl MatchedResponseEvidence for ScanMatchedResponse {
 fn map_scan_evidence_error(batch: &ScanBatch, error: ExchangeEvidenceError) -> ScanError {
     let batch_sequence = batch.probes[0].sequence;
     let sequence = match &error {
-        ExchangeEvidenceError::SentPacketMismatch { request_index }
-        | ExchangeEvidenceError::InvalidSentFrame { request_index, .. } => {
+        ExchangeEvidenceError::SentPacketMismatch { request_index } => {
             batch.probes[*request_index].sequence
         }
         _ => batch_sequence,

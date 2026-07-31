@@ -60,7 +60,6 @@ macro_rules! declare_options_layer {
             impl $ty {
                 "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, $schema(), name, value), layout: (0, 1) },
                 "options" => { kind: Bytes, derived: false, required: false, description: "Option bytes, padded to an eight-byte header boundary", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, $schema(), name, value), layout: (2, header_len) },
-                normalize |layer| { layer.next_header.normalize(); }
             }
             layout pub(crate) fn $layout(header_len: usize);
         }
@@ -313,7 +312,6 @@ reflective_layer! {
         "fragment_offset" => { kind: Unsigned, derived: false, required: true, description: "Fragment offset in eight-byte units", get |layer| Some(reflect_get(&layer.fragment_offset)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.fragment_offset = u16::try_from(value).ok().filter(|value| *value <= 0x1fff).ok_or_else(|| out_of_range(fragment_schema(), name))?; Ok(()) }, _ => Err(wrong_type(fragment_schema(), name, "unsigned")) }, layout: (2, 4) },
         "more_fragments" => { kind: Bool, derived: false, required: true, description: "More-fragments flag", get |layer| Some(reflect_get(&layer.more_fragments)), set |layer, value, name| reflect_set(&mut layer.more_fragments, fragment_schema(), name, value), layout: (2, 4) },
         "identification" => { kind: Unsigned, derived: false, required: true, description: "Fragment identification", get |layer| Some(reflect_get(&layer.identification)), set |layer, value, name| reflect_set(&mut layer.identification, fragment_schema(), name, value), layout: (4, 8) },
-        normalize |layer| { layer.next_header.normalize(); }
     }
     layout pub(crate) fn fragment_layout();
 }
@@ -498,7 +496,6 @@ reflective_layer! {
         "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", get |layer| Some(reflect_get(&layer.tag)), set |layer, value, name| reflect_set(&mut layer.tag, srh_schema(), name, value), layout: (6, 8) },
         "segments" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, segments_end) },
         "tlvs" => { kind: Bytes, derived: false, required: false, description: "TLV bytes following the segment list, including padding", get |layer| Some(reflect_get(&layer.tlvs)), set |layer, value, name| reflect_set(&mut layer.tlvs, srh_schema(), name, value), layout: (segments_end, header_len) },
-        normalize |layer| { layer.next_header.normalize(); layer.segments_left.normalize(); layer.last_entry.normalize(); }
     }
     layout pub(crate) fn srh_layout(segments_end: usize, header_len: usize);
 }

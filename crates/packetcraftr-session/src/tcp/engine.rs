@@ -25,9 +25,10 @@ impl Reassembler {
         now: Instant,
     ) -> Result<(), Error> {
         self.validate_limits()?;
-        if let Some(existing) = self.flows.get(&flow)
+        if let Some(existing) = self.flows.get_mut(&flow)
             && existing.base_sequence == first_payload_sequence
         {
+            existing.last_update = existing.last_update.max(now);
             return Ok(());
         }
         let last_update = self
@@ -152,14 +153,7 @@ impl Reassembler {
     /// otherwise misinterpret the next generation's segments against the old
     /// sequence base. Evicting an unknown flow is a no-op.
     pub fn evict_flow(&mut self, flow: &FlowKey) -> Vec<Event> {
-        if !self.flows.contains_key(flow) {
-            return Vec::new();
-        }
         self.remove_flows(vec![flow.clone()])
-    }
-
-    pub fn limits(&self) -> &ReassemblyLimits {
-        &self.limits
     }
 
     pub fn flow_count(&self) -> usize {
@@ -224,9 +218,9 @@ impl Reassembler {
     fn remove_flows(&mut self, mut keys: Vec<FlowKey>) -> Vec<Event> {
         keys.sort_by_key(|key| {
             (
-                key.source.to_string(),
+                key.source,
                 key.source_port,
-                key.destination.to_string(),
+                key.destination,
                 key.destination_port,
             )
         });

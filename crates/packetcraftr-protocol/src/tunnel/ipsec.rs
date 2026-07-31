@@ -244,7 +244,6 @@ reflective_layer! {
         "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", get |layer| Some(reflect_get(&layer.spi)), set |layer, value, name| reflect_set(&mut layer.spi, ah_schema(), name, value), layout: (4, 8) },
         "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", get |layer| Some(reflect_get(&layer.sequence)), set |layer, value, name| reflect_set(&mut layer.sequence, ah_schema(), name, value), layout: (8, 12) },
         "icv" => { kind: Bytes, derived: false, required: false, description: "Integrity check value, a multiple of 4 bytes", get |layer| Some(reflect_get(&layer.icv)), set |layer, value, name| reflect_set(&mut layer.icv, ah_schema(), name, value), layout: (AH_FIXED_LEN, header_len) },
-        normalize |layer| { layer.next_header.normalize(); layer.payload_length.normalize(); }
     }
     layout pub(crate) fn ah_layout(header_len: usize);
 }

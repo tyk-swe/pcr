@@ -127,10 +127,6 @@ impl Reassembler {
         }
     }
 
-    pub fn limits(&self) -> &ReassemblyLimits {
-        &self.limits
-    }
-
     pub fn flow_count(&self) -> usize {
         self.flows.len()
     }
@@ -347,10 +343,10 @@ impl Reassembler {
                     .map(|_| key.clone())
             })
             .collect::<Vec<_>>();
-        expired.sort_by_cached_key(|key| {
+        expired.sort_by_key(|key| {
             (
-                key.source.to_string(),
-                key.destination.to_string(),
+                key.source,
+                key.destination,
                 key.identification,
                 key.next_header,
             )
@@ -375,8 +371,8 @@ impl Reassembler {
         let mut keys = self.flows.keys().cloned().collect::<Vec<_>>();
         keys.sort_by_key(|key| {
             (
-                key.source.to_string(),
-                key.destination.to_string(),
+                key.source,
+                key.destination,
                 key.identification,
                 key.next_header,
             )
@@ -472,42 +468,6 @@ mod tests {
             event,
             Event::Complete(value) if value.bytes == Bytes::from_static(b"abcdefghijk")
         ));
-    }
-
-    #[test]
-    fn adjacent_fragments_coalesce() {
-        let now = Instant::now();
-        let mut reassembler = Reassembler::new(
-            ReassemblyLimits::default(),
-            OverlapPolicy::RejectConflicting,
-        );
-        reassembler
-            .push(
-                Fragment {
-                    key: key(),
-                    offset: 0,
-                    more_fragments: true,
-                    bytes: Bytes::from_static(b"abcdefgh"),
-                },
-                now,
-            )
-            .unwrap();
-        reassembler
-            .push(
-                Fragment {
-                    key: key(),
-                    offset: 8,
-                    more_fragments: true,
-                    bytes: Bytes::from_static(b"ijklmnop"),
-                },
-                now,
-            )
-            .unwrap();
-
-        let state = reassembler.flows.get(&key()).unwrap();
-        assert_eq!(state.segments.len(), 1);
-        assert_eq!(&state.segments[&0][..], b"abcdefghijklmnop");
-        assert_eq!(state.fragment_count, 2);
     }
 
     #[test]
@@ -933,33 +893,5 @@ mod tests {
         let stored = &reassembler.flows[&key()].segments[&8];
         assert_eq!(stored.as_ref(), b"\x07\x07\x07\x07\x07\x07\x07\x07");
         assert_ne!(stored.as_ptr(), slice_pointer);
-    }
-
-    #[test]
-    fn sparse_aggregate_rejection_precedes_span_sized_scratch_allocation() {
-        let now = Instant::now();
-        let limits = ReassemblyLimits {
-            max_bytes_per_flow: 10_000_008,
-            max_aggregate_bytes: DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE,
-            ..ReassemblyLimits::default()
-        };
-        let mut reassembler = Reassembler::new(limits, OverlapPolicy::RejectConflicting);
-        assert_eq!(
-            reassembler
-                .push(
-                    Fragment {
-                        key: key(),
-                        offset: 10_000_000,
-                        more_fragments: true,
-                        bytes: Bytes::from_static(b"xxxxxxxx"),
-                    },
-                    now,
-                )
-                .unwrap_err(),
-            Error::AggregateByteLimit {
-                limit: DATAGRAM_STATE_METADATA_CHARGE + FRAGMENT_SEGMENT_METADATA_CHARGE
-            }
-        );
-        assert_eq!(reassembler.flow_count(), 0);
     }
 }

@@ -15,14 +15,27 @@ use std::{
 
 use crate::{
     Error as LiveIoError,
-    capture::{
-        CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame, validate_timeout,
-    },
+    capture::{CaptureQueueLimits, CaptureSession, CaptureStatistics, CapturedFrame, MAX_TIMEOUT},
 };
 
 use super::{CaptureInterrupt, NativeCaptureParts, queue::SharedCapture, worker::capture_worker};
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
+
+fn capture_deadline(timeout: Duration) -> Result<Instant, LiveIoError> {
+    if timeout > MAX_TIMEOUT {
+        return Err(LiveIoError::InvalidCaptureTimeout {
+            timeout,
+            maximum: MAX_TIMEOUT,
+        });
+    }
+    Instant::now()
+        .checked_add(timeout)
+        .ok_or(LiveIoError::InvalidCaptureTimeout {
+            timeout,
+            maximum: MAX_TIMEOUT,
+        })
+}
 
 pub(in crate::platform) struct NativeCaptureSession {
     shared: Arc<SharedCapture>,
@@ -37,8 +50,7 @@ impl NativeCaptureSession {
         parts: NativeCaptureParts,
         limits: CaptureQueueLimits,
     ) -> Result<Self, LiveIoError> {
-        let validated_limits = limits.validate()?;
-        let shared = Arc::new(SharedCapture::new(validated_limits));
+        let shared = Arc::new(SharedCapture::new(limits));
         let stop = Arc::new(AtomicBool::new(false));
         let worker_shared = Arc::clone(&shared);
         let worker_stop = Arc::clone(&stop);
@@ -80,10 +92,7 @@ impl NativeCaptureSession {
 
 impl CaptureSession for NativeCaptureSession {
     fn wait_ready(&mut self, timeout: Duration) -> Result<(), LiveIoError> {
-        validate_timeout(timeout)?;
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .expect("validated bounded capture timeout must fit Instant");
+        let deadline = capture_deadline(timeout)?;
         let mut state = self.shared.lock()?;
         while !state.ready && !state.closed && state.error.is_none() {
             let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
@@ -119,10 +128,7 @@ impl CaptureSession for NativeCaptureSession {
         &mut self,
         timeout: Duration,
     ) -> Result<Option<CapturedFrame>, LiveIoError> {
-        validate_timeout(timeout)?;
-        let deadline = Instant::now()
-            .checked_add(timeout)
-            .expect("validated bounded capture timeout must fit Instant");
+        let deadline = capture_deadline(timeout)?;
         let mut state = self.shared.lock()?;
         loop {
             if let Some(captured) = state.queue.front() {

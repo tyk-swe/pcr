@@ -22,15 +22,15 @@ use super::super::rendering::{
 use super::super::runtime::{default_registry_arc, prepare_route_request, system_client};
 
 #[derive(Debug)]
-pub(crate) struct CaptureOutcome {
+struct CaptureOutcome {
     diagnostics: Vec<packet::diagnostic::Diagnostic>,
-    pub(crate) stats: output::envelope::Stats,
+    stats: output::envelope::Stats,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct CaptureBudget {
-    pub(crate) max_frames: u64,
-    pub(crate) max_bytes: u64,
+struct CaptureBudget {
+    max_frames: u64,
+    max_bytes: u64,
 }
 
 impl From<&client::policy::Policy> for CaptureBudget {
@@ -174,6 +174,27 @@ pub(crate) fn run_capture(
         }
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let format = capture_file_format(output)?;
+            let configuration_error = match format {
+                capture::Format::PcapNg if limits.snap_length < 32 => {
+                    Some(capture::Error::SizeLimitExceeded {
+                        kind: "pcapng interface description",
+                        declared: 32,
+                        limit: limits.snap_length,
+                    })
+                }
+                capture::Format::PcapNg if route.route.link_type.0 > u16::MAX as u32 => {
+                    Some(capture::Error::LinkTypeOutOfRange {
+                        link_type: route.route.link_type.0,
+                    })
+                }
+                _ => None,
+            };
+            if let Some(source) = configuration_error {
+                return Err(CliError::new(
+                    5,
+                    format!("initialize capture output failed: {source}"),
+                ));
+            }
             let mut capture = arm_capture().map_err(CliError::classified)?;
             let stdout = io::stdout();
             let writer = match format {
@@ -186,30 +207,13 @@ pub(crate) fn run_capture(
                         ..PcapOptions::default()
                     },
                 ),
-                capture::Format::PcapNg => (|| {
-                    // Reject mandatory-interface configuration before the
-                    // section header is committed to stdout.
-                    if limits.snap_length < 32 {
-                        return Err(capture::Error::SizeLimitExceeded {
-                            kind: "pcapng interface description",
-                            declared: 32,
-                            limit: limits.snap_length,
-                        });
-                    }
-                    if route.route.link_type.0 > u16::MAX as u32 {
-                        return Err(capture::Error::LinkTypeOutOfRange {
-                            link_type: route.route.link_type.0,
-                        });
-                    }
-                    let writer = Writer::pcapng_with_options(
-                        stdout.lock(),
-                        PcapNgOptions {
-                            max_size: limits.snap_length,
-                            ..PcapNgOptions::default()
-                        },
-                    )?;
-                    Ok(writer)
-                })(),
+                capture::Format::PcapNg => Writer::pcapng_with_options(
+                    stdout.lock(),
+                    PcapNgOptions {
+                        max_size: limits.snap_length,
+                        ..PcapNgOptions::default()
+                    },
+                ),
             };
             let mut writer = match writer.map(CaptureOutput::link_mapped) {
                 Ok(mut writer) => {
@@ -272,7 +276,7 @@ fn validate_capture_window(timeout: Duration) -> Result<(), CliError> {
     Ok(())
 }
 
-pub(crate) fn drive_capture<C, F>(
+fn drive_capture<C, F>(
     mut capture: C,
     timeout: Duration,
     limits: net::capture::Limits,

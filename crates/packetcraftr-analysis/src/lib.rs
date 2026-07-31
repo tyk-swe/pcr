@@ -37,19 +37,10 @@ use packetcraftr_packet::decode::{
     DecodedPacket, Decoder, Error as DecodeError, Options as DecodeOptions,
 };
 use packetcraftr_packet::filter::{Context as FilterContext, Filter};
-use packetcraftr_packet::{
-    Packet,
-    layer::{Padding, Raw},
-    registry::ProtocolRegistry,
-};
-use packetcraftr_protocol::ipv6::Fragment as Ipv6Fragment;
+use packetcraftr_packet::{Packet, layer::Padding, registry::ProtocolRegistry};
 use packetcraftr_protocol::network::{Ipv4, Ipv6};
 use packetcraftr_protocol::transport::{Tcp, Udp};
 use packetcraftr_session::ReassemblyLimits;
-use packetcraftr_session::fragment::{
-    DatagramKey as FragmentKey, Event as FragmentEvent, Fragment, OverlapPolicy,
-    Reassembler as FragmentReassembler,
-};
 use packetcraftr_session::tcp::{
     Error as SessionTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
 };
@@ -64,10 +55,8 @@ pub mod stats;
 mod tests;
 
 pub use error::AnalysisError as Error;
+use error::AnalysisError;
 pub use pipeline::{
     AnalysisLimits as Limits, AnalysisOptions as Options, AnalysisSummary as Summary, FrameRecord,
     run,
 };
-pub use session_index::{CanonicalFlow, StreamIndex, ip_fragment, tcp_segment, udp_flow};
-
-use error::AnalysisError;

@@ -4,45 +4,6 @@
 use super::*;
 
 #[test]
-fn pcapng_round_trip_preserves_multiple_interfaces_and_direction() {
-    let mut writer = Writer::pcapng_with_options(
-        Vec::new(),
-        PcapNgOptions {
-            endianness: Endianness::Big,
-            ..PcapNgOptions::default()
-        },
-    )
-    .unwrap();
-    let ethernet = writer.add_interface(LinkType::ETHERNET).unwrap();
-    let cooked = writer.add_interface(LinkType::LINUX_SLL2).unwrap();
-    assert_eq!((ethernet, cooked), (0, 1));
-
-    let mut first = frame(
-        UNIX_EPOCH + Duration::new(10, 111_222_333),
-        LinkType::ETHERNET,
-        &[0xaa, 0xbb, 0xcc],
-    );
-    first.interface = Some(ethernet);
-    first.direction = Some(Direction::Inbound);
-    let mut second = frame(
-        UNIX_EPOCH + Duration::new(11, 999_888_777),
-        LinkType::LINUX_SLL2,
-        &[0, 1, 2, 3, 4, 5, 6],
-    );
-    second.interface = Some(cooked);
-    second.direction = Some(Direction::Outbound);
-    writer.write_frame(&first).unwrap();
-    writer.write_frame(&second).unwrap();
-
-    let mut reader = Reader::new(Cursor::new(writer.into_inner())).unwrap();
-    assert_eq!(reader.format(), Format::PcapNg);
-    assert_eq!(reader.endianness(), Endianness::Big);
-    assert_eq!(reader.next_frame().unwrap(), Some(first));
-    assert_eq!(reader.next_frame().unwrap(), Some(second));
-    assert_eq!(reader.next_frame().unwrap(), None);
-}
-
-#[test]
 fn bounded_transcode_preserves_pcapng_interface_metadata_and_frames() {
     let mut writer = Writer::pcapng_with_options(
         Vec::new(),

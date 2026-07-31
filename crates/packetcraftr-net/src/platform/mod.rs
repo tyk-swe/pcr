@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn native_snapshot_preserves_gateway_reason_and_low_route_mtu() {
+    fn native_snapshot_preserves_gateway_reason_and_uses_conservative_route_mtu() {
         let gateway = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1));
         let decision = finish_route(
             IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
@@ -309,6 +309,18 @@ mod tests {
         assert_eq!(decision.next_hop, Some(gateway));
         assert_eq!(decision.selection_reason, RouteSelectionReason::Gateway);
         assert_eq!(decision.mtu, 576);
+
+        let decision = finish_route(
+            IpAddr::V4(Ipv4Addr::new(198, 51, 100, 1)),
+            None,
+            None,
+            NativeRouteSnapshot {
+                route_mtu: Some(9_000),
+                ..snapshot()
+            },
+        )
+        .unwrap();
+        assert_eq!(decision.mtu, 1_500);
     }
 
     #[test]
@@ -381,6 +393,19 @@ mod tests {
                 interface: "mock0".to_owned(),
             }
         );
+
+        assert!(matches!(
+            finish_route(
+                destination,
+                None,
+                None,
+                NativeRouteSnapshot {
+                    selected_address: Some(unavailable),
+                    ..snapshot()
+                }
+            ),
+            Err(NativeRouteError::InvalidResponse { .. })
+        ));
     }
 
     #[test]

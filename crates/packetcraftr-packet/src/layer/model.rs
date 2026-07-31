@@ -134,18 +134,6 @@ pub trait Layer: Any + Send + Sync + fmt::Debug {
     fn protocol_id(&self) -> &ProtocolId {
         &self.schema().protocol
     }
-
-    /// Reset dependent values to automatic derivation.
-    fn normalize(&mut self) {}
-
-    /// Names of the fields this layer declares a static byte range for.
-    ///
-    /// Layers that declare no static layout return an empty list. Conformance
-    /// tests use this to assert every declared layout name is also a schema
-    /// field.
-    fn declared_layout_fields(&self) -> Vec<&'static str> {
-        Vec::new()
-    }
 }
 
 impl Clone for Box<dyn Layer> {

@@ -288,7 +288,10 @@ impl ExchangeAccumulator {
         if self.workflow_examined_unsolicited >= self.unsolicited.len() {
             return ExchangeProcessOutcome::Continue;
         }
-        if self.stop_workflow_promotion_if_deadline_expired(deadline) {
+        if Instant::now() >= deadline {
+            self.unsolicited_freshness.fill(None);
+            self.workflow_examined_unsolicited = self.unsolicited.len();
+            self.mark_correlation_deadline_expired();
             return ExchangeProcessOutcome::CorrelationDeadlineExpired;
         }
         if self.workflow_response_limit_reached(max_responses) {
@@ -296,13 +299,27 @@ impl ExchangeAccumulator {
             return ExchangeProcessOutcome::Continue;
         }
 
-        let candidates = self
+        let mut candidates = self
             .unsolicited
-            .split_off(self.workflow_examined_unsolicited);
-        let candidate_freshness = self
-            .unsolicited_freshness
-            .split_off(self.workflow_examined_unsolicited);
-        for (decoded, freshness) in candidates.into_iter().zip(candidate_freshness) {
+            .split_off(self.workflow_examined_unsolicited)
+            .into_iter()
+            .zip(
+                self.unsolicited_freshness
+                    .split_off(self.workflow_examined_unsolicited),
+            );
+        while let Some((decoded, freshness)) = candidates.next() {
+            if Instant::now() >= deadline {
+                self.unsolicited.push(decoded);
+                self.unsolicited_freshness.push(None);
+                for (decoded, _) in candidates {
+                    self.unsolicited.push(decoded);
+                    self.unsolicited_freshness.push(None);
+                }
+                self.unsolicited_freshness.fill(None);
+                self.workflow_examined_unsolicited = self.unsolicited.len();
+                self.mark_correlation_deadline_expired();
+                return ExchangeProcessOutcome::CorrelationDeadlineExpired;
+            }
             let Some(freshness) = freshness else {
                 self.unsolicited.push(decoded);
                 self.unsolicited_freshness.push(None);
@@ -313,45 +330,47 @@ impl ExchangeAccumulator {
                 self.unsolicited_freshness.push(Some(freshness));
                 continue;
             }
-            let mut matching_requests = Vec::new();
+            let mut winner = None;
             for (request_index, prepared_request) in prepared
                 .iter()
                 .enumerate()
                 .take(freshness.eligible_requests)
             {
-                if self.stop_workflow_promotion_if_deadline_expired(deadline) {
-                    return ExchangeProcessOutcome::CorrelationDeadlineExpired;
-                }
                 let matched =
                     matches_request(request_index, &prepared_request.built.packet, &decoded);
-                if self.stop_workflow_promotion_if_deadline_expired(deadline) {
+                if Instant::now() >= deadline {
+                    self.unsolicited.push(decoded);
+                    self.unsolicited_freshness.push(None);
+                    for (decoded, _) in candidates {
+                        self.unsolicited.push(decoded);
+                        self.unsolicited_freshness.push(None);
+                    }
+                    self.unsolicited_freshness.fill(None);
+                    self.workflow_examined_unsolicited = self.unsolicited.len();
+                    self.mark_correlation_deadline_expired();
                     return ExchangeProcessOutcome::CorrelationDeadlineExpired;
                 }
-                if matched {
-                    matching_requests.push(request_index);
+                if matched
+                    && winner.is_none_or(|best_index| {
+                        self.response_counts[request_index] < self.response_counts[best_index]
+                    })
+                {
+                    winner = Some(request_index);
                 }
             }
-            if matching_requests.is_empty() {
+            let Some(request_index) = winner else {
                 self.unsolicited.push(decoded);
                 self.unsolicited_freshness.push(Some(freshness));
                 continue;
-            }
-            for request_index in matching_requests {
-                if self.workflow_response_limit_reached(max_responses) {
-                    break;
-                }
-                if self.stop_workflow_promotion_if_deadline_expired(deadline) {
-                    return ExchangeProcessOutcome::CorrelationDeadlineExpired;
-                }
-                self.response_counts[request_index] += 1;
-                self.responses.push(MatchedResponse {
-                    request_index,
-                    response: decoded.clone(),
-                    latency: freshness
-                        .received_at
-                        .saturating_duration_since(sent_at[request_index]),
-                });
-            }
+            };
+            self.response_counts[request_index] += 1;
+            self.responses.push(MatchedResponse {
+                request_index,
+                response: decoded,
+                latency: freshness
+                    .received_at
+                    .saturating_duration_since(sent_at[request_index]),
+            });
         }
         self.workflow_examined_unsolicited = self.unsolicited.len();
         // Ambient frames remain available from Client::exchange, but the
@@ -373,17 +392,6 @@ impl ExchangeAccumulator {
                 ),
             ),
         );
-        true
-    }
-
-    fn stop_workflow_promotion_if_deadline_expired(&mut self, deadline: Instant) -> bool {
-        if Instant::now() < deadline {
-            return false;
-        }
-        self.unsolicited.clear();
-        self.unsolicited_freshness.clear();
-        self.workflow_examined_unsolicited = 0;
-        self.mark_correlation_deadline_expired();
         true
     }
 

@@ -83,7 +83,6 @@ reflective_layer! {
         "source" => { kind: Ipv4, derived: false, required: true, description: "Source IPv4 address", get |layer| Some(reflect_get(&layer.source)), set |layer, value, name| reflect_set(&mut layer.source, ipv4_schema(), name, value), layout: (12, 16) },
         "destination" => { kind: Ipv4, derived: false, required: true, description: "Destination IPv4 address", get |layer| Some(reflect_get(&layer.destination)), set |layer, value, name| reflect_set(&mut layer.destination, ipv4_schema(), name, value), layout: (16, 20) },
         "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim IPv4 option bytes", get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, ipv4_schema(), name, value), layout: (20, header_len) },
-        normalize |layer| { layer.total_length.normalize(); layer.protocol.normalize(); layer.checksum.normalize(); }
     }
     layout pub(crate) fn ipv4_layout(header_len: usize);
 }

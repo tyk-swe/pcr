@@ -47,8 +47,6 @@ pub(crate) fn run_fuzz(
         limits,
         policy,
     } = arguments;
-    let registry = default_registry_arc()?;
-    let packet = read_recipe(recipe, &registry)?;
     let targets = fields
         .into_iter()
         .map(|field| {
@@ -82,8 +80,15 @@ pub(crate) fn run_fuzz(
         },
     };
     request.validate().map_err(fuzz_cli_error)?;
-
-    let result = if live {
+    let prepared_live = if live {
+        let live_options = workflow::fuzz::LiveOptions {
+            timeout: Duration::from_millis(timeout_ms),
+            cases_per_second: rate,
+            destination,
+            allow_malformed_live,
+        }
+        .validate()
+        .map_err(fuzz_cli_error)?;
         let policy = policy.into_policy();
         policy.validate().map_err(CliError::classified)?;
         validate_live_interface_selector("fuzz", interface.as_deref())?;
@@ -102,6 +107,14 @@ pub(crate) fn run_fuzz(
             1,
             queue_limits,
         )?;
+        Some((live_options, policy, exchange))
+    } else {
+        None
+    };
+    let registry = default_registry_arc()?;
+    let packet = read_recipe(recipe, &registry)?;
+
+    let result = if let Some((live_options, policy, exchange)) = prepared_live {
         let mut executor = CliFuzzExecutor {
             registry: Arc::clone(&registry),
             policy: policy.clone(),
@@ -112,12 +125,7 @@ pub(crate) fn run_fuzz(
         let mut clock = workflow::clock::SystemClock;
         workflow::fuzz::run_live(
             &request,
-            workflow::fuzz::LiveOptions {
-                timeout: Duration::from_millis(timeout_ms),
-                cases_per_second: rate,
-                destination,
-                allow_malformed_live,
-            },
+            live_options,
             packet,
             registry,
             &mut authorizer,

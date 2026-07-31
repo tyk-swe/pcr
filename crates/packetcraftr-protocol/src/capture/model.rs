@@ -308,7 +308,6 @@ reflective_layer! {
         "arp_hardware_type" => { kind: Unsigned, derived: false, required: true, description: "ARP hardware type", get |layer| Some(reflect_get(&layer.arp_hardware_type)), set |layer, value, name| reflect_set(&mut layer.arp_hardware_type, linux_sll_schema(), name, value), layout: (2, 4) },
         "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u16::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll_schema(), name, "unsigned")) }, layout: (4, 6) },
         "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll_schema(), name, value), layout: (6, 14) },
-        normalize |layer| { layer.protocol.normalize(); }
     }
     layout pub(crate) fn linux_sll_layout();
 }
@@ -322,7 +321,6 @@ reflective_layer! {
         "interface_index" => { kind: Unsigned, derived: false, required: false, description: "Interface index", get |layer| Some(reflect_get(&layer.interface_index)), set |layer, value, name| reflect_set(&mut layer.interface_index, linux_sll2_schema(), name, value), layout: (4, 8) },
         "address_length" => { kind: Unsigned, derived: false, required: true, description: "Link address length", get |layer| Some(reflect_get(&layer.address_length)), set |layer, value, name| match value { FieldValue::Unsigned(value) => { layer.address_length = u8::try_from(value).ok().filter(|value| *value <= 8).ok_or_else(|| out_of_range(linux_sll2_schema(), name))?; Ok(()) }, _ => Err(wrong_type(linux_sll2_schema(), name, "unsigned")) }, layout: (11, 12) },
         "address" => { kind: Bytes, derived: false, required: false, description: "Eight-byte link address slot", get |layer| Some(reflect_get(&layer.address)), set |layer, value, name| reflect_set(&mut layer.address, linux_sll2_schema(), name, value), layout: (12, 20) },
-        normalize |layer| { layer.protocol.normalize(); }
     }
     layout pub(crate) fn linux_sll2_layout();
 }

@@ -985,7 +985,6 @@ dependencies = [
  "packetcraftr-protocol",
  "packetcraftr-session",
  "packetcraftr-workflow",
- "serde",
  "serde_json",
 ]
 
@@ -1110,7 +1109,6 @@ dependencies = [
  "packetcraftr-capture",
  "packetcraftr-packet",
  "serde",
- "serde_json",
 ]
 
 [[package]]

@@ -79,7 +79,7 @@ pub(super) fn read_next_pcap_frame<R: Read>(
         });
     }
     validate_declared_lengths(captured_length, original_length, max_size, "pcap packet")?;
-    if snap_len != 0 && captured_length > snap_len {
+    if captured_length > snap_len {
         return Err(Error::InvalidData {
             format: Format::Pcap,
             reason: "captured packet exceeds the file snap length",

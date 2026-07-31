@@ -16,9 +16,13 @@ fail() {
 
 [[ "$(uname -s)" == "Linux" ]] || fail "Linux is required"
 
-for command in cargo ethtool ip kill python3 sysctl; do
-    command -v "$command" >/dev/null 2>&1 || fail "required command '$command' was not found in PATH"
-done
+command -v python3 >/dev/null 2>&1 || fail "required command 'python3' was not found in PATH"
+
+case "${1:-}" in
+    -h | --help)
+        exec python3 "$harness" "$@"
+        ;;
+esac
 
 if ((EUID == 0)); then
     export PCR_NATIVE_E2E_PRIVILEGE_MODE=direct
@@ -31,11 +35,12 @@ fi
 cd -- "$repository_root"
 
 case "${1:-}" in
-    -h | --help | --check-prerequisites)
+    --check-prerequisites)
         exec python3 "$harness" "$@"
         ;;
 esac
 
+command -v cargo >/dev/null 2>&1 || fail "required command 'cargo' was not found in PATH"
 python3 "$harness" --check-prerequisites
 
 target_dir="${CARGO_TARGET_DIR:-$repository_root/target}"
@@ -63,8 +68,7 @@ if ! binary="$("${cargo_command[@]}" | python3 "$artifact_resolver" packetcraftr
 fi
 [[ -x "$binary" ]] || fail "Cargo reported success but '$binary' is not executable"
 
-binary_directory="$(cd -- "$(dirname -- "$binary")" && pwd -P)"
-PACKETCRAFTR_BIN="$binary_directory/$(basename -- "$binary")"
+PACKETCRAFTR_BIN="$binary"
 export PACKETCRAFTR_BIN
 printf 'native-e2e PacketcraftR binary: %s\n' "$PACKETCRAFTR_BIN"
 

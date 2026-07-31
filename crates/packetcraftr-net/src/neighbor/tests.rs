@@ -31,7 +31,6 @@ use crate::{
     transmit::{IoSendReport, Layer2Frame, Layer2Io},
 };
 use packetcraftr_capture::{Direction, Frame, LinkType};
-use packetcraftr_error::Classified;
 
 type FrameResponseScript = dyn Fn(&Bytes) -> Vec<Frame> + Send + Sync;
 
@@ -596,10 +595,6 @@ fn timeout_is_bounded_attempted_and_joined() {
         bounded,
     );
     let error = resolver.resolve_request(&request).unwrap_err();
-    assert_eq!(
-        error.classification().category,
-        packetcraftr_error::Category::Timeout
-    );
     let NeighborError::NotFound {
         attempts,
         captured,

@@ -94,7 +94,6 @@ reflective_layer! {
             get |layer| Some(reflect_get(&layer.urgent_pointer)), set |layer, value, name| reflect_set(&mut layer.urgent_pointer, tcp_schema(), name, value), layout: (18, 20) },
         "options" => { kind: Bytes, derived: false, required: false, description: "Verbatim standard or unknown TCP options",
             get |layer| Some(reflect_get(&layer.options)), set |layer, value, name| reflect_set(&mut layer.options, tcp_schema(), name, value), layout: (20, header_len) },
-        normalize |layer| { layer.checksum.normalize(); }
     }
     layout pub(crate) fn tcp_layout(header_len: usize);
 }

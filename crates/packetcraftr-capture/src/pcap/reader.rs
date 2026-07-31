@@ -256,8 +256,7 @@ impl<R: Read> Reader<R> {
                     .expect("section header metadata sum was validated");
                 match &mut self.state {
                     ReaderState::PcapNg(state) => {
-                        let transition = state.plan_section(header, self.max_interfaces)?;
-                        state.apply_section(transition);
+                        state.start_section(header, self.max_interfaces)?;
                     }
                     ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                 }
@@ -324,13 +323,12 @@ impl<R: Read> Reader<R> {
                     let description = parse_interface_description(body, section_endianness)?;
                     match &mut self.state {
                         ReaderState::PcapNg(state) => {
-                            let transition = state.plan_interface(
+                            state.add_interface(
+                                &mut self.interfaces,
                                 description,
-                                self.interfaces.len(),
                                 self.max_interfaces,
                                 self.max_total_interfaces,
                             )?;
-                            state.apply_interface(&mut self.interfaces, transition);
                         }
                         ReaderState::Pcap { .. } => unreachable!("state checked by caller"),
                     }
@@ -405,10 +403,7 @@ impl<R: Read> Iterator for Reader<R> {
         match self.next_frame() {
             Ok(Some(frame)) => Some(Ok(frame)),
             Ok(None) => None,
-            Err(error) => {
-                self.finished = true;
-                Some(Err(error))
-            }
+            Err(error) => Some(Err(error)),
         }
     }
 }

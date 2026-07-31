@@ -38,19 +38,15 @@ pub(super) fn validate_timestamp_resolution(resolution: TimestampResolution) -> 
     }
 }
 
-pub(super) fn validate_frame_lengths(frame: &Frame, max_size: usize) -> Result<(), Error> {
-    if frame.bytes().len() != frame.captured_length() as usize {
-        return Err(Error::CapturedLengthMismatch {
-            declared: frame.captured_length(),
-            actual: frame.bytes().len(),
+pub(super) fn validate_frame_size(frame: &Frame, max_size: usize) -> Result<(), Error> {
+    if frame.captured_length() as usize > max_size {
+        return Err(Error::SizeLimitExceeded {
+            kind: "captured packet",
+            declared: u64::from(frame.captured_length()),
+            limit: max_size,
         });
     }
-    validate_declared_lengths(
-        frame.captured_length(),
-        frame.original_length(),
-        max_size,
-        "captured packet",
-    )
+    Ok(())
 }
 
 pub(super) fn validate_declared_lengths(

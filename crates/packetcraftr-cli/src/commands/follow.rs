@@ -5,7 +5,6 @@ use packetcraftr::{analysis, output};
 
 use super::super::arguments::{CliFollowDirection, FollowArgs};
 use super::super::errors::CliError;
-use super::super::errors::analysis_cli_error;
 use super::super::rendering::{emit_json, emit_stderr_message, write_raw, write_stdout_line};
 use super::offline_analysis::{
     PreparedOfflineAnalysis, open_offline_reader, prepare_offline_analysis,
@@ -66,7 +65,7 @@ pub(crate) fn run_follow(
         }
         Ok(())
     })
-    .map_err(analysis_cli_error)?;
+    .map_err(CliError::classified)?;
     let summary = collector.finish(&run_summary.trailing_tcp_events);
 
     match output {

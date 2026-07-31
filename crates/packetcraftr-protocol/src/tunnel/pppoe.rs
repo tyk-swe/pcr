@@ -67,7 +67,6 @@ reflective_layer! {
         "code" => { kind: Unsigned, derived: false, required: false, description: "Stage code: zero for session data, a discovery code otherwise", get |layer| Some(reflect_get(&layer.code)), set |layer, value, name| reflect_set(&mut layer.code, pppoe_schema(), name, value), layout: (1, 2) },
         "session_id" => { kind: Unsigned, derived: false, required: true, description: "Session identifier assigned during discovery", get |layer| Some(reflect_get(&layer.session_id)), set |layer, value, name| reflect_set(&mut layer.session_id, pppoe_schema(), name, value), layout: (2, 4) },
         "length" => { kind: Unsigned, derived: true, required: false, description: "Payload length excluding the header", get |layer| Some(reflect_get(&layer.length)), set |layer, value, name| reflect_set(&mut layer.length, pppoe_schema(), name, value), layout: (4, 6) },
-        normalize |layer| { layer.length.normalize(); }
     }
     layout pub(crate) fn pppoe_layout();
 }
@@ -303,7 +302,6 @@ reflective_layer! {
     fn ppp_schema() => { protocol: protocol("ppp"), name: "PPP" }
     impl Ppp {
         "protocol" => { kind: Unsigned, derived: true, required: false, description: "PPP protocol number selecting the payload", get |layer| Some(reflect_get(&layer.protocol)), set |layer, value, name| reflect_set(&mut layer.protocol, ppp_schema(), name, value), layout: (0, 2) },
-        normalize |layer| { layer.protocol.normalize(); }
     }
     layout pub(crate) fn ppp_layout();
 }

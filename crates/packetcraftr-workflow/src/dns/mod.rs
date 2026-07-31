@@ -38,7 +38,7 @@ use super::evidence::{
     EvidenceBudget, EvidenceDiagnosticDescriptor, ExchangeEvidenceError, ResponseCandidate,
     ResponseEvidence, push_undecoded_limit_diagnostic, response_within_deadline, retain_evidence,
     select_response_candidate, validate_aggregate_evidence_limits,
-    validate_capture_statistics_evidence, validate_frame, validate_response_frames_and_deadlines,
+    validate_capture_statistics_evidence, validate_response_frames_and_deadlines,
     validate_sent_byte_accounting,
 };
 use super::nonzero_ipv4_identification;

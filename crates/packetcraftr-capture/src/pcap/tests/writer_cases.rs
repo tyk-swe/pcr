@@ -216,22 +216,23 @@ fn partial_pcapng_packet_poisons_without_committing_counters() {
 }
 
 #[test]
-fn flush_failure_poisons_writer() {
+fn flush_failure_can_be_retried() {
     let mut writer = Writer::pcap(PartialFailSink::new(usize::MAX), LinkType::ETHERNET).unwrap();
     writer.get_mut().fail_flush = true;
 
-    let first = expect_io_error(writer.flush());
-    assert_eq!(first.kind(), io::ErrorKind::BrokenPipe);
+    assert_eq!(
+        expect_io_error(writer.flush()).kind(),
+        io::ErrorKind::BrokenPipe
+    );
     assert_eq!(writer.get_ref().flush_calls, 1);
-    let writes_after_failure = writer.get_ref().write_calls;
 
     writer.get_mut().fail_flush = false;
-    let retained =
-        expect_io_error(writer.write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[1])));
-    assert_eq!(retained.kind(), first.kind());
-    assert_eq!(retained.to_string(), first.to_string());
-    assert_eq!(writer.get_ref().write_calls, writes_after_failure);
-    assert_eq!(writer.frames_written(), 0);
+    writer.flush().unwrap();
+    writer
+        .write_frame(&frame(UNIX_EPOCH, LinkType::ETHERNET, &[1]))
+        .unwrap();
+    assert_eq!(writer.get_ref().flush_calls, 2);
+    assert_eq!(writer.frames_written(), 1);
 }
 
 #[test]
@@ -246,24 +247,6 @@ fn pcapng_default_interface_constructor_validates_before_writing() {
         assert!(matches!(result, Err(Error::LinkTypeOutOfRange { .. })));
     }
     assert!(invalid_link_type.is_empty());
-}
-
-#[test]
-fn writer_option_defaults_match_convenience_constructors() {
-    let pcap = Writer::pcap(Vec::new(), LinkType::ETHERNET)
-        .unwrap()
-        .into_inner();
-    let configured_pcap =
-        Writer::pcap_with_options(Vec::new(), LinkType::ETHERNET, PcapOptions::default())
-            .unwrap()
-            .into_inner();
-    assert_eq!(configured_pcap, pcap);
-
-    let pcapng = Writer::pcapng(Vec::new()).unwrap().into_inner();
-    let configured_pcapng = Writer::pcapng_with_options(Vec::new(), PcapNgOptions::default())
-        .unwrap()
-        .into_inner();
-    assert_eq!(configured_pcapng, pcapng);
 }
 
 #[test]

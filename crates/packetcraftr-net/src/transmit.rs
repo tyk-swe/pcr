@@ -96,13 +96,6 @@ impl<'a> Frame<'a> {
             Self::Layer3(frame) => frame.route(),
         }
     }
-
-    pub fn link_mode(self) -> LinkMode {
-        match self {
-            Self::Layer2(_) => LinkMode::Layer2,
-            Self::Layer3(_) => LinkMode::Layer3,
-        }
-    }
 }
 
 fn require_link_mode(route: &MaterializedRoute, expected: LinkMode) -> Result<(), Error> {

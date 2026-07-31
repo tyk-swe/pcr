@@ -138,11 +138,6 @@ pub struct FrameOutput {
 
 impl FrameOutput {
     pub fn try_from_frame(frame: Frame) -> Result<Self, OutputContractError> {
-        frame
-            .validate()
-            .map_err(|source| OutputContractError::InvalidFrame {
-                message: source.to_string(),
-            })?;
         Ok(Self {
             timestamp: frame.timestamp.try_into()?,
             captured_length: frame.captured_length(),

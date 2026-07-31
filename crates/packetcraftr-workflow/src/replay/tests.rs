@@ -7,15 +7,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use bytes::Bytes;
 
-use super::wire::{
-    replay_link_mode, replay_network_envelope, replay_wire_destinations,
-    validate_transmission_evidence,
-};
+use super::wire::{replay_link_mode, replay_network_envelope, validate_transmission_evidence};
 use super::*;
 use crate::BoundaryError;
 use packetcraftr_capture::Writer;
 use packetcraftr_packet::{Packet, layer::Raw};
-use packetcraftr_protocol::{network::Ipv4, transport::Udp};
+use packetcraftr_protocol::{
+    link::{Ethernet, Vlan},
+    network::Ipv4,
+    transport::Udp,
+};
 use std::result::Result;
 
 #[test]
@@ -91,20 +92,8 @@ fn replay_timing_with_non_positive_or_unrepresentable_values_returns_invalid_tim
 
 #[test]
 fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
-    let mut ipv4 = vec![0_u8; 20];
-    ipv4[0] = 0x45;
-    ipv4[16..20].copy_from_slice(&[8, 8, 8, 8]);
-    let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, ipv4).unwrap();
-    assert_eq!(
-        replay_wire_destinations(&frame).unwrap().addresses,
-        [IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))]
-    );
-    let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
-    let authorizer = SystemAuthorizer::new(
-        packetcraftr_client::policy::Policy::default(),
-        Arc::clone(&registry),
-        true,
-    );
+    let frame = raw_frame(Ipv4Addr::new(8, 8, 8, 8));
+    let authorizer = SystemAuthorizer::new(packetcraftr_client::policy::Policy::default(), true);
     let error = authorizer
         .authorize_frame(&frame, LinkMode::Layer3)
         .unwrap_err();
@@ -112,12 +101,16 @@ fn system_authorizer_when_raw_ipv4_targets_public_address_denies_frame() {
 }
 
 fn authorized_raw_frame() -> Frame {
+    raw_frame(Ipv4Addr::new(10, 0, 0, 2))
+}
+
+fn raw_frame(destination: Ipv4Addr) -> Frame {
     let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
     let mut packet = Packet::new();
     packet
         .push(Ipv4 {
             source: Ipv4Addr::new(10, 0, 0, 1),
-            destination: Ipv4Addr::new(10, 0, 0, 2),
+            destination,
             ..Ipv4::default()
         })
         .push(Udp {
@@ -135,14 +128,13 @@ fn authorized_raw_frame() -> Frame {
 #[test]
 fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
     let frame = authorized_raw_frame();
-    let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
     let mut packet_policy = packetcraftr_client::policy::Policy {
         max_packets_per_operation: 1,
         allow_permissive_packets: true,
         ..packetcraftr_client::policy::Policy::default()
     };
     packet_policy.max_bytes_per_operation = u64::MAX;
-    let mut authorizer = SystemAuthorizer::new(packet_policy, Arc::clone(&registry), true);
+    let mut authorizer = SystemAuthorizer::new(packet_policy, true);
     let error = authorizer
         .authorize_operation(
             ReplayAuthorizationContext {
@@ -162,7 +154,7 @@ fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
         ..packetcraftr_client::policy::Policy::default()
     };
     byte_policy.allow_public_destinations = false;
-    let mut authorizer = SystemAuthorizer::new(byte_policy, registry, true);
+    let mut authorizer = SystemAuthorizer::new(byte_policy, true);
     let error = authorizer
         .authorize_operation(
             ReplayAuthorizationContext {
@@ -180,14 +172,13 @@ fn system_authorizer_enforces_cumulative_policy_packet_and_byte_budgets() {
 fn system_authorizer_uses_engine_budget_for_each_replay_operation() {
     let frame = authorized_raw_frame();
     let bytes = frame.bytes().clone();
-    let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
     let policy = packetcraftr_client::policy::Policy {
         max_packets_per_operation: 1,
         max_bytes_per_operation: u64::MAX,
         allow_permissive_packets: true,
         ..packetcraftr_client::policy::Policy::default()
     };
-    let mut authorizer = SystemAuthorizer::new(policy, registry, true);
+    let mut authorizer = SystemAuthorizer::new(policy, true);
     let mut options = replay_options(ReplayTiming::Immediate);
     options.link_mode = LinkMode::Layer3;
     let mut first_reader = capture_reader(
@@ -232,8 +223,7 @@ fn system_authorizer_uses_engine_budget_for_each_replay_operation() {
 }
 
 #[test]
-fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
-    let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
+fn system_authorizer_rejects_unsupported_or_truncated_ipv6_routing_headers() {
     for mut unsupported in [vec![0_u8; 48], vec![0_u8; 40]] {
         unsupported[0] = 0x60;
         unsupported[6] = 43;
@@ -243,64 +233,20 @@ fn system_authorizer_when_ipv6_routing_header_is_unsupported_rejects_frame() {
             unsupported[42] = 0;
         }
         let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, unsupported).unwrap();
-        assert!(
-            replay_wire_destinations(&frame)
-                .unwrap()
-                .has_unsupported_routing_header
-        );
-        let authorizer = SystemAuthorizer::new(
-            packetcraftr_client::policy::Policy::default(),
-            Arc::clone(&registry),
-            true,
-        );
+        let authorizer =
+            SystemAuthorizer::new(packetcraftr_client::policy::Policy::default(), true);
         let error = authorizer
             .authorize_frame(&frame, LinkMode::Layer3)
             .unwrap_err();
         assert_eq!(
             error.classification().code,
-            "capability.replay_routing_header"
+            "policy.invalid_packet_semantics"
         );
     }
 }
 
 #[test]
-fn replay_srh_validation_requires_the_header_to_name_the_active_segment() {
-    let active: Ipv6Addr = "fd00::10".parse().unwrap();
-    let final_destination: Ipv6Addr = "fd00::20".parse().unwrap();
-    let mut bytes = vec![0_u8; 80];
-    bytes[0] = 0x60;
-    bytes[4..6].copy_from_slice(&40_u16.to_be_bytes());
-    bytes[6] = 43;
-    bytes[24..40].copy_from_slice(&active.octets());
-    bytes[40] = 59;
-    bytes[41] = 4;
-    bytes[42] = 4;
-    bytes[43] = 1;
-    bytes[44] = 1;
-    bytes[48..64].copy_from_slice(&final_destination.octets());
-    bytes[64..80].copy_from_slice(&active.octets());
-    let frame = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes.clone()).unwrap();
-
-    let destinations = replay_wire_destinations(&frame).unwrap();
-    assert!(!destinations.has_unsupported_routing_header);
-    assert!(
-        destinations
-            .addresses
-            .contains(&IpAddr::V6(final_destination))
-    );
-
-    bytes[24..40].copy_from_slice(&Ipv6Addr::LOCALHOST.octets());
-    let malformed = Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
-    assert!(
-        replay_wire_destinations(&malformed)
-            .unwrap()
-            .has_unsupported_routing_header
-    );
-}
-
-#[test]
 fn raw_ip_link_types_must_match_the_packet_version() {
-    let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
     for (link_type, bytes, declared) in [
         (LinkType::IPV4, vec![0x60], "IPv4"),
         (LinkType::IPV6, vec![0x45], "IPv6"),
@@ -309,11 +255,8 @@ fn raw_ip_link_types_must_match_the_packet_version() {
         let error = replay_network_envelope(&frame).unwrap_err();
         assert!(error.to_string().contains(declared));
 
-        let authorizer = SystemAuthorizer::new(
-            packetcraftr_client::policy::Policy::default(),
-            Arc::clone(&registry),
-            true,
-        );
+        let authorizer =
+            SystemAuthorizer::new(packetcraftr_client::policy::Policy::default(), true);
         let error = authorizer
             .authorize_frame(&frame, LinkMode::Layer3)
             .unwrap_err();
@@ -460,76 +403,60 @@ fn replay_network_envelope_rejects_empty_truncated_and_unknown_packets() {
 }
 
 #[test]
-fn replay_wire_destinations_walks_vlan_and_ipv4_source_routes() {
+fn system_authorizer_checks_vlan_encapsulated_ipv4_source_routes() {
     let final_destination = Ipv4Addr::new(10, 0, 0, 9);
-    let route_destination = Ipv4Addr::new(10, 0, 0, 10);
-    let mut bytes = vec![0_u8; 18 + 28];
-    bytes[12..14].copy_from_slice(&0x8100_u16.to_be_bytes());
-    bytes[16..18].copy_from_slice(&0x0800_u16.to_be_bytes());
-    bytes[18] = 0x47;
-    bytes[34..38].copy_from_slice(&final_destination.octets());
-    bytes[38..45].copy_from_slice(&[
-        131,
-        7,
-        4,
-        route_destination.octets()[0],
-        route_destination.octets()[1],
-        route_destination.octets()[2],
-        route_destination.octets()[3],
-    ]);
-    let destinations =
-        replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::ETHERNET, bytes).unwrap())
-            .unwrap();
-    assert_eq!(
-        destinations.addresses,
-        [IpAddr::V4(final_destination), IpAddr::V4(route_destination)]
-    );
-    assert!(!destinations.has_unsupported_routing_header);
+    let route_destination = Ipv4Addr::new(8, 8, 8, 8);
+    let mut packet = Packet::new();
+    packet
+        .push(Ethernet::default())
+        .push(Vlan::default())
+        .push(Ipv4 {
+            source: Ipv4Addr::new(10, 0, 0, 1),
+            destination: final_destination,
+            options: Bytes::from(vec![
+                131,
+                7,
+                4,
+                route_destination.octets()[0],
+                route_destination.octets()[1],
+                route_destination.octets()[2],
+                route_destination.octets()[3],
+                0,
+            ]),
+            ..Ipv4::default()
+        })
+        .push(Udp {
+            source_port: 40_000,
+            destination_port: 9,
+            ..Udp::default()
+        });
+    let registry = Arc::new(packetcraftr_protocol::builtin::registry().unwrap());
+    let built = Builder::new(registry)
+        .build(packet, BuildContext::default(), BuildOptions::default())
+        .unwrap();
+    let frame = Frame::new(UNIX_EPOCH, LinkType::ETHERNET, built.bytes).unwrap();
+    let authorizer = SystemAuthorizer::new(packetcraftr_client::policy::Policy::default(), true);
+    let error = authorizer
+        .authorize_frame(&frame, LinkMode::Layer2)
+        .unwrap_err();
+    assert_eq!(error.classification().code, "policy.public_destination");
 }
 
 #[test]
-fn replay_wire_destinations_fail_closed_on_malformed_ipv4_options() {
+fn system_authorizer_fails_closed_on_malformed_ipv4_source_routes() {
     let mut bytes = vec![0_u8; 24];
     bytes[0] = 0x46;
     bytes[16..20].copy_from_slice(&[10, 0, 0, 2]);
     bytes[20..24].copy_from_slice(&[131, 1, 0, 0]);
-    let error =
-        match replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap()) {
-            Ok(_) => panic!("malformed source-route option was accepted"),
-            Err(error) => error,
-        };
-    assert!(error.to_string().contains("invalid length 1"));
-}
-
-#[test]
-fn replay_wire_destinations_walks_non_routing_ipv6_extensions() {
-    let destination: Ipv6Addr = "fd00::2".parse().unwrap();
-    let mut bytes = vec![0_u8; 64];
-    bytes[0] = 0x60;
-    bytes[6] = 0;
-    bytes[24..40].copy_from_slice(&destination.octets());
-    bytes[40] = 44;
-    bytes[41] = 0;
-    bytes[48] = 51;
-    bytes[56] = 59;
-    bytes[57] = 0;
-    let destinations =
-        replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap()).unwrap();
-    assert_eq!(destinations.addresses, [IpAddr::V6(destination)]);
-    assert!(!destinations.has_unsupported_routing_header);
-}
-
-#[test]
-fn replay_wire_destinations_ignores_truncated_non_routing_extensions() {
-    for (next_header, length) in [(44, 44), (51, 41), (0, 44), (60, 44)] {
-        let mut bytes = vec![0_u8; length];
-        bytes[0] = 0x60;
-        bytes[6] = next_header;
-        let result =
-            replay_wire_destinations(&Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap())
-                .unwrap();
-        assert!(!result.has_unsupported_routing_header, "{next_header}");
-    }
+    let frame = Frame::new(UNIX_EPOCH, LinkType::RAW, bytes).unwrap();
+    let authorizer = SystemAuthorizer::new(packetcraftr_client::policy::Policy::default(), true);
+    let error = authorizer
+        .authorize_frame(&frame, LinkMode::Layer3)
+        .unwrap_err();
+    assert_eq!(
+        error.classification().code,
+        "policy.invalid_packet_semantics"
+    );
 }
 
 #[test]

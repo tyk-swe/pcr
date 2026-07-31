@@ -61,10 +61,6 @@ class CaseContext:
     responder: ResponderProcess | None
     invocations: list[CliInvocation]
 
-    def packetcraftr_environment(self) -> dict[str, str]:
-        """Environment additions for command-specific child processes."""
-        return {"PACKETCRAFTR_BIN": str(self.packetcraftr_binary)}
-
     def run_packetcraftr(
         self,
         arguments: Sequence[str],

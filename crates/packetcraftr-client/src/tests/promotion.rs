@@ -21,7 +21,7 @@ fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
             ether_type: WireValue::Exact(0x88b5),
             ..Ethernet::default()
         })
-        .push(MacSensitiveLayer);
+        .push(MacSensitiveLayer::default());
     let built = Builder::new(Arc::clone(&registry))
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap();
@@ -78,6 +78,7 @@ fn matcher_result_is_not_committed_after_correlation_deadline_expires() {
 }
 
 fn workflow_accumulator_with_unsolicited(
+    request_count: usize,
     promotion_deadline: impl FnOnce() -> Instant,
 ) -> (
     ExchangeAccumulator,
@@ -95,31 +96,34 @@ fn workflow_accumulator_with_unsolicited(
             BuildOptions::default(),
         )
         .unwrap();
-    let prepared = vec![PreparedExchangePacket {
-        built: built.clone(),
-        route: MaterializedRoute {
-            plan: PlannedRoute {
-                route: route(LinkCapability::Layer3),
-                mode: LinkMode::Layer3,
-                lookup_destination: Some(IpAddr::V4(destination)),
-                final_destination: Some(IpAddr::V4(destination)),
-                visited_destinations: vec![IpAddr::V4(destination)],
-                packet_source: Some(IpAddr::V4(source)),
-                neighbor_source: Some(IpAddr::V4(source)),
-                neighbor_target: Some(IpAddr::V4(destination)),
-                destination_mac: None,
-                source_mac: None,
-                neighbor_vlan_tags: Vec::new(),
-                synthesized_ethernet: false,
-            },
-            neighbor_resolution: None,
+    let prepared_route = MaterializedRoute {
+        plan: PlannedRoute {
+            route: route(LinkCapability::Layer3),
+            mode: LinkMode::Layer3,
+            lookup_destination: Some(IpAddr::V4(destination)),
+            final_destination: Some(IpAddr::V4(destination)),
+            visited_destinations: vec![IpAddr::V4(destination)],
+            packet_source: Some(IpAddr::V4(source)),
+            neighbor_source: Some(IpAddr::V4(source)),
+            neighbor_target: Some(IpAddr::V4(destination)),
+            destination_mac: None,
+            source_mac: None,
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
         },
-    }];
-    let sent_at = vec![Instant::now()];
+        neighbor_resolution: None,
+    };
+    let prepared = (0..request_count)
+        .map(|_| PreparedExchangePacket {
+            built: built.clone(),
+            route: prepared_route.clone(),
+        })
+        .collect::<Vec<_>>();
+    let sent_at = vec![Instant::now(); request_count];
     let process_deadline = sent_at[0].checked_add(Duration::from_secs(1)).unwrap();
     let dissector = Dissector::new(Arc::clone(&registry));
     let options = ExchangeOptions::default();
-    let mut accumulator = ExchangeAccumulator::new(1);
+    let mut accumulator = ExchangeAccumulator::new(request_count);
 
     let outcome = accumulator.process(
         CapturedFrame::new(
@@ -145,7 +149,7 @@ fn workflow_accumulator_with_unsolicited(
 #[test]
 fn expired_workflow_promotion_does_not_invoke_matcher() {
     let (mut accumulator, prepared, sent_at, deadline) =
-        workflow_accumulator_with_unsolicited(|| {
+        workflow_accumulator_with_unsolicited(1, || {
             Instant::now()
                 .checked_sub(Duration::from_millis(1))
                 .unwrap()
@@ -168,7 +172,7 @@ fn expired_workflow_promotion_does_not_invoke_matcher() {
     assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
     assert_eq!(matcher_calls, 0);
     assert!(accumulator.responses.is_empty());
-    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.unsolicited.len(), 1);
     assert_eq!(
         accumulator
             .diagnostics
@@ -182,7 +186,7 @@ fn expired_workflow_promotion_does_not_invoke_matcher() {
 #[test]
 fn workflow_promotion_crossing_deadline_is_not_committed() {
     let (mut accumulator, prepared, sent_at, deadline) =
-        workflow_accumulator_with_unsolicited(|| {
+        workflow_accumulator_with_unsolicited(1, || {
             Instant::now()
                 .checked_add(Duration::from_millis(100))
                 .unwrap()
@@ -206,7 +210,7 @@ fn workflow_promotion_crossing_deadline_is_not_committed() {
     assert_eq!(outcome, ExchangeProcessOutcome::CorrelationDeadlineExpired);
     assert_eq!(matcher_calls, 1);
     assert!(accumulator.responses.is_empty());
-    assert!(accumulator.unsolicited.is_empty());
+    assert_eq!(accumulator.unsolicited.len(), 1);
     assert!(
         accumulator
             .diagnostics
@@ -218,7 +222,7 @@ fn workflow_promotion_crossing_deadline_is_not_committed() {
 #[test]
 fn unmatched_frame_is_preserved_when_only_earlier_requests_were_eligible() {
     let (mut accumulator, mut prepared, sent_at, deadline) =
-        workflow_accumulator_with_unsolicited(|| {
+        workflow_accumulator_with_unsolicited(1, || {
             Instant::now()
                 .checked_add(Duration::from_millis(100))
                 .unwrap()
@@ -241,6 +245,30 @@ fn unmatched_frame_is_preserved_when_only_earlier_requests_were_eligible() {
     assert_eq!(outcome, ExchangeProcessOutcome::Continue);
     assert!(accumulator.responses.is_empty());
     assert_eq!(accumulator.unsolicited.len(), 1);
+}
+
+#[test]
+fn workflow_promotion_assigns_a_frame_to_one_request() {
+    let (mut accumulator, prepared, sent_at, deadline) =
+        workflow_accumulator_with_unsolicited(2, || {
+            Instant::now().checked_add(Duration::from_secs(1)).unwrap()
+        });
+    accumulator.response_counts[0] = 1;
+
+    let outcome = accumulator.promote_workflow_unsolicited(
+        WorkflowPromotionContext {
+            prepared: &prepared,
+            sent_at: &sent_at,
+            deadline,
+            max_responses: 2,
+        },
+        &mut |_, _, _| true,
+    );
+
+    assert_eq!(outcome, ExchangeProcessOutcome::Continue);
+    assert_eq!(accumulator.responses.len(), 1);
+    assert_eq!(accumulator.responses[0].request_index, 1);
+    assert!(accumulator.unsolicited.is_empty());
 }
 
 #[test]

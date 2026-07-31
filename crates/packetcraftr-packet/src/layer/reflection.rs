@@ -8,7 +8,7 @@ use bytes::Bytes;
 use super::{FieldError, LayerSchema};
 use crate::field::{FieldValue, WireValue};
 
-/// Declares a layer's schema, getter/setter dispatch, and static layout names.
+/// Declares a layer's schema, getter/setter dispatch, and static layout.
 /// Encoding and decoding remain handwritten in protocol modules.
 ///
 /// Exported so sibling workspace crates can declare their own layers; it is not
@@ -33,7 +33,6 @@ macro_rules! reflective_layer {
                     $(, layout: ($start:expr_2021, $end:expr_2021))?
                 }
             ),* $(,)?
-            $(normalize |$normalizer:ident| $normalize:block)?
         }
         layout $vis:vis fn $layout:ident($($layout_arg:ident: $layout_ty:ty),* $(,)?) ;
     ) => {
@@ -108,20 +107,6 @@ macro_rules! reflective_layer {
                 }
             }
 
-            $(
-                fn normalize(&mut self) {
-                    let $normalizer = self;
-                    $normalize
-                }
-            )?
-
-            fn declared_layout_fields(&self) -> Vec<&'static str> {
-                vec![
-                    $(
-                        $crate::reflective_layer!(@layout_name $field $(, $start, $end)?)
-                    ),*
-                ].into_iter().flatten().collect()
-            }
         }
 
         $vis fn $layout($($layout_arg: $layout_ty),*)
@@ -147,12 +132,6 @@ macro_rules! reflective_layer {
             name: $field.to_owned(),
             range: $crate::layout::Range::new($start, $end),
         })
-    };
-    (@layout_name $field:literal) => {
-        None
-    };
-    (@layout_name $field:literal, $start:expr, $end:expr) => {
-        Some($field)
     };
 }
 

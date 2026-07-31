@@ -366,8 +366,7 @@ fn map_traceroute_evidence_error(
 ) -> TracerouteError {
     let batch_sequence = batch.probes[0].sequence;
     let sequence = match &error {
-        ExchangeEvidenceError::SentPacketMismatch { request_index }
-        | ExchangeEvidenceError::InvalidSentFrame { request_index, .. } => {
+        ExchangeEvidenceError::SentPacketMismatch { request_index } => {
             batch.probes[*request_index].sequence
         }
         _ => batch_sequence,

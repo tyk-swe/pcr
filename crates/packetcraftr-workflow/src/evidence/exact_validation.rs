@@ -12,14 +12,7 @@ use packetcraftr_packet::{Packet, decode::Result as DecodedPacket};
 use super::budget::{checked_frame_bytes, checked_frame_count, checked_sent_frame_bytes};
 use crate::Stats;
 
-pub(crate) fn validate_frame(frame: &Frame, kind: &str) -> Result<(), String> {
-    frame
-        .validate()
-        .map_err(|error| format!("{kind} frame is invalid: {error}"))
-}
-
 pub(crate) fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
-    validate_frame(&decoded.frame, kind)?;
     if decoded.original != decoded.frame.bytes() {
         return Err(format!("{kind} original bytes differ from its exact frame"));
     }
@@ -74,10 +67,6 @@ pub(crate) enum ExchangeEvidenceError {
     SentPacketMismatch {
         request_index: usize,
     },
-    InvalidSentFrame {
-        request_index: usize,
-        message: String,
-    },
     SentByteCountOverflow,
     SentByteCountMismatch {
         reported: u64,
@@ -91,9 +80,6 @@ pub(crate) enum ExchangeEvidenceError {
         timeout: Duration,
     },
     InvalidUnsolicitedResponse {
-        message: String,
-    },
-    InvalidUndecodedFrame {
         message: String,
     },
     InvalidCaptureStatistics {
@@ -150,7 +136,6 @@ pub(crate) fn validate_sent_byte_accounting(
 pub(crate) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
     matched_responses: &[M],
     unsolicited: &[DecodedPacket],
-    undecoded: &[Frame],
     timeout: Duration,
 ) -> Result<(), ExchangeEvidenceError> {
     for response in matched_responses {
@@ -160,10 +145,6 @@ pub(crate) fn validate_response_frames_and_deadlines<M: ResponseEvidence>(
     for response in unsolicited {
         validate_decoded_frame(response, "unsolicited response")
             .map_err(|message| ExchangeEvidenceError::InvalidUnsolicitedResponse { message })?;
-    }
-    for frame in undecoded {
-        validate_frame(frame, "undecoded")
-            .map_err(|message| ExchangeEvidenceError::InvalidUndecodedFrame { message })?;
     }
     Ok(())
 }
@@ -221,10 +202,8 @@ pub(crate) fn format_exchange_evidence_error(
         ExchangeEvidenceError::SentPacketMismatch { .. } => {
             format!("sent packet does not preserve the {workflow} destination and probe identity")
         }
-        ExchangeEvidenceError::InvalidSentFrame { message, .. }
-        | ExchangeEvidenceError::InvalidMatchedResponse { message }
+        ExchangeEvidenceError::InvalidMatchedResponse { message }
         | ExchangeEvidenceError::InvalidUnsolicitedResponse { message }
-        | ExchangeEvidenceError::InvalidUndecodedFrame { message }
         | ExchangeEvidenceError::InvalidCaptureStatistics { message } => message,
         ExchangeEvidenceError::SentByteCountOverflow => {
             "sent frame byte accounting overflowed".to_owned()
@@ -276,28 +255,16 @@ where
         max_captured_bytes,
     )?;
 
-    for (request_index, (sent, frame)) in evidence
-        .sent_packets
-        .iter()
-        .zip(evidence.sent_frames)
-        .enumerate()
-    {
+    for (request_index, sent) in evidence.sent_packets.iter().enumerate() {
         if !sent_packet_matches(request_index, sent) {
             return Err(ExchangeEvidenceError::SentPacketMismatch { request_index });
         }
-        validate_frame(frame, "sent").map_err(|message| {
-            ExchangeEvidenceError::InvalidSentFrame {
-                request_index,
-                message,
-            }
-        })?;
     }
 
     validate_sent_byte_accounting(evidence.sent_frames, evidence.stats.bytes)?;
     validate_response_frames_and_deadlines(
         evidence.matched_responses,
         evidence.unsolicited,
-        evidence.undecoded,
         evidence.timeout,
     )?;
     validate_capture_statistics_evidence(evidence.stats.capture)?;

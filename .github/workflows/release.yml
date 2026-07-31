@@ -1,12 +1,18 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish (for example, v0.4.0)
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 permissions:
@@ -20,9 +26,29 @@ jobs:
     timeout-minutes: 10
     outputs:
       prerelease: ${{ steps.metadata.outputs.prerelease }}
+      release_sha: ${{ steps.provenance.outputs.release_sha }}
       version: ${{ steps.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag }}
+      - name: Require the tagged commit to be on the default branch
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_sha="$(git rev-parse HEAD)"
+          default_branch="$(
+            gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch
+          )"
+          git fetch --no-tags origin \
+            "+refs/heads/${default_branch}:refs/remotes/origin/${default_branch}"
+          git merge-base --is-ancestor \
+            "$release_sha" "refs/remotes/origin/${default_branch}"
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
       - name: Require successful CI for the tagged commit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -31,7 +57,7 @@ jobs:
           successful_runs="$(
             gh api --method GET \
               "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
-              -f head_sha="$GITHUB_SHA" \
+              -f head_sha="$(git rev-parse HEAD)" \
               -f status=success \
               --jq '[.workflow_runs[] | select(.event == "push")] | length'
           )"
@@ -64,8 +90,8 @@ jobs:
           )"
 
           expected_tag="v${version}"
-          if [[ "$GITHUB_REF_NAME" != "$expected_tag" ]]; then
-            echo "tag '$GITHUB_REF_NAME' does not match packetcraftr-cli version '$expected_tag'" >&2
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "tag '$RELEASE_TAG' does not match packetcraftr-cli version '$expected_tag'" >&2
             exit 1
           fi
 
@@ -153,6 +179,8 @@ jobs:
       VERSION: ${{ needs.preflight.outputs.version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ needs.preflight.outputs.release_sha }}
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -268,6 +296,18 @@ jobs:
       VERSION: ${{ needs.preflight.outputs.version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.preflight.outputs.release_sha }}
+      - name: Ensure the release tag has not moved
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.preflight.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin \
+            "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          test "$(git rev-parse "${RELEASE_TAG}^{commit}")" = "$RELEASE_SHA"
       - name: Download binary archives
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -354,7 +394,7 @@ jobs:
           if [[ "$PRERELEASE" == true ]]; then
             prerelease_args+=(--prerelease)
           fi
-          gh release create "$GITHUB_REF_NAME" dist/* \
+          gh release create "$RELEASE_TAG" dist/* \
             --verify-tag \
             --title "PacketcraftR v${VERSION}" \
             --notes-file release-notes.md \

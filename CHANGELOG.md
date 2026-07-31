@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Restricted GitHub release publication to manually selected tags whose commits
+  are contained in the repository's default branch, and pinned every build and
+  publish step to the validated commit.
+
 ### Changed
 
 - Registered a bounded DNS-over-UDP dissector that publishes read-only header

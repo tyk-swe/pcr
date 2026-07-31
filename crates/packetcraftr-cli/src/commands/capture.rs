@@ -49,6 +49,7 @@ pub(crate) fn run_capture(
     let CaptureArgs {
         route,
         timeout_ms,
+        capture_filter,
         filter,
         limits,
     } = arguments;
@@ -59,10 +60,10 @@ pub(crate) fn run_capture(
         .validate()
         .map_err(CliError::classified)?;
     let registry = default_registry_arc()?;
-    // The filter compiles before any route, resolution, or capture work, so a
-    // mistyped expression is refused without live side effects. Received
-    // frames are dissected under the same snapshot bound the capture reads
-    // with; this selects what is reported, it does not narrow what the
+    // The display filter compiles before any route, resolution, or capture
+    // work, so a mistyped expression is refused without live side effects.
+    // Received frames are dissected under the same snapshot bound the capture
+    // reads with; this selects what is reported, it does not narrow what the
     // backend captures.
     let selector = match filter.as_deref() {
         Some(source) => {
@@ -81,12 +82,16 @@ pub(crate) fn run_capture(
     let route = client
         .plan(&request.packet, request.destination, &request.options)
         .map_err(CliError::classified)?;
+    let arm_capture = || match capture_filter.as_deref() {
+        Some(filter) => {
+            net::capture::SystemProvider.arm_capture_with_filter(&route, limits, filter)
+        }
+        None => net::capture::SystemProvider.arm_capture(&route, limits),
+    };
 
     match output {
         output::contract::Format::Text => {
-            let capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
-                .map_err(CliError::classified)?;
+            let capture = arm_capture().map_err(CliError::classified)?;
             let outcome = drive_capture(
                 capture,
                 timeout,
@@ -120,9 +125,7 @@ pub(crate) fn run_capture(
             render_diagnostics_text(&outcome.diagnostics)
         }
         output::contract::Format::Hex => {
-            let capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
-                .map_err(CliError::classified)?;
+            let capture = arm_capture().map_err(CliError::classified)?;
             let outcome = drive_capture(
                 capture,
                 timeout,
@@ -138,9 +141,7 @@ pub(crate) fn run_capture(
             render_diagnostics_stderr(&outcome.diagnostics)
         }
         output::contract::Format::Ndjson => {
-            let capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
-                .map_err(CliError::classified)?;
+            let capture = arm_capture().map_err(CliError::classified)?;
             let outcome = drive_capture(
                 capture,
                 timeout,
@@ -173,9 +174,7 @@ pub(crate) fn run_capture(
         }
         output::contract::Format::Pcap | output::contract::Format::Pcapng => {
             let format = capture_file_format(output)?;
-            let mut capture = net::capture::SystemProvider
-                .arm_capture(&route, limits)
-                .map_err(CliError::classified)?;
+            let mut capture = arm_capture().map_err(CliError::classified)?;
             let stdout = io::stdout();
             let writer = match format {
                 capture::Format::Pcap => Writer::pcap_with_options(
@@ -300,9 +299,9 @@ where
     }
     // Two counters, because they answer different questions: `frames` counts
     // every frame the backend delivered, which is what the policy budgets
-    // account for whether or not a filter keeps the frame, while `matched`
-    // numbers the records actually emitted so a filtered stream stays
-    // contiguous. Without a filter the two never diverge.
+    // account for whether or not the display filter keeps the frame, while
+    // `matched` numbers the records actually emitted so a filtered stream
+    // stays contiguous. Without a display filter the two never diverge.
     let mut frames = 0_u64;
     let mut matched = 0_u64;
     let mut bytes = 0_u64;
@@ -670,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_byte_budget_counts_frames_the_filter_rejects() {
+    fn capture_byte_budget_counts_frames_the_display_filter_rejects() {
         let frames = (1..=2_u8)
             .map(|index| Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![index; 3]).unwrap())
             .collect::<Vec<_>>();
@@ -684,7 +683,7 @@ mod tests {
                 max_bytes: 5,
             },
             Some(&selector),
-            |_, _| unreachable!("no frame matches the filter"),
+            |_, _| unreachable!("no frame matches the display filter"),
         )
         .unwrap_err();
 
@@ -694,7 +693,7 @@ mod tests {
     }
 
     #[test]
-    fn capture_filter_that_cannot_dissect_a_frame_is_an_error() {
+    fn display_filter_that_cannot_dissect_a_frame_is_an_error() {
         let frames =
             [Frame::new(SystemTime::UNIX_EPOCH, LinkType::RAW, vec![0x45, 0, 0, 0]).unwrap()];
         let selector = frame_selector("frame.number == 1", 2);

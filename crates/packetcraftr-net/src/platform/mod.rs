@@ -44,7 +44,7 @@ mod route_dispatch;
 #[cfg(all(windows, any(feature = "native-interfaces", feature = "native-route")))]
 mod windows;
 
-pub(crate) use capture_dispatch::system_capture;
+pub(crate) use capture_dispatch::{system_capture, system_capture_with_filter};
 pub(crate) use interface_dispatch::system_interfaces;
 pub(crate) use layer2_dispatch::system_send_layer2;
 pub(crate) use layer3_dispatch::system_send_layer3;
@@ -52,6 +52,10 @@ pub(crate) use route_dispatch::{system_interface_route, system_route};
 
 use super::Error as LiveIoError;
 #[cfg(any(
+    all(
+        any(feature = "native-layer2", feature = "native-layer3"),
+        any(target_os = "linux", target_os = "macos", windows)
+    ),
     all(
         feature = "native-route",
         any(target_os = "linux", target_os = "macos")
@@ -128,13 +132,15 @@ fn unsupported_native_route(message: &'static str) -> NativeRouteError {
     any(feature = "native-layer2", feature = "native-layer3"),
     any(target_os = "linux", target_os = "macos", windows)
 ))]
-fn validate_current_interface_identity(expected: &InterfaceId) -> Result<(), LiveIoError> {
+fn validate_current_interface_identity(
+    expected: &InterfaceId,
+) -> Result<InterfaceInfo, LiveIoError> {
     let interfaces = system_interfaces()?;
-    if interfaces
+    if let Some(interface) = interfaces
         .iter()
-        .any(|interface| interface_identity_matches(&interface.id, expected))
+        .find(|interface| interface_identity_matches(&interface.id, expected))
     {
-        return Ok(());
+        return Ok(interface.clone());
     }
     let actual = interfaces
         .iter()

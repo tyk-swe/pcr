@@ -238,6 +238,20 @@ pub trait Provider: Send + Sync {
     type Capture: Session;
 
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error>;
+
+    /// Starts capture with a native libpcap/Npcap BPF filter. Providers that
+    /// cannot install native filters fail closed instead of falling back to
+    /// unfiltered capture.
+    fn arm_capture_with_filter(
+        &self,
+        _route: &PlannedRoute,
+        _limits: Limits,
+        _filter: &str,
+    ) -> Result<Self::Capture, Error> {
+        Err(Error::Unsupported {
+            message: "this capture provider cannot install native capture filters".to_owned(),
+        })
+    }
 }
 
 /// Owned native capture session. The native handle and capture worker remain
@@ -285,6 +299,15 @@ impl Provider for SystemProvider {
     fn arm_capture(&self, route: &PlannedRoute, limits: Limits) -> Result<Self::Capture, Error> {
         super::platform::system_capture(route, limits).map(SystemSession::new)
     }
+
+    fn arm_capture_with_filter(
+        &self,
+        route: &PlannedRoute,
+        limits: Limits,
+        filter: &str,
+    ) -> Result<Self::Capture, Error> {
+        super::platform::system_capture_with_filter(route, limits, filter).map(SystemSession::new)
+    }
 }
 
 #[cfg(test)]
@@ -293,6 +316,12 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    use crate::exchange::Composite;
+    use crate::route::models::{LinkCapability, LinkMode};
+    use crate::route::{
+        DestinationScope, InterfaceId, PlannedRoute, RouteDecision, RouteSelectionReason,
+    };
+    use packetcraftr_capture::LinkType;
     use packetcraftr_error::Classified;
 
     struct CountingCapture {
@@ -316,6 +345,104 @@ mod tests {
 
         fn statistics(&self) -> Statistics {
             Statistics::default()
+        }
+    }
+
+    #[derive(Debug)]
+    struct TestCapture;
+
+    impl Session for TestCapture {
+        fn wait_ready(&mut self, _timeout: Duration) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn next_captured_frame(&mut self, _timeout: Duration) -> Result<Option<Captured>, Error> {
+            Ok(None)
+        }
+
+        fn shutdown(&mut self) -> Result<(), Error> {
+            Ok(())
+        }
+
+        fn statistics(&self) -> Statistics {
+            Statistics::default()
+        }
+    }
+
+    struct DefaultFilterProvider {
+        ordinary_calls: Arc<AtomicUsize>,
+    }
+
+    impl Provider for DefaultFilterProvider {
+        type Capture = TestCapture;
+
+        fn arm_capture(
+            &self,
+            _route: &PlannedRoute,
+            _limits: Limits,
+        ) -> Result<Self::Capture, Error> {
+            self.ordinary_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(TestCapture)
+        }
+    }
+
+    struct FilterProvider {
+        ordinary_calls: Arc<AtomicUsize>,
+        filtered_calls: Arc<AtomicUsize>,
+    }
+
+    impl Provider for FilterProvider {
+        type Capture = TestCapture;
+
+        fn arm_capture(
+            &self,
+            _route: &PlannedRoute,
+            _limits: Limits,
+        ) -> Result<Self::Capture, Error> {
+            self.ordinary_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(TestCapture)
+        }
+
+        fn arm_capture_with_filter(
+            &self,
+            _route: &PlannedRoute,
+            _limits: Limits,
+            filter: &str,
+        ) -> Result<Self::Capture, Error> {
+            assert_eq!(filter, "udp port 53");
+            self.filtered_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(TestCapture)
+        }
+    }
+
+    fn route() -> PlannedRoute {
+        PlannedRoute {
+            route: RouteDecision {
+                interface: InterfaceId {
+                    name: "test0".to_owned(),
+                    index: 1,
+                },
+                source_mac: None,
+                selected_address: None,
+                preferred_source: None,
+                next_hop: None,
+                selection_reason: RouteSelectionReason::InterfaceOnly,
+                destination_scope: DestinationScope::Unspecified,
+                mtu: 1_500,
+                capability: LinkCapability::Layer2,
+                link_type: LinkType(1),
+            },
+            mode: LinkMode::Layer2,
+            lookup_destination: None,
+            final_destination: None,
+            visited_destinations: Vec::new(),
+            packet_source: None,
+            neighbor_source: None,
+            neighbor_target: None,
+            destination_mac: None,
+            source_mac: None,
+            neighbor_vlan_tags: Vec::new(),
+            synthesized_ethernet: false,
         }
     }
 
@@ -369,5 +496,41 @@ mod tests {
             invalid.validate(),
             Err(Error::InvalidCaptureStatistics { .. })
         ));
+    }
+
+    #[test]
+    fn native_filter_default_fails_closed_without_ordinary_capture_fallback() {
+        let ordinary_calls = Arc::new(AtomicUsize::new(0));
+        let provider = DefaultFilterProvider {
+            ordinary_calls: Arc::clone(&ordinary_calls),
+        };
+
+        let error = provider
+            .arm_capture_with_filter(&route(), Limits::default(), "udp port 53")
+            .unwrap_err();
+        assert!(matches!(error, Error::Unsupported { .. }));
+        assert_eq!(ordinary_calls.load(Ordering::SeqCst), 0);
+
+        provider.arm_capture(&route(), Limits::default()).unwrap();
+        assert_eq!(ordinary_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn composite_preserves_ordinary_and_filtered_capture_delegation() {
+        let ordinary_calls = Arc::new(AtomicUsize::new(0));
+        let filtered_calls = Arc::new(AtomicUsize::new(0));
+        let provider = FilterProvider {
+            ordinary_calls: Arc::clone(&ordinary_calls),
+            filtered_calls: Arc::clone(&filtered_calls),
+        };
+        let composite = Composite::new((), provider);
+
+        composite.arm_capture(&route(), Limits::default()).unwrap();
+        composite
+            .arm_capture_with_filter(&route(), Limits::default(), "udp port 53")
+            .unwrap();
+
+        assert_eq!(ordinary_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(filtered_calls.load(Ordering::SeqCst), 1);
     }
 }

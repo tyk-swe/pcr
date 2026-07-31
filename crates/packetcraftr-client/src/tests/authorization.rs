@@ -2,6 +2,66 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+
+#[test]
+fn mapped_private_ipv4_destination_is_not_treated_as_public_ipv6() {
+    let destination = "::ffff:10.0.0.2".parse().unwrap();
+    let mut request = Packet::new();
+    request.push(Ipv6 {
+        source: "::ffff:10.0.0.1".parse().unwrap(),
+        destination,
+        ..Ipv6::default()
+    });
+    let client = Client::new(
+        Arc::new(default_registry().unwrap()),
+        FixedRoutes(RouteDecision {
+            selected_address: Some(IpAddr::V6("::ffff:10.0.0.1".parse().unwrap())),
+            preferred_source: Some(IpAddr::V6("::ffff:10.0.0.1".parse().unwrap())),
+            link_type: LinkType::IPV6,
+            ..route(LinkCapability::Layer3)
+        }),
+        CountingNeighbors::default(),
+        RejectingPacketIo,
+        TrafficPolicy::default(),
+    );
+
+    client
+        .plan(&request, None, &PlanOptions::default())
+        .unwrap();
+}
+
+#[test]
+fn materialized_packet_destinations_are_authorized() {
+    let registry = Arc::new(default_registry().unwrap());
+    let client = Client::new(
+        Arc::clone(&registry),
+        FixedRoutes(route(LinkCapability::Layer3)),
+        CountingNeighbors::default(),
+        RejectingPacketIo,
+        TrafficPolicy::default(),
+    );
+    let mut built = Builder::new(registry)
+        .build(
+            packet(
+                Ipv4Addr::new(10, 0, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                12_345,
+                9,
+            ),
+            BuildContext::default(),
+            BuildOptions::default(),
+        )
+        .unwrap();
+    built.packet.get_mut::<Ipv4>().unwrap().destination = Ipv4Addr::new(8, 8, 8, 8);
+
+    assert!(matches!(
+        client.authorize_built(&built, false),
+        Err(ClientError::Policy(
+            TrafficPolicyError::PublicDestination { destination }
+        )) if destination == IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))
+    ));
+}
+
 #[test]
 fn synthesized_ethernet_is_authorized_before_neighbor_traffic() {
     let neighbors = CountingNeighbors::default();

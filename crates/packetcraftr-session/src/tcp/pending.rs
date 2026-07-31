@@ -1,12 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::Range;
 
 use bytes::Bytes;
 
-use super::state::{TcpFlowState, emitted_history_conflicts, flow_memory_charge, retained_bytes};
+use super::state::{
+    TcpFlowState, emitted_history_conflicts, flow_memory_charge, prepare_emitted_history,
+    retained_bytes,
+};
 use super::{Error, ReassemblyLimits, Segment};
 
 use accounting::{PushAccountingInput, plan_push_accounting};
@@ -170,11 +173,13 @@ pub(super) fn plan_push(
     let initial_history_capacity = accounting.initial_history_capacity;
     let history_allocation = accounting.history_allocation;
 
-    materialize_pending_merge(&state.pending, offset, payload, &mut merge).ok_or(
+    materialize_pending_merge(&state.pending, offset, payload, &mut merge)?.ok_or(
         Error::FlowByteLimit {
             limit: limits.max_bytes_per_flow,
         },
     )?;
+    let history_replacement =
+        prepare_emitted_history(state, initial_history_capacity, history_allocation)?;
     let direct_payload = if merge.direct_output {
         let end = payload_start
             .checked_add(payload.len())
@@ -206,7 +211,7 @@ pub(super) fn plan_push(
         direct_payload,
         pending_bytes,
         initial_history_capacity,
-        history_allocation,
+        history_replacement,
         closed,
         aggregate_bytes,
         aggregate_memory_charge,
@@ -223,7 +228,7 @@ pub(super) struct PushPlan {
     direct_payload: Option<Range<usize>>,
     pending_bytes: usize,
     initial_history_capacity: usize,
-    history_allocation: usize,
+    history_replacement: Option<VecDeque<u8>>,
     closed: bool,
     aggregate_bytes: usize,
     aggregate_memory_charge: usize,
@@ -344,36 +349,51 @@ fn materialize_pending_merge(
     offset: u64,
     payload: &[u8],
     plan: &mut PendingMergePlan,
-) -> Option<()> {
+) -> Result<Option<()>, Error> {
     if plan.added_bytes == 0 || plan.direct_output {
-        return Some(());
+        return Ok(Some(()));
     }
-    let union_len = usize::try_from(plan.union_end.checked_sub(plan.union_start)?).ok()?;
-    let mut bytes = vec![0u8; union_len];
-    let payload_start = usize::try_from(offset.checked_sub(plan.union_start)?).ok()?;
-    let payload_end = payload_start.checked_add(payload.len())?;
+    let Some(union_len) = plan
+        .union_end
+        .checked_sub(plan.union_start)
+        .and_then(|length| usize::try_from(length).ok())
+    else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
     bytes
-        .get_mut(payload_start..payload_end)?
-        .copy_from_slice(payload);
-    let mut current = plan.first_affected;
-    for index in 0..plan.affected_segment_count {
-        let start = current?;
-        let value = existing.get(&start)?;
-        let relative = usize::try_from(start.checked_sub(plan.union_start)?).ok()?;
-        let end = relative.checked_add(value.len())?;
-        // Retained bytes win overlaps, preserving the existing retransmission
-        // semantics after conflict detection.
-        bytes.get_mut(relative..end)?.copy_from_slice(value);
-        if index + 1 < plan.affected_segment_count {
-            current = existing
-                .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
-                .next()
-                .map(|(start, _)| *start);
+        .try_reserve_exact(union_len)
+        .map_err(|_| Error::AllocationFailed {
+            requested: union_len,
+        })?;
+    bytes.resize(union_len, 0);
+    let materialized = (|| {
+        let payload_start = usize::try_from(offset.checked_sub(plan.union_start)?).ok()?;
+        let payload_end = payload_start.checked_add(payload.len())?;
+        bytes
+            .get_mut(payload_start..payload_end)?
+            .copy_from_slice(payload);
+        let mut current = plan.first_affected;
+        for index in 0..plan.affected_segment_count {
+            let start = current?;
+            let value = existing.get(&start)?;
+            let relative = usize::try_from(start.checked_sub(plan.union_start)?).ok()?;
+            let end = relative.checked_add(value.len())?;
+            // Retained bytes win overlaps, preserving the existing retransmission
+            // semantics after conflict detection.
+            bytes.get_mut(relative..end)?.copy_from_slice(value);
+            if index + 1 < plan.affected_segment_count {
+                current = existing
+                    .range((std::ops::Bound::Excluded(start), std::ops::Bound::Unbounded))
+                    .next()
+                    .map(|(start, _)| *start);
+            }
         }
-    }
-    plan.replacement = Some(PendingReplacement {
-        start: plan.union_start,
-        bytes: Bytes::from(bytes),
-    });
-    Some(())
+        plan.replacement = Some(PendingReplacement {
+            start: plan.union_start,
+            bytes: Bytes::from(bytes),
+        });
+        Some(())
+    })();
+    Ok(materialized)
 }

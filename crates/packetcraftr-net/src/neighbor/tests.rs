@@ -14,6 +14,7 @@ use super::wire::{
     NEIGHBOR_ADVERTISEMENT_TYPE, NEIGHBOR_SOLICITATION_LENGTH, NEIGHBOR_SOLICITATION_TYPE,
     SOLICITED_ADVERTISEMENT_FLAG, SOURCE_LINK_LAYER_OPTION, TARGET_LINK_LAYER_OPTION,
     VLAN_HEADER_LENGTH, checksum, ethernet_prefix, icmpv6_checksum, ipv6_address,
+    match_neighbor_response,
 };
 use super::{ActiveResolver as ActiveNeighborResolver, Options as NeighborResolutionOptions};
 use crate::{
@@ -318,6 +319,23 @@ fn neighbor_advertisement(request: &NeighborRequest, target_mac: MacAddress) -> 
     inbound_frame_at_unix_epoch(Bytes::from(frame), request.interface.index)
 }
 
+fn neighbor_advertisement_with_hop_by_hop(
+    request: &NeighborRequest,
+    target_mac: MacAddress,
+) -> Frame {
+    let valid = neighbor_advertisement(request, target_mac);
+    let mut bytes = valid.bytes().to_vec();
+    let ipv6_offset = ETHERNET_HEADER_LENGTH + request.vlan_tags.len() * VLAN_HEADER_LENGTH;
+    bytes[ipv6_offset + 6] = 0;
+    bytes.splice(
+        ipv6_offset + IPV6_HEADER_LENGTH..ipv6_offset + IPV6_HEADER_LENGTH,
+        [IPV6_NEXT_HEADER_ICMP, 0, 0, 0, 0, 0, 0, 0],
+    );
+    let payload_length = u16::from_be_bytes([bytes[ipv6_offset + 4], bytes[ipv6_offset + 5]]) + 8;
+    bytes[ipv6_offset + 4..ipv6_offset + 6].copy_from_slice(&payload_length.to_be_bytes());
+    inbound_frame_at_unix_epoch(Bytes::from(bytes), request.interface.index)
+}
+
 #[test]
 fn arp_resolution_preserves_vlan_route_and_uses_cache() {
     let mut request = neighbor_request("192.0.2.7", "192.0.2.1");
@@ -476,6 +494,15 @@ fn ndp_solicitation_and_advertisement_follow_wire_contract() {
         ),
         0
     );
+}
+
+#[test]
+fn ndp_accepts_advertisement_after_hop_by_hop_header() {
+    let request = neighbor_request("2001:db8::7", "2001:db8::1");
+    let target_mac = MacAddress([0x02, 0, 0, 0, 0, 1]);
+    let frame = neighbor_advertisement_with_hop_by_hop(&request, target_mac);
+
+    assert_eq!(match_neighbor_response(&request, &frame), Some(target_mac));
 }
 
 #[test]

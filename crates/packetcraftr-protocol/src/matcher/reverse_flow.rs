@@ -74,11 +74,6 @@ impl ResponseMatcher for ReverseFlowMatcher {
                 else {
                     return MatchResult::no_match();
                 };
-                let request_acknowledgment = request_layer
-                    .field("acknowledgment")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u32::try_from(value).ok())
-                    .unwrap_or(0);
                 let Some(response_flags) = response_layer
                     .field("flags")
                     .and_then(|value| value.as_u64())
@@ -86,16 +81,6 @@ impl ResponseMatcher for ReverseFlowMatcher {
                 else {
                     return MatchResult::no_match();
                 };
-                let response_acknowledgment = response_layer
-                    .field("acknowledgment")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u32::try_from(value).ok())
-                    .unwrap_or(0);
-                let response_sequence = response_layer
-                    .field("sequence")
-                    .and_then(|value| value.as_u64())
-                    .and_then(|value| u32::try_from(value).ok())
-                    .unwrap_or(0);
                 let Some(request_payload_length) = tcp_payload_length(request, request_layer_index)
                 else {
                     return MatchResult::no_match();
@@ -107,10 +92,31 @@ impl ResponseMatcher for ReverseFlowMatcher {
                 let has_ack = response_flags & Tcp::ACK != 0;
                 let has_rst = response_flags & Tcp::RST != 0;
                 if has_ack {
+                    let Some(response_acknowledgment) = response_layer
+                        .field("acknowledgment")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok())
+                    else {
+                        return MatchResult::no_match();
+                    };
                     if response_acknowledgment != expected_acknowledgment {
                         return MatchResult::no_match();
                     }
-                } else if has_rst {
+                } else if has_rst && request_flags & Tcp::ACK != 0 {
+                    let Some(request_acknowledgment) = request_layer
+                        .field("acknowledgment")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok())
+                    else {
+                        return MatchResult::no_match();
+                    };
+                    let Some(response_sequence) = response_layer
+                        .field("sequence")
+                        .and_then(|value| value.as_u64())
+                        .and_then(|value| u32::try_from(value).ok())
+                    else {
+                        return MatchResult::no_match();
+                    };
                     if response_sequence != request_acknowledgment {
                         return MatchResult::no_match();
                     }

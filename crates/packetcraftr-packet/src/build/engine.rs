@@ -90,6 +90,8 @@ pub enum BuildError {
     },
     #[error("packet length arithmetic overflow")]
     LengthOverflow,
+    #[error("could not allocate {requested} bytes for the packet buffer")]
+    AllocationFailure { requested: usize },
     #[error("codec for layer {protocol} returned a different materialized layer {actual}")]
     MaterializedProtocolMismatch {
         protocol: ProtocolId,

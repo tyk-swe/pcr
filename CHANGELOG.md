@@ -20,6 +20,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bounded cumulative PCAPNG metadata bytes before block-body reads, with a new
+  `ReaderOptions::max_metadata_bytes_per_frame` ceiling and resource-limit
+  classification for capture size, interface, and metadata limits.
+- Hardened fragment and TCP reassembly against malformed wire alignment,
+  regressing timestamps, phantom empty generations, infallible scratch
+  allocations, and incorrect accounting of complete single-fragment datagrams.
+- Fixed offline analysis clock overflow, out-of-order I/O bucket origins,
+  multi-century bucket offsets, and stale simultaneous-open state after TCP
+  closure or eviction.
+- Made packet-buffer allocation failures typed, rejected unsupported expression
+  escapes, preserved negative `frame.time_epoch` values, accepted valid IPv6
+  SRH TLVs/padding, and tightened bare-RST response correlation.
+- Fixed native capture queue draining and bounded shutdown, Npcap activation
+  warnings, finite Linux netlink operations and shutdown, and NDP responses
+  carried after supported IPv6 extension headers.
+- Re-authorized every materialized packet destination, classified IPv4-mapped
+  IPv6 addresses by their mapped address, and preserved unmatched or
+  freshness-less ambient exchange evidence.
+- Prevented one unsolicited frame from satisfying multiple probes, preserved
+  executor failures and committed replay evidence across deadline boundaries,
+  varied UDP scan retry identities, rejected duplicate fuzz strategies, and
+  shared fuzz preparation/evidence aggregate byte accounting.
+- Required successful CI for the exact release tag commit, synchronized fuzz
+  Clippy policy with the workspace, and moved the Rust 1.97 pin to 1.97.1.
 - Fixed `replay --interface <INDEX>` treating a numeric selector as both an
   interface index and a literal interface name, which prevented ordinary
   numeric interface selection from resolving.

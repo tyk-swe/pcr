@@ -22,6 +22,8 @@ use crate::{
 
 use super::{CaptureInterrupt, NativeCaptureParts, queue::SharedCapture, worker::capture_worker};
 
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
+
 pub(in crate::platform) struct NativeCaptureSession {
     shared: Arc<SharedCapture>,
     stop: Arc<AtomicBool>,
@@ -97,11 +99,14 @@ impl CaptureSession for NativeCaptureSession {
                 });
             }
         }
-        if let Some(error) = state.error.clone() {
+        if let Some(error) = state
+            .error
+            .clone()
+            .filter(|_| !state.ready || state.queue.is_empty())
+        {
             state.error_observed = true;
-            return Err(error);
-        }
-        if state.ready {
+            Err(error)
+        } else if state.ready {
             Ok(())
         } else {
             Err(LiveIoError::CaptureReadiness {
@@ -120,18 +125,19 @@ impl CaptureSession for NativeCaptureSession {
             .expect("validated bounded capture timeout must fit Instant");
         let mut state = self.shared.lock()?;
         loop {
-            if let Some(error) = state.error.clone() {
-                state.error_observed = true;
-                return Err(error);
-            }
-            if let Some(captured) = state.queue.pop_front() {
-                state.queued_bytes = state
+            if let Some(captured) = state.queue.front() {
+                let queued_bytes = state
                     .queued_bytes
                     .checked_sub(captured.frame.bytes().len())
                     .ok_or_else(|| LiveIoError::InvalidCaptureStatistics {
                         message: "native capture queue byte accounting underflowed".to_owned(),
                     })?;
-                return Ok(Some(captured));
+                state.queued_bytes = queued_bytes;
+                return Ok(state.queue.pop_front());
+            }
+            if let Some(error) = state.error.clone() {
+                state.error_observed = true;
+                return Err(error);
             }
             if state.closed || timeout.is_zero() {
                 return Ok(None);
@@ -155,11 +161,7 @@ impl CaptureSession for NativeCaptureSession {
         if let Some(interrupt) = &self.interrupt {
             interrupt.interrupt();
         }
-        let join_result = self.worker.take().map_or(Ok(()), |worker| {
-            worker.join().map_err(|_| LiveIoError::Capture {
-                message: "native capture worker panicked during shutdown".to_owned(),
-            })
-        });
+        let join_result = self.worker.take().map_or(Ok(()), join_worker);
         self.interrupt.take();
 
         let result = join_result.and_then(|()| {
@@ -185,6 +187,23 @@ impl CaptureSession for NativeCaptureSession {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .statistics
     }
+}
+
+fn join_worker(worker: JoinHandle<()>) -> Result<(), LiveIoError> {
+    let deadline = Instant::now()
+        .checked_add(SHUTDOWN_TIMEOUT)
+        .expect("fixed native capture shutdown timeout must fit Instant");
+    while !worker.is_finished() {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Err(LiveIoError::DeadlineExceeded {
+                operation: "shutting down native capture",
+            });
+        };
+        thread::park_timeout(remaining.min(Duration::from_millis(10)));
+    }
+    worker.join().map_err(|_| LiveIoError::Capture {
+        message: "native capture worker panicked during shutdown".to_owned(),
+    })
 }
 
 impl Drop for NativeCaptureSession {

@@ -191,6 +191,7 @@ pub(in crate::fuzz) fn prepare(
         cases,
         built_case_count,
         built_byte_count,
+        retained_byte_count: retained_bytes,
     })
 }
 

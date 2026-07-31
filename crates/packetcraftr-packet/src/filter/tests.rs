@@ -847,6 +847,14 @@ fn frame_fields_read_the_capture_record_rather_than_any_layer() {
 }
 
 #[test]
+fn frame_time_epoch_preserves_pre_epoch_seconds() {
+    let mut packet = sample();
+    packet.frame.timestamp = UNIX_EPOCH - Duration::from_millis(500);
+    assert!(matches("frame.time_epoch == -1", &packet));
+    assert!(matches("frame.time_epoch < 0", &packet));
+}
+
+#[test]
 fn an_absent_interface_id_matches_nothing_rather_than_zero() {
     let mut packet = Packet::new();
     packet.push(Raw::new(vec![0x00]));

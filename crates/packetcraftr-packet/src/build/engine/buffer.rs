@@ -109,7 +109,7 @@ impl PacketBuffer {
             });
         }
 
-        let mut storage = vec![0_u8; capacity];
+        let mut storage = allocate_zeroed(capacity)?;
         let spare = capacity - total;
         let start = match (prefix.is_empty(), suffix.is_empty()) {
             (false, true) => spare,
@@ -139,5 +139,31 @@ impl PacketBuffer {
             return Bytes::from(self.storage);
         }
         Bytes::copy_from_slice(&self.storage[self.start..self.end])
+    }
+}
+
+fn allocate_zeroed(capacity: usize) -> Result<Vec<u8>, BuildError> {
+    let mut storage = Vec::new();
+    storage
+        .try_reserve_exact(capacity)
+        .map_err(|_| BuildError::AllocationFailure {
+            requested: capacity,
+        })?;
+    storage.resize(capacity, 0);
+    Ok(storage)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn impossible_allocation_is_reported_instead_of_panicking() {
+        assert!(matches!(
+            allocate_zeroed(usize::MAX),
+            Err(BuildError::AllocationFailure {
+                requested: usize::MAX
+            })
+        ));
     }
 }

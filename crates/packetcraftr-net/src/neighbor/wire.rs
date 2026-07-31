@@ -278,11 +278,12 @@ fn match_neighbor_advertisement(
         return None;
     }
     let ipv6 = ethernet.payload;
-    if ipv6[0] >> 4 != 6 || ipv6[6] != IPV6_NEXT_HEADER_ICMP || ipv6[7] != 255 {
+    if ipv6[0] >> 4 != 6 || ipv6[7] != 255 {
         return None;
     }
     let payload_length = usize::from(u16::from_be_bytes([ipv6[4], ipv6[5]]));
-    let icmp = ipv6.get(IPV6_HEADER_LENGTH..IPV6_HEADER_LENGTH + payload_length)?;
+    let payload = ipv6.get(IPV6_HEADER_LENGTH..IPV6_HEADER_LENGTH + payload_length)?;
+    let icmp = upper_layer_icmpv6(ipv6[6], payload)?;
     if icmp.len() < 24
         || icmp[0] != NEIGHBOR_ADVERTISEMENT_TYPE
         || icmp[1] != 0
@@ -332,6 +333,29 @@ fn match_neighbor_advertisement(
         return None;
     }
     Some(target_mac)
+}
+
+fn upper_layer_icmpv6(mut next_header: u8, mut payload: &[u8]) -> Option<&[u8]> {
+    loop {
+        match next_header {
+            IPV6_NEXT_HEADER_ICMP => return Some(payload),
+            0 | 43 | 60 => {
+                let header = payload.get(..2)?;
+                next_header = header[0];
+                let length = (usize::from(header[1]) + 1).checked_mul(8)?;
+                payload = payload.get(length..)?;
+            }
+            51 => {
+                let header = payload.get(..2)?;
+                next_header = header[0];
+                let length = (usize::from(header[1]) + 2).checked_mul(4)?;
+                payload = payload.get(length..)?;
+            }
+            // RFC 6980 requires receivers to discard fragmented NDP messages.
+            44 => return None,
+            _ => return None,
+        }
+    }
 }
 
 fn solicited_node_multicast(target: Ipv6Addr) -> Ipv6Addr {

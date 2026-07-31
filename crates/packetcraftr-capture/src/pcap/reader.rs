@@ -47,6 +47,7 @@ pub struct Reader<R> {
     max_interfaces: usize,
     pub(super) max_total_interfaces: usize,
     max_metadata_blocks_per_frame: usize,
+    max_metadata_bytes_per_frame: usize,
     scratch: Vec<u8>,
     finished: bool,
 }
@@ -64,6 +65,7 @@ impl<R: Read> Reader<R> {
             max_interfaces_per_section: max_interfaces,
             max_total_interfaces,
             max_metadata_blocks_per_frame,
+            max_metadata_bytes_per_frame,
         } = options;
         let mut scratch = Vec::new();
         let mut magic = [0_u8; 4];
@@ -132,6 +134,7 @@ impl<R: Read> Reader<R> {
             max_interfaces,
             max_total_interfaces,
             max_metadata_blocks_per_frame,
+            max_metadata_bytes_per_frame,
             scratch,
             finished: false,
         })
@@ -206,6 +209,7 @@ impl<R: Read> Reader<R> {
 
     fn next_pcapng_frame(&mut self) -> Result<Option<Frame>, Error> {
         let mut metadata_blocks = 0usize;
+        let mut metadata_bytes = 0usize;
         loop {
             let (section_endianness, section_interface_base, remaining_in_section) =
                 match &self.state {
@@ -244,8 +248,12 @@ impl<R: Read> Reader<R> {
                     &mut self.inner,
                     raw_header[4..8].try_into().expect("four-byte slice"),
                     self.max_size,
+                    Some((metadata_bytes, self.max_metadata_bytes_per_frame)),
                     &mut self.scratch,
                 )?;
+                metadata_bytes = metadata_bytes
+                    .checked_add(header.block_length)
+                    .expect("section header metadata sum was validated");
                 match &mut self.state {
                     ReaderState::PcapNg(state) => {
                         let transition = state.plan_section(header, self.max_interfaces)?;
@@ -267,10 +275,29 @@ impl<R: Read> Reader<R> {
                     remaining,
                 });
             }
-            let remaining =
+            let block_length_usize =
                 usize::try_from(block_length).map_err(|_| Error::InvalidBlockLength {
                     length: block_length,
-                })? - 8;
+                })?;
+            let is_packet = matches!(
+                block_type,
+                PCAPNG_ENHANCED_PACKET_BLOCK | PCAPNG_PACKET_BLOCK | PCAPNG_SIMPLE_PACKET_BLOCK
+            );
+            if !is_packet {
+                metadata_blocks = metadata_blocks.saturating_add(1);
+                if metadata_blocks > self.max_metadata_blocks_per_frame {
+                    return Err(Error::MetadataBlockLimit {
+                        limit: self.max_metadata_blocks_per_frame,
+                    });
+                }
+                metadata_bytes = metadata_bytes
+                    .checked_add(block_length_usize)
+                    .filter(|actual| *actual <= self.max_metadata_bytes_per_frame)
+                    .ok_or(Error::MetadataByteLimit {
+                        limit: self.max_metadata_bytes_per_frame,
+                    })?;
+            }
+            let remaining = block_length_usize - 8;
             read_exact_vec(
                 &mut self.inner,
                 &mut self.scratch,
@@ -290,18 +317,6 @@ impl<R: Read> Reader<R> {
 
             if let ReaderState::PcapNg(state) = &mut self.state {
                 state.commit_block(block_length);
-            }
-
-            if !matches!(
-                block_type,
-                PCAPNG_ENHANCED_PACKET_BLOCK | PCAPNG_PACKET_BLOCK | PCAPNG_SIMPLE_PACKET_BLOCK
-            ) {
-                metadata_blocks = metadata_blocks.saturating_add(1);
-                if metadata_blocks > self.max_metadata_blocks_per_frame {
-                    return Err(Error::MetadataBlockLimit {
-                        limit: self.max_metadata_blocks_per_frame,
-                    });
-                }
             }
 
             match block_type {

@@ -91,6 +91,8 @@ pub enum Error {
     FlowByteLimit { limit: usize },
     #[error("TCP flow table would exceed aggregate byte limit {limit}")]
     AggregateByteLimit { limit: usize },
+    #[error("could not allocate {requested} bytes for TCP reassembly")]
+    AllocationFailed { requested: usize },
     #[error("TCP per-flow window {limit} reaches or exceeds the serial-number half-space")]
     InvalidWindowLimit { limit: usize },
     #[error(

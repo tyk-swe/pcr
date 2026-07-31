@@ -42,14 +42,14 @@ pub(crate) fn select_response_candidate<'a, O, K: Ord>(
     timeout: Duration,
     rank: impl Fn(&O) -> u8,
     tie_break_key: impl Fn(&O) -> K,
-) {
+) -> bool {
     if !response_within_deadline(
         candidate.latency,
         candidate.decoded.frame.timestamp,
         sent_at,
         timeout,
     ) {
-        return;
+        return false;
     }
     let candidate_precedes = best.as_ref().is_none_or(|current| {
         let candidate_rank = rank(&candidate.observation);
@@ -73,4 +73,5 @@ pub(crate) fn select_response_candidate<'a, O, K: Ord>(
     if candidate_precedes {
         *best = Some(candidate);
     }
+    candidate_precedes
 }

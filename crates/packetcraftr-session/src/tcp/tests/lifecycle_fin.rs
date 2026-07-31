@@ -139,3 +139,25 @@ fn evicting_a_flow_surfaces_its_pending_bytes_and_ignores_unknown_flows() {
     assert_eq!(reassembler.flow_count(), 0);
     assert_eq!(reassembler.aggregate_bytes(), 0);
 }
+
+#[test]
+fn empty_flagless_segment_does_not_create_a_generation() {
+    let now = Instant::now();
+    let mut reassembler = Reassembler::new(ReassemblyLimits::default());
+
+    assert!(reassembler.push(segment(100, b""), now).unwrap().is_empty());
+    assert_eq!(reassembler.flow_count(), 0);
+
+    reassembler.push(segment(100, b"abc"), now).unwrap();
+    let mut fin = segment(103, b"");
+    fin.fin = true;
+    assert!(
+        reassembler
+            .push(fin, now)
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event, Event::Closed { .. }))
+    );
+    assert!(reassembler.push(segment(104, b""), now).unwrap().is_empty());
+    assert_eq!(reassembler.flow_count(), 0);
+}

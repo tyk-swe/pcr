@@ -1367,7 +1367,7 @@ fn infeasible_replay_delay_is_rejected_before_frame_side_effects() {
 }
 
 #[test]
-fn slow_transmitter_boundaries_expire_before_emit_or_a_later_frame() {
+fn slow_boundaries_record_only_a_committed_transmission_before_expiring() {
     for slow_validation in [true, false] {
         let mut reader = capture_reader(
             LinkType::ETHERNET,
@@ -1414,7 +1414,7 @@ fn slow_transmitter_boundaries_expire_before_emit_or_a_later_frame() {
             transmitter.transmission_calls,
             usize::from(!slow_validation)
         );
-        assert_eq!(emitted, 0);
+        assert_eq!(emitted, usize::from(!slow_validation));
     }
 }
 

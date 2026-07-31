@@ -261,7 +261,7 @@ where
         // a throttled cadence otherwise, so idle state is still released
         // while nothing is being pushed. The eviction evidence rides with the
         // frame whose arrival revealed it.
-        let now = clock.at(timestamp);
+        let now = clock.at(timestamp, number)?;
         let sweep_due = clock.should_sweep(now);
         let mut tcp_events = Vec::new();
         let mut fragment_events = Vec::new();
@@ -275,20 +275,18 @@ where
             });
             if pushable || sweep_due {
                 tcp_events.extend(reassembler.expire(now));
+                for event in &tcp_events {
+                    if let TcpEvent::Closed { flow, .. } | TcpEvent::Evicted { flow, .. } = event {
+                        half_open_pure_syns.remove(flow);
+                    }
+                }
             }
             if pushable && let Some(segment) = segment {
                 let acknowledged = transports(&decoded.packet)
                     .tcp
                     .is_some_and(|(_, _, tcp)| tcp.flags & Tcp::ACK != 0);
-                if segment.syn && !acknowledged && segment.payload.is_empty() {
-                    // Bounded like the flow table itself; past the cap a
-                    // flow simply loses simultaneous-open protection.
-                    if half_open_pure_syns.len() < limits.max_flows.saturating_mul(2) {
-                        half_open_pure_syns.insert(segment.flow.clone());
-                    }
-                } else {
-                    half_open_pure_syns.remove(&segment.flow);
-                }
+                let flow = segment.flow.clone();
+                let pure_syn = segment.syn && !acknowledged && segment.payload.is_empty();
                 // A SYN — client SYN or SYN-ACK — that replaces this
                 // direction's tracked generation reuses the four-tuple for a
                 // new connection, so whatever the reverse direction retained
@@ -421,6 +419,20 @@ where
                         return Err(AnalysisError::Reassembly { number, source });
                     }
                 }
+                for event in &tcp_events {
+                    if let TcpEvent::Closed { flow, .. } | TcpEvent::Evicted { flow, .. } = event {
+                        half_open_pure_syns.remove(flow);
+                    }
+                }
+                if pure_syn {
+                    // Bounded like the flow table itself; past the cap a
+                    // flow simply loses simultaneous-open protection.
+                    if half_open_pure_syns.len() < limits.max_flows.saturating_mul(2) {
+                        half_open_pure_syns.insert(flow);
+                    }
+                } else {
+                    half_open_pure_syns.remove(&flow);
+                }
             }
         }
         let fragment = ip_fragment(&decoded);
@@ -507,15 +519,15 @@ impl CaptureClock {
     /// Returns a monotonic instant for `timestamp`: never earlier than any
     /// instant already returned, so a capture whose timestamps run backwards
     /// cannot rewind idle accounting and expire still-active state early.
-    fn at(&mut self, timestamp: SystemTime) -> Instant {
+    fn at(&mut self, timestamp: SystemTime, number: u64) -> Result<Instant, AnalysisError> {
         let origin = *self.origin.get_or_insert(timestamp);
         let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
         self.latest = self
             .base
             .checked_add(offset)
-            .unwrap_or(self.base)
+            .ok_or(AnalysisError::TimestampRange { number })?
             .max(self.latest);
-        self.latest
+        Ok(self.latest)
     }
 
     /// Whether capture time has advanced enough to justify an expiry sweep.
@@ -527,5 +539,25 @@ impl CaptureClock {
             self.swept = Some(now);
         }
         due
+    }
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::*;
+    use std::time::UNIX_EPOCH;
+
+    #[test]
+    fn capture_clock_rejects_unrepresentable_offsets_instead_of_freezing() {
+        let mut clock = CaptureClock::new();
+        clock.origin = Some(UNIX_EPOCH);
+        let far_future = UNIX_EPOCH
+            .checked_add(Duration::from_secs(u64::try_from(i64::MAX).unwrap()))
+            .unwrap();
+
+        assert!(matches!(
+            clock.at(far_future, 7),
+            Err(AnalysisError::TimestampRange { number: 7 })
+        ));
     }
 }

@@ -139,6 +139,23 @@ mod tests {
         }
     }
 
+    struct BlockingSource {
+        release: Arc<AtomicBool>,
+    }
+
+    impl NativeCaptureSource for BlockingSource {
+        fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+            while !self.release.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_millis(1));
+            }
+            Ok(NativeCaptureEvent::Closed)
+        }
+
+        fn statistics(&mut self) -> Result<NativeCaptureStatistics, LiveIoError> {
+            Ok(NativeCaptureStatistics::default())
+        }
+    }
+
     fn panic_session(source: Box<dyn NativeCaptureSource>) -> NativeCaptureSession {
         NativeCaptureSession::spawn(
             NativeCaptureParts {
@@ -256,6 +273,40 @@ mod tests {
     }
 
     #[test]
+    fn shutdown_is_bounded_when_capture_source_ignores_interrupt() {
+        let release = Arc::new(AtomicBool::new(false));
+        let mut session = NativeCaptureSession::spawn(
+            NativeCaptureParts {
+                source: Box::new(BlockingSource {
+                    release: Arc::clone(&release),
+                }),
+                interrupt: Arc::new(MockInterrupt(Arc::new(AtomicUsize::new(0)))),
+                interface: InterfaceId {
+                    name: "mock0".to_owned(),
+                    index: 7,
+                },
+                link_type: LinkType::ETHERNET,
+            },
+            CaptureQueueLimits {
+                max_frames: 1,
+                max_bytes: 4,
+                snap_length: 4,
+                overflow_policy: CaptureOverflowPolicy::Fail,
+            },
+        )
+        .unwrap();
+        session.wait_ready(Duration::from_secs(1)).unwrap();
+
+        assert!(matches!(
+            session.shutdown(),
+            Err(LiveIoError::DeadlineExceeded {
+                operation: "shutting down native capture"
+            })
+        ));
+        release.store(true, Ordering::Release);
+    }
+
+    #[test]
     fn fail_policy_reports_queue_loss() {
         let mut session = session(
             vec![packet(1, 4), packet(2, 4)],
@@ -350,12 +401,12 @@ mod tests {
     }
 
     #[test]
-    fn source_failure_propagates_once_and_shutdown_still_joins() {
+    fn source_failure_drains_queued_frame_before_propagating() {
         let interrupts = Arc::new(AtomicUsize::new(0));
         let mut session = NativeCaptureSession::spawn(
             NativeCaptureParts {
                 source: Box::new(MockSource {
-                    events: VecDeque::new(),
+                    events: VecDeque::from([packet(9, 4)]),
                     drops: NativeCaptureStatistics::default(),
                     failure: Some(LiveIoError::Capture {
                         message: "injected receive failure".to_owned(),
@@ -376,17 +427,15 @@ mod tests {
             },
         )
         .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let error = match session.wait_ready(Duration::from_secs(1)) {
-            Err(error) => error,
-            Ok(()) => loop {
-                match session.next_captured_frame(Duration::from_millis(50)) {
-                    Err(error) => break error,
-                    Ok(_) if Instant::now() < deadline => thread::yield_now(),
-                    Ok(_) => panic!("capture did not propagate its injected source failure"),
-                }
-            },
-        };
+        session.wait_ready(Duration::from_secs(1)).unwrap();
+        let frame = session
+            .next_captured_frame(Duration::from_secs(1))
+            .unwrap()
+            .unwrap();
+        assert_eq!(frame.frame.bytes().as_ref(), &[9, 9, 9, 9]);
+        let error = session
+            .next_captured_frame(Duration::from_secs(1))
+            .unwrap_err();
         assert!(matches!(error, LiveIoError::Capture { .. }));
         session.shutdown().unwrap();
         assert_eq!(interrupts.load(Ordering::SeqCst), 1);

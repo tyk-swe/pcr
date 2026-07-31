@@ -121,7 +121,7 @@ pub(super) fn open_handle(
     // SAFETY: all pre-activation options are complete and this handle has not
     // previously been activated.
     let activation = unsafe { (handle.api.pcap_activate)(handle.raw.as_ptr()) };
-    if activation != 0 {
+    if activation < 0 {
         return Err(map_activation_error(
             interface,
             activation,

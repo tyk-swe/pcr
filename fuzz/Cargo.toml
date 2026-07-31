@@ -21,6 +21,12 @@ unreachable_pub = "warn"
 
 [lints.clippy]
 undocumented_unsafe_blocks = "deny"
+missing_panics_doc = "deny"
+return_self_not_must_use = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+cast_precision_loss = "deny"
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"

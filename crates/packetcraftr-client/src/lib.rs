@@ -375,6 +375,7 @@ where
         built: &BuiltPacket,
         allow_permissive_live: bool,
     ) -> Result<(), ClientError> {
+        self.policy.authorize_packet_destinations(&built.packet)?;
         if built.requires_live_opt_in {
             if !allow_permissive_live {
                 return Err(ClientError::PermissiveLiveOptInRequired);

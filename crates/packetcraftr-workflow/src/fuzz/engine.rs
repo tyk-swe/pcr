@@ -137,6 +137,18 @@ where
         cases_rejected: request.cases as u64 - prepared.built_case_count,
         ..FuzzStats::default()
     };
+    let retained_byte_count =
+        usize::try_from(prepared.retained_byte_count).map_err(|_| FuzzError::ByteLimit {
+            actual: prepared.retained_byte_count,
+            limit: request.limits.max_total_bytes as u64,
+        })?;
+    let mut evidence_limits = request.limits;
+    evidence_limits.max_evidence_bytes = evidence_limits.max_evidence_bytes.min(
+        request
+            .limits
+            .max_total_bytes
+            .saturating_sub(retained_byte_count),
+    );
     let mut evidence = EvidenceBudget::default();
     let mut operation_diagnostics = Vec::new();
     let mut scheduled_delay = Duration::ZERO;
@@ -205,7 +217,7 @@ where
                 unmatched: execution.unmatched,
                 undecoded: execution.undecoded,
             },
-            request.limits,
+            evidence_limits,
             &mut evidence,
             &mut operation_diagnostics,
             &deadline,
@@ -242,6 +254,7 @@ pub(super) struct PreparedFuzz {
     pub(super) cases: Vec<FuzzCase>,
     pub(super) built_case_count: u64,
     pub(super) built_byte_count: u64,
+    pub(super) retained_byte_count: u64,
 }
 
 #[derive(Clone)]

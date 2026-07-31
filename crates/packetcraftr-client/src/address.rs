@@ -16,6 +16,9 @@ pub(super) fn is_public(address: IpAddr) -> bool {
                     || address.is_documentation())
         }
         IpAddr::V6(address) => {
+            if let Some(mapped) = address.to_ipv4_mapped() {
+                return is_public(IpAddr::V4(mapped));
+            }
             address.is_multicast()
                 || !(address.is_loopback()
                     || address.is_unspecified()

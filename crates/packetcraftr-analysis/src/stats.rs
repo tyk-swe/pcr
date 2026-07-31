@@ -163,6 +163,7 @@ pub struct StatsCollector {
     bytes: u64,
     first_timestamp: Option<SystemTime>,
     last_timestamp: Option<SystemTime>,
+    io_origin: Option<SystemTime>,
     protocols: BTreeMap<String, Tally>,
     conversations: BTreeMap<(TransportKind, u64), ConversationState>,
     endpoints: BTreeMap<IpAddr, EndpointTally>,
@@ -186,6 +187,7 @@ impl StatsCollector {
             bytes: 0,
             first_timestamp: None,
             last_timestamp: None,
+            io_origin: None,
             protocols: BTreeMap::new(),
             conversations: BTreeMap::new(),
             endpoints: BTreeMap::new(),
@@ -200,21 +202,7 @@ impl StatsCollector {
         let timestamp = record.decoded.frame.timestamp;
         self.frames += 1;
         self.bytes += bytes;
-        let origin = *self.first_timestamp.get_or_insert(timestamp);
-        self.first_timestamp = Some(origin.min(timestamp));
-        self.last_timestamp = Some(match self.last_timestamp {
-            Some(last) => last.max(timestamp),
-            None => timestamp,
-        });
-
-        // I/O series: a frame timestamped before the first observed frame
-        // belongs to the first bucket rather than to invented negative time.
-        let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
-        let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
-        self.io
-            .entry(u64::try_from(bucket).unwrap_or(u64::MAX))
-            .or_default()
-            .add(bytes);
+        self.observe_time(timestamp, bytes);
 
         // Protocol presence: once per distinct protocol per frame.
         let mut seen: Vec<&str> = Vec::new();
@@ -246,6 +234,27 @@ impl StatsCollector {
         if let (Some(stream), Some(flow)) = (record.udp_stream, udp_flow(record.decoded)) {
             self.conversation(TransportKind::Udp, stream, &flow, bytes, timestamp);
         }
+    }
+
+    fn observe_time(&mut self, timestamp: SystemTime, bytes: u64) {
+        let origin = *self.io_origin.get_or_insert(timestamp);
+        self.first_timestamp = Some(
+            self.first_timestamp
+                .map_or(timestamp, |first| first.min(timestamp)),
+        );
+        self.last_timestamp = Some(match self.last_timestamp {
+            Some(last) => last.max(timestamp),
+            None => timestamp,
+        });
+
+        // I/O series: a frame timestamped before the first observed frame
+        // belongs to the first bucket rather than to invented negative time.
+        let offset = timestamp.duration_since(origin).unwrap_or(Duration::ZERO);
+        let bucket = offset.as_nanos() / self.interval.as_nanos().max(1);
+        self.io
+            .entry(u64::try_from(bucket).unwrap_or(u64::MAX))
+            .or_default()
+            .add(bytes);
     }
 
     fn conversation(
@@ -355,9 +364,8 @@ impl StatsCollector {
                 // Computed in wide nanoseconds so a small interval over a
                 // long capture keeps exact offsets; only spans beyond what
                 // Duration can hold at all saturate.
-                offset: Duration::from_nanos(
-                    u64::try_from(interval.as_nanos().saturating_mul(u128::from(bucket)))
-                        .unwrap_or(u64::MAX),
+                offset: duration_from_nanos_saturating(
+                    interval.as_nanos().saturating_mul(u128::from(bucket)),
                 ),
                 frames: tally.frames,
                 bytes: tally.bytes,
@@ -379,6 +387,16 @@ impl StatsCollector {
     }
 }
 
+fn duration_from_nanos_saturating(nanoseconds: u128) -> Duration {
+    const NANOS_PER_SECOND: u128 = 1_000_000_000;
+    let Ok(seconds) = u64::try_from(nanoseconds / NANOS_PER_SECOND) else {
+        return Duration::MAX;
+    };
+    let subsecond = u32::try_from(nanoseconds % NANOS_PER_SECOND)
+        .expect("nanosecond remainder is less than one billion");
+    Duration::new(seconds, subsecond)
+}
+
 /// The innermost IP layer's addresses, when the frame has any.
 fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
     let mut network = None;
@@ -390,4 +408,33 @@ fn innermost_network(record: &FrameRecord<'_>) -> Option<(IpAddr, IpAddr)> {
         }
     }
     network
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{StatsCollector, duration_from_nanos_saturating};
+    use std::time::{Duration, UNIX_EPOCH};
+
+    #[test]
+    fn wide_nanosecond_offsets_use_durations_full_range() {
+        let six_hundred_years = 600_u128 * 365 * 24 * 60 * 60 * 1_000_000_000;
+        assert!(duration_from_nanos_saturating(six_hundred_years) > Duration::from_nanos(u64::MAX));
+        assert_eq!(duration_from_nanos_saturating(u128::MAX), Duration::MAX);
+    }
+
+    #[test]
+    fn out_of_order_timestamps_do_not_move_the_io_origin() {
+        let mut collector = StatsCollector::new(Duration::from_secs(1)).unwrap();
+        collector.observe_time(UNIX_EPOCH + Duration::from_secs(10), 1);
+        collector.observe_time(UNIX_EPOCH + Duration::from_secs(5), 1);
+        collector.observe_time(UNIX_EPOCH + Duration::from_secs(11), 1);
+        let report = collector.finish();
+
+        assert_eq!(
+            report.first_timestamp,
+            Some(UNIX_EPOCH + Duration::from_secs(5))
+        );
+        assert_eq!(report.io[0].frames, 2);
+        assert_eq!(report.io[1].offset, Duration::from_secs(1));
+    }
 }

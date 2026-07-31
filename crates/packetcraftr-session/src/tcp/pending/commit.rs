@@ -6,9 +6,7 @@ use std::time::Instant;
 use bytes::Bytes;
 
 use super::{PendingMergePlan, PushPlan};
-use crate::tcp::state::{
-    TcpFlowState, append_emitted_history, resize_emitted_history, trim_emitted_history,
-};
+use crate::tcp::state::{TcpFlowState, append_emitted_history, trim_emitted_history};
 use crate::tcp::{Event, FlowKey, Reassembler, Segment};
 
 pub(in crate::tcp) fn commit_push(
@@ -84,7 +82,7 @@ fn commit_flow_push(
         merge,
         pending_bytes,
         initial_history_capacity,
-        history_allocation,
+        history_replacement,
         ..
     } = plan;
     retransmitted += merge.overlapping_bytes;
@@ -92,7 +90,9 @@ fn commit_flow_push(
 
     state.last_update = state.last_update.max(now);
     trim_emitted_history(state, initial_history_capacity);
-    resize_emitted_history(state, history_allocation);
+    if let Some(history) = history_replacement {
+        state.emitted_history = history;
+    }
     apply_pending_merge(state, merge);
     state.pending_bytes = pending_bytes;
     if state.fin_offset.is_none() {

@@ -15,12 +15,16 @@ use std::{
     pin::Pin,
     sync::mpsc::{self, Receiver, Sender, SyncSender},
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 use rtnetlink::{Handle, new_connection};
 
 use super::os_error;
 use crate::route::NativeRouteError;
+
+const NETLINK_OPERATION_TIMEOUT: Duration = Duration::from_secs(2);
+const NETLINK_RESPONSE_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub(super) fn with_netlink<F, Fut, T>(operation: F) -> Result<T, NativeRouteError>
 where
@@ -116,13 +120,15 @@ where
         .spawn(move || {
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_io()
+                .enable_time()
                 .build()
                 .map_err(|error| os_error("create Tokio netlink runtime", error))?;
             runtime.block_on(async move {
                 let (connection, handle, _) = new_connection()
                     .map_err(|error| os_error("open route netlink socket", error))?;
                 let connection = tokio::spawn(connection);
-                let result = operation(handle).await;
+                let result =
+                    await_netlink_operation(operation(handle), NETLINK_OPERATION_TIMEOUT).await;
                 connection.abort();
                 result
             })
@@ -166,7 +172,7 @@ impl NetlinkWorker {
             .spawn(move || netlink_worker(command_receiver, setup_sender))
             .map_err(|error| os_error("spawn netlink worker", error))?;
 
-        match setup_receiver.recv() {
+        match setup_receiver.recv_timeout(NETLINK_OPERATION_TIMEOUT) {
             Ok(Ok(())) => Ok(Self {
                 namespace,
                 commands,
@@ -176,13 +182,14 @@ impl NetlinkWorker {
                 let _ = thread.join();
                 Err(error)
             }
-            Err(_) => {
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
                 if thread.join().is_err() {
                     Err(netlink_worker_panicked())
                 } else {
                     Err(netlink_channel_error("setup response channel closed"))
                 }
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(netlink_timeout("initialize netlink")),
         }
     }
 
@@ -208,9 +215,17 @@ impl NetlinkWorker {
             .map_err(|_| {
                 NetlinkExecutionError::Worker(netlink_channel_error("command channel closed"))
             })?;
-        let response = receiver.recv().map_err(|_| {
-            NetlinkExecutionError::Worker(netlink_channel_error("response channel closed"))
-        })?;
+        let response =
+            receiver
+                .recv_timeout(NETLINK_RESPONSE_TIMEOUT)
+                .map_err(|error| match error {
+                    mpsc::RecvTimeoutError::Disconnected => NetlinkExecutionError::Worker(
+                        netlink_channel_error("response channel closed"),
+                    ),
+                    mpsc::RecvTimeoutError::Timeout => {
+                        NetlinkExecutionError::Worker(netlink_timeout("wait for netlink response"))
+                    }
+                })?;
         let value = response.map_err(NetlinkExecutionError::Operation)?;
         value.downcast::<T>().map(|value| *value).map_err(|_| {
             NetlinkExecutionError::Worker(netlink_channel_error(
@@ -224,9 +239,7 @@ impl NetlinkWorker {
             return Ok(());
         };
         let send_result = self.commands.send(NetlinkCommand::Shutdown);
-        if thread.join().is_err() {
-            return Err(netlink_worker_panicked());
-        }
+        join_netlink_worker(thread, NETLINK_RESPONSE_TIMEOUT)?;
         send_result.map_err(|_| netlink_channel_error("shutdown command channel closed"))
     }
 }
@@ -249,6 +262,7 @@ fn netlink_worker(
 ) {
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_io()
+        .enable_time()
         .build()
     {
         Ok(runtime) => runtime,
@@ -277,7 +291,10 @@ fn netlink_worker(
                 response,
             } => {
                 let result = catch_unwind(AssertUnwindSafe(|| {
-                    runtime.block_on(operation(handle.clone()))
+                    runtime.block_on(await_netlink_operation(
+                        operation(handle.clone()),
+                        NETLINK_OPERATION_TIMEOUT,
+                    ))
                 }))
                 .unwrap_or_else(|_| Err(netlink_worker_panicked()));
                 let _ = response.send(result);
@@ -286,6 +303,18 @@ fn netlink_worker(
         }
     }
     connection.abort();
+}
+
+async fn await_netlink_operation<F, T>(
+    operation: F,
+    timeout: Duration,
+) -> Result<T, NativeRouteError>
+where
+    F: Future<Output = Result<T, NativeRouteError>>,
+{
+    tokio::time::timeout(timeout, operation)
+        .await
+        .map_err(|_| netlink_timeout("execute netlink operation"))?
 }
 
 fn netlink_worker_panicked() -> NativeRouteError {
@@ -297,5 +326,80 @@ fn netlink_worker_panicked() -> NativeRouteError {
 fn netlink_channel_error(message: &'static str) -> NativeRouteError {
     NativeRouteError::InvalidResponse {
         message: format!("Linux netlink worker {message}"),
+    }
+}
+
+fn netlink_timeout(operation: &'static str) -> NativeRouteError {
+    NativeRouteError::OperatingSystem {
+        operation,
+        message: "finite operation deadline expired".to_owned(),
+    }
+}
+
+fn join_netlink_worker(thread: JoinHandle<()>, timeout: Duration) -> Result<(), NativeRouteError> {
+    let deadline = Instant::now()
+        .checked_add(timeout)
+        .ok_or_else(|| netlink_timeout("shut down netlink worker"))?;
+    while !thread.is_finished() {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            return Err(netlink_timeout("shut down netlink worker"));
+        };
+        thread::park_timeout(remaining.min(Duration::from_millis(10)));
+    }
+    thread.join().map_err(|_| netlink_worker_panicked())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        future,
+        sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        },
+    };
+
+    use super::*;
+
+    #[test]
+    fn netlink_operation_timeout_cancels_pending_future() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let error = runtime
+            .block_on(await_netlink_operation(
+                future::pending::<Result<(), NativeRouteError>>(),
+                Duration::ZERO,
+            ))
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            NativeRouteError::OperatingSystem {
+                operation: "execute netlink operation",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn netlink_worker_shutdown_wait_is_bounded() {
+        let release = Arc::new(AtomicBool::new(false));
+        let worker_release = Arc::clone(&release);
+        let worker = thread::spawn(move || {
+            while !worker_release.load(Ordering::Acquire) {
+                thread::park_timeout(Duration::from_millis(1));
+            }
+        });
+
+        assert!(matches!(
+            join_netlink_worker(worker, Duration::ZERO),
+            Err(NativeRouteError::OperatingSystem {
+                operation: "shut down netlink worker",
+                ..
+            })
+        ));
+        release.store(true, Ordering::Release);
     }
 }

@@ -49,11 +49,29 @@ fn reversed_protocol_layers<'request, 'response>(
     {
         return None;
     }
+    let request_outer = outer_network_endpoints(request)?;
+    let response_outer = outer_network_endpoints(response)?;
+    if request_outer.source != response_outer.destination
+        || request_outer.destination != response_outer.source
+    {
+        return None;
+    }
     Some(ReversedProtocolLayers {
         request_index,
         request: request_layer,
         response_index,
         response: response_layer,
+    })
+}
+
+/// The envelope of the packet transmitted on the wire: the outermost IP path,
+/// ignoring anything behind an encapsulation boundary. A direct reply must
+/// reverse it; reversing only an inner tunnel tuple is not correlation.
+fn outer_network_endpoints(packet: &Packet) -> Option<NetworkEnvelope> {
+    let path = semantics::outer_ip_path(packet).ok()??;
+    Some(NetworkEnvelope {
+        source: path.source,
+        destination: path.final_destination,
     })
 }
 

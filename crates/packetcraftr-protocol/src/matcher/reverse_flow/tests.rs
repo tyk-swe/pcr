@@ -91,7 +91,7 @@ fn reverse_tuple_uses_srh_final_destination() {
 }
 
 #[test]
-fn reverse_tuple_uses_network_envelope_nearest_transport() {
+fn reverse_tuple_rejects_a_reply_that_only_reverses_the_inner_tunnel_tuple() {
     let outer_source = address("2001:db8::1");
     let outer_destination = address("2001:db8::2");
     let inner_source = address("2001:db8:1::1");
@@ -115,11 +115,57 @@ fn reverse_tuple_uses_network_envelope_nearest_transport() {
         });
     let mut response = Packet::new();
     response
-        // The outer tunnel endpoints are deliberately unrelated. The
-        // UDP response belongs to the encapsulated network envelope.
         .push(Ipv6 {
             source: address("2001:db8:ffff::1"),
             destination: address("2001:db8:ffff::2"),
+            ..Ipv6::default()
+        })
+        .push(Ipv6 {
+            source: inner_destination,
+            destination: inner_source,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 9,
+            destination_port: 12_345,
+            ..Udp::default()
+        });
+
+    assert!(
+        !ReverseFlowMatcher::new(BuiltinProtocol::Udp)
+            .matches(&request, &response)
+            .matched
+    );
+}
+
+#[test]
+fn reverse_tuple_accepts_a_fully_reversed_tunneled_reply() {
+    let outer_source = address("2001:db8::1");
+    let outer_destination = address("2001:db8::2");
+    let inner_source = address("2001:db8:1::1");
+    let inner_destination = address("2001:db8:1::2");
+    let mut request = Packet::new();
+    request
+        .push(Ipv6 {
+            source: outer_source,
+            destination: outer_destination,
+            ..Ipv6::default()
+        })
+        .push(Ipv6 {
+            source: inner_source,
+            destination: inner_destination,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 9,
+            ..Udp::default()
+        });
+    let mut response = Packet::new();
+    response
+        .push(Ipv6 {
+            source: outer_destination,
+            destination: outer_source,
             ..Ipv6::default()
         })
         .push(Ipv6 {

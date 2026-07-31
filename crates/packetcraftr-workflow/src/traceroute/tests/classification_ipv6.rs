@@ -40,7 +40,7 @@ fn ipv6_classifier_accepts_intermediate_response() {
 }
 
 #[test]
-fn tunneled_direct_reply_reaches_the_inner_destination() {
+fn tunneled_direct_reply_requires_the_outer_envelope_to_reverse_too() {
     let registry = default_registry().unwrap();
     let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
     let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
@@ -63,8 +63,8 @@ fn tunneled_direct_reply_reaches_the_inner_destination() {
             destination_port: DEFAULT_TRACEROUTE_UDP_PORT,
             ..Udp::default()
         });
-    let mut reply = Packet::new();
-    reply
+    let mut inner_only_reply = Packet::new();
+    inner_only_reply
         .push(Ipv6 {
             source: "2001:db8:ffff::1".parse().unwrap(),
             destination: "2001:db8:ffff::2".parse().unwrap(),
@@ -80,12 +80,38 @@ fn tunneled_direct_reply_reaches_the_inner_destination() {
             destination_port: TRACEROUTE_SOURCE_PORT,
             ..Udp::default()
         });
+    assert!(
+        classify_traceroute_response(
+            &registry,
+            TracerouteStrategy::Udp,
+            &request,
+            &decoded_at(inner_only_reply, 2, Vec::new()),
+        )
+        .is_none()
+    );
 
+    let mut tunneled_reply = Packet::new();
+    tunneled_reply
+        .push(Ipv6 {
+            source: outer_destination,
+            destination: outer_source,
+            ..Ipv6::default()
+        })
+        .push(Ipv6 {
+            source: inner_destination,
+            destination: inner_source,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: DEFAULT_TRACEROUTE_UDP_PORT,
+            destination_port: TRACEROUTE_SOURCE_PORT,
+            ..Udp::default()
+        });
     let classification = classify_traceroute_response(
         &registry,
         TracerouteStrategy::Udp,
         &request,
-        &decoded_at(reply, 2, Vec::new()),
+        &decoded_at(tunneled_reply, 2, Vec::new()),
     )
     .unwrap();
 

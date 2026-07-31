@@ -145,7 +145,7 @@ fn icmp_direct_matcher_classifies_matching_echo_reply_as_open() {
 }
 
 #[test]
-fn tunneled_direct_reply_reports_the_inner_responder() {
+fn tunneled_direct_reply_requires_the_outer_envelope_to_reverse_too() {
     let registry = default_registry().unwrap();
     let outer_source: Ipv6Addr = "2001:db8::1".parse().unwrap();
     let outer_destination: Ipv6Addr = "2001:db8::2".parse().unwrap();
@@ -168,8 +168,8 @@ fn tunneled_direct_reply_reports_the_inner_responder() {
             destination_port: 53,
             ..Udp::default()
         });
-    let mut reply = Packet::new();
-    reply
+    let mut inner_only_reply = Packet::new();
+    inner_only_reply
         .push(Ipv6 {
             source: "2001:db8:ffff::1".parse().unwrap(),
             destination: "2001:db8:ffff::2".parse().unwrap(),
@@ -185,12 +185,38 @@ fn tunneled_direct_reply_reports_the_inner_responder() {
             destination_port: 50_000,
             ..Udp::default()
         });
+    assert!(
+        classify_scan_response(
+            &registry,
+            ScanTransport::Udp,
+            &request,
+            &decoded(inner_only_reply, Vec::new()),
+        )
+        .is_none()
+    );
 
+    let mut tunneled_reply = Packet::new();
+    tunneled_reply
+        .push(Ipv6 {
+            source: outer_destination,
+            destination: outer_source,
+            ..Ipv6::default()
+        })
+        .push(Ipv6 {
+            source: inner_destination,
+            destination: inner_source,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 53,
+            destination_port: 50_000,
+            ..Udp::default()
+        });
     let classification = classify_scan_response(
         &registry,
         ScanTransport::Udp,
         &request,
-        &decoded(reply, Vec::new()),
+        &decoded(tunneled_reply, Vec::new()),
     )
     .unwrap();
 

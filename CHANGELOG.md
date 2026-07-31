@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rejected reverse-flow correlation that only reversed an encapsulated probe's
+  inner transport tuple, so injected or captured inner-tuple replies can no
+  longer be treated as valid responses for tunneled probes; a direct reply must
+  also reverse the transmitted outer envelope.
 - Accepted synthesized Ethernet envelopes when validating sent DNS probes and
   rejected encoding dissected DNS layers whose public fields diverge from their
   retained wire payload.

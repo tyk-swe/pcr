@@ -138,6 +138,23 @@ fn executor_cannot_underreport_exact_dns_wire_bytes() {
 }
 
 #[test]
+fn dns_validation_accepts_a_synthesized_ethernet_envelope() {
+    let (probe, mut execution) = dns_validation_fixture();
+    execution
+        .sent
+        .insert(0, packetcraftr_protocol::link::Ethernet::default())
+        .unwrap();
+
+    validate_dns_execution(
+        &probe,
+        &execution,
+        DnsLimits::default(),
+        Duration::from_millis(10),
+    )
+    .unwrap();
+}
+
+#[test]
 fn dns_executor_response_frames_and_deadlines_preserve_exact_errors() {
     let (probe, mut malformed) = dns_validation_fixture();
     malformed.responses.push(DnsMatchedResponse {

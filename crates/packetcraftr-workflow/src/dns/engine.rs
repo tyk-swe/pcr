@@ -449,16 +449,22 @@ pub(super) fn validate_dns_execution(
     } else {
         BuiltinProtocol::Ipv6
     };
-    if execution.sent.len() != 3
+    let network_index = execution
+        .sent
+        .iter()
+        .next()
+        .filter(|layer| BuiltinProtocol::of(*layer) == Some(BuiltinProtocol::Ethernet))
+        .map_or(0, |_| 1);
+    if execution.sent.len() != network_index + 3
         || !execution
             .sent
             .iter()
-            .next()
+            .nth(network_index)
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(network_protocol))
         || !execution
             .sent
             .iter()
-            .nth(1)
+            .nth(network_index + 1)
             .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
         || dns_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
         || network.destination != probe.server_address

@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Accepted synthesized Ethernet envelopes when validating sent DNS probes and
+  rejected encoding dissected DNS layers whose public fields diverge from their
+  retained wire payload.
 - Bounded cumulative PCAPNG metadata bytes before block-body reads, with a new
   `ReaderOptions::max_metadata_bytes_per_frame` ceiling and resource-limit
   classification for capture size, interface, and metadata limits.

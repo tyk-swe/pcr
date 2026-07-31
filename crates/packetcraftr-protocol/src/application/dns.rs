@@ -102,6 +102,18 @@ impl Dns {
     pub fn wire(&self) -> &Bytes {
         &self.wire
     }
+
+    fn validate_wire_consistency(&self) -> Result<(), CodecError> {
+        let parsed = Self::from_wire(self.wire.clone())?;
+        if parsed == *self {
+            Ok(())
+        } else {
+            Err(invalid(
+                "dns",
+                "DNS fields were changed after dissection and no longer match the retained wire payload",
+            ))
+        }
+    }
 }
 
 fn read_u16(input: &[u8], cursor: &mut usize) -> Result<u16, CodecError> {
@@ -323,6 +335,7 @@ impl LayerCodec for DnsCodec {
         if context.child.is_some() || !payload.is_empty() {
             return Err(invalid("dns", "DNS is a terminal UDP payload layer"));
         }
+        layer.validate_wire_consistency()?;
         ensure_encode_budget("dns", layer.wire.len(), context)?;
         Ok(EncodedLayer {
             prefix: layer.wire.to_vec(),
@@ -405,6 +418,17 @@ mod tests {
         many[4..6].copy_from_slice(&65_u16.to_be_bytes());
         assert!(matches!(
             Dns::from_wire(many),
+            Err(CodecError::Invalid { .. })
+        ));
+    }
+
+    #[test]
+    fn rejects_fields_that_diverge_from_retained_wire_bytes() {
+        let mut dns = Dns::from_wire(query()).unwrap();
+        dns.id ^= 1;
+
+        assert!(matches!(
+            dns.validate_wire_consistency(),
             Err(CodecError::Invalid { .. })
         ));
     }

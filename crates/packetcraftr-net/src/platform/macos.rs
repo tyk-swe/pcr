@@ -243,36 +243,26 @@ fn sockaddr_prefix(address: *const libc::sockaddr, interface_address: IpAddr) ->
     // SAFETY: getifaddrs owns the live record for this call, and its leading
     // length byte bounds the complete sockaddr allocation.
     let bytes = unsafe { std::slice::from_raw_parts(address.cast::<u8>(), length) };
-    let mask = sockaddr_ip(bytes)?;
-    if interface_address.is_ipv4() != mask.is_ipv4() {
-        return None;
+    let ip = sockaddr_ip(bytes)?;
+    match (interface_address, ip) {
+        (IpAddr::V4(_), IpAddr::V4(mask)) => contiguous_prefix(&mask.octets()),
+        (IpAddr::V6(_), IpAddr::V6(mask)) => contiguous_prefix(&mask.octets()),
+        _ => None,
     }
-    netmask_prefix(mask)
 }
 
-fn netmask_prefix(mask: IpAddr) -> Option<u8> {
-    match mask {
-        IpAddr::V4(mask) => {
-            let mask = u32::from(mask);
-            let prefix = mask.leading_ones();
-            let canonical = u32::MAX.checked_shl(u32::BITS - prefix).unwrap_or_default();
-            if mask != canonical {
-                return None;
-            }
-            u8::try_from(prefix).ok()
+fn contiguous_prefix(bytes: &[u8]) -> Option<u8> {
+    let mut prefix = 0_u32;
+    let mut reached_suffix = false;
+    for &byte in bytes {
+        let leading = byte.leading_ones();
+        if (reached_suffix && byte != 0) || byte.count_ones() != leading {
+            return None;
         }
-        IpAddr::V6(mask) => {
-            let mask = u128::from(mask);
-            let prefix = mask.leading_ones();
-            let canonical = u128::MAX
-                .checked_shl(u128::BITS - prefix)
-                .unwrap_or_default();
-            if mask != canonical {
-                return None;
-            }
-            u8::try_from(prefix).ok()
-        }
+        prefix = prefix.checked_add(leading)?;
+        reached_suffix |= leading != u8::BITS;
     }
+    u8::try_from(prefix).ok()
 }
 
 fn link_address(address: *const libc::sockaddr, length: usize) -> Option<MacAddress> {
@@ -584,20 +574,36 @@ mod tests {
     }
 
     #[test]
-    fn netmask_prefix_accepts_only_contiguous_masks() {
-        let cases = [
-            ("0.0.0.0", Some(0_u8)),
-            ("255.255.254.0", Some(23)),
-            ("255.255.255.255", Some(32)),
-            ("255.0.255.0", None),
-            ("::", Some(0)),
-            ("ffff:ffff:ffff:ffff::", Some(64)),
-            ("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", Some(128)),
-            ("ffff:ffff:0:ffff::", None),
-        ];
+    fn interface_netmask_prefix_requires_contiguous_bits() {
+        for (mask, expected) in [
+            (IpAddr::V4(Ipv4Addr::new(255, 255, 255, 0)), Some(24)),
+            (IpAddr::V4(Ipv4Addr::UNSPECIFIED), Some(0)),
+            (IpAddr::V4(Ipv4Addr::new(255, 0, 255, 0)), None),
+            (IpAddr::V4(Ipv4Addr::new(255, 127, 0, 0)), None),
+        ] {
+            let encoded = encode_sockaddr(mask).unwrap();
+            assert_eq!(
+                sockaddr_prefix(
+                    encoded.as_ptr().cast(),
+                    IpAddr::V4(Ipv4Addr::new(192, 0, 2, 1)),
+                ),
+                expected
+            );
+        }
 
-        for (mask, expected) in cases {
-            assert_eq!(netmask_prefix(mask.parse().unwrap()), expected, "{mask}");
+        for (mask, expected) in [
+            (
+                IpAddr::V6("ffff:ffff:ffff:ffff::".parse().unwrap()),
+                Some(64),
+            ),
+            (IpAddr::V6(Ipv6Addr::UNSPECIFIED), Some(0)),
+            (IpAddr::V6("ffff:0:ffff::".parse().unwrap()), None),
+        ] {
+            let encoded = encode_sockaddr(mask).unwrap();
+            assert_eq!(
+                sockaddr_prefix(encoded.as_ptr().cast(), IpAddr::V6(Ipv6Addr::LOCALHOST)),
+                expected
+            );
         }
     }
 

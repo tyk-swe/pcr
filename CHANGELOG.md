@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Required reverse-flow response correlation to match and reverse every IP
+  envelope in an encapsulated request, preventing inner-tuple-only spoofing.
 - Accepted synthesized Ethernet envelopes when validating sent DNS probes and
   rejected encoding dissected DNS layers whose public fields diverge from their
   retained wire payload.

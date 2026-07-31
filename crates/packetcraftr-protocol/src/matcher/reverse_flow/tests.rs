@@ -91,7 +91,7 @@ fn reverse_tuple_uses_srh_final_destination() {
 }
 
 #[test]
-fn reverse_tuple_uses_network_envelope_nearest_transport() {
+fn reverse_tuple_requires_reversed_outer_tunnel_envelope() {
     let outer_source = address("2001:db8::1");
     let outer_destination = address("2001:db8::2");
     let inner_source = address("2001:db8:1::1");
@@ -134,10 +134,66 @@ fn reverse_tuple_uses_network_envelope_nearest_transport() {
         });
 
     let matcher = ReverseFlowMatcher::new(BuiltinProtocol::Udp);
-    assert!(matcher.matches(&request, &response).matched);
-    assert_eq!(
-        matcher.responder(&request, &response),
-        Some(IpAddr::V6(inner_destination))
+    assert!(!matcher.matches(&request, &response).matched);
+
+    let mut valid_response = Packet::new();
+    valid_response
+        .push(Ipv6 {
+            source: outer_destination,
+            destination: outer_source,
+            ..Ipv6::default()
+        })
+        .push(Ipv6 {
+            source: inner_destination,
+            destination: inner_source,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 9,
+            destination_port: 12_345,
+            ..Udp::default()
+        });
+    assert!(matcher.matches(&request, &valid_response).matched);
+}
+
+#[test]
+fn reverse_tuple_rejects_plain_response_to_tunneled_request() {
+    let inner_source = address("2001:db8:1::1");
+    let inner_destination = address("2001:db8:1::2");
+    let mut request = Packet::new();
+    request
+        .push(Ipv6 {
+            source: address("2001:db8::1"),
+            destination: address("2001:db8::2"),
+            ..Ipv6::default()
+        })
+        .push(Ipv6 {
+            source: inner_source,
+            destination: inner_destination,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 12_345,
+            destination_port: 9,
+            ..Udp::default()
+        });
+    let mut response = Packet::new();
+    response
+        .push(Ipv6 {
+            source: inner_destination,
+            destination: inner_source,
+            ..Ipv6::default()
+        })
+        .push(Udp {
+            source_port: 9,
+            destination_port: 12_345,
+            ..Udp::default()
+        });
+
+    assert!(
+        !ReverseFlowMatcher::new(BuiltinProtocol::Udp)
+            .matches(&request, &response)
+            .matched
     );
 }
 

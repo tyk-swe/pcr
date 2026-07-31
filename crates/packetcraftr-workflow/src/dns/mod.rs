@@ -23,12 +23,12 @@ use packetcraftr_packet::{
     codec::NetworkEnvelope,
     decode::DecodedPacket,
     diagnostic::{Diagnostic, DiagnosticSeverity, push_diagnostic_once},
-    field::FieldValue,
-    layer::Raw,
+    layer::{MalformedLayer, Raw},
     registry::ProtocolRegistry,
     template::PacketTemplate,
 };
 use packetcraftr_protocol::{
+    application::Dns,
     network::{Ipv4, Ipv6},
     transport::Udp,
 };

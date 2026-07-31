@@ -664,7 +664,7 @@ fn stats_collector_tallies_every_table_with_stable_orders() {
         [
             (stats::TransportKind::Tcp, 1000, 2),
             (stats::TransportKind::Tcp, 2000, 2),
-            (stats::TransportKind::Udp, 53, 2),
+            (stats::TransportKind::Udp, 5353, 2),
         ]
     );
 

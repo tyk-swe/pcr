@@ -8,7 +8,7 @@ fn expert_surfaces_decode_diagnostics_as_findings() {
     // A frame whose transport claims UDP but carries a truncated header
     // dissects with diagnostics; expert folds them in as findings.
     let mut writer = Writer::pcap(Vec::new(), LinkType::RAW).unwrap();
-    let mut bytes = build_bytes(udp_packet([10, 0, 0, 3], 53, 53)).to_vec();
+    let mut bytes = build_bytes(udp_packet([10, 0, 0, 3], 5353, 5353)).to_vec();
     bytes.truncate(24);
     // Repair the IPv4 total length so only the UDP header is short.
     bytes[2..4].copy_from_slice(&24_u16.to_be_bytes());

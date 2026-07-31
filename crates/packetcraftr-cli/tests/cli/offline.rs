@@ -181,6 +181,21 @@ fn protocols_text_lists_manifest_order_and_describes_ordered_fields() {
         "{detail}"
     );
     assert!(detail.contains("  options kind=bytes"));
+
+    let dns = binary()
+        .args(["--output", "json", "protocols", "dns"])
+        .output()
+        .unwrap();
+    assert!(dns.status.success());
+    let dns: serde_json::Value = serde_json::from_slice(&dns.stdout).unwrap();
+    assert_eq!(dns["result"]["protocol"]["decode_only"], true);
+    assert!(
+        dns["result"]["protocol"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field["name"] == "qname")
+    );
 }
 
 #[test]
@@ -282,7 +297,7 @@ fn filterable_capture() -> PathBuf {
     let udp = built_frame(
         "ethernet(source=02:00:00:00:00:01,destination=02:00:00:00:00:02)\
          /ipv4(source=10.0.0.1,destination=10.0.0.2)\
-         /udp(source_port=1000,destination_port=53)/raw(text=q)",
+         /udp(source_port=1000,destination_port=5353)/raw(text=q)",
     );
     let tcp = built_frame(
         "ethernet(source=02:00:00:00:00:03,destination=02:00:00:00:00:04)\
@@ -822,7 +837,7 @@ fn followable_capture() -> PathBuf {
     );
     let decoy = built_frame(
         "ethernet/ipv4(source=10.0.0.9,destination=10.0.0.8)\
-         /udp(source_port=53,destination_port=53)/raw(text=decoy)",
+         /udp(source_port=5353,destination_port=5353)/raw(text=decoy)",
     );
     write_capture(&[&ping, &decoy, &pong], false)
 }

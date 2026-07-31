@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Registered a bounded DNS-over-UDP dissector that publishes read-only header
+  and question fields, retains the complete payload for exact round trips, and
+  selects typed DNS on UDP port 53 while preserving raw custom-port payloads.
 - Removed the unused aggregate protocol-support manifest, workflow matrix, and
   fallback metadata. Consumers should use `support::BUILTIN_PROTOCOLS` and
   `support::BUILTIN_CAPTURE_ROOTS`, the tables used by the runtime registry and

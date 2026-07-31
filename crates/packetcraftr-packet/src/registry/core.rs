@@ -8,7 +8,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use super::super::codec::LayerCodec;
-use super::super::field::{FieldKind, FieldValue};
+use super::super::field::FieldKind;
 use super::super::layer::{LayerSchema, ProtocolId};
 use super::super::matcher::ResponseMatcher;
 
@@ -230,9 +230,9 @@ impl ProtocolRegistry {
 
     /// The reflective schema of a registered protocol.
     ///
-    /// Schemas are captured once, when the registry is built, from a default
-    /// layer produced by each codec. A decode-only codec cannot construct one,
-    /// so it reports [`None`]; its decoded layers still carry their own schema.
+    /// Schemas are captured once, when the registry is built, through each
+    /// codec's schema-publication hook. Decode-only codecs may publish a
+    /// schema even when they cannot construct a layer.
     pub fn schema<Q>(&self, protocol: &Q) -> Option<&'static LayerSchema>
     where
         ProtocolId: std::borrow::Borrow<Q>,
@@ -502,15 +502,13 @@ impl RegistryBuilder {
                 });
             }
         }
-        // Capture each protocol's reflective schema once, from a default layer.
-        // Filter compilation and protocol discovery both need field metadata
-        // without constructing a throwaway layer per lookup. A decode-only
-        // codec cannot build one and is simply absent from the map.
-        let defaults = BTreeMap::<String, FieldValue>::new();
+        // Capture each protocol's reflective schema once. Constructible codecs
+        // retain the default factory behavior through LayerCodec's default
+        // hook, while decode-only codecs may publish static schemas directly.
         let mut schemas = BTreeMap::new();
         for (protocol, codec) in &self.codecs {
-            if let Ok(layer) = codec.make_layer(&defaults) {
-                schemas.insert(protocol.clone(), layer.schema());
+            if let Some(schema) = codec.published_schema() {
+                schemas.insert(protocol.clone(), schema);
             }
         }
         for (path, binding) in &self.filter_fields {

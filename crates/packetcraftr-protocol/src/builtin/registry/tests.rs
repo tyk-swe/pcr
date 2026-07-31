@@ -8,6 +8,7 @@ use bytes::Bytes;
 
 use super::*;
 use crate::{
+    application::Dns,
     gre::Gre,
     icmp::{Icmpv4, Icmpv6},
     ipv6::{DestinationOptions, HopByHop, SegmentRoutingHeader},

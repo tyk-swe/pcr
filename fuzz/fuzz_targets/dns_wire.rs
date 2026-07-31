@@ -4,6 +4,7 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use packetcraftr::protocol::application::Dns;
 use packetcraftr::workflow::dns::{Limits, QueryType, decode_response, decode_tcp_frame};
 
 fuzz_target!(|data: &[u8]| {
@@ -32,6 +33,7 @@ fuzz_target!(|data: &[u8]| {
         max_rejected_records: 32,
         ..Limits::default()
     };
+    let _ = Dns::from_wire(wire.to_vec());
     if mode & 0x80 == 0 {
         let _ = decode_response(wire, "example.test", query_type, transaction_id, limits);
     } else {

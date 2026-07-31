@@ -8,6 +8,7 @@ use packetcraftr_packet::{
     semantics::BuiltinProtocol,
 };
 
+mod application;
 mod filter;
 mod ip_extension;
 mod link;
@@ -20,6 +21,7 @@ pub(super) fn register(builder: &mut RegistryBuilder) -> Result<(), RegistryErro
     ip_extension::register(builder)?;
     tunnel::register(builder)?;
     transport::register(builder)?;
+    application::register(builder)?;
     terminal::register(builder)?;
     filter::register(builder)
 }

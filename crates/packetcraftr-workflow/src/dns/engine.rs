@@ -6,7 +6,7 @@
 /// authorization, resolution, and authorization of every answer before a new
 /// probe is constructed.
 use super::Clock;
-use super::wire::raw_payload;
+use super::wire::dns_payload;
 use super::{
     Authorizer, DNS_EPHEMERAL_SOURCE_PORT_BASE, DNS_EVIDENCE_DIAGNOSTICS, Deadline,
     DeadlineExceeded, DecodedPacket, DnsAttemptEvidence, DnsAttemptStatus, DnsError, DnsExchange,
@@ -449,13 +449,21 @@ pub(super) fn validate_dns_execution(
     } else {
         BuiltinProtocol::Ipv6
     };
-    if !super::probe::packet_shape_matches(
-        &execution.sent,
-        &[network_protocol, BuiltinProtocol::Udp, BuiltinProtocol::Raw],
-    ) || network.destination != probe.server_address
+    if execution.sent.len() != 3
+        || !execution
+            .sent
+            .iter()
+            .next()
+            .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(network_protocol))
+        || !execution
+            .sent
+            .iter()
+            .nth(1)
+            .is_some_and(|layer| BuiltinProtocol::of(layer) == Some(BuiltinProtocol::Udp))
+        || dns_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
+        || network.destination != probe.server_address
         || ports.source != probe.source_port
         || ports.destination != probe.server_port
-        || raw_payload(&execution.sent).as_deref() != Some(probe.query.as_ref())
     {
         return Err(DnsError::InvalidEvidence {
             attempt,

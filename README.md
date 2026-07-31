@@ -59,8 +59,10 @@ VXLAN carries inner Ethernet frames, while GENEVE can carry inner Ethernet or
 typed IP stacks. Unknown numeric link types and unknown discriminators remain
 bounded and are preserved as raw bytes. Built-in protocol support is
 header-focused: SCTP chunks are not decoded into typed chunk models, ESP
-ciphertext stays opaque, DNS messages remain owned by the DNS workflow, and
-other application payloads are represented as raw bytes.
+ciphertext stays opaque, DNS-over-UDP headers and bounded questions are
+dissected as a typed exact-round-trip payload, and other application payloads
+are represented as raw bytes. The DNS workflow remains authoritative for full
+resource-record, EDNS, correlation, and TCP-response decoding.
 
 ## Output formats and terminal colour
 

@@ -279,7 +279,6 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::exchange::Composite;
     use crate::route::models::{LinkCapability, LinkMode};
     use crate::route::{
         DestinationScope, InterfaceId, PlannedRoute, RouteDecision, RouteSelectionReason,
@@ -429,14 +428,14 @@ mod tests {
     }
 
     #[test]
-    fn composite_preserves_ordinary_and_filtered_capture_delegation() {
+    fn tuple_preserves_ordinary_and_filtered_capture_delegation() {
         let ordinary_calls = Arc::new(AtomicUsize::new(0));
         let filtered_calls = Arc::new(AtomicUsize::new(0));
         let provider = FilterProvider {
             ordinary_calls: Arc::clone(&ordinary_calls),
             filtered_calls: Arc::clone(&filtered_calls),
         };
-        let composite = Composite::new((), provider);
+        let composite = ((), provider);
 
         composite.arm_capture(&route(), Limits::default()).unwrap();
         composite

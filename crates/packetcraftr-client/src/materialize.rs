@@ -24,9 +24,6 @@ pub(super) fn build_context(plan: &PlannedRoute) -> BuildContext {
     BuildContext {
         source: plan.packet_source,
         destination: plan.final_destination,
-        mtu: Some(plan.route.mtu),
-        link_type: Some(plan.route.link_type.0),
-        metadata: Default::default(),
     }
 }
 

@@ -25,18 +25,6 @@ pub enum StatsTableName {
     Io,
 }
 
-impl StatsTableName {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Conversations => "conversations",
-            Self::Endpoints => "endpoints",
-            Self::Protocols => "protocols",
-            Self::Ports => "ports",
-            Self::Io => "io",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StatsTransport {

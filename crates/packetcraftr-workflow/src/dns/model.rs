@@ -277,13 +277,11 @@ impl DnsName {
 impl PartialEq for DnsName {
     fn eq(&self, other: &Self) -> bool {
         self.labels.len() == other.labels.len()
-            && self.labels.iter().zip(&other.labels).all(|(left, right)| {
-                left.len() == right.len()
-                    && left
-                        .iter()
-                        .zip(right.iter())
-                        .all(|(left, right)| left.eq_ignore_ascii_case(right))
-            })
+            && self
+                .labels
+                .iter()
+                .zip(&other.labels)
+                .all(|(left, right)| left.eq_ignore_ascii_case(right))
     }
 }
 

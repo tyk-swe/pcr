@@ -107,7 +107,6 @@ fn build_context_materializes_only_the_outer_network_envelope() {
             BuildContext {
                 source: Some(source.into()),
                 destination: Some(destination.into()),
-                ..BuildContext::default()
             },
             BuildOptions::default(),
         )

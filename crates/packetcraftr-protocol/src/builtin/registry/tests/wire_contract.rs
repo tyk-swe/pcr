@@ -283,7 +283,6 @@ fn build_context_materializes_unspecified_ip_addresses_before_checksums() {
             BuildContext {
                 source: Some("192.0.2.1".parse().unwrap()),
                 destination: Some("198.51.100.2".parse().unwrap()),
-                ..BuildContext::default()
             },
             BuildOptions::default(),
         )

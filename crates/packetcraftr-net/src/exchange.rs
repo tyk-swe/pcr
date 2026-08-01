@@ -1,37 +1,24 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-//! Composition contracts for capture-before-send exchanges.
+//! Tuple composition for capture-before-send exchanges.
 
 use super::Error;
 use super::capture::{CaptureProvider, CaptureQueueLimits};
 use super::route::PlannedRoute;
 use super::transmit::{IoSendReport, PacketIo, TransmissionFrame};
 
-/// Composes separately owned transmission and capture providers.
-#[derive(Clone, Copy, Debug)]
-pub struct Composite<S, C> {
-    sender: S,
-    capture: C,
-}
-
-impl<S, C> Composite<S, C> {
-    pub fn new(sender: S, capture: C) -> Self {
-        Self { sender, capture }
-    }
-}
-
-impl<S, C> PacketIo for Composite<S, C>
+impl<S, C> PacketIo for (S, C)
 where
     S: PacketIo,
     C: Send + Sync,
 {
     fn send(&self, frame: TransmissionFrame<'_>) -> Result<IoSendReport, Error> {
-        self.sender.send(frame)
+        self.0.send(frame)
     }
 }
 
-impl<S, C> CaptureProvider for Composite<S, C>
+impl<S, C> CaptureProvider for (S, C)
 where
     S: Send + Sync,
     C: CaptureProvider,
@@ -43,7 +30,7 @@ where
         route: &PlannedRoute,
         limits: CaptureQueueLimits,
     ) -> Result<Self::Capture, Error> {
-        self.capture.arm_capture(route, limits)
+        self.1.arm_capture(route, limits)
     }
 
     fn arm_capture_with_filter(
@@ -52,6 +39,6 @@ where
         limits: CaptureQueueLimits,
         filter: &str,
     ) -> Result<Self::Capture, Error> {
-        self.capture.arm_capture_with_filter(route, limits, filter)
+        self.1.arm_capture_with_filter(route, limits, filter)
     }
 }

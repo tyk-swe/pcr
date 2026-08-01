@@ -9,8 +9,7 @@ use std::time::Duration;
 use clap::Parser;
 use packetcraftr::{
     client::{self, Client},
-    net::{self, exchange::Composite},
-    output,
+    net, output,
     packet::{self, Packet},
     protocol, workflow,
 };
@@ -198,7 +197,7 @@ pub(super) fn run(cli: Cli) -> Result<(), CliError> {
 
 type SystemPacketIo =
     net::transmit::Dispatch<net::transmit::SystemLayer2, net::transmit::SystemLayer3>;
-type SystemExchangeIo = Composite<SystemPacketIo, net::capture::SystemProvider>;
+type SystemExchangeIo = (SystemPacketIo, net::capture::SystemProvider);
 pub(super) type SystemClient =
     Client<net::route::SystemProvider, net::neighbor::SystemResolver, SystemExchangeIo>;
 
@@ -218,7 +217,7 @@ pub(super) fn system_client(
         registry,
         net::route::SystemProvider,
         net::neighbor::SystemResolver::default(),
-        Composite::new(
+        (
             net::transmit::Dispatch::new(net::transmit::SystemLayer2, net::transmit::SystemLayer3),
             net::capture::SystemProvider,
         ),

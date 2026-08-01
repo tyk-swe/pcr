@@ -8,22 +8,30 @@ use packetcraftr_packet::{
     semantics::BuiltinProtocol,
 };
 
-mod application;
-mod filter;
 mod ip_extension;
 mod link;
-mod terminal;
-mod transport;
 mod tunnel;
 
 pub(super) fn register(builder: &mut RegistryBuilder) -> Result<(), RegistryError> {
     link::register(builder)?;
     ip_extension::register(builder)?;
     tunnel::register(builder)?;
-    transport::register(builder)?;
-    application::register(builder)?;
-    terminal::register(builder)?;
-    filter::register(builder)
+    for parent in [
+        BuiltinProtocol::Udp,
+        BuiltinProtocol::Tcp,
+        BuiltinProtocol::Sctp,
+    ] {
+        bind(builder, parent, 0, BuiltinProtocol::Raw, 0)?;
+    }
+    bind(builder, BuiltinProtocol::Udp, 53, BuiltinProtocol::Dns, 100)?;
+    bind(
+        builder,
+        BuiltinProtocol::Arp,
+        0,
+        BuiltinProtocol::Padding,
+        0,
+    )?;
+    crate::builtin::filter::register_filter_fields(builder)
 }
 
 fn bind_common_ip_children(

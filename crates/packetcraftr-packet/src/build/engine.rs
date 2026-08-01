@@ -1,7 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::sync::Arc;
 
@@ -36,9 +35,6 @@ pub enum BuildMode {
 pub struct BuildContext {
     pub source: Option<IpAddr>,
     pub destination: Option<IpAddr>,
-    pub mtu: Option<u32>,
-    pub link_type: Option<u32>,
-    pub metadata: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

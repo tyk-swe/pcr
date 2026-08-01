@@ -212,7 +212,7 @@ fn render_dns_text(
             attempt.attempt,
             attempt.server_address,
             attempt.source_port,
-            dns_attempt_status_name(attempt.status),
+            dns_outcome_name(attempt.status),
             output_timestamp_text(attempt.sent_at),
             attempt
                 .received_at
@@ -250,11 +250,7 @@ fn render_dns_text(
     for record in &result.rejected_records {
         write_stdout_line(format_args!(
             "rejected section={} index={} owner={} type_code={} reason={}",
-            dns_section_name(record.section),
-            record.index,
-            record.owner,
-            record.type_code,
-            record.reason,
+            record.section, record.index, record.owner, record.type_code, record.reason,
         ))?;
     }
     for evidence in &result.undecoded {
@@ -298,11 +294,7 @@ fn render_dns_record_text(
         .map_err(|error| CliError::new(4, format!("DNS output serialization failed: {error}")))?;
     write_stdout_line(format_args!(
         "record section={} owner={} class={} ttl={} data={}",
-        dns_section_name(section),
-        record.owner,
-        record.class,
-        record.ttl,
-        data,
+        section, record.owner, record.class, record.ttl, data,
     ))
 }
 
@@ -422,17 +414,6 @@ fn render_dns_stream(
     .map_err(|error| error.at_sequence(sequence))
 }
 
-fn dns_attempt_status_name(value: output::dns::AttemptStatus) -> &'static str {
-    match value {
-        output::dns::AttemptStatus::Response => "response",
-        output::dns::AttemptStatus::Truncated => "truncated",
-        output::dns::AttemptStatus::Timeout => "timeout",
-        output::dns::AttemptStatus::Unrelated => "unrelated",
-        output::dns::AttemptStatus::DecodeFailure => "decode_failure",
-        output::dns::AttemptStatus::NetworkFailure => "network_failure",
-    }
-}
-
 fn dns_outcome_name(value: output::dns::Outcome) -> &'static str {
     match value {
         output::dns::Outcome::Response => "response",
@@ -444,23 +425,12 @@ fn dns_outcome_name(value: output::dns::Outcome) -> &'static str {
     }
 }
 
-fn dns_section_name(value: output::dns::Section) -> &'static str {
-    match value {
-        output::dns::Section::Answer => "answer",
-        output::dns::Section::Authority => "authority",
-        output::dns::Section::Additional => "additional",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::net::Ipv4Addr;
     use std::time::Duration;
 
-    use super::{
-        dns_attempt_status_name, dns_outcome_name, dns_section_name, render_dns_stream,
-        render_dns_text,
-    };
+    use super::{dns_outcome_name, render_dns_stream, render_dns_text};
     use crate::rendering::capture_stdout;
     use packetcraftr::output::{
         dns::{
@@ -578,16 +548,6 @@ mod tests {
     #[test]
     fn dns_text_names_cover_every_public_enum_variant() {
         for (value, expected) in [
-            (AttemptStatus::Response, "response"),
-            (AttemptStatus::Truncated, "truncated"),
-            (AttemptStatus::Timeout, "timeout"),
-            (AttemptStatus::Unrelated, "unrelated"),
-            (AttemptStatus::DecodeFailure, "decode_failure"),
-            (AttemptStatus::NetworkFailure, "network_failure"),
-        ] {
-            assert_eq!(dns_attempt_status_name(value), expected);
-        }
-        for (value, expected) in [
             (Outcome::Response, "response"),
             (Outcome::Truncated, "truncated"),
             (Outcome::Timeout, "timeout"),
@@ -602,7 +562,7 @@ mod tests {
             (Section::Authority, "authority"),
             (Section::Additional, "additional"),
         ] {
-            assert_eq!(dns_section_name(value), expected);
+            assert_eq!(value.to_string(), expected);
         }
     }
 

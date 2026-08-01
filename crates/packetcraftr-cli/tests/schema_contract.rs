@@ -115,11 +115,7 @@ fn dns_record_schema_accepts_every_output_variant() {
 #[test]
 fn every_ndjson_line_is_an_independently_valid_record() {
     let output = validator("packetcraftr.output.v1.schema.json");
-    let fixture =
-        fs::read(root().join("tests/fixtures/captures/pcapng/multi-link.pcapng")).unwrap();
-    let capture = root().join("target/schema-contract.pcapng");
-    fs::create_dir_all(capture.parent().unwrap()).unwrap();
-    fs::write(&capture, fixture).unwrap();
+    let capture = root().join("tests/fixtures/captures/pcapng/multi-link.pcapng");
 
     let result = std::process::Command::new(env!("CARGO_BIN_EXE_packetcraftr"))
         .args(["--output", "ndjson", "read"])

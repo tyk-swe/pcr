@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Removed unread build-context metadata and unused output enum string helpers,
+  replaced the capture/send composite wrapper with tuple composition, and
+  collapsed duplicated command-output and DNS text formatting paths. This is a
+  breaking Rust API cleanup; emitted command documents are unchanged.
 - Removed repository-unused public scaffolding, including the secondary error
   category taxonomy, impossible capture-frame validation, packet normalization
   and layout-reflection hooks, offline fragment reporting and unused analysis

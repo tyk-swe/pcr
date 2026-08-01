@@ -186,11 +186,5 @@ fn is_same_or_ancestor(zone: &DnsName, name: &DnsName) -> bool {
                 .iter()
                 .rev()
                 .zip(name.labels.iter().rev())
-                .all(|(left, right)| {
-                    DnsName {
-                        labels: vec![left.clone()],
-                    } == DnsName {
-                        labels: vec![right.clone()],
-                    }
-                }))
+                .all(|(left, right)| left.eq_ignore_ascii_case(right)))
 }

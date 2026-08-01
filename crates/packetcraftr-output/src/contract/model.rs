@@ -142,6 +142,15 @@ pub struct CommandOutputContract {
     pub formats: &'static [OutputFormat],
 }
 
+impl CommandOutputContract {
+    const fn from_command(command: CommandName) -> Self {
+        Self {
+            command,
+            formats: command.formats(),
+        }
+    }
+}
+
 const BUILD_FORMATS: &[OutputFormat] = &[
     OutputFormat::Text,
     OutputFormat::Json,
@@ -189,78 +198,24 @@ const FOLLOW_FORMATS: &[OutputFormat] = &[
 
 /// Complete v1 command/format matrix. Extending a command requires changing this table.
 pub const COMMAND_OUTPUT_CONTRACTS: &[CommandOutputContract] = &[
-    CommandOutputContract {
-        command: CommandName::Build,
-        formats: BUILD_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Dissect,
-        formats: BUILD_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Protocols,
-        formats: AGGREGATE_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Plan,
-        formats: AGGREGATE_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Send,
-        formats: SEND_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Exchange,
-        formats: EXCHANGE_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Capture,
-        formats: CAPTURE_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Read,
-        formats: CAPTURE_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Replay,
-        formats: REPLAY_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Scan,
-        formats: TOOL_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Stats,
-        formats: AGGREGATE_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Expert,
-        formats: TOOL_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Follow,
-        formats: FOLLOW_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Traceroute,
-        formats: TOOL_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Dns,
-        formats: TOOL_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Fuzz,
-        formats: TOOL_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Interfaces,
-        formats: AGGREGATE_FORMATS,
-    },
-    CommandOutputContract {
-        command: CommandName::Routes,
-        formats: AGGREGATE_FORMATS,
-    },
+    CommandOutputContract::from_command(CommandName::Build),
+    CommandOutputContract::from_command(CommandName::Dissect),
+    CommandOutputContract::from_command(CommandName::Protocols),
+    CommandOutputContract::from_command(CommandName::Plan),
+    CommandOutputContract::from_command(CommandName::Send),
+    CommandOutputContract::from_command(CommandName::Exchange),
+    CommandOutputContract::from_command(CommandName::Capture),
+    CommandOutputContract::from_command(CommandName::Read),
+    CommandOutputContract::from_command(CommandName::Replay),
+    CommandOutputContract::from_command(CommandName::Scan),
+    CommandOutputContract::from_command(CommandName::Stats),
+    CommandOutputContract::from_command(CommandName::Expert),
+    CommandOutputContract::from_command(CommandName::Follow),
+    CommandOutputContract::from_command(CommandName::Traceroute),
+    CommandOutputContract::from_command(CommandName::Dns),
+    CommandOutputContract::from_command(CommandName::Fuzz),
+    CommandOutputContract::from_command(CommandName::Interfaces),
+    CommandOutputContract::from_command(CommandName::Routes),
 ];
 
 /// Failure produced while enforcing the shared output contract.

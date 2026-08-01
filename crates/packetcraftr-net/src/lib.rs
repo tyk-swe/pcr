@@ -9,7 +9,7 @@
 
 pub mod capture;
 mod error;
-pub mod exchange;
+mod exchange;
 pub mod interface;
 pub mod link;
 pub mod neighbor;

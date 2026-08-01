@@ -179,7 +179,6 @@ mod tests {
             let build = BuildContext {
                 source: Some(source),
                 destination: Some(destination),
-                ..BuildContext::default()
             };
             assert_eq!(
                 encode_network(&context(&packet, 1, &build, &registry)).unwrap(),
@@ -199,7 +198,6 @@ mod tests {
         let mismatched = BuildContext {
             source: Some(Ipv4Addr::LOCALHOST.into()),
             destination: Some(Ipv6Addr::LOCALHOST.into()),
-            ..BuildContext::default()
         };
         for build in [BuildContext::default(), mismatched] {
             assert!(encode_network(&context(&packet, 1, &build, &registry)).is_err());
@@ -214,7 +212,6 @@ mod tests {
         let build = BuildContext {
             source: Some(Ipv4Addr::new(192, 0, 2, 1).into()),
             destination: Some(Ipv4Addr::new(192, 0, 2, 2).into()),
-            ..BuildContext::default()
         };
         let network = encode_network(&context(&packet, 2, &build, &registry)).unwrap();
         assert_eq!(network.source, build.source.unwrap());
@@ -223,7 +220,6 @@ mod tests {
         let wrong_family = BuildContext {
             source: Some(Ipv6Addr::LOCALHOST.into()),
             destination: Some(Ipv6Addr::LOCALHOST.into()),
-            ..BuildContext::default()
         };
         let network = encode_network(&context(&packet, 2, &wrong_family, &registry)).unwrap();
         assert_eq!(network.source, IpAddr::V4(Ipv4Addr::UNSPECIFIED));
@@ -241,7 +237,6 @@ mod tests {
         let build = BuildContext {
             source: Some(Ipv4Addr::LOCALHOST.into()),
             destination: Some(Ipv4Addr::BROADCAST.into()),
-            ..BuildContext::default()
         };
         let network = encode_network(&context(&packet, 3, &build, &registry)).unwrap();
         assert_eq!(network.source, IpAddr::V4(Ipv4Addr::UNSPECIFIED));

@@ -62,7 +62,6 @@ fn command_matrix_is_complete_and_has_no_duplicate_formats() {
     assert_eq!(COMMAND_OUTPUT_CONTRACTS.len(), 18);
     for (contract_index, contract) in COMMAND_OUTPUT_CONTRACTS.iter().enumerate() {
         assert!(!contract.formats.is_empty());
-        assert_eq!(contract.formats, contract.command.formats());
         assert!(
             !COMMAND_OUTPUT_CONTRACTS[..contract_index]
                 .iter()

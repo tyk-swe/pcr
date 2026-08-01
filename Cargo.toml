@@ -68,7 +68,7 @@ pcap = { version = "2.4", default-features = false }
 pnet_datalink = { version = "0.35", default-features = false, features = ["std"] }
 rtnetlink = { version = "0.21", default-features = false, features = ["tokio_socket"] }
 socket2 = { version = "0.6", default-features = false, features = ["all"] }
-tokio = { version = "1", default-features = false, features = ["net", "rt"] }
+tokio = { version = "1", default-features = false, features = ["rt"] }
 windows = { version = "0.62", default-features = false, features = [
     "std",
     "Win32_Foundation",

@@ -19,15 +19,6 @@ pub enum FollowDirection {
     Server,
 }
 
-impl FollowDirection {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Client => "client",
-            Self::Server => "server",
-        }
-    }
-}
-
 impl From<Direction> for FollowDirection {
     fn from(value: Direction) -> Self {
         match value {

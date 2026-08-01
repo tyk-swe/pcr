@@ -42,7 +42,7 @@ jobs:
           PCR_NATIVE_E2E_PRIVILEGE_MODE=sudo \
             PCR_NATIVE_E2E_TEST_PRIVILEGED=1 \
             PYTHONPATH=tests \
-            python3 -m unittest native_e2e.support.test_command
+            python3 -m unittest discover --start-directory tests --pattern 'test_*.py'
       - name: Run strict namespace E2E smoke tests
         shell: bash
         env:

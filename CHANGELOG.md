@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Tightened output validation to reject malformed IP addresses and DNS records
+  containing fields from a different record type. IP-address rejection requires
+  JSON Schema `format` assertions, which the bundled validators now enable.
 - Rejected live packets whose final Ethernet/VLAN bytes, malformed routing
   layers, custom registries, or non-atomic IP fragments could conceal an
   unauthorized destination; checks run on exact preliminary and rebuilt bytes

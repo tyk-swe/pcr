@@ -3,6 +3,7 @@ name = "packetcraftr-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
+rust-version = "1.96"
 license = "AGPL-3.0-only"
 
 [package.metadata]

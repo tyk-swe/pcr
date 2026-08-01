@@ -20,7 +20,10 @@ fn validator(name: &str) -> Validator {
     let schema = json_file(root().join("schemas").join(name));
     jsonschema::draft202012::meta::validate(&schema)
         .unwrap_or_else(|error| panic!("{name} is not valid Draft 2020-12: {error}"));
-    jsonschema::draft202012::new(&schema).unwrap()
+    jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(&schema)
+        .unwrap()
 }
 
 #[test]
@@ -57,6 +60,55 @@ fn committed_schemas_and_every_document_example_validate() {
                 output.iter_errors(&value).collect::<Vec<_>>()
             );
         }
+    }
+}
+
+#[test]
+fn dns_record_schema_accepts_every_output_variant() {
+    let output = validator("packetcraftr.output.v1.schema.json");
+    let template = json_file(root().join("examples/documents/output-dns-success.json"));
+
+    for data in [
+        json!({"type": "a", "address": "192.0.2.1"}),
+        json!({"type": "aaaa", "address": "2001:db8::1"}),
+        json!({"type": "cname", "canonical_name": "alias.example."}),
+        json!({"type": "mx", "preference": 10, "exchange": "mail.example."}),
+        json!({"type": "ns", "name_server": "ns.example."}),
+        json!({"type": "ptr", "pointer": "host.example."}),
+        json!({
+            "type": "soa",
+            "primary_name_server": "ns.example.",
+            "responsible_mailbox": "hostmaster.example.",
+            "serial": 1,
+            "refresh": 2,
+            "retry": 3,
+            "expire": 4,
+            "minimum": 5
+        }),
+        json!({"type": "srv", "priority": 0, "weight": 1, "port": 443, "target": "service.example."}),
+        json!({"type": "txt", "strings": ["value"], "strings_hex": ["76616c7565"]}),
+        json!({
+            "type": "opt",
+            "edns": {
+                "udp_payload_size": 1232,
+                "extended_response_code": 0,
+                "version": 0,
+                "dnssec_ok": false,
+                "flags": 0,
+                "options": []
+            }
+        }),
+        json!({"type": "unknown", "type_code": 99, "rdata_hex": "00"}),
+    ] {
+        let mut document = template.clone();
+        let record = document["result"]["answers"][0].as_object_mut().unwrap();
+        record.retain(|field, _| matches!(field.as_str(), "owner" | "class" | "ttl"));
+        record.extend(data.as_object().unwrap().clone());
+        assert!(
+            output.is_valid(&document),
+            "rejected valid DNS record {data}: {:?}",
+            output.iter_errors(&document).collect::<Vec<_>>()
+        );
     }
 }
 
@@ -209,7 +261,50 @@ fn schemas_reject_representative_contract_violations() {
         "accepted ICMP traceroute completion with a destination port"
     );
 
-    let mut dns = json_file(root().join("examples/documents/output-dns-success.json"));
-    dns["result"]["transport"] = json!("tcp");
-    assert!(!output.is_valid(&dns), "accepted unsupported DNS transport");
+    let dns = json_file(root().join("examples/documents/output-dns-success.json"));
+
+    let mut unsupported_dns_transport = dns.clone();
+    unsupported_dns_transport["result"]["transport"] = json!("tcp");
+    assert!(
+        !output.is_valid(&unsupported_dns_transport),
+        "accepted unsupported DNS transport"
+    );
+
+    let mut cross_variant_dns_record = dns.clone();
+    cross_variant_dns_record["result"]["answers"][0]["address"] = json!("192.0.2.1");
+    assert!(
+        !output.is_valid(&cross_variant_dns_record),
+        "accepted a TXT record with an A-record field"
+    );
+
+    for (record_type, address) in [("a", "192.0.2.1"), ("aaaa", "2001:db8::1")] {
+        let mut dns_address_record = dns.clone();
+        let record = dns_address_record["result"]["answers"][0]
+            .as_object_mut()
+            .unwrap();
+        record.insert("type".to_owned(), json!(record_type));
+        record.insert("address".to_owned(), json!(address));
+        record.remove("strings");
+        record.remove("strings_hex");
+        assert!(
+            output.is_valid(&dns_address_record),
+            "rejected valid {record_type} record address"
+        );
+        dns_address_record["result"]["answers"][0]["address"] = json!("not-an-ip");
+        assert!(
+            !output.is_valid(&dns_address_record),
+            "accepted malformed {record_type} record address"
+        );
+    }
+
+    let mut stats = json_file(root().join("examples/documents/output-stats-success.json"));
+    stats["result"]["conversations"][0]["address_a"] = json!("not-an-ip");
+    assert!(!output.is_valid(&stats), "accepted malformed stats address");
+
+    let mut plan = json_file(root().join("examples/documents/output-plan-success.json"));
+    plan["result"]["route"]["route"]["selected_address"] = json!("not-an-ip");
+    assert!(
+        !output.is_valid(&plan),
+        "accepted malformed nullable route address"
+    );
 }

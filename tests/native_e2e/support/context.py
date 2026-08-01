@@ -75,6 +75,8 @@ class CaseContext:
             str(self.packetcraftr_binary),
             *[str(argument) for argument in arguments],
         )
+        command = self.runner.command(argv, privileged=True)
+        record_count = len(self.runner.records)
         started = time.monotonic()
         try:
             completed = self.runner.run(
@@ -94,9 +96,26 @@ class CaseContext:
                 )
             )
             raise
+        except BaseException:
+            if len(self.runner.records) > record_count:
+                record = self.runner.records[-1]
+                if (
+                    record.argv == command
+                    and record.outcome.startswith("interrupted by ")
+                ):
+                    self.invocations.append(
+                        CliInvocation(
+                            argv=record.argv,
+                            outcome=record.outcome,
+                            stdout=record.stdout,
+                            stderr=record.stderr,
+                            elapsed_seconds=time.monotonic() - started,
+                        )
+                    )
+            raise
         self.invocations.append(
             CliInvocation(
-                argv=tuple(self.runner.command(argv, privileged=True)),
+                argv=command,
                 outcome=f"exit {completed.returncode}",
                 stdout=completed.stdout,
                 stderr=completed.stderr,

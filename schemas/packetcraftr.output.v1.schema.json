@@ -728,7 +728,7 @@
           "$ref": "#/$defs/uint64"
         },
         "address_a": {
-          "type": "string"
+          "$ref": "#/$defs/ipAddress"
         },
         "port_a": {
           "type": "integer",
@@ -736,7 +736,7 @@
           "maximum": 65535
         },
         "address_b": {
-          "type": "string"
+          "$ref": "#/$defs/ipAddress"
         },
         "port_b": {
           "type": "integer",
@@ -778,7 +778,7 @@
       ],
       "properties": {
         "address": {
-          "type": "string"
+          "$ref": "#/$defs/ipAddress"
         },
         "tx_frames": {
           "$ref": "#/$defs/uint64"
@@ -1108,8 +1108,7 @@
       ],
       "properties": {
         "address": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/ipAddress"
         },
         "port": {
           "type": "integer",
@@ -1779,7 +1778,7 @@
         "resolved_addresses": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ipAddress"
           }
         },
         "ports": {
@@ -1815,12 +1814,12 @@
         "resolved_addresses": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ipAddress"
           },
           "minItems": 1
         },
         "destination": {
-          "type": "string"
+          "$ref": "#/$defs/ipAddress"
         },
         "strategy": {
           "type": "string",
@@ -1928,7 +1927,7 @@
         "resolved_addresses": {
           "type": "array",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/ipAddress"
           },
           "minItems": 1
         },
@@ -2230,7 +2229,7 @@
               "type": "string"
             },
             "resolved_address": {
-              "type": "string"
+              "$ref": "#/$defs/ipAddress"
             },
             "port": {
               "$ref": "#/$defs/scanPort"
@@ -2271,7 +2270,7 @@
             "resolved_addresses": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/ipAddress"
               }
             }
           },
@@ -2297,7 +2296,7 @@
               "type": "string"
             },
             "destination": {
-              "type": "string"
+              "$ref": "#/$defs/ipAddress"
             },
             "hop": {
               "$ref": "#/$defs/traceHop"
@@ -2347,12 +2346,12 @@
             "resolved_addresses": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/ipAddress"
               },
               "minItems": 1
             },
             "destination": {
-              "type": "string"
+              "$ref": "#/$defs/ipAddress"
             },
             "strategy": {
               "type": "string",
@@ -2557,7 +2556,7 @@
             "resolved_addresses": {
               "type": "array",
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/ipAddress"
               },
               "minItems": 1
             },
@@ -2959,18 +2958,15 @@
           "$ref": "#/$defs/linkMode"
         },
         "lookup_destination": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/ipAddress"
         },
         "final_destination": {
-          "type": "string",
-          "minLength": 1
+          "$ref": "#/$defs/ipAddress"
         },
         "visited_destinations": {
           "type": "array",
           "items": {
-            "type": "string",
-            "minLength": 1
+            "$ref": "#/$defs/ipAddress"
           }
         },
         "packet_source": {
@@ -3052,12 +3048,27 @@
         }
       ]
     },
+    "ipAddress": {
+      "description": "Validators must enable JSON Schema format assertions to enforce IP address syntax.",
+      "type": "string",
+      "anyOf": [
+        {
+          "format": "ipv4"
+        },
+        {
+          "format": "ipv6"
+        }
+      ]
+    },
     "nullableIpAddress": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "minLength": 1
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ipAddress"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "linkMode": {
       "type": "string",
@@ -3371,7 +3382,7 @@
           ]
         },
         "destination": {
-          "type": "string"
+          "$ref": "#/$defs/ipAddress"
         },
         "destination_port": {
           "type": "integer",
@@ -3402,7 +3413,7 @@
           ]
         },
         "responder": {
-          "type": "string"
+          "$ref": "#/$defs/ipAddress"
         },
         "sent_at": {
           "$ref": "#/$defs/timestamp"
@@ -3473,7 +3484,7 @@
                 ]
               },
               "destination": {
-                "type": "string"
+                "$ref": "#/$defs/ipAddress"
               },
               "destination_port": {
                 "type": "integer",
@@ -3496,7 +3507,7 @@
                 ]
               },
               "responder": {
-                "type": "string"
+                "$ref": "#/$defs/ipAddress"
               },
               "sent_at": {
                 "$ref": "#/$defs/timestamp"
@@ -3606,7 +3617,7 @@
           "maximum": 32
         },
         "server_address": {
-          "type": "string"
+          "$ref": "#/$defs/ipAddress"
         },
         "source_port": {
           "type": "integer",
@@ -3762,286 +3773,258 @@
         "type"
       ],
       "properties": {
-          "owner": {
-            "type": "string"
-          },
-          "class": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "ttl": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "type": {
-            "type": "string",
-            "enum": [
-              "a",
-              "aaaa",
-              "cname",
-              "mx",
-              "ns",
-              "ptr",
-              "soa",
-              "srv",
-              "txt",
-              "opt",
-              "unknown"
-            ]
-          },
-          "address": {
-            "type": "string"
-          },
-          "preference": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "exchange": {
-            "type": "string"
-          },
-          "canonical_name": {
-            "type": "string"
-          },
-          "name_server": {
-            "type": "string"
-          },
-          "pointer": {
-            "type": "string"
-          },
-          "primary_name_server": {
-            "type": "string"
-          },
-          "responsible_mailbox": {
-            "type": "string"
-          },
-          "serial": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "refresh": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "retry": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "expire": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "minimum": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 4294967295
-          },
-          "priority": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "weight": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "port": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "target": {
-            "type": "string"
-          },
-          "strings": {
-            "type": "array",
-            "items": {
+        "owner": {
+          "type": "string"
+        },
+        "class": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "ttl": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "a",
+            "aaaa",
+            "cname",
+            "mx",
+            "ns",
+            "ptr",
+            "soa",
+            "srv",
+            "txt",
+            "opt",
+            "unknown"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "type": {
+              "const": "a"
+            },
+            "address": {
+              "type": "string",
+              "format": "ipv4"
+            }
+          }
+        },
+        {
+          "required": [
+            "address"
+          ],
+          "properties": {
+            "type": {
+              "const": "aaaa"
+            },
+            "address": {
+              "type": "string",
+              "format": "ipv6"
+            }
+          }
+        },
+        {
+          "required": [
+            "canonical_name"
+          ],
+          "properties": {
+            "type": {
+              "const": "cname"
+            },
+            "canonical_name": {
               "type": "string"
             }
-          },
-          "strings_hex": {
-            "type": "array",
-            "items": {
+          }
+        },
+        {
+          "required": [
+            "preference",
+            "exchange"
+          ],
+          "properties": {
+            "type": {
+              "const": "mx"
+            },
+            "preference": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "exchange": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "name_server"
+          ],
+          "properties": {
+            "type": {
+              "const": "ns"
+            },
+            "name_server": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "pointer"
+          ],
+          "properties": {
+            "type": {
+              "const": "ptr"
+            },
+            "pointer": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "primary_name_server",
+            "responsible_mailbox",
+            "serial",
+            "refresh",
+            "retry",
+            "expire",
+            "minimum"
+          ],
+          "properties": {
+            "type": {
+              "const": "soa"
+            },
+            "primary_name_server": {
+              "type": "string"
+            },
+            "responsible_mailbox": {
+              "type": "string"
+            },
+            "serial": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "refresh": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "retry": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "expire": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "minimum": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          }
+        },
+        {
+          "required": [
+            "priority",
+            "weight",
+            "port",
+            "target"
+          ],
+          "properties": {
+            "type": {
+              "const": "srv"
+            },
+            "priority": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "weight": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "port": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "target": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "required": [
+            "strings",
+            "strings_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "txt"
+            },
+            "strings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "strings_hex": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/hexBytes"
+              }
+            }
+          }
+        },
+        {
+          "required": [
+            "edns"
+          ],
+          "properties": {
+            "type": {
+              "const": "opt"
+            },
+            "edns": {
+              "$ref": "#/$defs/dnsEdns"
+            }
+          }
+        },
+        {
+          "required": [
+            "type_code",
+            "rdata_hex"
+          ],
+          "properties": {
+            "type": {
+              "const": "unknown"
+            },
+            "type_code": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "rdata_hex": {
               "$ref": "#/$defs/hexBytes"
             }
-          },
-          "type_code": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 65535
-          },
-          "rdata_hex": {
-            "$ref": "#/$defs/hexBytes"
-          },
-          "edns": {
-            "$ref": "#/$defs/dnsEdns"
-          }
-      },
-      "allOf": [
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "opt"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "edns"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "enum": [
-                  "a",
-                  "aaaa"
-                ]
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "address"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "cname"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "canonical_name"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "mx"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "preference",
-              "exchange"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "ns"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "name_server"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "ptr"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "pointer"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "soa"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "primary_name_server",
-              "responsible_mailbox",
-              "serial",
-              "refresh",
-              "retry",
-              "expire",
-              "minimum"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "srv"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "priority",
-              "weight",
-              "port",
-              "target"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "txt"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "strings",
-              "strings_hex"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "type": {
-                "const": "unknown"
-              }
-            }
-          },
-          "then": {
-            "required": [
-              "type_code",
-              "rdata_hex"
-            ]
           }
         }
       ],
-      "additionalProperties": false
+      "unevaluatedProperties": false
     },
     "fuzzCase": {
       "type": "object",

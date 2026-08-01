@@ -80,7 +80,10 @@ def validate_output_schema(
             ) from error
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         Draft202012Validator.check_schema(schema)
-        validator = Draft202012Validator(schema)
+        validator = Draft202012Validator(
+            schema,
+            format_checker=Draft202012Validator.FORMAT_CHECKER,
+        )
         _VALIDATORS[schema_path] = validator
     errors = sorted(
         validator.iter_errors(document),

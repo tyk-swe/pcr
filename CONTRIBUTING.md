@@ -80,11 +80,11 @@ Every pull request must have one primary responsibility.
 - Update fixtures, goldens, examples, and schemas together when an approved
   serialized or CLI contract changes.
 
-The canonical library domains are `capture`, `client`, `error`, `net`,
-`output`, `packet`, `protocol`, `session`, and `workflow`, each a crate under
-`crates/` named `packetcraftr-<domain>`. Prefer specific module names that
-describe their responsibility, and keep the inter-crate dependency graph
-acyclic. Unsafe code is confined to
+The canonical library domains are `analysis`, `budget`, `capture`, `client`,
+`error`, `net`, `output`, `packet`, `protocol`, `session`, and `workflow`, each
+a crate under `crates/` named `packetcraftr-<domain>`. Prefer specific module
+names that describe their responsibility, and keep the inter-crate dependency
+graph acyclic. Unsafe code is confined to
 `crates/packetcraftr-net/src/platform/`, and every unsafe block needs a
 specific `SAFETY` explanation.
 

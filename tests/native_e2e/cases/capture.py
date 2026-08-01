@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from ..support.context import CaseContext, NativeCase
+from ..support.output import validate_output_schema
 
 PRIME_SCRIPT = """\
 import socket
@@ -157,9 +159,14 @@ def run_filter_before_budget(context: CaseContext) -> dict[str, object]:
             try:
                 emitter.wait(timeout=3.0)
             except subprocess.TimeoutExpired as error:
-                emitter.kill()
-                emitter.wait(timeout=1.0)
-                raise AssertionError("capture traffic emitter did not exit") from error
+                cleanup_errors = context.runner.terminate_process_group(
+                    emitter,
+                    privileged=True,
+                )
+                detail = f": {'; '.join(cleanup_errors)}" if cleanup_errors else ""
+                raise AssertionError(
+                    f"capture traffic emitter did not exit{detail}"
+                ) from error
             finally:
                 context.runner.note_process_exit(emitter)
 
@@ -168,7 +175,7 @@ def run_filter_before_budget(context: CaseContext) -> dict[str, object]:
         raise AssertionError(
             f"capture traffic emitter exited {emitter.returncode}: {diagnostic}"
         )
-    records = _records(completed)
+    records = _records(context.native_e2e_root, completed)
     if completed.returncode != 0:
         raise AssertionError(f"filtered capture failed: {records!r}")
     frame_records = [
@@ -227,7 +234,7 @@ def run_invalid_filter(context: CaseContext) -> dict[str, object]:
         ),
         timeout=5.0,
     )
-    records = _records(completed)
+    records = _records(context.native_e2e_root, completed)
     if completed.returncode == 0:
         raise AssertionError(f"invalid native filter succeeded: {records!r}")
     if any(record.get("status") == "success" for record in records):
@@ -245,7 +252,10 @@ def run_invalid_filter(context: CaseContext) -> dict[str, object]:
     }
 
 
-def _records(completed: subprocess.CompletedProcess[str]) -> list[dict[str, Any]]:
+def _records(
+    native_e2e_root: Path,
+    completed: subprocess.CompletedProcess[str],
+) -> list[dict[str, Any]]:
     if completed.stderr:
         raise AssertionError(f"NDJSON capture wrote stderr: {completed.stderr!r}")
     records: list[dict[str, Any]] = []
@@ -253,6 +263,7 @@ def _records(completed: subprocess.CompletedProcess[str]) -> list[dict[str, Any]
         value = json.loads(line)
         if not isinstance(value, dict):
             raise AssertionError(f"NDJSON capture record was not an object: {value!r}")
+        validate_output_schema(native_e2e_root, value)
         records.append(value)
     if not records:
         raise AssertionError("NDJSON capture emitted no records")

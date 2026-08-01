@@ -14,8 +14,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from .command import CommandFailure, CommandRunner
+from .command import CommandFailure, CommandRecord, CommandRunner
+from .context import CaseContext, NativeCase
 from .topology import AddressPlan, Topology, TopologyNames
 
 
@@ -41,6 +43,8 @@ import sys
 child = subprocess.Popen(
     [sys.executable, "-c", "import time; time.sleep(30)"],
 )
+print("partial stdout", flush=True)
+print("partial stderr", file=sys.stderr, flush=True)
 with open(sys.argv[1], "w", encoding="utf-8") as stream:
     json.dump({"leader": os.getpid(), "child": child.pid}, stream)
 child.wait()
@@ -188,16 +192,17 @@ class CommandRunnerProcessTests(unittest.TestCase):
         runner = CommandRunner(())
         pids: tuple[int, ...] = ()
         previous_handler = signal.getsignal(signal.SIGALRM)
+        interruption = ProbeInterrupt()
 
         def interrupt(_signum: int, _frame: object) -> None:
-            raise ProbeInterrupt
+            raise interruption
 
         with tempfile.TemporaryDirectory(prefix="pcr-command-test-") as directory:
             identity_path = Path(directory) / "identity.json"
             try:
                 signal.signal(signal.SIGALRM, interrupt)
                 signal.setitimer(signal.ITIMER_REAL, 1.0)
-                with self.assertRaises(ProbeInterrupt):
+                with self.assertRaises(ProbeInterrupt) as raised:
                     runner.run(
                         (
                             sys.executable,
@@ -207,15 +212,19 @@ class CommandRunnerProcessTests(unittest.TestCase):
                         ),
                         timeout=10.0,
                     )
+                self.assertIs(raised.exception, interruption)
                 identity = json.loads(identity_path.read_text(encoding="utf-8"))
                 pids = (identity["leader"], identity["child"])
                 self._wait_for_exit(pids)
+                record = runner.records[-1]
                 self.assertTrue(
-                    runner.records[-1].outcome.startswith(
+                    record.outcome.startswith(
                         "interrupted by ProbeInterrupt"
                     ),
-                    runner.records[-1].outcome,
+                    record.outcome,
                 )
+                self.assertEqual(record.stdout, "partial stdout\n")
+                self.assertEqual(record.stderr, "partial stderr\n")
             finally:
                 signal.setitimer(signal.ITIMER_REAL, 0.0)
                 signal.signal(signal.SIGALRM, previous_handler)
@@ -225,6 +234,46 @@ class CommandRunnerProcessTests(unittest.TestCase):
                         check=False,
                         timeout=2.0,
                     )
+
+    def test_interruption_records_packetcraftr_partial_output(self) -> None:
+        runner = CommandRunner(())
+        topology = mock.Mock()
+        topology.names.client_namespace = "client"
+        context = CaseContext(
+            case=NativeCase("probe", 1, 1, 2, 3, lambda _: {}),
+            packetcraftr_binary=Path(sys.executable),
+            native_e2e_root=Path(__file__).parent.parent,
+            temporary_directory=Path("."),
+            runner=runner,
+            topology=topology,
+            responder=None,
+            invocations=[],
+        )
+        command = runner.command(
+            ("ip", "netns", "exec", "client", sys.executable),
+            privileged=True,
+        )
+        interruption = ProbeInterrupt()
+
+        def interrupt(*_args: object, **_kwargs: object) -> None:
+            runner.records.append(
+                CommandRecord(
+                    command,
+                    "interrupted by ProbeInterrupt",
+                    "partial stdout\n",
+                    "partial stderr\n",
+                )
+            )
+            raise interruption
+
+        with mock.patch.object(runner, "run", side_effect=interrupt):
+            with self.assertRaises(ProbeInterrupt) as raised:
+                context.run_packetcraftr(())
+
+        self.assertIs(raised.exception, interruption)
+        self.assertEqual(len(context.invocations), 1)
+        self.assertEqual(context.invocations[0].stdout, "partial stdout\n")
+        self.assertEqual(context.invocations[0].stderr, "partial stderr\n")
 
     def test_wait_for_exit_treats_zombie_as_exited(self) -> None:
         child_pid, parent = self._start_zombie_fixture(ZOMBIE_DESCENDANT_SCRIPT)

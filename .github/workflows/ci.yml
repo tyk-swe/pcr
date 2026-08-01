@@ -121,6 +121,8 @@ jobs:
         run: cargo +1.96.0 check --locked --all-targets --no-default-features
       - name: Minimum supported Rust 1.96 complete profile
         run: cargo +1.96.0 check --locked --all-targets --all-features
+      - name: Minimum supported Rust 1.96 fuzz targets
+        run: cargo +1.96.0 check --manifest-path fuzz/Cargo.toml --locked --all-targets
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Source conventions
@@ -211,7 +213,6 @@ jobs:
 
   fuzz-smoke:
     name: fuzz smoke (${{ matrix.target }})
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:

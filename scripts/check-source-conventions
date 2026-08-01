@@ -19,7 +19,8 @@ report() {
     status=1
 }
 
-mapfile -t files < <(find crates fuzz/fuzz_targets -name '*.rs' -type f 2>/dev/null | sort)
+file_list=$(find crates fuzz/fuzz_targets -name '*.rs' -type f | sort)
+mapfile -t files < <(printf '%s' "$file_list")
 
 for file in "${files[@]}"; do
     mapfile -n 2 -t header < "$file"

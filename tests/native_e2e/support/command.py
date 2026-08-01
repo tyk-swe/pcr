@@ -18,6 +18,8 @@ from typing import IO, Mapping, Sequence
 class CommandRecord:
     argv: tuple[str, ...]
     outcome: str
+    stdout: str = ""
+    stderr: str = ""
 
     def render(self, sequence: int) -> str:
         return f"[{sequence:03d}] $ {shlex.join(self.argv)} [{self.outcome}]"
@@ -97,7 +99,10 @@ class CommandRunner:
         try:
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as error:
-            cleanup_errors = self._terminate_process_group(process, privileged)
+            cleanup_errors = self.terminate_process_group(
+                process,
+                privileged=privileged,
+            )
             stdout, stderr = self._collect_after_abort(process, error, cleanup_errors)
             outcome = f"timeout after {timeout:.1f}s"
             if cleanup_errors:
@@ -110,12 +115,19 @@ class CommandRunner:
                 stderr,
             ) from error
         except BaseException as error:
-            cleanup_errors = self._terminate_process_group(process, privileged)
-            self._close_capture_pipes(process)
+            cleanup_errors = self.terminate_process_group(
+                process,
+                privileged=privileged,
+            )
+            stdout, stderr = self._collect_after_abort(
+                process,
+                None,
+                cleanup_errors,
+            )
             outcome = f"interrupted by {type(error).__name__}"
             if cleanup_errors:
                 outcome += "; " + "; ".join(cleanup_errors)
-            self.records.append(CommandRecord(command, outcome))
+            self.records.append(CommandRecord(command, outcome, stdout, stderr))
             raise
 
         completed = subprocess.CompletedProcess(
@@ -176,9 +188,10 @@ class CommandRunner:
             for sequence, record in enumerate(self.records, start=1)
         )
 
-    def _terminate_process_group(
+    def terminate_process_group(
         self,
         process: subprocess.Popen[str],
+        *,
         privileged: bool,
     ) -> list[str]:
         """Terminate every descendant sharing the command's isolated process group."""
@@ -289,11 +302,15 @@ class CommandRunner:
     def _collect_after_abort(
         self,
         process: subprocess.Popen[str],
-        timeout_error: subprocess.TimeoutExpired,
+        timeout_error: subprocess.TimeoutExpired | None,
         errors: list[str],
     ) -> tuple[str, str]:
-        stdout = self._decode_timeout_output(timeout_error.stdout)
-        stderr = self._decode_timeout_output(timeout_error.stderr)
+        stdout = self._decode_timeout_output(
+            timeout_error.stdout if timeout_error is not None else None
+        )
+        stderr = self._decode_timeout_output(
+            timeout_error.stderr if timeout_error is not None else None
+        )
         try:
             final_stdout, final_stderr = process.communicate(timeout=2.0)
         except subprocess.TimeoutExpired as error:

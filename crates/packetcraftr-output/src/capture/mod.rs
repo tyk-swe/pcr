@@ -3,5 +3,6 @@
 
 //! Offline-read and live-capture stream output.
 
-mod model;
-pub use model::{CaptureFrameCommandResult as Event, ReadFrameCommandResult as Read};
+pub(crate) mod model;
+pub use crate::frame::{Captured as Frame, Direction, Timestamp};
+pub use model::CaptureFrameCommandResult as Event;

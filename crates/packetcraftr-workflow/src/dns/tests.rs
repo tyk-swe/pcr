@@ -9,8 +9,8 @@ use std::time::UNIX_EPOCH;
 
 use super::engine::{dns_source_port, validate_dns_execution};
 use super::*;
+use crate::policy_authorizer::PolicyAuthorizer;
 use crate::target::Authorized;
-use crate::target_adapter::PolicyAuthorizer;
 use evidence_validation::{NoopClock, ScriptedResolver, TimeoutExecutor};
 use outcome::{PayloadExecutor, single_attempt_request};
 use packetcraftr_capture::LinkType;

@@ -11,8 +11,8 @@ use super::super::*;
 use super::support::{
     CountingRejectExecutor, NoopClock, UndecodedExecutor, udp_traceroute_request,
 };
+use crate::policy_authorizer::PolicyAuthorizer;
 use crate::target::Authorized;
-use crate::target_adapter::PolicyAuthorizer;
 use packetcraftr_client::policy::Policy as TrafficPolicy;
 use packetcraftr_client::target::{Error as TargetResolutionError, Resolver as HostnameResolver};
 use packetcraftr_protocol::builtin::registry as default_registry;

@@ -44,7 +44,7 @@ packetcraftr-net = { path = "crates/packetcraftr-net", version = "0.4.0" }
 packetcraftr-output = { path = "crates/packetcraftr-output", version = "0.4.0" }
 packetcraftr-packet = { path = "crates/packetcraftr-packet", version = "0.4.0" }
 packetcraftr-protocol = { path = "crates/packetcraftr-protocol", version = "0.4.0" }
-packetcraftr-session = { path = "crates/packetcraftr-session", version = "0.4.0" }
+packetcraftr-reassembly = { path = "crates/packetcraftr-reassembly", version = "0.4.0" }
 packetcraftr-workflow = { path = "crates/packetcraftr-workflow", version = "0.4.0" }
 
 anstream = "1"

@@ -156,7 +156,7 @@ pub(crate) fn run_read(
         }
 
         let result = match &decoding {
-            None => output::capture::Read::try_from_frame(frame)
+            None => output::read::Result::try_from_frame(frame)
                 .map_err(|source| CliError::classified(source).at_sequence(sequence))?,
             Some((decoder, compiled)) => {
                 let decoded = decoder
@@ -173,10 +173,10 @@ pub(crate) fn run_read(
                     continue;
                 }
                 if dissect {
-                    output::capture::Read::try_from_decoded(frame, &decoded)
+                    output::read::Result::try_from_decoded(frame, &decoded)
                         .map_err(|source| CliError::classified(source).at_sequence(sequence))?
                 } else {
-                    output::capture::Read::try_from_frame(frame)
+                    output::read::Result::try_from_frame(frame)
                         .map_err(|source| CliError::classified(source).at_sequence(sequence))?
                 }
             }

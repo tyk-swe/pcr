@@ -4,6 +4,7 @@
 //! Structured scan output.
 
 mod model;
+pub use crate::frame::{Captured as Frame, Timestamp};
 pub use model::{
     ProbeEvidenceOutput as Evidence, ScanClassification as Classification,
     ScanCommandResult as Result, ScanPortOutput as Port, ScanProbeStatus as ProbeStatus,

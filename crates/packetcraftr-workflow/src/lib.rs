@@ -12,11 +12,11 @@ pub mod clock;
 pub mod dns;
 mod evidence;
 pub mod fuzz;
+mod policy_authorizer;
 mod probe;
 pub mod replay;
 pub mod scan;
 pub mod target;
-mod target_adapter;
 pub mod traceroute;
 
 /// Maps an operation-local sequence to an IPv4 identification that native

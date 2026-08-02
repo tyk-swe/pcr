@@ -335,7 +335,7 @@ fn expiry_is_exact_at_the_boundary_even_between_sweeps() {
 }
 
 #[test]
-fn adapters_map_decoded_layers_onto_session_inputs() {
+fn adapters_map_decoded_layers_onto_reassembly_inputs() {
     let registry = registry();
     let decoder = Decoder::new(Arc::clone(&registry));
     let frame = Frame::new(

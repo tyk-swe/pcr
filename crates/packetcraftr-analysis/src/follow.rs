@@ -5,8 +5,8 @@
 
 use bytes::Bytes;
 
+use super::conversation_index::{transport_payload, transports};
 use super::expert::StreamTransport;
-use super::session_index::{transport_payload, transports};
 use super::{FlowKey, FrameRecord, Tcp, TcpEvent};
 
 /// Which conversation to follow, in the same vocabulary the `tcp.stream`

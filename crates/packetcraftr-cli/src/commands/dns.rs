@@ -435,10 +435,9 @@ mod tests {
     use packetcraftr::output::{
         dns::{
             Attempt, AttemptStatus, Edns, EdnsOption, Outcome, Record, RecordData, RejectedRecord,
-            Result as DnsResult, Section,
+            Result as DnsResult, Section, Timestamp,
         },
         envelope::Stats,
-        frame::Timestamp,
     };
 
     fn record(owner: &str, data: RecordData) -> Record {

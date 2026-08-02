@@ -4,6 +4,7 @@
 //! Structured capture-replay output.
 
 mod model;
+pub use crate::frame::Captured;
 pub use model::{
     ReplayCommandResult as Result, ReplayFrameCommandResult as Frame,
     ReplayInterfaceOutput as Interface, ReplayLinkMode as LinkMode,

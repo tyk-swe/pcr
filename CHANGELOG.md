@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Renamed the `packetcraftr-session` package and
+  `packetcraftr_session` crate to `packetcraftr-reassembly` and
+  `packetcraftr_reassembly`. The facade path is now
+  `packetcraftr::reassembly`, and the shared configuration type moved from
+  `session::ReassemblyLimits` to `reassembly::Limits`; the old paths have no
+  compatibility aliases.
+- **Breaking:** Flattened command output paths: `output::capture::Read` is now
+  `output::read::Result`, while `output::network::{interfaces, plan, routes,
+  send, exchange}` are now the top-level `output::{interfaces, plan, routes,
+  send, exchange}` modules. Serialized command documents are unchanged.
 - Adopted cargo-nextest 0.9.140 for repository unit and integration tests and
   mold for Linux linking across local development, CI, fuzzing, native E2E,
   coverage, and release builds. Doctests continue to use Cargo's standard test

@@ -5,7 +5,7 @@
 //!
 //! This crate owns the read → dissect → index → filter → dispatch loop the
 //! offline analysis commands share, and the adapters that map decoded layers
-//! onto the session crate's reassembly inputs. Everything here is offline by
+//! onto the reassembly crate's reassembly inputs. Everything here is offline by
 //! design: there is no resolver, route, capture, or transmission seam, so
 //! analysis needs no authorization gates and runs in every build profile.
 //!
@@ -40,16 +40,16 @@ use packetcraftr_packet::filter::{Context as FilterContext, Filter};
 use packetcraftr_packet::{Packet, layer::Padding, registry::ProtocolRegistry};
 use packetcraftr_protocol::network::{Ipv4, Ipv6};
 use packetcraftr_protocol::transport::{Tcp, Udp};
-use packetcraftr_session::ReassemblyLimits;
-use packetcraftr_session::tcp::{
-    Error as SessionTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
+use packetcraftr_reassembly::Limits as TcpReassemblyLimits;
+use packetcraftr_reassembly::tcp::{
+    Error as ReassemblyTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
 };
 
+mod conversation_index;
 mod error;
 pub mod expert;
 pub mod follow;
 mod pipeline;
-mod session_index;
 pub mod stats;
 #[cfg(test)]
 mod tests;

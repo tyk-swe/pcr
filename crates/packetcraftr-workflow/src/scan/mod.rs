@@ -68,8 +68,8 @@ const IPV6_PROBE_BYTES: u64 = 14 + 40 + 20;
 const SCAN_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
     EvidenceDiagnosticDescriptor::new("scan", "scan");
 
-mod adapter;
 mod classification;
+mod client_executor;
 mod engine;
 mod error;
 mod model;
@@ -79,7 +79,7 @@ mod tests;
 /// Executes scan batches through a client's capture-ready exchange lifecycle.
 pub type ClientExecutor<'a, R, N, I> =
     super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Scan>;
-pub use super::target_adapter::PolicyAuthorizer;
+pub use super::policy_authorizer::PolicyAuthorizer;
 pub use classification::{
     ScanResponseClassification as ResponseClassification,
     classify_scan_response as classify_response,

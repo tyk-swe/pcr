@@ -7,12 +7,12 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant, SystemTime};
 
-use super::session_index::{StreamIndex, tcp_segment, transports, udp_flow};
+use super::conversation_index::{StreamIndex, tcp_segment, transports, udp_flow};
 use super::{
     AnalysisError, Arc, Bytes, CaptureError, DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES,
     DEFAULT_STREAM_FRAMES, Deadline, DecodeOptions, DecodedPacket, Decoder, Filter, FilterContext,
-    FlowKey, ProtocolRegistry, Read, Reader, ReassemblyLimits, Segment, SessionTcpError, Tcp,
-    TcpEvent, TcpReassembler,
+    FlowKey, ProtocolRegistry, Read, Reader, ReassemblyTcpError, Segment, Tcp, TcpEvent,
+    TcpReassembler, TcpReassemblyLimits,
 };
 
 const DEFAULT_MAX_ANALYSIS_FLOWS: usize = 8_192;
@@ -148,9 +148,9 @@ where
     // reassembler keys each direction separately, so it gets two flow slots
     // per conversation.
     let mut tcp_reassembler = options.tcp_events.then(|| {
-        TcpReassembler::new(ReassemblyLimits {
+        TcpReassembler::new(TcpReassemblyLimits {
             max_flows: limits.max_flows.saturating_mul(2),
-            ..ReassemblyLimits::default()
+            ..TcpReassemblyLimits::default()
         })
     });
     // Directional flows whose latest pushed segment was a bare opening SYN.
@@ -384,9 +384,9 @@ where
                     // malformed sequences that conflict with a delivered
                     // FIN.
                     Err(
-                        SessionTcpError::FlowByteLimit { .. }
-                        | SessionTcpError::SegmentLimit { .. }
-                        | SessionTcpError::AggregateByteLimit { .. },
+                        ReassemblyTcpError::FlowByteLimit { .. }
+                        | ReassemblyTcpError::SegmentLimit { .. }
+                        | ReassemblyTcpError::AggregateByteLimit { .. },
                     ) => {
                         tcp_events.extend(reassembler.evict_flow(&segment.flow));
                         tcp_events.extend(

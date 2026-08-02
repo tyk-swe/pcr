@@ -7,7 +7,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use libfuzzer_sys::fuzz_target;
-use packetcraftr::session::{ReassemblyLimits, fragment, tcp};
+use packetcraftr::reassembly::{Limits, fragment, tcp};
 
 fn low_u32(value: u64) -> u32 {
     u32::try_from(value & u64::from(u32::MAX)).expect("mask bounds the value to 32 bits")
@@ -18,7 +18,7 @@ fn low_u16(value: u64) -> u16 {
 }
 
 fuzz_target!(|data: &[u8]| {
-    let limits = ReassemblyLimits {
+    let limits = Limits {
         max_flows: 16,
         max_bytes_per_flow: 4096,
         max_aggregate_bytes: 64 * 1024,

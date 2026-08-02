@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Domain crates live under `crates/`; dependencies flow upward from shared errors, budgets, and capture/session types through packet, protocol, network, client, analysis, workflow, and output layers to the `packetcraftr` facade and `packetcraftr-cli`. Keep this graph acyclic.
+PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Domain crates live under `crates/`; dependencies flow upward from shared errors, budgets, and capture/reassembly types through packet, protocol, network, client, analysis, workflow, and output layers to the `packetcraftr` facade and `packetcraftr-cli`. Keep this graph acyclic.
 
 The offline/live split is a dependency edge, not a convention. `packetcraftr-analysis` holds the offline capture pipeline and must never depend on `packetcraftr-client` or `packetcraftr-net`; that absence is what guarantees it has no resolver, route, capture, or transmission seam to gate. Live probing lives in `packetcraftr-workflow`. Both bound themselves with `packetcraftr-budget`, which sits at the bottom of the graph beside `packetcraftr-error`.
 
@@ -34,7 +34,7 @@ Use Rust’s built-in `#[test]` harness and descriptive behavior names, such as 
 
 ## Commit & Pull Request Guidelines
 
-History follows Conventional Commits: `fix(session): handle reassembly timeout`. Use domain scopes without the `packetcraftr-` prefix; mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Record user-visible changes under `CHANGELOG.md`’s `[Unreleased]` section. PRs should explain intent and impact, link issues, list validation performed, and note feature or platform effects. Include updated goldens or representative output for CLI changes.
+History follows Conventional Commits: `fix(reassembly): handle stream timeout`. Use domain scopes without the `packetcraftr-` prefix; mark breaking changes with `!` and a `BREAKING CHANGE:` footer. Record user-visible changes under `CHANGELOG.md`’s `[Unreleased]` section. PRs should explain intent and impact, link issues, list validation performed, and note feature or platform effects. Include updated goldens or representative output for CLI changes.
 
 ## Security & Live Operations
 

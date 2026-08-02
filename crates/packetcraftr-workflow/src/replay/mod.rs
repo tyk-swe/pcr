@@ -43,15 +43,14 @@ use packetcraftr_packet::build::{
 use packetcraftr_packet::decode::{Decoder, Options as DecodeOptions};
 use packetcraftr_packet::{codec::NetworkEnvelope, registry::ProtocolRegistry};
 
-mod adapter;
 mod engine;
 mod error;
 mod model;
+mod system_boundary;
 #[cfg(test)]
 mod tests;
 mod wire;
 
-pub use adapter::{SystemAuthorizer, SystemTransmitter};
 pub use engine::{replay_capture as run, replay_capture_with_selector as run_with_selector};
 pub use error::ReplayError as Error;
 pub use model::{
@@ -60,6 +59,7 @@ pub use model::{
     ReplayOptions as Options, ReplaySelector as Selector, ReplaySummary as Summary,
     ReplayTiming as Timing, ReplayTransmission as Transmission, ReplayTransmitter as Transmitter,
 };
+pub use system_boundary::{SystemAuthorizer, SystemTransmitter};
 
 #[cfg(test)]
 use engine::{replay_capture, replay_capture_with_selector};

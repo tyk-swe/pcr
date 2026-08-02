@@ -4,6 +4,7 @@
 //! Structured DNS output.
 
 mod model;
+pub use crate::frame::{Captured as Frame, Timestamp};
 pub use model::{
     DnsAttemptOutput as Attempt, DnsCommandResult as Result, DnsEdnsOptionOutput as EdnsOption,
     DnsEdnsOutput as Edns, DnsOutcome as Outcome, DnsOutcome as AttemptStatus,

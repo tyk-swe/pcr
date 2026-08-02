@@ -22,5 +22,5 @@ packetcraftr-capture.workspace = true
 packetcraftr-error.workspace = true
 packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true
-packetcraftr-session.workspace = true
+packetcraftr-reassembly.workspace = true
 thiserror.workspace = true

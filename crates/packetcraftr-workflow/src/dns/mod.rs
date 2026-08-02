@@ -83,7 +83,7 @@ const DNS_CLASS_IN: u16 = 1;
 const DNS_TYPE_OPT: u16 = 41;
 const MAX_DNS_PROBE_OVERHEAD: u64 = 14 + 40 + 8;
 
-mod adapter;
+mod client_executor;
 mod engine;
 mod error;
 mod model;
@@ -94,7 +94,7 @@ mod wire;
 /// Executes DNS queries through a client's capture-ready exchange lifecycle.
 pub type ClientExecutor<'a, R, N, I> =
     super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Dns>;
-pub use super::target_adapter::PolicyAuthorizer;
+pub use super::policy_authorizer::PolicyAuthorizer;
 pub use engine::dns as run;
 pub use error::{DnsError as Error, DnsWireError as WireError};
 pub use model::{

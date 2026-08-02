@@ -129,8 +129,9 @@ PacketcraftR is a Cargo workspace. Each library domain is its own crate under
 `crates/`, the `packetcraftr` crate re-exports all of them under their domain
 names so `packetcraftr::packet::…` continues to work, and `packetcraftr-cli`
 builds the `packetcraftr` binary. Depend on `packetcraftr` for the whole
-library, or on individual crates such as `packetcraftr-capture` to compile only
-what you use. `AGENTS.md` lists every crate and the layering between them.
+library, or on individual crates such as `packetcraftr-capture` and
+`packetcraftr-reassembly` to compile only what you use. `AGENTS.md` describes
+the crate layering and the offline/live boundary.
 
 ## Cargo features and tested profiles
 

@@ -99,7 +99,7 @@ pub(crate) fn run_capture(
                 budget,
                 selector.as_ref(),
                 |frame, sequence| {
-                    let frame = output::frame::Captured::try_from_frame(frame)
+                    let frame = output::capture::Frame::try_from_frame(frame)
                         .map_err(CliError::classified)?;
                     write_stdout_line(format_args!(
                         "{sequence}: dlt={} caplen={} wirelen={} {}",
@@ -133,7 +133,7 @@ pub(crate) fn run_capture(
                 budget,
                 selector.as_ref(),
                 |frame, _| {
-                    let frame = output::frame::Captured::try_from_frame(frame)
+                    let frame = output::capture::Frame::try_from_frame(frame)
                         .map_err(CliError::classified)?;
                     write_plain_line(format_args!("{}", frame.bytes_hex))
                 },
@@ -149,7 +149,7 @@ pub(crate) fn run_capture(
                 budget,
                 selector.as_ref(),
                 |frame, sequence| {
-                    let frame = output::frame::Captured::try_from_frame(frame)
+                    let frame = output::capture::Frame::try_from_frame(frame)
                         .map_err(CliError::classified)?;
                     emit_json_compact(&output::envelope::Stream::success(
                         output::contract::Command::Capture,

@@ -4,7 +4,7 @@
 //! Failure from a bounded offline analysis run.
 
 use super::{CaptureError, Classification, Classified, DecodeError, Duration, Error, Kind};
-use packetcraftr_session::tcp::Error as TcpError;
+use packetcraftr_reassembly::tcp::Error as TcpError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -33,7 +33,7 @@ pub enum AnalysisError {
     Reassembly {
         number: u64,
         #[source]
-        source: packetcraftr_session::tcp::Error,
+        source: packetcraftr_reassembly::tcp::Error,
     },
     #[error("analysis ran {actual:?}, exceeding the configured duration of {limit:?}")]
     DurationLimit { actual: Duration, limit: Duration },

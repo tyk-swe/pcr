@@ -7,7 +7,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use packetcraftr_packet::diagnostic::DiagnosticSeverity;
 
-use super::session_index::{transport_payload, transports};
+use super::conversation_index::{transport_payload, transports};
 use super::{FlowKey, FrameRecord, Tcp, TcpEvent};
 
 use finding::new as new_finding;
@@ -93,7 +93,7 @@ impl ExpertSummary {
 
 /// Detects cross-frame TCP conditions from dissected headers.
 ///
-/// Retransmission and gap evidence comes from the session reassembler's
+/// Retransmission and gap evidence comes from the reassembly engine's
 /// sequence tracking, delivered through the pipeline's TCP events; the
 /// header-derived conditions here — duplicate acknowledgment, zero window,
 /// window full, keep-alive, reset — need acknowledgment and window fields

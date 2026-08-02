@@ -141,7 +141,7 @@ dependencies = [
  "packetcraftr-output",
  "packetcraftr-packet",
  "packetcraftr-protocol",
- "packetcraftr-session",
+ "packetcraftr-reassembly",
  "packetcraftr-workflow",
 ]
 
@@ -155,7 +155,7 @@ dependencies = [
  "packetcraftr-error",
  "packetcraftr-packet",
  "packetcraftr-protocol",
- "packetcraftr-session",
+ "packetcraftr-reassembly",
  "thiserror",
 ]
 
@@ -253,7 +253,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "packetcraftr-session"
+name = "packetcraftr-reassembly"
 version = "0.4.0"
 dependencies = [
  "bytes",

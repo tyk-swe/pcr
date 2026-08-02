@@ -20,7 +20,9 @@ use packetcraftr::{
         },
     },
     output::{
-        capture::{Event as CaptureFrameCommandResult, Read as ReadFrameCommandResult},
+        capture::{
+            Event as CaptureFrameCommandResult, Frame as FrameOutput, Timestamp as OutputTimestamp,
+        },
         contract::{CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName},
         dns::{
             Attempt as DnsAttemptOutput, AttemptStatus as DnsAttemptStatus,
@@ -32,22 +34,23 @@ use packetcraftr::{
             Aggregate as AggregateOutput, CaptureStats as CaptureStatistics,
             Stats as OperationStats, Stream as StreamRecord,
         },
-        frame::{Captured as FrameOutput, Timestamp as OutputTimestamp, Wire as WireFrameOutput},
-        network::{
-            exchange::{Event as ExchangeStreamCommandResult, Result as ExchangeCommandResult},
-            interfaces::{
-                Capability as InterfaceCapability, Flags as InterfaceFlags,
-                Interface as InterfaceOutput, Result as InterfacesCommandResult,
-            },
-            plan::Result as PlanCommandResult,
-            routes::Result as RoutesCommandResult,
-            send::{MaterializedRoute as MaterializedRouteOutput, Result as SendCommandResult},
+        exchange::{Event as ExchangeStreamCommandResult, Result as ExchangeCommandResult},
+        interfaces::{
+            Capability as InterfaceCapability, Flags as InterfaceFlags,
+            Interface as InterfaceOutput, Result as InterfacesCommandResult,
         },
+        plan::Result as PlanCommandResult,
+        read::Result as ReadFrameCommandResult,
         replay::{Frame as ReplayFrameCommandResult, Result as ReplayCommandResult},
+        routes::Result as RoutesCommandResult,
         scan::{
             Classification as ScanClassification, Event as ScanStreamCommandResult,
             Evidence as ProbeEvidenceOutput, Port as ScanPortOutput,
             ProbeStatus as ScanProbeStatus, Result as ScanCommandResult,
+        },
+        send::{
+            MaterializedRoute as MaterializedRouteOutput, Result as SendCommandResult,
+            Wire as WireFrameOutput,
         },
         traceroute::{
             Completion as TraceCompletionReason, Event as TracerouteStreamCommandResult,

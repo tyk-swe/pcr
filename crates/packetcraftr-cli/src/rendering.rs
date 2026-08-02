@@ -79,7 +79,7 @@ pub(super) fn spaced_hex(bytes: &[u8]) -> String {
     output
 }
 
-pub(super) fn output_timestamp_text(timestamp: output::frame::Timestamp) -> String {
+pub(super) fn output_timestamp_text(timestamp: output::capture::Timestamp) -> String {
     if timestamp.unix_seconds >= 0 || timestamp.nanoseconds == 0 {
         return format!("{}.{:09}", timestamp.unix_seconds, timestamp.nanoseconds);
     }
@@ -493,14 +493,14 @@ mod tests {
     #[test]
     fn pre_epoch_timestamp_text_uses_conventional_signed_decimal_notation() {
         assert_eq!(
-            output_timestamp_text(output::frame::Timestamp {
+            output_timestamp_text(output::capture::Timestamp {
                 unix_seconds: -3,
                 nanoseconds: 750_000_000,
             }),
             "-2.250000000"
         );
         assert_eq!(
-            output_timestamp_text(output::frame::Timestamp {
+            output_timestamp_text(output::capture::Timestamp {
                 unix_seconds: -1,
                 nanoseconds: 500_000_000,
             }),

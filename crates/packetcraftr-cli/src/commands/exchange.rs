@@ -83,8 +83,8 @@ pub(crate) fn run_exchange(
         return write_capture_file(output, frames);
     }
 
-    let (result, diagnostics, stats) = output::network::exchange::Result::try_from_exchange(result)
-        .map_err(CliError::classified)?;
+    let (result, diagnostics, stats) =
+        output::exchange::Result::try_from_exchange(result).map_err(CliError::classified)?;
     match output {
         output::contract::Format::Text => {
             write_stdout_line(format_args!(
@@ -117,11 +117,11 @@ pub(crate) fn run_exchange(
 }
 
 fn render_exchange_stream(
-    result: output::network::exchange::Result,
+    result: output::exchange::Result,
     diagnostics: Vec<packet::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
 ) -> Result<(), CliError> {
-    let output::network::exchange::Result {
+    let output::exchange::Result {
         sent,
         responses,
         unanswered,
@@ -135,7 +135,7 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::network::exchange::Event::Sent {
+            output::exchange::Event::Sent {
                 request_index,
                 frame,
             },
@@ -145,7 +145,7 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::network::exchange::Event::Response {
+            output::exchange::Event::Response {
                 request_index: response.request_index,
                 response: response.response,
                 latency: response.latency,
@@ -156,7 +156,7 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::network::exchange::Event::Unanswered {
+            output::exchange::Event::Unanswered {
                 request_index: *request_index,
             },
         )?;
@@ -165,21 +165,21 @@ fn render_exchange_stream(
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::network::exchange::Event::Unsolicited { frame },
+            output::exchange::Event::Unsolicited { frame },
         )?;
     }
     for frame in undecoded {
         emit_stream_record(
             output::contract::Command::Exchange,
             &mut sequence,
-            output::network::exchange::Event::Undecoded { frame },
+            output::exchange::Event::Undecoded { frame },
         )?;
     }
     emit_json_compact(
         &output::envelope::Stream::success(
             output::contract::Command::Exchange,
             sequence,
-            output::network::exchange::Event::Complete { unanswered },
+            output::exchange::Event::Complete { unanswered },
             diagnostics,
         )
         .with_stats(stats),

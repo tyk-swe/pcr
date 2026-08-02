@@ -13,9 +13,9 @@ use packetcraftr_capture::{Frame, LinkType, Writer};
 use packetcraftr_packet::build::{Builder, Context as BuildContext, Options as BuildOptions};
 use packetcraftr_packet::filter::Options as FilterOptions;
 use packetcraftr_packet::layer::Raw;
-use packetcraftr_session::tcp::Event as SessionTcpEvent;
+use packetcraftr_reassembly::tcp::Event as SessionTcpEvent;
 
-use super::session_index::{tcp_segment, udp_flow};
+use super::conversation_index::{tcp_segment, udp_flow};
 
 fn registry() -> Arc<ProtocolRegistry> {
     Arc::new(packetcraftr_protocol::builtin::registry().unwrap())

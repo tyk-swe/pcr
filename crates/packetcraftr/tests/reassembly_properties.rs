@@ -5,10 +5,17 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use packetcraftr::session::{ReassemblyLimits, fragment, tcp};
+use packetcraftr::reassembly::{Limits, fragment, tcp};
 
-fn limits() -> ReassemblyLimits {
-    ReassemblyLimits {
+#[test]
+fn direct_and_facade_reassembly_paths_are_public() {
+    let direct = packetcraftr_reassembly::Limits::default();
+    let facade = packetcraftr::reassembly::Limits::default();
+    assert_eq!(direct, facade);
+}
+
+fn limits() -> Limits {
+    Limits {
         max_flows: 8,
         max_bytes_per_flow: 128,
         max_aggregate_bytes: 2_048,

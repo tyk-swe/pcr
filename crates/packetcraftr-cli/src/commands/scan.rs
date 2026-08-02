@@ -268,8 +268,7 @@ mod tests {
     use crate::rendering::capture_stdout;
     use packetcraftr::output::{
         envelope::Stats,
-        frame::Timestamp,
-        scan::{Classification, Evidence, Port, ProbeStatus, Result as ScanResult},
+        scan::{Classification, Evidence, Port, ProbeStatus, Result as ScanResult, Timestamp},
     };
 
     fn evidence() -> Evidence {

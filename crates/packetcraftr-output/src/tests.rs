@@ -32,7 +32,6 @@ use packetcraftr_workflow::{
     },
 };
 
-use super::capture::Read as ReadFrameCommandResult;
 use super::contract::{
     CONTRACTS as COMMAND_OUTPUT_CONTRACTS, Command as CommandName, Format as OutputFormat,
 };
@@ -42,9 +41,9 @@ use super::dns::{
 use super::envelope::{Aggregate as AggregateOutput, Stream as StreamRecord};
 use super::frame::{Captured as FrameOutput, Timestamp as OutputTimestamp};
 use super::fuzz::Outcome as FuzzCaseOutcome;
-use super::network::{
-    interfaces::Result as InterfacesCommandResult, routes::Result as RoutesCommandResult,
-};
+use super::interfaces::Result as InterfacesCommandResult;
+use super::read::Result as ReadFrameCommandResult;
+use super::routes::Result as RoutesCommandResult;
 use super::scan::{Classification as ScanClassification, Result as ScanCommandResult};
 use super::traceroute::{Completion as TraceCompletionReason, Result as TracerouteCommandResult};
 

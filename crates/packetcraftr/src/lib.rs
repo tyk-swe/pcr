@@ -32,7 +32,8 @@
 //!   dissection;
 //! - [`protocol`] supplies the built-in codecs, matchers, capture roots, and
 //!   capability tables;
-//! - [`session`] provides bounded fragment and transport reassembly state; and
+//! - [`reassembly`] provides bounded fragment and transport reassembly state;
+//!   and
 //! - [`workflow`] implements replay, scan, traceroute, DNS, and fuzz workflows.
 //!
 //! [`analysis`] and [`workflow`] are separate crates because the offline and
@@ -72,5 +73,5 @@ pub use packetcraftr_net as net;
 pub use packetcraftr_output as output;
 pub use packetcraftr_packet as packet;
 pub use packetcraftr_protocol as protocol;
-pub use packetcraftr_session as session;
+pub use packetcraftr_reassembly as reassembly;
 pub use packetcraftr_workflow as workflow;

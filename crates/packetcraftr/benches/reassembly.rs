@@ -7,8 +7,8 @@ use std::time::Instant;
 
 use bytes::Bytes;
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
-use packetcraftr::session::{
-    ReassemblyLimits,
+use packetcraftr::reassembly::{
+    Limits,
     fragment::{DatagramKey, Fragment, OverlapPolicy, Reassembler as FragmentReassembler},
     tcp::{FlowKey, Reassembler as TcpReassembler, Segment},
 };
@@ -36,10 +36,10 @@ fn tcp_key() -> FlowKey {
 }
 
 fn sparse_fragment_state() -> (FragmentReassembler, Instant) {
-    let limits = ReassemblyLimits {
+    let limits = Limits {
         max_bytes_per_flow: 4_096,
         max_fragments_per_datagram: FRAGMENT_SEGMENTS + 1,
-        ..ReassemblyLimits::default()
+        ..Limits::default()
     };
     let now = Instant::now();
     let mut reassembler = FragmentReassembler::new(limits, OverlapPolicy::RejectConflicting);
@@ -60,10 +60,10 @@ fn sparse_fragment_state() -> (FragmentReassembler, Instant) {
 }
 
 fn sparse_tcp_state() -> (TcpReassembler, Instant) {
-    let limits = ReassemblyLimits {
+    let limits = Limits {
         max_bytes_per_flow: 16 * 1024,
         max_tcp_segments_per_flow: TCP_SEGMENTS + 1,
-        ..ReassemblyLimits::default()
+        ..Limits::default()
     };
     let now = Instant::now();
     let mut reassembler = TcpReassembler::new(limits);
@@ -93,7 +93,7 @@ fn sparse_tcp_state() -> (TcpReassembler, Instant) {
 
 fn in_order_tcp_state() -> (TcpReassembler, Instant) {
     let now = Instant::now();
-    let mut reassembler = TcpReassembler::new(ReassemblyLimits::default());
+    let mut reassembler = TcpReassembler::new(Limits::default());
     reassembler
         .open_flow(tcp_key(), 100, now)
         .expect("benchmark flow should open");
@@ -103,9 +103,9 @@ fn in_order_tcp_state() -> (TcpReassembler, Instant) {
 fn bounded_history_tcp_state() -> (TcpReassembler, Instant) {
     const HISTORY_BYTES: usize = 256;
     let now = Instant::now();
-    let mut reassembler = TcpReassembler::new(ReassemblyLimits {
+    let mut reassembler = TcpReassembler::new(Limits {
         max_bytes_per_flow: HISTORY_BYTES,
-        ..ReassemblyLimits::default()
+        ..Limits::default()
     });
     reassembler
         .open_flow(tcp_key(), 100, now)

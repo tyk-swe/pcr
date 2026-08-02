@@ -54,7 +54,7 @@ const SYNTHESIZED_ETHERNET_BYTES: u64 = 14;
 const SPLITMIX_INCREMENT: u64 = 0x9e37_79b9_7f4a_7c15;
 const CASE_DOMAIN: u64 = 0xd1b5_4a32_d192_ed03;
 
-mod adapter;
+mod client_executor;
 mod engine;
 mod error;
 mod execution;
@@ -63,7 +63,7 @@ mod mutation;
 #[cfg(test)]
 mod tests;
 
-pub use adapter::PolicyAuthorizer;
+pub use client_executor::PolicyAuthorizer;
 pub use engine::{fuzz as run, fuzz_live as run_live};
 pub use error::FuzzError as Error;
 pub use model::{

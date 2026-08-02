@@ -285,9 +285,9 @@ mod tests {
     use crate::rendering::capture_stdout;
     use packetcraftr::output::{
         envelope::Stats,
-        frame::Timestamp,
         traceroute::{
             Completion, Hop, Probe, ProbeStatus, ResponseKind, Result as TracerouteResult,
+            Timestamp,
         },
     };
 

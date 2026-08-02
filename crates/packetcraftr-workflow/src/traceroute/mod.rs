@@ -66,8 +66,8 @@ const TRACEROUTE_SOURCE_PORT: u16 = 49_152;
 const TRACEROUTE_EVIDENCE_DIAGNOSTICS: EvidenceDiagnosticDescriptor =
     EvidenceDiagnosticDescriptor::new("traceroute", "traceroute");
 
-mod adapter;
 mod classification;
+mod client_executor;
 mod engine;
 mod error;
 mod model;
@@ -77,7 +77,7 @@ mod tests;
 /// Executes traceroute batches through a client's capture-ready exchange lifecycle.
 pub type ClientExecutor<'a, R, N, I> =
     super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Traceroute>;
-pub use super::target_adapter::PolicyAuthorizer;
+pub use super::policy_authorizer::PolicyAuthorizer;
 pub use classification::{
     TracerouteResponseClassification as ResponseClassification,
     classify_traceroute_response as classify_response,

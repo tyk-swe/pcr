@@ -1,0 +1,50 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::sync::Arc;
+
+use packetcraftr_net::route::{NeighborResolver, RoutePlanner, RouteProvider};
+use packetcraftr_net::transmit::PacketIo;
+use packetcraftr_packet::registry::ProtocolRegistry;
+
+use crate::policy::TrafficPolicy;
+
+/// High-level composition of packet construction, passive route planning,
+/// explicit neighbor materialization, policy, and packet I/O.
+#[derive(Debug)]
+pub struct Client<R, N, I> {
+    pub(crate) registry: Arc<ProtocolRegistry>,
+    pub(crate) routes: R,
+    pub(crate) neighbors: N,
+    pub(crate) io: I,
+    pub(crate) policy: TrafficPolicy,
+    pub(crate) planner: RoutePlanner,
+}
+
+impl<R, N, I> Client<R, N, I>
+where
+    R: RouteProvider,
+    N: NeighborResolver,
+    I: PacketIo,
+{
+    pub fn new(
+        registry: Arc<ProtocolRegistry>,
+        routes: R,
+        neighbors: N,
+        io: I,
+        policy: TrafficPolicy,
+    ) -> Self {
+        Self {
+            registry,
+            routes,
+            neighbors,
+            io,
+            policy,
+            planner: RoutePlanner,
+        }
+    }
+
+    pub fn registry(&self) -> &Arc<ProtocolRegistry> {
+        &self.registry
+    }
+}

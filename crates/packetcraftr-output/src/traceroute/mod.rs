@@ -4,6 +4,7 @@
 //! Structured traceroute output.
 
 mod model;
+pub use crate::frame::{Captured as Frame, Timestamp};
 pub use model::{
     TraceCompletionReason as Completion, TraceHopOutput as Hop, TraceProbeOutput as Probe,
     TraceProbeStatus as ProbeStatus, TraceResponseKind as ResponseKind,

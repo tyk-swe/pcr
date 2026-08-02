@@ -13,7 +13,7 @@ use super::engine::{
 };
 use super::*;
 use crate::dns::ClientExecutor as DnsClientExecutor;
-use crate::target_adapter::PolicyAuthorizer;
+use crate::policy_authorizer::PolicyAuthorizer;
 use crate::traceroute::ClientExecutor as TracerouteClientExecutor;
 use packetcraftr_capture::LinkType;
 use packetcraftr_client::Client;

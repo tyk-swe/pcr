@@ -27,7 +27,7 @@ packetcraftr-net.workspace = true
 packetcraftr-output.workspace = true
 packetcraftr-packet.workspace = true
 packetcraftr-protocol.workspace = true
-packetcraftr-session.workspace = true
+packetcraftr-reassembly.workspace = true
 packetcraftr-workflow.workspace = true
 
 [dev-dependencies]

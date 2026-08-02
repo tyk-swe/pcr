@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::net::IpAddr;
 use std::time::{Duration, SystemTime};
 
-use super::session_index::{CanonicalFlow, tcp_segment, udp_flow};
+use super::conversation_index::{CanonicalFlow, tcp_segment, udp_flow};
 use super::{AnalysisError, FlowKey, FrameRecord, Ipv4, Ipv6};
 
 /// Which transport a conversation or port tally belongs to.

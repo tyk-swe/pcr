@@ -1,0 +1,10 @@
+nextest-version = "0.9.140"
+
+[profile.default]
+fail-fast = false
+
+# This assertion has a deliberately narrow timing margin. Keep unrelated test
+# processes from consuming its executor window.
+[[profile.default.overrides]]
+filter = 'test(slow_executor_error_is_not_masked_by_the_duration_limit)'
+threads-required = "num-test-threads"

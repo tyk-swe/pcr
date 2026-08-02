@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Adopted cargo-nextest 0.9.140 for repository unit and integration tests and
+  mold for Linux linking across local development, CI, fuzzing, native E2E,
+  coverage, and release builds. Doctests continue to use Cargo's standard test
+  runner.
 - Removed unread build-context metadata and unused output enum string helpers,
   replaced the capture/send composite wrapper with tuple composition, and
   collapsed duplicated command-output and DNS text formatting paths. This is a

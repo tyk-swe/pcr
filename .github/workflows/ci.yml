@@ -30,6 +30,8 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
           key: cargo-tools-deny-v3-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml') }}-0.20.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
+      - name: Install Linux linker
+        run: sudo apt-get update && sudo apt-get install --yes clang mold
       - name: Install pinned cargo-deny
         run: cargo install cargo-deny --locked --version 0.20.2
       - name: Enforce the RUSTSEC-2024-0436 internal remediation target
@@ -73,14 +75,24 @@ jobs:
           key: cargo-test-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-test-${{ matrix.platform }}-${{ hashFiles('rust-toolchain.toml') }}-
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+        name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
+      - uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: nextest@0.9.140
       - run: rustup component add clippy rustfmt
       - name: Test portable profile
-        run: cargo test --locked --no-default-features
+        run: cargo nextest run --locked --no-default-features
+      - name: Test portable profile doctests
+        run: cargo test --doc --locked --no-default-features
       - name: Test default profile
-        run: cargo test --locked
+        run: cargo nextest run --locked
+      - name: Test default profile doctests
+        run: cargo test --doc --locked
       - name: Test complete profile
-        run: cargo test --locked --all-features
+        run: cargo nextest run --locked --all-features
+      - name: Test complete profile doctests
+        run: cargo test --doc --locked --all-features
       - name: Check release pcap-free profile
         run: >-
           cargo check --locked --release --package packetcraftr-cli
@@ -113,7 +125,8 @@ jobs:
             fuzz/target
           key: cargo-quality-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-hack-0.6.45-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
           restore-keys: cargo-quality-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-msrv-1.96.0-
-      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
       - run: rustup toolchain install 1.96.0 --profile minimal
       - run: rustup component add clippy rustfmt
       - run: cargo install cargo-hack --locked --version 0.6.45
@@ -172,6 +185,8 @@ jobs:
             ~/.cargo/git/db
             target
           key: cargo-portable-${{ matrix.target }}-${{ hashFiles('rust-toolchain.toml') }}-${{ hashFiles('Cargo.lock') }}
+      - name: Install Linux linker
+        run: sudo apt-get update && sudo apt-get install --yes clang mold
       - run: rustup target add ${{ matrix.target }}
       - name: Check portable interface-enumeration profile
         run: >-
@@ -196,15 +211,19 @@ jobs:
             ~/.cargo/registry/cache
             ~/.cargo/git/db
             target/llvm-cov-target
-          key: cargo-coverage-linux-v3-${{ hashFiles('rust-toolchain.toml') }}-llvm-cov-0.8.7-${{ hashFiles('Cargo.lock') }}
-      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+          key: cargo-coverage-linux-v4-${{ hashFiles('rust-toolchain.toml') }}-nextest-0.9.140-llvm-cov-0.8.7-${{ hashFiles('Cargo.lock') }}
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
       - run: rustup component add llvm-tools-preview
+      - uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+        with:
+          tool: nextest@0.9.140
       - run: cargo install cargo-llvm-cov --locked --version 0.8.7
       # Measured 86.1% lines on 2026-07-30. The floor keeps deliberate headroom
       # while catching meaningful regressions; raise it when the measurement
       # moves, do not lower it to make a change fit.
       - name: Enforce 85% line coverage
-        run: cargo llvm-cov --locked --all-features --workspace --lcov --output-path lcov.info --fail-under-lines 85
+        run: cargo llvm-cov nextest --locked --all-features --workspace --lcov --output-path lcov.info --fail-under-lines 85
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-lcov
@@ -244,7 +263,8 @@ jobs:
             ~/.cargo/git/db
             fuzz/target
           key: cargo-fuzz-linux-v2-nightly-2026-07-11-0.13.2-${{ hashFiles('Cargo.lock', 'fuzz/Cargo.lock') }}
-      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
       - run: rustup toolchain install nightly-2026-07-11 --profile minimal
       - run: cargo install cargo-fuzz --locked --version 0.13.2
       - name: Run fixed deterministic budget

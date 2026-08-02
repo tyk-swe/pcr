@@ -54,7 +54,8 @@ jobs:
           path: fuzz/corpus/${{ matrix.target }}
           key: nightly-fuzz-corpus-v3-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: nightly-fuzz-corpus-v3-${{ matrix.target }}-
-      - run: sudo apt-get update && sudo apt-get install --yes libpcap-dev
+      - name: Install Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install --yes clang libpcap-dev mold
       - run: rustup toolchain install nightly-2026-07-11 --profile minimal
       - run: cargo install cargo-fuzz --locked --version 0.13.2
       - name: Fuzz for ten minutes

@@ -8,16 +8,23 @@ public issue.
 ## Development setup
 
 The package uses Rust 2024. Rust 1.97 is pinned in `rust-toolchain.toml`, and
-Rust 1.96 is the minimum supported version. Linux all-feature builds require
-the `libpcap-dev` development package.
+Rust 1.96 is the minimum supported version. Normal test execution requires
+cargo-nextest 0.9.140. Linux builds use clang as the linker driver and mold as
+the linker; all-feature builds also require the `libpcap-dev` development
+package. Install the pinned test runner with
+`cargo install --locked cargo-nextest --version 0.9.140` if it is not already
+available.
 
 Common checks are:
 
 ```console
 cargo build --locked
-cargo test --locked --no-default-features
-cargo test --locked
-cargo test --locked --all-features
+cargo nextest run --locked --no-default-features
+cargo test --doc --locked --no-default-features
+cargo nextest run --locked
+cargo test --doc --locked
+cargo nextest run --locked --all-features
+cargo test --doc --locked --all-features
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --all-features --no-deps
@@ -33,8 +40,8 @@ The complete enforced matrix, tool versions, thresholds, release checks, and
 artifacts live in the [CI workflows](.github/workflows/).
 
 Linux native networking also has a strict, opt-in namespace harness. It is not
-part of ordinary unprivileged `cargo test`; its dedicated entry point fails
-when prerequisites or privileges are unavailable:
+part of ordinary unprivileged `cargo nextest run`; its dedicated entry point
+fails when prerequisites or privileges are unavailable:
 
 ```console
 sudo -v && scripts/test-native-e2e
@@ -106,7 +113,7 @@ List exact commands and outcomes in the pull request. Select checks according
 to risk:
 
 - Packet, schema, or output changes: run the focused regression tests plus
-  `cargo test --locked --test schema_contract --test document_examples`.
+  `cargo nextest run --locked --test schema_contract --test document_examples`.
 - Public API changes: run the relevant downstream `external_*` integration
   tests.
 - Feature-gated changes: test no-default, default, and all-feature profiles.

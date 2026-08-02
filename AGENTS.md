@@ -12,13 +12,13 @@ Place unit tests beside their modules. Integration tests live in `crates/packetc
 
 - `cargo build --locked`: build the workspace with pinned dependencies.
 - `cargo run -p packetcraftr-cli -- --help`: run the CLI locally.
-- `cargo test --locked`: run the default test profile; also test `--no-default-features` and `--all-features` before release.
+- `cargo nextest run --locked`: run the default unit/integration test profile; also test `--no-default-features` and `--all-features` before release. Run matching `cargo test --doc` commands because nextest does not execute doctests.
 - `cargo fmt --all -- --check`: verify formatting.
 - `scripts/check-source-conventions`: enforce repository source layout.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: apply the CI lint gate.
 - `cargo fmt --manifest-path fuzz/Cargo.toml -- --check` and `cargo clippy --manifest-path fuzz/Cargo.toml --locked --all-targets -- -D warnings`: apply the same gates to the fuzz workspace, which the root `--all` flags do not reach.
 
-Rust 1.97 is pinned; 1.96 is the MSRV. All-feature Linux builds require `libpcap-dev`.
+Rust 1.97 is pinned; 1.96 is the MSRV. Normal test execution requires cargo-nextest 0.9.140. Linux builds require clang and mold; all-feature Linux builds also require `libpcap-dev`.
 
 ## Coding Style & Naming Conventions
 

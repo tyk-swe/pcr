@@ -32,7 +32,7 @@ jobs:
       - name: Install native-E2E prerequisites
         run: >-
           sudo apt-get update &&
-          sudo apt-get install --yes ethtool iproute2 libpcap-dev python3-jsonschema shellcheck
+          sudo apt-get install --yes clang ethtool iproute2 libpcap-dev mold python3-jsonschema shellcheck
       - name: Lint native-E2E helpers
         env:
           PYTHONPYCACHEPREFIX: ${{ runner.temp }}/native-e2e-pycache

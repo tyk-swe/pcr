@@ -50,11 +50,8 @@ pub(crate) use native_policy::{
     NativeRouteSnapshot, finish_route, interface_decision, validate_preferred_source_family,
 };
 
-#[cfg(any(
-    all(
-        feature = "native-route",
-        any(target_os = "linux", target_os = "macos")
-    ),
-    all(any(feature = "native-interfaces", feature = "native-route"), windows)
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub(crate) use crate::platform::validate_native_interface;

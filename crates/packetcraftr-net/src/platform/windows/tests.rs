@@ -3,19 +3,25 @@
 
 #![cfg(test)]
 
+#[cfg(feature = "native-route")]
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+#[cfg(feature = "native-route")]
 use windows::Win32::NetworkManagement::Ndis::NET_LUID_LH;
 
-use super::adapter::{BufferBounds, WindowsAdapter, adapter_index_for, find_windows_adapter};
+use super::adapter::BufferBounds;
+#[cfg(feature = "native-route")]
+use super::adapter::{WindowsAdapter, adapter_index_for, find_windows_adapter};
 use super::enumeration::interfaces;
 #[cfg(feature = "native-route")]
 use super::query::encode_address;
+#[cfg(feature = "native-route")]
 use crate::{
     interface::{InterfaceFlags, InterfaceInfo},
     link::LinkCapability,
     route::{InterfaceId, Provider as RouteProvider, RouteSelectionReason},
 };
+#[cfg(feature = "native-route")]
 use packetcraftr_core::frame::LinkType;
 
 #[test]
@@ -75,6 +81,7 @@ fn ipv6_scope_id_is_only_encoded_for_scoped_addresses() {
     assert_eq!(unsafe { link_local.Ipv6.Anonymous.sin6_scope_id }, 42);
 }
 
+#[cfg(feature = "native-route")]
 #[test]
 fn family_specific_adapter_indices_are_preserved_and_selected() {
     let adapter = WindowsAdapter {

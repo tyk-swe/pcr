@@ -8,12 +8,14 @@
 ))]
 
 use super::*;
+#[cfg(not(windows))]
+use crate::route::find_interface;
 use crate::{
     interface::{InterfaceAddress, InterfaceFlags, InterfaceInfo},
     link::{LinkCapability, MacAddress},
     route::{
-        InterfaceId, NativeRouteError, NativeRouteSnapshot, RouteSelectionReason, find_interface,
-        finish_route, interface_decision,
+        InterfaceId, NativeRouteError, NativeRouteSnapshot, RouteSelectionReason, finish_route,
+        interface_decision,
     },
 };
 use packetcraftr_core::frame::LinkType;

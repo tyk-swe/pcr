@@ -1,7 +1,11 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::*;
+use std::collections::HashMap;
+use std::net::IpAddr;
+use std::sync::Mutex;
+
+use packetcraftr_net::route::{InterfaceId, RouteDecision, RouteProvider};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum ExchangeRouteLookupKey {

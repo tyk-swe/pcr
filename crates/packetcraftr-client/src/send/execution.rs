@@ -1,7 +1,24 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use crate::*;
+use std::sync::Arc;
+use std::time::Instant;
+
+use packetcraftr_net::{
+    capture::CaptureStatistics,
+    route::{NeighborResolver, RouteProvider},
+    transmit::{PacketIo, TransmissionFrame},
+};
+use packetcraftr_packet::{Packet, build::Builder};
+
+use crate::Client;
+use crate::Stats;
+use crate::materialize::{
+    build_context, materialize_link_fields, materialize_link_structure, materialize_network_fields,
+    patch_builtin_ethernet, require_fixed_width_link_materialization,
+};
+use crate::send::{ClientError, SendOptions, SendReport};
+use crate::validation::{validate_mtu, validate_send_report};
 
 impl<R, N, I> Client<R, N, I>
 where
@@ -69,69 +86,4 @@ where
             },
         })
     }
-
-    pub(crate) fn authorize_built(
-        &self,
-        built: &BuiltPacket,
-        allow_permissive_live: bool,
-    ) -> Result<(), ClientError> {
-        self.policy.authorize_packet_destinations(&built.packet)?;
-        if built.requires_live_opt_in {
-            if !allow_permissive_live {
-                return Err(ClientError::PermissiveLiveOptInRequired);
-            }
-            if !self.policy.allow_permissive_packets {
-                return Err(TrafficPolicyError::PermissivePacket.into());
-            }
-        }
-        Ok(())
-    }
-
-    pub(crate) fn authorize_final_wire(
-        &self,
-        built: &BuiltPacket,
-        route: &PlannedRoute,
-    ) -> Result<(), ClientError> {
-        let link_type = match route.mode {
-            LinkMode::Layer2 => route.route.link_type,
-            LinkMode::Layer3 => LinkType::RAW,
-            LinkMode::Auto => return Err(LiveIoError::UnresolvedLinkMode.into()),
-        };
-        let frame = Frame::new(
-            std::time::SystemTime::UNIX_EPOCH,
-            link_type,
-            built.bytes.clone(),
-        )
-        .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
-            reason: error.to_string(),
-        })?;
-        static REGISTRY: OnceLock<Result<Arc<ProtocolRegistry>, String>> = OnceLock::new();
-        let registry = REGISTRY
-            .get_or_init(|| {
-                packetcraftr_protocol::builtin::registry()
-                    .map(Arc::new)
-                    .map_err(|error| error.to_string())
-            })
-            .as_ref()
-            .map_err(|reason| TrafficPolicyError::InvalidPacketSemantics {
-                reason: reason.clone(),
-            })?;
-        let decoded = Dissector::new(Arc::clone(registry))
-            .decode(frame, DecodeOptions::default())
-            .map_err(|error| TrafficPolicyError::InvalidPacketSemantics {
-                reason: error.to_string(),
-            })?;
-        self.policy.authorize_packet_destinations(&decoded.packet)?;
-        Ok(())
-    }
-}
-
-pub(crate) fn ensure_preparation_deadline(deadline: Instant) -> Result<(), ClientError> {
-    if deadline.checked_duration_since(Instant::now()).is_none() {
-        return Err(LiveIoError::DeadlineExceeded {
-            operation: "preparing the exchange",
-        }
-        .into());
-    }
-    Ok(())
 }

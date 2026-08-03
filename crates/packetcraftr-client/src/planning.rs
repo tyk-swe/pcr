@@ -1,8 +1,21 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use super::*;
-use crate::send::execution::ensure_preparation_deadline;
+use std::net::IpAddr;
+use std::time::Instant;
+
+use packetcraftr_net::{
+    route::{NeighborResolver, PlanOptions, PlannedRoute, RouteProvider},
+    transmit::PacketIo,
+};
+use packetcraftr_packet::{Packet, semantics::BuiltinProtocol};
+
+use crate::Client;
+use crate::exchange::deadline::ensure_preparation_deadline;
+use crate::send::ClientError;
+use crate::target::{
+    HostnameResolver, IpVersion, LiveTarget, ResolvedTarget, TargetResolutionError,
+};
 
 impl<R, N, I> Client<R, N, I>
 where

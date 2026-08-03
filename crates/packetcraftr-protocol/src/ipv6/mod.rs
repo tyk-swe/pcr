@@ -3,9 +3,16 @@
 
 //! IPv6 extension-header models.
 
-mod model;
+mod fragment;
+mod options;
+mod srh;
 
-pub use model::{DestinationOptions, HopByHop, Ipv6Fragment as Fragment, SegmentRoutingHeader};
-pub(crate) use model::{
-    DestinationOptionsCodec, HopByHopCodec, Ipv6FragmentCodec, SegmentRoutingHeaderCodec,
-};
+#[cfg(test)]
+mod tests;
+
+pub use fragment::Ipv6Fragment as Fragment;
+pub(crate) use fragment::Ipv6FragmentCodec;
+pub use options::{DestinationOptions, HopByHop};
+pub(crate) use options::{DestinationOptionsCodec, HopByHopCodec};
+pub use srh::SegmentRoutingHeader;
+pub(crate) use srh::SegmentRoutingHeaderCodec;

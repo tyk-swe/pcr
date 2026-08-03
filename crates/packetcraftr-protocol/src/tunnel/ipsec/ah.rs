@@ -17,13 +17,12 @@ use packetcraftr_packet::{
     semantics::BuiltinProtocol,
 };
 
-use super::super::common::{
+use crate::common::{
     ValueExpectation, ensure_encode_budget, expected_discriminator_for_value, invalid, make_layer,
-    payload_without_padding, protocol, resolve_u8, strict_or_diagnostic, truncated,
-    validate_auto_raw_discriminator, validate_raw_child_discriminator, wrong_layer,
+    protocol, resolve_u8, strict_or_diagnostic, truncated, validate_auto_raw_discriminator,
+    validate_raw_child_discriminator, wrong_layer,
 };
 
-const ESP_LEN: usize = 8;
 const AH_FIXED_LEN: usize = 12;
 
 /// Whether a protocol behind AH belongs to the other address family. The
@@ -42,161 +41,6 @@ fn ah_family_mismatch(under_ipv6: Option<bool>, child: &str) -> bool {
                 | "ipv6_srh"
         ),
         None => false,
-    }
-}
-
-/// IPsec ESP header (RFC 4303), IP protocol 50.
-///
-/// Everything after the sequence number is ciphertext — including the
-/// trailer and ICV — so the payload is deliberately opaque.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Esp {
-    /// Security parameters index.
-    pub spi: u32,
-    /// Anti-replay sequence number.
-    pub sequence: u32,
-}
-
-impl Default for Esp {
-    fn default() -> Self {
-        Self {
-            // The first SPI outside the reserved ranges: zero must never
-            // appear on the wire and 1-255 are held by IANA.
-            spi: 256,
-            sequence: 0,
-        }
-    }
-}
-
-reflective_layer! {
-    fn esp_schema() => { protocol: protocol("esp"), name: "ESP" }
-    impl Esp {
-        "spi" => { kind: Unsigned, derived: false, required: true, description: "Security parameters index", get |layer| Some(reflect_get(&layer.spi)), set |layer, value, name| reflect_set(&mut layer.spi, esp_schema(), name, value), layout: (0, 4) },
-        "sequence" => { kind: Unsigned, derived: false, required: false, description: "Anti-replay sequence number", get |layer| Some(reflect_get(&layer.sequence)), set |layer, value, name| reflect_set(&mut layer.sequence, esp_schema(), name, value), layout: (4, 8) }
-    }
-    layout pub(crate) fn esp_layout();
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct EspCodec;
-
-impl LayerCodec for EspCodec {
-    fn protocol_id(&self) -> ProtocolId {
-        protocol("esp")
-    }
-
-    fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
-    }
-
-    fn encode(
-        &self,
-        layer: &dyn Layer,
-        payload: &[u8],
-        context: &LayerEncodeContext<'_>,
-    ) -> Result<EncodedLayer, CodecError> {
-        let layer = layer
-            .as_any()
-            .downcast_ref::<Esp>()
-            .ok_or_else(|| wrong_layer("esp", layer))?;
-        ensure_encode_budget("esp", ESP_LEN, context)?;
-        let mut diagnostics = Vec::new();
-        // The ciphertext always ends in the two-byte Pad Length / Next
-        // Header trailer, so a shorter payload cannot be a complete packet.
-        if payload_without_padding("esp", payload, context)?.len() < 2 {
-            strict_or_diagnostic(
-                "esp",
-                "build.esp_trailer",
-                "spi",
-                "the encrypted payload must include the two-byte ESP trailer",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        if layer.spi == 0 {
-            strict_or_diagnostic(
-                "esp",
-                "build.esp_spi",
-                "spi",
-                "SPI zero is reserved and must not appear on the wire",
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        // The payload is ciphertext: a typed child would serialize plaintext
-        // protocol structure that dissection deliberately never recovers, so
-        // the layer stack could not round-trip.
-        if let Some(child) = context.child
-            && !matches!(
-                child.protocol_id().as_str(),
-                "raw" | "padding" | "malformed"
-            )
-        {
-            strict_or_diagnostic(
-                "esp",
-                "build.esp_ciphertext",
-                "spi",
-                format!(
-                    "the ESP payload is ciphertext; carry the {} bytes as a raw layer",
-                    child.protocol_id()
-                ),
-                context,
-                &mut diagnostics,
-            )?;
-        }
-        let mut prefix = Vec::with_capacity(ESP_LEN);
-        prefix.extend_from_slice(&layer.spi.to_be_bytes());
-        prefix.extend_from_slice(&layer.sequence.to_be_bytes());
-        Ok(EncodedLayer {
-            prefix,
-            suffix: Vec::new(),
-            materialized: Box::new(layer.clone()),
-            fields: esp_layout(),
-            diagnostics,
-        })
-    }
-
-    fn decode(
-        &self,
-        input: &[u8],
-        _context: &LayerDecodeContext<'_>,
-    ) -> Result<DecodedLayerValue, CodecError> {
-        if input.len() < ESP_LEN {
-            return Err(truncated("esp", ESP_LEN, input.len()));
-        }
-        let payload_len = input.len() - ESP_LEN;
-        let mut diagnostics = Vec::new();
-        if payload_len < 2 {
-            diagnostics.push(
-                Diagnostic::warning(
-                    "decode.esp_trailer",
-                    "the ciphertext is too short for the two-byte ESP trailer",
-                )
-                .at_field("sequence"),
-            );
-        }
-        Ok(DecodedLayerValue {
-            fields: esp_layout(),
-            layer: Box::new(Esp {
-                spi: u32::from_be_bytes([input[0], input[1], input[2], input[3]]),
-                sequence: u32::from_be_bytes([input[4], input[5], input[6], input[7]]),
-            }),
-            consumed: ESP_LEN,
-            payload_offset: ESP_LEN,
-            payload_len,
-            // Ciphertext: always the opaque child.
-            next: vec![Discriminator(0)],
-            diagnostics,
-            stop: payload_len == 0,
-            network: None,
-        })
-    }
-
-    fn make_layer(
-        &self,
-        fields: &BTreeMap<String, FieldValue>,
-    ) -> Result<Box<dyn Layer>, CodecError> {
-        make_layer(Esp::default(), fields)
     }
 }
 
@@ -257,7 +101,7 @@ impl LayerCodec for AhCodec {
     }
 
     fn aliases(&self) -> &'static [&'static str] {
-        super::super::support::aliases(self.protocol_id().as_str())
+        crate::support::aliases(self.protocol_id().as_str())
     }
 
     fn encode(
@@ -490,128 +334,5 @@ impl LayerCodec for AhCodec {
         fields: &BTreeMap<String, FieldValue>,
     ) -> Result<Box<dyn Layer>, CodecError> {
         make_layer(Ah::default(), fields)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use packetcraftr_packet::registry::ProtocolRegistry;
-
-    fn decode_context(registry: &ProtocolRegistry) -> LayerDecodeContext<'_> {
-        LayerDecodeContext {
-            registry,
-            layer_index: 0,
-            absolute_offset: 0,
-            verify_checksums: false,
-            allow_trailing_padding: false,
-            network: None,
-            discriminator: None,
-        }
-    }
-
-    #[test]
-    fn esp_reads_its_header_and_keeps_the_ciphertext_opaque() {
-        let registry = ProtocolRegistry::default();
-        let decoded = EspCodec
-            .decode(
-                &[0, 0, 0x30, 0x39, 0, 0, 0, 7, 0xde, 0xad],
-                &decode_context(&registry),
-            )
-            .unwrap();
-        let esp = decoded.layer.as_any().downcast_ref::<Esp>().unwrap();
-
-        assert_eq!(esp.spi, 12345);
-        assert_eq!(esp.sequence, 7);
-        assert_eq!(decoded.payload_len, 2);
-        assert_eq!(decoded.next, vec![Discriminator(0)]);
-
-        assert!(matches!(
-            EspCodec.decode(&[0; 7], &decode_context(&registry)),
-            Err(CodecError::Truncated { .. })
-        ));
-    }
-
-    #[test]
-    fn ah_gates_non_zero_reserved_bits_on_permissive_mode() {
-        use packetcraftr_packet::{
-            Packet,
-            build::{BuildContext, BuildMode},
-        };
-
-        let ah = Ah {
-            next_header: WireValue::Exact(59),
-            reserved: 7,
-            ..Ah::default()
-        };
-        let mut packet = Packet::new();
-        packet.push(ah.clone());
-        let registry = ProtocolRegistry::default();
-        let build_context = BuildContext::default();
-        let encode = |mode| {
-            AhCodec.encode(
-                &ah,
-                &[],
-                &LayerEncodeContext {
-                    packet: &packet,
-                    index: 0,
-                    build_context: &build_context,
-                    mode,
-                    registry: &registry,
-                    child: None,
-                    remaining_packet_bytes: 64,
-                },
-            )
-        };
-
-        assert!(matches!(
-            encode(BuildMode::Strict),
-            Err(CodecError::Invalid { .. })
-        ));
-        let permissive = encode(BuildMode::Permissive).unwrap();
-        assert!(
-            permissive
-                .diagnostics
-                .iter()
-                .any(|diagnostic| diagnostic.code == "build.ah_reserved")
-        );
-
-        let mut bytes = vec![59, 4, 0, 7, 0, 0, 0, 9, 0, 0, 0, 1];
-        bytes.extend_from_slice(&[0; 12]);
-        let decoded = AhCodec.decode(&bytes, &decode_context(&registry)).unwrap();
-        assert_eq!(decoded.diagnostics[0].code, "decode.ah_reserved");
-    }
-
-    #[test]
-    fn ah_reads_the_icv_from_its_length_field_and_continues_the_chain() {
-        let registry = ProtocolRegistry::default();
-        let mut bytes = vec![6, 4, 0, 0, 0, 0, 0, 9, 0, 0, 0, 1];
-        bytes.extend_from_slice(&[0xaa; 12]);
-        bytes.extend_from_slice(&[0x02]);
-        let decoded = AhCodec.decode(&bytes, &decode_context(&registry)).unwrap();
-        let ah = decoded.layer.as_any().downcast_ref::<Ah>().unwrap();
-
-        assert_eq!(ah.next_header, WireValue::Exact(6));
-        assert_eq!(ah.spi, 9);
-        assert_eq!(ah.icv.as_ref(), &[0xaa; 12]);
-        assert_eq!(decoded.consumed, 24);
-        assert_eq!(decoded.payload_len, 1);
-        assert_eq!(decoded.next, vec![Discriminator(6)]);
-
-        // The declared length must cover the fixed header and fit the input.
-        assert!(matches!(
-            AhCodec.decode(
-                &[6, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0, 1],
-                &decode_context(&registry)
-            ),
-            Err(CodecError::Invalid { .. })
-        ));
-        assert!(matches!(
-            AhCodec.decode(
-                &[6, 9, 0, 0, 0, 0, 0, 9, 0, 0, 0, 1],
-                &decode_context(&registry)
-            ),
-            Err(CodecError::Truncated { .. })
-        ));
     }
 }

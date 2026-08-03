@@ -3,7 +3,13 @@
 
 //! Capture-link header models.
 
-mod model;
+mod bsd;
+mod sll;
 
-pub use model::{BsdLoop, BsdNull, CaptureByteOrder as ByteOrder, LinuxSll, LinuxSll2};
-pub(crate) use model::{BsdLoopCodec, BsdNullCodec, LinuxSll2Codec, LinuxSllCodec};
+#[cfg(test)]
+mod tests;
+
+pub use bsd::{BsdLoop, BsdNull, CaptureByteOrder as ByteOrder};
+pub(crate) use bsd::{BsdLoopCodec, BsdNullCodec};
+pub use sll::{LinuxSll, LinuxSll2};
+pub(crate) use sll::{LinuxSll2Codec, LinuxSllCodec};

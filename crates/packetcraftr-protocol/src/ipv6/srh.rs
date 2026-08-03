@@ -1,0 +1,270 @@
+// Copyright (C) 2026 tyk-swe
+// SPDX-License-Identifier: AGPL-3.0-only
+
+use std::collections::BTreeMap;
+use std::net::{IpAddr, Ipv6Addr};
+
+use bytes::Bytes;
+
+use packetcraftr_packet::{
+    codec::{
+        CodecError, DecodedLayerValue, EncodedLayer, LayerCodec, LayerDecodeContext,
+        LayerEncodeContext, NetworkEnvelope,
+    },
+    field::{FieldValue, WireValue},
+    layer::{Layer, ProtocolId, reflect_get, reflect_set, reflective_layer},
+    registry::Discriminator,
+};
+
+use crate::common::{
+    ValueExpectation, aliased_fields, expected_discriminator, invalid, make_layer, protocol,
+    resolve_u8, truncated, validate_auto_raw_discriminator, validate_ipv6_routing_child,
+    validate_raw_child_discriminator, wrong_layer, wrong_type,
+};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SegmentRoutingHeader {
+    pub next_header: WireValue<u8>,
+    pub segments_left: WireValue<u8>,
+    pub last_entry: WireValue<u8>,
+    pub flags: u8,
+    pub tag: u16,
+    /// Visit order (first visited segment through final destination).
+    pub segments: Vec<Ipv6Addr>,
+    /// Type-length-value bytes following the segment list, including padding.
+    pub tlvs: Bytes,
+}
+
+impl Default for SegmentRoutingHeader {
+    fn default() -> Self {
+        Self {
+            next_header: WireValue::Auto,
+            segments_left: WireValue::Auto,
+            last_entry: WireValue::Auto,
+            flags: 0,
+            tag: 0,
+            segments: Vec::new(),
+            tlvs: Bytes::new(),
+        }
+    }
+}
+
+reflective_layer! {
+    fn srh_schema() => { protocol: protocol("ipv6_srh"), name: "IPv6 Segment Routing Header" }
+    impl SegmentRoutingHeader {
+        "next_header" => { kind: Unsigned, derived: true, required: false, description: "IPv6 next-header discriminator", get |layer| Some(reflect_get(&layer.next_header)), set |layer, value, name| reflect_set(&mut layer.next_header, srh_schema(), name, value), layout: (0, 1) },
+        "segments_left" => { kind: Unsigned, derived: true, required: false, description: "Remaining segments", get |layer| Some(reflect_get(&layer.segments_left)), set |layer, value, name| reflect_set(&mut layer.segments_left, srh_schema(), name, value), layout: (3, 4) },
+        "last_entry" => { kind: Unsigned, derived: true, required: false, description: "Highest segment-list index", get |layer| Some(reflect_get(&layer.last_entry)), set |layer, value, name| reflect_set(&mut layer.last_entry, srh_schema(), name, value), layout: (4, 5) },
+        "flags" => { kind: Unsigned, derived: false, required: false, description: "SRH flags", get |layer| Some(reflect_get(&layer.flags)), set |layer, value, name| reflect_set(&mut layer.flags, srh_schema(), name, value), layout: (5, 6) },
+        "tag" => { kind: Unsigned, derived: false, required: false, description: "SRH tag", get |layer| Some(reflect_get(&layer.tag)), set |layer, value, name| reflect_set(&mut layer.tag, srh_schema(), name, value), layout: (6, 8) },
+        "segments" => { kind: List, derived: false, required: true, description: "Segments in visit order", get |layer| Some(FieldValue::List(layer.segments.iter().copied().map(FieldValue::Ipv6).collect())), set |layer, value, name| match value { FieldValue::List(values) => { layer.segments = values.into_iter().map(|value| match value { FieldValue::Ipv6(value) => Ok(value), FieldValue::Text(value) => value.parse().map_err(|_| wrong_type(srh_schema(), name, "list of IPv6 addresses")), _ => Err(wrong_type(srh_schema(), name, "list of IPv6 addresses")) }).collect::<Result<Vec<_>, _>>()?; Ok(()) }, _ => Err(wrong_type(srh_schema(), name, "list")) }, layout: (8, segments_end) },
+        "tlvs" => { kind: Bytes, derived: false, required: false, description: "TLV bytes following the segment list, including padding", get |layer| Some(reflect_get(&layer.tlvs)), set |layer, value, name| reflect_set(&mut layer.tlvs, srh_schema(), name, value), layout: (segments_end, header_len) },
+    }
+    layout pub(crate) fn srh_layout(segments_end: usize, header_len: usize);
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct SegmentRoutingHeaderCodec;
+
+impl LayerCodec for SegmentRoutingHeaderCodec {
+    fn protocol_id(&self) -> ProtocolId {
+        protocol("ipv6_srh")
+    }
+
+    fn aliases(&self) -> &'static [&'static str] {
+        crate::support::aliases(self.protocol_id().as_str())
+    }
+
+    fn encode(
+        &self,
+        layer: &dyn Layer,
+        _payload: &[u8],
+        context: &LayerEncodeContext<'_>,
+    ) -> Result<EncodedLayer, CodecError> {
+        let layer = layer
+            .as_any()
+            .downcast_ref::<SegmentRoutingHeader>()
+            .ok_or_else(|| wrong_layer("ipv6_srh", layer))?;
+        if layer.segments.is_empty() || layer.segments.len() > 127 {
+            return Err(invalid("ipv6_srh", "SRH requires 1..=127 segments"));
+        }
+        if layer.flags != 0 {
+            return Err(invalid("ipv6_srh", "unsupported SRH flags must be zero"));
+        }
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "the guard above rejects an empty segment list and any list longer than \
+                      127, so the decremented length is at most 126"
+        )]
+        let expected_last = (layer.segments.len() - 1) as u8;
+        let mut diagnostics = Vec::new();
+        let expectation = expected_discriminator("ipv6_srh", context, 59_u8);
+        validate_auto_raw_discriminator(
+            "ipv6_srh",
+            "next_header",
+            &layer.next_header,
+            context,
+            &mut diagnostics,
+        )?;
+        let (next, materialized_next) = resolve_u8(
+            "ipv6_srh",
+            "next_header",
+            &layer.next_header,
+            expectation,
+            context.mode,
+            &mut diagnostics,
+        )?;
+        validate_raw_child_discriminator("ipv6_srh", u64::from(next), context, &mut diagnostics)?;
+        validate_ipv6_routing_child("ipv6_srh", next, context, &mut diagnostics)?;
+        let (segments_left, materialized_left) = resolve_u8(
+            "ipv6_srh",
+            "segments_left",
+            &layer.segments_left,
+            ValueExpectation::Suggested(expected_last),
+            context.mode,
+            &mut diagnostics,
+        )?;
+        if segments_left > expected_last {
+            let message =
+                format!("segments_left is {segments_left}, exceeding last_entry {expected_last}");
+            if context.mode == packetcraftr_packet::build::BuildMode::Strict {
+                return Err(invalid("ipv6_srh", message));
+            }
+            diagnostics.push(
+                packetcraftr_packet::diagnostic::Diagnostic::warning(
+                    "build.srh_segments_left",
+                    message,
+                )
+                .at_field("segments_left"),
+            );
+        }
+        let (last_entry, materialized_last) = resolve_u8(
+            "ipv6_srh",
+            "last_entry",
+            &layer.last_entry,
+            ValueExpectation::Required(expected_last),
+            context.mode,
+            &mut diagnostics,
+        )?;
+        let segments_end = layer
+            .segments
+            .len()
+            .checked_mul(16)
+            .and_then(|length| length.checked_add(8))
+            .ok_or_else(|| invalid("ipv6_srh", "SRH segment-list length overflow"))?;
+        let unpadded_len = segments_end
+            .checked_add(layer.tlvs.len())
+            .ok_or_else(|| invalid("ipv6_srh", "SRH TLV length overflow"))?;
+        let header_len = unpadded_len
+            .checked_add((8 - unpadded_len % 8) % 8)
+            .ok_or_else(|| invalid("ipv6_srh", "SRH padding overflow"))?;
+        let hdr_ext_len = u8::try_from(header_len / 8 - 1)
+            .map_err(|_| invalid("ipv6_srh", "SRH length cannot be represented"))?;
+        let mut prefix = Vec::with_capacity(header_len);
+        prefix.extend_from_slice(&[next, hdr_ext_len, 4, segments_left, last_entry, 0]);
+        prefix.extend_from_slice(&layer.tag.to_be_bytes());
+        for segment in layer.segments.iter().rev() {
+            prefix.extend_from_slice(&segment.octets());
+        }
+        prefix.extend_from_slice(&layer.tlvs);
+        prefix.resize(header_len, 0);
+        let mut materialized = layer.clone();
+        materialized.next_header = materialized_next;
+        materialized.segments_left = materialized_left;
+        materialized.last_entry = materialized_last;
+        materialized.tlvs = Bytes::copy_from_slice(&prefix[segments_end..]);
+        Ok(EncodedLayer {
+            prefix,
+            suffix: Vec::new(),
+            materialized: Box::new(materialized),
+            fields: srh_layout(segments_end, header_len),
+            diagnostics,
+        })
+    }
+
+    fn decode(
+        &self,
+        input: &[u8],
+        context: &LayerDecodeContext<'_>,
+    ) -> Result<DecodedLayerValue, CodecError> {
+        if input.len() < 8 {
+            return Err(truncated("ipv6_srh", 8, input.len()));
+        }
+        if input[2] == 0 {
+            return Err(CodecError::Unsupported {
+                protocol: protocol("ipv6_srh"),
+                message: "IPv6 routing type 0 is prohibited".to_owned(),
+            });
+        }
+        if input[2] != 4 {
+            return Err(CodecError::Unsupported {
+                protocol: protocol("ipv6_srh"),
+                message: format!("unsupported routing type {}", input[2]),
+            });
+        }
+        let header_len = (usize::from(input[1]) + 1)
+            .checked_mul(8)
+            .ok_or_else(|| invalid("ipv6_srh", "header length overflow"))?;
+        if input.len() < header_len {
+            return Err(truncated("ipv6_srh", header_len, input.len()));
+        }
+        let count = usize::from(input[4]) + 1;
+        let segments_end = count
+            .checked_mul(16)
+            .and_then(|length| length.checked_add(8))
+            .ok_or_else(|| invalid("ipv6_srh", "segment-list length overflow"))?;
+        if header_len < segments_end || input[3] > input[4] {
+            return Err(invalid(
+                "ipv6_srh",
+                "Last Entry or Segments Left is inconsistent",
+            ));
+        }
+        if input[5] != 0 {
+            return Err(invalid("ipv6_srh", "unsupported flags are non-zero"));
+        }
+        let mut wire_segments = Vec::with_capacity(count);
+        for chunk in input[8..segments_end].chunks_exact(16) {
+            let mut bytes = [0u8; 16];
+            bytes.copy_from_slice(chunk);
+            wire_segments.push(Ipv6Addr::from(bytes));
+        }
+        wire_segments.reverse();
+        let final_destination = wire_segments
+            .last()
+            .copied()
+            .ok_or_else(|| invalid("ipv6_srh", "segment list is empty"))?;
+        let network = context.network.map(|network| NetworkEnvelope {
+            source: network.source,
+            destination: IpAddr::V6(final_destination),
+        });
+        Ok(DecodedLayerValue {
+            layer: Box::new(SegmentRoutingHeader {
+                next_header: WireValue::Exact(input[0]),
+                segments_left: WireValue::Exact(input[3]),
+                last_entry: WireValue::Exact(input[4]),
+                flags: input[5],
+                tag: u16::from_be_bytes([input[6], input[7]]),
+                segments: wire_segments,
+                tlvs: Bytes::copy_from_slice(&input[segments_end..header_len]),
+            }),
+            consumed: header_len,
+            payload_offset: header_len,
+            payload_len: input.len() - header_len,
+            next: vec![Discriminator(u64::from(input[0]))],
+            fields: srh_layout(segments_end, header_len),
+            diagnostics: Vec::new(),
+            stop: input.len() == header_len,
+            network,
+        })
+    }
+
+    fn make_layer(
+        &self,
+        fields: &BTreeMap<String, FieldValue>,
+    ) -> Result<Box<dyn Layer>, CodecError> {
+        make_layer(
+            SegmentRoutingHeader::default(),
+            &aliased_fields("ipv6_srh", fields, &[("segs", "segments")])?,
+        )
+    }
+}

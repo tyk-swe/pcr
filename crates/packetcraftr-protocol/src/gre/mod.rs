@@ -5,5 +5,8 @@
 
 mod model;
 
+#[cfg(test)]
+mod tests;
+
 pub use model::Gre;
 pub(crate) use model::GreCodec;

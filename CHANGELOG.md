@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Separate mixed protocol families and extract inline test modules across `packetcraftr-protocol` into dedicated modules (`ipv6::{options, fragment, srh}`, `capture::{bsd, sll}`, `tunnel::ipsec::{ah, esp}`).
 - **Breaking:** Consolidated the workspace from thirteen packages to ten.
   `packetcraftr-error` and `packetcraftr-budget` are now
   `packetcraftr-core::{error,budget}`, shared frame types moved to

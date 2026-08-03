@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use super::error::invalid_configuration;
 use crate::{
     capture::{CaptureOverflowPolicy, CaptureQueueLimits},
     neighbor::Error as NeighborError,
@@ -77,8 +78,4 @@ impl NeighborResolutionOptions {
         .map_err(|error| invalid_configuration(error.to_string()))?;
         Ok(self)
     }
-}
-
-pub(super) fn invalid_configuration(message: String) -> NeighborError {
-    NeighborError::InvalidConfiguration { message }
 }

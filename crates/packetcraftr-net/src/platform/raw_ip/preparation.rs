@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use bytes::Bytes;
 
 use super::super::super::{Error as LiveIoError, transmit::Layer3Frame};
-use super::super::InterfaceId;
+use crate::route::InterfaceId;
 
 const IPV4_MINIMUM_HEADER: usize = 20;
 const IPV6_HEADER: usize = 40;

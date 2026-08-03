@@ -8,15 +8,17 @@ use thiserror::Error;
 use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_packet::{
     Packet,
-    field::FieldValue,
     layer::ProtocolId,
     semantics::{self, BuiltinProtocol},
 };
 
-use super::models::{
-    LinkMode, MAX_NEIGHBOR_VLAN_TAGS, MacAddress, NeighborRequest, NeighborResolution,
-    NeighborVlanKind, NeighborVlanTag, PlanOptions, PlannedRoute, RouteProvider,
+use super::intent::{
+    arp_link_macs, extract_neighbor_vlan_tags, multicast_mac, outer_ethernet_mac,
+    packet_has_link_layer_intent,
 };
+use super::materialize::materialize;
+pub(crate) use super::materialize::{MaterializedRoute, NeighborError, NeighborResolver};
+use super::models::{LinkMode, PlanOptions, PlannedRoute, RouteProvider};
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -137,15 +139,6 @@ impl Classified for PlanError {
 
 #[derive(Clone, Debug, Default)]
 pub struct RoutePlanner;
-
-fn packet_has_link_layer_intent(packet: &Packet) -> bool {
-    semantics::outer_layers(packet).any(|layer| {
-        matches!(
-            BuiltinProtocol::of(layer),
-            Some(BuiltinProtocol::Ethernet | BuiltinProtocol::Vlan | BuiltinProtocol::Vlan8021ad)
-        )
-    })
-}
 
 impl RoutePlanner {
     /// Perform passive route/source/link selection. This never invokes ARP/NDP,
@@ -385,7 +378,3 @@ impl RoutePlanner {
         materialize(plan, resolver)
     }
 }
-
-// Keep these items in the planner module's lexical scope so existing rustdoc
-// canonical paths remain stable while their implementation lives separately.
-include!("materialize.rs");

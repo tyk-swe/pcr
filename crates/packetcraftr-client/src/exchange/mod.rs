@@ -4,11 +4,20 @@
 //! Multi-packet capture-ready exchange contracts.
 
 mod accumulator;
+mod arming;
+mod capture;
 mod contract;
+mod correlation;
+pub(crate) mod deadline;
 mod execution;
-mod guard;
+mod finalization;
 mod options;
+mod preparation;
+mod readiness;
+mod retention;
 pub(crate) mod route_cache;
+mod send_sequence;
+mod shutdown;
 mod transaction;
 
 pub(crate) use accumulator::{
@@ -20,7 +29,6 @@ pub use contract::{
     MAX_EXCHANGE_TIMEOUT, MatchedResponse as Response,
 };
 pub(crate) use contract::{ExchangeOptions, ExchangeResult};
-pub(crate) use guard::CaptureGuard;
-pub(crate) use transaction::{
-    ExchangeTransaction, PlannedExchangePacket, PreparedExchange, PreparedExchangePacket,
-};
+pub(crate) use preparation::{PreparedExchange, PreparedExchangePacket};
+pub(crate) use shutdown::CaptureGuard;
+pub(crate) use transaction::ExchangeTransaction;

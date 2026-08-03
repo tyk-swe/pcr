@@ -74,6 +74,11 @@ pub(crate) use interface_identity::interface_identity_matches;
     any(target_os = "linux", target_os = "macos", windows)
 ))]
 pub(crate) use interface_identity::validate_current_interface_identity;
+#[cfg(all(
+    feature = "native-route",
+    any(target_os = "linux", target_os = "macos", windows)
+))]
+pub(crate) use interface_validation::validate_native_interface;
 #[cfg(any(
     all(
         feature = "native-route",
@@ -81,9 +86,7 @@ pub(crate) use interface_identity::validate_current_interface_identity;
     ),
     all(any(feature = "native-interfaces", feature = "native-route"), windows)
 ))]
-pub(crate) use interface_validation::{
-    interface_error, validate_native_interface, validate_native_interfaces,
-};
+pub(crate) use interface_validation::{interface_error, validate_native_interfaces};
 pub(crate) use layer2_dispatch::system_send_layer2;
 pub(crate) use layer3_dispatch::system_send_layer3;
 pub(crate) use route_dispatch::{system_interface_route, system_route};

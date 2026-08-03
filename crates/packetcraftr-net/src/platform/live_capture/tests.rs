@@ -80,11 +80,13 @@ impl NativeCaptureSource for PanicAfterReadySource {
 }
 
 struct BlockingSource {
+    entered: Arc<AtomicBool>,
     release: Arc<AtomicBool>,
 }
 
 impl NativeCaptureSource for BlockingSource {
     fn next_event(&mut self) -> Result<NativeCaptureEvent, LiveIoError> {
+        self.entered.store(true, Ordering::Release);
         while !self.release.load(Ordering::Acquire) {
             thread::park_timeout(Duration::from_millis(1));
         }
@@ -214,10 +216,12 @@ fn native_session_defends_direct_timeout_entry_points() {
 
 #[test]
 fn shutdown_is_bounded_when_capture_source_ignores_interrupt() {
+    let entered = Arc::new(AtomicBool::new(false));
     let release = Arc::new(AtomicBool::new(false));
     let mut session = NativeCaptureSession::spawn(
         NativeCaptureParts {
             source: Box::new(BlockingSource {
+                entered: Arc::clone(&entered),
                 release: Arc::clone(&release),
             }),
             interrupt: Arc::new(MockInterrupt(Arc::new(AtomicUsize::new(0)))),
@@ -236,6 +240,14 @@ fn shutdown_is_bounded_when_capture_source_ignores_interrupt() {
     )
     .unwrap();
     session.wait_ready(Duration::from_secs(1)).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    while !entered.load(Ordering::Acquire) {
+        assert!(
+            Instant::now() < deadline,
+            "capture source did not enter its blocking read"
+        );
+        thread::yield_now();
+    }
 
     assert!(matches!(
         session.shutdown(),

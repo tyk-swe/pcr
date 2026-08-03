@@ -8,8 +8,9 @@ use bytes::Bytes;
 
 use crate::{Direction, Frame, LinkType};
 
-use super::models::{
-    DEFAULT_SIZE_LIMIT, Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions,
+use super::error::Error;
+use super::model::{
+    DEFAULT_SIZE_LIMIT, Endianness, Format, Interface, Limits, PcapNgOptions, PcapOptions,
     ReaderOptions, TimestampResolution, TranscodeReport,
 };
 use super::reader::Reader;

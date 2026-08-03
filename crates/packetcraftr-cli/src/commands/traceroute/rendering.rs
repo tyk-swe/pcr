@@ -1,169 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::sync::Arc;
-use std::time::Duration;
+use packetcraftr::{output, packet};
 
-use packetcraftr::{client, net, output, packet, workflow};
-
-use super::super::arguments::TracerouteArgs;
-use super::super::errors::CliError;
-use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stream_record, output_timestamp_text,
-    render_diagnostics_text, spaced_hex, write_stdout_line,
+use crate::errors::CliError;
+use crate::rendering::{
+    emit_json_compact, emit_stream_record, output_timestamp_text, render_diagnostics_text,
+    spaced_hex, write_stdout_line,
 };
-use super::super::runtime::{
-    DeferredInterface, SystemClient, default_registry_arc, parse_workflow_target, system_client,
-    workflow_exchange_options,
-};
-use super::scan::validate_live_interface_selector;
 
-pub(crate) fn run_traceroute(
-    arguments: TracerouteArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
-    let TracerouteArgs {
-        target,
-        strategy,
-        family,
-        port,
-        first_hop,
-        max_hops,
-        attempts,
-        timeout_ms,
-        rate,
-        max_probes,
-        max_duration_ms,
-        max_undecoded,
-        interface,
-        source,
-        link_mode,
-        limits,
-        policy,
-    } = arguments;
-    let target = parse_workflow_target(target)?;
-    let strategy: workflow::traceroute::Strategy = strategy.into();
-    let destination_port = match strategy {
-        workflow::traceroute::Strategy::Udp => {
-            Some(port.unwrap_or(workflow::traceroute::DEFAULT_TRACEROUTE_UDP_PORT))
-        }
-        workflow::traceroute::Strategy::Tcp => {
-            Some(port.unwrap_or(workflow::traceroute::DEFAULT_TRACEROUTE_TCP_PORT))
-        }
-        workflow::traceroute::Strategy::Icmp => port,
-    };
-    let queue_limits = limits.into_limits();
-    let trace_limits = workflow::traceroute::Limits {
-        max_probes,
-        max_duration: Duration::from_millis(max_duration_ms),
-        max_evidence_frames: queue_limits.max_frames,
-        max_evidence_bytes: queue_limits.max_bytes,
-        max_undecoded,
-    };
-    let request = workflow::traceroute::Request {
-        target,
-        strategy,
-        address_family: family.into(),
-        destination_port,
-        first_hop,
-        max_hops,
-        probes_per_hop: attempts,
-        timeout: Duration::from_millis(timeout_ms),
-        probes_per_second: rate,
-        limits: trace_limits,
-    };
-    request.validate().map_err(traceroute_cli_error)?;
-    let policy = policy.into_policy();
-    policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("traceroute", interface.as_deref())?;
-    let max_template_packets = usize::try_from(attempts).map_err(|_| {
-        CliError::new(
-            2,
-            "traceroute attempt count exceeds the platform size limit",
-        )
-    })?;
-
-    let registry = default_registry_arc()?;
-    let exchange = workflow_exchange_options(
-        client::send::Options {
-            destination: None,
-            plan: net::route::Options {
-                link_mode: link_mode.into(),
-                interface: None,
-                preferred_source: source,
-            },
-            build: packet::build::Options::default(),
-            allow_permissive_live: false,
-        },
-        request.timeout,
-        max_template_packets,
-        queue_limits,
-    )?;
-
-    let mut executor = CliTracerouteExecutor {
-        client: system_client(Arc::clone(&registry), policy.clone()),
-        exchange,
-        interface: DeferredInterface::new(interface),
-    };
-    let resolver = client::target::SystemResolver;
-    let mut authorizer = workflow::traceroute::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::SystemClock;
-    let result = workflow::traceroute::run(
-        &request,
-        &mut authorizer,
-        &registry,
-        &mut executor,
-        &mut clock,
-    )
-    .map_err(traceroute_cli_error)?;
-    let (result, diagnostics, stats) =
-        output::traceroute::Result::try_from_traceroute(result).map_err(CliError::classified)?;
-
-    match output {
-        output::contract::Format::Text => render_traceroute_text(result, diagnostics, stats),
-        output::contract::Format::Json => emit_json(
-            &output::envelope::Aggregate::success(
-                output::contract::Command::Traceroute,
-                result,
-                diagnostics,
-            )
-            .with_stats(stats),
-        ),
-        output::contract::Format::Ndjson => render_traceroute_stream(result, diagnostics, stats),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Traceroute,
-                format: output,
-            },
-        )),
-    }
-}
-
-struct CliTracerouteExecutor {
-    client: SystemClient,
-    exchange: client::exchange::Options,
-    interface: DeferredInterface,
-}
-
-impl workflow::traceroute::Executor for CliTracerouteExecutor {
-    fn execute(
-        &mut self,
-        batch: &workflow::traceroute::Batch,
-    ) -> Result<workflow::traceroute::Execution, workflow::BoundaryError> {
-        self.interface
-            .resolve_into(&mut self.exchange.send.plan)
-            .map_err(CliError::into_boundary_error)?;
-        workflow::traceroute::ClientExecutor::new(&self.client, self.exchange.clone())
-            .execute(batch)
-    }
-}
-
-pub(crate) fn traceroute_cli_error(error: workflow::traceroute::Error) -> CliError {
-    let sequence = error.sequence();
-    CliError::classified_at_optional_sequence(error, sequence)
-}
-
-fn render_traceroute_text(
+pub(super) fn render_traceroute_text(
     result: output::traceroute::Result,
     diagnostics: Vec<packet::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -246,14 +92,14 @@ fn render_traceroute_text(
     render_diagnostics_text(&diagnostics)
 }
 
-fn trace_probe_status_name(value: output::traceroute::ProbeStatus) -> &'static str {
+pub(super) fn trace_probe_status_name(value: output::traceroute::ProbeStatus) -> &'static str {
     match value {
         output::traceroute::ProbeStatus::Response => "response",
         output::traceroute::ProbeStatus::Timeout => "timeout",
     }
 }
 
-fn trace_response_kind_name(value: output::traceroute::ResponseKind) -> &'static str {
+pub(super) fn trace_response_kind_name(value: output::traceroute::ResponseKind) -> &'static str {
     match value {
         output::traceroute::ResponseKind::Intermediate => "intermediate",
         output::traceroute::ResponseKind::DestinationReached => "destination_reached",
@@ -261,7 +107,7 @@ fn trace_response_kind_name(value: output::traceroute::ResponseKind) -> &'static
     }
 }
 
-fn trace_completion_name(value: output::traceroute::Completion) -> &'static str {
+pub(super) fn trace_completion_name(value: output::traceroute::Completion) -> &'static str {
     match value {
         output::traceroute::Completion::DestinationReached => "destination_reached",
         output::traceroute::Completion::Unreachable => "unreachable",
@@ -270,11 +116,63 @@ fn trace_completion_name(value: output::traceroute::Completion) -> &'static str 
     }
 }
 
+pub(super) fn render_traceroute_stream(
+    result: output::traceroute::Result,
+    diagnostics: Vec<packet::diagnostic::Diagnostic>,
+    stats: output::envelope::Stats,
+) -> Result<(), CliError> {
+    let output::traceroute::Result {
+        target,
+        resolved_addresses,
+        destination,
+        strategy,
+        destination_port,
+        hops,
+        undecoded,
+        completion,
+    } = result;
+    let mut sequence = 0_u64;
+    for hop in hops {
+        emit_stream_record(
+            output::contract::Command::Traceroute,
+            &mut sequence,
+            output::traceroute::Event::Hop {
+                target: target.clone(),
+                destination,
+                hop,
+            },
+        )?;
+    }
+    for evidence in undecoded {
+        emit_stream_record(
+            output::contract::Command::Traceroute,
+            &mut sequence,
+            output::traceroute::Event::Undecoded {
+                hop_limit: evidence.hop_limit,
+                frame: evidence.frame,
+            },
+        )?;
+    }
+    emit_json_compact(
+        &output::envelope::Stream::success(
+            output::contract::Command::Traceroute,
+            sequence,
+            output::traceroute::Event::Complete {
+                target,
+                resolved_addresses,
+                destination,
+                strategy,
+                destination_port,
+                completion,
+            },
+            diagnostics,
+        )
+        .with_stats(stats),
+    )
+    .map_err(|error| error.at_sequence(sequence))
+}
+
 #[cfg(test)]
-#[expect(
-    clippy::items_after_test_module,
-    reason = "stream rendering is kept beside its output-event implementation"
-)]
 mod tests {
     use std::time::Duration;
 
@@ -392,60 +290,4 @@ mod tests {
         assert!(rendered.contains("response=intermediate"));
         assert!(rendered.contains("\"sequence\":2"));
     }
-}
-
-fn render_traceroute_stream(
-    result: output::traceroute::Result,
-    diagnostics: Vec<packet::diagnostic::Diagnostic>,
-    stats: output::envelope::Stats,
-) -> Result<(), CliError> {
-    let output::traceroute::Result {
-        target,
-        resolved_addresses,
-        destination,
-        strategy,
-        destination_port,
-        hops,
-        undecoded,
-        completion,
-    } = result;
-    let mut sequence = 0_u64;
-    for hop in hops {
-        emit_stream_record(
-            output::contract::Command::Traceroute,
-            &mut sequence,
-            output::traceroute::Event::Hop {
-                target: target.clone(),
-                destination,
-                hop,
-            },
-        )?;
-    }
-    for evidence in undecoded {
-        emit_stream_record(
-            output::contract::Command::Traceroute,
-            &mut sequence,
-            output::traceroute::Event::Undecoded {
-                hop_limit: evidence.hop_limit,
-                frame: evidence.frame,
-            },
-        )?;
-    }
-    emit_json_compact(
-        &output::envelope::Stream::success(
-            output::contract::Command::Traceroute,
-            sequence,
-            output::traceroute::Event::Complete {
-                target,
-                resolved_addresses,
-                destination,
-                strategy,
-                destination_port,
-                completion,
-            },
-            diagnostics,
-        )
-        .with_stats(stats),
-    )
-    .map_err(|error| error.at_sequence(sequence))
 }

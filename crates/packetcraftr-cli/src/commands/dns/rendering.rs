@@ -1,191 +1,15 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
-use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use packetcraftr::{output, packet};
 
-use packetcraftr::{client, net, output, packet, workflow};
-
-use super::super::arguments::DnsArgs;
-use super::super::errors::CliError;
-use super::super::rendering::{
-    emit_json, emit_json_compact, emit_stream_record, output_timestamp_text,
-    render_diagnostics_text, spaced_hex, write_stdout_line,
+use crate::errors::CliError;
+use crate::rendering::{
+    emit_json_compact, emit_stream_record, output_timestamp_text, render_diagnostics_text,
+    spaced_hex, write_stdout_line,
 };
-use super::super::runtime::{
-    DeferredInterface, default_registry_arc, parse_workflow_target, system_client,
-    workflow_exchange_options,
-};
-use super::scan::validate_live_interface_selector;
 
-pub(crate) fn run_dns(
-    arguments: DnsArgs,
-    output: output::contract::Format,
-) -> Result<(), CliError> {
-    let DnsArgs {
-        server,
-        name,
-        query_type,
-        family,
-        port,
-        transaction_id,
-        source_port,
-        no_recursion,
-        attempts,
-        timeout_ms,
-        rate,
-        max_duration_ms,
-        max_message_bytes,
-        max_records,
-        max_name_pointers,
-        max_txt_strings,
-        max_txt_bytes,
-        max_rejected_records,
-        max_undecoded,
-        interface,
-        source,
-        link_mode,
-        limits,
-        policy,
-    } = arguments;
-    let server = parse_workflow_target(server)?;
-    let queue_limits = limits.into_limits();
-    let request = workflow::dns::Request {
-        server,
-        address_family: family.into(),
-        server_port: port,
-        source_port: source_port.unwrap_or_else(generated_dns_source_port),
-        query_name: name,
-        query_type: query_type.into(),
-        transaction_id: transaction_id.unwrap_or_else(generated_dns_transaction_id),
-        recursion_desired: !no_recursion,
-        attempts,
-        timeout: Duration::from_millis(timeout_ms),
-        queries_per_second: rate,
-        limits: workflow::dns::Limits {
-            max_message_bytes,
-            max_records,
-            max_name_pointers,
-            max_txt_strings,
-            max_txt_bytes,
-            max_rejected_records,
-            max_evidence_frames: queue_limits.max_frames,
-            max_evidence_bytes: queue_limits.max_bytes,
-            max_undecoded,
-            max_duration: Duration::from_millis(max_duration_ms),
-        },
-    };
-    let policy = policy.into_policy();
-    policy.validate().map_err(CliError::classified)?;
-    validate_live_interface_selector("dns", interface.as_deref())?;
-
-    let registry = default_registry_arc()?;
-    let exchange = workflow_exchange_options(
-        client::send::Options {
-            destination: None,
-            plan: net::route::Options {
-                link_mode: link_mode.into(),
-                interface: None,
-                preferred_source: source,
-            },
-            build: packet::build::Options::default(),
-            allow_permissive_live: false,
-        },
-        request.timeout,
-        1,
-        queue_limits,
-    )?;
-
-    let mut executor = CliDnsExecutor {
-        registry: Arc::clone(&registry),
-        policy: policy.clone(),
-        exchange,
-        interface: DeferredInterface::new(interface),
-    };
-    let resolver = client::target::SystemResolver;
-    let mut authorizer = workflow::dns::PolicyAuthorizer::new(&policy, &resolver);
-    let mut clock = workflow::clock::SystemClock;
-    let result = workflow::dns::run(
-        &request,
-        &mut authorizer,
-        &registry,
-        &mut executor,
-        &mut clock,
-    )
-    .map_err(dns_cli_error)?;
-    let (result, diagnostics, stats) =
-        output::dns::Result::try_from_dns(result).map_err(CliError::classified)?;
-    match output {
-        output::contract::Format::Text => render_dns_text(result, diagnostics, stats),
-        output::contract::Format::Json => emit_json(
-            &output::envelope::Aggregate::success(
-                output::contract::Command::Dns,
-                result,
-                diagnostics,
-            )
-            .with_stats(stats),
-        ),
-        output::contract::Format::Ndjson => render_dns_stream(result, diagnostics, stats),
-        _ => Err(CliError::classified(
-            output::contract::Error::UnsupportedFormat {
-                command: output::contract::Command::Dns,
-                format: output,
-            },
-        )),
-    }
-}
-
-fn generated_dns_transaction_id() -> u16 {
-    let bytes = generated_dns_entropy().to_le_bytes();
-    u16::from_le_bytes([bytes[0], bytes[1]])
-}
-
-fn generated_dns_source_port() -> u16 {
-    const WIDTH: u16 = u16::MAX - workflow::dns::DNS_EPHEMERAL_SOURCE_PORT_BASE + 1;
-    let offset = u16::try_from(generated_dns_entropy() % u64::from(WIDTH))
-        .expect("ephemeral source-port offset is bounded to u16");
-    workflow::dns::DNS_EPHEMERAL_SOURCE_PORT_BASE + offset
-}
-
-fn generated_dns_entropy() -> u64 {
-    let time = SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let mut hasher = RandomState::new().build_hasher();
-    hasher.write_u128(time);
-    hasher.write_u32(std::process::id());
-    hasher.finish()
-}
-
-struct CliDnsExecutor {
-    registry: Arc<packet::registry::Registry>,
-    policy: client::policy::Policy,
-    exchange: client::exchange::Options,
-    interface: DeferredInterface,
-}
-
-impl workflow::dns::Executor for CliDnsExecutor {
-    fn execute(
-        &mut self,
-        exchange: &workflow::dns::Exchange,
-    ) -> Result<workflow::dns::Execution, workflow::BoundaryError> {
-        self.interface
-            .resolve_into(&mut self.exchange.send.plan)
-            .map_err(CliError::into_boundary_error)?;
-        let client = system_client(Arc::clone(&self.registry), self.policy.clone());
-        workflow::dns::ClientExecutor::new(&client, self.exchange.clone()).execute(exchange)
-    }
-}
-
-pub(crate) fn dns_cli_error(error: workflow::dns::Error) -> CliError {
-    let sequence = error.sequence();
-    CliError::classified_at_optional_sequence(error, sequence)
-}
-
-fn render_dns_text(
+pub(super) fn render_dns_text(
     result: output::dns::Result,
     diagnostics: Vec<packet::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -298,7 +122,7 @@ fn render_dns_record_text(
     ))
 }
 
-fn render_dns_stream(
+pub(super) fn render_dns_stream(
     result: output::dns::Result,
     diagnostics: Vec<packet::diagnostic::Diagnostic>,
     stats: output::envelope::Stats,
@@ -414,7 +238,7 @@ fn render_dns_stream(
     .map_err(|error| error.at_sequence(sequence))
 }
 
-fn dns_outcome_name(value: output::dns::Outcome) -> &'static str {
+pub(super) fn dns_outcome_name(value: output::dns::Outcome) -> &'static str {
     match value {
         output::dns::Outcome::Response => "response",
         output::dns::Outcome::Truncated => "truncated",

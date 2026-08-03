@@ -156,7 +156,7 @@ def _probe_namespace_and_veth(runner: CommandRunner) -> None:
             "network namespaces and veth pairs could not be created safely. "
             "The harness needs CAP_NET_ADMIN plus permission to create named "
             "network namespaces (normally root/CAP_SYS_ADMIN with /run/netns "
-            "mount access). Run `sudo -v` before scripts/test-native-e2e or "
+            "mount access). Run `sudo -v` before scripts/test-e2e or "
             f"grant equivalent capabilities. Probe failure: {failure}"
         ) from failure
 

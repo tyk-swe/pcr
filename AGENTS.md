@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Its ten packages live under `crates/`. Dependencies flow upward from `packetcraftr-core` through capture, packet, protocol, network, client, analysis, and workflow to the `packetcraftr` facade and `packetcraftr-cli`. Reassembly is owned by analysis, while render-neutral output models are owned by the facade. Keep this graph acyclic and run `scripts/check-workspace-architecture` after dependency changes.
+PacketcraftR is a Rust 2024 Cargo workspace for packet construction, dissection, capture I/O, and bounded diagnostics. Its ten packages live under `crates/`. Dependencies flow upward from `packetcraftr-core` through capture, packet, protocol, network, client, analysis, and workflow to the `packetcraftr` facade and `packetcraftr-cli`. Reassembly is owned by analysis, while render-neutral output models are owned by the facade. Keep this graph acyclic and run `scripts/check-arch` after dependency changes.
 
 The offline/live split is a dependency edge, not a convention. `packetcraftr-analysis` holds the offline capture pipeline and reassembly algorithms and must never depend on `packetcraftr-client` or `packetcraftr-net`; that absence is what guarantees it has no resolver, route, capture, or transmission seam to gate. Live probing lives in `packetcraftr-workflow`. Both use the bottom-layer budgets and errors in `packetcraftr-core`.
 
@@ -14,8 +14,8 @@ Place unit tests beside their modules. Integration tests live in `crates/packetc
 - `cargo run -p packetcraftr-cli -- --help`: run the CLI locally.
 - `cargo nextest run --locked`: run the default unit/integration test profile; also test `--no-default-features` and `--all-features` before release. Run matching `cargo test --doc` commands because nextest does not execute doctests.
 - `cargo fmt --all -- --check`: verify formatting.
-- `scripts/check-workspace-architecture`: enforce the exact normal internal dependency graph.
-- `scripts/check-source-conventions`: enforce repository source layout.
+- `scripts/check-arch`: enforce the exact normal internal dependency graph.
+- `scripts/check-conventions`: enforce repository source layout.
 - `cargo clippy --locked --all-targets --all-features -- -D warnings`: apply the CI lint gate.
 - `cargo fmt --manifest-path fuzz/Cargo.toml -- --check` and `cargo clippy --manifest-path fuzz/Cargo.toml --locked --all-targets -- -D warnings`: apply the same gates to the fuzz workspace, which the root `--all` flags do not reach.
 

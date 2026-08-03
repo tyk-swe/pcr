@@ -44,7 +44,7 @@ part of ordinary unprivileged `cargo nextest run`; its dedicated entry point
 fails when prerequisites or privileges are unavailable:
 
 ```console
-sudo -v && scripts/test-native-e2e
+sudo -v && scripts/test-e2e
 ```
 
 The harness builds the all-feature PacketcraftR binary once, then exercises

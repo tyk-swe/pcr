@@ -188,7 +188,7 @@ def binary_from_environment() -> Path:
     value = os.environ.get("PACKETCRAFTR_BIN")
     if not value:
         raise RuntimeError(
-            "PACKETCRAFTR_BIN is unset; use scripts/test-native-e2e so the "
+            "PACKETCRAFTR_BIN is unset; use scripts/test-e2e so the "
             "binary is built exactly once"
         )
     binary = Path(value).resolve()

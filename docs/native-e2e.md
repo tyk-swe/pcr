@@ -20,7 +20,7 @@ nor permits public DNS or external Internet access.
 Prime sudo's credential cache, then use the repository entry point:
 
 ```console
-sudo -v && scripts/test-native-e2e
+sudo -v && scripts/test-e2e
 ```
 
 The script uses non-interactive sudo only for namespace operations. Cargo runs
@@ -29,7 +29,7 @@ and exports its absolute path as `PACKETCRAFTR_BIN` to all later test cases.
 Running as root also works without sudo:
 
 ```console
-scripts/test-native-e2e
+scripts/test-e2e
 ```
 
 The dedicated command is strict. A missing tool, unsupported namespace
@@ -38,7 +38,7 @@ it never converts the run into a success or skip. Probe prerequisites alone
 with:
 
 ```console
-scripts/test-native-e2e --check-prerequisites
+scripts/test-e2e --check-prerequisites
 ```
 
 Ordinary unprivileged `cargo nextest run` does not discover this privileged
@@ -128,7 +128,7 @@ Audit this path by intentionally failing one native case:
 
 ```console
 PCR_NATIVE_E2E_ARTIFACT_DIR=/tmp/packetcraftr-native-e2e \
-  scripts/test-native-e2e --force-failure route-ipv4
+  scripts/test-e2e --force-failure route-ipv4
 ```
 
 That command must exit nonzero, print diagnostics, and still leave no generated
@@ -137,7 +137,7 @@ namespace, veth, fixture process, Unix socket, or temporary directory.
 ## Layout and extension points
 
 ```text
-scripts/test-native-e2e                 strict build-and-run entry point
+scripts/test-e2e                       strict build-and-run entry point
 tests/native_e2e/harness.py             lifecycle and result reporting
 tests/native_e2e/cases/route.py         IPv4/IPv6 route planning
 tests/native_e2e/cases/send.py          IPv4/IPv6 native Layer 3 sends
@@ -159,7 +159,7 @@ main CI workflow and is also directly available through **Run workflow** in
 GitHub Actions. It uses the known `ubuntu-24.04` runner; installs ethtool,
 iproute2, libpcap development files, Python jsonschema, and shellcheck; compiles
 the Python helpers; exercises direct, prefixed, and privileged process-tree
-timeout cleanup; then runs `scripts/test-native-e2e`.
+timeout cleanup; then runs `scripts/test-e2e`.
 
 The runner must provide passwordless non-interactive sudo and permission to
 create named network namespaces and veth pairs, change forwarding sysctls, and

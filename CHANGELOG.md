@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Renamed the repository entry-point scripts to shorter names:
+  `scripts/check-source-conventions` is now `scripts/check-conventions`,
+  `scripts/check-workspace-architecture` is now `scripts/check-arch`, and
+  `scripts/test-native-e2e` is now `scripts/test-e2e`. Behavior is unchanged;
+  documentation, CI workflows, and harness messages reference the new names.
 - Separate mixed protocol families and extract inline test modules across `packetcraftr-protocol` into dedicated modules (`ipv6::{options, fragment, srh}`, `capture::{bsd, sll}`, `tunnel::ipsec::{ah, esp}`).
 - **Breaking:** Consolidated the workspace from thirteen packages to ten.
   `packetcraftr-error` and `packetcraftr-budget` are now

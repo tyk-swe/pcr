@@ -147,7 +147,7 @@ The normal internal dependency graph is exact:
 | `packetcraftr` | core, capture, packet, protocol, net, client, analysis, workflow |
 | `packetcraftr-cli` | packetcraftr |
 
-`scripts/check-workspace-architecture` enforces this graph, including the
+`scripts/check-arch` enforces this graph, including the
 absence of any analysis path to the live client or network crates. `AGENTS.md`
 describes the layering and offline/live boundary.
 

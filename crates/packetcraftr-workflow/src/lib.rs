@@ -31,7 +31,7 @@ const fn nonzero_ipv4_identification(sequence: u64) -> u16 {
 
 pub use address_family::AddressFamily;
 pub use packetcraftr_client::Stats;
-pub use packetcraftr_error::BoundaryError;
+pub use packetcraftr_core::error::BoundaryError;
 
 #[cfg(test)]
 mod tests {

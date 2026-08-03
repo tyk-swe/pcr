@@ -29,7 +29,7 @@ use crate::{
     link::{LinkCapability, MacAddress},
     route::{InterfaceId, NativeRouteError, RouteDecision, RouteSelectionReason},
 };
-use packetcraftr_capture::LinkType;
+use packetcraftr_core::frame::LinkType;
 
 pub(super) async fn query_route(
     handle: Handle,

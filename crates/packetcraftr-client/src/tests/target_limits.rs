@@ -184,7 +184,7 @@ fn capture_queue_limits_fail_closed_at_zero_and_stable_maxima() {
         (
             "snap_length",
             CaptureQueueLimits {
-                snap_length: packetcraftr_capture::DEFAULT_SIZE_LIMIT + 1,
+                snap_length: packetcraftr_core::frame::DEFAULT_SIZE_LIMIT + 1,
                 ..CaptureQueueLimits::default()
             },
         ),

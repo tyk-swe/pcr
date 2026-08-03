@@ -13,9 +13,6 @@ workspace = true
 
 [dependencies]
 bytes.workspace = true
-packetcraftr-error.workspace = true
+packetcraftr-core.workspace = true
 serde.workspace = true
 thiserror.workspace = true
-
-[dev-dependencies]
-serde_json.workspace = true

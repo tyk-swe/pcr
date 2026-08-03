@@ -18,7 +18,7 @@ use packetcraftr_client::policy::Policy as TrafficPolicy;
 use packetcraftr_client::target::{
     Error as TargetResolutionError, Hostname, Resolver as HostnameResolver,
 };
-use packetcraftr_error::Classified;
+use packetcraftr_core::error::Classified;
 use packetcraftr_packet::semantics::BuiltinProtocol;
 use packetcraftr_protocol::builtin::registry as default_registry;
 use packetcraftr_protocol::icmp::{Icmpv4, Icmpv6};

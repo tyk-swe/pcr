@@ -4,7 +4,7 @@
 //! Exact Raw, Padding, Malformed, and unsupported-root materialization.
 
 use bytes::Bytes;
-use packetcraftr_capture::Frame;
+use packetcraftr_core::frame::Frame;
 
 use crate::{
     Packet,

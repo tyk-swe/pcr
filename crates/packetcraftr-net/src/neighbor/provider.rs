@@ -22,7 +22,7 @@ use crate::{
     },
     transmit::{IoSendReport, Layer2Frame, Layer2Io, SystemLayer2Io},
 };
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 
 use super::cache::{NeighborCacheEntry, NeighborCacheKey, NeighborExchangeOutcome};
 use super::options::{NeighborResolutionOptions, invalid_configuration};

@@ -18,9 +18,9 @@ use thiserror::Error;
 
 use super::clock::Clock;
 use super::evidence::EvidenceBudget;
-use packetcraftr_budget::{Deadline, DeadlineExceeded};
 use packetcraftr_capture::{Frame, LinkType};
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_net::{
     capture::{CaptureStatistics, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES},
     route::{NeighborResolver, RouteProvider},

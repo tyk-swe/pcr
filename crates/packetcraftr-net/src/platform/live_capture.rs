@@ -11,7 +11,7 @@ use std::time::{Instant, SystemTime};
 use bytes::Bytes;
 
 use crate::{Error as LiveIoError, route::InterfaceId};
-use packetcraftr_capture::LinkType;
+use packetcraftr_core::frame::LinkType;
 
 pub(super) use session::NativeCaptureSession;
 pub(super) use time::{monotonic_packet_time, system_time};
@@ -76,7 +76,7 @@ mod tests {
         CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CapturedFrame,
     };
     use bytes::Bytes;
-    use packetcraftr_capture::{Frame, LinkType};
+    use packetcraftr_core::frame::{Frame, LinkType};
 
     use super::{queue::SharedCapture, time::monotonic_time_for_age};
 

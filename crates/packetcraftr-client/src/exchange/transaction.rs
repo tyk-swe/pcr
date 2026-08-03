@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{CaptureOverflowPolicy, CaptureQueueLimits, CaptureSession, CaptureStatistics},

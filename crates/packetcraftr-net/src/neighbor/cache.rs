@@ -8,7 +8,7 @@ use crate::{
     link::MacAddress,
     route::{InterfaceId, NeighborRequest, NeighborVlanTag},
 };
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct NeighborCacheKey {

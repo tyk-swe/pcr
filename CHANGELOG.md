@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** Consolidated the workspace from thirteen packages to ten.
+  `packetcraftr-error` and `packetcraftr-budget` are now
+  `packetcraftr-core::{error,budget}`, shared frame types moved to
+  `packetcraftr-core::frame`, reassembly moved to
+  `packetcraftr-analysis::reassembly`, and render-neutral output models moved
+  into `packetcraftr::output`. Existing facade error, capture-frame,
+  reassembly, and output paths remain re-exported where specified; the removed
+  packages have no compatibility wrappers. Packet behavior, features, and
+  serialized output contracts are unchanged.
 - **Breaking:** Renamed the `packetcraftr-session` package and
   `packetcraftr_session` crate to `packetcraftr-reassembly` and
   `packetcraftr_reassembly`. The facade path is now

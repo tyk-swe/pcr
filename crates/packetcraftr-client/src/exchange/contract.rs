@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use packetcraftr_capture::Frame;
+use packetcraftr_core::frame::Frame;
 use packetcraftr_net::capture::{
     CaptureOverflowPolicy, DEFAULT_CAPTURE_QUEUE_BYTES, DEFAULT_CAPTURE_QUEUE_FRAMES,
 };

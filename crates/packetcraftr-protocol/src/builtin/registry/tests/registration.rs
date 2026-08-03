@@ -19,14 +19,14 @@ fn builtin_registration_is_deterministic_and_has_portable_roots() {
     assert_eq!(first_ids, second_ids);
     assert_eq!(
         first
-            .root_for_link_type(packetcraftr_capture::LinkType::ETHERNET.0)
+            .root_for_link_type(packetcraftr_core::frame::LinkType::ETHERNET.0)
             .unwrap()
             .as_str(),
         "ethernet"
     );
     assert_eq!(
         first
-            .root_for_link_type(packetcraftr_capture::LinkType::RAW.0)
+            .root_for_link_type(packetcraftr_core::frame::LinkType::RAW.0)
             .unwrap()
             .as_str(),
         "raw_ip"
@@ -210,9 +210,9 @@ fn generic_raw_link_root_selects_the_ip_version() {
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap()
         .bytes;
-    let frame = packetcraftr_capture::Frame::new(
+    let frame = packetcraftr_core::frame::Frame::new(
         std::time::SystemTime::UNIX_EPOCH,
-        packetcraftr_capture::LinkType::RAW,
+        packetcraftr_core::frame::LinkType::RAW,
         bytes,
     )
     .unwrap();
@@ -238,9 +238,9 @@ fn generic_raw_ipv6_root_continues_through_extensions() {
         .build(packet, BuildContext::default(), BuildOptions::default())
         .unwrap()
         .bytes;
-    let frame = packetcraftr_capture::Frame::new(
+    let frame = packetcraftr_core::frame::Frame::new(
         std::time::SystemTime::UNIX_EPOCH,
-        packetcraftr_capture::LinkType::RAW,
+        packetcraftr_core::frame::LinkType::RAW,
         bytes,
     )
     .unwrap();

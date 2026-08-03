@@ -7,8 +7,8 @@ use std::net::IpAddr;
 use serde::{Deserialize, Serialize};
 
 use crate::capture::CaptureStatistics;
-use packetcraftr_capture::{Frame, LinkType};
-use packetcraftr_error::{Classification, Kind};
+use packetcraftr_core::error::{Classification, Kind};
+use packetcraftr_core::frame::{Frame, LinkType};
 
 /// Maximum explicit VLAN headers copied into a neighbor-discovery request.
 pub(crate) const MAX_NEIGHBOR_VLAN_TAGS: usize = 8;

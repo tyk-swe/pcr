@@ -4,7 +4,7 @@
 use super::{BoundaryError, Classified, Duration, Error, Kind};
 // `scan` re-exports `ScanClassification as Classification`, so the shared
 // error taxonomy is aliased here to keep the two names unambiguous.
-use packetcraftr_error::Classification as ErrorClassification;
+use packetcraftr_core::error::Classification as ErrorClassification;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -106,7 +106,7 @@ impl Classified for ScanError {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_error::{BoundaryError, Classification, Classified, Kind};
+    use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 
     use super::ScanError;
     use std::time::Duration;

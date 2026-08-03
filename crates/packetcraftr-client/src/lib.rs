@@ -30,7 +30,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 use packetcraftr_net::{
     Error as LiveIoError,
     capture::{CaptureProvider, CaptureStatistics},

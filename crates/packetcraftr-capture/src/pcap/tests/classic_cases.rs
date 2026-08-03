@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use super::*;
+use crate::FrameError;
 
 #[test]
 fn classic_pcap_round_trip_preserves_full_record() {
@@ -178,10 +179,10 @@ fn classic_pcap_reads_big_endian_nanosecond_records_and_rejects_bad_lengths() {
     let mut reader = Reader::new(Cursor::new(invalid)).unwrap();
     assert!(matches!(
         reader.next_frame(),
-        Err(Error::OriginalLengthTooSmall {
+        Err(Error::Frame(FrameError::OriginalLengthTooSmall {
             captured: 5,
             original: 3
-        })
+        }))
     ));
 }
 

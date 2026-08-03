@@ -313,7 +313,7 @@ mod tests {
         link::LinkCapability,
         route::InterfaceId,
     };
-    use packetcraftr_capture::LinkType;
+    use packetcraftr_core::frame::LinkType;
     use std::net::{IpAddr, Ipv4Addr};
 
     fn interface() -> InterfaceInfo {

@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 
 use super::models::{InterfaceId, RouteDecision, RouteProvider};
 
@@ -127,7 +127,7 @@ impl Classified for NativeRouteError {
 
 #[cfg(test)]
 mod tests {
-    use packetcraftr_error::{Classified, Kind};
+    use packetcraftr_core::error::{Classified, Kind};
 
     use super::NativeRouteError;
 

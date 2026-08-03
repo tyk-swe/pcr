@@ -60,7 +60,7 @@ pub struct Info {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mtu: Option<u32>,
     pub capability: LinkCapability,
-    pub link_type: packetcraftr_capture::LinkType,
+    pub link_type: packetcraftr_core::frame::LinkType,
 }
 
 /// Enumerates interfaces without exposing a native handle or wrapper type.

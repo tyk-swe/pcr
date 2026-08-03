@@ -10,7 +10,7 @@ use super::super::{
     link::{LinkCapability, MacAddress},
     route::InterfaceId,
 };
-use packetcraftr_capture::LinkType;
+use packetcraftr_core::frame::LinkType;
 
 pub(super) fn interfaces() -> Vec<InterfaceInfo> {
     pnet_datalink::interfaces()

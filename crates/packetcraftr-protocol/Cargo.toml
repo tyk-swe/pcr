@@ -13,6 +13,6 @@ workspace = true
 
 [dependencies]
 bytes.workspace = true
-packetcraftr-capture.workspace = true
+packetcraftr-core.workspace = true
 packetcraftr-packet.workspace = true
 serde.workspace = true

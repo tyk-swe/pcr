@@ -14,10 +14,10 @@
 //!
 //! # Domain map
 //!
-//! Each domain is an independently compiled crate in the `packetcraftr`
-//! workspace; this crate re-exports all ten under their canonical names, so
-//! `packetcraftr::packet` and `packetcraftr_packet` name the same items.
-//! Depend on the individual crates instead to compile only part of the stack.
+//! The workspace's domains are independently compiled where their dependency
+//! boundaries require it. This facade also owns the render-neutral [`output`]
+//! module and re-exports analysis reassembly at [`reassembly`]. Depend on an
+//! individual domain crate to compile only part of the stack.
 //!
 //! The ten canonical domains are:
 //!
@@ -25,7 +25,7 @@
 //!   and stream reassembly;
 //! - [`capture`] reads and writes bounded classic PCAP and PCAPNG streams;
 //! - [`client`] plans and executes policy-gated send and exchange operations;
-//! - [`error`] provides the shared classified error vocabulary;
+//! - [`core`] provides shared errors, budgets, and frame types;
 //! - [`net`] defines interfaces, routes, providers, and native I/O boundaries;
 //! - [`output`] defines render-neutral output models and versioned envelopes;
 //! - [`packet`] owns layers, documents, registries, exact building, and bounded
@@ -66,12 +66,14 @@
 #![forbid(unsafe_code)]
 
 pub use packetcraftr_analysis as analysis;
+pub use packetcraftr_analysis::reassembly;
 pub use packetcraftr_capture as capture;
 pub use packetcraftr_client as client;
-pub use packetcraftr_error as error;
+pub use packetcraftr_core as core;
+pub use packetcraftr_core::error;
 pub use packetcraftr_net as net;
-pub use packetcraftr_output as output;
 pub use packetcraftr_packet as packet;
 pub use packetcraftr_protocol as protocol;
-pub use packetcraftr_reassembly as reassembly;
 pub use packetcraftr_workflow as workflow;
+
+pub mod output;

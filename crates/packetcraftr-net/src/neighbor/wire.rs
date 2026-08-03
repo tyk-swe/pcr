@@ -11,7 +11,7 @@ use crate::{
         MAX_NEIGHBOR_VLAN_TAGS, NeighborError, NeighborRequest, NeighborVlanKind, NeighborVlanTag,
     },
 };
-use packetcraftr_capture::{Frame, LinkType};
+use packetcraftr_core::frame::{Frame, LinkType};
 
 pub(super) const ETHERNET_HEADER_LENGTH: usize = 14;
 pub(super) const ETHERNET_MINIMUM_WITHOUT_FCS: usize = 60;

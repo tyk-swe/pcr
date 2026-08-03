@@ -87,7 +87,7 @@ impl<R: RouteProvider> RouteProvider for ExchangeRouteProvider<'_, R> {
         self.get_or_lookup(key, || self.inner.lookup_interface(interface))
     }
 
-    fn classify_error(&self, error: &Self::Error) -> packetcraftr_error::Classification {
+    fn classify_error(&self, error: &Self::Error) -> packetcraftr_core::error::Classification {
         self.inner.classify_error(error)
     }
 }

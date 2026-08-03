@@ -547,7 +547,7 @@ mod tests {
         builtin::registry as default_registry,
         network::{Ipv4, Ipv6},
     };
-    use packetcraftr_capture::{Frame, LinkType};
+    use packetcraftr_core::frame::{Frame, LinkType};
     use packetcraftr_packet::layer::Raw;
     use packetcraftr_packet::{
         Packet,

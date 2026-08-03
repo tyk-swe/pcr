@@ -5,7 +5,7 @@
 //!
 //! This crate owns the read → dissect → index → filter → dispatch loop the
 //! offline analysis commands share, and the adapters that map decoded layers
-//! onto the reassembly crate's reassembly inputs. Everything here is offline by
+//! onto the independent reassembly module's inputs. Everything here is offline by
 //! design: there is no resolver, route, capture, or transmission seam, so
 //! analysis needs no authorization gates and runs in every build profile.
 //!
@@ -28,11 +28,15 @@ use std::time::Duration;
 use bytes::Bytes;
 use thiserror::Error;
 
-use packetcraftr_budget::Deadline;
+use crate::reassembly::Limits as TcpReassemblyLimits;
+use crate::reassembly::tcp::{
+    Error as ReassemblyTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
+};
 use packetcraftr_capture::{
     DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Reader,
 };
-use packetcraftr_error::{BoundaryError, Classification, Classified, Kind};
+use packetcraftr_core::budget::Deadline;
+use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
 use packetcraftr_packet::decode::{
     DecodedPacket, Decoder, Error as DecodeError, Options as DecodeOptions,
 };
@@ -40,16 +44,13 @@ use packetcraftr_packet::filter::{Context as FilterContext, Filter};
 use packetcraftr_packet::{Packet, layer::Padding, registry::ProtocolRegistry};
 use packetcraftr_protocol::network::{Ipv4, Ipv6};
 use packetcraftr_protocol::transport::{Tcp, Udp};
-use packetcraftr_reassembly::Limits as TcpReassemblyLimits;
-use packetcraftr_reassembly::tcp::{
-    Error as ReassemblyTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
-};
 
 mod conversation_index;
 mod error;
 pub mod expert;
 pub mod follow;
 mod pipeline;
+pub mod reassembly;
 pub mod stats;
 #[cfg(test)]
 mod tests;

@@ -28,7 +28,7 @@ use crate::{
     link::{LinkCapability, MacAddress},
     route::{InterfaceId, NativeRouteError},
 };
-use packetcraftr_capture::LinkType;
+use packetcraftr_core::frame::LinkType;
 
 #[derive(Clone)]
 pub(super) struct WindowsAdapter {

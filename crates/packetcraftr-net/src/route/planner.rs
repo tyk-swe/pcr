@@ -5,7 +5,7 @@ use std::net::IpAddr;
 
 use thiserror::Error;
 
-use packetcraftr_error::{Classification, Classified, Kind};
+use packetcraftr_core::error::{Classification, Classified, Kind};
 use packetcraftr_packet::{
     Packet,
     field::FieldValue,

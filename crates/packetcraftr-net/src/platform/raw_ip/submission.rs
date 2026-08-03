@@ -22,11 +22,9 @@ use windows::Win32::Networking::WinSock::{
     SOCKET, SOCKET_ERROR, WSAGetLastError, setsockopt,
 };
 
-use super::{
-    super::super::Error as LiveIoError,
-    super::InterfaceId,
-    preparation::{IpFamily, PreparedRawIp},
-};
+use super::preparation::{IpFamily, PreparedRawIp};
+use crate::Error as LiveIoError;
+use crate::route::InterfaceId;
 
 const IPPROTO_RAW: i32 = 255;
 

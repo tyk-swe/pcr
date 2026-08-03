@@ -1,32 +1,32 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-use std::collections::HashMap;
-use std::net::IpAddr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
 use crate::{
-    Error as LiveIoError,
     capture::{
         CaptureOverflowPolicy, CaptureProvider, CaptureQueueLimits, CaptureSession,
         CaptureStatistics, CapturedFrame, SystemCaptureProvider,
     },
     link::{LinkCapability, LinkMode, MacAddress},
     route::{
-        DestinationScope, InterfaceId, MAX_NEIGHBOR_VLAN_TAGS, MaterializedRoute, NeighborError,
-        NeighborRequest, NeighborResolution, NeighborResolver, PlannedRoute, RouteDecision,
-        RouteSelectionReason,
+        DestinationScope, MaterializedRoute, NeighborError, NeighborRequest, NeighborResolution,
+        NeighborResolver, PlannedRoute, RouteDecision, RouteSelectionReason,
     },
-    transmit::{IoSendReport, Layer2Frame, Layer2Io, SystemLayer2Io},
+    transmit::{Layer2Frame, Layer2Io, SystemLayer2Io},
 };
-use packetcraftr_core::frame::{Frame, LinkType};
 
-use super::cache::{NeighborCacheEntry, NeighborCacheKey, NeighborExchangeOutcome};
-use super::options::{NeighborResolutionOptions, invalid_configuration};
-use super::wire::{build_request_frame, is_unicast_mac, match_neighbor_response};
+use super::cache::{NeighborCache, NeighborCacheKey, NeighborExchangeOutcome};
+use super::error::{invalid_configuration, map_io_error};
+use super::evidence::{
+    retain_evidence, retain_matching_evidence, validate_captured_frame, validate_request,
+    validate_send_report,
+};
+use super::options::NeighborResolutionOptions;
+use super::wire::{build_request_frame, match_neighbor_response};
 
 /// Injectable active resolver. Production composition uses the `System*`
 /// providers; tests and applications can supply deterministic providers.
@@ -35,7 +35,7 @@ pub struct ActiveNeighborResolver<L, C> {
     layer2: L,
     capture: C,
     options: NeighborResolutionOptions,
-    cache: Arc<Mutex<HashMap<NeighborCacheKey, NeighborCacheEntry>>>,
+    cache: Arc<NeighborCache>,
 }
 
 impl<L, C> Clone for ActiveNeighborResolver<L, C>
@@ -63,7 +63,7 @@ impl<L, C> ActiveNeighborResolver<L, C> {
             layer2,
             capture,
             options: options.validate()?,
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(NeighborCache::new()),
         })
     }
 }
@@ -109,7 +109,7 @@ where
     ) -> Result<NeighborResolution, NeighborError> {
         validate_request(request)?;
         let cache_key = NeighborCacheKey::from(request);
-        if let Some(mac_address) = self.cached(&cache_key)? {
+        if let Some(mac_address) = self.cache.get(&cache_key)? {
             return Ok(NeighborResolution {
                 mac_address,
                 attempts: 0,
@@ -181,7 +181,7 @@ where
                 capture_statistics: validated_statistics,
             });
         };
-        self.cache(mac_address, cache_key)?;
+        self.cache.insert(mac_address, cache_key, &self.options)?;
         Ok(NeighborResolution {
             mac_address,
             attempts: outcome.attempts,
@@ -300,102 +300,6 @@ where
             evidence_truncated,
         })
     }
-
-    fn cached(&self, key: &NeighborCacheKey) -> Result<Option<MacAddress>, NeighborError> {
-        let now = Instant::now();
-        let mut cache = self.cache.lock().map_err(|_| NeighborError::State {
-            message: "neighbor cache mutex was poisoned".to_owned(),
-        })?;
-        cache.retain(|_, entry| entry.expires_at > now);
-        Ok(cache.get(key).map(|entry| entry.mac_address))
-    }
-
-    fn cache(&self, mac_address: MacAddress, key: NeighborCacheKey) -> Result<(), NeighborError> {
-        let now = Instant::now();
-        let expires_at = now
-            .checked_add(self.options.cache_ttl)
-            .ok_or_else(|| invalid_configuration("cache deadline overflowed".to_owned()))?;
-        let mut cache = self.cache.lock().map_err(|_| NeighborError::State {
-            message: "neighbor cache mutex was poisoned".to_owned(),
-        })?;
-        cache.retain(|_, entry| entry.expires_at > now);
-        if !cache.contains_key(&key)
-            && cache.len() >= self.options.max_cache_entries
-            && let Some(oldest) = cache
-                .iter()
-                .min_by_key(|(_, entry)| entry.inserted_at)
-                .map(|(key, _)| key.clone())
-        {
-            cache.remove(&oldest);
-        }
-        cache.insert(
-            key,
-            NeighborCacheEntry {
-                mac_address,
-                inserted_at: now,
-                expires_at,
-            },
-        );
-        Ok(())
-    }
-}
-
-fn validate_request(request: &NeighborRequest) -> Result<(), NeighborError> {
-    if request.interface_source.is_ipv4() != request.target.is_ipv4() {
-        return Err(NeighborError::InvalidRequest {
-            message: format!(
-                "source {} and target {} use different address families",
-                request.interface_source, request.target
-            ),
-        });
-    }
-    if request.interface_source.is_unspecified() || request.interface_source.is_multicast() {
-        return Err(NeighborError::InvalidRequest {
-            message: format!(
-                "interface source {} is not a usable unicast address",
-                request.interface_source
-            ),
-        });
-    }
-    if request.target.is_unspecified() || request.target.is_multicast() {
-        return Err(NeighborError::InvalidRequest {
-            message: format!("target {} is not a unicast neighbor", request.target),
-        });
-    }
-    if request.link_type != LinkType::ETHERNET {
-        return Err(NeighborError::InvalidRequest {
-            message: format!(
-                "link type {} does not support Ethernet ARP/NDP",
-                request.link_type.0
-            ),
-        });
-    }
-    if !is_unicast_mac(request.interface_mac) {
-        return Err(NeighborError::InvalidRequest {
-            message: format!(
-                "interface MAC {} is not an individual unicast address",
-                request.interface_mac
-            ),
-        });
-    }
-    if request.mtu == 0 {
-        return Err(NeighborError::InvalidRequest {
-            message: "interface MTU is zero".to_owned(),
-        });
-    }
-    if request.vlan_tags.len() > MAX_NEIGHBOR_VLAN_TAGS {
-        return Err(NeighborError::InvalidRequest {
-            message: format!("VLAN stack exceeds {MAX_NEIGHBOR_VLAN_TAGS} discovery tags"),
-        });
-    }
-    for tag in &request.vlan_tags {
-        if tag.priority > 7 || tag.vlan_id > 4095 {
-            return Err(NeighborError::InvalidRequest {
-                message: "VLAN priority or identifier is outside its wire range".to_owned(),
-            });
-        }
-    }
-    Ok(())
 }
 
 fn discovery_route(request: &NeighborRequest, destination_mac: MacAddress) -> PlannedRoute {
@@ -423,107 +327,5 @@ fn discovery_route(request: &NeighborRequest, destination_mac: MacAddress) -> Pl
         source_mac: Some(request.interface_mac),
         neighbor_vlan_tags: request.vlan_tags.clone(),
         synthesized_ethernet: false,
-    }
-}
-
-fn retain_evidence(
-    frame: Frame,
-    options: &NeighborResolutionOptions,
-    captured: &mut Vec<Frame>,
-    captured_bytes: &mut usize,
-    truncated: &mut bool,
-) {
-    if captured.len() >= options.max_capture_queue_frames
-        || *captured_bytes + frame.bytes().len() > options.max_captured_bytes
-    {
-        *truncated = true;
-        return;
-    }
-    *captured_bytes += frame.bytes().len();
-    captured.push(frame);
-}
-
-fn retain_matching_evidence(
-    frame: Frame,
-    options: &NeighborResolutionOptions,
-    captured: &mut Vec<Frame>,
-    captured_bytes: &mut usize,
-    truncated: &mut bool,
-) {
-    let frame_length = frame.bytes().len();
-    while captured.len() >= options.max_capture_queue_frames
-        || *captured_bytes + frame_length > options.max_captured_bytes
-    {
-        let discarded = captured.remove(0);
-        *captured_bytes -= discarded.bytes().len();
-        *truncated = true;
-    }
-    *captured_bytes += frame_length;
-    captured.push(frame);
-}
-
-fn validate_captured_frame(
-    request: &NeighborRequest,
-    frame: &Frame,
-    snap_length: usize,
-) -> Result<(), NeighborError> {
-    if frame.bytes().len() > snap_length {
-        return Err(resolution_error(
-            &request.interface,
-            request.target,
-            format!(
-                "capture returned {} bytes beyond the configured {snap_length}-byte snap length",
-                frame.bytes().len()
-            ),
-        ));
-    }
-    Ok(())
-}
-
-fn validate_send_report(
-    request: &NeighborRequest,
-    expected: &Bytes,
-    report: IoSendReport,
-) -> Result<(), NeighborError> {
-    if report.bytes_sent != expected.len() {
-        return Err(map_io_error(
-            request,
-            "sending discovery request",
-            LiveIoError::PartialSend {
-                expected: expected.len(),
-                actual: report.bytes_sent,
-            },
-        ));
-    }
-    if report.wire_bytes != *expected {
-        return Err(map_io_error(
-            request,
-            "validating discovery send evidence",
-            LiveIoError::InvalidSendEvidence {
-                message: "discovery wire bytes differ from the exact submitted frame".to_owned(),
-            },
-        ));
-    }
-    Ok(())
-}
-
-fn resolution_error(interface: &InterfaceId, target: IpAddr, message: String) -> NeighborError {
-    NeighborError::Resolution {
-        interface: interface.name.clone(),
-        target,
-        message,
-    }
-}
-
-fn map_io_error(
-    request: &NeighborRequest,
-    operation: &'static str,
-    error: LiveIoError,
-) -> NeighborError {
-    NeighborError::Io {
-        interface: request.interface.name.clone(),
-        target: request.target,
-        operation,
-        source: error,
     }
 }

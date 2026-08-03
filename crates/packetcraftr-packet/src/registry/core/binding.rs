@@ -9,7 +9,7 @@ pub struct Discriminator(pub u64);
 /// How one display-filter path resolves onto reflective layer fields.
 ///
 /// Canonical `<protocol>.<field>` paths need no binding: the filter compiler
-/// resolves them directly against [`ProtocolRegistry::schema`]. Bindings exist
+/// resolves them directly against [`crate::registry::ProtocolRegistry::schema`]. Bindings exist
 /// so a protocol can additionally publish the conventional spellings operators
 /// already type, and so a packed field can be addressed one flag at a time.
 #[derive(Clone, Debug, PartialEq, Eq)]

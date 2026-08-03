@@ -18,7 +18,7 @@ use windows::Win32::Networking::WinSock::AF_UNSPEC;
 use super::adapter::{BufferBounds, WindowsAdapter, parse_adapters};
 use crate::{interface::InterfaceInfo, route::NativeRouteError};
 
-pub(super) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
+pub(in crate::platform) fn interfaces() -> Result<Vec<InterfaceInfo>, NativeRouteError> {
     Ok(adapter_snapshots()?
         .into_iter()
         .map(|adapter| adapter.interface)

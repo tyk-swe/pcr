@@ -78,10 +78,29 @@ mod clock_tests {
     #[test]
     fn capture_clock_rejects_unrepresentable_offsets_instead_of_freezing() {
         let mut clock = CaptureClock::new();
+        let mut low = 0_u64;
+        let mut high = u64::MAX;
+        while low < high {
+            let distance = high - low;
+            let midpoint = low + distance / 2 + distance % 2;
+            if clock
+                .base
+                .checked_add(Duration::from_secs(midpoint))
+                .is_some()
+            {
+                low = midpoint;
+            } else {
+                high = midpoint - 1;
+            }
+        }
+        clock.base = clock
+            .base
+            .checked_add(Duration::from_secs(low))
+            .expect("the search retains only representable instants");
         clock.origin = Some(UNIX_EPOCH);
         let far_future = UNIX_EPOCH
-            .checked_add(Duration::from_secs(u64::try_from(i64::MAX).unwrap()))
-            .unwrap();
+            .checked_add(Duration::from_secs(1))
+            .expect("one second after the Unix epoch is portable");
 
         assert!(matches!(
             clock.at(far_future, 7),

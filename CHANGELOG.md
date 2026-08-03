@@ -68,6 +68,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Restored all-feature macOS and Windows native-route builds after the platform
+  module split, made the offline capture-clock overflow regression portable to
+  Windows, and repaired the registry schema documentation link.
 - Tightened output validation to reject malformed IP addresses and DNS records
   containing fields from a different record type. IP-address rejection requires
   JSON Schema `format` assertions, which the bundled validators now enable.

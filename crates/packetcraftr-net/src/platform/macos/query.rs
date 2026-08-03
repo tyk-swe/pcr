@@ -24,7 +24,7 @@ use crate::{
 
 static ROUTE_SEQUENCE: AtomicI32 = AtomicI32::new(1);
 
-pub(super) fn route(
+pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
@@ -104,7 +104,9 @@ pub(super) fn route(
     )
 }
 
-pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, NativeRouteError> {
+pub(in crate::platform) fn interface_route(
+    requested: &InterfaceId,
+) -> Result<RouteDecision, NativeRouteError> {
     interface_decision(find_interface(interfaces()?, requested)?)
 }
 

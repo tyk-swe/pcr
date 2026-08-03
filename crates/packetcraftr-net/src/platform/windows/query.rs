@@ -10,7 +10,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use windows::Win32::Foundation::{
     ERROR_ADDRESS_NOT_ASSOCIATED, ERROR_HOST_UNREACHABLE, ERROR_NETWORK_UNREACHABLE, ERROR_NO_DATA,
-    ERROR_NOT_FOUND, NO_ERROR, WIN32_ERROR,
+    ERROR_NOT_FOUND, NO_ERROR,
 };
 use windows::Win32::NetworkManagement::IpHelper::{GetBestRoute2, MIB_IPFORWARD_ROW2};
 use windows::Win32::NetworkManagement::Ndis::NET_LUID_LH;
@@ -27,7 +27,7 @@ use crate::platform::{
 use crate::route::InterfaceId;
 use crate::route::{NativeRouteError, RouteDecision, RouteSelectionReason};
 
-pub(super) fn route(
+pub(in crate::platform) fn route(
     destination: IpAddr,
     interface_hint: Option<&InterfaceId>,
     preferred_source: Option<IpAddr>,
@@ -101,7 +101,7 @@ pub(super) fn route(
         ) {
             return Err(NativeRouteError::RouteNotFound { destination });
         }
-        return Err(win32_error("GetBestRoute2", WIN32_ERROR(result)));
+        return Err(win32_error("GetBestRoute2", result));
     }
 
     let selected_address =
@@ -162,7 +162,9 @@ pub(super) fn route(
     )
 }
 
-pub(super) fn interface_route(requested: &InterfaceId) -> Result<RouteDecision, NativeRouteError> {
+pub(in crate::platform) fn interface_route(
+    requested: &InterfaceId,
+) -> Result<RouteDecision, NativeRouteError> {
     let adapters = adapter_snapshots()?;
     interface_decision(find_windows_adapter(&adapters, requested)?.interface)
 }

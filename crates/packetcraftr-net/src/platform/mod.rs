@@ -49,10 +49,7 @@ mod unsupported;
 #[cfg(all(windows, any(feature = "native-interfaces", feature = "native-route")))]
 mod windows;
 
-#[cfg(all(
-    feature = "native-route",
-    any(target_os = "linux", target_os = "macos")
-))]
+#[cfg(all(feature = "native-route", target_os = "linux"))]
 pub(crate) use super::route::find_interface;
 #[cfg(all(
     feature = "native-route",

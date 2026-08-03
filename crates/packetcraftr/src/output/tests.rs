@@ -7,10 +7,17 @@ use std::time::{Duration, UNIX_EPOCH};
 use bytes::Bytes;
 
 use packetcraftr_capture::Frame;
+use packetcraftr_client::{
+    Stats as ClientStats,
+    exchange::{Response as ExchangeResponse, Result as ExchangeResult},
+};
 use packetcraftr_core::error::Classified;
 use packetcraftr_net::{
     interface::{Flags as InterfaceFlags, Id as InterfaceId, Info as InterfaceInfo},
     link::Capability as LinkCapability,
+};
+use packetcraftr_packet::{
+    Packet, build::BuiltPacket, decode::DecodedPacket, layout::PacketLayout,
 };
 use packetcraftr_workflow::{
     Stats as WorkflowStats,
@@ -39,6 +46,7 @@ use super::dns::{
     AttemptStatus as DnsAttemptStatus, RecordData as DnsRecordData, Result as DnsCommandResult,
 };
 use super::envelope::{Aggregate as AggregateOutput, Stream as StreamRecord};
+use super::exchange::Result as ExchangeCommandResult;
 use super::frame::{Captured as FrameOutput, Timestamp as OutputTimestamp};
 use super::fuzz::Outcome as FuzzCaseOutcome;
 use super::interfaces::Result as InterfacesCommandResult;
@@ -274,6 +282,66 @@ fn frame_results_preserve_capture_fields() {
     assert_eq!(output.captured_length, 1);
     assert_eq!(output.original_length, 1);
     assert_eq!(output.bytes(), &[0]);
+}
+
+#[test]
+fn exchange_output_preserves_every_evidence_family_and_operation_stats() {
+    let captured = |bytes: &'static [u8]| {
+        Frame::new(
+            UNIX_EPOCH + Duration::from_secs(7),
+            packetcraftr_capture::LinkType::RAW,
+            bytes.to_vec(),
+        )
+        .unwrap()
+    };
+    let decoded = |bytes: &'static [u8]| DecodedPacket {
+        packet: Packet::new(),
+        original: Bytes::from_static(bytes),
+        frame: captured(bytes),
+        layout: PacketLayout::default(),
+        diagnostics: Vec::new(),
+    };
+    let result = ExchangeResult {
+        sent: vec![BuiltPacket {
+            bytes: Bytes::from_static(b"request"),
+            packet: Packet::new(),
+            layout: PacketLayout::default(),
+            diagnostics: Vec::new(),
+            requires_live_opt_in: false,
+        }],
+        sent_evidence: vec![captured(b"request")],
+        responses: vec![ExchangeResponse {
+            request_index: 0,
+            response: decoded(b"response"),
+            latency: Duration::from_millis(4),
+        }],
+        unanswered: vec![2],
+        unsolicited: vec![decoded(b"unsolicited")],
+        undecoded: vec![captured(b"undecoded")],
+        diagnostics: Vec::new(),
+        stats: ClientStats {
+            packets_attempted: 2,
+            packets_completed: 1,
+            bytes: 23,
+            elapsed: Duration::from_millis(9),
+            capture: packetcraftr_net::capture::Statistics::default(),
+        },
+    };
+
+    let (output, diagnostics, stats) = ExchangeCommandResult::try_from_exchange(result).unwrap();
+
+    assert!(diagnostics.is_empty());
+    assert_eq!(output.sent[0].bytes(), b"request");
+    assert_eq!(output.responses[0].request_index, 0);
+    assert_eq!(output.responses[0].response.frame.bytes(), b"response");
+    assert_eq!(output.responses[0].latency, Duration::from_millis(4));
+    assert_eq!(output.unanswered, [2]);
+    assert_eq!(output.unsolicited[0].frame.bytes(), b"unsolicited");
+    assert_eq!(output.undecoded[0].bytes(), b"undecoded");
+    assert_eq!(stats.packets_attempted, 2);
+    assert_eq!(stats.packets_completed, 1);
+    assert_eq!(stats.bytes, 23);
+    assert_eq!(stats.elapsed, Duration::from_millis(9));
 }
 
 #[test]

@@ -5,9 +5,13 @@
 
 use bytes::Bytes;
 
-use super::conversation_index::{transport_payload, transports};
-use super::expert::StreamTransport;
-use super::{FlowKey, FrameRecord, Tcp, TcpEvent};
+use crate::adapter::{transport_payload, transports};
+use crate::expert::StreamTransport;
+use crate::pipeline::FrameRecord;
+use crate::reassembly::tcp::{Event as TcpEvent, FlowKey};
+
+mod dedup;
+use dedup::Deduplicator;
 
 /// Which conversation to follow, in the same vocabulary the `tcp.stream`
 /// and `udp.stream` display filters use.
@@ -69,23 +73,7 @@ pub struct FollowSummary {
 pub struct FollowCollector {
     selector: Selector,
     summary: FollowSummary,
-    /// Sequence one past the last byte delivered per direction. The
-    /// reassembler delivers exactly once within a generation, but it forgets
-    /// a cleanly closed flow, so a retransmitted closing segment re-delivers
-    /// from a fresh generation; this edge is what keeps extraction
-    /// exactly-once across that seam.
-    client_delivered: Option<u32>,
-    server_delivered: Option<u32>,
-    /// Base each direction's latest SYN implied, distinguishing a
-    /// retransmitted handshake — which must keep the delivery edges — from
-    /// tuple reuse, which must not inherit them.
-    client_syn_base: Option<u32>,
-    server_syn_base: Option<u32>,
-    /// Whether each direction closed cleanly. A SYN after a close is a new
-    /// connection even when it lands on the recorded base, so the delivery
-    /// edges must not survive it.
-    client_closed: bool,
-    server_closed: bool,
+    dedup: Deduplicator,
 }
 
 impl FollowCollector {
@@ -93,12 +81,7 @@ impl FollowCollector {
         Self {
             selector,
             summary: FollowSummary::default(),
-            client_delivered: None,
-            server_delivered: None,
-            client_syn_base: None,
-            server_syn_base: None,
-            client_closed: false,
-            server_closed: false,
+            dedup: Deduplicator::new(),
         }
     }
 
@@ -155,12 +138,7 @@ impl FollowCollector {
                     TcpEvent::Closed { flow, reset: false }
                         if *flow == client || *flow == client.reverse() =>
                     {
-                        let closed = if *flow == client {
-                            &mut self.client_closed
-                        } else {
-                            &mut self.server_closed
-                        };
-                        *closed = true;
+                        self.dedup.mark_closed(flow, &client);
                     }
                     _ => {}
                 }
@@ -177,36 +155,9 @@ impl FollowCollector {
             .client_flow
             .get_or_insert_with(|| flow.clone())
             .clone();
-        // A SYN that opens a new generation invalidates the delivery edges,
-        // whose only purpose is to bridge re-delivery seams within one
-        // connection. A new generation is proven by a changed base, by a
-        // clean close of the direction, or by the eviction this very SYN
-        // triggered; a retransmitted handshake SYN proves none of those and
-        // keeps the edges, as does an eviction on a non-SYN frame — a reset
-        // or expiry — whose delayed duplicates the edges still catch.
-        if tcp.flags & Tcp::SYN != 0 {
-            let first = tcp.sequence.wrapping_add(1);
-            let (recorded, closed, evicted) = if flow == client {
-                (
-                    &mut self.client_syn_base,
-                    self.client_closed,
-                    client_evicted,
-                )
-            } else {
-                (
-                    &mut self.server_syn_base,
-                    self.server_closed,
-                    server_evicted,
-                )
-            };
-            if *recorded != Some(first) || closed || evicted {
-                *recorded = Some(first);
-                self.client_delivered = None;
-                self.server_delivered = None;
-                self.client_closed = false;
-                self.server_closed = false;
-            }
-        }
+
+        self.dedup
+            .observe_syn(&flow, &client, tcp, client_evicted, server_evicted);
         self.summary.frames += 1;
         let mut chunks = Vec::new();
         for event in record.tcp_events {
@@ -226,7 +177,7 @@ impl FollowCollector {
                 if bytes.is_empty() {
                     continue;
                 }
-                let Some(bytes) = self.deduplicate(direction, *sequence, bytes) else {
+                let Some(bytes) = self.dedup.deduplicate(direction, *sequence, bytes) else {
                     continue;
                 };
                 self.tally(direction, bytes.len());
@@ -238,42 +189,6 @@ impl FollowCollector {
             }
         }
         chunks
-    }
-
-    /// Trims a delivery against the direction's delivered edge.
-    ///
-    /// Within one reassembler generation deliveries never overlap, but a
-    /// segment retransmitted after its flow closed cleanly re-delivers from
-    /// a fresh generation; bytes at or before the edge are dropped and the
-    /// edge advances over what remains.
-    fn deduplicate(&mut self, direction: Direction, sequence: u32, bytes: &Bytes) -> Option<Bytes> {
-        let delivered = match direction {
-            Direction::ClientToServer => &mut self.client_delivered,
-            Direction::ServerToClient => &mut self.server_delivered,
-        };
-        let end = sequence.wrapping_add(u32::try_from(bytes.len()).unwrap_or(u32::MAX));
-        let bytes = match *delivered {
-            Some(edge) => {
-                let overlap = edge.wrapping_sub(sequence);
-                if overlap == 0 || overlap >= 0x8000_0000 {
-                    // Starts at or past the edge: nothing already delivered.
-                    bytes.clone()
-                } else if end.wrapping_sub(edge) >= 0x8000_0000 || end == edge {
-                    // Ends at or before the edge: wholly re-delivered.
-                    return None;
-                } else {
-                    bytes.slice(usize::try_from(overlap).unwrap_or(bytes.len())..)
-                }
-            }
-            None => bytes.clone(),
-        };
-        // The edge only advances; serial arithmetic keeps it meaningful
-        // across the 32-bit wrap.
-        *delivered = Some(match *delivered {
-            Some(edge) if end.wrapping_sub(edge) >= 0x8000_0000 => edge,
-            _ => end,
-        });
-        Some(bytes)
     }
 
     fn observe_udp(&mut self, record: &FrameRecord<'_>) -> Vec<Chunk> {

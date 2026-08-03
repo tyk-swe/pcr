@@ -3,8 +3,13 @@
 
 //! Failure from a bounded offline analysis run.
 
-use super::{CaptureError, Classification, Classified, DecodeError, Duration, Error, Kind};
+use std::time::Duration;
+use thiserror::Error;
+
 use crate::reassembly::tcp::Error as TcpError;
+use packetcraftr_capture::Error as CaptureError;
+use packetcraftr_core::error::{Classification, Classified, Kind};
+use packetcraftr_packet::decode::Error as DecodeError;
 
 #[derive(Debug, Error)]
 #[non_exhaustive]

@@ -21,30 +21,10 @@
 
 #![forbid(unsafe_code)]
 
-use std::io::Read;
-use std::sync::Arc;
-use std::time::Duration;
+pub(crate) use packetcraftr_core::error::BoundaryError;
+pub(crate) use reassembly::tcp::FlowKey;
 
-use bytes::Bytes;
-use thiserror::Error;
-
-use crate::reassembly::Limits as TcpReassemblyLimits;
-use crate::reassembly::tcp::{
-    Error as ReassemblyTcpError, Event as TcpEvent, FlowKey, Reassembler as TcpReassembler, Segment,
-};
-use packetcraftr_capture::{
-    DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Reader,
-};
-use packetcraftr_core::budget::Deadline;
-use packetcraftr_core::error::{BoundaryError, Classification, Classified, Kind};
-use packetcraftr_packet::decode::{
-    DecodedPacket, Decoder, Error as DecodeError, Options as DecodeOptions,
-};
-use packetcraftr_packet::filter::{Context as FilterContext, Filter};
-use packetcraftr_packet::{Packet, layer::Padding, registry::ProtocolRegistry};
-use packetcraftr_protocol::network::{Ipv4, Ipv6};
-use packetcraftr_protocol::transport::{Tcp, Udp};
-
+mod adapter;
 mod conversation_index;
 mod error;
 pub mod expert;

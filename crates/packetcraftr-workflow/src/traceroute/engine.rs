@@ -1,13 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Resolves and authorizes the complete target set before constructing a
-/// probe, approves the complete packet/byte/time budget, and preserves every
-/// attempt until checksum-valid evidence reaches a terminal outcome.
-use super::super::bounded_probe::{
-    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, ResponseSelector,
-    approve_operation, resolve_selected, retain_undecoded_frames, run_batches,
-};
 use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
     EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Icmpv4, Icmpv6, IpAddr, Ipv4, Ipv6,
@@ -17,9 +10,18 @@ use super::{
     TracerouteExecutor, TracerouteHopResult, TracerouteLimits, TracerouteMatchedResponse,
     TracerouteProbe, TracerouteProbeEvidence, TracerouteProbeStatus, TracerouteRequest,
     TracerouteResponseKind, TracerouteResult, TracerouteStrategy, TracerouteUndecodedEvidence, Udp,
-    classify_traceroute_response, format_exchange_evidence_error, nonzero_ipv4_identification,
-    push_diagnostic_once, retain_evidence, validate_shared_exchange_evidence,
+    classify_traceroute_response, format_exchange_evidence_error, push_diagnostic_once,
+    retain_evidence, validate_shared_exchange_evidence,
 };
+/// Resolves and authorizes the complete target set before constructing a
+/// probe, approves the complete packet/byte/time budget, and preserves every
+/// attempt until checksum-valid evidence reaches a terminal outcome.
+use crate::kernel::bounded_probe::{
+    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, run_batches,
+};
+use crate::kernel::evidence::{ResponseSelector, retain_undecoded_frames};
+use crate::kernel::probe::{nonzero_ipv4_identification, packet_shape_matches};
+use crate::kernel::target::{approve_operation, resolve_selected};
 use packetcraftr_packet::semantics::BuiltinProtocol;
 
 /// Runs a bounded traceroute, authorizing the destination before any probe.
@@ -237,7 +239,7 @@ fn worst_case_duration(request: &TracerouteRequest) -> Result<Duration, Tracerou
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, TracerouteError> {
-    crate::clock::rate_delay(probes, rate).ok_or(TracerouteError::InvalidLimit {
+    crate::kernel::clock::rate_delay(probes, rate).ok_or(TracerouteError::InvalidLimit {
         field: "probes_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),
@@ -392,7 +394,7 @@ pub(super) fn sent_traceroute_probe_matches(probe: &TracerouteProbe, sent: &Pack
         TracerouteStrategy::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
         TracerouteStrategy::Icmp => BuiltinProtocol::Icmpv6,
     };
-    if !crate::probe::packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
+    if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
     }
     let network_matches = match probe.address {

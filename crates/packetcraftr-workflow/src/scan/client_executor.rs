@@ -6,7 +6,7 @@ use super::{
     ScanBatchExecution, ScanExecutor, ScanMatchedResponse, ScanTransport, TemplateValues,
     classify_scan_response,
 };
-use crate::client_executor::{ClientExecutor, Scan};
+use crate::kernel::client_executor::{ClientExecutor, Scan};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
 /// Executes homogeneous scan batches through the client's capture-ready

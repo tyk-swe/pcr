@@ -34,9 +34,21 @@ mod tests {
     #[test]
     fn transports_have_stable_names_displays_and_probe_mappings() {
         for (transport, name, probe) in [
-            (ScanTransport::Tcp, "tcp", crate::probe::Transport::Tcp),
-            (ScanTransport::Udp, "udp", crate::probe::Transport::Udp),
-            (ScanTransport::Icmp, "icmp", crate::probe::Transport::Icmp),
+            (
+                ScanTransport::Tcp,
+                "tcp",
+                crate::kernel::probe::Transport::Tcp,
+            ),
+            (
+                ScanTransport::Udp,
+                "udp",
+                crate::kernel::probe::Transport::Udp,
+            ),
+            (
+                ScanTransport::Icmp,
+                "icmp",
+                crate::kernel::probe::Transport::Icmp,
+            ),
         ] {
             assert_eq!(transport.as_str(), name);
             assert_eq!(transport.to_string(), name);

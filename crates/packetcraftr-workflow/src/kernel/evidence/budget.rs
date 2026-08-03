@@ -111,6 +111,46 @@ pub(crate) fn push_undecoded_limit_diagnostic(
     );
 }
 
+/// Applies the operation-wide evidence budget and undecoded retention cap in
+/// one place while allowing workflows to retain their own typed wrapper.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the retention seam threads the frame batch, its output sink, and every bound that \
+              caps it; a parameter struct would only rename the same fields"
+)]
+pub(crate) fn retain_undecoded_frames<T, E>(
+    frames: Vec<Frame>,
+    output: &mut Vec<T>,
+    max_undecoded: usize,
+    budget: &mut EvidenceBudget,
+    descriptor: EvidenceDiagnosticDescriptor,
+    max_evidence_frames: usize,
+    max_evidence_bytes: usize,
+    diagnostics: &mut Vec<Diagnostic>,
+    mut map: impl FnMut(Frame) -> T,
+    mut check_deadline: impl FnMut() -> Result<(), E>,
+) -> Result<(), E> {
+    for frame in frames {
+        check_deadline()?;
+        if output.len() >= max_undecoded {
+            push_undecoded_limit_diagnostic(diagnostics, descriptor, max_undecoded);
+            break;
+        }
+        if retain_evidence(
+            budget,
+            &frame,
+            descriptor,
+            max_evidence_frames,
+            max_evidence_bytes,
+            diagnostics,
+        ) {
+            output.push(map(frame));
+        }
+        check_deadline()?;
+    }
+    Ok(())
+}
+
 pub(crate) fn checked_frame_count(counts: &[usize]) -> Option<usize> {
     counts
         .iter()

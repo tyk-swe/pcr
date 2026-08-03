@@ -5,6 +5,8 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::time::Duration;
 
+use packetcraftr_core::budget::Deadline;
+
 /// Injectable delay seam shared by rate-limited and replay workflows.
 pub trait Clock {
     type Error: Error + Send + Sync + 'static;
@@ -25,7 +27,7 @@ impl Clock for SystemClock {
     }
 }
 
-pub(super) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
+pub(crate) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
     let Some(rate) = rate else {
         return Some(Duration::ZERO);
     };
@@ -35,6 +37,15 @@ pub(super) fn rate_delay(items: usize, rate: Option<u32>) -> Option<Duration> {
         .checked_add(rate.checked_sub(1)?)?
         / rate;
     Some(Duration::from_nanos(u64::try_from(nanos).ok()?))
+}
+
+pub(crate) fn check_deadline<E>(
+    deadline: &Deadline,
+    mut duration_error: impl FnMut(Duration, Duration) -> E,
+) -> Result<(), E> {
+    deadline
+        .check()
+        .map_err(|error| duration_error(error.actual, error.limit))
 }
 
 #[cfg(test)]
@@ -55,7 +66,7 @@ mod tests {
 
     #[test]
     fn system_clock_implements_the_public_clock_trait() {
-        let mut clock = crate::clock::SystemClock;
+        let mut clock = SystemClock;
         assert_eq!(clock.sleep(Duration::ZERO), Ok(()));
     }
 }

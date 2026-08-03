@@ -6,11 +6,11 @@
 use std::time::Duration;
 
 use packetcraftr_capture::Frame;
+use packetcraftr_client::Stats;
 use packetcraftr_net::capture::Statistics as CaptureStatistics;
 use packetcraftr_packet::{Packet, decode::Result as DecodedPacket};
 
 use super::budget::{checked_frame_bytes, checked_frame_count, checked_sent_frame_bytes};
-use crate::Stats;
 
 pub(crate) fn validate_decoded_frame(decoded: &DecodedPacket, kind: &str) -> Result<(), String> {
     if decoded.original != decoded.frame.bytes() {

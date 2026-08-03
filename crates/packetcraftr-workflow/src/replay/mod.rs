@@ -18,7 +18,7 @@ use std::time::{Duration, SystemTime};
 use serde::Serialize;
 use thiserror::Error;
 
-use super::clock::Clock as WorkflowClock;
+use crate::kernel::clock::Clock as WorkflowClock;
 use packetcraftr_capture::{
     DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, Error as CaptureError, Format,
     Frame, Interface, LinkType, Reader,

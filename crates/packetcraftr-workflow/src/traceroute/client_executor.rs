@@ -6,7 +6,7 @@ use super::{
     TracerouteBatch, TracerouteBatchExecution, TracerouteExecutor, TracerouteMatchedResponse,
     TracerouteStrategy, classify_traceroute_response,
 };
-use crate::client_executor::{ClientExecutor, Traceroute};
+use crate::kernel::client_executor::{ClientExecutor, Traceroute};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
 /// Executes homogeneous traceroute hop batches through the client's

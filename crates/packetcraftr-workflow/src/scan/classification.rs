@@ -23,7 +23,7 @@ pub fn classify_scan_response(
     response: &DecodedPacket,
 ) -> Option<ScanResponseClassification> {
     let observation =
-        crate::probe::observe(registry, transport.probe_transport(), request, response)?;
+        crate::kernel::probe::observe(registry, transport.probe_transport(), request, response)?;
     let classification = match observation.correlation {
         Correlation::TcpReset | Correlation::PortUnreachable => ScanClassification::Closed,
         Correlation::TcpSynAck | Correlation::UdpReply | Correlation::IcmpReply => {

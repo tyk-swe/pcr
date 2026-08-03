@@ -16,8 +16,8 @@ use bytes::Bytes;
 use serde::Serialize;
 use thiserror::Error;
 
-use super::clock::Clock;
-use super::evidence::EvidenceBudget;
+use crate::kernel::clock::Clock;
+use crate::kernel::evidence::EvidenceBudget;
 use packetcraftr_capture::{Frame, LinkType};
 use packetcraftr_core::budget::{Deadline, DeadlineExceeded};
 use packetcraftr_core::error::{Classification, Classified, Kind};
@@ -76,8 +76,13 @@ pub use model::{
     FuzzTargetParseError as TargetParseError,
 };
 /// Executes fuzz cases through a client's capture-ready exchange lifecycle.
-pub type ClientExecutor<'a, R, N, I> =
-    super::client_executor::ClientExecutor<'a, R, N, I, super::client_executor::Fuzz>;
+pub type ClientExecutor<'a, R, N, I> = crate::kernel::client_executor::ClientExecutor<
+    'a,
+    R,
+    N,
+    I,
+    crate::kernel::client_executor::Fuzz,
+>;
 
 #[cfg(test)]
 use engine::{fuzz, fuzz_live};

@@ -1,13 +1,6 @@
 // Copyright (C) 2026 tyk-swe
 // SPDX-License-Identifier: AGPL-3.0-only
 
-/// Resolves and authorizes the complete target set before constructing any
-/// probe, applies operation-wide packet/byte/duration limits, schedules
-/// homogeneous batches, and classifies only checksum-valid correlated facts.
-use super::super::bounded_probe::{
-    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, ResponseSelector,
-    approve_operation, resolve_selected, retain_undecoded_frames, run_batches,
-};
 use super::{
     Authorizer, Bytes, Clock, Deadline, DeadlineExceeded, DecodedPacket, Diagnostic, Duration,
     EvidenceBudget, ExchangeEvidence, ExchangeEvidenceError, Frame, HashMap, IPV4_PROBE_BYTES,
@@ -16,9 +9,17 @@ use super::{
     ScanClassification, ScanEndpointResult, ScanError, ScanExecutor, ScanLimits,
     ScanMatchedResponse, ScanProbe, ScanProbeEvidence, ScanProbeStatus, ScanRequest, ScanResult,
     ScanTransport, Stats, Tcp, Udp, classify_scan_response, format_exchange_evidence_error,
-    nonzero_ipv4_identification, push_diagnostic_once, retain_evidence,
-    validate_shared_exchange_evidence,
+    push_diagnostic_once, retain_evidence, validate_shared_exchange_evidence,
 };
+/// Resolves and authorizes the complete target set before constructing any
+/// probe, applies operation-wide packet/byte/duration limits, schedules
+/// homogeneous batches, and classifies only checksum-valid correlated facts.
+use crate::kernel::bounded_probe::{
+    ProbeBatch, ProbeExecution, ProbeLifecycle, ProbeRunConfig, run_batches,
+};
+use crate::kernel::evidence::{ResponseSelector, retain_undecoded_frames};
+use crate::kernel::probe::{nonzero_ipv4_identification, packet_shape_matches};
+use crate::kernel::target::{approve_operation, resolve_selected};
 use packetcraftr_packet::semantics::BuiltinProtocol;
 
 pub fn scan<A, E, C>(
@@ -259,7 +260,7 @@ fn worst_case_duration(
 }
 
 fn rate_delay(probes: usize, rate: Option<u32>) -> Result<Duration, ScanError> {
-    crate::clock::rate_delay(probes, rate).ok_or(ScanError::InvalidLimit {
+    crate::kernel::clock::rate_delay(probes, rate).ok_or(ScanError::InvalidLimit {
         field: "probes_per_second",
         value: u64::from(rate.unwrap_or_default()),
         reason: "rate-delay arithmetic overflowed".to_owned(),
@@ -412,7 +413,7 @@ pub(super) fn sent_scan_probe_matches(probe: &ScanProbe, sent: &Packet) -> bool 
         ScanTransport::Icmp if probe.address.is_ipv4() => BuiltinProtocol::Icmpv4,
         ScanTransport::Icmp => BuiltinProtocol::Icmpv6,
     };
-    if !crate::probe::packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
+    if !packet_shape_matches(sent, &[network_protocol, transport_protocol]) {
         return false;
     }
     let network_matches = match probe.address {

@@ -8,7 +8,7 @@ use super::{
     NeighborResolver, Packet, PacketTemplate, RouteProvider,
 };
 use crate::BoundaryError;
-use crate::client_executor::{ClientExecutor, Fuzz};
+use crate::kernel::client_executor::{ClientExecutor, Fuzz};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
 pub struct PolicyAuthorizer<'a> {

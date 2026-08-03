@@ -5,7 +5,7 @@ use super::{
     BoundaryError, DnsExchange, DnsExchangeExecution, DnsExecutor, DnsMatchedResponse,
     NeighborResolver, PacketTemplate, ProbeTransport, RouteProvider, probe,
 };
-use crate::client_executor::{ClientExecutor, Dns};
+use crate::kernel::client_executor::{ClientExecutor, Dns};
 use packetcraftr_net::{capture::CaptureProvider, transmit::PacketIo};
 
 /// Executes one DNS query through the client's capture-ready exchange

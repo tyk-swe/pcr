@@ -6,7 +6,8 @@
 use std::io::Read;
 
 use super::super::{
-    models::{Endianness, Error, Format},
+    error::Error,
+    model::{Endianness, Format},
     wire::{
         decode_i64, decode_u16, decode_u32, read_exact_counted, read_exact_or_eof, read_exact_vec,
     },

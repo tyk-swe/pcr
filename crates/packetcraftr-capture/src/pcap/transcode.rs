@@ -3,7 +3,8 @@
 
 use std::io::{Read, Write};
 
-use super::models::{Error, Format, Limits, PcapNgOptions, PcapOptions, TranscodeReport};
+use super::error::Error;
+use super::model::{Format, Limits, PcapNgOptions, PcapOptions, TranscodeReport};
 use super::reader::Reader;
 use super::writer::{Writer, WriterState};
 

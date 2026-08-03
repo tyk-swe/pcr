@@ -8,17 +8,19 @@
 //! writing capture files.
 
 mod classic;
-mod models;
+mod error;
+mod model;
 mod pcapng;
 mod reader;
 mod transcode;
 mod wire;
 mod writer;
 
-pub use models::{
+pub use error::Error;
+pub use model::{
     DEFAULT_INTERFACE_LIMIT, DEFAULT_METADATA_BLOCK_LIMIT, DEFAULT_METADATA_BYTE_LIMIT,
     DEFAULT_SIZE_LIMIT, DEFAULT_STREAM_BYTES, DEFAULT_STREAM_FRAMES, DEFAULT_TOTAL_INTERFACE_LIMIT,
-    Endianness, Error, Format, Interface, Limits, PcapNgOptions, PcapOptions, ReaderOptions,
+    Endianness, Format, Interface, Limits, PcapNgOptions, PcapOptions, ReaderOptions,
     TimestampResolution, TranscodeReport,
 };
 pub use reader::Reader;

@@ -2,20 +2,20 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::io::{self, Write};
-use std::time::UNIX_EPOCH;
 
 use crate::{Frame, LinkType};
 
-use super::classic::{write_pcap_header, write_pcap_record};
-use super::models::{
-    DEFAULT_INTERFACE_LIMIT, Endianness, Error, Format, Interface, Limits, PcapNgOptions,
-    PcapOptions, TimestampPrecision, TimestampResolution,
+use super::classic::{write_pcap_frame, write_pcap_header};
+use super::error::Error;
+use super::model::{
+    DEFAULT_INTERFACE_LIMIT, Endianness, Format, Interface, Limits, PcapNgOptions, PcapOptions,
+    TimestampPrecision, TimestampResolution,
 };
-use super::pcapng::{write_enhanced_packet, write_interface_description, write_section_header};
-use super::wire::{
-    WRITER_TIMESTAMP_RESOLUTION, align_to_u32, timestamp_to_ticks, usize_to_u32_limit,
-    validate_frame_size, validate_timestamp_resolution,
+use super::pcapng::{
+    select_interface, validate_new_interface, write_enhanced_packet, write_interface_description,
+    write_section_header,
 };
+use super::wire::{align_to_u32, timestamp_to_ticks, usize_to_u32_limit, validate_frame_size};
 
 pub(super) enum WriterState {
     Pcap {
@@ -28,13 +28,6 @@ pub(super) enum WriterState {
         endianness: Endianness,
         interfaces: Vec<Interface>,
     },
-}
-
-#[derive(Clone, Copy, Debug)]
-struct InterfacePlan {
-    id: u32,
-    description: Interface,
-    requires_description_block: bool,
 }
 
 #[derive(Debug)]
@@ -250,7 +243,7 @@ impl<W: Write> Writer<W> {
         self.add_interface_description(Interface {
             link_type,
             snap_len,
-            timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
+            timestamp_resolution: super::wire::WRITER_TIMESTAMP_RESOLUTION,
             timestamp_offset: 0,
         })
     }
@@ -258,7 +251,26 @@ impl<W: Write> Writer<W> {
     /// Adds one PCAPNG interface while retaining its timestamp metadata.
     pub fn add_interface_description(&mut self, description: Interface) -> Result<u32, Error> {
         self.ensure_output_available()?;
-        let (endianness, interface_id) = self.validate_new_interface(description)?;
+        let (endianness, interface_id) = match &self.state {
+            WriterState::Pcap { .. } => {
+                return Err(Error::WrongWriterFormat {
+                    expected: Format::PcapNg,
+                    actual: Format::Pcap,
+                });
+            }
+            WriterState::PcapNg {
+                endianness,
+                interfaces,
+            } => (
+                *endianness,
+                validate_new_interface(
+                    description,
+                    interfaces,
+                    self.max_size,
+                    self.max_interfaces,
+                )?,
+            ),
+        };
 
         self.write_output(|inner| {
             write_interface_description(
@@ -277,60 +289,6 @@ impl<W: Write> Writer<W> {
             WriterState::Pcap { .. } => unreachable!("format checked above"),
         }
         Ok(interface_id)
-    }
-
-    fn validate_new_interface(&self, description: Interface) -> Result<(Endianness, u32), Error> {
-        validate_timestamp_resolution(description.timestamp_resolution)?;
-        let block_length = if description.timestamp_offset == 0 {
-            32
-        } else {
-            44
-        };
-        if self.max_size < block_length {
-            return Err(Error::SizeLimitExceeded {
-                kind: "pcapng interface description",
-                declared: block_length as u64,
-                limit: self.max_size,
-            });
-        }
-        let (endianness, interface_id) = match &self.state {
-            WriterState::Pcap { .. } => {
-                return Err(Error::WrongWriterFormat {
-                    expected: Format::PcapNg,
-                    actual: Format::Pcap,
-                });
-            }
-            WriterState::PcapNg {
-                endianness,
-                interfaces,
-            } => {
-                let next_count = interfaces
-                    .len()
-                    .checked_add(1)
-                    .ok_or(Error::InterfaceLimit {
-                        limit: self.max_interfaces,
-                    })?;
-                if next_count > self.max_interfaces {
-                    return Err(Error::InterfaceLimit {
-                        limit: self.max_interfaces,
-                    });
-                }
-                (
-                    *endianness,
-                    u32::try_from(interfaces.len()).map_err(|_| Error::InterfaceLimit {
-                        limit: self.max_interfaces.min(u32::MAX as usize),
-                    })?,
-                )
-            }
-        };
-
-        if description.link_type.0 > u16::MAX as u32 {
-            return Err(Error::LinkTypeOutOfRange {
-                link_type: description.link_type.0,
-            });
-        }
-
-        Ok((endianness, interface_id))
     }
 
     /// Writes one frame, validating all representability and length invariants
@@ -377,13 +335,16 @@ impl<W: Write> Writer<W> {
                 let timestamp_precision = *precision;
                 let snapshot_length = *snap_len;
                 let file_link_type = *link_type;
-                self.write_pcap_frame(
-                    frame,
-                    file_endianness,
-                    timestamp_precision,
-                    snapshot_length,
-                    file_link_type,
-                )
+                self.write_output(|inner| {
+                    write_pcap_frame(
+                        inner,
+                        file_endianness,
+                        timestamp_precision,
+                        snapshot_length,
+                        file_link_type,
+                        frame,
+                    )
+                })
             }
             WriterState::PcapNg { .. } => self.write_pcapng_frame(frame),
         }?;
@@ -392,68 +353,12 @@ impl<W: Write> Writer<W> {
         Ok(())
     }
 
-    fn write_pcap_frame(
-        &mut self,
-        frame: &Frame,
-        endianness: Endianness,
-        precision: TimestampPrecision,
-        snap_len: u32,
-        link_type: LinkType,
-    ) -> Result<(), Error> {
-        if frame.interface.is_some() {
-            return Err(Error::MetadataNotRepresentable {
-                format: Format::Pcap,
-                field: "interface",
-            });
-        }
-        if frame.direction.is_some() {
-            return Err(Error::MetadataNotRepresentable {
-                format: Format::Pcap,
-                field: "direction",
-            });
-        }
-        if frame.link_type != link_type {
-            return Err(Error::InterfaceLinkTypeMismatch {
-                interface: 0,
-                expected: link_type.0,
-                actual: frame.link_type.0,
-            });
-        }
-        if frame.captured_length() > snap_len {
-            return Err(Error::SizeLimitExceeded {
-                kind: "pcap captured packet",
-                declared: u64::from(frame.captured_length()),
-                limit: snap_len as usize,
-            });
-        }
-
-        let elapsed =
-            frame
-                .timestamp
-                .duration_since(UNIX_EPOCH)
-                .map_err(|_| Error::TimestampOutOfRange {
-                    format: Format::Pcap,
-                })?;
-        let seconds = u32::try_from(elapsed.as_secs()).map_err(|_| Error::TimestampOutOfRange {
-            format: Format::Pcap,
-        })?;
-
-        let fraction = match precision {
-            TimestampPrecision::Microseconds if !elapsed.subsec_nanos().is_multiple_of(1_000) => {
-                return Err(Error::MetadataNotRepresentable {
-                    format: Format::Pcap,
-                    field: "microsecond timestamp precision",
-                });
-            }
-            TimestampPrecision::Microseconds => elapsed.subsec_micros(),
-            TimestampPrecision::Nanoseconds => elapsed.subsec_nanos(),
-        };
-
-        self.write_output(|inner| write_pcap_record(inner, endianness, seconds, fraction, frame))
-    }
-
     fn write_pcapng_frame(&mut self, frame: &Frame) -> Result<(), Error> {
-        let plan = self.select_interface(frame)?;
+        let interfaces = match &self.state {
+            WriterState::PcapNg { interfaces, .. } => interfaces,
+            WriterState::Pcap { .. } => unreachable!("format checked by caller"),
+        };
+        let plan = select_interface(frame, interfaces, self.max_size, self.max_interfaces)?;
         let interface_id = plan.id;
         let interface = plan.description;
         let endianness = self.endianness();
@@ -499,68 +404,6 @@ impl<W: Write> Writer<W> {
                 block_length,
                 frame,
             )
-        })
-    }
-
-    fn select_interface(&self, frame: &Frame) -> Result<InterfacePlan, Error> {
-        let interfaces = match &self.state {
-            WriterState::PcapNg { interfaces, .. } => interfaces,
-            WriterState::Pcap { .. } => unreachable!("format checked by caller"),
-        };
-        if let Some(interface_id) = frame.interface {
-            let interface =
-                interfaces
-                    .get(interface_id as usize)
-                    .ok_or(Error::UndefinedInterface {
-                        interface: interface_id,
-                        available: interfaces.len(),
-                    })?;
-            if interface.link_type != frame.link_type {
-                return Err(Error::InterfaceLinkTypeMismatch {
-                    interface: interface_id,
-                    expected: interface.link_type.0,
-                    actual: frame.link_type.0,
-                });
-            }
-            return Ok(InterfacePlan {
-                id: interface_id,
-                description: *interface,
-                requires_description_block: false,
-            });
-        }
-
-        let mut matches = interfaces
-            .iter()
-            .enumerate()
-            .filter(|(_, interface)| interface.link_type == frame.link_type);
-        let Some((index, description)) = matches.next() else {
-            let description = Interface {
-                link_type: frame.link_type,
-                snap_len: usize_to_u32_limit(self.max_size)?,
-                timestamp_resolution: WRITER_TIMESTAMP_RESOLUTION,
-                timestamp_offset: 0,
-            };
-            let (_, id) = self.validate_new_interface(description)?;
-            return Ok(InterfacePlan {
-                id,
-                description,
-                requires_description_block: true,
-            });
-        };
-        if matches.next().is_some() {
-            return Err(Error::AmbiguousInterface {
-                link_type: frame.link_type.0,
-            });
-        }
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "validate_new_interface refuses indexes above u32"
-        )]
-        let id = index as u32;
-        Ok(InterfacePlan {
-            id,
-            description: *description,
-            requires_description_block: false,
         })
     }
 
